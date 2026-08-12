@@ -89,6 +89,27 @@ was given up and why. The tolerance flags in `ci.yml` exist only because the
 tree is still empty: each one names the seam that removes it, and that seam
 removes it.
 
+## Architecture decision records
+
+When a construction decision is **not answered by `docs/SPEC.md`** and a
+reasonable engineer might choose differently, write
+`docs/adr/NNNN-slug.md` **in the same pull request as the decision**. Four
+sections, under a page: context, decision, alternatives rejected and why,
+consequences.
+
+- **Never write an ADR restating something the spec already decides.** Link to
+  the spec section instead. An ADR that paraphrases §7.4 is noise that makes the
+  real ones harder to find.
+- **If a decision contradicts the spec, an ADR is not sufficient.** Raise it,
+  and update the spec. A record of having gone around the spec is not the same
+  as the spec being right.
+- The test is both halves together: the spec is silent, *and* the choice is
+  genuinely contestable. Picking a JSON library needs no ADR. Picking how
+  identity separation is enforced does.
+- Number sequentially, never reuse a number, and do not renumber. A superseded
+  ADR stays in place with a line at the top pointing at the one that replaced
+  it.
+
 ## Secrets
 
 Never create, read, modify, or echo a repository secret or an environment
@@ -133,6 +154,14 @@ Supporting rules that make the above hold:
 - Re-identification is possible only through the Care queue, only by the Care
   role, and is automatically audit-logged (actor, timestamp, case). Admin and
   VPAA cannot read flagged comment content or reach identity.
+- **A reveal that touches the revealer's own purview is flagged as a conflict of
+  interest** (SPEC §6.2). A Care staffer revealing a student in a section they
+  themselves teach is the case that matters. Never block the reveal — a student
+  at risk does not wait on a governance check — but mark the audit entry, and
+  surface it distinctly in the Admin access log and to the periodic outside
+  review. This is the detective control that makes the permitted overlap between
+  a Care assignment and a reporting assignment visible rather than merely
+  tolerated. Any audit schema must be able to carry this flag.
 - Instructor and leadership read paths go through identity-separated SQL views
   that structurally cannot join to identity columns. Enforce this in migrations
   (`backend/app/views_sql/`), not only in application code.
@@ -163,12 +192,23 @@ Supporting rules that make the above hold:
   department — is the case that proves purview cannot come from containment.
 - Lead Faculty get the hierarchy view only, never a by-lead-faculty pivot. Chair
   and above additionally get the by-lead pivot over their purview.
-- Care is deliberately not composable with any reporting role. Its only power is
-  the threat queue.
-- Every role can enter by LTI launch; leadership, Care, and Admin can also enter
-  by OIDC web login. Both doors resolve to the same identity and the same full
-  purview. The launch context resolves which section a link points at; it never
-  caps what a leadership user may see.
+- Care is deliberately not composable with any reporting role: a Care assignment
+  grants no reporting purview, and no reporting assignment grants Care. Its only
+  power is the threat queue. One *person* may nonetheless hold both — a Care
+  staffer who also teaches a section is unlikely but legitimate — so the two are
+  separate capabilities on the same person, never a union. Do not add a
+  constraint forbidding the combination; it is an accepted risk, governed by the
+  ethical obligations of the Office of Community Standards and by the identity
+  -access audit log.
+- **Entry doors are a property of the assignment, not the person.** Every
+  reporting role (instructor, lead faculty, chair, assistant dean, dean, VPAA)
+  can enter by LTI launch. Every role except instructor and student can *also*
+  enter by OIDC web login; leadership holds both doors, and Care and Admin are
+  web login only. Students enter by launch only. A person holding two
+  assignments uses whichever door fits the assignment they are acting under.
+- Both doors resolve to the same identity and the same full purview. The launch
+  context resolves which section a link points at; it never caps what a
+  leadership user may see.
 - LMS-owned data (courses, sections, section codes, enrollments, teaching
   instructors) is read-only in Pulse. Course level derives from the course
   number; section length and dates derive from the section code via the

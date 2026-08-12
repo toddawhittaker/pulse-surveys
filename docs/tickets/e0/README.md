@@ -1,0 +1,104 @@
+# E0 — Foundations: build order
+
+Eighteen tickets decomposing the E0 seams in SPEC §14.3. Each is sized for a
+single focused session and leaves the repository in a working state: CI green,
+Compose stack healthy, nothing half-wired at a boundary.
+
+Say **"build E0, ticket 3"** and it means E0-03.
+
+Branch names follow the seam convention in `CONTRIBUTING.md`: cut
+`e0/<slug>` from `epic/e0-foundations`, one ticket per branch, one pull request
+into the epic branch.
+
+Already done, do not rebuild — reference these instead: the branch and pull
+request model (#1, #2), the secrets policy (#3), and the CI pipeline with
+`make ci`, the checker scripts, and Dependabot (#5).
+
+## Build order
+
+| # | Ticket | Depends on | Summary |
+|---|---|---|---|
+| 01 | [Backend skeleton and configuration surface](E0-01-backend-skeleton.md) | none | FastAPI app factory, env-driven `Settings`, `.env.example`, `/healthz`; turns on the ruff, mypy, audit, and license gates. |
+| 02 | [Backend Dockerfile and Compose stack](E0-02-compose-stack.md) | 01 | `api`, `db`, `redis`, `mailpit` with real health checks; `docker compose up` works. |
+| 03 | [Celery worker and beat](E0-03-celery-worker-beat.md) | 02 | Celery app, `worker` and `beat` services with health checks that fail when the broker is down. |
+| 04 | [Database session and Alembic baseline](E0-04-db-session-alembic.md) | 02 | Engine, session, migration chain, testcontainers fixture; turns on the migration-drift and test gates. |
+| 05 | [Org containment schema](E0-05-org-containment-schema.md) | 04 | Institution through section, with course level derived from the course number. |
+| 06 | [Term calendar and start-letter map schema](E0-06-term-calendar-schema.md) | 04 | `term`, `week`, `survey_window`, `start_letter_map`; timezone-aware throughout. |
+| 07 | [Section-code parser and date derivation](E0-07-section-code-parser.md) | 05, 06 | Parse `R3WW`, derive length, dates, and modality; Hypothesis property tests over the full letter map. |
+| 08 | [Identity schema and LTI registration tables](E0-08-identity-schema.md) | 04, 05 | `user` split from `user_identity` so identity is table-level, plus `person`, `enrollment`, and the LTI registration tables. |
+| 09 | [Role assignments and the supervision graph](E0-09-role-assignment-graph.md) | 05, 06, 08 | `role_assignment` with `reports_to` pointing at assignments, cycle rejection, lead-faculty mapping. |
+| 10 | [Identity-separated read views](E0-10-identity-separated-views.md) | 08, 09 | Three database roles so instructor screens physically cannot read identity, while Care keeps an audited door; first §4.1 invariants; invariant suite becomes unskippable. |
+| 11 | [Authorization skeleton](E0-11-authz-skeleton.md) | 09, 10 | The `services/authz.py` chokepoint, role grain, sibling-lead isolation; transitive union deliberately deferred to E9. |
+| 12 | [AI output contracts and prompt layout](E0-12-ai-contracts.md) | 01 | One Pydantic contract per §7.4 task, versioned prompt directory, contracts usable as eval fixtures. |
+| 13 | [AIGateway shell and one working round-trip](E0-13-ai-gateway-roundtrip.md) | 04, 12 | Single-shot gateway, comment validity end to end, fail-open on timeout, append-only classification rows. |
+| 14 | [Mock LMS: JWKS and LTI 1.3 launch](E0-14-mock-lms-launch.md) | 02, 08 | Platform-side launch with per-run issuer keys and a signed `id_token`. |
+| 15 | [Mock LMS: NRPS, AGS, and seed data](E0-15-mock-lms-nrps-ags.md) | 14 | Paged roster service, line items and score posting, seed courses with mid-term adds and drops. |
+| 16 | [Mock OIDC identity provider](E0-16-mock-idp.md) | 02, 08 | Discovery, authorize, token, JWKS, PKCE, seeded leadership, Care, and admin users. |
+| 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
+| 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
+
+## Dependency graph
+
+```
+01 ── 02 ──┬── 03
+           └── 04 ──┬── 05 ──┬── 07 ───────────────┐
+                    ├── 06 ──┘                     │
+                    └── 08 ──┬── 09 ── 10 ── 11 ───┼── 18
+                             └── 14 ── 15 ─────────┤
+                                                   │
+01 ── 12 ── 13 ─────────────────────────────────── ┤
+02 ── 16 ───────────────────────────────────────── ┤
+07, 09, 15 ── 17 ───────────────────────────────── ┘
+```
+
+Strictly sequential through 04. After that, three chains run independently and
+can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
+(12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
+chain and the mock LMS; ticket 18 needs everything.
+
+## How CI tightens
+
+Most CI gates ship tolerant because nothing they check exists yet — see
+[ADR 0002](../../adr/0002-ci-gates-ship-tolerant.md) for why, and for the cost
+that choice carries. Each becomes enforcing in a specific ticket, and landing
+that ticket includes removing its tolerance:
+
+| Gate | Becomes enforcing in |
+|---|---|
+| ruff, mypy, pip-audit, license check | 01 |
+| Docker build and Compose health (`api`) | 02 |
+| Compose health (`api`, `worker`, `beat`) | 03 |
+| migration drift, pytest | 04 |
+| §4.1 invariant suite — no skips permitted | 10 |
+| Playwright e2e | 18 |
+| AI eval floors | E2, not E0 — the last tolerance to survive this epic |
+
+The frontend gates (`tsc`, `eslint`, production build, bundle budget) stay
+tolerant through all of E0. No frontend exists until E1.
+
+## Notes on the decomposition
+
+Where this differs from the seam list in §14.3, and why:
+
+- **"repo+CI" is already done** and is not a ticket here.
+- **"Compose+Dockerfiles" is split** into 02 and 03. The Compose file and the
+  Celery runtime are separately reviewable, and the health-check argument list
+  in CI changes in a way worth seeing on its own.
+- **"core schema" is split four ways** — 05, 06, 08, 09 — plus 10 for the views.
+  It is by far the largest seam in §14.3, and 09 in particular carries the
+  supervision graph, which decides whether purview can be computed correctly at
+  all.
+- **The section-code parser (07) is its own ticket** rather than part of the
+  term schema. It is pure logic with heavy property testing, which is a
+  different kind of session from writing migrations.
+- **"AIGateway shell + task contract models" is split** into 12 and 13, because
+  the contracts are a design decision worth settling before an implementation
+  pulls them into a shape.
+- **"mock LMS" is split** into 14 and 15. Launch signing and the Advantage
+  services are independently testable, and 15 is where NRPS paging lands, which
+  is a named per-platform deviation in §7.3.
+- **18 is new** — §14.3 implies E0's exit criterion but lists no seam that
+  proves it. Without it the e2e gate would stay tolerant into E1.
+
+The illustrative seam names in `CONTRIBUTING.md` predate this file. Where the
+two differ, these ticket branch names win.

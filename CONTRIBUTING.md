@@ -48,10 +48,11 @@ either direction.
 | E12 — Notifications | `epic/e12-notifications` |
 | E13 — Hardening & release ⚠ | `epic/e13-hardening-release` |
 
-Seam names come from the *Ticket seams* line under each epic in §14.3. E0's
-seams, for example, are `e0/repo-ci`, `e0/compose-stack`, `e0/core-schema`,
-`e0/mock-lms`, `e0/mock-idp`, `e0/ai-gateway-shell`, `e0/authz-skeleton`, and
-`e0/seed-script`.
+Seam names come from the *Ticket seams* line under each epic in §14.3. Where an
+epic has been decomposed into numbered tickets under `docs/tickets/`, those
+ticket branch names win over the illustrative list in the spec —
+[`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is the build order for
+E0 and names all eighteen of its branches.
 
 ⚠ marks epics that additionally require line-by-line human review of the
 security-relevant diff.
@@ -147,6 +148,19 @@ Two rules worth stating outright. A failing test is never fixed by skipping,
 xfailing, or deleting it; if the test is wrong, fix it in its own commit and say
 why in the pull request. And an eval floor is never lowered to get a gate to
 pass — floors move only in a pull request whose purpose is moving them.
+
+## Architecture decision records
+
+When a construction decision is not answered by [`docs/SPEC.md`](docs/SPEC.md)
+and a reasonable engineer might choose differently, write
+`docs/adr/NNNN-slug.md` in the same pull request: context, decision,
+alternatives rejected and why, consequences. Under a page.
+
+Do not write one restating something the spec already decides — link to the spec
+section instead. If a decision contradicts the spec, an ADR is not sufficient:
+raise it, and update the spec.
+
+[`docs/adr/README.md`](docs/adr/README.md) has the format and the index.
 
 ## Secrets
 
