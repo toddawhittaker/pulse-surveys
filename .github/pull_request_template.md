@@ -29,6 +29,15 @@ Check what this PR covers. For anything not applicable, write "n/a" and why.
 - [ ] **Docs.** README and configuration-surface updates for anything an
       operator or developer would need.
 
+## Secrets check
+
+- [ ] No real credential appears in this diff, its commit messages, or this
+      description.
+- [ ] Any new configuration variable is listed in `.env.example` with a
+      placeholder value.
+- [ ] If this adds or widens a `secrets.*` reference in a workflow, the
+      repository owner agreed to it first. Say where.
+
 ## Confidentiality check
 
 - [ ] No read path added or changed here widens what a student can see.

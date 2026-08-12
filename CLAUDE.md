@@ -44,6 +44,24 @@ assessment. Never use an admin override to bypass a protection rule. Never
 merge anything while CI is failing. Never retarget a pull request across
 epics — close it and re-cut the branch.
 
+## Secrets
+
+Never create, read, modify, or echo a repository secret or an environment
+secret. Never add a secret reference to a workflow without asking first — that
+includes a new `secrets.*` expression, a new environment binding, and widening
+an existing one. Ask, then wait for an answer; do not add it provisionally.
+
+Local secrets live in `.env`, which is gitignored and must stay that way.
+`.env.example` is the committed counterpart: it carries variable *names* and
+obviously-fake placeholder values, never a real credential, and never a value
+copied from a working `.env`. When a seam adds a configuration variable, add
+its name to `.env.example` in the same pull request.
+
+Do not print the contents of `.env`, paste a credential into a commit message
+or a pull request body, or write one into a test fixture, a seed script, or a
+log line. If a real secret is needed to run something, say what is needed and
+let Todd supply it.
+
 ## Confidentiality invariants (SPEC §4.1)
 
 These are automated assertions in the test suite, not conventions. Every read
