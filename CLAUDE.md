@@ -89,6 +89,27 @@ was given up and why. The tolerance flags in `ci.yml` exist only because the
 tree is still empty: each one names the seam that removes it, and that seam
 removes it.
 
+## Architecture decision records
+
+When a construction decision is **not answered by `docs/SPEC.md`** and a
+reasonable engineer might choose differently, write
+`docs/adr/NNNN-slug.md` **in the same pull request as the decision**. Four
+sections, under a page: context, decision, alternatives rejected and why,
+consequences.
+
+- **Never write an ADR restating something the spec already decides.** Link to
+  the spec section instead. An ADR that paraphrases §7.4 is noise that makes the
+  real ones harder to find.
+- **If a decision contradicts the spec, an ADR is not sufficient.** Raise it,
+  and update the spec. A record of having gone around the spec is not the same
+  as the spec being right.
+- The test is both halves together: the spec is silent, *and* the choice is
+  genuinely contestable. Picking a JSON library needs no ADR. Picking how
+  identity separation is enforced does.
+- Number sequentially, never reuse a number, and do not renumber. A superseded
+  ADR stays in place with a line at the top pointing at the one that replaced
+  it.
+
 ## Secrets
 
 Never create, read, modify, or echo a repository secret or an environment

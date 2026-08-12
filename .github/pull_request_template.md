@@ -31,6 +31,10 @@ Check what this PR covers. For anything not applicable, write "n/a" and why.
       do this work for the first time.
 - [ ] **Docs.** README and configuration-surface updates for anything an
       operator or developer would need.
+- [ ] **ADR.** If this made a construction decision the spec does not answer and
+      a reasonable engineer might have made differently, `docs/adr/NNNN-slug.md`
+      is in this pull request. If it contradicts the spec, the spec is updated
+      here too — an ADR alone is not sufficient. Write "none" if neither applies.
 
 ## Secrets check
 

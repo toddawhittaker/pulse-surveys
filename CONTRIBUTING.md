@@ -149,6 +149,19 @@ xfailing, or deleting it; if the test is wrong, fix it in its own commit and say
 why in the pull request. And an eval floor is never lowered to get a gate to
 pass — floors move only in a pull request whose purpose is moving them.
 
+## Architecture decision records
+
+When a construction decision is not answered by [`docs/SPEC.md`](docs/SPEC.md)
+and a reasonable engineer might choose differently, write
+`docs/adr/NNNN-slug.md` in the same pull request: context, decision,
+alternatives rejected and why, consequences. Under a page.
+
+Do not write one restating something the spec already decides — link to the spec
+section instead. If a decision contradicts the spec, an ADR is not sufficient:
+raise it, and update the spec.
+
+[`docs/adr/README.md`](docs/adr/README.md) has the format and the index.
+
 ## Secrets
 
 Local secrets live in `.env`, which is gitignored. Its committed counterpart
