@@ -105,5 +105,11 @@ the trigger, never your own judgment that the work looks done.
 ## Throughout
 
 The implementer appends every attempt to `docs/tickets/e0/.attempts/<TICKET>.md`
-as it goes. If it does not, remind it — that file is the only thing that
-survives if this session ends mid-ticket, and a resumed ticket reads it cold.
+as it goes. If it does not, remind it.
+
+**If a ticket spans two sittings, resume the session rather than starting a new
+one.** Subagent transcripts persist with their session, so `claude --resume`
+brings the warm implementer back with its reasoning intact — including why it
+abandoned each approach. A *new* session cannot reach it, and falls back to the
+attempt log, which carries the conclusions but not the reasoning. Tell the user
+this if you notice a ticket is going to span a break.

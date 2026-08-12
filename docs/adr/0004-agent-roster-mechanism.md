@@ -22,9 +22,12 @@ differently.
 per-PR review, four epic-boundary — invoked by three skills: `/build-ticket`,
 `/review-pr`, `/review-selftest`.
 
-**Warmth comes from `SendMessage`, within a session only.** The implementer is
+**Warmth comes from `SendMessage`, scoped to a session.** The implementer is
 spawned once per ticket and re-addressed by name; a send resumes it from its
-transcript. Across sessions it is backed by an append-only attempt log at
+transcript. Subagent transcripts persist with their session, so **resuming the
+session — `claude --resume` — restores the warm implementer even across a
+restart of Claude Code.** What loses warmth is starting a *new* session, not
+closing the terminal. Backing it up for that case: an append-only attempt log at
 `docs/tickets/e0/.attempts/<TICKET>.md` and `memory: project`.
 
 **Gating is computed, not delegated.** `/review-pr` runs `git diff --name-only`
@@ -78,10 +81,13 @@ can change the PR body before it opens. Promote once the findings are trusted.
 
 ## Consequences
 
-- **A ticket spanning two sessions loses the implementer's reasoning**, keeping
-  only its conclusions via the attempt log. This is a real gap against the
-  intent doc's "continuity for construction," and it is not fixable with current
-  tooling — subagents are in-process and die with the session.
+- **A ticket spanning two sittings keeps its warm implementer if the session is
+  resumed, and loses it if a new session is started.** Resume with
+  `claude --resume` rather than opening a fresh session mid-ticket. A new
+  session keeps only the conclusions, via the attempt log — the reasoning behind
+  a rejected approach is gone, which is the part the intent doc's "continuity
+  for construction" is actually about. The attempt log exists for that case and
+  is a weaker substitute, not an equivalent.
 - **Blinding the test author is correct for E0 and gets harder at E1.**
   Greenfield tickets can be written from acceptance criteria alone; tests
   extending an existing service cannot, unless the ticket states the public
