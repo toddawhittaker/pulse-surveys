@@ -2,7 +2,42 @@
 
 Full detail lives in `docs/SPEC.md` and `docs/DESIGN_BRIEF.md`. This file lists
 what must not be violated. Where the two documents disagree, the spec wins (it
-is later); the brief still governs anything the spec does not restate.
+is later); the brief still governs anything the spec does not restate. Process
+rules are in `CONTRIBUTING.md`; the branch and pull request section below is the
+operative summary.
+
+## Branch and pull request discipline
+
+`main` is protected. Never commit to it, never merge into it locally, never
+force-push anything anywhere. Every change reaches `main` through a pull
+request, and so does every change to an epic branch.
+
+Three tiers. `main` holds reviewed work. One long-lived **epic branch** per
+epic in SPEC §14.3, named `epic/e<N>-<kebab-title>` (`epic/e0-foundations`,
+`epic/e1-entering-the-app`), cut from `main`. One short-lived **seam branch**
+per ticket seam listed under that epic, named `e<N>/<kebab-seam>`
+(`e0/compose-stack`, `e0/core-schema`, `e1/launch-flow`), cut from its epic
+branch. Seam branches merge into their epic branch by pull request; epic
+branches merge into `main` by pull request. No exceptions, no direct merges in
+either direction. `CONTRIBUTING.md` has the full epic branch name table.
+
+For every unit of work, in order:
+
+1. Confirm which epic branch the work belongs to. Create it from `main` if it
+   does not exist yet.
+2. Cut a seam branch from that epic branch. Never work directly on the epic
+   branch.
+3. Commit in small, coherent steps. The subject line names the seam:
+   `e1/launch-flow: validate state and nonce on LTI launch`.
+4. Open a pull request into the epic branch when the seam is done. Use the
+   template: state the seam, the §14.2 definition-of-done items covered (tests,
+   AI evals, separate-agent security review, accessibility, docs), and anything
+   deliberately deferred.
+5. Stop. Todd approves and merges every pull request.
+
+Never merge your own pull request. Never use an admin override to bypass a
+protection rule. Never mark a pull request ready while CI is failing. Never
+retarget a pull request across epics — close it and re-cut the branch.
 
 ## Confidentiality invariants (SPEC §4.1)
 

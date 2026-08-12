@@ -30,6 +30,7 @@ an exported design prototype. No application code has been written yet.
   implements.
 - [`CLAUDE.md`](CLAUDE.md) — the constraints that must not be violated,
   condensed from the two documents above.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — the branch and pull request model.
 
 ## Deployment model
 
