@@ -1,7 +1,7 @@
 # Contributing
 
 This repository uses a three-tier branch model. It exists so that `main` always
-reflects reviewed, mergeable work, and so that each epic accumulates its seams
+reflects reviewed, mergeable work, and so that each epic accumulates its tickets
 in one place before it lands.
 
 > **`CLAUDE.md` is authoritative on process.** This file is the same rules
@@ -14,7 +14,7 @@ in one place before it lands.
 ```
 main                     protected; release history
   └── epic/e0-foundations        one long-lived branch per epic (SPEC §14.3)
-        ├── e0/compose-stack     one short-lived branch per ticket seam
+        ├── e0/compose-stack     one short-lived branch per ticket
         ├── e0/core-schema
         └── e0/mock-lms
 ```
@@ -26,11 +26,11 @@ force-push anything to it. Every change reaches `main` through a pull request.
 named `epic/e<N>-<kebab-title>`. They are cut from `main` and merge back into
 `main` by pull request when the epic is done.
 
-**Seam branches** are short-lived, one per ticket seam listed under an epic in
-§14.3, named `e<N>/<kebab-seam>`. They are cut from their epic branch and merge
+**Ticket branches** are short-lived, one per ticket listed under an epic in
+§14.3, named `e<N>/<kebab-slug>`. They are cut from their epic branch and merge
 back into that epic branch by pull request.
 
-Seam branches merge into their epic branch by pull request. Epic branches merge
+Ticket branches merge into their epic branch by pull request. Epic branches merge
 into `main` by pull request. There are no exceptions and no direct merges in
 either direction.
 
@@ -53,9 +53,9 @@ either direction.
 | E12 — Notifications | `epic/e12-notifications` |
 | E13 — Hardening & release ⚠ | `epic/e13-hardening-release` |
 
-Seam names come from the *Ticket seams* line under each epic in §14.3. Where an
-epic has been decomposed into numbered tickets under `docs/tickets/`, those
-ticket branch names win over the illustrative list in the spec —
+Ticket branch names come from the *Ticket breakdown* line under each epic in
+§14.3. Where an epic has been decomposed into numbered tickets under
+`docs/tickets/`, those ticket branch names win over the list in the spec —
 [`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is the build order for
 E0 and names all eighteen of its branches.
 
@@ -73,7 +73,7 @@ security-relevant diff.
    git push -u origin epic/e1-entering-the-app
    ```
 
-2. **Cut the seam branch** from the epic branch:
+2. **Cut the ticket branch** from the epic branch:
 
    ```bash
    git checkout epic/e1-entering-the-app
@@ -82,23 +82,23 @@ security-relevant diff.
    ```
 
 3. **Commit in small, coherent steps.** Each commit does one thing and its
-   subject line names the seam:
+   subject line names the ticket:
 
    ```
    e1/launch-flow: validate state and nonce on LTI launch
    ```
 
-4. **Open a pull request into the epic branch** when the seam is done. The
-   template in `.github/pull_request_template.md` asks for the seam, the §14.2
+4. **Open a pull request into the epic branch** when the ticket is done. The
+   template in `.github/pull_request_template.md` asks for the ticket, the §14.2
    definition-of-done items covered, and anything deliberately deferred. Fill
-   all three in — the deferred list is how the next seam knows what it inherits.
+   all three in — the deferred list is how the next ticket knows what it inherits.
 
    ```bash
    gh pr create --base epic/e1-entering-the-app --fill
    ```
 
 5. **Stop there** and wait for the repository owner. Do not merge because the
-   seam looks finished to you.
+   ticket looks finished to you.
 
 ## Who may merge what
 
@@ -106,16 +106,16 @@ Merge authority splits by target branch.
 
 | Pull request | Who merges |
 |---|---|
-| seam branch → epic branch | the owner, or an agent **after** the owner approves it in writing |
+| ticket branch → epic branch | the owner, or an agent **after** the owner approves it in writing |
 | epic branch → `main` | the owner, always, without exception |
 
 An agent may never merge an epic branch into `main`. An agent may merge its own
-seam pull request into an epic branch, but only once the owner has approved it
+ticket pull request into an epic branch, but only once the owner has approved it
 in conversation — the owner's approval is the trigger, never the agent's own
 judgment that the work is done.
 
 The reasoning: `main` is the branch worth protecting, and an epic landing there
-is the decision that deserves a human every time. A seam landing on an epic
+is the decision that deserves a human every time. A ticket landing on an epic
 branch is a smaller, more reversible step, and it is still gated on a human
 saying yes. What the rule forbids is an agent deciding on its own that
 something is ready.
@@ -124,9 +124,9 @@ something is ready.
 
 - Never use an admin override to bypass a protection rule.
 - Never mark a pull request ready for review while CI is failing.
-- Never force-push to `main` or to an epic branch. Force-pushing your own seam
+- Never force-push to `main` or to an epic branch. Force-pushing your own ticket
   branch before review is fine.
-- If a seam turns out to belong to a different epic, close the pull request and
+- If a ticket turns out to belong to a different epic, close the pull request and
   re-cut the branch. Do not retarget across epics.
 
 ## CI
@@ -145,8 +145,8 @@ catch a failure before you push.
 Fast gates run first and everything else waits on them.
 
 Most of the tree does not exist yet, so most jobs currently detect absence and
-pass with a note naming the seam that will make them enforcing. Landing that
-seam includes removing its tolerance — a seam that adds tests but leaves the
+pass with a note naming the ticket that will make them enforcing. Landing that
+ticket includes removing its tolerance — a ticket that adds tests but leaves the
 test gate tolerant has not finished.
 
 Two rules worth stating outright. A failing test is never fixed by skipping,
@@ -182,7 +182,7 @@ request bodies, test fixtures, seed data, or logs.
 
 ## Definition of done
 
-Every epic — and by extension every seam that composes it — carries the five
+Every epic — and by extension every ticket that composes it — carries the five
 conditions in [SPEC §14.2](docs/SPEC.md): tests land with the feature, AI evals
 are updated when a model task changes, a separate agent runs the adversarial
 security review, accessibility is handled in-slice rather than deferred to E13,

@@ -1,12 +1,12 @@
 # E0 — Foundations: build order
 
-Eighteen tickets decomposing the E0 seams in SPEC §14.3. Each is sized for a
+Eighteen tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
 Say **"build E0, ticket 3"** and it means E0-03.
 
-Branch names follow the seam convention in `CONTRIBUTING.md`: cut
+Branch names follow the ticket convention in `CONTRIBUTING.md`: cut
 `e0/<slug>` from `epic/e0-foundations`, one ticket per branch, one pull request
 into the epic branch.
 
@@ -78,14 +78,14 @@ tolerant through all of E0. No frontend exists until E1.
 
 ## Notes on the decomposition
 
-Where this differs from the seam list in §14.3, and why:
+Where this differs from the ticket list in §14.3, and why:
 
 - **"repo+CI" is already done** and is not a ticket here.
 - **"Compose+Dockerfiles" is split** into 02 and 03. The Compose file and the
   Celery runtime are separately reviewable, and the health-check argument list
   in CI changes in a way worth seeing on its own.
 - **"core schema" is split four ways** — 05, 06, 08, 09 — plus 10 for the views.
-  It is by far the largest seam in §14.3, and 09 in particular carries the
+  It is by far the largest ticket in §14.3, and 09 in particular carries the
   supervision graph, which decides whether purview can be computed correctly at
   all.
 - **The section-code parser (07) is its own ticket** rather than part of the
@@ -97,8 +97,8 @@ Where this differs from the seam list in §14.3, and why:
 - **"mock LMS" is split** into 14 and 15. Launch signing and the Advantage
   services are independently testable, and 15 is where NRPS paging lands, which
   is a named per-platform deviation in §7.3.
-- **18 is new** — §14.3 implies E0's exit criterion but lists no seam that
+- **18 is new** — §14.3 implies E0's exit criterion but lists no ticket that
   proves it. Without it the e2e gate would stay tolerant into E1.
 
-The illustrative seam names in `CONTRIBUTING.md` predate this file. Where the
+The illustrative ticket names in `CONTRIBUTING.md` predate this file. Where the
 two differ, these ticket branch names win.

@@ -1,7 +1,7 @@
-# Seam
+# Ticket
 
-<!-- Which ticket seam from SPEC §14.3 does this PR deliver? Name the epic and
-     the seam, e.g. "E0 — Foundations / core schema". One seam per PR. -->
+<!-- Which ticket from SPEC §14.3 does this PR deliver? Name the epic and
+     the ticket, e.g. "E0 — Foundations / core schema". One ticket per PR. -->
 
 ## What changed
 
@@ -63,6 +63,6 @@ Check what this PR covers. For anything not applicable, write "n/a" and why.
 
 ## Deliberately deferred
 
-<!-- Anything intentionally left out of this seam, and why. Be specific — this
-     is the record of what the next seam has to pick up. Write "nothing" if
-     the seam is complete as scoped. -->
+<!-- Anything intentionally left out of this ticket, and why. Be specific — this
+     is the record of what the next ticket has to pick up. Write "nothing" if
+     the ticket is complete as scoped. -->

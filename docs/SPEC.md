@@ -502,63 +502,63 @@ After a single foundations epic (E0), **epics are vertical feature slices**, not
 
 ### 14.3 Epics
 
-Hours are focused engineering time for one senior engineer, solo vs. maximizing Claude Code, ±20%. Each epic's estimate includes its testing, eval, and review work per §14.2. "Ticket seams" indicate how each epic naturally decomposes into scoped tickets.
+Hours are focused engineering time for one senior engineer, solo vs. maximizing Claude Code, ±20%. Each epic's estimate includes its testing, eval, and review work per §14.2. "Ticket breakdown" indicates how each epic naturally decomposes into scoped tickets.
 
 **E0 — Foundations** (solo 135h / CC 63h)
 The only horizontal epic: monorepo scaffold, Compose stack, CI pipeline with test/lint/typecheck/eval gates, Dockerfiles, config surface, core schema and migrations (org, term, identity aggregates), `AIGateway` shell with typed Pydantic contracts and one working task round-trip, authz skeleton, **mock LMS** (LTI 1.3 login/launch, JWKS, NRPS + AGS stubs, seed data), and **mock OIDC IdP** (discovery, authorize, token, JWKS, seeded users). Exit: `docker compose up` yields a launchable-into, loggable-into, testable system that does nothing yet.
-*Ticket seams:* repo+CI; Compose+Dockerfiles; core schema; mock LMS; mock IdP; AIGateway shell + task contract models; authz skeleton; seed script.
+*Ticket breakdown:* repo+CI; Compose+Dockerfiles; core schema; mock LMS; mock IdP; AIGateway shell + task contract models; authz skeleton; seed script.
 
 **E1 — Entering the app** ⚠ (solo 100h / CC 60h)
 Both doors work end-to-end: LTI launch validation (state/nonce, platform storage for cookieless iframes), automatic section/enrollment provisioning from launch plus the hourly roster sync, section-code parsing against the start-letter map (derived length, start/end dates, modality; §2.2), course-level derivation from course numbers, role resolution from `id_token` claims and the app-owned assignment model, OIDC web login against the mock IdP, unified session model so both doors resolve to the same identity and correct purview. Exit: a student, an instructor, and a Dean each land on the right (empty) view from either door, and a synced section shows correct derived dates.
-*Ticket seams:* launch flow; cookieless session; section provisioning + code parsing; hourly roster sync; OIDC login; role/purview resolution; dual-door identity merge.
+*Ticket breakdown:* launch flow; cookieless session; section provisioning + code parsing; hourly roster sync; OIDC login; role/purview resolution; dual-door identity merge.
 
 **E2 — Weekly survey & validity** (solo 70h / CC 34h)
 The five-question form (Likert, conditional-required text, workload slider), survey-window scheduling from term dates (Friday 18:00 ET open), synchronous AI validity gating with fail-open on provider timeout, one-open-survey rule, resubmission within window. Exit: a student submits a valid response; "it was okay" is bounced with immediate feedback.
-*Ticket seams:* window scheduler; survey form UI; submit API; validity task + prompts + evals; fail-open path; resubmission rules.
+*Ticket breakdown:* window scheduler; survey form UI; submit API; validity task + prompts + evals; fail-open path; resubmission rules.
 
 **E3 — Grade passback** (solo 55h / CC 30h)
 AGS line-item creation, participation formula (valid weeks ÷ elapsed weeks, enrollment-windowed), weekly recompute job, score posting with retry/failure handling, Hypothesis property tests across adds/drops/missed weeks, `PlatformProfile` seams for AGS quirks. Exit: mock-LMS gradebook shows correct percentages across enrollment edge cases.
-*Ticket seams:* line-item management; formula service + property tests; posting job + retries; platform adapter seam.
+*Ticket breakdown:* line-item management; formula service + property tests; posting job + retries; platform adapter seam.
 
 **E4 — Instructor Monday report** (solo 85h / CC 42h)
 Report generation job at window close, TrendPair with course-week axis and term-week sub-label, per-stream distributions, workload mean/median, response/validity rates, per-stream AI summaries under the §5.1 contracts (criticism preserved, counts stated, generated even in small-N), grouped comment lists each led by its stream summary, week navigation across published weeks, small-N suppression of raw comments (§4) including cumulative batched release and flag concealment (§5.2). Exit: instructor opens a real Monday report for a seeded section with a diverging two-stream story.
-*Ticket seams:* report job; distribution + dual-axis queries; summary task + prompts + evals; report UI; week navigation; small-N logic (⚠ human review on the suppression queries).
+*Ticket breakdown:* report job; distribution + dual-axis queries; summary task + prompts + evals; report UI; week navigation; small-N logic (⚠ human review on the suppression queries).
 
 **E5 — Benchmarks & comparison sets** (solo 70h / CC 36h)
 Default comparison-set resolution (same lead's courses, matched length+level from derived attributes), **past-referencing benchmarks** spanning current and prior terms, named-set management UI where invalid length/level combinations are impossible, university-wide line within length+level cohort, benchmark min-N suppression (distinct threshold), overlay rendering in both TrendPair panels, cohort-mode term-axis aggregates, student-view exclusion of all benchmark lines (invariant §4.1.1). Exit: an instructor sees three lines per panel benchmarked against prior terms; a student provably sees two lines and no benchmarks.
-*Ticket seams:* set resolution service; historical benchmark queries; named-set CRUD; panel overlays + cohort mode; min-N rules; invariant tests.
+*Ticket breakdown:* set resolution service; historical benchmark queries; named-set CRUD; panel overlays + cohort mode; min-N rules; invariant tests.
 
 **E6 — Moderation & exclusions** (solo 65h / CC 33h)
 Moderation classification at window close with harm-type routing (§5.2): instructor-abuse to the Lead Faculty review queue, welfare signals to Care regardless of thresholds. Full lifecycle — flagged-collapsed, excluded-with-undo, kept-with-undo (both directions logged), excluded text muted-but-visible to the instructor, reason-required exclusion of unflagged comments, small-N flag concealment with the neutral participation trace, exclusion log at the Lead Faculty prefix scope and above. Exit: the anti-cherry-picking trail is visible up-chain, and a welfare-flagged comment in a 3-response week provably reaches Care with no trace in the instructor view.
-*Ticket seams:* moderation task + evals; harm-type routing; lifecycle state machine + undo; LF review queue; small-N concealment tests; exclusion/kept log views.
+*Ticket breakdown:* moderation task + evals; harm-type routing; lifecycle state machine + undo; LF review queue; small-N concealment tests; exclusion/kept log views.
 
 **E7 — Response loop** (solo 70h / CC 36h)
 Instructor response editor with non-anonymous posting and as-students-see-it Edit path, AI draft-from-themes, instructor-initiated draft check (re-runnable, clears on edit), publish flow, required-response policy per prefix, aggregate hold with 48h delinquency surfacing, respond-on-behalf enabling at 96h with honest attribution, release of held aggregates. Exit: required-mode section shows nothing to students until a named human publishes.
-*Ticket seams:* editor UI; draft task; coaching task + evals; publish/hold state machine; reminders; on-behalf flow + attribution.
+*Ticket breakdown:* editor UI; draft task; coaching task + evals; publish/hold state machine; reminders; on-behalf flow + attribution.
 
 **E8 — Student loop closure** (solo 35h / CC 16h)
 Student results view: own-section aggregates, published comment set, instructor response; next-launch surfacing. Exit: the full weekly loop demos end-to-end from one student's seat.
-*Ticket seams:* results UI; published-set assembly; launch-time routing.
+*Ticket breakdown:* results UI; published-set assembly; launch-time routing.
 
 **E9 — Leadership hierarchy & roll-ups** ⚠ (solo 110h / CC 55h)
 The people graph and supervision model in full: People & reporting editor (top-down build), Lead Faculty mapping table with CSV import/export and dry-run diffs, purview computation over the assignment DAG (assistant-dean insertions, two-hat people, sibling-lead isolation), multi-role switcher / union purview with multi-root nav, roll-up dashboards at every level on the term axis with cohort selection, hierarchy and by-lead tree modes (by-lead for chair+ only), read-only section drill-down into the Monday report, n-threshold enforcement at the aggregation being viewed. Exit: the assistant-dean worked example (§2.1) resolves correctly from either door, and Hypothesis-generated graphs prove sibling isolation and transitive unions.
-*Ticket seams:* people graph editor; LF mapping + CSV dry-run; purview service over the DAG (⚠); role switcher; roll-up queries + cohort mode; tree modes; scope-boundary property tests.
+*Ticket breakdown:* people graph editor; LF mapping + CSV dry-run; purview service over the DAG (⚠); role switcher; roll-up queries + cohort mode; tree modes; scope-boundary property tests.
 
 **E10 — Care queue & safety** ⚠ (solo 60h / CC 40h)
 Threat/self-harm classification routing, suppression from all instructor/leadership views, Care-only queue UI with the two-action case flow (reveal identity / false positive, resolve-only-after-reveal with disposition note), automatic identity-access audit logging, Admin-visible access log and open-case count/age aperture (without content), configurable stale-case escalation notice, false-positive feed into evals. Highest human-review burden in the plan; the threat-recall eval floor is set and validated here. Exit: a seeded threat comment reaches only Care, a false positive closes without identity ever surfacing, and every reveal leaves an audit row.
-*Ticket seams:* safety routing; suppression proofs; queue UI + case state machine; reveal + audit (⚠ line-by-line); resolution notes; count/age aperture + escalation notice; recall-floor eval work.
+*Ticket breakdown:* safety routing; suppression proofs; queue UI + case state machine; reveal + audit (⚠ line-by-line); resolution notes; count/age aperture + escalation notice; recall-floor eval work.
 
 **E11 — Admin console & observability** (solo 70h / CC 32h)
 LTI health and launch-outcome log, job dashboard, AI provider metrics and spend, classifier drift panel with override-to-eval feed, full configuration surface (§6.3), LTI platform registration UI. Exit: an operator can diagnose a failed launch and a stuck job without shell access.
-*Ticket seams:* launch log; job dashboard; AI metrics; drift panel; config UI; registration UI.
+*Ticket breakdown:* launch log; job dashboard; AI metrics; drift panel; config UI; registration UI.
 
 **E12 — Notifications** (solo 25h / CC 10h)
 Email rendering and SMTP delivery, link-only Monday instructor mail, optional student open/published notices, per-institution toggles, Mailpit-verified e2e. Exit: Monday morning mail arrives with numbers and a link, never content.
-*Ticket seams:* templates; delivery + toggles; e2e via Mailpit.
+*Ticket breakdown:* templates; delivery + toggles; e2e via Mailpit.
 
 **E13 — Hardening & release** ⚠ (solo 60h / CC 35h)
 System-level passes that only make sense against the whole: full WCAG 2.2 AA audit, retention job + purge verification, load test (report generation at 500 sections), end-to-end FERPA data-flow review, dependency/license sweep for MIT compatibility, operator documentation, cut v1.0. This epic exists *despite* integrated testing, not instead of it.
-*Ticket seams:* a11y audit; retention + purge tests; load test; FERPA review (⚠ human-led); license sweep; docs; release.
+*Ticket breakdown:* a11y audit; retention + purge tests; load test; FERPA review (⚠ human-led); license sweep; docs; release.
 
 ### 14.4 Totals and sequencing
 
