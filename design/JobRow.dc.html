@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="border-bottom:1px solid var(--hairline);font-family:var(--font-mono)">
+  <div style="display:grid;grid-template-columns:1fr 170px 150px 80px 120px 110px;gap:var(--space-4);align-items:center;padding:10px 4px">
+    <span style="font-size:12px;font-weight:500;color:var(--spruce)">{{ name }}</span>
+    <span style="font-size:12px;color:var(--spruce-60)">{{ schedule }}</span>
+    <span style="font-size:12px;color:var(--spruce-60)">{{ lastRun }}</span>
+    <span style="font-size:12px;color:var(--spruce-60)">{{ duration }}</span>
+    <span style="font-size:12px;font-weight:500;color:{{ statusColor }}">{{ statusLabel }}</span>
+    <span>
+      <sc-if value="{{ canRerun }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ askRerun }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Run again</button>
+      </sc-if>
+    </span>
+  </div>
+  <sc-if value="{{ confirming }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;align-items:center;gap:var(--space-3);padding:0 4px var(--space-3);font-family:var(--font-body);font-size:var(--text-1);color:var(--spruce)">
+      <span>Run {{ name }} now. It will retry from the last failed step.</span>
+      <button onClick="{{ confirmRerun }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--spruce);border-radius:var(--radius-input);background:var(--spruce);color:var(--paper);cursor:pointer;white-space:nowrap">Run now</button>
+      <button onClick="{{ cancelRerun }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer">Cancel</button>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:80},&quot;jobName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;LMS roster sync&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;schedule&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Hourly&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;lastRun&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Today 10:02 AM&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;duration&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;12 s&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;status&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;ok&quot;,&quot;options&quot;:[&quot;ok&quot;,&quot;retrying&quot;,&quot;failed&quot;],&quot;tsType&quot;:&quot;'ok' | 'retrying' | 'failed'&quot;},&quot;retries&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:10}}">
+class Component extends DCLogic {
+  state = { confirming: false, rerun: false };
+  renderVals() {
+    const status = this.state.rerun ? 'retrying' : (this.props.status ?? 'ok');
+    const retries = this.props.retries ?? 0;
+    const colors = { ok: 'var(--spruce-60)', retrying: 'var(--marigold-deep)', failed: 'var(--madder)' };
+    return {
+      name: (this.props.jobName ?? this.props.name) ?? '',
+      schedule: this.props.schedule ?? '',
+      lastRun: this.state.rerun ? 'just now' : (this.props.lastRun ?? ''),
+      duration: this.props.duration ?? '',
+      statusLabel: status + (status !== 'ok' && retries ? ' · retry ' + retries : ''),
+      statusColor: colors[status] ?? 'var(--spruce-60)',
+      canRerun: status === 'failed' && !this.state.confirming,
+      confirming: this.state.confirming,
+      askRerun: () => this.setState({ confirming: true }),
+      cancelRerun: () => this.setState({ confirming: false }),
+      confirmRerun: () => this.setState({ confirming: false, rerun: true })
+    };
+  }
+}
+</script>
+</body>
+</html>

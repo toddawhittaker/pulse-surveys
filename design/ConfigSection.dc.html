@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5);font-family:var(--font-body)">
+  <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-4)">{{ title }}</div>
+  <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+    <sc-for list="{{ fieldRows }}" as="f" hint-placeholder-count="3">
+      <div>
+        <div style="display:flex;align-items:center;gap:var(--space-4)">
+          <label style="flex:0 0 220px;font-size:var(--text-1);font-weight:500;color:var(--spruce)">{{ f.label }}</label>
+          <sc-if value="{{ f.isText }}" hint-placeholder-val="{{ true }}">
+            <input type="text" value="{{ f.value }}" onChange="{{ f.change }}" style="flex:1;min-width:0;box-sizing:border-box;padding:6px var(--space-3);font-family:var(--font-mono);font-size:12px;color:var(--spruce);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+          </sc-if>
+          <sc-if value="{{ f.isToggle }}" hint-placeholder-val="{{ false }}">
+            <button role="switch" aria-checked="{{ f.on }}" onClick="{{ f.change }}" aria-label="{{ f.label }}" style="flex:none;width:40px;height:22px;border-radius:11px;border:1px solid {{ f.trackBorder }};background:{{ f.trackBg }};padding:2px;display:flex;justify-content:{{ f.knobSide }};cursor:pointer"><span style="width:16px;height:16px;border-radius:50%;background:var(--paper);box-shadow:var(--shadow-card)"></span></button>
+          </sc-if>
+        </div>
+        <div style="margin-left:236px;margin-top:4px;font-size:12px;line-height:1.5;color:var(--spruce-60)">{{ f.helper }}</div>
+        <sc-if value="{{ f.confirming }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-left:236px;margin-top:var(--space-2);padding:var(--space-3) var(--space-4);background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+            <div style="font-size:var(--text-1);line-height:1.5;color:var(--spruce)">{{ f.confirmText }}</div>
+            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-2)">
+              <button onClick="{{ f.apply }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--spruce);border-radius:var(--radius-input);background:var(--spruce);color:var(--paper);cursor:pointer;white-space:nowrap">Apply change</button>
+              <button onClick="{{ f.revert }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Keep {{ f.original }}</button>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:720,&quot;height&quot;:300},&quot;title&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Survey window&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;fields&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{id: string; label: string; value: string | boolean; helper?: string; type?: 'text' | 'toggle'; confirm?: string}[]&quot;}}">
+class Component extends DCLogic {
+  state = { values: {}, pending: {} };
+  renderVals() {
+    const fields = this.props.fields ?? [];
+    return {
+      title: this.props.title ?? '',
+      fieldRows: fields.map((f) => {
+        const cur = this.state.values[f.id] ?? f.value;
+        const pending = this.state.pending[f.id] ?? false;
+        const isToggle = f.type === 'toggle';
+        const on = isToggle && (cur === true || cur === 'on');
+        return {
+          label: f.label,
+          helper: f.helper ?? '',
+          isText: !isToggle,
+          isToggle,
+          value: cur,
+          on,
+          trackBg: on ? 'var(--spruce)' : 'var(--chalk)',
+          trackBorder: on ? 'var(--spruce)' : 'var(--hairline)',
+          knobSide: on ? 'flex-end' : 'flex-start',
+          change: (e) => {
+            const next = isToggle ? !on : e.target.value;
+            this.setState((s) => ({
+              values: Object.assign({}, s.values, { [f.id]: next }),
+              pending: f.confirm ? Object.assign({}, s.pending, { [f.id]: next !== f.value }) : s.pending
+            }));
+          },
+          confirming: pending && !!f.confirm,
+          confirmText: f.confirm ?? '',
+          original: String(f.value),
+          apply: () => this.setState((s) => ({ pending: Object.assign({}, s.pending, { [f.id]: false }) })),
+          revert: () => this.setState((s) => ({
+            values: Object.assign({}, s.values, { [f.id]: f.value }),
+            pending: Object.assign({}, s.pending, { [f.id]: false })
+          }))
+        };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

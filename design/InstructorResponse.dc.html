@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="font-family:var(--font-body)">
+  <div style="background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+      <span style="font-family:var(--font-mono);font-size:12px;font-weight:500;letter-spacing:0.08em;color:var(--spruce-60);border:1px solid var(--hairline);border-radius:var(--radius-input);padding:2px 6px;background:var(--paper)">AI</span>
+      <span style="font-size:var(--text-1);font-weight:500;color:var(--spruce-60)">Suggested response — edit before posting</span>
+      <button onClick="{{ useDraft }}" style="margin-left:auto;white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer;transition:background 150ms ease" style-hover="background:var(--hairline)">Use draft</button>
+    </div>
+    <p style="margin:0;font-size:var(--text-2);line-height:1.55;color:var(--spruce)">{{ suggestedText }}</p>
+  </div>
+  <sc-if value="{{ notPosted }}" hint-placeholder-val="{{ true }}">
+    <textarea value="{{ value }}" onChange="{{ onChange }}" placeholder="Write to your students — they see this alongside next week's survey." rows="5" style="display:block;width:100%;box-sizing:border-box;margin-top:var(--space-3);padding:var(--space-3) var(--space-4);font-family:var(--font-body);font-size:var(--text-2);line-height:1.55;color:var(--spruce);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-input);resize:vertical"></textarea>
+    <sc-if value="{{ hasThemes }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:var(--space-3)">
+        <button onClick="{{ runCheck }}" style="white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer" style-hover="background:var(--chalk)">Check draft with AI</button>
+        <sc-if value="{{ hasCheck }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:var(--space-3);background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-3) var(--space-4)">
+            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+              <span style="font-family:var(--font-mono);font-size:12px;font-weight:500;letter-spacing:0.08em;color:var(--spruce-60);border:1px solid var(--hairline);border-radius:var(--radius-input);padding:2px 6px;background:var(--paper)">AI</span>
+              <span style="font-size:var(--text-1);font-weight:500;color:var(--spruce-60)">Draft check — optional, never blocks posting</span>
+            </div>
+            <p style="margin:0;font-size:var(--text-1);line-height:1.55;color:var(--spruce)">{{ checkText }}</p>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-top:var(--space-3)">
+      <span style="font-size:var(--text-1);color:var(--spruce-60)">{{ audienceNote }}</span>
+      <button onClick="{{ post }}" disabled="{{ postDisabled }}" style="white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:8px 16px;border-radius:var(--radius-input);border:1px solid var(--spruce);background:var(--spruce);color:var(--paper);cursor:pointer;opacity:{{ postOpacity }};transition:opacity 150ms ease">Post response</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{ posted }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:var(--space-3);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-4) var(--space-5)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+        <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60)">Posted — students see this with next week's survey</span>
+        <button onClick="{{ unpost }}" style="white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer" style-hover="background:var(--chalk)">Edit</button>
+      </div>
+      <p style="margin:0;font-size:var(--text-2);line-height:1.55;color:var(--spruce)">{{ value }}</p>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:672,&quot;height&quot;:320},&quot;suggested&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Thank you for the candid feedback on pacing. You're right that this week stacked three chapters against the midterm; I'm moving one to after break and posting a reading priority guide tonight. Glad the field sampling lab worked — more of that is coming.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;audienceNote&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Visible to all enrolled students. Not anonymous — it posts under your name.&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { value: '', posted: false, checkText: null };
+  renderVals() {
+    const suggested = this.props.suggested ?? '';
+    const value = this.state.value;
+    const posted = this.state.posted;
+    const themes = this.props.themes ?? [];
+    const runCheck = () => {
+      if (!value.trim()) { this.setState({ checkText: 'Nothing to check yet — write or pull in a draft first.' }); return; }
+      const low = value.toLowerCase();
+      const hit = themes.filter((t) => t.keywords.some((k) => low.indexOf(k) >= 0));
+      const miss = themes.filter((t) => !t.keywords.some((k) => low.indexOf(k) >= 0));
+      let text;
+      if (miss.length === 0) text = 'Your draft speaks to each of this week\u2019s main themes' + (hit.length ? ' (' + hit.map((t) => t.label).join('; ') + ')' : '') + '. Ready when you are.';
+      else text = (hit.length ? 'Your draft addresses ' + hit.map((t) => t.label).join(' and ') + '. ' : '') + 'It doesn\u2019t yet touch ' + miss.map((t) => t.label + ' (' + t.count + ' comments)').join(' or ') + ' — a sentence there would show those students they were heard.';
+      this.setState({ checkText: text });
+    };
+    return {
+      hasThemes: themes.length > 0,
+      hasCheck: !!this.state.checkText,
+      checkText: this.state.checkText ?? '',
+      runCheck,
+      suggestedText: suggested,
+      value,
+      notPosted: !posted,
+      posted,
+      audienceNote: this.props.audienceNote ?? 'Visible to all enrolled students. Not anonymous — it posts under your name.',
+      postDisabled: value.trim().length === 0,
+      postOpacity: value.trim().length === 0 ? 0.4 : 1,
+      onChange: (e) => this.setState({ value: e.target.value, checkText: null }),
+      useDraft: () => this.setState({ value: suggested, posted: false, checkText: null }),
+      post: () => { if (value.trim()) this.setState({ posted: true }); },
+      unpost: () => this.setState({ posted: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

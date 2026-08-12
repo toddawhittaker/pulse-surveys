@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="font-family:var(--font-body)">
+  <sc-if value="{{ hasItems }}" hint-placeholder-val="{{ true }}">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--space-3)">
+      <sc-for list="{{ items }}" as="it" hint-placeholder-count="2">
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-4) var(--space-5);display:flex;flex-direction:column;gap:var(--space-2)">
+          <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
+            <sc-if value="{{ it.hasStream }}" hint-placeholder-val="{{ false }}">
+              <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);border:1px solid var(--hairline);border-radius:var(--radius-input);padding:2px 8px;white-space:nowrap">{{ it.stream }}</span>
+            </sc-if>
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.04em;color:var(--marigold-deep);white-space:nowrap">{{ it.rule }}</span>
+          </div>
+          <div style="font-size:var(--text-2);font-weight:500;color:var(--spruce)">{{ it.section }}</div>
+          <div style="font-size:var(--text-1);color:var(--spruce-60)">{{ it.detail }}</div>
+          <a href="{{ it.href }}" style="font-size:var(--text-1);font-weight:500;color:var(--marigold-deep);text-decoration:none;margin-top:var(--space-1)" style-hover="color:var(--spruce)">Open Monday report →</a>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:var(--space-6) var(--space-5);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card)">
+      <svg width="160" height="24" aria-hidden="true" style="display:block;margin-bottom:var(--space-3)"><line x1="2" y1="12" x2="146" y2="12" style="stroke:var(--mist);stroke-width:2;stroke-linecap:round"></line><circle cx="153" cy="12" r="3.5" style="fill:var(--mist)"></circle></svg>
+      <div style="font-size:var(--text-2);color:var(--spruce-60)">Nothing needs attention this week.</div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:720,&quot;height&quot;:220},&quot;items&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{section: string; rule: string; stream?: string; detail?: string; href?: string}[]&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const items = (this.props.items ?? []).map((it) => ({
+      section: it.section, rule: it.rule, detail: it.detail ?? '',
+      stream: it.stream ?? '', hasStream: !!it.stream,
+      href: it.href ?? 'InstructorMondayReport.dc.html'
+    }));
+    return { items, hasItems: items.length > 0, isEmpty: items.length === 0 };
+  }
+}
+</script>
+</body>
+</html>

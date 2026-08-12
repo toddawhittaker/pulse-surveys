@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-5) var(--space-6);font-family:var(--font-body)">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-4)">
+    <span style="font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--madder)">{{ classification }}</span>
+    <span style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);white-space:nowrap">{{ caseId }}</span>
+  </div>
+  <p style="margin:var(--space-4) 0;font-family:var(--font-display);font-weight:400;font-size:var(--text-3);line-height:1.55;color:var(--spruce);text-wrap:pretty">&ldquo;{{ text }}&rdquo;</p>
+  <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">{{ context }} · {{ statusLabel }}</div>
+  <sc-if value="{{ showIdentity }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:var(--space-4);padding-top:var(--space-4);border-top:1px solid var(--hairline)">
+      <div style="font-size:var(--text-2);font-weight:500;color:var(--spruce)">{{ identityName }}</div>
+      <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);margin-top:2px">{{ identitySid }}</div>
+      <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);margin-top:var(--space-2)">Identity visible · this access was logged.</div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showOpenActions }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-4)">
+      <button onClick="{{ reveal }}" style="font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:8px 14px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Reveal student identity</button>
+      <button onClick="{{ falsePositive }}" style="font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:8px 14px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Mark false positive</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showResolve }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-4);align-items:center">
+      <input type="text" value="{{ note }}" onChange="{{ setNote }}" placeholder="Optional disposition note" aria-label="Disposition note" style="flex:1 1 260px;min-width:0;box-sizing:border-box;padding:8px var(--space-3);font-family:var(--font-mono);font-size:12px;color:var(--spruce);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+      <button onClick="{{ resolve }}" style="flex:none;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:8px 14px;border:1px solid var(--spruce);border-radius:var(--radius-input);background:var(--spruce);color:var(--paper);cursor:pointer;white-space:nowrap">Mark resolved</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{ hasDispositionLine }}" hint-placeholder-val="{{ false }}">
+    <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);margin-top:var(--space-3)">{{ dispositionLine }}</div>
+  </sc-if>
+  <sc-if value="{{ hasNoteLine }}" hint-placeholder-val="{{ false }}">
+    <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce);margin-top:var(--space-1)">{{ dispositionNote }}</div>
+  </sc-if>
+  <sc-if value="{{ showFpNote }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:var(--text-1);color:var(--spruce-60);margin-top:var(--space-2)">False positives improve detection.</div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:640,&quot;height&quot;:280},&quot;classification&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Self-harm risk&quot;,&quot;options&quot;:[&quot;Self-harm risk&quot;,&quot;Threat of harm&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;text&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;I don't really see the point in continuing with any of this anymore. Nothing I do changes anything.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;context&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;BIOL 2150 · R3WW · WK 07&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;caseId&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;CASE 2026-0141&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;status&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;open&quot;,&quot;options&quot;:[&quot;open&quot;,&quot;resolved&quot;],&quot;tsType&quot;:&quot;'open' | 'resolved'&quot;},&quot;revealed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;identity&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{name: string; sid: string} | null&quot;},&quot;onReveal&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onResolve&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(note: string) =&gt; void&quot;},&quot;onFalsePositive&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;dispositionLine&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;dispositionNote&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;fpNote&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { note: null };
+  renderVals() {
+    const status = this.props.status ?? 'open';
+    const revealed = this.props.revealed ?? false;
+    const isOpen = status === 'open';
+    const identity = this.props.identity ?? null;
+    const note = this.state.note ?? '';
+    const onResolve = this.props.onResolve ?? (() => {});
+    return {
+      classification: this.props.classification ?? '',
+      caseId: this.props.caseId ?? '',
+      text: this.props.text ?? '',
+      context: this.props.context ?? '',
+      statusLabel: isOpen ? 'Open' : 'Resolved',
+      showIdentity: revealed && !!identity,
+      identityName: identity ? identity.name : '',
+      identitySid: identity ? identity.sid : '',
+      showOpenActions: isOpen && !revealed,
+      reveal: this.props.onReveal ?? (() => {}),
+      falsePositive: this.props.onFalsePositive ?? (() => {}),
+      showResolve: isOpen && revealed,
+      note,
+      setNote: (e) => this.setState({ note: e.target.value }),
+      resolve: () => onResolve(note.trim()),
+      hasDispositionLine: !!(this.props.dispositionLine),
+      dispositionLine: this.props.dispositionLine ?? '',
+      hasNoteLine: !!(this.props.dispositionNote),
+      dispositionNote: this.props.dispositionNote ?? '',
+      showFpNote: this.props.fpNote ?? false
+    };
+  }
+}
+</script>
+</body>
+</html>

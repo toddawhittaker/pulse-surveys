@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&family=Schibsted+Grotesk:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--chalk);min-height:100vh;padding:var(--space-6) var(--space-5);box-sizing:border-box" data-screen-label="Leadership Roll-up">
+<div style="max-width:1200px;margin:0 auto">
+  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-5)">
+    <dc-import name="WeekEyebrow" week="{{ week }}" total="{{ totalWeeks }}" note="roll-up" hint-size="200px,20px"></dc-import>
+    <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);white-space:nowrap">{{ roleLabel }}</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-5);align-items:flex-start">
+    <div style="flex:0 1 280px;min-width:240px">
+      <sc-if value="{{ showModeToggle }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;gap:4px;background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-input);padding:4px;margin-bottom:var(--space-3)">
+        <button onClick="{{ modeHier }}" style="flex:1;min-height:32px;border:none;border-radius:3px;background:{{ hierBg }};color:var(--spruce);font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;font-weight:{{ hierWeight }}">Hierarchy</button>
+        <button onClick="{{ modeLead }}" style="flex:1;min-height:32px;border:none;border-radius:3px;background:{{ leadBg }};color:var(--spruce);font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;font-weight:{{ leadWeight }}">Lead faculty</button>
+      </div>
+      </sc-if>
+      <sc-if value="{{ showModeSpacer }}" hint-placeholder-val="{{ false }}">
+        <div style="height:42px;margin-bottom:var(--space-3)" aria-hidden="true"></div>
+      </sc-if>
+      <dc-import name="HierarchyNav" nodes="{{ tree }}" selected-id="{{ sel }}" on-select="{{ selectNode }}" hint-size="280px,420px"></dc-import>
+    </div>
+    <div style="flex:1 1 560px;min-width:0">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:42px;box-sizing:border-box;font-family:var(--font-mono);font-size:12px;letter-spacing:0.04em;color:var(--spruce-60);margin-bottom:var(--space-3)">
+        <sc-for list="{{ crumbs }}" as="cr" hint-placeholder-count="3">
+          <span style="display:flex;align-items:center;gap:6px">
+            <button onClick="{{ cr.pick }}" style="border:none;background:transparent;padding:2px 0;font-family:var(--font-mono);font-size:12px;letter-spacing:0.04em;color:{{ cr.color }};font-weight:{{ cr.weight }};cursor:{{ cr.cursor }}" style-hover="color:var(--spruce)">{{ cr.name }}</button>
+            <sc-if value="{{ cr.hasSep }}" hint-placeholder-val="{{ true }}"><span aria-hidden="true">›</span></sc-if>
+          </span>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{ isSection }}" hint-placeholder-val="{{ false }}">
+        <div style="pointer-events:none">
+          <dc-import name="InstructorMondayReport" embedded="{{ true }}" hint-size="100%,1900px"></dc-import>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isAggregate }}" hint-placeholder-val="{{ true }}">
+        <article style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-6);box-sizing:border-box">
+          <dc-import name="AggregateHeader" node-name="{{ nodeName }}" scope-line="{{ scopeLine }}" total-weeks="{{ 18 }}" axis="term" instr-cohorts="{{ instrCohorts }}" course-cohorts="{{ courseCohorts }}" trend-i="{{ trendI }}" trend-c="{{ trendC }}" bench-i="{{ benchI }}" bench-c="{{ benchC }}" uni-i="{{ uniI }}" uni-c="{{ uniC }}" hint-size="100%,680px"></dc-import>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-4)">
+            <sc-for list="{{ cohortChips }}" as="ch" hint-placeholder-count="4">
+              <button onClick="{{ ch.pick }}" style="display:flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:{{ ch.bg }};font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce);cursor:pointer;font-weight:{{ ch.weight }}" style-hover="background:var(--chalk)">
+                <sc-if value="{{ ch.hasDot }}" hint-placeholder-val="{{ false }}"><span style="width:8px;height:8px;border-radius:50%;background:{{ ch.color }}"></span></sc-if>{{ ch.label }}
+              </button>
+            </sc-for>
+          </div>
+
+          <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Workload</h2>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-5)">
+            <dc-import name="StatPair" label="Median hours this week" value="{{ medianH }}" unit="h" compare="{{ medianCompare }}" hint-size="100%,90px"></dc-import>
+            <dc-import name="StatPair" label="Mean hours this week" value="{{ meanH }}" unit="h" compare="{{ meanCompare }}" hint-size="100%,90px"></dc-import>
+          </div>
+
+          <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Participation</h2>
+          <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+            <dc-import name="ResponseRateBar" label="Response rate" num="{{ respNum }}" den="{{ respDen }}" hint-size="100%,36px"></dc-import>
+            <dc-import name="ResponseRateBar" label="Validity rate" num="{{ validNum }}" den="{{ respNum }}" hint-size="100%,36px"></dc-import>
+          </div>
+
+          <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Needs attention</h2>
+          <dc-import name="AttentionList" items="{{ attention }}" hint-size="100%,220px"></dc-import>
+
+          <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Comments</h2>
+          <dc-import name="AiPanel" heading="AI summary across this node's comment streams" text="{{ summary }}" meta="{{ summaryMeta }}" hint-size="100%,150px"></dc-import>
+          <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the instructor</div>
+            <sc-if value="{{ hasInstr }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+                <sc-for list="{{ instrComments }}" as="c" hint-placeholder-count="2">
+                  <dc-import name="CommentCard" text="{{ c.text }}" hint-size="100%,90px"></dc-import>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noInstr }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:var(--text-1);color:var(--spruce-60)">No published comments about instructors at this node this week.</div>
+            </sc-if>
+            <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the course</div>
+            <sc-if value="{{ hasCourse }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+                <sc-for list="{{ courseComments }}" as="c" hint-placeholder-count="2">
+                  <dc-import name="CommentCard" text="{{ c.text }}" hint-size="100%,90px"></dc-import>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noCourse }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:var(--text-1);color:var(--spruce-60)">No published comments about courses at this node this week.</div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ smallN }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:var(--space-4)">
+              <dc-import name="SmallNNotice" responded="{{ respNum }}" total="{{ respDen }}" hint-size="100%,160px"></dc-import>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showPolicies }}" hint-placeholder-val="{{ false }}">
+            <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Prefix policy</h2>
+            <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+              <sc-for list="{{ policies }}" as="p" hint-placeholder-count="1">
+                <dc-import name="PolicyToggle" course-set="{{ p.courseSet }}" enabled="{{ p.enabled }}" read-only="{{ p.readOnly }}" on-toggle="{{ p.onToggle }}" hint-size="100%,170px"></dc-import>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ showPolicyNote }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:var(--text-1);color:var(--spruce-60);margin-top:var(--space-6)">Response-required policy is set per course prefix by its Lead Faculty. Select a prefix to view its setting.</div>
+          </sc-if>
+
+          <sc-if value="{{ showLog }}" hint-placeholder-val="{{ false }}">
+            <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Exclusion log</h2>
+            <div style="display:grid;grid-template-columns:80px 150px 1fr 200px;gap:var(--space-4);font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60);padding-bottom:var(--space-2);border-bottom:1px solid var(--hairline)"><span>Date</span><span>Instructor</span><span>Comment</span><span>Status &amp; reason</span></div>
+            <sc-for list="{{ logRows }}" as="lr" hint-placeholder-count="2">
+              <dc-import name="ExclusionLogRow" date="{{ lr.date }}" instructor="{{ lr.instructor }}" excerpt="{{ lr.excerpt }}" flag-status="{{ lr.flagStatus }}" reason="{{ lr.reason }}" hint-size="100%,80px"></dc-import>
+            </sc-for>
+          </sc-if>
+        </article>
+      </sc-if>
+    </div>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;role&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;lead-faculty&quot;,&quot;options&quot;:[&quot;lead-faculty&quot;,&quot;chair&quot;,&quot;dean&quot;,&quot;vp&quot;],&quot;tsType&quot;:&quot;'lead-faculty' | 'chair' | 'dean' | 'vp'&quot;,&quot;section&quot;:&quot;Scope&quot;}}">
+class Component extends DCLogic {
+  state = { sel: null, policyOverrides: {}, navMode: 'hierarchy', cohortSel: 'all' };
+  COHORTS = [
+    { key: 'w1', label: 'U sections · started 8/17', color: 'var(--marigold)', start: 1,
+      I: [3.9, 3.9, 3.8, 3.9, 3.8, 3.7, 3.7, 3.8, 3.8, 3.7], C: [3.8, 3.8, 3.7, 3.8, 3.7, 3.6, 3.6, 3.7, 3.6, 3.6] },
+    { key: 'w4', label: 'R sections · started 9/7', color: 'var(--spruce)', start: 4,
+      I: [4.0, 4.0, 3.8, 4.0, 3.7, 3.4, 3.6], C: [3.9, 3.8, 3.6, 3.9, 3.5, 3.3, 3.4] },
+    { key: 'w7', label: 'Q sections · started 9/28', color: 'var(--marigold-deep)', start: 7,
+      I: [3.8, 3.9, 3.7, 3.8], C: [3.7, 3.8, 3.6, 3.6] }
+  ];
+  buildTrees() {
+    const ADJUNCTS = ['Dr. C. Vance', 'Dr. I. Petrov', 'Dr. N. Almasi', 'Dr. G. Yoon', 'Dr. B. Kowalski', 'Dr. F. Ibarra', 'Dr. D. McAllister', 'Dr. S. Banerjee', 'Dr. W. Trask', 'Dr. O. Lindqvist', 'Dr. H. Nakamura', 'Dr. A. Duplessis'];
+    const secs = (cid, n, letter) => Array.from({ length: n }, (_, i) => {
+      const code = letter + (i + 1) + 'WW';
+      const instr = (cid === '2150' && i === 2) ? 'Dr. M. Ellison' : ADJUNCTS[(cid.split('').reduce((a, ch) => a + ch.charCodeAt(0), 0) + i * 5) % ADJUNCTS.length];
+      return { id: 'sec-' + cid + '-0' + (i + 1), name: code, count: instr };
+    });
+    const crs = (cid, name, n, lead, letter) => ({ id: 'crs-' + cid, name, count: n + ' sections · ' + lead, children: secs(cid, n, letter ?? 'Q'), _secs: n, _lead: lead });
+    const pre = (id, name, courses) => {
+      const t = courses.reduce((a, c) => a + c._secs, 0);
+      return { id: 'pre-' + id, name, count: courses.length + ' courses · ' + t + ' sections', children: courses, _secs: t };
+    };
+    const dept = (id, name, prefixes, chair) => {
+      const t = prefixes.reduce((a, p) => a + p._secs, 0);
+      return { id: 'dept-' + id, name, count: prefixes.length + ' prefixes · ' + t + ' sections' + (chair ? ' · Chair: ' + chair : ''), children: prefixes, _secs: t };
+    };
+    const biol = pre('biol', 'BIOL', [
+      crs('1110', 'BIOL 1110 — General Biology I', 3, 'Dr. T. Nguyen', 'E'), crs('1120', 'BIOL 1120 — General Biology II', 3, 'Dr. T. Nguyen', 'F'),
+      crs('1130', 'BIOL 1130 — Biology Lab Foundations', 2, 'Dr. S. Park', 'H'), crs('2150', 'BIOL 2150 — Principles of Ecology', 3, 'Dr. Rivera', 'R'),
+      crs('2300', 'BIOL 2300 — Cell Biology', 2, 'Dr. S. Park', 'U'), crs('3200', 'BIOL 3200 — Evolution', 2, 'Dr. Rivera', 'R'),
+      crs('3450', 'BIOL 3450 — Molecular Genetics', 2, 'Dr. A. Okafor', 'Q'), crs('4410', 'BIOL 4410 — Field Ecology', 2, 'Dr. Rivera', 'Q')
+    ]);
+    const mars = pre('mars', 'MARS', [crs('2210', 'MARS 2210 — Intro Marine Science', 2, 'Dr. S. Park', 'E'), crs('3310', 'MARS 3310 — Coastal Ecosystems', 2, 'Dr. Rivera', 'F')]);
+    const bio = dept('bio', 'Biology', [biol, mars], 'Dr. K. Sorensen');
+    const chemMk = (p) => dept('chem', 'Chemistry', p, 'Dr. R. Marchetti');
+    const chem = chemMk([
+      pre('chem', 'CHEM', [crs('1210', 'CHEM 1210 — General Chemistry I', 3, 'Dr. L. Moreau', 'U'), crs('1220', 'CHEM 1220 — General Chemistry II', 3, 'Dr. L. Moreau', 'Q'), crs('2310', 'CHEM 2310 — Organic Chemistry I', 2, 'Dr. H. Braun', 'E'), crs('2320', 'CHEM 2320 — Organic Chemistry II', 2, 'Dr. H. Braun', 'H')]),
+      pre('bchm', 'BCHM', [crs('3100', 'BCHM 3100 — Biochemistry I', 2, 'Dr. H. Braun', 'R')])
+    ]);
+    const phys = dept('phys', 'Physics', [
+      pre('phys', 'PHYS', [crs('2400', 'PHYS 2400 — Mechanics', 2, 'Dr. K. Adeyemi', 'U'), crs('2410', 'PHYS 2410 — Electricity & Magnetism', 2, 'Dr. K. Adeyemi', 'Q')]),
+      pre('astr', 'ASTR', [crs('1040', 'ASTR 1040 — Solar System Astronomy', 2, 'Dr. K. Adeyemi', 'E')])
+    ], 'Dr. Y. Osman');
+    const math = dept('math', 'Mathematics', [
+      pre('math', 'MATH', [crs('1610', 'MATH 1610 — Calculus I', 3, 'Dr. P. Shah', 'U'), crs('1620', 'MATH 1620 — Calculus II', 2, 'Dr. P. Shah', 'Q')]),
+      pre('stat', 'STAT', [crs('2000', 'STAT 2000 — Statistical Methods', 2, 'Dr. E. Costa', 'F')]),
+      pre('mis', 'MIS', [crs('3050', 'MIS 3050 — Data Management', 2, 'Dr. E. Costa', 'H')])
+    ], 'Dr. C. Bellamy');
+    const psy = dept('psy', 'Psychology', [pre('psyc', 'PSYC', [crs('1010', 'PSYC 1010 — Intro Psychology', 3, 'Dr. R. Feld', 'E')])], 'Dr. T. Marsh');
+    const eng = dept('eng', 'English', [pre('engl', 'ENGL', [crs('1100', 'ENGL 1100 — College Writing', 3, 'Dr. M. Osei', 'F')])], 'Dr. V. Rowe');
+    const allSci = [bio, chem, phys, math];
+    const sci = { id: 'col-sci', name: 'College of Sciences', count: '4 departments · ' + allSci.reduce((a, d) => a + d._secs, 0) + ' sections · Dean: Dr. P. Ashford', children: allSci, _secs: allSci.reduce((a, d) => a + d._secs, 0) };
+    const laDepts = [psy, eng];
+    const la = { id: 'col-la', name: 'College of Liberal Arts', count: '2 departments · ' + laDepts.reduce((a, d) => a + d._secs, 0) + ' sections · Dean: Dr. L. Deng', children: laDepts, _secs: laDepts.reduce((a, d) => a + d._secs, 0) };
+    const myCourses = (p) => {
+      const own = p.children.filter((c) => c._lead === 'Dr. Rivera').map((c) => Object.assign({}, c, { count: c._secs + ' sections' }));
+      const t = own.reduce((a, c) => a + c._secs, 0);
+      return { id: p.id, name: p.name, count: own.length + ' courses · ' + t + ' sections', children: own, _secs: t };
+    };
+    return { 'lead-faculty': [myCourses(biol), myCourses(mars)], 'chair': [biol, mars], 'dean': [bio, chem, phys, math], 'vp': [sci, la] };
+  }
+  buildLeadTree(roots) {
+    const byLead = {};
+    const walk = (list) => list.forEach((n) => {
+      if (n._lead) {
+        (byLead[n._lead] = byLead[n._lead] || []).push(n);
+      } else if (n.children) walk(n.children);
+    });
+    walk(roots);
+    return Object.keys(byLead).sort().map((lead) => {
+      const courses = byLead[lead];
+      const t = courses.reduce((a, c) => a + c._secs, 0);
+      return { id: 'lf-' + lead.replace(/[^a-z]/gi, '').toLowerCase(), name: lead, count: courses.length + ' courses · ' + t + ' sections', children: courses, _secs: t };
+    });
+  }
+  NODE_DATA = {
+    'pre-biol': { scope: '8 courses · 19 sections · 402 of 486 responded this week · Lead Faculty: Dr. Rivera, Dr. T. Nguyen, Dr. S. Park, Dr. A. Okafor', resp: [402, 486], valid: [385, 402], med: '5.4', mean: '5.9',
+      trendI: [4.0, 4.0, 3.8, 4.0, 3.7, 3.4, 3.6], trendC: [3.9, 3.8, 3.6, 3.9, 3.5, 3.3, 3.4],
+      attention: [
+        { section: 'BIOL 2150 · R2WW', rule: 'Response rate under 40%', detail: '8 of 23 responded this week' },
+        { section: 'BIOL 3200 · R1WW', stream: 'Instructor', rule: 'Instructor trend down 2+ consecutive weeks', detail: '3.9 → 3.6 → 3.4 over weeks 5–7' }
+      ],
+      summary: 'Across BIOL, field and lab experiences draw the most consistent praise, and instructor support holds steady. The recurring criticism is reading volume ahead of midterms — it appears in five of nineteen sections, concentrated in BIOL 2150 and BIOL 3200.',
+      instr: [{ text: 'Office hours across these courses keep getting called out as the place where things click.' }, { text: 'Lecture pacing is the most common instructor-stream concern this week.' }],
+      course: [{ text: 'The field sampling labs are the highlight of the prefix — students ask for more.' }, { text: 'Reading load before the midterm comes up in five sections, in nearly the same words.' }] },
+    'dept-bio': { scope: '2 prefixes · 10 courses · 23 sections · 458 of 556 responded this week', resp: [458, 556], valid: [439, 458], med: '5.4', mean: '5.8',
+      trendI: [3.9, 3.9, 3.8, 3.9, 3.8, 3.6, 3.7], trendC: [3.8, 3.8, 3.6, 3.8, 3.6, 3.4, 3.5],
+      attention: [
+        { section: 'BIOL 3200 · R1WW', stream: 'Instructor', rule: 'Instructor trend down 2+ consecutive weeks', detail: '3.9 → 3.6 → 3.4 over weeks 5–7' },
+        { section: 'BIOL 1120 · F2WW', rule: 'Response required · delinquent 48h+', detail: 'Student results held 52 hours awaiting a response' }
+      ],
+      summary: 'Department-wide, ratings dipped through the midterm window and are steadying. Course-stream comments concentrate on reading volume and lab report timing; instructor-stream comments remain mostly positive, with pacing the main exception.',
+      instr: [{ text: 'Instructors here answer email fast — that comes up in almost every course.' }, { text: 'Several sections want lecture pacing to leave more room for questions.' }],
+      course: [{ text: 'Lab-heavy weeks are consistently the best-rated across the department.' }, { text: 'Midterm-week reading stacks are the most repeated complaint.' }] },
+    'col-sci': { scope: '4 departments · 8 prefixes · 29 courses · 66 sections · 1,084 of 1,347 responded this week', resp: [1084, 1347], valid: [1041, 1084], med: '5.2', mean: '5.6',
+      trendI: [3.9, 3.9, 3.8, 3.9, 3.8, 3.7, 3.7], trendC: [3.8, 3.8, 3.7, 3.8, 3.7, 3.5, 3.6],
+      attention: [
+        { section: 'CHEM 1210 · U2WW', stream: 'Course', rule: 'Course trend down 2+ consecutive weeks', detail: '3.8 → 3.5 → 3.2 over weeks 5–7' },
+        { section: 'PHYS 2400 · U1WW', rule: 'Response required · delinquent 48h+', detail: 'Student results held 52 hours awaiting a response' }
+      ],
+      summary: 'College-wide, the instructor stream is holding steadier than the course stream, which softened through the midterm window. Workload sits above benchmark in the lab sciences; hands-on sessions remain the strongest-rated experiences in every department.',
+      instr: [{ text: 'Students across the college describe instructors as responsive outside class.' }, { text: 'Pacing before exams is the most common instructor-stream theme this week.' }],
+      course: [{ text: 'Lab and field sessions rate highest in every department this week.' }, { text: 'Reading and problem-set stacking before midterms is the dominant course-stream theme.' }] },
+    'univ': { scope: '6 departments · 11 prefixes · 35 courses · 72 sections · 1,391 of 1,752 responded this week', resp: [1391, 1752], valid: [1336, 1391], med: '5.1', mean: '5.5',
+      trendI: [3.8, 3.9, 3.8, 3.9, 3.8, 3.7, 3.8], trendC: [3.8, 3.8, 3.7, 3.8, 3.7, 3.6, 3.7],
+      attention: [],
+      summary: 'Institution-wide, both streams are within a tenth of their term averages and the midterm dip is recovering. Workload medians run half an hour above the university benchmark, concentrated in lab sciences. No sections meet attention rules this week.',
+      instr: [{ text: 'Responsiveness outside class is the most repeated instructor-stream theme university-wide.' }, { text: 'Where pacing concerns appear, they cluster in midterm-heavy weeks, not particular departments.' }],
+      course: [{ text: 'Applied and hands-on sessions are the strongest-rated course experiences in every department.' }, { text: 'Assessment-week workload stacking is the one theme that appears everywhere.' }] }
+  };
+  BENCH = { benchI: [3.9, 3.9, 3.8, 3.9, 3.9, 3.8, 3.9], benchC: [3.8, 3.8, 3.7, 3.8, 3.8, 3.7, 3.8], uniI: [3.8, 3.8, 3.7, 3.8, 3.8, 3.7, 3.8], uniC: [3.7, 3.7, 3.6, 3.7, 3.7, 3.6, 3.7] };
+  findPath(nodes, id, trail) {
+    for (const n of nodes) {
+      const t = trail.concat(n);
+      if (n.id === id) return t;
+      if (n.children) { const r = this.findPath(n.children, id, t); if (r) return r; }
+    }
+    return null;
+  }
+  renderVals() {
+    const role = this.props.role ?? 'lead-faculty';
+    const ROLES = { 'lead-faculty': { label: 'Lead Faculty', sel: 'pre-biol' }, 'chair': { label: 'Department Chair', sel: 'pre-biol' }, 'dean': { label: 'Dean', sel: 'dept-bio' }, 'vp': { label: 'VP of Academics', sel: 'col-sci' } };
+    const R = ROLES[role] ?? ROLES['lead-faculty'];
+    const trees = this.buildTrees();
+    const hierTree = trees[role] ?? trees['lead-faculty'];
+    const isLFRole = role === 'lead-faculty';
+    const byLead = this.state.navMode === 'lead' && !isLFRole;
+    const tree = byLead ? this.buildLeadTree(hierTree) : hierTree;
+    const sel = this.state.sel ?? (byLead ? tree[0].id : R.sel);
+    const path = this.findPath(tree, sel, []) ?? [tree[0]];
+    const node = path[path.length - 1];
+    const realSel = node.id;
+    const isSection = realSel.indexOf('sec-') === 0;
+    const d = this.NODE_DATA[realSel];
+    const isLF = isLFRole;
+    const isPrefix = realSel.indexOf('pre-') === 0;
+    const isDept = realSel.indexOf('dept-') === 0;
+    const data = d ?? { scope: node.count + ' · 41 of 52 responded this week', resp: [41, 52], valid: [39, 41], med: '5.0', mean: '5.4', trendI: [3.9, 3.9, 3.8, 3.9, 3.8, 3.7, 3.7], trendC: [3.8, 3.8, 3.7, 3.8, 3.7, 3.6, 3.6], attention: [], summary: 'Feedback at this node is steady this week; workload sits slightly above the comparable benchmark. No sections meet attention rules.', instr: [], course: [], smallN: (node._secs ?? 0) <= 3 };
+    const pol = (nm, on, id) => ({ courseSet: nm, enabled: this.state.policyOverrides[id] ?? on, readOnly: !isLF, onToggle: (next) => this.setState((s) => ({ policyOverrides: Object.assign({}, s.policyOverrides, { [id]: next }) })) });
+    let policies = [];
+    if (isPrefix) policies = [pol(node.name, realSel === 'pre-biol', realSel)];
+    else if (isDept) policies = (node.children ?? []).map((c) => pol(c.name, c.id === 'pre-biol', c.id));
+    const smallN = !isSection && !!data.smallN && !(data.instr && data.instr.length);
+    const csel = this.state.cohortSel;
+    const shown = this.COHORTS.filter((co) => csel === 'all' || co.key === csel);
+    const instrCohorts = shown.map((co) => ({ values: co.I, startWeek: co.start, color: co.color }));
+    const courseCohorts = shown.map((co) => ({ values: co.C, startWeek: co.start, color: co.color }));
+    const cohortChips = [{ key: 'all', label: 'All starts', hasDot: false, color: '' }].concat(this.COHORTS.map((co) => ({ key: co.key, label: co.label, hasDot: true, color: co.color }))).map((ch) => ({
+      label: ch.label, hasDot: ch.hasDot, color: ch.color,
+      bg: csel === ch.key ? 'var(--chalk)' : 'var(--paper)',
+      weight: csel === ch.key ? 600 : 400,
+      pick: () => this.setState({ cohortSel: ch.key })
+    }));
+    return {
+      week: 7, totalWeeks: 12,
+      roleLabel: 'Viewing as ' + R.label,
+      showModeToggle: !isLFRole,
+      showModeSpacer: isLFRole,
+      tree, sel: realSel,
+      selectNode: (id) => this.setState({ sel: id }),
+      modeHier: () => this.setState({ navMode: 'hierarchy', sel: null }),
+      modeLead: () => this.setState({ navMode: 'lead', sel: null }),
+      hierBg: byLead ? 'transparent' : 'var(--chalk)', leadBg: byLead ? 'var(--chalk)' : 'transparent',
+      hierWeight: byLead ? 400 : 600, leadWeight: byLead ? 600 : 400,
+      crumbs: path.map((p, i) => ({
+        name: p.name,
+        pick: () => this.setState({ sel: p.id }),
+        color: i === path.length - 1 ? 'var(--spruce)' : 'var(--spruce-60)',
+        weight: i === path.length - 1 ? 500 : 400,
+        cursor: i === path.length - 1 ? 'default' : 'pointer',
+        hasSep: i < path.length - 1
+      })),
+      isSection, isAggregate: !isSection,
+      nodeName: node.name, scopeLine: data.scope,
+      trendI: data.trendI, trendC: data.trendC,
+      instrCohorts, courseCohorts, cohortChips,
+      benchI: this.BENCH.benchI, benchC: this.BENCH.benchC, uniI: this.BENCH.uniI, uniC: this.BENCH.uniC,
+      medianH: data.med, medianCompare: 'vs 5.0 h comparable · 4.8 h university',
+      meanH: data.mean, meanCompare: 'vs 5.4 h comparable · 5.1 h university',
+      respNum: data.resp[0], respDen: data.resp[1], validNum: data.valid[0],
+      attention: data.attention,
+      summary: data.summary,
+      summaryMeta: 'Generated from ' + data.resp[0] + ' responses across this node',
+      showComments: !smallN, smallN,
+      instrComments: data.instr, courseComments: data.course,
+      hasInstr: data.instr.length > 0, noInstr: data.instr.length === 0 && !smallN,
+      hasCourse: data.course.length > 0, noCourse: data.course.length === 0 && !smallN,
+      showPolicies: policies.length > 0,
+      policies,
+      showPolicyNote: !isSection && policies.length === 0,
+      showLog: isLF && realSel === 'pre-biol',
+      logRows: [
+        { date: 'Oct 20', instructor: 'Dr. M. Ellison', excerpt: 'This professor is clueless and should not be allowed near a classroom.', flagStatus: 'AI-flagged', reason: 'Personal attack with no actionable content.' },
+        { date: 'Oct 13', instructor: 'Dr. J. Whitfield', excerpt: 'Everyone knows exactly who wrote last week\u2019s comment about the lab groups.', flagStatus: 'Unflagged — reason given', reason: 'Identifies a classmate; privacy risk.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

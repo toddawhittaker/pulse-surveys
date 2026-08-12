@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="border-bottom:1px solid var(--hairline);font-family:var(--font-mono)">
+  <button onClick="{{ toggle }}" style="width:100%;box-sizing:border-box;display:grid;grid-template-columns:150px 1fr 170px 20px;gap:var(--space-4);align-items:center;padding:10px 4px;border:none;background:transparent;text-align:left;cursor:{{ cursor }};font-family:var(--font-mono)">
+    <span style="font-size:12px;color:var(--spruce-60)">{{ time }}</span>
+    <span style="font-size:12px;color:var(--spruce)">{{ platform }}</span>
+    <span style="font-size:12px;font-weight:500;color:{{ outcomeColor }}">{{ outcome }}</span>
+    <span aria-hidden="true" style="font-size:12px;color:var(--spruce-60)">{{ chevron }}</span>
+  </button>
+  <sc-if value="{{ isExpanded }}" hint-placeholder-val="{{ false }}">
+    <div style="padding:0 4px var(--space-4) 154px">
+      <p style="margin:0;font-family:var(--font-body);font-size:var(--text-1);line-height:1.55;color:var(--spruce);max-width:70ch">{{ reason }}</p>
+      <div style="margin-top:var(--space-2);padding:var(--space-2) var(--space-3);background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-input);font-size:12px;color:var(--spruce-60);overflow-x:auto;white-space:pre">{{ raw }}</div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:120},&quot;time&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;09:41:22&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;platform&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Canvas · franklin.instructure.com&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;outcome&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;success&quot;,&quot;options&quot;:[&quot;success&quot;,&quot;signature failure&quot;,&quot;clock skew&quot;,&quot;state mismatch&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;reason&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;raw&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;expanded&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { expanded: null };
+  renderVals() {
+    const outcome = this.props.outcome ?? 'success';
+    const ok = outcome === 'success';
+    const hasDetail = !ok;
+    const expanded = (this.state.expanded ?? (this.props.expanded ?? false)) && hasDetail;
+    return {
+      time: this.props.time ?? '',
+      platform: this.props.platform ?? '',
+      outcome,
+      outcomeColor: ok ? 'var(--spruce-60)' : 'var(--madder)',
+      chevron: hasDetail ? (expanded ? '▾' : '▸') : '',
+      cursor: hasDetail ? 'pointer' : 'default',
+      isExpanded: expanded,
+      reason: this.props.reason ?? '',
+      raw: this.props.raw ?? '',
+      toggle: () => { if (hasDetail) this.setState({ expanded: !expanded }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

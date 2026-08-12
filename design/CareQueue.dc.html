@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--chalk);min-height:100vh;padding:var(--space-7) var(--space-6);box-sizing:border-box" data-screen-label="Care Queue">
+<div style="max-width:1160px;margin:0 auto">
+  <h1 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-4);line-height:1.25;margin:0 0 var(--space-7);color:var(--spruce)">Care queue</h1>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-6);align-items:flex-start">
+    <div style="flex:1 1 620px;min-width:0">
+      <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);line-height:1.2;margin:0 0 var(--space-4);color:var(--spruce)">Open</h2>
+      <sc-if value="{{ hasOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+          <sc-for list="{{ openCases }}" as="c" hint-placeholder-count="3">
+            <dc-import name="CaseCard" classification="{{ c.cls }}" text="{{ c.text }}" context="{{ c.ctx }}" case-id="{{ c.id }}" status="open" revealed="{{ c.revealed }}" identity="{{ c.identity }}" on-reveal="{{ c.onReveal }}" on-resolve="{{ c.onResolve }}" on-false-positive="{{ c.onFalsePositive }}" hint-size="100%,260px"></dc-import>
+          </sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:var(--space-8) var(--space-5);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card)">
+          <svg width="160" height="24" aria-hidden="true" style="display:block;margin-bottom:var(--space-4)"><line x1="2" y1="12" x2="146" y2="12" style="stroke:var(--mist);stroke-width:2;stroke-linecap:round"></line><circle cx="153" cy="12" r="3.5" style="fill:var(--mist)"></circle></svg>
+          <div style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);color:var(--spruce)">No open cases</div>
+          <p style="margin:var(--space-2) 0 0;font-size:var(--text-1);line-height:1.55;color:var(--spruce-60);max-width:40ch">New cases appear here the moment they are routed.</p>
+        </div>
+      </sc-if>
+      <div style="margin-top:var(--space-7)">
+        <button onClick="{{ toggleResolved }}" style="display:flex;align-items:baseline;gap:var(--space-2);border:none;background:transparent;padding:0;cursor:pointer;font-family:var(--font-display);font-weight:600;font-size:var(--text-3);color:var(--spruce)">Resolved<span style="font-family:var(--font-mono);font-size:12px;font-weight:400;color:var(--spruce-60)">{{ resolvedToggleLabel }}</span></button>
+        <sc-if value="{{ resolvedOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-4)">
+            <sc-for list="{{ resolvedShownCases }}" as="r" hint-placeholder-count="2">
+              <dc-import name="CaseCard" classification="{{ r.cls }}" text="{{ r.text }}" context="{{ r.ctx }}" case-id="{{ r.id }}" status="resolved" revealed="{{ r.revealed }}" identity="{{ r.identity }}" disposition-line="{{ r.line }}" disposition-note="{{ r.note }}" fp-note="{{ r.fp }}" hint-size="100%,220px"></dc-import>
+            </sc-for>
+          </div>
+          <sc-if value="{{ hasMoreResolved }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ showMoreResolved }}" style="margin-top:var(--space-4);font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:8px 14px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer">{{ showMoreLabel }}</button>
+          </sc-if>
+        </sc-if>
+      </div>
+    </div>
+    <aside style="flex:1 1 300px;max-width:360px;min-width:280px;padding-top:40px;box-sizing:border-box">
+      <dc-import name="GuidancePanel" hint-size="100%,420px"></dc-import>
+    </aside>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pageState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;open&quot;,&quot;options&quot;:[&quot;open&quot;,&quot;revealed&quot;,&quot;resolved&quot;,&quot;empty&quot;],&quot;tsType&quot;:&quot;'open' | 'revealed' | 'resolved' | 'empty'&quot;,&quot;section&quot;:&quot;Page state&quot;}}">
+class Component extends DCLogic {
+  state = { revealed: {}, disposed: {}, resolvedOpen: null, resolvedShown: null };
+  RESOLVED_BATCH = 10;
+  STAFF = 'M. Calloway';
+  OPEN = [
+    { id: 'CASE 2026-0141', cls: 'Self-harm risk', text: 'I don\u2019t really see the point in continuing with any of this anymore. Nothing I do changes anything.', ctx: 'BIOL 2150 · R3WW · WK 07', identity: { name: 'Jordan Reyes', sid: 'S00341882' } },
+    { id: 'CASE 2026-0142', cls: 'Self-harm risk', text: 'Honestly, by the time this course ends I don\u2019t think it will matter to anyone whether I\u2019m here or not.', ctx: 'CHEM 1210 · U2WW · WK 09', identity: { name: 'Sam Okonkwo', sid: 'S00287416' } },
+    { id: 'CASE 2026-0143', cls: 'Threat of harm', text: 'Marcus better hope he\u2019s not in my lab group again next week. I\u2019m done being calm about this.', ctx: 'BIOL 2150 · R2WW · WK 07', identity: { name: 'Casey Whitman', sid: 'S00305227' } }
+  ];
+  RESOLVED = [
+    { id: 'CASE 2026-0137', cls: 'Self-harm risk', text: 'Some weeks I wonder why I even bother waking up for this class.', ctx: 'MATH 1610 · U1WW · WK 08', line: 'Marked resolved · Oct 22 · M. Calloway', note: 'Reached the student by phone; connected them with Counseling and Psychological Services.', fp: false, revealed: true, identity: { name: 'Priya Raman', sid: 'S00262114' } },
+    { id: 'CASE 2026-0131', cls: 'Threat of harm', text: 'This exam is going to kill me, everyone should be scared for me lol.', ctx: 'PSYC 1010 · E2WW · WK 05', line: 'Marked false positive · Oct 15 · M. Calloway', note: '', fp: true, revealed: false, identity: null }
+  ];
+  renderVals() {
+    const mode = this.props.pageState ?? 'open';
+    const empty = mode === 'empty';
+    const openSeeds = empty ? [] : this.OPEN;
+    const seedDisposed = mode === 'resolved' ? { 'CASE 2026-0141': { line: 'Marked resolved · Nov 2 · ' + this.STAFF, note: 'Spoke with the student by phone; connected them with CAPS.', fp: false, revealed: true } } : {};
+    const disposed = Object.assign({}, seedDisposed, this.state.disposed);
+    const revealedFor = (id) => this.state.revealed[id] ?? (mode === 'revealed' && id === 'CASE 2026-0141');
+    const openCases = openSeeds.filter((c) => !disposed[c.id]).map((c) => ({
+      id: c.id, cls: c.cls, text: c.text, ctx: c.ctx, identity: c.identity,
+      revealed: revealedFor(c.id),
+      onReveal: () => this.setState((s) => ({ revealed: Object.assign({}, s.revealed, { [c.id]: true }) })),
+      onResolve: (note) => this.setState((s) => ({ disposed: Object.assign({}, s.disposed, { [c.id]: { line: 'Marked resolved · Nov 2 · ' + this.STAFF, note, fp: false, revealed: true } }) })),
+      onFalsePositive: () => this.setState((s) => ({ disposed: Object.assign({}, s.disposed, { [c.id]: { line: 'Marked false positive · Nov 2 · ' + this.STAFF, note: '', fp: true, revealed: false } }) }))
+    }));
+    const disposedCases = openSeeds.filter((c) => disposed[c.id]).map((c) => ({
+      id: c.id, cls: c.cls, text: c.text, ctx: c.ctx,
+      identity: disposed[c.id].revealed ? c.identity : null,
+      revealed: disposed[c.id].revealed,
+      line: disposed[c.id].line, note: disposed[c.id].note, fp: disposed[c.id].fp
+    }));
+    const resolvedCases = disposedCases.concat(this.RESOLVED);
+    const resolvedOpen = this.state.resolvedOpen ?? (mode === 'resolved');
+    const shown = this.state.resolvedShown ?? this.RESOLVED_BATCH;
+    const resolvedShownCases = resolvedCases.slice(0, shown);
+    const remaining = resolvedCases.length - resolvedShownCases.length;
+    return {
+      hasOpen: openCases.length > 0,
+      isEmpty: openCases.length === 0,
+      openCases, resolvedShownCases, resolvedOpen,
+      hasMoreResolved: remaining > 0,
+      showMoreLabel: 'Show ' + Math.min(this.RESOLVED_BATCH, remaining) + ' more · ' + remaining + ' older',
+      showMoreResolved: () => this.setState({ resolvedShown: shown + this.RESOLVED_BATCH }),
+      resolvedToggleLabel: resolvedOpen ? 'hide' : 'show ' + resolvedCases.length,
+      toggleResolved: () => this.setState({ resolvedOpen: !resolvedOpen })
+    };
+  }
+}
+</script>
+</body>
+</html>

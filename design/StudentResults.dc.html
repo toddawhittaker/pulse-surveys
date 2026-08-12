@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--chalk);min-height:100vh;padding:var(--space-6) var(--space-4);box-sizing:border-box" data-screen-label="Student Results">
+<div style="max-width:480px;margin:0 auto">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+    <dc-import name="WeekEyebrow" week="{{ week }}" total="{{ totalWeeks }}" note="results" hint-size="200px,20px"></dc-import>
+    <div style="display:flex;gap:var(--space-2);flex:none">
+      <button onClick="{{ prevWeek }}" disabled="{{ prevDisabled }}" aria-label="Previous week" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:14px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ prevOpacity }};transition:background 150ms ease" style-hover="background:var(--paper)">←</button>
+      <button onClick="{{ nextWeek }}" disabled="{{ nextDisabled }}" aria-label="Next week" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:14px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ nextOpacity }};transition:background 150ms ease" style-hover="background:var(--paper)">→</button>
+    </div>
+  </div>
+  <div style="font-size:var(--text-2);font-weight:500;color:var(--spruce);margin-top:var(--space-2)">{{ courseLine }}</div>
+  <div style="font-size:var(--text-1);color:var(--spruce-60);margin-top:2px">Lead Faculty: Dr. Rivera</div>
+  <sc-if value="{{ showResults }}" hint-placeholder-val="{{ true }}">
+    <div style="font-size:var(--text-1);color:var(--spruce-60);margin-top:var(--space-1)">{{ participation }}</div>
+  </sc-if>
+  <svg width="120" height="14" aria-hidden="true" style="display:block;margin:var(--space-3) 0 0"><path d="M1 10 H52 L60 3 L68 10 H106" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round"></path><circle cx="112" cy="10" r="3.5" style="fill:var(--marigold)"></circle></svg>
+
+  <sc-if value="{{ showAwaiting }}" hint-placeholder-val="{{ false }}">
+    <dc-import name="StateNotice" variant="flat" title="Results arrive with your instructor's reply" body="Your instructor is reading this week's feedback now. Results open here once they've responded." hint-size="100%,260px"></dc-import>
+  </sc-if>
+
+  <sc-if value="{{ showResults }}" hint-placeholder-val="{{ true }}">
+    <div style="margin-top:var(--space-6)">
+      <dc-import name="ResponseCard" body="{{ responseBody }}" variant="{{ responseVariant }}" date="{{ responseDate }}" hint-size="100%,320px"></dc-import>
+    </div>
+
+    <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Your class this week</h2>
+    <dc-import name="TrendDuo" instr-section="{{ trendI }}" course-section="{{ trendC }}" total-weeks="{{ totalWeeks }}" term-offset="{{ termOffset }}" hint-size="100%,340px"></dc-import>
+    <div style="font-family:var(--font-mono);font-size:var(--text-2);color:var(--spruce);margin-top:var(--space-5)">Class median: {{ medianH }} h on this course</div>
+
+    <div style="margin-top:var(--space-7)">
+      <dc-import name="RatingHistogram" title="“My instructor supported my learning”" counts="{{ q1Counts }}" show-benchmark="{{ false }}" hint-size="100%,180px"></dc-import>
+    </div>
+    <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+      <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the instructor</div>
+      <sc-if value="{{ hasInstr }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <sc-for list="{{ instrComments }}" as="c" hint-placeholder-count="2">
+            <dc-import name="CommentCard" text="{{ c.text }}" hint-size="100%,90px"></dc-import>
+          </sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{ noInstr }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:var(--text-1);color:var(--spruce-60)">No published comments about the instructor this week.</div>
+      </sc-if>
+    </sc-if>
+
+    <div style="margin-top:var(--space-7)">
+      <dc-import name="RatingHistogram" title="“Materials and activities supported my learning”" counts="{{ q2Counts }}" show-benchmark="{{ false }}" hint-size="100%,180px"></dc-import>
+    </div>
+    <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+      <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the course</div>
+      <sc-if value="{{ hasCourse }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <sc-for list="{{ courseComments }}" as="c" hint-placeholder-count="3">
+            <dc-import name="CommentCard" text="{{ c.text }}" hint-size="100%,90px"></dc-import>
+          </sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{ noCourse }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:var(--text-1);color:var(--spruce-60)">No published comments about the course this week.</div>
+      </sc-if>
+    </sc-if>
+    <sc-if value="{{ smallN }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:var(--space-5)">
+        <dc-import name="SmallNNotice" audience="student" responded="{{ responded }}" total="{{ enrolled }}" hint-size="100%,160px"></dc-import>
+      </div>
+    </sc-if>
+  </sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pageState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;published&quot;,&quot;options&quot;:[&quot;published&quot;,&quot;on-behalf&quot;,&quot;awaiting&quot;,&quot;small-n&quot;],&quot;tsType&quot;:&quot;'published' | 'on-behalf' | 'awaiting' | 'small-n'&quot;,&quot;section&quot;:&quot;Page state&quot;}}">
+class Component extends DCLogic {
+  state = { viewWeek: null };
+  SEC_I = [4.1, 4.0, 3.7, 4.1, 3.6, 3.2, 3.6];
+  SEC_C = [4.0, 3.9, 3.5, 4.1, 3.6, 3.3, 3.4];
+  DATES = ['Mon Sep 7', 'Mon Sep 14', 'Mon Sep 21', 'Mon Sep 28', 'Mon Oct 5', 'Mon Oct 12', 'Mon Oct 19'];
+  WEEKS = [
+    { r: 20, q1: [0, 1, 4, 7, 8], q2: [0, 1, 5, 8, 6], med: 4.0,
+      resp: 'Welcome to BIOL 2150 \u2014 glad the first week landed well. Field trip dates are now posted on Canvas under Schedule, ten weeks out, so commuters and folks with work shifts can plan ahead.',
+      instr: [{ text: 'Clear about expectations on day one. I know exactly what the big assignments are.' }, { text: 'Approachable \u2014 stayed after class to answer questions about the lab schedule.' }],
+      course: [{ text: 'Canvas site is well organized. Would like the field trip dates posted sooner so I can plan work shifts.' }, { text: 'The intro reading was a reasonable length. Good on-ramp.' }] },
+    { r: 21, q1: [0, 1, 5, 8, 7], q2: [0, 2, 5, 8, 6], med: 4.5,
+      resp: 'Good suggestion on worked examples \u2014 starting this week I\u2019ll photograph the board work and post it with the slides. A practice problem set with an answer key goes up Thursday, ahead of quiz 1.',
+      instr: [{ text: 'Lectures are clear but go fast. Posting the worked examples afterward would help a lot.' }, { text: 'Good at connecting lecture to the local ecosystems we will see on field trips.' }],
+      course: [{ text: 'The population growth simulator was actually fun. More interactive stuff like that.' }, { text: 'Reading load felt right this week. Two chapters is manageable.' }] },
+    { r: 19, q1: [0, 2, 6, 7, 4], q2: [1, 2, 6, 7, 3], med: 5.0,
+      resp: 'Fair criticism on quiz 1 \u2014 the species-interaction questions leaned harder on the reading than lecture signaled. Future quizzes will come with a short topic list, and I\u2019m reweighting question 4. A second office-hours slot (Wed 4\u20135) starts next week.',
+      instr: [{ text: 'Fast email replies, even on the weekend. Appreciated.' }, { text: 'In lecture the quiz was described as \u201cstraightforward.\u201d It was not. Set expectations more carefully.' }],
+      course: [{ text: 'Quiz 1 leaned hard on species interactions that we only touched briefly in lecture.' }, { text: 'The mutualism examples in the reading were the best part of the week.' }] },
+    { r: 22, q1: [0, 1, 4, 9, 8], q2: [0, 1, 4, 9, 8], med: 5.0,
+      resp: 'Really glad the stream session worked \u2014 your enthusiasm made it. Two more field sessions are on the schedule (weeks 9 and 11), and yes, we\u2019re fixing the wader sizes before then.',
+      instr: [{ text: 'The stream demo was the best class so far. Walking through the sampling live made it stick.' }, { text: 'Patient with everyone who fell behind on the macroinvertebrate IDs. No one got left out.' }],
+      course: [{ text: 'More field sessions like this one, please. Worth every minute of the drive.' }, { text: 'The field data sheet was well designed \u2014 easy to fill out with wet hands.' }] },
+    { r: 18, q1: [1, 2, 5, 6, 4], q2: [0, 2, 6, 7, 3], med: 5.5,
+      resp: 'You\u2019re right that quiz 2 grades are late \u2014 they\u2019ll be back by Friday, with notes on the free-response. I\u2019ve also moved the lab report deadline to Monday so it no longer collides with the article discussions.',
+      instr: [{ text: 'Still waiting on quiz 2 grades after two weeks. Hard to know where I stand.' }, { text: 'Office hours were useful for the article discussion \u2014 got more there than in lecture.' }],
+      course: [{ text: 'Two journal articles plus a lab report in one week is a lot for a 2000-level course.' }, { text: 'The Hubbell article was dense. A reading guide would have helped a lot.' }] },
+    { r: 17, q1: [1, 3, 6, 5, 2], q2: [1, 3, 5, 6, 2], med: 6.0,
+      resp: 'Message received on pacing \u2014 I\u2019d rather you learn it than skim it. This week I\u2019m marking each reading as core or supplemental, and lecture will build in time for questions again. Keep the candid feedback coming.',
+      instr: [{ text: 'Lately questions in lecture get pushed to office hours because we are behind. Slowing down a little would help.' }, { text: 'Still a fair and organized instructor. Just feels rushed lately.' }],
+      course: [{ text: 'The reading is stacking up faster than I can keep pace with, and the lab rubric is strict.' }, { text: 'I like the material, but the pace means I am skimming instead of learning.' }] },
+    { r: 18, q1: [1, 2, 5, 6, 4], q2: [1, 3, 5, 6, 3], med: 6.5,
+      resp: 'Thank you for the candid feedback on pacing. You\u2019re right that this week stacked three chapters against the midterm \u2014 I\u2019m moving one to after break and posting a reading priority guide tonight. Also fixing the problem set instructions that contradicted Tuesday\u2019s lecture. Glad the field sampling lab worked; more of that is coming.',
+      instr: [{ text: 'Office hours were genuinely helpful, but the problem set instructions contradicted what was said in Tuesday\u2019s lecture. I lost time reconciling the two.' }, { text: 'Credit where due: the field sampling lab was designed and run really well.' }],
+      course: [{ text: 'The field sampling lab finally made the quadrat math click for me. More weeks like this one.' }, { text: 'The pace this week was rough. We covered three chapters and the reading roughly doubled right before the midterm \u2014 something has to give.' }, { text: 'Three chapters in one week before an exam is too much. Cut a chapter or move the midterm.' }, { text: 'Most of my hours go to the lab write-ups. The rubric is clear \u2014 it\u2019s just a lot on top of the reading.' }]
+    }
+  ];
+  renderVals() {
+    const mode = this.props.pageState ?? 'published';
+    const smallN = mode === 'small-n';
+    const awaiting = mode === 'awaiting';
+    const current = 7;
+    const week = (smallN || awaiting) ? current : (this.state.viewWeek ?? current);
+    const navOff = smallN || awaiting;
+    const base = {
+      week, totalWeeks: 12, termOffset: 3,
+      prevDisabled: navOff || week <= 1,
+      nextDisabled: navOff || week >= current,
+      prevOpacity: (navOff || week <= 1) ? 0.35 : 1,
+      nextOpacity: (navOff || week >= current) ? 0.35 : 1,
+      prevWeek: () => this.setState({ viewWeek: Math.max(1, week - 1) }),
+      nextWeek: () => this.setState({ viewWeek: Math.min(current, week + 1) }),
+      courseLine: 'BIOL 2150 — Principles of Ecology · R3WW',
+      showAwaiting: awaiting, showResults: !awaiting,
+      smallN, showComments: !awaiting && !smallN,
+      responseVariant: (mode === 'on-behalf' && week === current) ? 'on-behalf' : 'instructor',
+      responseDate: this.DATES[week - 1]
+    };
+    const w = this.WEEKS[week - 1];
+    if (smallN) {
+      return Object.assign(base, {
+        courseLine: 'BIOL 2150 — Principles of Ecology · R1WW',
+        participation: '3 of 9 classmates responded.',
+        responded: 3, enrolled: 9,
+        responseBody: 'Thanks to the three of you who have responded so far. The reading load note is heard \u2014 I\u2019m posting a priority guide for the midterm chapters this week.',
+        trendI: [3.7, 4.0, 3.3, 3.7, 4.0, 3.7, 3.7], trendC: [3.3, 3.7, 3.0, 3.3, 3.7, 3.3, 4.0],
+        q1Counts: [0, 0, 1, 2, 0], q2Counts: [0, 0, 1, 1, 1],
+        medianH: '5.5',
+        instrComments: [], courseComments: [],
+        hasInstr: false, noInstr: false, hasCourse: false, noCourse: false
+      });
+    }
+    return Object.assign(base, {
+      participation: w.r + ' of 24 classmates responded.',
+      responded: w.r, enrolled: 24,
+      responseBody: w.resp,
+      trendI: this.SEC_I.slice(0, week), trendC: this.SEC_C.slice(0, week),
+      q1Counts: w.q1, q2Counts: w.q2,
+      medianH: w.med.toFixed(1),
+      instrComments: w.instr, courseComments: w.course,
+      hasInstr: w.instr.length > 0, noInstr: w.instr.length === 0,
+      hasCourse: w.course.length > 0, noCourse: w.course.length === 0
+    });
+  }
+}
+</script>
+</body>
+</html>

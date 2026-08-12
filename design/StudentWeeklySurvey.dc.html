@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--chalk);min-height:100vh;padding:var(--space-6) var(--space-4);box-sizing:border-box" data-screen-label="Student Weekly Survey">
+<div style="max-width:480px;margin:0 auto">
+  <dc-import name="WeekEyebrow" week="{{ week }}" total="{{ totalWeeks }}" note="{{ eyebrowNote }}" hint-size="100%,20px"></dc-import>
+  <div style="font-size:var(--text-2);font-weight:500;color:var(--spruce);margin-top:var(--space-2)">{{ courseLine }}</div>
+  <svg width="120" height="14" aria-hidden="true" style="display:block;margin:var(--space-3) 0 0"><path d="M1 10 H52 L60 3 L68 10 H106" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round"></path><circle cx="112" cy="10" r="3.5" style="fill:var(--marigold)"></circle></svg>
+
+  <sc-if value="{{ showForm }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:var(--space-5);margin-top:var(--space-6)">
+      <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-5);display:flex;flex-direction:column;gap:var(--space-5)">
+        <dc-import name="LikertInput" question="My instructor supported my learning this week." value="{{ q1 }}" on-select="{{ setQ1 }}" hint-size="100%,120px"></dc-import>
+        <dc-import name="ConditionalTextArea" label="Why that rating?" placeholder="What helped — or got in the way?" value="{{ q2 }}" state="{{ q2State }}" on-change="{{ setQ2 }}" hint-size="100%,170px"></dc-import>
+      </div>
+      <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-5);display:flex;flex-direction:column;gap:var(--space-5)">
+        <dc-import name="LikertInput" question="Materials and activities supported my learning this week." value="{{ q3 }}" on-select="{{ setQ3 }}" hint-size="100%,120px"></dc-import>
+        <dc-import name="ConditionalTextArea" label="Why that rating?" placeholder="What should change?" value="{{ q4 }}" state="{{ q4State }}" on-change="{{ setQ4 }}" hint-size="100%,170px"></dc-import>
+      </div>
+      <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-5)">
+        <dc-import name="WorkloadSlider" value="{{ hours }}" on-change="{{ setHours }}" hint-size="100%,120px"></dc-import>
+      </div>
+      <dc-import name="SubmitBar" disabled="{{ submitDisabled }}" on-submit="{{ submit }}" hint-size="100%,110px"></dc-import>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showSubmitted }}" hint-placeholder-val="{{ false }}">
+    <dc-import name="StateNotice" variant="beat" title="Your pulse is in" body="{{ submittedBody }}" hint-size="100%,280px"></dc-import>
+    <button style="display:block;width:100%;min-height:48px;box-sizing:border-box;font-family:var(--font-body);font-size:var(--text-2);font-weight:500;padding:12px 16px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer;transition:background 150ms ease" style-hover="background:var(--paper)">View previous results</button>
+  </sc-if>
+  <sc-if value="{{ showClosed }}" hint-placeholder-val="{{ false }}">
+    <dc-import name="StateNotice" variant="flat" title="The next survey opens Friday at 6:00 PM" body="{{ closedBody }}" hint-size="100%,240px"></dc-import>
+    <button style="display:block;width:100%;min-height:48px;box-sizing:border-box;font-family:var(--font-body);font-size:var(--text-2);font-weight:500;padding:12px 16px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer;transition:background 150ms ease" style-hover="background:var(--paper)">View previous results</button>
+  </sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:1100},&quot;pageState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;default&quot;,&quot;options&quot;:[&quot;default&quot;,&quot;bounce&quot;,&quot;submitted&quot;,&quot;closed&quot;],&quot;tsType&quot;:&quot;'default' | 'bounce' | 'submitted' | 'closed'&quot;,&quot;section&quot;:&quot;Page state&quot;}}">
+class Component extends DCLogic {
+  state = { q1: null, q2: null, q3: null, q4: null, hours: null, bounce2: null, bounce4: null, view: null };
+  MIN_SPECIFIC = 25;
+  renderVals() {
+    const mode = this.props.pageState ?? 'default';
+    const seeded = mode === 'default' || mode === 'bounce';
+    const q1 = this.state.q1 ?? (seeded ? 4 : 0);
+    const q2 = this.state.q2 ?? '';
+    const q3 = this.state.q3 ?? (seeded ? 2 : 0);
+    const q4 = this.state.q4 ?? (mode === 'bounce' ? 'it was okay' : '');
+    const hours = this.state.hours ?? 6.5;
+    const bounce4 = this.state.bounce4 ?? (mode === 'bounce');
+    const bounce2 = this.state.bounce2 ?? false;
+    const view = this.state.view ?? (mode === 'submitted' ? 'submitted' : mode === 'closed' ? 'closed' : 'form');
+    const q2Req = q1 > 0 && q1 <= 2, q4Req = q3 > 0 && q3 <= 2;
+    const canSubmit = q1 > 0 && q3 > 0 && (!q2Req || q2.trim().length > 0) && (!q4Req || q4.trim().length > 0);
+    const thin = (t) => t.trim().length < this.MIN_SPECIFIC;
+    return {
+      week: 7, totalWeeks: 12,
+      eyebrowNote: view === 'closed' ? 'opens Fri 6:00 PM' : 'closes Sun 11:59 PM',
+      courseLine: 'BIOL 2150 — Principles of Ecology · R3WW',
+      showForm: view === 'form', showSubmitted: view === 'submitted', showClosed: view === 'closed',
+      q1, q2, q3, q4, hours,
+      q2State: q2Req ? (bounce2 ? 'bounce' : 'required') : 'optional',
+      q4State: q4Req ? (bounce4 ? 'bounce' : 'required') : 'optional',
+      setQ1: (n) => this.setState({ q1: n }),
+      setQ2: (v) => this.setState({ q2: v, bounce2: false }),
+      setQ3: (n) => this.setState({ q3: n }),
+      setQ4: (v) => this.setState({ q4: v, bounce4: false }),
+      setHours: (h) => this.setState({ hours: h }),
+      submitDisabled: !canSubmit,
+      submit: () => {
+        const b2 = q2Req && thin(q2), b4 = q4Req && thin(q4);
+        if (b2 || b4) this.setState({ bounce2: b2, bounce4: b4 });
+        else this.setState({ view: 'submitted' });
+      },
+      submittedBody: 'Participation credit for week 7 is recorded. Results and your instructor\u2019s response will appear here after Monday.',
+      closedBody: 'Surveys run Friday 6:00 PM through Sunday 11:59 PM (Eastern). You can review earlier weeks any time.'
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="font-family:var(--font-body)">
+  <button onClick="{{ handleSubmit }}" disabled="{{ disabled }}" style="width:100%;min-height:48px;white-space:nowrap;font-family:var(--font-body);font-size:var(--text-2);font-weight:500;padding:12px 16px;border-radius:var(--radius-input);border:1px solid var(--spruce);background:var(--spruce);color:var(--paper);cursor:{{ cursor }};opacity:{{ opacity }};transition:opacity 150ms ease">{{ buttonLabel }}</button>
+  <p style="margin:var(--space-3) 0 0;font-size:var(--text-1);line-height:1.5;color:var(--spruce-60);text-align:center;text-wrap:pretty">{{ note }}</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:350,&quot;height&quot;:120},&quot;disabled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;buttonLabel&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Submit this week's pulse&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;note&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Responses are confidential. Your instructor never sees your name with your answers.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onSubmit&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const disabled = this.props.disabled ?? false;
+    return {
+      disabled,
+      cursor: disabled ? 'default' : 'pointer',
+      opacity: disabled ? 0.4 : 1,
+      buttonLabel: this.props.buttonLabel ?? "Submit this week's pulse",
+      note: this.props.note ?? 'Responses are confidential. Your instructor never sees your name with your answers.',
+      handleSubmit: this.props.onSubmit ?? (() => {})
+    };
+  }
+}
+</script>
+</body>
+</html>

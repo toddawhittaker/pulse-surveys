@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}
+input[type=range].ws{-webkit-appearance:none;appearance:none;width:100%;height:44px;background:transparent;margin:0;padding:0}
+input[type=range].ws::-webkit-slider-runnable-track{height:4px;background:var(--hairline);border-radius:2px}
+input[type=range].ws::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--spruce);margin-top:-10px;border:none;cursor:pointer}
+input[type=range].ws::-moz-range-track{height:4px;background:var(--hairline);border-radius:2px}
+input[type=range].ws::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--spruce);border:none;cursor:pointer}
+input[type=range].ws.dragging::-webkit-slider-thumb{width:30px;height:30px;margin-top:-13px;background:var(--marigold)}
+input[type=range].ws.dragging::-moz-range-thumb{width:30px;height:30px;background:var(--marigold)}</style></helmet>
+<div style="font-family:var(--font-body)">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-2)">
+    <label for="ws-input" style="font-size:var(--text-2);font-weight:500;line-height:1.4;color:var(--spruce)">{{ label }}</label>
+    <span aria-hidden="true" style="font-family:var(--font-mono);font-size:var(--text-3);font-variant-numeric:tabular-nums;color:{{ readoutColor }};transform:{{ readoutScale }};transform-origin:right center;transition:transform 120ms ease,color 120ms ease">{{ readout }}</span>
+  </div>
+  <input id="ws-input" class="ws {{ dragClass }}" type="range" min="0" max="40" step="0.5" value="{{ value }}" onChange="{{ handleChange }}" onPointerDown="{{ dragStart }}" onPointerUp="{{ dragEnd }}" onBlur="{{ dragEnd }}" aria-label="{{ ariaLabel }}" aria-valuetext="{{ readout }}">
+  <div style="display:flex;justify-content:space-between;margin-top:var(--space-1)">
+    <span style="font-size:12px;color:var(--spruce-60)">0 h</span>
+    <span style="font-size:12px;color:var(--spruce-60)">40 h</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:350,&quot;height&quot;:120},&quot;label&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Hours spent on this course this week&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;value&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:6.5,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:40,&quot;step&quot;:0.5},&quot;onChange&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(hours: number) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  state = { dragging: false };
+  renderVals() {
+    const value = this.props.value ?? 0;
+    const onChange = this.props.onChange ?? (() => {});
+    const label = this.props.label ?? 'Hours spent on this course this week';
+    return {
+      label,
+      value,
+      dragClass: this.state.dragging ? 'dragging' : '',
+      readout: value.toFixed(1) + ' h',
+      readoutColor: this.state.dragging ? 'var(--marigold-deep)' : 'var(--spruce)',
+      readoutScale: this.state.dragging ? 'scale(1.08)' : 'scale(1)',
+      handleChange: (e) => onChange(parseFloat(e.target.value)),
+      dragStart: () => this.setState({ dragging: true }),
+      dragEnd: () => this.setState({ dragging: false }),
+      ariaLabel: label + ', 0 to 40 hours in half-hour steps'
+    };
+  }
+}
+</script>
+</body>
+</html>

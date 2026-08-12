@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><meta name="design_doc_mode" content="canvas"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600&family=Spline+Sans+Mono:wght@400;600&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}.dv-turn{padding:40px 44px 32px;scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px 'Spline Sans Mono',monospace;padding:3px 7px;background:var(--spruce);color:var(--paper);border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 'Schibsted Grotesk',sans-serif;color:var(--spruce)}.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}.dv-oid{font:600 10.5px 'Spline Sans Mono',monospace;padding:3px 7px;background:var(--hairline);color:var(--spruce);border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Schibsted Grotesk',sans-serif;color:var(--spruce-60)}.dv-card{max-width:100%;background:var(--paper);border:1px solid var(--hairline);border-radius:8px;box-shadow:var(--shadow-card);overflow:hidden}.dv-opt:target .dv-oid{background:var(--marigold);color:var(--spruce)}</style></helmet>
+<section class="dv-turn" id="t2">
+  <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Student Weekly Survey — four states at 390px, plus 960px check</span></div>
+  <div class="dv-opts">
+    <div class="dv-opt" id="2a">
+      <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>In progress · Q1 rated 4 · Q3 rated 2 → Q4 required</div>
+      <div class="dv-card" style="width:390px"><dc-import name="StudentWeeklySurvey" page-state="default" hint-size="390px,1100px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="2b">
+      <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Validity bounce · &ldquo;it was okay&rdquo; too thin, coached not shamed</div>
+      <div class="dv-card" style="width:390px"><dc-import name="StudentWeeklySurvey" page-state="bounce" hint-size="390px,1100px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="2c">
+      <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Submitted · pulse beats once</div>
+      <div class="dv-card" style="width:390px"><dc-import name="StudentWeeklySurvey" page-state="submitted" hint-size="390px,480px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="2d">
+      <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Between windows · flat line + link to previous results</div>
+      <div class="dv-card" style="width:390px"><dc-import name="StudentWeeklySurvey" page-state="closed" hint-size="390px,480px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="2e">
+      <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>960px width check · column holds centered</div>
+      <div class="dv-card" style="width:960px"><dc-import name="StudentWeeklySurvey" page-state="default" hint-size="960px,1100px"></dc-import></div>
+    </div>
+  </div>
+</section>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>html{overflow-y:scroll}body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--chalk);min-height:100vh;box-sizing:border-box" data-screen-label="Admin Console">
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2) var(--space-6);align-items:center;background:var(--paper);border-bottom:1px solid var(--hairline);padding:var(--space-2) var(--space-5);font-family:var(--font-mono);font-size:12px">
+    <span style="font-weight:500;color:var(--spruce);letter-spacing:0.06em;text-transform:uppercase;margin-right:var(--space-4)">Pulse admin</span>
+    <sc-for list="{{ strip }}" as="s" hint-placeholder-count="4">
+      <button onClick="{{ s.go }}" style="border:none;background:transparent;padding:2px 0;font-family:var(--font-mono);font-size:12px;color:{{ s.color }};cursor:pointer;white-space:nowrap;font-weight:{{ s.weight }}">{{ s.label }}</button>
+    </sc-for>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-5);align-items:flex-start;max-width:1220px;margin:0 auto;padding:var(--space-5)">
+    <nav aria-label="Console sections" style="flex:0 0 180px;background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-2)">
+      <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="5">
+        <button onClick="{{ n.go }}" style="width:100%;box-sizing:border-box;text-align:left;padding:8px 12px;border:none;border-radius:var(--radius-input);background:{{ n.bg }};font-family:var(--font-mono);font-size:12px;letter-spacing:0.04em;color:var(--spruce);cursor:pointer;font-weight:{{ n.weight }}">{{ n.label }}</button>
+      </sc-for>
+    </nav>
+    <div style="flex:1 1 700px;min-width:0">
+
+      <sc-if value="{{ vHealth }}" hint-placeholder-val="{{ true }}">
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-4);margin-bottom:var(--space-2)">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60)">LTI launches · last 24 h</span>
+            <span style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">{{ launchSummary }}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:150px 1fr 170px 20px;gap:var(--space-4);padding:6px 4px;border-bottom:1px solid var(--hairline);font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60)"><span>Time</span><span>Platform</span><span>Outcome</span><span></span></div>
+          <sc-for list="{{ launches }}" as="l" hint-placeholder-count="8">
+            <dc-import name="HealthRow" time="{{ l.time }}" platform="{{ l.platform }}" outcome="{{ l.outcome }}" reason="{{ l.reason }}" raw="{{ l.raw }}" expanded="{{ l.expanded }}" hint-size="100%,42px"></dc-import>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ vJobs }}" hint-placeholder-val="{{ false }}">
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+          <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-2)">Background jobs</div>
+          <div style="display:grid;grid-template-columns:1fr 170px 150px 80px 120px 110px;gap:var(--space-4);padding:6px 4px;border-bottom:1px solid var(--hairline);font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60)"><span>Job</span><span>Schedule</span><span>Last run</span><span>Took</span><span>Status</span><span></span></div>
+          <sc-for list="{{ jobs }}" as="j" hint-placeholder-count="6">
+            <dc-import name="JobRow" job-name="{{ j.name }}" schedule="{{ j.schedule }}" last-run="{{ j.lastRun }}" duration="{{ j.duration }}" status="{{ j.status }}" retries="{{ j.retries }}" hint-size="100%,42px"></dc-import>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ vAi }}" hint-placeholder-val="{{ false }}">
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+          <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-2)">Provider metrics · last 24 h</div>
+          <dc-import name="MetricBlock" rows="{{ metricRows }}" hint-size="100%,260px"></dc-import>
+        </div>
+        <div style="margin-top:var(--space-5)">
+          <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-3)">Classifier spot-review</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:var(--space-4)">
+            <sc-for list="{{ driftSamples }}" as="d" hint-placeholder-count="2">
+              <dc-import name="DriftCard" sample-id="{{ d.sampleId }}" model="{{ d.model }}" text="{{ d.text }}" override-open="{{ d.overrideOpen }}" override-seed="{{ d.overrideSeed }}" hint-size="100%,240px"></dc-import>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ vCare }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="CarePanel" open-count="{{ careOpen }}" oldest-hours="{{ careOldest }}" threshold-hours="{{ careThreshold }}" contact="{{ careContact }}" sent-date="{{ careSent }}" hint-size="100%,180px"></dc-import>
+      </sc-if>
+
+      <sc-if value="{{ vConfig }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+          <dc-import name="ConfigSection" title="Term calendar" fields="{{ fTerm }}" hint-size="100%,220px"></dc-import>
+          <dc-import name="ConfigSection" title="Survey window" fields="{{ fWindow }}" hint-size="100%,220px"></dc-import>
+          <dc-import name="ConfigSection" title="Thresholds" fields="{{ fThresholds }}" hint-size="100%,180px"></dc-import>
+          <dc-import name="ConfigSection" title="Retention" fields="{{ fRetention }}" hint-size="100%,120px"></dc-import>
+          <dc-import name="ConfigSection" title="Notifications" fields="{{ fNotify }}" hint-size="100%,200px"></dc-import>
+          <dc-import name="ConfigSection" title="AI provider" fields="{{ fAi }}" hint-size="100%,200px"></dc-import>
+          <dc-import name="ConfigSection" title="Care escalation" fields="{{ fCare }}" hint-size="100%,160px"></dc-import>
+          <dc-import name="CarePanel" open-count="{{ careOpen }}" oldest-hours="{{ careOldest }}" threshold-hours="{{ careThreshold }}" contact="{{ careContact }}" sent-date="{{ careSent }}" hint-size="100%,180px"></dc-import>
+
+          <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+            <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-3)">LMS registrations</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:var(--space-4)">
+              <dc-import name="RegistrationCard" platform="Canvas" issuer="https://canvas.instructure.com" client-id="103400000000000042" deployments="2 active (prod, sandbox)" jwks-status="OK" jwks-fetched="41 min ago" urls="{{ toolUrls }}" hint-size="100%,280px"></dc-import>
+              <dc-import name="RegistrationCard" platform="Moodle · partner site" issuer="https://lms.partner.edu" client-id="pulse-tool-7f2" deployments="1 active" jwks-status="OK" jwks-fetched="2 h ago" urls="{{ toolUrls }}" hint-size="100%,280px"></dc-import>
+            </div>
+            <button style="margin-top:var(--space-3);font-family:var(--font-body);font-size:12px;font-weight:500;padding:6px 12px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer">Add platform</button>
+          </div>
+
+          <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+            <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-2)">Course catalog · synced from LMS</div>
+            <div style="font-size:12px;line-height:1.5;color:var(--spruce-60);margin-bottom:var(--space-3)">Read-only. Courses, sections, and teaching instructors sync hourly from the LMS (roster sync). Length and start dates derive from section codes; edit course data in the LMS.</div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:flex-start">
+              <div style="flex:0 1 280px;min-width:240px">
+                <dc-import name="HierarchyNav" nodes="{{ orgTree }}" selected-id="{{ orgSel }}" on-select="{{ selectOrg }}" hint-size="280px,320px"></dc-import>
+              </div>
+              <div style="flex:1 1 300px;min-width:0;font-family:var(--font-mono);font-size:12px">
+                <div style="display:grid;grid-template-columns:130px 1fr;gap:6px var(--space-4)">
+                  <span style="color:var(--spruce-60)">Selected</span><span style="color:var(--spruce);font-weight:500">{{ orgSelName }}</span>
+                  <span style="color:var(--spruce-60)">Length</span><span style="color:var(--spruce)">12 weeks · derived from section codes</span>
+                  <span style="color:var(--spruce-60)">Level</span><span style="color:var(--spruce)">2000 · derived from course number</span>
+                  <span style="color:var(--spruce-60)">Lead faculty</span><span style="color:var(--spruce)">Dr. Rivera · from mapping below</span>
+                  <span style="color:var(--spruce-60)">Last sync</span><span style="color:var(--spruce)">Today 10:02 AM</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+            <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-2)">People &amp; reporting</div>
+            <div style="font-size:12px;line-height:1.5;color:var(--spruce-60);margin-bottom:var(--space-3)">Pulse owns this graph — the LMS has no equivalent. Purview is computed from these reports-to edges.</div>
+            <div style="display:grid;grid-template-columns:1fr 160px 1fr;gap:var(--space-4);padding:6px 4px;border-bottom:1px solid var(--hairline)">
+              <sc-for list="{{ peopleHeaders }}" as="h" hint-placeholder-count="3">
+                <button onClick="{{ h.sort }}" style="border:none;background:transparent;padding:0;text-align:left;font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60);cursor:pointer;font-weight:{{ h.weight }};white-space:nowrap">{{ h.label }}{{ h.arrow }}</button>
+              </sc-for>
+            </div>
+            <sc-for list="{{ people }}" as="p" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:1fr 160px 1fr;gap:var(--space-4);padding:8px 4px;border-bottom:1px solid var(--hairline);font-family:var(--font-mono);font-size:12px">
+                <span style="color:var(--spruce);font-weight:500">{{ p.name }}</span>
+                <span style="color:var(--spruce-60)">{{ p.category }}</span>
+                <span style="color:var(--spruce)">{{ p.reportsTo }}</span>
+              </div>
+            </sc-for>
+            <div style="display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-3);font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">
+              <button onClick="{{ pPrev }}" disabled="{{ pPrevOff }}" style="font-family:var(--font-mono);font-size:12px;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ pPrevOp }};white-space:nowrap">← Prev</button>
+              <span style="white-space:nowrap">{{ pRange }}</span>
+              <button onClick="{{ pNext }}" disabled="{{ pNextOff }}" style="font-family:var(--font-mono);font-size:12px;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ pNextOp }};white-space:nowrap">Next →</button>
+              <span style="margin-left:auto;white-space:nowrap">Show
+                <sc-for list="{{ pSizes }}" as="z" hint-placeholder-count="3">
+                  <button onClick="{{ z.pick }}" style="border:none;background:transparent;padding:0 3px;font-family:var(--font-mono);font-size:12px;color:var(--spruce);cursor:pointer;font-weight:{{ z.weight }};text-decoration:{{ z.deco }}">{{ z.n }}</button>
+                </sc-for>
+              </span>
+            </div>
+            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+              <button onClick="{{ toggleAddPerson }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:6px 12px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Add person</button>
+              <button style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:6px 12px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Export CSV</button>
+              <button onClick="{{ runPeopleDryRun }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:6px 12px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Import CSV…</button>
+            </div>
+            <sc-if value="{{ addPersonOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:var(--space-3);padding:var(--space-3) var(--space-4);background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-input);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+                <input type="text" value="{{ npName }}" onChange="{{ setNpName }}" placeholder="Name" aria-label="Name" style="flex:1 1 160px;min-width:0;box-sizing:border-box;padding:6px var(--space-3);font-family:var(--font-mono);font-size:12px;color:var(--spruce);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+                <select value="{{ npCat }}" onChange="{{ setNpCat }}" aria-label="Category" style="flex:0 1 170px;padding:6px var(--space-2);font-family:var(--font-mono);font-size:12px;color:var(--spruce);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+                  <sc-for list="{{ categoryOptions }}" as="o" hint-placeholder-count="5"><option value="{{ o.v }}">{{ o.v }}</option></sc-for>
+                </select>
+                <select value="{{ npRep }}" onChange="{{ setNpRep }}" aria-label="Reports to" style="flex:0 1 170px;padding:6px var(--space-2);font-family:var(--font-mono);font-size:12px;color:var(--spruce);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+                  <sc-for list="{{ reportsToOptions }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.v }}</option></sc-for>
+                </select>
+                <button onClick="{{ addPerson }}" disabled="{{ addDisabled }}" style="flex:none;font-family:var(--font-body);font-size:12px;font-weight:500;padding:6px 12px;border:1px solid var(--spruce);border-radius:var(--radius-input);background:var(--spruce);color:var(--paper);cursor:{{ addCursor }};opacity:{{ addOpacity }};white-space:nowrap">Add</button>
+              </div>
+              <div style="margin-top:var(--space-1);font-size:12px;color:var(--spruce-60)">Reports-to lists people already in the graph — add from the top down.</div>
+            </sc-if>
+            <sc-if value="{{ showPeopleDiff }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:var(--space-3);padding:var(--space-3) var(--space-4);background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+                <div style="font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--spruce)">Dry run — nothing applied yet</div>
+                <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);margin-top:var(--space-1)">1 person added · 1 reports-to changed (Dr. R. Marchetti → Dr. J. Hale) · 1 row skipped (unknown category)</div>
+                <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+                  <button onClick="{{ applyPeopleImport }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--spruce);border-radius:var(--radius-input);background:var(--spruce);color:var(--paper);cursor:pointer;white-space:nowrap">Apply import</button>
+                  <button onClick="{{ discardPeopleImport }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer">Discard</button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5)">
+            <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-2)">Lead faculty mapping</div>
+            <div style="font-size:12px;line-height:1.5;color:var(--spruce-60);margin-bottom:var(--space-3)">Person → courses they manage as Lead Faculty. A course without a mapping falls to its department chair.</div>
+            <div style="display:grid;grid-template-columns:200px 1fr;gap:var(--space-4);padding:6px 4px;border-bottom:1px solid var(--hairline);font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60)">
+              <button onClick="{{ sortMappings }}" style="border:none;background:transparent;padding:0;text-align:left;font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60);cursor:pointer;font-weight:500;white-space:nowrap">Lead faculty{{ mapArrow }}</button>
+              <span>Courses</span>
+            </div>
+            <sc-for list="{{ leadMappings }}" as="lm" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:200px 1fr;gap:var(--space-4);padding:8px 4px;border-bottom:1px solid var(--hairline);font-family:var(--font-mono);font-size:12px">
+                <span style="color:var(--spruce);font-weight:500">{{ lm.person }}</span>
+                <span style="color:var(--spruce-60)">{{ lm.courses }}</span>
+              </div>
+            </sc-for>
+            <div style="display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-3);font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">
+              <button onClick="{{ mPrev }}" disabled="{{ mPrevOff }}" style="font-family:var(--font-mono);font-size:12px;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ mPrevOp }};white-space:nowrap">← Prev</button>
+              <span style="white-space:nowrap">{{ mRange }}</span>
+              <button onClick="{{ mNext }}" disabled="{{ mNextOff }}" style="font-family:var(--font-mono);font-size:12px;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ mNextOp }};white-space:nowrap">Next →</button>
+              <span style="margin-left:auto;white-space:nowrap">Show
+                <sc-for list="{{ mSizes }}" as="z" hint-placeholder-count="3">
+                  <button onClick="{{ z.pick }}" style="border:none;background:transparent;padding:0 3px;font-family:var(--font-mono);font-size:12px;color:var(--spruce);cursor:pointer;font-weight:{{ z.weight }};text-decoration:{{ z.deco }}">{{ z.n }}</button>
+                </sc-for>
+              </span>
+            </div>
+            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+              <button style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:6px 12px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Export CSV</button>
+              <button onClick="{{ runDryRun }}" data-role="mapping-import" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:6px 12px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;white-space:nowrap">Import CSV…</button>
+            </div>
+            <sc-if value="{{ showDiff }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:var(--space-3);padding:var(--space-3) var(--space-4);background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-input)">
+                <div style="font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--spruce)">Dry run — nothing applied yet</div>
+                <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);margin-top:var(--space-1)">2 mappings added · 1 changed (BIOL 3200 → Dr. Okafor) · BIOL 4410 left unmapped, falls to chair · 1 row skipped (unknown person)</div>
+                <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+                  <button onClick="{{ applyImport }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--spruce);border-radius:var(--radius-input);background:var(--spruce);color:var(--paper);cursor:pointer;white-space:nowrap">Apply import</button>
+                  <button onClick="{{ discardImport }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer">Discard</button>
+                </div>
+              </div>
+            </sc-if>
+          </div>          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pageState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;calm&quot;,&quot;options&quot;:[&quot;calm&quot;,&quot;health-alert&quot;,&quot;drift-override&quot;,&quot;config-diff&quot;],&quot;tsType&quot;:&quot;'calm' | 'health-alert' | 'drift-override' | 'config-diff'&quot;,&quot;section&quot;:&quot;Page state&quot;}}">
+class Component extends DCLogic {
+  state = { view: null, orgSel: null, diff: null, peopleDiff: false, addOpen: false, npName: null, npCat: null, npRep: null, added: [], pSortKey: null, pSortDir: 1, mSortDir: 0, pPage: 0, pSize: 10, mPage: 0, mSize: 10 };
+  lastName(full) {
+    const toks = full.replace(/^(Dr|Prof|Professor|Mr|Ms|Mrs|Mx)\.?\s+/i, '').trim().split(/\s+/);
+    return (toks[toks.length - 1] || full).toLowerCase();
+  }
+  pager(list, page, size, setter) {
+    const total = list.length;
+    const pages = Math.max(1, Math.ceil(total / size));
+    const cur = Math.min(page, pages - 1);
+    const start = cur * size;
+    const rows = list.slice(start, start + size);
+    return {
+      rows,
+      range: total === 0 ? '0 of 0' : (start + 1) + '–' + (start + rows.length) + ' of ' + total,
+      prevOff: cur === 0, nextOff: cur >= pages - 1,
+      prev: () => setter({ page: Math.max(0, cur - 1) }),
+      next: () => setter({ page: Math.min(pages - 1, cur + 1) }),
+      sizes: [10, 20, 50].map((n) => ({ n: String(n), weight: n === size ? 600 : 400, deco: n === size ? 'underline' : 'none', pick: () => setter({ page: 0, size: n }) }))
+    };
+  }
+  CATEGORIES = ['VP of Academics', 'Dean', 'Assistant Dean', 'Department Chair', 'Lead Faculty'];
+  MAPPINGS = [
+    { person: 'Dr. Rivera', courses: 'BIOL 2150 · BIOL 3200 · BIOL 4410 · MARS 3310' },
+    { person: 'Dr. T. Nguyen', courses: 'BIOL 1110 · BIOL 1120' },
+    { person: 'Dr. S. Park', courses: 'BIOL 1130 · BIOL 2300 · MARS 2210' },
+    { person: 'Dr. A. Okafor', courses: 'BIOL 3450' },
+    { person: 'Dr. L. Moreau', courses: 'CHEM 1210 · CHEM 1220' },
+    { person: 'Dr. H. Braun', courses: 'CHEM 2310 · CHEM 2320 · BCHM 3100' }
+  ];
+  LAUNCHES_OK = [
+    { time: '10:42:07', platform: 'Canvas · franklin.instructure.com', outcome: 'success' },
+    { time: '10:41:52', platform: 'Canvas · franklin.instructure.com', outcome: 'success' },
+    { time: '10:40:11', platform: 'Moodle · lms.partner.edu', outcome: 'success' },
+    { time: '10:38:46', platform: 'Canvas · franklin.instructure.com', outcome: 'success' },
+    { time: '10:36:03', platform: 'Canvas · franklin.instructure.com', outcome: 'success' },
+    { time: '10:31:47', platform: 'Canvas · franklin.instructure.com', outcome: 'clock skew', reason: 'This device\u2019s clock was 4 minutes behind, so the launch token looked expired. The retry succeeded; nothing to do unless it recurs from the same user.', raw: 'JWT validation failed: iat is in the future (skew 241s > 120s)' },
+    { time: '10:29:30', platform: 'Moodle · lms.partner.edu', outcome: 'success' },
+    { time: '10:27:14', platform: 'Canvas · franklin.instructure.com', outcome: 'success' }
+  ];
+  JOBS = [
+    { name: 'Survey window open', schedule: 'Fridays 6:00 PM', lastRun: 'Fri 6:00 PM', duration: '1.2 s', status: 'ok', retries: 0 },
+    { name: 'Survey close + validity pass', schedule: 'Sundays 11:59 PM', lastRun: 'Sun 11:59 PM', duration: '4 m 12 s', status: 'ok', retries: 0 },
+    { name: 'AI summaries', schedule: 'Mondays 3:00 AM', lastRun: 'Mon 3:00 AM', duration: '8 m 40 s', status: 'retrying', retries: 2 },
+    { name: 'Monday report build', schedule: 'Mondays 5:00 AM', lastRun: 'Mon 5:00 AM', duration: '11 m 3 s', status: 'ok', retries: 0 },
+    { name: 'Benchmark refresh', schedule: 'Nightly 2:00 AM', lastRun: 'Today 2:00 AM', duration: '6 m 21 s', status: 'ok', retries: 0 },
+    { name: 'LMS roster sync', schedule: 'Hourly', lastRun: 'Today 10:02 AM', duration: '\u2014', status: 'failed', retries: 3 }
+  ];
+  METRICS = [
+    { task: 'validity', requests: '4,812', p95: '420 ms', err: '0.2%', spend: '$8.14', trend: [40, 44, 41, 46, 43, 48, 45, 47, 50, 46, 49, 52, 48, 51] },
+    { task: 'moderation', requests: '4,812', p95: '610 ms', err: '0.4%', spend: '$11.90', trend: [40, 43, 42, 45, 44, 47, 46, 48, 49, 47, 50, 51, 49, 52] },
+    { task: 'summary', requests: '1,286', p95: '2,140 ms', err: '0.6%', spend: '$42.30', trend: [10, 11, 10, 12, 11, 13, 12, 90, 13, 12, 14, 13, 12, 14] },
+    { task: 'draft', requests: '214', p95: '1,890 ms', err: '0.9%', spend: '$6.75', trend: [2, 3, 2, 3, 3, 4, 3, 15, 4, 3, 4, 4, 3, 4] },
+    { task: 'coaching', requests: '88', p95: '1,650 ms', err: '0.0%', spend: '$2.10', trend: [0, 1, 1, 2, 1, 2, 2, 3, 2, 3, 3, 4, 3, 4] }
+  ];
+  DRIFT = [
+    { sampleId: 'SAMPLE 8841 · validity stream', model: 'Nonsense', text: 'good class i guess idk' },
+    { sampleId: 'SAMPLE 8846 · moderation stream', model: 'Privacy risk', text: 'The girl who sits front left always answers first and it makes the rest of us look bad.' }
+  ];
+  buildOrgTree() {
+    const secs = (cid, n, letter) => Array.from({ length: n }, (_, i) => ({ id: 'o-sec-' + cid + '-' + (i + 1), name: letter + (i + 1) + 'WW', count: '' }));
+    const crs = (cid, name, n, letter) => ({ id: 'o-crs-' + cid, name, count: n + ' sections', children: secs(cid, n, letter) });
+    return [
+      { id: 'o-dept-bio', name: 'Biology', count: '2 prefixes', children: [
+        { id: 'o-pre-biol', name: 'BIOL', count: '8 courses', children: [crs('2150', 'BIOL 2150 — Principles of Ecology', 3, 'R'), crs('3200', 'BIOL 3200 — Evolution', 2, 'R')] },
+        { id: 'o-pre-mars', name: 'MARS', count: '2 courses', children: [crs('2210', 'MARS 2210 — Intro Marine Science', 2, 'E')] }
+      ] },
+      { id: 'o-dept-chem', name: 'Chemistry', count: '2 prefixes', children: [
+        { id: 'o-pre-chem', name: 'CHEM', count: '4 courses', children: [crs('1210', 'CHEM 1210 — General Chemistry I', 3, 'U')] }
+      ] }
+    ];
+  }
+  renderVals() {
+    const mode = this.props.pageState ?? 'calm';
+    const healthAlert = mode === 'health-alert';
+    const configState = mode === 'config-diff';
+    const defView = { 'calm': 'health', 'health-alert': 'health', 'drift-override': 'ai', 'config-diff': 'config' }[mode] ?? 'health';
+    const view = this.state.view ?? defView;
+    const launches = healthAlert
+      ? [{ time: '10:43:18', platform: 'Canvas · franklin.instructure.com', outcome: 'signature failure', expanded: true, reason: 'The launch was signed with a key we don\u2019t recognize. Usually the LMS rotated its keys and our cached copy is stale \u2014 refetch keys for this platform under Configuration \u2192 LMS registrations, then ask the user to relaunch.', raw: 'JWT signature verification failed: kid "b41c-2026" not present in cached JWKS (fetched 26 h ago)' }].concat(this.LAUNCHES_OK)
+      : this.LAUNCHES_OK;
+    const careOpen = configState ? 3 : 1;
+    const careOldest = configState ? 31 : 6;
+    const strip = [
+      { label: 'LTI ' + (healthAlert ? '96.8%' : '99.4%') + ' · 24 h', breach: healthAlert, view: 'health' },
+      { label: 'Stuck jobs: ' + (healthAlert ? '1 failed · 41 m' : 'none'), breach: false, view: 'jobs' },
+      { label: 'AI errors 0.4%', breach: false, view: 'ai' },
+      { label: 'Care ' + careOpen + ' open · ' + careOldest + ' h', breach: careOldest > 24, view: 'care' }
+    ].map((s) => ({
+      label: s.label,
+      color: s.breach ? 'var(--madder)' : 'var(--spruce-60)',
+      weight: s.breach ? 500 : 400,
+      go: () => this.setState({ view: s.view })
+    }));
+    const NAV = [['health', 'Health'], ['jobs', 'Jobs'], ['ai', 'AI'], ['care', 'Care'], ['config', 'Configuration']];
+    const orgTree = this.buildOrgTree();
+    const orgSel = this.state.orgSel ?? 'o-crs-2150';
+    const findName = (list) => { for (const n of list) { if (n.id === orgSel) return n.name; if (n.children) { const r = findName(n.children); if (r) return r; } } return null; };
+    const showDiff = this.state.diff ?? configState;
+    const SEED_PEOPLE = [
+      { name: 'Dr. E. Navarro', category: 'VP of Academics', reportsTo: '—' },
+      { name: 'Dr. P. Ashford', category: 'Dean', reportsTo: 'Dr. E. Navarro' },
+      { name: 'Dr. J. Hale', category: 'Assistant Dean', reportsTo: 'Dr. P. Ashford' },
+      { name: 'Dr. K. Sorensen', category: 'Department Chair', reportsTo: 'Dr. J. Hale' },
+      { name: 'Dr. R. Marchetti', category: 'Department Chair', reportsTo: 'Dr. P. Ashford' },
+      { name: 'Dr. Rivera', category: 'Lead Faculty', reportsTo: 'Dr. K. Sorensen' }
+    ];
+    const rank = (c) => this.CATEGORIES.indexOf(c);
+    const pKey = this.state.pSortKey;
+    const pDir = this.state.pSortDir;
+    const people = SEED_PEOPLE.concat(this.state.added).sort((x, y) => {
+      if (pKey === 'name') return this.lastName(x.name).localeCompare(this.lastName(y.name)) * pDir;
+      if (pKey === 'reportsTo') return this.lastName(x.reportsTo).localeCompare(this.lastName(y.reportsTo)) * pDir;
+      return (rank(x.category) - rank(y.category)) * (pKey === 'category' ? pDir : 1);
+    });
+    const sortBy = (key) => () => this.setState((s) => ({ pSortKey: key, pSortDir: s.pSortKey === key ? -s.pSortDir : 1, pPage: 0 }));
+    const sortedMappings = this.state.mSortDir === 0 ? this.MAPPINGS : this.MAPPINGS.slice().sort((x, y) => this.lastName(x.person).localeCompare(this.lastName(y.person)) * this.state.mSortDir);
+    const pp = this.pager(people, this.state.pPage, this.state.pSize, (u) => this.setState({ pPage: u.page, pSize: u.size ?? this.state.pSize }));
+    const mp = this.pager(sortedMappings, this.state.mPage, this.state.mSize, (u) => this.setState({ mPage: u.page, mSize: u.size ?? this.state.mSize }));
+    const arrowFor = (key) => pKey === key ? (pDir === 1 ? ' ↑' : ' ↓') : '';
+    const npName = this.state.npName ?? '';
+    const npCat = this.state.npCat ?? 'Lead Faculty';
+    const npRep = this.state.npRep ?? '—';
+    return {
+      strip,
+      navItems: NAV.map(([id, label]) => ({
+        label,
+        bg: view === id ? 'var(--chalk)' : 'transparent',
+        weight: view === id ? 500 : 400,
+        go: () => this.setState({ view: id })
+      })),
+      vHealth: view === 'health', vJobs: view === 'jobs', vAi: view === 'ai', vCare: view === 'care', vConfig: view === 'config',
+      launchSummary: healthAlert ? '2,341 launches · 75 failures' : '2,341 launches · 14 failures',
+      launches,
+      jobs: healthAlert ? this.JOBS : this.JOBS.map((j) => j.status === 'failed' ? Object.assign({}, j, { status: 'ok', duration: '14 s', retries: 0 }) : j),
+      metricRows: this.METRICS,
+      driftSamples: this.DRIFT.map((d, i) => Object.assign({}, d, {
+        overrideOpen: mode === 'drift-override' && i === 0,
+        overrideSeed: mode === 'drift-override' && i === 0 ? 'Valid' : ''
+      })),
+      careOpen, careOldest, careThreshold: 24,
+      careContact: 'standards@franklin.edu',
+      careSent: 'Nov 2, 9:14 AM',
+      fTerm: [
+        { id: 'term', label: 'Current term', value: 'Fall 2026', helper: 'Week numbering and section start letters derive from this term\u2019s calendar.' },
+        { id: 'start', label: 'First day', value: 'Aug 17, 2026', helper: 'Term week 01 begins here.' },
+        { id: 'break', label: 'Break', value: 'Nov 23 \u2013 Nov 28', helper: 'No survey windows open during break.' }
+      ],
+      fWindow: [
+        { id: 'opens', label: 'Survey opens', value: 'Friday 6:00 PM', helper: 'Students can start responding at this time each week.' },
+        { id: 'closes', label: 'Survey closes', value: 'Sunday 11:59 PM', helper: 'Late responses are not accepted after this.' },
+        { id: 'tz', label: 'Timezone', value: 'America/New_York', helper: 'All window times use this zone, regardless of where students are.' }
+      ],
+      fThresholds: [
+        { id: 'nthresh', label: 'Comment threshold (N)', value: '5', helper: 'Reports hide raw comments below this number of responses.', confirm: 'Lowering this exposes comments in sections currently below the threshold. Raising it hides comments instructors can see today. Takes effect at the next Monday report build.' },
+        { id: 'benchmin', label: 'Benchmark minimum', value: '8', helper: 'Comparable-course lines render only when at least this many matching sections exist.' }
+      ],
+      fRetention: [
+        { id: 'retention', label: 'Response retention', value: '6 terms', helper: 'Raw responses older than this are deleted permanently.', confirm: 'Shortening retention deletes older responses on the next nightly run. Deleted responses cannot be recovered, and past-term benchmarks recompute without them.' }
+      ],
+      fNotify: [
+        { id: 'n1', label: 'Monday report email', value: true, type: 'toggle', helper: 'Emails each instructor when their report is ready.' },
+        { id: 'n2', label: 'Saturday student reminder', value: true, type: 'toggle', helper: 'One reminder to students who haven\u2019t responded, Saturday noon.' },
+        { id: 'n3', label: 'Response-required 48 h notice', value: true, type: 'toggle', helper: 'Notifies the lead faculty when a required response is 48 hours late.' }
+      ],
+      fAi: [
+        { id: 'aiurl', label: 'Provider base URL', value: 'https://api.provider.example/v1', helper: 'All AI tasks call this endpoint.' },
+        { id: 'aimodel', label: 'Model', value: 'sonnet-4-6', helper: 'Used for every task; per-task overrides are not configured.' },
+        { id: 'aikey', label: 'API key', value: 'sk-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022Q3vA', helper: 'Stored encrypted. Paste a new key to rotate; the old key is revoked on save.' }
+      ],
+      fCare: [
+        { id: 'carethresh', label: 'Escalation threshold', value: '24 hours', helper: 'Past this age, the escalation contact is notified automatically.', confirm: 'Changing the threshold re-evaluates all open cases immediately; notices send for any case already past the new age.' },
+        { id: 'carecontact', label: 'Escalation contact', value: 'standards@franklin.edu', helper: 'Receives the automatic notice. Must be monitored during business hours.' }
+      ],
+      toolUrls: { login: 'https://pulse.franklin.edu/lti/login', launch: 'https://pulse.franklin.edu/lti/launch', jwks: 'https://pulse.franklin.edu/.well-known/jwks.json' },
+      orgTree, orgSel,
+      orgSelName: findName(orgTree) ?? '',
+      selectOrg: (id) => this.setState({ orgSel: id }),
+      people: pp.rows,
+      pPrev: pp.prev, pNext: pp.next, pPrevOff: pp.prevOff, pNextOff: pp.nextOff,
+      pPrevOp: pp.prevOff ? 0.4 : 1, pNextOp: pp.nextOff ? 0.4 : 1,
+      pRange: pp.range, pSizes: pp.sizes,
+      mPrev: mp.prev, mNext: mp.next, mPrevOff: mp.prevOff, mNextOff: mp.nextOff,
+      mPrevOp: mp.prevOff ? 0.4 : 1, mNextOp: mp.nextOff ? 0.4 : 1,
+      mRange: mp.range, mSizes: mp.sizes,
+      peopleHeaders: [
+        { label: 'Name', key: 'name' }, { label: 'Category', key: 'category' }, { label: 'Reports to', key: 'reportsTo' }
+      ].map((h) => ({ label: h.label, arrow: arrowFor(h.key), weight: pKey === h.key ? 600 : 500, sort: sortBy(h.key) })),
+      leadMappings: mp.rows,
+      mapArrow: this.state.mSortDir === 0 ? '' : (this.state.mSortDir === 1 ? ' ↑' : ' ↓'),
+      sortMappings: () => this.setState((s) => ({ mSortDir: s.mSortDir === 1 ? -1 : 1, mPage: 0 })),
+      addPersonOpen: this.state.addOpen,
+      toggleAddPerson: () => this.setState({ addOpen: !this.state.addOpen }),
+      npName, npCat, npRep,
+      setNpName: (e) => this.setState({ npName: e.target.value }),
+      setNpCat: (e) => this.setState({ npCat: e.target.value }),
+      setNpRep: (e) => this.setState({ npRep: e.target.value }),
+      categoryOptions: this.CATEGORIES.map((v) => ({ v })),
+      reportsToOptions: [{ v: '—' }].concat(people.map((p) => ({ v: p.name }))),
+      addDisabled: !npName.trim(),
+      addCursor: npName.trim() ? 'pointer' : 'default',
+      addOpacity: npName.trim() ? 1 : 0.4,
+      addPerson: () => { if (npName.trim()) this.setState((s) => ({ added: s.added.concat({ name: npName.trim(), category: npCat, reportsTo: npRep }), addOpen: false, npName: '', npCat: null, npRep: null })); },
+      showPeopleDiff: this.state.peopleDiff,
+      runPeopleDryRun: () => this.setState({ peopleDiff: true }),
+      applyPeopleImport: () => this.setState({ peopleDiff: false }),
+      discardPeopleImport: () => this.setState({ peopleDiff: false }),
+      showDiff,
+      runDryRun: () => this.setState({ diff: true }),
+      applyImport: () => this.setState({ diff: false }),
+      discardImport: () => this.setState({ diff: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

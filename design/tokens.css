@@ -1,0 +1,65 @@
+/* ============================================================
+   Pulse Surveys — design tokens (handoff, session 7)
+   Single source of truth. Components consume these custom
+   properties only; no raw hex anywhere in component styles.
+   React/Tailwind handoff: map 1:1 into tailwind.config theme.
+   ============================================================ */
+:root {
+  /* ---- Palette — cool paper and botanical ink ----
+     Semantic meanings are load-bearing; see Usage Rules.md. */
+  --chalk: #F6F8F4;         /* App/page background; also AiPanel inset fill. Cool paper, never pure white. */
+  --paper: #FFFFFF;         /* Card and reading-surface background (reports, comments, responses). */
+  --spruce: #1E3932;        /* Primary ink: body text, headings, filled bars, the Course line in TrendDuo. */
+  --spruce-60: #5B7269;     /* Secondary ink: labels, helpers, meta, mono eyebrows, axis text. */
+  --hairline: #DCE4DD;      /* Borders, dividers, table rules, chart gridlines. Never for text. */
+  --marigold: #DFA320;      /* The hero accent: current-section trend line + terminal dot, focus ring,
+                               selected/active states, validity coaching (never an error red). */
+  --marigold-deep: #8F6A10; /* Marigold at text-contrast: links, marigold-toned text on paper/chalk. */
+  --madder: #A93F32;        /* Reserved: "attend to this." Flag chips, Care classification labels,
+                               breached thresholds in the admin strip. Never decoration, never headers. */
+  --mist: #93A5A0;          /* De-emphasis: benchmark/university comparison lines (dashed/dotted),
+                               excluded-comment text, flat pulse-line in empty states. */
+
+  /* ---- Type — three faces, three jobs ---- */
+  --font-display: 'Literata', Georgia, serif;                      /* Report titles, section heads, and any student's or instructor's own words at reading size (comments, cases, responses). */
+  --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;  /* UI copy, helpers, buttons, labels. */
+  --font-mono: 'Spline Sans Mono', ui-monospace, monospace;        /* Numerals, eyebrows, section codes, dates, rule names, audit/meta lines. Dominant voice on the Admin Console. */
+
+  /* ---- Type scale ---- */
+  --text-1: 13px;  /* meta, helpers, eyebrows */
+  --text-2: 16px;  /* body, comment text */
+  --text-3: 20px;  /* section headings */
+  --text-4: 25px;  /* page titles, StatPair values */
+  --text-5: 31px;  /* reserved display size (rarely used) */
+
+  /* ---- Spacing — 4px base ramp ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---- Radii — print-adjacent squareness ---- */
+  --radius-input: 4px;  /* buttons, inputs, chips */
+  --radius-card: 8px;   /* cards, panels */
+
+  /* ---- Elevation — one shadow, barely there ---- */
+  --shadow-card: 0 1px 2px rgba(30, 57, 50, .06);
+}
+
+/* Focus ring — marigold, everywhere, always visible */
+:focus-visible {
+  outline: 2px solid var(--marigold);
+  outline-offset: 2px;
+}
+
+/* All motion removed under reduced motion — no exceptions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

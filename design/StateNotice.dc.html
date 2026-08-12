@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}@keyframes sn-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes sn-fade{from{opacity:0}to{opacity:1}}</style></helmet>
+<div style="font-family:var(--font-body);display:flex;flex-direction:column;align-items:center;text-align:center;padding:var(--space-8) var(--space-5)">
+  <sc-if value="{{ isBeat }}" hint-placeholder-val="{{ false }}">
+    <svg width="160" height="36" aria-hidden="true" style="display:block;margin-bottom:var(--space-5)"><path d="M2 24 H62 L74 8 L86 32 L94 24 H146" pathLength="1" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;animation:sn-draw 600ms ease-out both"></path><circle cx="153" cy="24" r="3.5" style="fill:var(--marigold);animation:sn-fade 150ms ease-out 560ms both"></circle></svg>
+  </sc-if>
+  <sc-if value="{{ isFlat }}" hint-placeholder-val="{{ true }}">
+    <svg width="160" height="36" aria-hidden="true" style="display:block;margin-bottom:var(--space-5)"><line x1="2" y1="24" x2="146" y2="24" style="stroke:var(--mist);stroke-width:2;stroke-linecap:round"></line><circle cx="153" cy="24" r="3.5" style="fill:var(--mist)"></circle></svg>
+  </sc-if>
+  <div style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);color:var(--spruce);margin-bottom:var(--space-2)">{{ title }}</div>
+  <p style="margin:0;max-width:42ch;font-size:var(--text-2);line-height:1.55;color:var(--spruce-60);text-wrap:pretty">{{ body }}</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:280},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;flat&quot;,&quot;options&quot;:[&quot;flat&quot;,&quot;beat&quot;],&quot;tsType&quot;:&quot;'flat' | 'beat'&quot;},&quot;title&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;This week's survey is closed&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;body&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;The week 8 window opens Monday at 8:00 AM.&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const variant = this.props.variant ?? 'flat';
+    return {
+      isBeat: variant === 'beat',
+      isFlat: variant !== 'beat',
+      title: this.props.title ?? '',
+      body: this.props.body ?? ''
+    };
+  }
+}
+</script>
+</body>
+</html>

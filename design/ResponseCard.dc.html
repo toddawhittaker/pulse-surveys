@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}@keyframes rc-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-6) var(--space-5);font-family:var(--font-body);animation:rc-rise 220ms ease-out both">
+  <svg width="120" height="14" aria-hidden="true" style="display:block;margin-bottom:var(--space-4)"><path d="M1 10 H52 L60 3 L68 10 H106" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round"></path><circle cx="112" cy="10" r="3.5" style="fill:var(--marigold)"></circle></svg>
+  <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-4)">{{ attribution }}</div>
+  <p style="margin:0;font-family:var(--font-display);font-weight:400;font-size:var(--text-3);line-height:1.55;color:var(--spruce);text-wrap:pretty">{{ body }}</p>
+  <sc-if value="{{ hasNote }}" hint-placeholder-val="{{ false }}">
+    <p style="margin:var(--space-4) 0 0;font-size:var(--text-1);line-height:1.5;color:var(--spruce-60)">{{ note }}</p>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:320},&quot;body&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Thank you for the candid feedback on pacing. You\u2019re right that this week stacked three chapters against the midterm — I\u2019m moving one to after break and posting a reading priority guide tonight.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;instructor&quot;,&quot;options&quot;:[&quot;instructor&quot;,&quot;on-behalf&quot;],&quot;tsType&quot;:&quot;'instructor' | 'on-behalf'&quot;},&quot;author&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Dr. M. Ellison&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;leadName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Dr. Rivera, Lead Faculty&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;date&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Mon Oct 19&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;note&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const variant = this.props.variant ?? 'instructor';
+    const date = this.props.date ?? 'Mon Oct 19';
+    const onBehalf = variant === 'on-behalf';
+    return {
+      body: this.props.body ?? '',
+      attribution: onBehalf
+        ? 'Response from ' + (this.props.leadName ?? 'Dr. Rivera, Lead Faculty') + ' · ' + date
+        : (this.props.author ?? 'Dr. M. Ellison') + ' · ' + date,
+      hasNote: onBehalf,
+      note: this.props.note ?? 'Your course\u2019s lead faculty read this week\u2019s feedback and responded on the course\u2019s behalf.'
+    };
+  }
+}
+</script>
+</body>
+</html>

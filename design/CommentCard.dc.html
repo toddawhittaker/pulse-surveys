@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-4) var(--space-5);font-family:var(--font-body)">
+  <sc-if value="{{ excluded }}" hint-placeholder-val="{{ false }}">
+    <p style="margin:0 0 var(--space-3);font-size:var(--text-2);line-height:1.55;color:var(--mist)">{{ text }}</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+      <span style="font-size:var(--text-1);line-height:1.5;color:var(--mist)">Excluded — students will not see this comment. The exclusion is logged and visible to the Lead Faculty.</span>
+      <button onClick="{{ restore }}" style="flex:none;white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer" style-hover="background:var(--chalk)">Undo</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{ kept }}" hint-placeholder-val="{{ false }}">
+    <p style="margin:0 0 var(--space-3);font-size:var(--text-2);line-height:1.55;color:var(--spruce)">{{ text }}</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+      <span style="font-size:var(--text-1);line-height:1.5;color:var(--spruce-60)">Kept — students will see this comment. The decision is logged.</span>
+      <button onClick="{{ unkeep }}" style="flex:none;white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer" style-hover="background:var(--chalk)">Undo</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{ notExcluded }}" hint-placeholder-val="{{ true }}">
+    <sc-if value="{{ hasStream }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-bottom:var(--space-2)"><span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);border:1px solid var(--hairline);border-radius:var(--radius-input);padding:2px 8px">{{ streamLabel }}</span></div>
+    </sc-if>
+    <sc-if value="{{ flagged }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:500;color:var(--madder);border:1px solid var(--madder);border-radius:var(--radius-input);padding:2px 8px">{{ flagLabel }}</span>
+        <span style="font-size:var(--text-1);color:var(--spruce-60)">Hidden from students pending your review</span>
+        <button onClick="{{ toggle }}" style="margin-left:auto;white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer" style-hover="background:var(--chalk)">{{ toggleLabel }}</button>
+      </div>
+    </sc-if>
+    <div style="overflow:hidden;max-height:{{ bodyMax }};transition:max-height 200ms ease">
+      <p style="margin:{{ bodyMargin }};font-size:var(--text-2);line-height:1.55;color:var(--spruce)">{{ text }}</p>
+    </div>
+    <sc-if value="{{ flaggedExpanded }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
+        <button onClick="{{ keep }}" style="white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--spruce);cursor:pointer" style-hover="background:var(--chalk)">Keep for students</button>
+        <button onClick="{{ exclude }}" style="white-space:nowrap;font-family:var(--font-body);font-size:var(--text-1);font-weight:500;padding:6px 12px;border-radius:var(--radius-input);border:1px solid var(--hairline);background:var(--paper);color:var(--madder);cursor:pointer" style-hover="background:var(--chalk)">Exclude from student view</button>
+      </div>
+    </sc-if>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:672,&quot;height&quot;:160},&quot;text&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;The field sampling lab finally made the quadrat math click for me. More weeks like this one.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;flag&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;&quot;,&quot;options&quot;:[&quot;&quot;,&quot;harmful&quot;,&quot;privacy&quot;,&quot;nonsense&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;default&quot;,&quot;options&quot;:[&quot;default&quot;,&quot;flagged-collapsed&quot;,&quot;flagged-expanded&quot;,&quot;excluded&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;stream&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;&quot;,&quot;options&quot;:[&quot;&quot;,&quot;instructor&quot;,&quot;course&quot;],&quot;tsType&quot;:&quot;'' | 'instructor' | 'course'&quot;}}">
+class Component extends DCLogic {
+  state = { expanded: null, excluded: null, kept: null };
+  renderVals() {
+    const flag = this.props.flag ?? '';
+    const variant = this.props.variant ?? (flag ? 'flagged-collapsed' : 'default');
+    const excluded = this.state.excluded ?? (variant === 'excluded');
+    const kept = (this.state.kept ?? false) && !excluded;
+    const expanded = this.state.expanded ?? (variant === 'flagged-expanded');
+    const flagged = !!flag && !excluded && !kept;
+    const collapsed = flagged && !expanded;
+    const stream = this.props.stream ?? '';
+    return {
+      hasStream: !!stream,
+      streamLabel: stream === 'instructor' ? 'Instructor' : 'Course',
+      text: this.props.text ?? '',
+      flagLabel: 'Flagged: ' + flag,
+      flagged,
+      kept,
+      notExcluded: !excluded && !kept,
+      flaggedExpanded: flagged && expanded,
+      excluded,
+      bodyMax: collapsed ? '0px' : '480px',
+      bodyMargin: flagged ? '12px 0 0' : '0',
+      toggleLabel: expanded ? 'Collapse' : 'Review comment',
+      toggle: () => this.setState({ expanded: !expanded }),
+      exclude: () => this.setState({ excluded: true, kept: false }),
+      keep: () => this.setState({ kept: true }),
+      unkeep: () => this.setState({ kept: false, expanded: true }),
+      restore: () => this.setState({ excluded: false, expanded: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

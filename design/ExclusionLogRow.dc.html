@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="display:grid;grid-template-columns:80px 150px 1fr 200px;gap:var(--space-4);align-items:start;padding:var(--space-3) 0;border-bottom:1px solid var(--hairline);font-family:var(--font-body)">
+  <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);padding-top:2px">{{ date }}</div>
+  <div style="font-size:var(--text-1);font-weight:500;color:var(--spruce)">{{ instructor }}</div>
+  <div style="font-family:var(--font-display);font-size:var(--text-1);font-style:italic;line-height:1.5;color:var(--spruce-60)">&ldquo;{{ excerpt }}&rdquo;</div>
+  <div>
+    <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:{{ statusColor }};margin-bottom:4px">{{ flagStatus }}</div>
+    <div style="font-size:var(--text-1);line-height:1.4;color:var(--spruce-60)">{{ reason }}</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:80},&quot;date&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Oct 20&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;instructor&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Dr. M. Ellison&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;excerpt&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;This professor is clueless and should not be allowed near a classroom.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;flagStatus&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;AI-flagged&quot;,&quot;options&quot;:[&quot;AI-flagged&quot;,&quot;Unflagged — reason given&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;reason&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Personal attack with no actionable content.&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const flagStatus = this.props.flagStatus ?? 'AI-flagged';
+    return {
+      date: this.props.date ?? '',
+      instructor: this.props.instructor ?? '',
+      excerpt: this.props.excerpt ?? '',
+      flagStatus,
+      statusColor: flagStatus === 'AI-flagged' ? 'var(--spruce-60)' : 'var(--marigold-deep)',
+      reason: this.props.reason ?? ''
+    };
+  }
+}
+</script>
+</body>
+</html>

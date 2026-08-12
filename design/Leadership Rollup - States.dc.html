@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><meta name="design_doc_mode" content="canvas"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600&family=Spline+Sans+Mono:wght@400;600&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}.dv-turn{padding:40px 44px 32px;scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px 'Spline Sans Mono',monospace;padding:3px 7px;background:var(--spruce);color:var(--paper);border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 'Schibsted Grotesk',sans-serif;color:var(--spruce)}.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}.dv-oid{font:600 10.5px 'Spline Sans Mono',monospace;padding:3px 7px;background:var(--hairline);color:var(--spruce);border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 'Schibsted Grotesk',sans-serif;color:var(--spruce-60)}.dv-card{max-width:100%;background:var(--paper);border:1px solid var(--hairline);border-radius:8px;box-shadow:var(--shadow-card);overflow:hidden}.dv-opt:target .dv-oid{background:var(--marigold);color:var(--spruce)}</style></helmet>
+<section class="dv-turn" id="t4">
+  <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Leadership Roll-up — one template, four scopes, plus tablet check</span></div>
+  <div class="dv-opts">
+    <div class="dv-opt" id="4a">
+      <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Lead Faculty · course set · PolicyToggle active · exclusion log</div>
+      <div class="dv-card" style="width:1280px"><dc-import name="LeadershipRollup" role="lead-faculty" hint-size="1280px,2600px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="4b">
+      <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Chair · department node · policies read-only</div>
+      <div class="dv-card" style="width:1280px"><dc-import name="LeadershipRollup" role="chair" hint-size="1280px,2600px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="4c">
+      <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Dean · college node · course-trend + delinquency attention cards</div>
+      <div class="dv-card" style="width:1280px"><dc-import name="LeadershipRollup" role="dean" hint-size="1280px,2400px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="4d">
+      <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>VP · institution root · empty AttentionList</div>
+      <div class="dv-card" style="width:1280px"><dc-import name="LeadershipRollup" role="vp" hint-size="1280px,2400px"></dc-import></div>
+    </div>
+    <div class="dv-opt" id="4e">
+      <div class="dv-olabel"><a class="dv-oid" href="#4e">4e</a>768px tablet check · panes stack</div>
+      <div class="dv-card" style="width:768px"><dc-import name="LeadershipRollup" role="dean" hint-size="768px,3000px"></dc-import></div>
+    </div>
+  </div>
+</section>
+</x-dc>
+</body>
+</html>

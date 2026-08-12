@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><meta name="design_doc_mode" content="canvas"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}.g-sec{padding:40px 44px 8px}.g-h{font-family:'Literata',serif;font-weight:600;font-size:20px;margin:0 0 4px;color:var(--spruce)}.g-sub{font-size:13px;color:var(--spruce-60);margin:0 0 24px}.g-row{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}.g-item{display:flex;flex-direction:column;gap:8px}.g-name{font-family:'Spline Sans Mono',monospace;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60)}.g-name b{color:var(--spruce);font-weight:500}
+input[type=range].ws{-webkit-appearance:none;appearance:none;width:100%;height:44px;background:transparent;margin:0;padding:0}
+input[type=range].ws::-webkit-slider-runnable-track{height:4px;background:var(--hairline);border-radius:2px}
+input[type=range].ws::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--spruce);margin-top:-10px;border:none;cursor:pointer}
+input[type=range].ws::-moz-range-track{height:4px;background:var(--hairline);border-radius:2px}
+input[type=range].ws::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--spruce);border:none;cursor:pointer}
+input[type=range].ws.dragging::-webkit-slider-thumb{width:30px;height:30px;margin-top:-13px;background:var(--marigold)}
+input[type=range].ws.dragging::-moz-range-thumb{width:30px;height:30px;background:var(--marigold)}</style></helmet>
+<div style="padding:44px 44px 8px">
+  <div style="font-family:var(--font-mono);font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60)">Pulse Surveys · design system handoff</div>
+  <h1 style="font-family:var(--font-display);font-weight:700;font-size:31px;margin:8px 0 4px">Component gallery</h1>
+  <p style="font-size:13px;color:var(--spruce-60);margin:0">Every primitive, every variant, labeled by exact component name. Values from tokens.css only. See Usage Rules.md for decision rules.</p>
+</div>
+
+<section class="g-sec"><h2 class="g-h">Rhythm &amp; eyebrows</h2><p class="g-sub">The mono week marker that opens every weekly surface.</p>
+<div class="g-row">
+  <div class="g-item"><span class="g-name"><b>WeekEyebrow</b> · default</span><dc-import name="WeekEyebrow" hint-size="360px,20px"></dc-import></div>
+  <div class="g-item"><span class="g-name"><b>WeekEyebrow</b> · results framing</span><dc-import name="WeekEyebrow" note="results" hint-size="200px,20px"></dc-import></div>
+</div></section>
+
+<section class="g-sec"><h2 class="g-h">Trend charts</h2><p class="g-sub">Three-line for instructor/leadership; single-line and TrendDuo for students. Panel and legend order is always Instructor → Course.</p>
+<div class="g-row">
+  <div class="g-item" style="width:720px"><span class="g-name"><b>PulseTrendChart</b> · three-line (instructor/leadership)</span><dc-import name="PulseTrendChart" hint-size="720px,280px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>PulseTrendChart</b> · single-line (student; comparables + legend hidden)</span><dc-import name="PulseTrendChart" comparables="{{ false }}" hint-size="720px,260px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>PulseTrendChart</b> · date axis labels</span><dc-import name="PulseTrendChart" label-mode="date" hint-size="720px,280px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>TrendPair</b> · stacked Instructor / Course panels, shared axis, one legend</span><dc-import name="TrendPair" hint-size="720px,440px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>TrendDuo</b> · student results only — two equal-weight lines</span><dc-import name="TrendDuo" hint-size="720px,280px"></dc-import></div>
+</div></section>
+
+<section class="g-sec"><h2 class="g-h">Ratings &amp; stats</h2>
+<div class="g-row">
+  <div class="g-item" style="width:320px"><span class="g-name"><b>RatingHistogram</b> · 1–5 distribution</span><dc-import name="RatingHistogram" hint-size="320px,180px"></dc-import></div>
+  <div class="g-item" style="width:320px"><span class="g-name"><b>RatingHistogram</b> · course stream</span><dc-import name="RatingHistogram" title="“Materials and activities supported my learning”" benchmark="{{ 3.8 }}" hint-size="320px,180px"></dc-import></div>
+  <div class="g-item" style="width:300px"><span class="g-name"><b>StatPair</b> · value + benchmark, mono numerals</span><dc-import name="StatPair" hint-size="300px,100px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>ResponseRateBar</b> · response rate</span><dc-import name="ResponseRateBar" hint-size="672px,44px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>ResponseRateBar</b> · validity rate</span><dc-import name="ResponseRateBar" label="Validity rate" num="{{ 17 }}" den="{{ 18 }}" hint-size="672px,44px"></dc-import></div>
+</div></section>
+
+<section class="g-sec"><h2 class="g-h">Comments &amp; summaries</h2><p class="g-sub">CommentCard's kept state is reached by interaction (Keep for students, with Undo) from flagged-expanded.</p>
+<div class="g-row">
+  <div class="g-item" style="width:672px"><span class="g-name"><b>CommentCard</b> · default</span><dc-import name="CommentCard" hint-size="672px,90px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>CommentCard</b> · flagged-collapsed (harmful)</span><dc-import name="CommentCard" text="This professor is clueless and should not be allowed near a classroom." flag="harmful" variant="flagged-collapsed" hint-size="672px,70px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>CommentCard</b> · flagged-expanded (privacy) — Keep / Exclude actions</span><dc-import name="CommentCard" text="Emma from my lab group copied most of our shared report and still got full credit. Not fair to the rest of us." flag="privacy" variant="flagged-expanded" hint-size="672px,180px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>CommentCard</b> · excluded (text stays visible, Undo)</span><dc-import name="CommentCard" text="This professor is clueless and should not be allowed near a classroom." flag="harmful" variant="excluded" hint-size="672px,140px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>CommentCard</b> · stream chip (interleaved contexts only)</span><dc-import name="CommentCard" stream="instructor" hint-size="672px,110px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>AiPanel</b> · chalk inset, mono AI label</span><dc-import name="AiPanel" hint-size="672px,150px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>SmallNNotice</b> · instructor audience</span><dc-import name="SmallNNotice" hint-size="672px,140px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>SmallNNotice</b> · student audience (privacy protects them)</span><dc-import name="SmallNNotice" audience="student" hint-size="672px,140px"></dc-import></div>
+</div></section>
+
+<section class="g-sec"><h2 class="g-h">Survey inputs</h2><p class="g-sub">Marigold coaches; nothing shames. All inputs keyboard-operable with the shared focus ring.</p>
+<div class="g-row">
+  <div class="g-item" style="width:350px"><span class="g-name"><b>LikertInput</b> · unanswered</span><dc-import name="LikertInput" hint-size="350px,110px"></dc-import></div>
+  <div class="g-item" style="width:350px"><span class="g-name"><b>LikertInput</b> · selected (4)</span><dc-import name="LikertInput" value="{{ 4 }}" hint-size="350px,110px"></dc-import></div>
+  <div class="g-item" style="width:350px"><span class="g-name"><b>ConditionalTextArea</b> · optional</span><dc-import name="ConditionalTextArea" hint-size="350px,190px"></dc-import></div>
+  <div class="g-item" style="width:350px"><span class="g-name"><b>ConditionalTextArea</b> · required (rating ≤ 2)</span><dc-import name="ConditionalTextArea" state="required" hint-size="350px,200px"></dc-import></div>
+  <div class="g-item" style="width:350px"><span class="g-name"><b>ConditionalTextArea</b> · validity bounce (coaching, marigold)</span><dc-import name="ConditionalTextArea" state="bounce" value="it was okay" hint-size="350px,230px"></dc-import></div>
+  <div class="g-item" style="width:350px"><span class="g-name"><b>WorkloadSlider</b> · 0–40h, 0.5 steps</span><dc-import name="WorkloadSlider" value="{{ 6.5 }}" hint-size="350px,110px"></dc-import></div>
+  <div class="g-item" style="width:350px"><span class="g-name"><b>SubmitBar</b> · enabled (sole home of confidentiality copy)</span><dc-import name="SubmitBar" hint-size="350px,120px"></dc-import></div>
+  <div class="g-item" style="width:350px"><span class="g-name"><b>SubmitBar</b> · disabled</span><dc-import name="SubmitBar" disabled="{{ true }}" hint-size="350px,120px"></dc-import></div>
+  <div class="g-item" style="width:390px"><span class="g-name"><b>StateNotice</b> · flat (closed / empty)</span><dc-import name="StateNotice" hint-size="390px,240px"></dc-import></div>
+  <div class="g-item" style="width:390px"><span class="g-name"><b>StateNotice</b> · beat (success)</span><dc-import name="StateNotice" variant="beat" title="Your pulse is in" body="Participation credit is recorded. Results and your instructor's response will appear here after Monday." hint-size="390px,240px"></dc-import></div>
+</div></section>
+
+<section class="g-sec"><h2 class="g-h">Responses</h2>
+<div class="g-row">
+  <div class="g-item" style="width:390px"><span class="g-name"><b>ResponseCard</b> · instructor-authored</span><dc-import name="ResponseCard" hint-size="390px,300px"></dc-import></div>
+  <div class="g-item" style="width:390px"><span class="g-name"><b>ResponseCard</b> · on-behalf (Lead Faculty)</span><dc-import name="ResponseCard" variant="on-behalf" hint-size="390px,320px"></dc-import></div>
+  <div class="g-item" style="width:672px"><span class="g-name"><b>InstructorResponse</b> · compose with AI draft + optional draft check (not on request list; established in session 1)</span><dc-import name="InstructorResponse" hint-size="672px,300px"></dc-import></div>
+</div></section>
+
+<section class="g-sec"><h2 class="g-h">Leadership roll-up</h2>
+<div class="g-row">
+  <div class="g-item" style="width:280px"><span class="g-name"><b>HierarchyNav</b> · collapsible tree, mono counts</span><dc-import name="HierarchyNav" hint-size="280px,400px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>AggregateHeader</b> · node name + scope + three-line TrendPair</span><dc-import name="AggregateHeader" hint-size="720px,660px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>AttentionList</b> · rule cards, stream named in mono, never ranked</span><dc-import name="AttentionList" items="{{ attentionItems }}" hint-size="720px,200px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>AttentionList</b> · empty (calm flat pulse line)</span><dc-import name="AttentionList" items="{{ emptyItems }}" hint-size="720px,140px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>ExclusionLogRow</b> · AI-flagged</span><dc-import name="ExclusionLogRow" date="Oct 20" instructor="Dr. M. Ellison" excerpt="This professor is clueless and should not be allowed near a classroom." flag-status="AI-flagged" reason="Personal attack with no actionable content." hint-size="900px,60px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>ExclusionLogRow</b> · unflagged, reason given</span><dc-import name="ExclusionLogRow" date="Oct 13" flag-status="Unflagged — reason given" excerpt="Half the class already failed and he acts like it's our fault." reason="Aggregate claim presented as fact; verifiably false for this section." hint-size="900px,60px"></dc-import></div>
+  <div class="g-item" style="width:560px"><span class="g-name"><b>PolicyToggle</b> · editable (Lead Faculty)</span><dc-import name="PolicyToggle" hint-size="560px,150px"></dc-import></div>
+  <div class="g-item" style="width:560px"><span class="g-name"><b>PolicyToggle</b> · read-only (Chair and above)</span><dc-import name="PolicyToggle" read-only="{{ true }}" hint-size="560px,170px"></dc-import></div>
+</div></section>
+
+<section class="g-sec"><h2 class="g-h">Care queue</h2><p class="g-sub">No motion on this surface. Madder appears only in the classification label.</p>
+<div class="g-row">
+  <div class="g-item" style="width:640px"><span class="g-name"><b>CaseCard</b> · open (identity absent, two actions)</span><dc-import name="CaseCard" classification="Self-harm risk" text="I don't really see the point in continuing with any of this. Nothing I do seems to change anything." context="BIOL 2150 · R3WW · WK 07" case-id="CASE 2026-0141" status="open" hint-size="640px,260px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>CaseCard</b> · revealed (identity block + logged-access marker)</span><dc-import name="CaseCard" classification="Self-harm risk" text="I don't really see the point in continuing with any of this. Nothing I do seems to change anything." context="BIOL 2150 · R3WW · WK 07" case-id="CASE 2026-0141" status="open" revealed="{{ true }}" identity="{{ galleryIdentity }}" hint-size="640px,340px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>CaseCard</b> · resolved with disposition note</span><dc-import name="CaseCard" classification="Self-harm risk" text="Everything is piling up at once and I honestly don't know how much longer I can keep doing this." context="MATH 1201 · E1WW · WK 04" case-id="CASE 2026-0137" status="resolved" revealed="{{ true }}" identity="{{ galleryIdentity }}" disposition-line="Resolved by M. Calloway · Nov 3" disposition-note="Referred to counseling services; student contacted same day." hint-size="640px,320px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>CaseCard</b> · false positive (identity never shown)</span><dc-import name="CaseCard" classification="Threat of harm" text="this exam is going to kill me lol" context="CHEM 1010 · E2WW · WK 03" case-id="CASE 2026-0139" status="resolved" fp-note="{{ true }}" disposition-line="Marked false positive by M. Calloway · Oct 28" hint-size="640px,280px"></dc-import></div>
+  <div class="g-item" style="width:340px"><span class="g-name"><b>GuidancePanel</b> · institution-configured prose</span><dc-import name="GuidancePanel" hint-size="340px,400px"></dc-import></div>
+</div></section>
+
+<section class="g-sec" style="padding-bottom:48px"><h2 class="g-h">Admin console</h2><p class="g-sub">Mono-dominant instrument panel. Madder only on breached thresholds.</p>
+<div class="g-row">
+  <div class="g-item" style="width:900px"><span class="g-name"><b>HealthRow</b> · success</span><dc-import name="HealthRow" time="09:41:22" platform="Canvas · franklin.instructure.com" outcome="success" hint-size="900px,50px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>HealthRow</b> · signature failure, expanded (plain words + raw error)</span><dc-import name="HealthRow" time="10:17:03" platform="Canvas · franklin.instructure.com" outcome="signature failure" expanded="{{ true }}" reason="The LMS signed this launch with a key we don't recognize. Usually the platform rotated its keys and our cached copy is stale — refetch keys for this registration." raw="JWT verification failed: kid 2026-07-a not present in cached JWKS" hint-size="900px,160px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>HealthRow</b> · state mismatch, collapsed</span><dc-import name="HealthRow" time="08:52:40" platform="Moodle · moodle.franklin.edu" outcome="state mismatch" reason="The browser returned a login state we didn't issue. Usually a stale tab or blocked third-party cookies; ask the user to relaunch from the LMS." raw="OIDC state parameter mismatch on /lti/launch" hint-size="900px,50px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>JobRow</b> · ok</span><dc-import name="JobRow" job-name="LMS roster sync" schedule="Hourly" last-run="Today 10:02 AM" duration="12 s" status="ok" retries="{{ 0 }}" hint-size="900px,50px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>JobRow</b> · retrying</span><dc-import name="JobRow" job-name="Monday Report generation" schedule="Weekly · Mon 6:00 AM" last-run="Today 6:00 AM" duration="4 m 12 s" status="retrying" retries="{{ 2 }}" hint-size="900px,50px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>JobRow</b> · failed (Run again with plain-verb confirm)</span><dc-import name="JobRow" job-name="Care escalation notices" schedule="Every 15 min" last-run="Today 9:45 AM" duration="—" status="failed" retries="{{ 3 }}" hint-size="900px,60px"></dc-import></div>
+  <div class="g-item" style="width:900px"><span class="g-name"><b>MetricBlock</b> · per-task AI metrics, table-first</span><dc-import name="MetricBlock" hint-size="900px,240px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>DriftCard</b> · sampled classification</span><dc-import name="DriftCard" sample-id="SAMPLE 8841 · validity stream" model="Nonsense" text="good class i guess idk" hint-size="640px,220px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>DriftCard</b> · mid-override</span><dc-import name="DriftCard" sample-id="SAMPLE 8867 · moderation stream" model="Harmful — personal attack" text="This class is a complete waste of everyone's time and money." override-open="{{ true }}" hint-size="640px,280px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>CarePanel</b> · within threshold</span><dc-import name="CarePanel" open-count="{{ 1 }}" oldest-hours="{{ 6 }}" threshold-hours="{{ 24 }}" contact="standards@franklin.edu" hint-size="640px,160px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>CarePanel</b> · past threshold (escalation notice sent)</span><dc-import name="CarePanel" open-count="{{ 2 }}" oldest-hours="{{ 30 }}" threshold-hours="{{ 24 }}" contact="standards@franklin.edu" sent-date="Nov 2, 9:14 AM" hint-size="640px,170px"></dc-import></div>
+  <div class="g-item" style="width:720px"><span class="g-name"><b>ConfigSection</b> · grouped settings, consequence helpers</span><dc-import name="ConfigSection" hint-size="720px,280px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>RegistrationCard</b> · JWKS OK</span><dc-import name="RegistrationCard" hint-size="640px,260px"></dc-import></div>
+  <div class="g-item" style="width:640px"><span class="g-name"><b>RegistrationCard</b> · JWKS stale</span><dc-import name="RegistrationCard" platform="Moodle" issuer="https://moodle.franklin.edu" client-id="pulse-moodle-01" deployments="1 active (prod)" jwks-status="stale" jwks-fetched="26 h ago" hint-size="640px,260px"></dc-import></div>
+</div></section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      emptyItems: [],
+      attentionItems: [
+        { section: 'BIOL 2150 · R1WW', rule: 'Course trend down 2+ consecutive weeks', stream: 'course', detail: '3.8 → 3.4 → 3.1 over weeks 5–7' },
+        { section: 'MARS 3110 · E2WW', rule: 'Response required · delinquent 52 h', detail: 'Report published Mon 6:00 AM' }
+      ],
+      galleryIdentity: { name: 'A. Whitfield', sid: 'F00482913' }
+    };
+  }
+}
+</script>
+</body>
+</html>

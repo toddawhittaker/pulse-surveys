@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="font-family:var(--font-body)">
+  <h1 style="font-family:var(--font-display);font-weight:700;font-size:var(--text-4);line-height:1.25;margin:0 0 var(--space-1);color:var(--spruce)">{{ name }}</h1>
+  <div style="font-size:var(--text-1);color:var(--spruce-60)">{{ scopeLine }}</div>
+  <svg width="120" height="14" aria-hidden="true" style="display:block;margin:var(--space-4) 0 var(--space-5)"><path d="M1 10 H52 L60 3 L68 10 H106" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round"></path><circle cx="112" cy="10" r="3.5" style="fill:var(--marigold)"></circle></svg>
+  <dc-import name="TrendPair" instr-section="{{ trendI }}" course-section="{{ trendC }}" instr-benchmark="{{ benchI }}" course-benchmark="{{ benchC }}" instr-university="{{ uniI }}" course-university="{{ uniC }}" total-weeks="{{ totalWeeks }}" instr-cohorts="{{ instrCohorts }}" course-cohorts="{{ courseCohorts }}" axis="{{ axis }}" hint-size="100%,520px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:720,&quot;height&quot;:680},&quot;name&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Ecology &amp; Evolution&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;scopeLine&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;3 courses · 7 sections · 148 of 172 responded this week&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;trendI&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;trendC&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;benchI&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;benchC&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;uniI&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;uniC&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;totalWeeks&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:12,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:2,&quot;max&quot;:20}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      name: this.props.nodeName ?? this.props.name ?? '',
+      scopeLine: this.props.scopeLine ?? '',
+      totalWeeks: this.props.totalWeeks ?? 12,
+      instrCohorts: this.props.instrCohorts ?? null,
+      courseCohorts: this.props.courseCohorts ?? null,
+      axis: this.props.axis ?? 'course',
+      trendI: this.props.trendI, trendC: this.props.trendC,
+      benchI: this.props.benchI, benchC: this.props.benchC,
+      uniI: this.props.uniI, uniC: this.props.uniC
+    };
+  }
+}
+</script>
+</body>
+</html>

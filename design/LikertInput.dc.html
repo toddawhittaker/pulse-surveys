@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}@keyframes li-beat{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}</style></helmet>
+<fieldset style="border:none;margin:0;padding:0;font-family:var(--font-body)">
+  <legend style="padding:0;font-size:var(--text-2);font-weight:500;line-height:1.4;color:var(--spruce);margin-bottom:var(--space-3)">{{ question }}</legend>
+  <div role="radiogroup" aria-label="{{ question }}" style="display:flex;justify-content:space-between">
+    <sc-for list="{{ dots }}" as="d" hint-placeholder-count="5">
+      <button role="radio" aria-checked="{{ d.checked }}" aria-label="{{ d.aria }}" onClick="{{ d.pick }}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;padding:0;cursor:pointer;border-radius:50%">
+        <span style="width:26px;height:26px;border-radius:50%;box-sizing:border-box;border:1.5px solid {{ d.ring }};background:{{ d.fill }};transition:border-color 150ms ease;animation:{{ d.anim }}"></span>
+      </button>
+    </sc-for>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:var(--space-1)">
+    <span style="font-size:12px;color:var(--spruce-60)">{{ lowLabel }}</span>
+    <span style="font-size:12px;color:var(--spruce-60)">{{ highLabel }}</span>
+  </div>
+</fieldset>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:350,&quot;height&quot;:120},&quot;question&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;My instructor supported my learning this week.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;value&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:5},&quot;onSelect&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(n: number) =&gt; void&quot;},&quot;lowLabel&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Strongly disagree&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;highLabel&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Strongly agree&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const value = this.props.value ?? 0;
+    const onSelect = this.props.onSelect ?? (() => {});
+    return {
+      question: this.props.question ?? '',
+      lowLabel: this.props.lowLabel ?? 'Strongly disagree',
+      highLabel: this.props.highLabel ?? 'Strongly agree',
+      dots: [1, 2, 3, 4, 5].map((n) => ({
+        checked: n === value,
+        aria: n + ' of 5',
+        pick: () => onSelect(n),
+        ring: n === value ? 'var(--spruce)' : 'var(--mist)',
+        fill: n === value ? 'var(--spruce)' : 'transparent',
+        anim: n === value ? 'li-beat 180ms ease-out' : 'none'
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-4) var(--space-5);font-family:var(--font-body)">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-4)">
+    <div>
+      <div style="font-size:var(--text-2);font-weight:500;color:var(--spruce)">Response required</div>
+      <div style="font-size:var(--text-1);color:var(--spruce-60);margin-top:2px">{{ courseSet }}</div>
+    </div>
+    <button role="switch" aria-checked="{{ isOn }}" aria-label="{{ ariaLabel }}" onClick="{{ handleToggle }}" disabled="{{ readOnly }}" style="flex:none;width:44px;height:24px;border-radius:12px;border:1px solid {{ trackBorder }};background:{{ trackBg }};padding:2px;display:flex;justify-content:{{ knobSide }};cursor:{{ cursor }};opacity:{{ opacity }};transition:background 150ms ease">
+      <span style="width:18px;height:18px;border-radius:50%;background:var(--paper);box-shadow:var(--shadow-card)"></span>
+    </button>
+  </div>
+  <p style="margin:var(--space-3) 0 0;font-size:var(--text-1);line-height:1.5;color:var(--spruce-60);text-wrap:pretty">When on: student results for each week are held until the instructor publishes a response, and respond-on-behalf is enabled for the Lead Faculty at 96 hours.</p>
+  <sc-if value="{{ readOnly }}" hint-placeholder-val="{{ false }}">
+    <p style="margin:var(--space-2) 0 0;font-size:var(--text-1);line-height:1.5;color:var(--spruce-60)">Set by this course set&rsquo;s Lead Faculty — read-only at your role.</p>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:560,&quot;height&quot;:170},&quot;courseSet&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Ecology &amp; Evolution&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;enabled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;readOnly&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;onToggle&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(next: boolean) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const on = this.props.enabled ?? false;
+    const readOnly = this.props.readOnly ?? false;
+    const onToggle = this.props.onToggle ?? (() => {});
+    return {
+      courseSet: this.props.courseSet ?? '',
+      isOn: on,
+      ariaLabel: 'Response required for ' + (this.props.courseSet ?? 'this course set'),
+      handleToggle: () => { if (!readOnly) onToggle(!on); },
+      readOnly,
+      trackBg: on ? 'var(--spruce)' : 'var(--chalk)',
+      trackBorder: on ? 'var(--spruce)' : 'var(--hairline)',
+      knobSide: on ? 'flex-end' : 'flex-start',
+      cursor: readOnly ? 'default' : 'pointer',
+      opacity: readOnly ? 0.55 : 1
+    };
+  }
+}
+</script>
+</body>
+</html>

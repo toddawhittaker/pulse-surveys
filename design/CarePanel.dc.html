@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5);font-family:var(--font-mono)">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:var(--space-4)">
+    <div><div style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60)">Open cases</div><div style="font-size:var(--text-3);font-weight:500;color:var(--spruce);font-variant-numeric:tabular-nums;margin-top:2px">{{ openCount }}</div></div>
+    <div><div style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60)">Oldest case</div><div style="font-size:var(--text-3);font-weight:500;color:{{ ageColor }};font-variant-numeric:tabular-nums;margin-top:2px">{{ oldestLabel }}</div></div>
+    <div><div style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60)">Escalation</div><div style="font-size:12px;color:var(--spruce);margin-top:6px;line-height:1.5">after {{ thresholdHours }} h → {{ contact }}</div></div>
+  </div>
+  <sc-if value="{{ escalated }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:var(--spruce-60);margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--hairline)">Escalation notice sent · {{ sentDate }}</div>
+  </sc-if>
+  <div style="font-family:var(--font-body);font-size:12px;color:var(--spruce-60);margin-top:var(--space-3)">Counts and ages only. Case content stays in the Care queue.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:640,&quot;height&quot;:180},&quot;openCount&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:99},&quot;oldestHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:6,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:999},&quot;thresholdHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:24,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:1,&quot;max&quot;:168},&quot;contact&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;standards@franklin.edu&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;sentDate&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Nov 2, 9:14 AM&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const oldest = this.props.oldestHours ?? 0;
+    const threshold = this.props.thresholdHours ?? 24;
+    const over = oldest > threshold;
+    return {
+      openCount: String(this.props.openCount ?? 0),
+      oldestLabel: (this.props.openCount ?? 0) > 0 ? oldest + ' h' : '—',
+      ageColor: over ? 'var(--madder)' : 'var(--spruce)',
+      thresholdHours: String(threshold),
+      contact: this.props.contact ?? '',
+      escalated: over,
+      sentDate: this.props.sentDate ?? ''
+    };
+  }
+}
+</script>
+</body>
+</html>

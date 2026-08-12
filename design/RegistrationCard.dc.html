@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5);font-family:var(--font-mono)">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-4)">
+    <span style="font-size:var(--text-1);font-weight:500;color:var(--spruce);font-family:var(--font-body)">{{ platform }}</span>
+    <span style="font-size:12px;color:{{ jwksColor }}">JWKS {{ jwksStatus }} · fetched {{ jwksFetched }}</span>
+  </div>
+  <div style="display:grid;grid-template-columns:130px 1fr;gap:6px var(--space-4);margin-top:var(--space-3);font-size:12px">
+    <span style="color:var(--spruce-60)">Issuer</span><span style="color:var(--spruce);overflow-wrap:anywhere">{{ issuer }}</span>
+    <span style="color:var(--spruce-60)">Client ID</span><span style="color:var(--spruce)">{{ clientId }}</span>
+    <span style="color:var(--spruce-60)">Deployments</span><span style="color:var(--spruce)">{{ deployments }}</span>
+  </div>
+  <div style="margin-top:var(--space-4);padding-top:var(--space-3);border-top:1px solid var(--hairline)">
+    <div style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60);margin-bottom:var(--space-2)">Tool URLs for the LMS admin</div>
+    <sc-for list="{{ urlRows }}" as="u" hint-placeholder-count="3">
+      <div style="display:flex;align-items:center;gap:var(--space-3);padding:3px 0">
+        <span style="flex:0 0 60px;font-size:12px;color:var(--spruce-60)">{{ u.label }}</span>
+        <span style="flex:1;min-width:0;font-size:12px;color:var(--spruce);overflow-wrap:anywhere">{{ u.url }}</span>
+        <button onClick="{{ u.copy }}" style="flex:none;font-family:var(--font-body);font-size:12px;font-weight:500;padding:2px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer">{{ u.copyLabel }}</button>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:640,&quot;height&quot;:280},&quot;platform&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Canvas&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;issuer&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;https://canvas.instructure.com&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;clientId&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;103400000000000042&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;deployments&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;2 active (prod, sandbox)&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;jwksStatus&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;OK&quot;,&quot;options&quot;:[&quot;OK&quot;,&quot;stale&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;jwksFetched&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;41 min ago&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;urls&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{login: string; launch: string; jwks: string}&quot;}}">
+class Component extends DCLogic {
+  state = { copied: {} };
+  renderVals() {
+    const urls = this.props.urls ?? { login: '', launch: '', jwks: '' };
+    const mk = (label, key) => ({
+      label,
+      url: urls[key] ?? '',
+      copyLabel: this.state.copied[key] ? 'Copied' : 'Copy',
+      copy: () => {
+        try { navigator.clipboard.writeText(urls[key] ?? ''); } catch (e) {}
+        this.setState((s) => ({ copied: Object.assign({}, s.copied, { [key]: true }) }));
+      }
+    });
+    const jwksStatus = this.props.jwksStatus ?? 'OK';
+    return {
+      platform: this.props.platform ?? '',
+      issuer: this.props.issuer ?? '',
+      clientId: this.props.clientId ?? '',
+      deployments: this.props.deployments ?? '',
+      jwksStatus,
+      jwksColor: jwksStatus === 'OK' ? 'var(--spruce-60)' : 'var(--madder)',
+      jwksFetched: this.props.jwksFetched ?? '',
+      urlRows: [mk('Login', 'login'), mk('Launch', 'launch'), mk('JWKS', 'jwks')]
+    };
+  }
+}
+</script>
+</body>
+</html>

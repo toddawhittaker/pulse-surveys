@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--chalk);padding:{{ outerPad }};box-sizing:border-box">
+<article style="max-width:{{ articleMax }};margin:0 auto;background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-6) var(--space-7);box-sizing:border-box" data-screen-label="Instructor Monday Report">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+    <dc-import name="WeekEyebrow" week="{{ week }}" total="{{ totalWeeks }}" note="{{ eyebrowNote }}" hint-size="400px,20px"></dc-import>
+    <div style="display:flex;gap:var(--space-2);flex:none">
+      <button onClick="{{ prevWeek }}" disabled="{{ prevDisabled }}" aria-label="Previous week" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:14px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ prevOpacity }};transition:background 150ms ease" style-hover="background:var(--chalk)">←</button>
+      <button onClick="{{ nextWeek }}" disabled="{{ nextDisabled }}" aria-label="Next week" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:14px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer;opacity:{{ nextOpacity }};transition:background 150ms ease" style-hover="background:var(--chalk)">→</button>
+    </div>
+  </div>
+  <h1 style="font-family:var(--font-display);font-weight:700;font-size:var(--text-4);line-height:1.25;margin:var(--space-3) 0 var(--space-1);color:var(--spruce)">{{ courseTitle }}</h1>
+  <div style="font-size:var(--text-1);color:var(--spruce-60)">{{ subtitle }}</div>
+  <div style="font-size:var(--text-1);color:var(--spruce-60);margin-top:2px">Lead Faculty: Dr. Rivera</div>
+  <svg width="120" height="14" aria-hidden="true" style="display:block;margin:var(--space-4) 0 var(--space-6)"><path d="M1 10 H52 L60 3 L68 10 H106" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round"></path><circle cx="112" cy="10" r="3.5" style="fill:var(--marigold)"></circle></svg>
+
+  <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:0 0 var(--space-4);color:var(--spruce)">Rating trend</h2>
+  <dc-import name="TrendPair" instr-section="{{ trendI }}" course-section="{{ trendC }}" instr-benchmark="{{ benchI }}" course-benchmark="{{ benchC }}" instr-university="{{ uniI }}" course-university="{{ uniC }}" total-weeks="{{ totalWeeks }}" term-offset="{{ termOffset }}" comp-label="Comparable 12-week courses" hint-size="100%,520px"></dc-import>
+
+  <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">This week's ratings</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6)">
+    <dc-import name="RatingHistogram" title="“My instructor supported my learning”" counts="{{ q1Counts }}" benchmark="{{ q1Bench }}" hint-size="100%,180px"></dc-import>
+    <dc-import name="RatingHistogram" title="“Materials and activities supported my learning”" counts="{{ q2Counts }}" benchmark="{{ q2Bench }}" hint-size="100%,180px"></dc-import>
+  </div>
+
+  <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Workload</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6)">
+    <dc-import name="StatPair" label="Median hours this week" value="{{ medianH }}" unit="h" compare="{{ medianCompare }}" hint-size="100%,90px"></dc-import>
+    <dc-import name="StatPair" label="Mean hours this week" value="{{ meanH }}" unit="h" compare="{{ meanCompare }}" hint-size="100%,90px"></dc-import>
+  </div>
+
+  <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Participation</h2>
+  <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+    <dc-import name="ResponseRateBar" label="Response rate" num="{{ responded }}" den="{{ enrolled }}" hint-size="100%,36px"></dc-import>
+    <dc-import name="ResponseRateBar" label="Validity rate" num="{{ validCount }}" den="{{ responded }}" hint-size="100%,36px"></dc-import>
+  </div>
+
+  <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-3);color:var(--spruce)">Comments</h2>
+  <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}"><div style="font-size:var(--text-1);color:var(--spruce-60);margin:0 0 var(--space-4)">Shown in random order. No names, no timestamps.</div></sc-if>
+
+  <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-4) 0 var(--space-3)">About the instructor</div>
+  <dc-import name="AiPanel" heading="AI summary — instructor comments" text="{{ instrSummary }}" meta="{{ summaryMeta }}" hint-size="100%,130px"></dc-import>
+  <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:var(--space-3);margin-top:var(--space-3)">
+      <sc-for list="{{ instrComments }}" as="c" hint-placeholder-count="2">
+        <dc-import name="CommentCard" text="{{ c.text }}" flag="{{ c.flag }}" hint-size="100%,90px"></dc-import>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-6) 0 var(--space-3)">About the course</div>
+  <dc-import name="AiPanel" heading="AI summary — course comments" text="{{ courseSummary }}" meta="{{ summaryMeta }}" hint-size="100%,130px"></dc-import>
+  <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:var(--space-3);margin-top:var(--space-3)">
+      <sc-for list="{{ courseComments }}" as="c" hint-placeholder-count="2">
+        <dc-import name="CommentCard" text="{{ c.text }}" flag="{{ c.flag }}" hint-size="100%,90px"></dc-import>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ smallN }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:var(--space-4)">
+      <dc-import name="SmallNNotice" responded="{{ responded }}" total="{{ enrolled }}" hint-size="100%,140px"></dc-import>
+    </div>
+  </sc-if>
+
+  <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Your response</h2>
+  <dc-import name="InstructorResponse" suggested="{{ suggestedResponse }}" audience-note="{{ audienceNote }}" themes="{{ responseThemes }}" hint-size="100%,320px"></dc-import>
+</article>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;smallN&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Report state&quot;}}">
+class Component extends DCLogic {
+  state = { viewWeek: null };
+  WEEKS = [
+    { r: 20, v: 20, q1: [0, 1, 4, 7, 8], q2: [0, 1, 5, 8, 6], med: 4.0, mean: 4.4,
+      instrSummary: 'First-week responses describe the instructor as organized and approachable. Several mention that expectations for the semester were laid out clearly.',
+      courseSummary: 'Students found the syllabus and Canvas site easy to navigate. A few asked for the field trip dates earlier.',
+      instrComments: [
+        { text: 'Clear about expectations on day one. I know exactly what the big assignments are.', flag: '' },
+        { text: 'Seems genuinely excited about ecology, which makes 8 AM easier to sit through.', flag: '' },
+        { text: 'Walked us through the syllabus instead of just posting it. Small thing, but appreciated.', flag: '' },
+        { text: 'Approachable — stayed after class to answer questions about the lab schedule.', flag: '' },
+        { text: 'Laid out exactly how grading works. No mystery, which I like.', flag: '' }
+      ],
+      resp: 'Welcome to BIOL 2150 — glad the first week landed well. Field trip dates are now posted on Canvas under Schedule, ten weeks out, so commuters and folks with work shifts can plan ahead.',
+      courseComments: [
+        { text: 'Canvas site is well organized. Would like the field trip dates posted sooner so I can plan work shifts.', flag: '' },
+        { text: 'Everything for week one was easy to find. Modules are labeled by week, which helps.', flag: '' },
+        { text: 'When are the field trips? I commute and need to arrange rides well in advance.', flag: '' },
+        { text: 'The intro reading was a reasonable length. Good on-ramp.', flag: '' },
+        { text: 'Textbook is expensive but at least the library has two copies on reserve.', flag: '' }
+      ] },
+    { r: 21, v: 21, q1: [0, 1, 5, 8, 7], q2: [0, 2, 5, 8, 6], med: 4.5, mean: 4.9,
+      instrSummary: 'Responses are positive about lecture clarity. Two students asked for worked examples to be posted after class.',
+      courseSummary: 'The population growth problem set was seen as fair. Some students want more practice problems before quizzes.',
+      instrComments: [
+        { text: 'Lectures are clear but go fast. Posting the worked examples afterward would help a lot.', flag: '' },
+        { text: 'Explains the math step by step, which I need. Would love the board work uploaded after class.', flag: '' },
+        { text: 'Good at connecting lecture to the local ecosystems we will see on field trips.', flag: '' },
+        { text: 'Sometimes erases the board before I finish copying. Photos or posted notes would fix this.', flag: '' },
+        { text: 'Answered my question about exponential vs logistic growth twice without making me feel dumb.', flag: '' }
+      ],
+      resp: 'Good suggestion on worked examples — starting this week I\u2019ll photograph the board work and post it with the slides. A practice problem set with an answer key goes up Thursday, ahead of quiz 1.',
+      courseComments: [
+        { text: 'Problem set 1 felt fair. More practice problems before the quiz would be welcome.', flag: '' },
+        { text: 'The population growth simulator was actually fun. More interactive stuff like that.', flag: '' },
+        { text: 'Practice problems with answer keys before the quiz would help me self-check.', flag: '' },
+        { text: 'Reading load felt right this week. Two chapters is manageable.', flag: '' },
+        { text: 'The problem set instructions were clear. Took me about two hours.', flag: '' }
+      ] },
+    { r: 19, v: 18, q1: [0, 2, 6, 7, 4], q2: [1, 2, 6, 7, 3], med: 5.0, mean: 5.3,
+      instrSummary: 'Students appreciate quick email replies. A few felt quiz 1 covered material differently than lecture emphasized.',
+      courseSummary: 'Quiz 1 difficulty is the main theme; several felt the species-interaction questions went beyond the reading.',
+      instrComments: [
+        { text: 'Fast email replies, even on the weekend. Appreciated.', flag: '' },
+        { text: 'Emailed Saturday about the quiz and had an answer by Sunday morning.', flag: '' },
+        { text: 'In lecture the quiz was described as “straightforward.” It was not. Set expectations more carefully.', flag: '' },
+        { text: 'Fair grader on the quiz free-response — partial credit was reasonable.', flag: '' },
+        { text: 'Office hours conflict with my chem lab. Any chance of a second slot?', flag: '' }
+      ],
+      resp: 'Fair criticism on quiz 1 — the species-interaction questions leaned harder on the reading than lecture signaled. Future quizzes will come with a short topic list, and I\u2019m reweighting question 4. A second office-hours slot (Wed 4–5) starts next week.',
+      courseComments: [
+        { text: 'Quiz 1 leaned hard on species interactions that we only touched briefly in lecture.', flag: '' },
+        { text: 'Readings are interesting but the quiz did not match what lecture emphasized.', flag: '' },
+        { text: 'The mutualism examples in the reading were the best part of the week.', flag: '' },
+        { text: 'A short review sheet listing which topics are fair game would have saved a lot of anxiety.', flag: '' },
+        { text: 'Quiz felt harder than the practice questions suggested. Calibrate one to the other.', flag: '' }
+      ] },
+    { r: 22, v: 22, q1: [0, 1, 4, 9, 8], q2: [0, 1, 4, 9, 8], med: 5.0, mean: 5.2,
+      instrSummary: 'The stream ecology field demo drew wide praise; students say the instructor made the methods easy to follow in the field.',
+      courseSummary: 'The field demo is the highlight of the semester so far. Requests to repeat the format for future units.',
+      instrComments: [
+        { text: 'The stream demo was the best class so far. Walking through the sampling live made it stick.', flag: '' },
+        { text: 'Explained the kick-net technique, then let us actually do it. Great teaching.', flag: '' },
+        { text: 'Patient with everyone who fell behind on the macroinvertebrate IDs. No one got left out.', flag: '' },
+        { text: 'You can tell field work is where this instructor is happiest. It rubs off.', flag: '' },
+        { text: 'Checked in with each group at the stream instead of just standing back. Helpful.', flag: '' }
+      ],
+      resp: 'Really glad the stream session worked — your enthusiasm made it. Two more field sessions are on the schedule (weeks 9 and 11), and yes, we\u2019re fixing the wader sizes before then.',
+      courseComments: [
+        { text: 'More field sessions like this one, please. Worth every minute of the drive.', flag: '' },
+        { text: 'Seeing the sampling protocol in a real stream beat three lectures on it.', flag: '' },
+        { text: 'The field data sheet was well designed — easy to fill out with wet hands.', flag: '' },
+        { text: 'Could we get waders in more sizes next time? Otherwise a perfect session.', flag: '' },
+        { text: 'The follow-up analysis assignment connected nicely to what we collected.', flag: '' }
+      ] },
+    { r: 18, v: 18, q1: [1, 2, 5, 6, 4], q2: [0, 2, 6, 7, 3], med: 5.5, mean: 6.0,
+      instrSummary: 'Feedback on the instructor remains steady. A few students want graded quizzes returned faster.',
+      courseSummary: 'Reading load is creeping up. Students flag the two-article week alongside the lab as heavy.',
+      instrComments: [
+        { text: 'Still waiting on quiz 2 grades after two weeks. Hard to know where I stand.', flag: '' },
+        { text: 'Lectures remain solid, but grade turnaround is slipping. I need feedback before the midterm.', flag: '' },
+        { text: 'Appreciated the honest heads-up that grading is behind. Just want a date.', flag: '' },
+        { text: 'Office hours were useful for the article discussion — got more there than in lecture.', flag: '' },
+        { text: 'Responds well to questions when asked, but we need the quiz back to know what to ask.', flag: '' }
+      ],
+      resp: 'You\u2019re right that quiz 2 grades are late — they\u2019ll be back by Friday, with notes on the free-response. I\u2019ve also moved the lab report deadline to Monday so it no longer collides with the article discussions.',
+      courseComments: [
+        { text: 'Two journal articles plus a lab report in one week is a lot for a 2000-level course.', flag: '' },
+        { text: 'The Hubbell article was dense. A reading guide would have helped a lot.', flag: '' },
+        { text: 'Lab report expectations are clear, but the timing against the readings is brutal.', flag: '' },
+        { text: 'I spent most of my week on this course and my other classes suffered.', flag: '' },
+        { text: 'Consider staggering the article discussions and the lab report due dates.', flag: '' }
+      ] },
+    { r: 17, v: 16, q1: [1, 3, 6, 5, 2], q2: [1, 3, 5, 6, 2], med: 6.0, mean: 6.6,
+      instrSummary: 'Tone this week is more critical: several responses say lecture pacing has picked up and questions get deferred. Office hours are still described as helpful.',
+      courseSummary: 'Workload is the dominant theme. Students describe the reading as stacked and the lab write-up rubric as demanding.',
+      instrComments: [
+        { text: 'Lately questions in lecture get pushed to office hours because we are behind. Slowing down a little would help.', flag: '' },
+        { text: 'The pace in lecture has picked up noticeably. Fewer pauses for questions than earlier in the term.', flag: '' },
+        { text: 'Office hours are still the best part — got real help on the community structure material.', flag: '' },
+        { text: 'I asked a question Tuesday and got “we have to move on.” I get it, but it stings.', flag: '' },
+        { text: 'Still a fair and organized instructor. Just feels rushed lately.', flag: '' }
+      ],
+      resp: 'Message received on pacing — I’d rather you learn it than skim it. This week I\u2019m marking each reading as core or supplemental, and lecture will build in time for questions again. Keep the candid feedback coming.',
+      courseComments: [
+        { text: 'The reading is stacking up faster than I can keep pace with, and the lab rubric is strict.', flag: '' },
+        { text: 'The lab write-up rubric has a lot of line items. Clear, but demanding.', flag: '' },
+        { text: 'Reading volume has roughly doubled since week 4. Please prioritize what matters most.', flag: '' },
+        { text: 'I like the material, but the pace means I am skimming instead of learning.', flag: '' },
+        { text: 'whatever lol', flag: 'nonsense' }
+      ] },
+    { r: 18, v: 17, q1: [1, 2, 5, 6, 4], q2: [1, 3, 5, 6, 3], med: 6.5, mean: 7.1,
+      instrSummary: 'Students describe office hours as genuinely helpful and credit the instructor for the field sampling lab. The main criticism is pacing: several say questions are being deferred as lecture races to cover material before the midterm. One comment is held for review under the harmful-content flag.',
+      courseSummary: 'The field sampling lab is called out as the strongest part of the week. The most consistent criticism is a doubled reading load and three chapters covered in one week ahead of the midterm. Lab write-ups are described as clear but time-consuming. One comment is held for review under the privacy flag.',
+      instrComments: [
+        { text: 'Office hours were genuinely helpful, but the problem set instructions contradicted what was said in Tuesday\u2019s lecture. I lost time reconciling the two.', flag: '' },
+        { text: 'Credit where due: the field sampling lab was designed and run really well.', flag: '' },
+        { text: 'Racing through material to hit the midterm. My questions keep getting deferred to office hours I cannot attend.', flag: '' },
+        { text: 'Went to office hours for the first time this week. Should have gone sooner — genuinely helpful.', flag: '' },
+        { text: 'This professor is clueless and should not be allowed near a classroom.', flag: 'harmful' }
+      ],
+      resp: 'Thank you for the candid feedback on pacing. You\u2019re right that this week stacked three chapters against the midterm — I\u2019m moving one to after break and posting a reading priority guide tonight. Also fixing the problem set instructions that contradicted Tuesday\u2019s lecture. Glad the field sampling lab worked; more of that is coming.',
+      courseComments: [
+        { text: 'The field sampling lab finally made the quadrat math click for me. More weeks like this one.', flag: '' },
+        { text: 'The pace this week was rough. We covered three chapters and the reading roughly doubled right before the midterm — something has to give.', flag: '' },
+        { text: 'Three chapters in one week before an exam is too much. Cut a chapter or move the midterm.', flag: '' },
+        { text: 'Emma from my lab group copied most of our shared report and still got full credit. Not fair to the rest of us.', flag: 'privacy' },
+        { text: 'Most of my hours go to the lab write-ups. The rubric is clear — it\u2019s just a lot on top of the reading.', flag: '' }
+      ] }
+  ];
+  SEC_I = [4.1, 4.0, 3.7, 4.1, 3.6, 3.2, 3.6];
+  SEC_C = [4.0, 3.9, 3.5, 4.1, 3.6, 3.3, 3.4];
+  BEN_I = [3.9, 3.9, 3.8, 3.9, 3.9, 3.8, 3.9];
+  BEN_C = [3.8, 3.8, 3.7, 3.8, 3.8, 3.7, 3.8];
+  UNI_I = [3.8, 3.8, 3.7, 3.8, 3.8, 3.7, 3.8];
+  UNI_C = [3.7, 3.7, 3.6, 3.7, 3.7, 3.6, 3.7];
+  renderVals() {
+    const smallN = this.props.smallN ?? false;
+    const enrolled = smallN ? 9 : 24;
+    const current = 7;
+    const week = smallN ? 7 : (this.state.viewWeek ?? current);
+    const base = {
+      week, totalWeeks: 12, termOffset: 3,
+      outerPad: (this.props.embedded ?? false) ? '0' : 'var(--space-6) var(--space-5)',
+      articleMax: (this.props.embedded ?? false) ? 'none' : '760px',
+      courseTitle: 'BIOL 2150 — Principles of Ecology',
+      eyebrowNote: 'responses closed Sun 11:59 PM',
+      smallN, showComments: !smallN,
+      prevDisabled: smallN || week <= 1,
+      nextDisabled: smallN || week >= current,
+      prevOpacity: (smallN || week <= 1) ? 0.35 : 1,
+      nextOpacity: (smallN || week >= current) ? 0.35 : 1,
+      prevWeek: () => this.setState({ viewWeek: Math.max(1, week - 1) }),
+      nextWeek: () => this.setState({ viewWeek: Math.min(current, week + 1) })
+    };
+    if (smallN) {
+      return Object.assign(base, {
+        subtitle: 'R1WW · Monday Report · 3 of 9 responded',
+        responded: 3, enrolled, validCount: 3,
+        trendI: [3.7, 4.0, 3.3, 3.7, 4.0, 3.7, 3.7], trendC: [3.3, 3.7, 3.0, 3.3, 3.7, 3.3, 4.0],
+        benchI: this.BEN_I, benchC: this.BEN_C, uniI: this.UNI_I, uniC: this.UNI_C,
+        q1Counts: [0, 0, 1, 2, 0], q1Bench: 3.9,
+        q2Counts: [0, 0, 1, 1, 1], q2Bench: 3.8,
+        medianH: '5.5', medianCompare: 'vs 5.0 h comparable · 4.8 h university',
+        meanH: '6.0', meanCompare: 'vs 5.4 h comparable · 5.1 h university',
+        instrSummary: 'All three responses describe the instructor as responsive; two mention office hours specifically.',
+        courseSummary: 'All three responses mention the field sampling lab positively. Two note that the reading load felt heavier than usual ahead of the midterm.',
+        summaryMeta: 'Generated from 3 responses',
+        instrComments: [], courseComments: [],
+        suggestedResponse: 'Thanks to the three of you who have responded so far. The reading load note is heard — I\u2019m posting a priority guide for the midterm chapters this week. If you haven\u2019t responded yet, the survey stays open through Sunday.',
+        audienceNote: 'Visible to all 9 enrolled students. Not anonymous — it posts under your name.',
+        responseThemes: [{ label: 'the reading load before the midterm', keywords: ['reading', 'priority', 'midterm', 'load'], count: 2 }]
+      });
+    }
+    const w = this.WEEKS[week - 1];
+    return Object.assign(base, {
+      subtitle: 'R3WW · Monday Report · ' + w.r + ' of 24 responded',
+      responded: w.r, enrolled, validCount: w.v,
+      trendI: this.SEC_I.slice(0, week), trendC: this.SEC_C.slice(0, week),
+      benchI: this.BEN_I.slice(0, week), benchC: this.BEN_C.slice(0, week),
+      uniI: this.UNI_I.slice(0, week), uniC: this.UNI_C.slice(0, week),
+      q1Counts: w.q1, q1Bench: 3.9,
+      q2Counts: w.q2, q2Bench: 3.8,
+      medianH: w.med.toFixed(1), medianCompare: 'vs 5.0 h comparable · 4.8 h university',
+      meanH: w.mean.toFixed(1), meanCompare: 'vs 5.4 h comparable · 5.1 h university',
+      instrSummary: w.instrSummary, courseSummary: w.courseSummary,
+      summaryMeta: 'Generated from ' + w.r + ' responses',
+      instrComments: w.instrComments, courseComments: w.courseComments,
+      suggestedResponse: w.resp,
+      responseThemes: week === 7 ? [
+        { label: 'pacing and the reading load', keywords: ['pacing', 'pace', 'reading', 'chapter', 'midterm', 'priority'], count: 5 },
+        { label: 'lab write-up workload', keywords: ['write-up', 'writeup', 'rubric', 'lab report'], count: 3 },
+        { label: 'the field sampling lab (praise)', keywords: ['field', 'sampling'], count: 3 }
+      ] : [],
+      audienceNote: 'Visible to all 24 enrolled students. Not anonymous — it posts under your name.'
+    });
+  }
+}
+</script>
+</body>
+</html>

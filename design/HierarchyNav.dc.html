@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}@keyframes hn-in{from{opacity:0}to{opacity:1}}</style></helmet>
+<nav aria-label="Your purview" style="font-family:var(--font-body);background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-3)">
+  <div style="display:flex;gap:var(--space-3);padding:0 10px var(--space-2)">
+    <button onClick="{{ expandAll }}" style="border:none;background:transparent;padding:0;font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60);cursor:pointer" style-hover="color:var(--spruce)">Expand all</button>
+    <button onClick="{{ collapseAll }}" style="border:none;background:transparent;padding:0;font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--spruce-60);cursor:pointer" style-hover="color:var(--spruce)">Collapse all</button>
+  </div>
+  <sc-for list="{{ rows }}" as="r" hint-placeholder-count="8">
+    <button onClick="{{ r.select }}" style="width:100%;box-sizing:border-box;display:flex;align-items:center;gap:8px;min-height:36px;padding:6px 10px 6px {{ r.pad }};border:none;border-radius:var(--radius-input);background:{{ r.bg }};color:var(--spruce);cursor:pointer;text-align:left;font-family:var(--font-body);animation:hn-in 150ms ease-out" style-hover="background:var(--chalk)">
+      <span onClick="{{ r.toggle }}" role="button" aria-label="{{ r.toggleAria }}" style="width:14px;flex:none;display:flex;align-items:center;justify-content:center">
+        <sc-if value="{{ r.hasChildren }}" hint-placeholder-val="{{ true }}">
+          <svg width="8" height="10" aria-hidden="true" style="transform:rotate({{ r.rot }});transition:transform 150ms ease"><path d="M1 1 L7 5 L1 9 Z" style="fill:var(--spruce-60)"></path></svg>
+        </sc-if>
+      </span>
+      <span style="display:flex;flex-direction:column;gap:1px;min-width:0">
+        <span style="font-size:var(--text-1);font-weight:{{ r.weight }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.name }}</span>
+        <sc-if value="{{ r.hasCount }}" hint-placeholder-val="{{ true }}">
+          <span style="font-family:var(--font-mono);font-size:11px;line-height:1.4;color:var(--spruce-60)">{{ r.count }}</span>
+        </sc-if>
+      </span>
+    </button>
+  </sc-for>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:280,&quot;height&quot;:420},&quot;nodes&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;HierarchyNode[]&quot;},&quot;selectedId&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onSelect&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(id: string) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  state = { expanded: {} };
+  renderVals() {
+    const nodes = this.props.nodes ?? [];
+    const selected = this.props.selectedId ?? '';
+    const onSelect = this.props.onSelect ?? (() => {});
+    const rows = [];
+    const walk = (list, depth) => {
+      list.forEach((n) => {
+        const hasChildren = !!(n.children && n.children.length);
+        const isOpen = this.state.expanded[n.id] ?? false;
+        rows.push({
+          name: n.name, count: n.count ?? '', hasCount: !!(n.count), hasChildren,
+          pad: (10 + depth * 16) + 'px',
+          bg: n.id === selected ? 'var(--chalk)' : 'transparent',
+          weight: n.id === selected ? 600 : 400,
+          rot: isOpen ? '90deg' : '0deg',
+          toggleAria: (isOpen ? 'Collapse ' : 'Expand ') + n.name,
+          select: () => onSelect(n.id),
+          toggle: (e) => { e.stopPropagation(); this.setState((s) => ({ expanded: Object.assign({}, s.expanded, { [n.id]: !isOpen }) })); }
+        });
+        if (hasChildren && isOpen) walk(n.children, depth + 1);
+      });
+    };
+    walk(nodes, 0);
+    const allIds = {};
+    const collect = (list) => list.forEach((n) => { if (n.children && n.children.length) { allIds[n.id] = true; collect(n.children); } });
+    collect(nodes);
+    return {
+      rows,
+      expandAll: () => this.setState({ expanded: allIds }),
+      collapseAll: () => this.setState({ expanded: {} })
+    };
+  }
+}
+</script>
+</body>
+</html>

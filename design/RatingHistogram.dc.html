@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div role="img" aria-label="{{ ariaLabel }}" style="font-family:var(--font-body)">
+  <div style="font-size:var(--text-1);font-weight:500;color:var(--spruce);margin:0 0 var(--space-1)">{{ title }}</div>
+  <div style="font-family:var(--font-mono);font-size:var(--text-1);color:var(--spruce-60);margin:0 0 var(--space-3)">mean <span style="color:var(--spruce)">{{ mean }}</span><sc-if value="{{ showBench }}" hint-placeholder-val="{{ true }}"><span> · comparable {{ benchLabel }}</span></sc-if></div>
+  <div style="display:flex;gap:var(--space-2);align-items:flex-end;height:96px" aria-hidden="true">
+    <sc-for list="{{ bars }}" as="b" hint-placeholder-count="5">
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:var(--space-1);height:100%">
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);text-align:center">{{ b.count }}</div>
+        <div style="height:{{ b.h }};background:var(--spruce);border-radius:2px 2px 0 0"></div>
+      </div>
+    </sc-for>
+  </div>
+  <div style="display:flex;gap:var(--space-2);border-top:1px solid var(--hairline);padding-top:var(--space-1)" aria-hidden="true">
+    <sc-for list="{{ bars }}" as="b" hint-placeholder-count="5"><div style="flex:1;text-align:center;font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">{{ b.label }}</div></sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:320,&quot;height&quot;:200},&quot;title&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Instructor support&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;counts&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;benchmark&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:3.9,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:1,&quot;max&quot;:5,&quot;step&quot;:0.1}}">
+class Component extends DCLogic {
+  renderVals() {
+    const counts = this.props.counts ?? [1, 2, 5, 6, 4];
+    const bench = this.props.benchmark ?? 3.9;
+    const n = counts.reduce((a, b) => a + b, 0);
+    const mean = n ? counts.reduce((a, c, i) => a + c * (i + 1), 0) / n : 0;
+    const max = Math.max(...counts, 1);
+    const showBench = this.props.showBenchmark ?? true;
+    return {
+      showBench,
+      title: this.props.title ?? 'Instructor support',
+      mean: mean.toFixed(1),
+      benchLabel: bench.toFixed(1),
+      bars: counts.map((c, i) => ({ label: String(i + 1), count: String(c), h: Math.max(Math.round(c / max * 72), c > 0 ? 3 : 2) + 'px' })),
+      ariaLabel: (this.props.title ?? 'Rating') + ' distribution, ' + n + ' responses, mean ' + mean.toFixed(1) + (showBench ? ' versus comparable-courses benchmark ' + bench.toFixed(1) : '') + '. Responses by rating 1 to 5: ' + counts.join(', ') + '.'
+    };
+  }
+}
+</script>
+</body>
+</html>

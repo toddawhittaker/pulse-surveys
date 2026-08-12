@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--chalk);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5);font-family:var(--font-body)">
+  <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
+    <span style="font-family:var(--font-mono);font-size:12px;font-weight:500;letter-spacing:0.08em;color:var(--spruce-60);border:1px solid var(--hairline);border-radius:var(--radius-input);padding:2px 6px;background:var(--paper)">AI</span>
+    <span style="font-size:var(--text-1);font-weight:500;color:var(--spruce-60)">{{ heading }}</span>
+  </div>
+  <p style="margin:0;font-size:var(--text-2);line-height:1.55;color:var(--spruce)">{{ text }}</p>
+  <div style="margin-top:var(--space-2);font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">{{ meta }}</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:672,&quot;height&quot;:180},&quot;heading&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;AI-generated summary of this week's comments&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;text&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Students single out the field sampling lab as the strongest part of the week.&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;meta&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Generated from 18 responses&quot;,&quot;tsType&quot;:&quot;string&quot;}}"></script>
+</body>
+</html>

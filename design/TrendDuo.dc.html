@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}@keyframes td-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes td-fade{from{opacity:0}to{opacity:1}}</style></helmet>
+<figure style="margin:0;font-family:var(--font-body)">
+<div style="display:flex;gap:var(--space-5);align-items:center;margin-bottom:var(--space-3);font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60)">
+  <span style="display:flex;align-items:center;gap:6px"><svg width="20" height="8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" style="stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round"></line></svg>Instructor</span>
+  <span style="display:flex;align-items:center;gap:6px"><svg width="20" height="8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" style="stroke:var(--spruce);stroke-width:2.5;stroke-linecap:round"></line></svg>Course</span>
+</div>
+<div style="position:relative;padding:0 0 {{ padB }} 40px" role="img" aria-label="{{ ariaLabel }}">
+  <svg viewBox="0 0 708 280" width="100%" style="display:block;overflow:visible" aria-hidden="true">
+    <sc-for list="{{ gridLines }}" as="g" hint-placeholder-count="5">
+      <line x1="0" x2="708" y1="{{ g.y }}" y2="{{ g.y }}" style="stroke:var(--hairline);stroke-width:1"></line>
+    </sc-for>
+    <path d="{{ coursePath }}" pathLength="1" style="fill:none;stroke:var(--spruce);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;animation:td-draw 600ms ease-out both"></path>
+    <path d="{{ instrPath }}" pathLength="1" style="fill:none;stroke:var(--marigold);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;animation:td-draw 600ms ease-out both"></path>
+  </svg>
+  <div style="position:absolute;left:calc(40px + {{ dotLeft }});top:{{ courseDotTop }};width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--spruce);animation:td-fade 150ms ease-out 560ms both" aria-hidden="true"></div>
+  <div style="position:absolute;left:calc(40px + {{ dotLeft }});top:{{ instrDotTop }};width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--marigold);animation:td-fade 150ms ease-out 560ms both" aria-hidden="true"></div>
+  <sc-for list="{{ gridLines }}" as="g" hint-placeholder-count="5">
+    <div style="position:absolute;left:0;width:32px;top:{{ g.topPct }};transform:translateY(-50%);text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)" aria-hidden="true">{{ g.label }}</div>
+  </sc-for>
+  <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="12">
+    <div style="position:absolute;bottom:0;left:calc(40px + {{ t.leftPct }});transform:translateX(-50%);text-align:center;font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);white-space:nowrap" aria-hidden="true">{{ t.label }}<sc-if value="{{ t.hasSub }}" hint-placeholder-val="{{ false }}"><div style="font-size:10px;color:var(--mist);margin-top:1px">{{ t.sub }}</div></sc-if></div>
+  </sc-for>
+</div>
+</figure>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:720,&quot;height&quot;:300},&quot;instrSection&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;courseSection&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number[]&quot;},&quot;totalWeeks&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:12,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:2,&quot;max&quot;:20}}">
+class Component extends DCLogic {
+  renderVals() {
+    const P = this.props;
+    const total = P.totalWeeks ?? 12, yMin = 1, yMax = 5;
+    const instr = P.instrSection ?? [4.1, 4.0, 3.7, 4.1, 3.6, 3.2, 3.6];
+    const course = P.courseSection ?? [4.0, 3.9, 3.5, 4.1, 3.6, 3.3, 3.4];
+    const W = 708, H = 280;
+    const tOff = P.termOffset ?? null;
+    const padBn = tOff === null ? 22 : 36;
+    const x = (i) => i * (W / (total - 1));
+    const y = (v) => H - 14 - (v - yMin) / (yMax - yMin) * (H - 28);
+    const path = (a) => a.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
+    // keep terminal dots distinguishable when the ends nearly coincide
+    let iEnd = y(instr[instr.length - 1]), cEnd = y(course[course.length - 1]);
+    if (Math.abs(iEnd - cEnd) < 8) {
+      const mid = (iEnd + cEnd) / 2, dir = iEnd <= cEnd ? 1 : -1;
+      iEnd = mid - dir * 4; cEnd = mid + dir * 4;
+    }
+    const topOf = (yv) => 'calc((100% - ' + padBn + 'px) * ' + (yv / H).toFixed(4) + ')';
+    return {
+      padB: padBn + 'px',
+      instrPath: path(instr), coursePath: path(course),
+      dotLeft: '(100% - 40px) * ' + (x(instr.length - 1) / W).toFixed(4),
+      instrDotTop: topOf(iEnd), courseDotTop: topOf(cEnd),
+      gridLines: [1, 2, 3, 4, 5].map((v) => ({ y: y(v).toFixed(1), topPct: topOf(y(v)), label: v.toFixed(1) })),
+      ticks: Array.from({ length: total }, (_, i) => ({ leftPct: '(100% - 40px) * ' + (i / (total - 1)).toFixed(4), label: (i === 0 ? 'WK ' : '') + String(i + 1).padStart(2, '0'), hasSub: tOff !== null, sub: tOff === null ? '' : (i === 0 ? 'TERM ' : '') + String(tOff + i + 1).padStart(2, '0') })),
+      ariaLabel: 'Weekly rating trends, week ' + instr.length + ' of ' + total + '. Instructor currently ' + instr[instr.length - 1].toFixed(1) + ', course ' + course[course.length - 1].toFixed(1) + '. Instructor by week: ' + instr.map((v) => v.toFixed(1)).join(', ') + '. Course by week: ' + course.map((v) => v.toFixed(1)).join(', ') + '.'
+    };
+  }
+}
+</script>
+</body>
+</html>

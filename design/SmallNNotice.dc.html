@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:var(--space-5);font-family:var(--font-body)">
+  <svg width="120" height="12" aria-hidden="true" style="display:block;margin-bottom:var(--space-3)"><line x1="1" y1="6" x2="108" y2="6" style="stroke:var(--mist);stroke-width:2;stroke-linecap:round"></line><circle cx="114" cy="6" r="3" style="fill:var(--mist)"></circle></svg>
+  <div style="font-weight:500;font-size:var(--text-2);color:var(--spruce);margin-bottom:6px">{{ title }}</div>
+  <p style="margin:0;font-size:var(--text-1);line-height:1.55;color:var(--spruce-60);text-wrap:pretty">{{ body }}</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:672,&quot;height&quot;:160},&quot;responded&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:500},&quot;total&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:9,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:500},&quot;threshold&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:1,&quot;max&quot;:20},&quot;audience&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;instructor&quot;,&quot;options&quot;:[&quot;instructor&quot;,&quot;student&quot;],&quot;tsType&quot;:&quot;'instructor' | 'student'&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const responded = this.props.responded ?? 3;
+    const total = this.props.total ?? 9;
+    const threshold = this.props.threshold ?? 5;
+    const audience = this.props.audience ?? 'instructor';
+    if (audience === 'student') {
+      return {
+        title: 'Comments stay private this week',
+        body: 'With only ' + responded + ' of ' + total + ' classmates responding, comments stay private so no one can be identified \u2014 including you. They\u2019ll appear here once more of your classmates have responded over the term.'
+      };
+    }
+    return {
+      title: 'Comments are hidden this week',
+      body: 'Only ' + responded + ' of ' + total + ' students have responded. To keep individual voices unidentifiable, raw comments stay hidden until at least ' + threshold + ' responses arrive. The AI summary above draws on everything received so far.'
+    };
+  }
+}
+</script>
+</body>
+</html>

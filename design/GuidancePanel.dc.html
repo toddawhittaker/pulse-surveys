@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-5) var(--space-6);font-family:var(--font-body)">
+  <div style="font-size:var(--text-2);font-weight:500;color:var(--spruce)">{{ title }}</div>
+  <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60);margin-top:2px">Set by your institution</div>
+  <div style="margin-top:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)">
+    <sc-for list="{{ paragraphs }}" as="p" hint-placeholder-count="4">
+      <p style="margin:0;font-size:var(--text-1);line-height:1.6;color:var(--spruce);text-wrap:pretty">{{ p.text }}</p>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:340,&quot;height&quot;:420},&quot;title&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Guidance&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;body&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string[]&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const body = this.props.body ?? [
+      'If a student may be at immediate risk, call Campus Safety at (614) 555-0119 before anything else. Do not wait on this queue.',
+      'Counseling and Psychological Services: (614) 555-0173, weekdays 8:00–5:00. After hours, 988 connects to the county crisis responder.',
+      'Every referral follows the Community Standards process, section 4.2. Include the case ID on the referral form.',
+      'Identity reveals are audited monthly by the Dean of Students office.',
+      'When in doubt between a referral and a false positive, refer. Detection review happens downstream.'
+    ];
+    return {
+      title: this.props.title ?? 'Guidance',
+      paragraphs: body.map((text) => ({ text }))
+    };
+  }
+}
+</script>
+</body>
+</html>

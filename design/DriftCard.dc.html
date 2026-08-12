@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@400;600&family=Schibsted+Grotesk:wght@400;500&family=Spline+Sans+Mono:wght@400;500&display=swap"><link rel="stylesheet" href="./tokens.css"><style>body{margin:0;background:var(--chalk);font-family:var(--font-body);color:var(--spruce)}a{color:var(--marigold-deep)}a:hover{color:var(--spruce)}</style></helmet>
+<div style="background:var(--paper);border:1px solid var(--hairline);border-radius:var(--radius-card);padding:var(--space-4) var(--space-5);font-family:var(--font-body)">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-4)">
+    <span style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">{{ sampleId }}</span>
+    <span style="font-family:var(--font-mono);font-size:12px;color:var(--spruce)">model: <span style="font-weight:500">{{ model }}</span></span>
+  </div>
+  <p style="margin:var(--space-3) 0;font-family:var(--font-display);font-size:var(--text-2);line-height:1.55;color:var(--spruce)">&ldquo;{{ text }}&rdquo;</p>
+  <sc-if value="{{ notSaved }}" hint-placeholder-val="{{ true }}">
+    <sc-if value="{{ closed }}" hint-placeholder-val="{{ true }}">
+      <button onClick="{{ openOverride }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 10px;border:1px solid var(--hairline);border-radius:var(--radius-input);background:var(--paper);color:var(--spruce);cursor:pointer">Reclassify</button>
+    </sc-if>
+    <sc-if value="{{ isOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center">
+        <sc-for list="{{ options }}" as="o" hint-placeholder-count="4">
+          <button onClick="{{ o.pick }}" style="font-family:var(--font-mono);font-size:12px;padding:4px 10px;border:1px solid {{ o.border }};border-radius:var(--radius-input);background:{{ o.bg }};color:var(--spruce);cursor:pointer;white-space:nowrap;font-weight:{{ o.weight }}">{{ o.label }}</button>
+        </sc-for>
+        <button onClick="{{ save }}" disabled="{{ saveDisabled }}" style="font-family:var(--font-body);font-size:12px;font-weight:500;padding:4px 12px;border:1px solid var(--spruce);border-radius:var(--radius-input);background:var(--spruce);color:var(--paper);cursor:{{ saveCursor }};opacity:{{ saveOpacity }};white-space:nowrap">Save override</button>
+      </div>
+    </sc-if>
+  </sc-if>
+  <sc-if value="{{ saved }}" hint-placeholder-val="{{ false }}">
+    <div style="font-family:var(--font-mono);font-size:12px;color:var(--spruce-60)">Override recorded: {{ savedLabel }}</div>
+  </sc-if>
+  <div style="font-size:12px;line-height:1.5;color:var(--spruce-60);margin-top:var(--space-3)">Overrides feed the evaluation set. Samples come from the validity and moderation streams only — threat and self-harm content never appears here.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:640,&quot;height&quot;:240},&quot;sampleId&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;SAMPLE 8841 · validity stream&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;model&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Nonsense&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;text&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;good class i guess idk&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;overrideOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;overrideSeed&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { open: null, choice: null, saved: false };
+  OPTIONS = ['Valid', 'Nonsense', 'Privacy risk', 'Abusive — instructor-directed'];
+  renderVals() {
+    const open = this.state.open ?? (this.props.overrideOpen ?? false);
+    const choice = this.state.choice ?? (this.props.overrideSeed || null);
+    const saved = this.state.saved;
+    return {
+      sampleId: this.props.sampleId ?? '',
+      model: this.props.model ?? '',
+      text: this.props.text ?? '',
+      notSaved: !saved,
+      closed: !open,
+      isOpen: open,
+      options: this.OPTIONS.map((label) => ({
+        label,
+        pick: () => this.setState({ choice: label }),
+        border: choice === label ? 'var(--spruce)' : 'var(--hairline)',
+        bg: choice === label ? 'var(--chalk)' : 'var(--paper)',
+        weight: choice === label ? 500 : 400
+      })),
+      openOverride: () => this.setState({ open: true }),
+      save: () => { if (choice) this.setState({ saved: true }); },
+      saveDisabled: !choice,
+      saveCursor: choice ? 'pointer' : 'default',
+      saveOpacity: choice ? 1 : 0.4,
+      saved,
+      savedLabel: choice ?? ''
+    };
+  }
+}
+</script>
+</body>
+</html>
