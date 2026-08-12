@@ -20,11 +20,29 @@ suite), §13 (`views_sql/` ships as migrations, not ORM convention).
 - `backend/app/views_sql/` with the first identity-separated views shipped as
   Alembic migrations: a section-roster view and an enrollment-count view that
   expose section membership and counts with **no** identity columns reachable.
-- A dedicated database role or grant model such that the instructor and
-  leadership read path physically lacks `SELECT` on identity columns. If a
-  grant-based approach proves impractical on the deployment target, document why
-  and fall back to views that omit the columns, stating the weaker guarantee
-  plainly.
+- **Three database roles**, established as migrations:
+  - `pulse_migrate` owns the schema and runs Alembic. Not used at runtime.
+  - `pulse_app` serves student, instructor, leadership, and admin requests. It
+    has **no grant of any kind** on `user_identity` (E0-08). An instructor
+    screen cannot leak a name because the connection it runs on cannot read the
+    table.
+  - `pulse_care` serves the Care queue only. It also gets **no** `SELECT` on
+    `user_identity` — see the reveal function below.
+- Two runtime connection pools, selected by the authorization layer from the
+  actor's role, never by the caller. A request cannot choose its own pool.
+- **The Care path must remain open, and this ticket proves it.** Care
+  re-identification is the one legitimate route to identity (§4, §6.2), and it
+  is deliberately not blocked. `pulse_care` gets `EXECUTE` on a single
+  `SECURITY DEFINER` function that returns identity **and writes the audit row
+  in the same transaction**, so a name cannot be obtained without leaving a
+  record. E0 ships this as a minimal proof of mechanism — there is no case model
+  until E10 — and E10 replaces the stub with the real audited reveal.
+- Note for whoever builds this: a table's **owner** and any **superuser** bypass
+  grants entirely. If a runtime role owns the tables or is superuser, the whole
+  scheme is decorative. Verify the runtime roles are neither.
+- If a grant-based approach proves impractical on the deployment target,
+  document why and fall back to views that omit the columns, stating the weaker
+  guarantee plainly rather than implying the stronger one.
 - Query helpers alongside the views so callers get a typed way in that does not
   tempt them to hand-write a join.
 - The first `@pytest.mark.invariant` tests, asserting §4.1 items reachable this
@@ -43,16 +61,32 @@ suite), §13 (`views_sql/` ships as migrations, not ORM convention).
   in E2 and E4.
 - Small-N suppression logic (E4) and benchmark min-N (E5); this ticket carries
   no thresholds.
-- Care-role re-identification and its audit log (E10).
+- The real Care re-identification flow — the case model, the two-action queue,
+  disposition notes, and the full audit schema (E10). This ticket ships only the
+  role, the grant, and a proof-of-mechanism function, so that E10 inherits a
+  door rather than a wall.
 
 ## Acceptance criteria
 
 - [ ] Views ship as Alembic migrations under `views_sql/`, not as ORM
       constructs; `alembic upgrade head` creates them and `alembic check` is
       clean.
-- [ ] A query through the instructor read path that attempts to select an
-      identity column fails — at the database level, with the error surfaced in
-      a test.
+- [ ] A query on the `pulse_app` connection that selects from `user_identity`
+      fails at the database level — permission denied, not an empty result. A
+      test asserts the failure and its cause.
+- [ ] `pulse_app` cannot reach identity by joining either: attempting to join a
+      view back to `user_identity` fails for the same reason.
+- [ ] **A `pulse_care` connection can still obtain identity** through the
+      `SECURITY DEFINER` function. A test asserts this succeeds — the Care path
+      is a requirement, not an oversight, and this test is what stops a later
+      change from silently closing it.
+- [ ] Calling that function writes an audit row in the same transaction. A test
+      asserts that rolling back the transaction discards both the read and the
+      audit row, so the two cannot come apart.
+- [ ] `pulse_care` cannot `SELECT` from `user_identity` directly — only through
+      the function.
+- [ ] Neither runtime role owns any table, and neither is a superuser. A test
+      asserts both, since either would silently void every grant above.
 - [ ] The structural test enumerates identity columns and finds none in any
       view. Adding an identity column to a view makes it fail; verify by hand,
       then revert.
@@ -77,7 +111,10 @@ real Postgres to exercise grants and views.
 **Accessibility does not apply.**
 
 **Security review applies and is the most important in E0 so far.** This is a
-⚠-grade concern by §14.2's standard even though E0 is not a ⚠ epic: review the
+⚠-grade concern by §14.2's standard even though E0 is not a ⚠ epic. Review the
 grant model for a bypass, confirm the views cannot be joined back to identity
-through a shared key, and check that no helper leaks a raw session that sidesteps
-them. Ask for line-by-line human review of the migration SQL.
+through a shared key, and check that no helper leaks a raw session that
+sidesteps them. Review the `SECURITY DEFINER` function especially closely — it
+is deliberately the one hole in the wall, so it needs a fixed `search_path`, no
+caller-controlled SQL, and no path that returns identity without writing the
+audit row. Ask for line-by-line human review of the migration SQL.

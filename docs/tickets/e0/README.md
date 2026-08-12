@@ -25,9 +25,9 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 05 | [Org containment schema](E0-05-org-containment-schema.md) | 04 | Institution through section, with course level derived from the course number. |
 | 06 | [Term calendar and start-letter map schema](E0-06-term-calendar-schema.md) | 04 | `term`, `week`, `survey_window`, `start_letter_map`; timezone-aware throughout. |
 | 07 | [Section-code parser and date derivation](E0-07-section-code-parser.md) | 05, 06 | Parse `R3WW`, derive length, dates, and modality; Hypothesis property tests over the full letter map. |
-| 08 | [Identity schema and LTI registration tables](E0-08-identity-schema.md) | 04, 05 | `user`, `person`, `enrollment`, `lti_platform`, `lti_deployment`, and the identity-column marker convention. |
+| 08 | [Identity schema and LTI registration tables](E0-08-identity-schema.md) | 04, 05 | `user` split from `user_identity` so identity is table-level, plus `person`, `enrollment`, and the LTI registration tables. |
 | 09 | [Role assignments and the supervision graph](E0-09-role-assignment-graph.md) | 05, 06, 08 | `role_assignment` with `reports_to` pointing at assignments, cycle rejection, lead-faculty mapping. |
-| 10 | [Identity-separated read views](E0-10-identity-separated-views.md) | 08, 09 | Views as migrations that structurally cannot join to identity; first §4.1 invariants; invariant suite becomes unskippable. |
+| 10 | [Identity-separated read views](E0-10-identity-separated-views.md) | 08, 09 | Three database roles so instructor screens physically cannot read identity, while Care keeps an audited door; first §4.1 invariants; invariant suite becomes unskippable. |
 | 11 | [Authorization skeleton](E0-11-authz-skeleton.md) | 09, 10 | The `services/authz.py` chokepoint, role grain, sibling-lead isolation; transitive union deliberately deferred to E9. |
 | 12 | [AI output contracts and prompt layout](E0-12-ai-contracts.md) | 01 | One Pydantic contract per §7.4 task, versioned prompt directory, contracts usable as eval fixtures. |
 | 13 | [AIGateway shell and one working round-trip](E0-13-ai-gateway-roundtrip.md) | 04, 12 | Single-shot gateway, comment validity end to end, fail-open on timeout, append-only classification rows. |

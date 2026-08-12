@@ -17,10 +17,15 @@ Read first: SPEC §8, §2.1 (data-source ownership), §4 (confidentiality), §7.
 
 ## Scope
 
-- `backend/app/models/identity.py`: `user`, `person`, `enrollment`.
+- `backend/app/models/identity.py`: `user`, `user_identity`, `person`,
+  `enrollment`.
 - `user` is keyed to the LMS user ID (§4: responses are keyed to it, and
-  identity is never displayed to an instructor or leadership role). Identity
-  columns — name, email — live here and nowhere else.
+  identity is never displayed to an instructor or leadership role). It holds the
+  key and the platform reference — **no names, no email addresses**.
+- `user_identity` is a separate table holding name and email, one row per user.
+  The split is deliberate and E0-10 depends on it: a *table*-level grant is far
+  harder to lose than a column-level one, which quietly disappears the next time
+  the table is rewritten. Identity columns live in this table and nowhere else.
 - `person` is the Pulse-owned record for the people graph: name, category. A
   `person` may or may not correspond to a `user`; the link is nullable and
   explicit.
@@ -45,6 +50,8 @@ Read first: SPEC §8, §2.1 (data-source ownership), §4 (confidentiality), §7.
 - [ ] `alembic upgrade head` creates the tables; `alembic check` is clean.
 - [ ] A `user` is unique per LMS user ID per platform; the same LMS ID on two
       platforms is two users.
+- [ ] No name or email column exists on `user`; both live only on
+      `user_identity`. A test asserts this, so the split cannot erode.
 - [ ] `enrollment` rejects an end date before its start date.
 - [ ] Overlapping enrollments for the same user and section are either rejected
       or explicitly permitted with a documented reason — decide and test it.
