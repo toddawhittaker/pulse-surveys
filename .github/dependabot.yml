@@ -1,0 +1,73 @@
+version: 2
+
+# Dependency versions are pinned and lockfiles are committed (CLAUDE.md), so
+# updates arrive as reviewable pull requests rather than as drift. Each one goes
+# through the same CI gates and the same branch model as any other change.
+updates:
+  # ---- Python backend -----------------------------------------------------
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    labels: [dependencies, python]
+    commit-message:
+      prefix: 'deps(py)'
+    groups:
+      # Patch and minor bumps arrive as one pull request so review effort goes
+      # to the ones that can actually break something.
+      python-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      # Majors for the LTI, database, and AI provider layers land deliberately
+      # in their own seam, not on a Monday morning batch.
+      - dependency-name: pylti1p3
+        update-types: [version-update:semver-major]
+      - dependency-name: sqlalchemy
+        update-types: [version-update:semver-major]
+      - dependency-name: alembic
+        update-types: [version-update:semver-major]
+
+  # ---- Frontend -----------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    labels: [dependencies, frontend]
+    commit-message:
+      prefix: 'deps(js)'
+    groups:
+      js-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+
+  # ---- GitHub Actions -----------------------------------------------------
+  # The only ecosystem with anything to update today. Actions are pinned by
+  # major tag in ci.yml; this keeps them current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: 'deps(ci)'
+    groups:
+      actions:
+        patterns: ['*']

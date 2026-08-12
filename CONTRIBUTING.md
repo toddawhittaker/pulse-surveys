@@ -123,6 +123,31 @@ something is ready.
 - If a seam turns out to belong to a different epic, close the pull request and
   re-cut the branch. Do not retarget across epics.
 
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to epic
+branches. `make ci` runs the same gates locally, in the same order, so you can
+catch a failure before you push.
+
+| Stage | Gates |
+|---|---|
+| Fast | CI checker self-test, ruff check and format, mypy, tsc, eslint, migration drift |
+| Test | pytest unit and integration with coverage, the §4.1 invariant suite, Playwright e2e, AI eval floors |
+| Build | all Docker images, Compose health on api/worker/beat, frontend production build, bundle budget |
+| Supply chain | pip-audit, npm audit, MIT license compatibility |
+
+Fast gates run first and everything else waits on them.
+
+Most of the tree does not exist yet, so most jobs currently detect absence and
+pass with a note naming the seam that will make them enforcing. Landing that
+seam includes removing its tolerance — a seam that adds tests but leaves the
+test gate tolerant has not finished.
+
+Two rules worth stating outright. A failing test is never fixed by skipping,
+xfailing, or deleting it; if the test is wrong, fix it in its own commit and say
+why in the pull request. And an eval floor is never lowered to get a gate to
+pass — floors move only in a pull request whose purpose is moving them.
+
 ## Secrets
 
 Local secrets live in `.env`, which is gitignored. Its committed counterpart

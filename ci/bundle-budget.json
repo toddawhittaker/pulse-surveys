@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "Gzipped budget for the production frontend build, enforced by",
+    "scripts/ci/check_bundle_size.py. Raising a number here is a visible diff",
+    "that has to be justified in the pull request that raises it.",
+    "",
+    "Starting values are an estimate, not a measurement: the frontend does not",
+    "exist yet. Expected occupants are React 19, TanStack Router and Query, and",
+    "Recharts, with Recharts by far the largest. Re-baseline these against the",
+    "first real production build rather than treating them as settled.",
+    "",
+    "Pulse runs inside an LMS iframe, often on campus wifi, and the survey is a",
+    "weekly interruption a student did not ask for. A slow first paint is a",
+    "response-rate problem, which makes this a product budget, not just a",
+    "hygiene one."
+  ],
+  "max_entry_js_gzip_bytes": 358400,
+  "max_initial_gzip_bytes": 1048576
+}
