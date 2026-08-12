@@ -1,0 +1,65 @@
+# fixture: unpaged-nrps-loop
+# reviewer: lti-oidc
+# expect: HIGH — the NRPS roster fetch reads the first page and stops. Link
+#         header paging is never followed, so any section with a roster larger
+#         than one page silently syncs a partial roster.
+# note: this passes every test written against small seed data, which is
+#       exactly why E0-15 requires the mock to page. Two smaller defects are
+#         planted alongside: the enrollment window is dropped, and the role is
+#         matched by substring rather than by LTI role URI.
+
+diff --git a/backend/app/lti/nrps.py b/backend/app/lti/nrps.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/lti/nrps.py
+@@ -0,0 +1,46 @@
++"""Names and Role Provisioning Service 2.0 roster sync."""
++
++from __future__ import annotations
++
++import httpx
++
++from app.config import Settings
++from app.models.identity import Enrollment
++
++MEMBERSHIP_ACCEPT = "application/vnd.ims.lti-nrps.v2.membershipcontainer+json"
++
++
++async def fetch_roster(
++    client: httpx.AsyncClient,
++    context_memberships_url: str,
++    token: str,
++) -> list[dict]:
++    """Return every member of the context."""
++    response = await client.get(
++        context_memberships_url,
++        headers={
++            "Authorization": f"Bearer {token}",
++            "Accept": MEMBERSHIP_ACCEPT,
++        },
++        timeout=30.0,
++    )
++    response.raise_for_status()
++    body = response.json()
++    return body.get("members", [])
++
++
++def to_enrollments(members: list[dict], section_id: int) -> list[Enrollment]:
++    """Map NRPS members onto enrollment rows."""
++    enrollments = []
++    for member in members:
++        roles = " ".join(member.get("roles", []))
++        if "Instructor" in roles:
++            role = "instructor"
++        else:
++            role = "student"
++
++        enrollments.append(
++            Enrollment(
++                section_id=section_id,
++                lms_user_id=member["user_id"],
++                role=role,
++                active=member.get("status", "Active") == "Active",
++            )
++        )
++    return enrollments

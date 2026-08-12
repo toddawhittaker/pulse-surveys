@@ -1,0 +1,37 @@
+# fixture: identity-column-in-view
+# reviewer: privacy-authz
+# expect: HIGH — the instructor-readable view exposes an identity column,
+#         defeating the structural guarantee in ADR 0001 and SPEC §8.
+# note: the join is via user_id, which reads as ordinary and is the point —
+#       this is what the accident looks like, not what sabotage looks like.
+
+diff --git a/backend/app/views_sql/004_section_response_view.sql b/backend/app/views_sql/004_section_response_view.sql
+new file mode 100644
+--- /dev/null
++++ b/backend/app/views_sql/004_section_response_view.sql
+@@ -0,0 +1,24 @@
++-- Instructor-readable view of weekly responses for a section.
++-- Used by the Monday report job and the instructor report API.
++
++CREATE OR REPLACE VIEW instructor_section_response AS
++SELECT
++    r.id                AS response_id,
++    r.section_id,
++    r.week_id,
++    r.submitted_at,
++    a.question_id,
++    a.rating,
++    a.workload,
++    a.comment_text,
++    ui.display_name     AS respondent_display_name,
++    u.lms_user_id
++FROM response r
++JOIN answer a        ON a.response_id = r.id
++JOIN "user" u        ON u.id = r.user_id
++JOIN user_identity ui ON ui.user_id = u.id
++WHERE r.is_valid = true;
++
++GRANT SELECT ON instructor_section_response TO pulse_app;
++
++-- Ordering left to the caller.
++CREATE INDEX IF NOT EXISTS ix_response_section_week ON response (section_id, week_id);
