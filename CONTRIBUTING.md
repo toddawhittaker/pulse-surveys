@@ -91,11 +91,31 @@ security-relevant diff.
    gh pr create --base epic/e1-entering-the-app --fill
    ```
 
-5. **Stop there.** The repository owner approves and merges every pull request.
+5. **Stop there** and wait for the repository owner. Do not merge because the
+   seam looks finished to you.
+
+## Who may merge what
+
+Merge authority splits by target branch.
+
+| Pull request | Who merges |
+|---|---|
+| seam branch → epic branch | the owner, or an agent **after** the owner approves it in writing |
+| epic branch → `main` | the owner, always, without exception |
+
+An agent may never merge an epic branch into `main`. An agent may merge its own
+seam pull request into an epic branch, but only once the owner has approved it
+in conversation — the owner's approval is the trigger, never the agent's own
+judgment that the work is done.
+
+The reasoning: `main` is the branch worth protecting, and an epic landing there
+is the decision that deserves a human every time. A seam landing on an epic
+branch is a smaller, more reversible step, and it is still gated on a human
+saying yes. What the rule forbids is an agent deciding on its own that
+something is ready.
 
 ## Rules that hold for everyone, including AI agents
 
-- Never merge your own pull request.
 - Never use an admin override to bypass a protection rule.
 - Never mark a pull request ready for review while CI is failing.
 - Never force-push to `main` or to an epic branch. Force-pushing your own seam

@@ -33,11 +33,16 @@ For every unit of work, in order:
    template: state the seam, the §14.2 definition-of-done items covered (tests,
    AI evals, separate-agent security review, accessibility, docs), and anything
    deliberately deferred.
-5. Stop. Todd approves and merges every pull request.
+5. Stop and wait for Todd. Do not merge on your own judgment that the seam
+   looks finished.
 
-Never merge your own pull request. Never use an admin override to bypass a
-protection rule. Never mark a pull request ready while CI is failing. Never
-retarget a pull request across epics — close it and re-cut the branch.
+Merge authority splits by target branch. **Never merge an epic branch into
+`main`** — that is Todd's call, always, without exception. You may merge a seam
+pull request into its epic branch, but only after Todd has approved it in
+writing in the conversation; his approval is the trigger, never your own
+assessment. Never use an admin override to bypass a protection rule. Never
+merge anything while CI is failing. Never retarget a pull request across
+epics — close it and re-cut the branch.
 
 ## Confidentiality invariants (SPEC §4.1)
 
