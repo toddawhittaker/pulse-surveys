@@ -40,3 +40,5 @@ stays where it is with a line at the top pointing at its replacement.
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-identity-separation-by-database-role.md) | Identity separation enforced by database role and grant | Accepted |
+| [0002](0002-ci-gates-ship-tolerant.md) | CI gates ship tolerant and name the seam that enforces them | Accepted, recorded retroactively |
+| [0003](0003-deferred-authz-seams-fail-closed.md) | Deferred authorization seams fail closed by raising | Accepted |

@@ -58,9 +58,10 @@ chain and the mock LMS; ticket 18 needs everything.
 
 ## How CI tightens
 
-Most CI gates ship tolerant because nothing they check exists yet. Each becomes
-enforcing in a specific ticket, and landing that ticket includes removing its
-tolerance:
+Most CI gates ship tolerant because nothing they check exists yet — see
+[ADR 0002](../../adr/0002-ci-gates-ship-tolerant.md) for why, and for the cost
+that choice carries. Each becomes enforcing in a specific ticket, and landing
+that ticket includes removing its tolerance:
 
 | Gate | Becomes enforcing in |
 |---|---|

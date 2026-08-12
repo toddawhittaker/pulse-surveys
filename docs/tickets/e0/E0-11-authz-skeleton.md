@@ -62,7 +62,9 @@ thin), §4.1, and the roles section of `CLAUDE.md`.
       union it with a reporting assignment raises rather than silently widening.
 - [ ] The deferred transitive union is a named, documented seam that raises
       `NotImplementedError` — not a silent empty set that would read as "no
-      access" and look like it works.
+      access" and look like it works. The module docstring explains why it
+      raises, per [ADR 0003](../../adr/0003-deferred-authz-seams-fail-closed.md);
+      without that, the next contributor "fixes" it.
 - [ ] mypy strict passes on `app/services/authz.py`.
 
 ## Definition of done
