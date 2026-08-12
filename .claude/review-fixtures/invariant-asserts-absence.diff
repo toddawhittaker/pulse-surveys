@@ -1,0 +1,48 @@
+# fixture: invariant-asserts-absence
+# reviewer: spec-conformance
+# expect: HIGH — the invariant test asserts an identity column is absent from
+#         the result rather than that the query is denied. It passes whenever
+#         the query returns nothing, including when it is broken for an
+#         unrelated reason.
+# note: deliberately chosen over "invariant test marked skip", which
+#       scripts/ci/check_invariants.py already catches mechanically. A skip
+#       tests CI; this tests the reviewer.
+
+diff --git a/tests/unit/test_confidentiality_invariants.py b/tests/unit/test_confidentiality_invariants.py
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/test_confidentiality_invariants.py
+@@ -0,0 +1,31 @@
++"""SPEC §4.1 invariants."""
++
++import pytest
++
++from app.services import reporting
++
++
++@pytest.mark.invariant
++def test_instructor_report_exposes_no_identity(session, seeded_section):
++    """§4.1 — identity is never displayed to an instructor, in any view."""
++    rows = reporting.section_responses(session, seeded_section.id)
++
++    for row in rows:
++        assert "respondent_display_name" not in row.keys()
++        assert "email" not in row.keys()
++
++
++@pytest.mark.invariant
++def test_student_sees_no_benchmark(session, seeded_section, student):
++    """§4.1 — students never see comparables or benchmarks."""
++    payload = reporting.student_results(session, seeded_section.id, student.id)
++
++    assert "benchmark" not in payload
++    assert "university_average" not in payload
++
++
++@pytest.mark.invariant
++def test_small_n_hides_comments(session, seeded_section):
++    """§4.1 — below the n-threshold, raw comments are hidden."""
++    report = reporting.monday_report(session, seeded_section.id, week=3)
++
++    if report.response_count < 5:
++        assert report.comments == []
