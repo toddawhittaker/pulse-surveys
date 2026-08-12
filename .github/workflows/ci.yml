@@ -1,0 +1,492 @@
+name: CI
+
+# Runs on every pull request and on pushes to epic branches. `main` needs no
+# push trigger of its own: every path to `main` is a pull request, and that
+# pull request already ran this pipeline.
+on:
+  pull_request:
+  push:
+    branches:
+      - 'epic/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Pinned deliberately (CLAUDE.md — "Pin dependency versions"). Dependabot's
+# github-actions and pip ecosystems bump these; nothing here floats.
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '20'
+  RUFF_VERSION: '0.6.9'
+  MYPY_VERSION: '1.11.2'
+  PIP_AUDIT_VERSION: '2.7.3'
+  PIP_LICENSES_VERSION: '5.0.0'
+
+jobs:
+  # --------------------------------------------------------------------------
+  # What exists yet? Every downstream job is tolerant of a tree that has not
+  # been built. As each E0 seam lands, flip the matching `allow-missing` step
+  # in that job from tolerant to enforcing — the job body is already written.
+  # --------------------------------------------------------------------------
+  detect:
+    name: Detect what exists
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.d.outputs.backend }}
+      frontend: ${{ steps.d.outputs.frontend }}
+      migrations: ${{ steps.d.outputs.migrations }}
+      compose: ${{ steps.d.outputs.compose }}
+      dockerfiles: ${{ steps.d.outputs.dockerfiles }}
+      pytests: ${{ steps.d.outputs.pytests }}
+      e2e: ${{ steps.d.outputs.e2e }}
+      evals: ${{ steps.d.outputs.evals }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: d
+        name: Probe the tree
+        run: |
+          set -euo pipefail
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
+          has_py() { [ -d backend/app ] && compgen -G "backend/app/**/*.py" > /dev/null 2>&1; }
+
+          echo "Probing repository layout (SPEC §13):"
+          if [ -d backend/app ]; then emit backend true; else emit backend false; fi
+          if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
+          if [ -f backend/alembic.ini ]; then emit migrations true; else emit migrations false; fi
+          if [ -f docker-compose.yml ]; then emit compose true; else emit compose false; fi
+          if compgen -G "*/Dockerfile" > /dev/null 2>&1; then emit dockerfiles true; else emit dockerfiles false; fi
+          if compgen -G "tests/unit/test_*.py" > /dev/null 2>&1 || compgen -G "tests/integration/test_*.py" > /dev/null 2>&1; then
+            emit pytests true
+          else
+            emit pytests false
+          fi
+          if compgen -G "tests/e2e/*.spec.ts" > /dev/null 2>&1; then emit e2e true; else emit e2e false; fi
+          if [ -d tests/evals ] && compgen -G "tests/evals/**/*.py" > /dev/null 2>&1; then emit evals true; else emit evals false; fi
+
+  # ==========================================================================
+  # FAST GATES — everything else waits on these.
+  # ==========================================================================
+
+  lint-python:
+    name: Fast · ruff + mypy
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pinned tools
+        run: pip install "ruff==${RUFF_VERSION}" "mypy==${MYPY_VERSION}"
+
+      - name: ruff check
+        run: |
+          if [ "${{ needs.detect.outputs.backend }}" != "true" ]; then
+            echo "::notice::No backend/app yet — ruff has nothing to check. Enforcing once e0/core-schema lands."
+            exit 0
+          fi
+          ruff check backend/ scripts/ mock-lms/ mock-idp/ tests/ 2>/dev/null || ruff check .
+
+      - name: ruff format --check
+        run: |
+          if [ "${{ needs.detect.outputs.backend }}" != "true" ]; then
+            echo "::notice::No backend/app yet — skipping format check."
+            exit 0
+          fi
+          ruff format --check .
+
+      # mypy runs over backend/, with the strict profile pinned to
+      # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
+      # the authorization chokepoint and the AI output contract; they carry the
+      # confidentiality and eval guarantees, so they get no untyped escape.
+      - name: mypy
+        run: |
+          if [ "${{ needs.detect.outputs.backend }}" != "true" ]; then
+            echo "::notice::No backend/app yet — mypy has nothing to check. Enforcing once e0/core-schema lands."
+            exit 0
+          fi
+          pip install -e ".[dev]" || pip install -r backend/requirements.txt || true
+          mypy
+
+  lint-frontend:
+    name: Fast · tsc + eslint
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nothing to check yet
+        if: needs.detect.outputs.frontend != 'true'
+        run: echo "::notice::No frontend/package.json yet — tsc and eslint have nothing to check. Enforcing once the frontend scaffold lands."
+
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.frontend == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (lockfile, exact)
+        if: needs.detect.outputs.frontend == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: tsc --noEmit
+        if: needs.detect.outputs.frontend == 'true'
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: eslint
+        if: needs.detect.outputs.frontend == 'true'
+        working-directory: frontend
+        run: npx eslint . --max-warnings=0
+
+  migration-drift:
+    name: Fast · migration drift
+    needs: detect
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: pulse_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nothing to check yet
+        if: needs.detect.outputs.migrations != 'true'
+        run: echo "::notice::No backend/alembic.ini yet — migration drift has nothing to check. Enforcing once e0/core-schema lands."
+
+      - uses: actions/setup-python@v5
+        if: needs.detect.outputs.migrations == 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend
+        if: needs.detect.outputs.migrations == 'true'
+        run: pip install -e ".[dev]"
+
+      # `alembic check` autogenerates against the live schema and exits non-zero
+      # if the models and the migrations have diverged. A model edited without a
+      # migration fails here rather than at deploy time.
+      - name: alembic upgrade head && alembic check
+        if: needs.detect.outputs.migrations == 'true'
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/pulse_ci
+        run: |
+          alembic upgrade head
+          alembic check
+
+  # The checkers below decide whether the build may go green, so a bug in one
+  # of them fails open and nobody notices. They run before there is a pytest
+  # suite to hold them, so they carry their own.
+  ci-selftest:
+    name: Fast · CI checker self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Self-test the CI checkers
+        run: python scripts/ci/test_ci_scripts.py
+      - name: Shell scripts parse
+        run: bash -n scripts/ci/wait_for_health.sh
+
+  fast-gate:
+    name: Fast gates passed
+    needs: [lint-python, lint-frontend, migration-drift, ci-selftest]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Lint, typecheck, migration drift, and checker self-tests are clean."
+
+  # ==========================================================================
+  # TEST GATES
+  # ==========================================================================
+
+  test:
+    name: Test · pytest + invariants
+    needs: [detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No suite yet
+        if: needs.detect.outputs.pytests != 'true'
+        run: echo "::notice::No tests/unit or tests/integration yet. Enforcing once the first seam ships tests (SPEC §14.2 item 1)."
+
+      - uses: actions/setup-python@v5
+        if: needs.detect.outputs.pytests == 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend + test deps
+        if: needs.detect.outputs.pytests == 'true'
+        run: pip install -e ".[dev]"
+
+      # The invariant suite runs first and alone, so a failure here is
+      # unambiguous and cheap. It then runs again inside the full suite; that
+      # duplication is deliberate.
+      #
+      # §4.1 invariants are assertions about what a student can never see. A
+      # skipped invariant test is indistinguishable from a deleted one in a
+      # green checkmark, so the checker treats skip, xfail, and empty
+      # collection as failures — not as skips.
+      - name: Invariant suite (§4.1) — no skips permitted
+        if: needs.detect.outputs.pytests == 'true'
+        run: |
+          mkdir -p reports
+          pytest -m invariant --junitxml=reports/invariants.xml || true
+          python scripts/ci/check_invariants.py reports/invariants.xml --allow-empty
+
+      - name: Unit + integration with coverage
+        if: needs.detect.outputs.pytests == 'true'
+        env:
+          # testcontainers drives its own Postgres; the runner's Docker daemon
+          # is what it talks to.
+          TESTCONTAINERS_RYUK_DISABLED: 'false'
+        run: |
+          pytest tests/unit tests/integration \
+            --cov=backend/app --cov-report=term-missing --cov-report=xml \
+            --junitxml=reports/pytest.xml
+
+      - name: Upload coverage
+        if: needs.detect.outputs.pytests == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: warn
+
+  e2e:
+    name: Test · Playwright e2e
+    needs: [detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No e2e specs yet
+        if: needs.detect.outputs.e2e != 'true'
+        run: echo "::notice::No tests/e2e specs yet. Enforcing once e0/mock-lms and e0/mock-idp land — §9.2 requires both doors exercised in every run."
+
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.e2e == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp)
+        if: needs.detect.outputs.e2e == 'true'
+        run: |
+          cp .env.example .env
+          docker compose up -d --build
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+
+      - name: Run Playwright
+        if: needs.detect.outputs.e2e == 'true'
+        run: |
+          npx --yes playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Compose logs on failure
+        if: failure() && needs.detect.outputs.e2e == 'true'
+        run: docker compose logs --no-color --tail=200
+
+      - uses: actions/upload-artifact@v4
+        if: failure() && needs.detect.outputs.e2e == 'true'
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+
+  evals:
+    name: Test · AI eval floors
+    needs: [detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No eval sets yet
+        if: needs.detect.outputs.evals != 'true'
+        run: |
+          echo "::notice::No tests/evals runner yet. Enforcing once e0/ai-gateway-shell lands."
+          echo "::notice::Running the eval suite needs a provider API key as a repository secret and a secrets.* reference in this workflow. Under the secrets policy in CLAUDE.md that is Todd's call, so it is proposed, not wired."
+
+      - uses: actions/setup-python@v5
+        if: needs.detect.outputs.evals == 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend
+        if: needs.detect.outputs.evals == 'true'
+        run: pip install -e ".[dev]"
+
+      # Per-task precision and recall floors live with the eval sets, not here,
+      # so changing a floor is a visible diff in the suite it governs. The
+      # threat/self-harm recall floor is the strictest in the suite (§9.3): a
+      # false negative there is a student in danger whose comment reached
+      # nobody, which is why it is a hard gate and never a warning.
+      - name: Eval runner (per-task floors; threat recall is a hard gate)
+        if: needs.detect.outputs.evals == 'true'
+        run: python -m tests.evals.runner --enforce-floors
+
+  # ==========================================================================
+  # BUILD GATES
+  # ==========================================================================
+
+  docker:
+    name: Build · images + Compose health
+    needs: [detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nothing to build yet
+        if: needs.detect.outputs.compose != 'true' || needs.detect.outputs.dockerfiles != 'true'
+        run: echo "::notice::No docker-compose.yml or Dockerfiles yet. Enforcing once e0/compose-stack lands."
+
+      - uses: docker/setup-buildx-action@v3
+        if: needs.detect.outputs.compose == 'true' && needs.detect.outputs.dockerfiles == 'true'
+
+      - name: Build all images
+        if: needs.detect.outputs.compose == 'true' && needs.detect.outputs.dockerfiles == 'true'
+        run: |
+          cp .env.example .env
+          docker compose build
+
+      - name: Stack comes up healthy (api, worker, beat)
+        if: needs.detect.outputs.compose == 'true' && needs.detect.outputs.dockerfiles == 'true'
+        run: |
+          docker compose up -d
+          ./scripts/ci/wait_for_health.sh api worker beat
+
+      - name: Compose logs on failure
+        if: failure() && needs.detect.outputs.compose == 'true'
+        run: docker compose logs --no-color --tail=200
+
+      - name: Tear down
+        if: always() && needs.detect.outputs.compose == 'true'
+        run: docker compose down -v || true
+
+  frontend-build:
+    name: Build · frontend + bundle budget
+    needs: [detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nothing to build yet
+        if: needs.detect.outputs.frontend != 'true'
+        run: echo "::notice::No frontend/ yet. Enforcing once the frontend scaffold lands."
+
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.frontend == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Production build
+        if: needs.detect.outputs.frontend == 'true'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Bundle budget
+        if: needs.detect.outputs.frontend == 'true'
+        run: python scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json
+
+  # ==========================================================================
+  # SUPPLY CHAIN
+  # ==========================================================================
+
+  supply-chain:
+    name: Supply chain · audit + licenses
+    needs: [detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pinned audit tools
+        run: pip install "pip-audit==${PIP_AUDIT_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
+
+      - name: pip-audit (fail on high/critical)
+        run: |
+          if [ ! -f pyproject.toml ] || ! grep -q '^\[project\]' pyproject.toml; then
+            echo "::notice::No declared Python dependencies yet — pip-audit has nothing to scan. Enforcing once e0/compose-stack pins the backend deps."
+            exit 0
+          fi
+          pip install -e .
+          pip-audit --strict --desc
+
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.frontend == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: npm audit (fail on high/critical)
+        if: needs.detect.outputs.frontend == 'true'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+      # MIT distribution is a spec requirement (§10, "Licensing hygiene"), so a
+      # copyleft dependency is a build break rather than a note for later.
+      - name: License compatibility (MIT distribution)
+        run: |
+          mkdir -p reports
+          ARGS=""
+          if [ -f pyproject.toml ] && grep -q '^\[project\]' pyproject.toml; then
+            pip-licenses --format=json --with-urls > reports/py-licenses.json
+            ARGS="$ARGS --python-json reports/py-licenses.json"
+          fi
+          if [ "${{ needs.detect.outputs.frontend }}" = "true" ]; then
+            (cd frontend && npx --yes license-checker-rseidelsohn@4.3.0 --json > ../reports/npm-licenses.json)
+            ARGS="$ARGS --npm-json reports/npm-licenses.json"
+          fi
+          if [ -z "$ARGS" ]; then
+            echo "::notice::No dependency manifests yet — license check has nothing to scan."
+            exit 0
+          fi
+          python scripts/ci/check_licenses.py $ARGS
+
+  # --------------------------------------------------------------------------
+  # One required check to point branch protection at. Fails if any gate failed
+  # or was cancelled; tolerant jobs report success, so this stays honest as the
+  # tree fills in.
+  # --------------------------------------------------------------------------
+  ci:
+    name: CI
+    if: always()
+    needs: [fast-gate, test, e2e, evals, docker, frontend-build, supply-chain]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verdict
+        run: |
+          echo "Results: ${{ join(needs.*.result, ', ') }}"
+          if echo "${{ join(needs.*.result, ',') }}" | grep -qE 'failure|cancelled'; then
+            echo "::error::One or more gates failed."
+            exit 1
+          fi
+          echo "All gates green."

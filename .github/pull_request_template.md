@@ -18,11 +18,14 @@ Check what this PR covers. For anything not applicable, write "n/a" and why.
       CI is green.
 - [ ] **AI evals updated.** If this touches a model task, eval cases were added
       for the new behavior and the CI precision and recall gates still pass.
-- [ ] **Security review by a separate agent.** An independent Claude Code
-      session reviewed this diff against the adversarial checklist:
-      authorization bypass across the role hierarchy, identity leakage past the
-      §4 and §8 separation, LTI and OIDC token handling, injection, and
-      audit-log completeness. Findings are triaged below.
+- [ ] **Security review by a separate agent.** `/security-review` was run in an
+      independent session against the adversarial checklist: authorization
+      bypass across the role hierarchy, identity leakage past the §4 and §8
+      separation, LTI and OIDC token handling, injection, and audit-log
+      completeness. Findings are triaged below.
+- [ ] **CI is green**, and no gate was skipped, ignored, or weakened to get it
+      there. No test was skipped, xfailed, or deleted to make this pass. No
+      eval floor was lowered.
 - [ ] **Accessibility in-slice.** New user interface meets keyboard and screen
       reader basics now. The full WCAG 2.2 AA audit in E13 verifies; it does not
       do this work for the first time.

@@ -44,6 +44,51 @@ assessment. Never use an admin override to bypass a protection rule. Never
 merge anything while CI is failing. Never retarget a pull request across
 epics — close it and re-cut the branch.
 
+## CI and build discipline
+
+CI is what makes the §14.2 definition of done enforceable instead of
+aspirational. Treat a red pipeline as information, never as an obstacle.
+
+**Never merge or mark a pull request ready with red CI.** Not "it's unrelated,"
+not "it passes locally." Run `make ci` before pushing; it runs the same gates in
+the same order as `.github/workflows/ci.yml`. When the two disagree, the
+workflow is right and the Makefile is the bug.
+
+**Never skip, xfail, mark flaky, or delete a failing test to make CI pass.** A
+failing test is either finding a real defect or is itself wrong. If the test is
+wrong, fix the test in its own commit, separate from the change that provoked
+it, and say in the pull request why the old assertion was incorrect. Deleting a
+red test and reporting green is a false report about the state of the system.
+
+**The §4.1 invariant suite may never be skipped.** CI runs it in an isolated
+pass and treats a skip, an xfail, or an empty collection as a failure, because
+in a green checkmark those are indistinguishable from a passing assertion.
+`scripts/ci/check_invariants.py` enforces this.
+
+**Never weaken an eval floor to get a gate to pass.** Precision and recall
+floors move only in a deliberate pull request whose subject is moving them and
+whose body says why the new number is right. The threat and self-harm recall
+floor is the strictest in the suite (§9.3) and is a hard gate: a false negative
+there is a student in danger whose comment reached nobody. Lowering it is a
+safety decision, not a build fix, and it is Todd's call, never yours.
+
+**Every pull request gets `/security-review` in a separate session before it is
+marked ready** (§14.2 item 3). Record what it found and how each finding was
+resolved in the pull request body. On a ⚠ epic (E1, E9, E10, E13) that review
+supplements line-by-line human review of the security-relevant diff; it never
+replaces it.
+
+**Pin dependency versions and commit lockfiles.** No floating ranges, no
+unpinned tool versions in CI. Dependabot proposes upgrades as pull requests that
+go through the same gates as anything else.
+
+**Do not weaken a gate to get past it.** Adding an ignore rule, an exclusion, a
+`continue-on-error`, or a raised budget is a change to what the project
+guarantees. Any of them belongs in its own pull request that says what coverage
+was given up and why. The tolerance flags in `ci.yml` exist only because the
+tree is still empty: each one names the seam that removes it, and that seam
+removes it.
+
 ## Secrets
 
 Never create, read, modify, or echo a repository secret or an environment
