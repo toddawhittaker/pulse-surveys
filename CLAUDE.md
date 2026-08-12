@@ -17,10 +17,12 @@ something in it belongs somewhere else.
 
 ## Read before you start
 
-The spec governs. Where `docs/SPEC.md` and `docs/DESIGN_BRIEF.md` disagree, the
-spec wins; the brief governs anything the spec does not restate. If your work
-contradicts the spec, that is not yours to resolve alone — raise it and update
-the spec.
+On what the system does, the spec governs: where `docs/SPEC.md` and
+`docs/DESIGN_BRIEF.md` disagree, the spec wins, and the brief governs anything
+the spec does not restate. On how work is done, **this file governs**: where
+`CONTRIBUTING.md` disagrees, this file wins — it is the same rules written for
+humans, and it is the copy that drifts. If your work contradicts the spec, that
+is not yours to resolve alone — raise it and update the spec.
 
 Read the relevant section before touching the code it governs. Do not work from
 a summary of it, including this file:
@@ -32,11 +34,9 @@ a summary of it, including this file:
 | terms, section codes, week axes | §2.2 |
 | anything the Care role can reach | §6.2 |
 | any model call, prompt, or contract | §7.4 — the single-shot boundary |
-| where a module goes | §13, and `docs/adr/` for how existing seams were built |
+| where a module goes | §13 — use an existing module; add one only when nothing fits |
 | any UI | `docs/DESIGN_BRIEF.md`, `design/tokens.css`, and §7.6 |
-
-New backend code belongs in an existing §13 module; add a new one only when
-nothing fits. Keep the top-level shape.
+| a seam someone already built | `docs/adr/` — how it was built and why |
 
 ## Branch and pull request discipline
 

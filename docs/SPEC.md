@@ -333,7 +333,7 @@ Selected constraints:
 
 - **Accessibility:** WCAG 2.2 AA; full keyboard operability inside the iframe; charts carry data-table equivalents.
 - **Privacy/compliance:** FERPA-aligned handling; no student PII in logs; secrets via environment/secret store; encryption at rest is deployment responsibility, in transit mandatory.
-- **Performance:** survey submit p95 < 2.5s including synchronous validity check; Monday report generation for 500 sections < 30 min.
+- **Performance:** survey submit p95 < 2.5s including synchronous validity check; Monday report generation for 500 sections < 30 min. The 2.5s figure and the p95 < 2s classifier budget in §3.3 and §7.4 measure different spans — the whole submit round-trip versus the model call inside it — and are not in conflict. Do not reconcile them into one number.
 - **I18n:** UI strings externalized from day one; English only at v1.
 - **Licensing hygiene:** dependencies compatible with MIT distribution.
 

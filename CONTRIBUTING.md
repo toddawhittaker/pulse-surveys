@@ -4,6 +4,11 @@ This repository uses a three-tier branch model. It exists so that `main` always
 reflects reviewed, mergeable work, and so that each epic accumulates its seams
 in one place before it lands.
 
+> **`CLAUDE.md` is authoritative on process.** This file is the same rules
+> written for humans, with more explanation and examples. Where the two
+> disagree, `CLAUDE.md` wins and this file is the bug — it is the copy that
+> drifts, because it is the one nobody's tooling reads.
+
 ## The three tiers
 
 ```
