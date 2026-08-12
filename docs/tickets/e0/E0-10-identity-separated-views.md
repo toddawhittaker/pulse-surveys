@@ -72,6 +72,10 @@ suite), §13 (`views_sql/` ships as migrations, not ORM convention).
   disposition notes, and the full audit schema (E10). This ticket ships only the
   role, the grant, and a proof-of-mechanism function, so that E10 inherits a
   door rather than a wall.
+- The conflict-of-interest flag on a reveal (SPEC §6.2, `CLAUDE.md`) is E10's to
+  compute. What this ticket owes it is an audit row shape that can carry the
+  flag, so E10 adds a value rather than redesigning the table. Leave the column
+  or leave room for it, and say which in the pull request.
 
 ## Acceptance criteria
 

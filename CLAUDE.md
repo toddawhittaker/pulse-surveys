@@ -133,6 +133,14 @@ Supporting rules that make the above hold:
 - Re-identification is possible only through the Care queue, only by the Care
   role, and is automatically audit-logged (actor, timestamp, case). Admin and
   VPAA cannot read flagged comment content or reach identity.
+- **A reveal that touches the revealer's own purview is flagged as a conflict of
+  interest** (SPEC §6.2). A Care staffer revealing a student in a section they
+  themselves teach is the case that matters. Never block the reveal — a student
+  at risk does not wait on a governance check — but mark the audit entry, and
+  surface it distinctly in the Admin access log and to the periodic outside
+  review. This is the detective control that makes the permitted overlap between
+  a Care assignment and a reporting assignment visible rather than merely
+  tolerated. Any audit schema must be able to carry this flag.
 - Instructor and leadership read paths go through identity-separated SQL views
   that structurally cannot join to identity columns. Enforce this in migrations
   (`backend/app/views_sql/`), not only in application code.
