@@ -1,6 +1,6 @@
 ---
 name: build-ticket
-description: Build one ticket through the test-author → implementer → arbitrator loop. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the seam branch, runs tests-first, and stops at a PR without merging.
+description: Build one ticket through the test-author → implementer → arbitrator loop. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch, runs tests-first, and stops at a PR without merging.
 ---
 
 # Build a ticket
@@ -20,7 +20,7 @@ Read the ticket file and `docs/tickets/e0/README.md` for its dependencies.
 E0-04 is not merged into the epic branch, stop and say so. Building against a
 missing dependency produces work that has to be redone.
 
-Confirm the epic branch exists and is current, then cut the seam branch named in
+Confirm the epic branch exists and is current, then cut the ticket branch named in
 the ticket's `**Branch:**` field:
 
 ```bash
@@ -95,7 +95,7 @@ Three outcomes:
 - Check whether the ticket made a construction decision the spec does not
   answer. If so, write the ADR **in this pull request** — that is the policy.
 - Open the pull request into the epic branch with the template filled in: the
-  seam, the §14.2 items that apply, security review findings, and anything
+  ticket, the §14.2 items that apply, security review findings, and anything
   deliberately deferred.
 - Run `/review-pr` on it.
 

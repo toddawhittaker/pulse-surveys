@@ -34,9 +34,9 @@ For E0 specifically, the exit checklist is in ticket E0-18 as well.
 - **The exit sentence, literally.** Each clause of it. If it says a student, an
   instructor, and a dean each land on the right view from either door, try all
   three, from both doors where both apply.
-- **Ticket seams from §14.3 all accounted for.** Every seam listed under the
+- **Ticket breakdown from §14.3 all accounted for.** Every ticket listed under the
   epic either landed or was consciously deferred with the deferral recorded.
-  A seam that quietly vanished is a finding.
+  A ticket that quietly vanished is a finding.
 - **Deferred work is written down.** Walk each merged pull request's
   "deliberately deferred" section and check the items exist somewhere durable —
   a ticket, an ADR, or the next epic's scope. Deferred work recorded only in a

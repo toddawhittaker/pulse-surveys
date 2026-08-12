@@ -29,7 +29,7 @@ env:
 jobs:
   # --------------------------------------------------------------------------
   # What exists yet? Every downstream job is tolerant of a tree that has not
-  # been built. As each E0 seam lands, flip the matching `allow-missing` step
+  # been built. As each E0 ticket lands, flip the matching `allow-missing` step
   # in that job from tolerant to enforcing — the job body is already written.
   # --------------------------------------------------------------------------
   detect:
@@ -229,7 +229,7 @@ jobs:
 
       - name: No suite yet
         if: needs.detect.outputs.pytests != 'true'
-        run: echo "::notice::No tests/unit or tests/integration yet. Enforcing once the first seam ships tests (SPEC §14.2 item 1)."
+        run: echo "::notice::No tests/unit or tests/integration yet. Enforcing once the first ticket ships tests (SPEC §14.2 item 1)."
 
       - uses: actions/setup-python@v5
         if: needs.detect.outputs.pytests == 'true'

@@ -1,4 +1,4 @@
-# 0002 — CI gates ship tolerant and name the seam that enforces them
+# 0002 — CI gates ship tolerant and name the ticket that enforces them
 
 **Status:** Accepted — recorded retroactively
 **Date:** 2026-08-12
@@ -34,7 +34,7 @@ table.
 ## Alternatives rejected
 
 **Omit each job until its code exists.** Rejected because the pipeline would
-then be written piecemeal, with each seam inventing its own job and no single
+then be written piecemeal, with each ticket inventing its own job and no single
 place showing the intended full gate set. Gates nobody is thinking about — the
 bundle budget, the license check — are exactly the ones that never get added.
 

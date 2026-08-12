@@ -36,7 +36,7 @@ a summary of it, including this file:
 | any model call, prompt, or contract | §7.4 — the single-shot boundary |
 | where a module goes | §13 — use an existing module; add one only when nothing fits |
 | any UI | `docs/DESIGN_BRIEF.md`, `design/tokens.css`, and §7.6 |
-| a seam someone already built | `docs/adr/` — how it was built and why |
+| something someone already built | `docs/adr/` — how it was built and why |
 
 ## Branch and pull request discipline
 
@@ -46,27 +46,27 @@ request, and so does every change to an epic branch.
 
 Three tiers. `main` holds reviewed work. One long-lived **epic branch** per epic
 in SPEC §14.3, named `epic/e<N>-<kebab-title>`, cut from `main`. One short-lived
-**seam branch** per ticket, named `e<N>/<kebab-slug>`, cut from its epic branch.
-Seam branches merge into their epic branch by pull request; epic branches merge
-into `main` by pull request. No exceptions, no direct merges in either
-direction. `CONTRIBUTING.md` has the branch name tables.
+**ticket branch** per item in that epic's breakdown, named `e<N>/<kebab-slug>`,
+cut from its epic branch. Ticket branches merge into their epic branch by pull
+request; epic branches merge into `main` by pull request. No exceptions, no
+direct merges either way. `CONTRIBUTING.md` has the branch name tables.
 
 For every unit of work, in order:
 
 1. Confirm which epic branch the work belongs to. Create it from `main` if it
    does not exist yet.
-2. Cut a seam branch from that epic branch. Never work directly on the epic
+2. Cut a ticket branch from that epic branch. Never work directly on the epic
    branch.
-3. Commit in small, coherent steps. The subject line names the seam:
+3. Commit in small, coherent steps. The subject line names the ticket:
    `e1/launch-flow: validate state and nonce on LTI launch`.
-4. Open a pull request into the epic branch when the seam is done. Use the
-   template: the seam, the §14.2 definition-of-done items covered, and anything
+4. Open a pull request into the epic branch when the ticket is done. Use the
+   template: the ticket, the §14.2 definition-of-done items covered, and anything
    deliberately deferred.
-5. Stop and wait for Todd. Do not merge on your own judgment that the seam looks
+5. Stop and wait for Todd. Do not merge on your own judgment that the ticket looks
    finished.
 
 Merge authority splits by target branch. **Never merge an epic branch into
-`main`** — that is Todd's call, always, without exception. You may merge a seam
+`main`** — that is Todd's call, always, without exception. You may merge a ticket
 pull request into its epic branch, but only after Todd has approved it in
 writing in the conversation; his approval is the trigger, never your own
 assessment. Never use an admin override to bypass a protection rule. Never merge
@@ -140,7 +140,7 @@ Ask, then wait for an answer; do not add it provisionally.
 
 Local secrets live in `.env`, which is gitignored and must stay that way.
 `.env.example` carries variable *names* and obviously-fake placeholders, never a
-real credential and never a value copied from a working `.env`. When a seam adds
+real credential and never a value copied from a working `.env`. When a ticket adds
 a configuration variable, add its name to `.env.example` in the same pull
 request.
 

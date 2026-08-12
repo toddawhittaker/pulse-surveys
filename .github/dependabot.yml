@@ -24,7 +24,7 @@ updates:
         update-types: [minor, patch]
     ignore:
       # Majors for the LTI, database, and AI provider layers land deliberately
-      # in their own seam, not on a Monday morning batch.
+      # in their own ticket, not on a Monday morning batch.
       - dependency-name: pylti1p3
         update-types: [version-update:semver-major]
       - dependency-name: sqlalchemy
