@@ -48,10 +48,11 @@ either direction.
 | E12 — Notifications | `epic/e12-notifications` |
 | E13 — Hardening & release ⚠ | `epic/e13-hardening-release` |
 
-Seam names come from the *Ticket seams* line under each epic in §14.3. E0's
-seams, for example, are `e0/repo-ci`, `e0/compose-stack`, `e0/core-schema`,
-`e0/mock-lms`, `e0/mock-idp`, `e0/ai-gateway-shell`, `e0/authz-skeleton`, and
-`e0/seed-script`.
+Seam names come from the *Ticket seams* line under each epic in §14.3. Where an
+epic has been decomposed into numbered tickets under `docs/tickets/`, those
+ticket branch names win over the illustrative list in the spec —
+[`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is the build order for
+E0 and names all eighteen of its branches.
 
 ⚠ marks epics that additionally require line-by-line human review of the
 security-relevant diff.
