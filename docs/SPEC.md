@@ -36,7 +36,8 @@ The design goal is trust: students must believe their responses are confidential
 
 Notes:
 
-- **Every role can enter through an LTI launch**, including leadership. The launch authenticates the person by their LMS user ID; because the app owns the supervision graph (§2.1), once identified they are shown their full purview — not just the course they happened to launch from. The launch context resolves *which* section a link points at, never caps what a leadership user may see.
+- **Entry doors are a property of the assignment, not the person.** A person holding two assignments uses whichever door fits the one they are acting under. Every *reporting* role — instructor, lead faculty, chair, assistant dean, dean, VP of Academics — can enter through an LTI launch, including leadership. Every role except instructor and student can *also* enter by web login; Care and Admin are web login only (their work has no launch context), and students enter by launch only. The table above is authoritative where this prose and it disagree.
+- The launch authenticates the person by their LMS user ID; because the app owns the supervision graph (§2.1), once identified they are shown their full purview — not just the course they happened to launch from. The launch context resolves *which* section a link points at, never caps what a leadership user may see.
 - LTI launch requires being an enrolled LMS user in *some* course, so **web login via OIDC is retained** for all leadership and staff roles (Entra ID, Okta, Keycloak, etc.; local accounts as a pilot fallback). Both doors resolve to the same identity and the same views.
 - Roles compose: multi-role people get a role/assignment switcher, or a union purview rendered as a multi-root hierarchy nav. **Care is deliberately not composable** with reporting roles — its sole power is the threat queue, kept isolated so safety re-identification never rides alongside routine oversight access.
 
@@ -126,10 +127,10 @@ This is the load-bearing wall of the product.
 
 Each of these is an automated assertion in the test suite (§9), not a convention:
 
-1. Students never see comparables, benchmarks, university averages, or other sections — in charts, text, or aria labels.
+1. Students never see comparables, benchmarks, university averages, or other sections — in charts, text, tooltips, exports, or aria labels.
 2. A Lead Faculty assignment never grants sibling leads' courses, at any point in the purview union computation.
 3. Below the n-threshold, raw comments are hidden from instructors and students alike.
-4. Aggregate language counts sections, never instructors; "needs attention," never "underperforming"; no ranking or score-sorting anywhere.
+4. Aggregate language counts sections, never instructors; "needs attention," never "underperforming"; no ranking, no composite scores, and no score-sorting anywhere.
 5. Confidentiality copy appears exactly once per surface (survey: in the submit bar), in plain words, no shield or lock iconography.
 6. No view may ever widen a student's visibility relative to these rules.
 
