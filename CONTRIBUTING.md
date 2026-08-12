@@ -123,6 +123,19 @@ something is ready.
 - If a seam turns out to belong to a different epic, close the pull request and
   re-cut the branch. Do not retarget across epics.
 
+## Secrets
+
+Local secrets live in `.env`, which is gitignored. Its committed counterpart
+`.env.example` lists variable names with obviously-fake placeholder values and
+never a real credential. A pull request that adds a configuration variable adds
+its name to `.env.example` in the same change.
+
+Nobody — contributor or AI agent — creates, reads, modifies, or echoes a
+repository or environment secret as a side effect of doing other work, and no
+pull request adds a `secrets.*` reference to a workflow without the repository
+owner agreeing to it first. Credentials never appear in commit messages, pull
+request bodies, test fixtures, seed data, or logs.
+
 ## Definition of done
 
 Every epic — and by extension every seam that composes it — carries the five
