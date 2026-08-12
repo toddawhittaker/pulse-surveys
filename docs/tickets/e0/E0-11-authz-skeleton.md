@@ -26,6 +26,13 @@ thin), §4.1, and the roles section of `CLAUDE.md`.
   exists.
 - Care is not composable with any reporting role — encode that here, so no later
   ticket can accidentally union it into a purview.
+- Care identification: an actor holds Care because they hold a live `CARE`
+  role assignment (E0-09), never because of anything in an LTI or OIDC claim.
+  The resolver reads the assignment table; it does not read claims for this.
+- The resolver returns Care as a *separate* capability rather than as an element
+  of the purview set, so that no union operation can ever pick it up. Ticket
+  E0-10's Care service asks this module whether the actor holds Care; that is
+  the only supported way to ask.
 - A `ScopedSession`-style helper or query dependency that makes the
   E0-10 views the default read path and makes bypassing it visibly deliberate.
 - The n-threshold guard *interface* — the parameter and the call site — with the

@@ -31,7 +31,18 @@ assistant-dean worked example — plus §8 and the roles section of `CLAUDE.md`.
   department chair; that resolution is a query concern, not a stored row.
 - Role grain constraint: an assignment's `scope_node_id` must reference a node
   of the right kind for its role — a chair scoped to a department, a dean to a
-  college, a lead to a course. Enforce it rather than trusting callers.
+  college, a lead to a course, **Care and Admin to the institution**. Enforce it
+  rather than trusting callers.
+- **Care is Pulse-owned and assigned only here.** No LTI claim, no OIDC claim,
+  and no LMS role may ever produce a `CARE` assignment. The launch or login
+  establishes who someone is; this table establishes what they may do, and for
+  Care the two must stay strictly separate — a claim-to-Care mapping would let
+  an LMS administrator grant themselves identity access, walking past every
+  guarantee in §4. Add a test asserting no claim-mapping code path can write a
+  `CARE` assignment.
+- A `CARE` assignment never carries a `reports_to` edge and is never the target
+  of one. It sits outside the supervision graph entirely, because it supervises
+  nothing and escalates to nobody (§2.1).
 
 ## Out of scope
 
@@ -54,6 +65,13 @@ assistant-dean worked example — plus §8 and the roles section of `CLAUDE.md`.
       accepted, and a test asserts this explicitly as legal.
 - [ ] A second lead-faculty mapping for an already-mapped course is rejected.
 - [ ] An assignment whose role and scope-node kind disagree is rejected.
+- [ ] A `CARE` assignment scoped to anything other than the institution is
+      rejected.
+- [ ] A `CARE` assignment with a `reports_to` edge is rejected, and so is an
+      attempt to point another assignment's `reports_to` at one.
+- [ ] No code path that maps LTI or OIDC claims to roles can produce a `CARE`
+      assignment — asserted by test, since this is the escalation that would
+      bypass §4 entirely.
 - [ ] The assistant-dean shape from §2.1 — lead courses plus supervised chairs —
       can be constructed in a fixture, even though computing its purview is E9.
 

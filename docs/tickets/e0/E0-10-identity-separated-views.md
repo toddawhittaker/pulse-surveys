@@ -28,8 +28,15 @@ suite), §13 (`views_sql/` ships as migrations, not ORM convention).
     table.
   - `pulse_care` serves the Care queue only. It also gets **no** `SELECT` on
     `user_identity` — see the reveal function below.
-- Two runtime connection pools, selected by the authorization layer from the
-  actor's role, never by the caller. A request cannot choose its own pool.
+- Two runtime connection pools. **The pool is bound to the service, not to the
+  person** — only the Care service module can obtain a `pulse_care` session, and
+  it independently verifies the actor holds a live `CARE` assignment before
+  doing anything. Two conditions, both required, so neither a routing mistake
+  nor a stale assignment is enough on its own. Selecting a pool from "the
+  actor's role" is not sufficient: a person may hold more than one assignment,
+  and that phrasing leaves the answer ambiguous exactly where it matters most.
+- A caller can never choose its own pool, and no general-purpose helper hands
+  out a `pulse_care` session.
 - **The Care path must remain open, and this ticket proves it.** Care
   re-identification is the one legitimate route to identity (§4, §6.2), and it
   is deliberately not blocked. `pulse_care` gets `EXECUTE` on a single
@@ -85,6 +92,12 @@ suite), §13 (`views_sql/` ships as migrations, not ORM convention).
       audit row, so the two cannot come apart.
 - [ ] `pulse_care` cannot `SELECT` from `user_identity` directly — only through
       the function.
+- [ ] Requesting a `pulse_care` session from outside the Care service module
+      fails. A test asserts that a reporting-path caller cannot obtain one even
+      when the acting person also holds a `CARE` assignment.
+- [ ] A person with no live `CARE` assignment cannot reach identity through the
+      function even if the Care service is somehow reached — the assignment
+      check and the pool binding are independent.
 - [ ] Neither runtime role owns any table, and neither is a superuser. A test
       asserts both, since either would silently void every grant above.
 - [ ] The structural test enumerates identity columns and finds none in any
