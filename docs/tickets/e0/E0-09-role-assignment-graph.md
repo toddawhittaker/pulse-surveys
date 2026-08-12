@@ -43,6 +43,13 @@ assistant-dean worked example — plus §8 and the roles section of `CLAUDE.md`.
 - A `CARE` assignment never carries a `reports_to` edge and is never the target
   of one. It sits outside the supervision graph entirely, because it supervises
   nothing and escalates to nobody (§2.1).
+- **A person may hold both a `CARE` assignment and a reporting assignment.** A
+  Care staffer who also teaches a section is unlikely but legitimate, and this
+  is a deliberate decision: do not add a constraint forbidding it. Non-
+  composability is about capabilities, not about people — Care grants no
+  reporting purview and no reporting role grants Care. The residual risk is
+  accepted, governed by the ethical obligations of the Office of Community
+  Standards and by the identity-access audit log.
 
 ## Out of scope
 
@@ -72,6 +79,11 @@ assistant-dean worked example — plus §8 and the roles section of `CLAUDE.md`.
 - [ ] No code path that maps LTI or OIDC claims to roles can produce a `CARE`
       assignment — asserted by test, since this is the escalation that would
       bypass §4 entirely.
+- [ ] A person holding both a `CARE` assignment and an instructor assignment is
+      **accepted**, with a test asserting it, so nobody later "tightens" this
+      into a constraint. The fixture is reused by E0-10 and E0-18.
+- [ ] Assignments record which entry doors they permit: launch for every
+      reporting role, web login for every role except instructor and student.
 - [ ] The assistant-dean shape from §2.1 — lead courses plus supervised chairs —
       can be constructed in a fixture, even though computing its purview is E9.
 

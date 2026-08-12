@@ -163,12 +163,23 @@ Supporting rules that make the above hold:
   department — is the case that proves purview cannot come from containment.
 - Lead Faculty get the hierarchy view only, never a by-lead-faculty pivot. Chair
   and above additionally get the by-lead pivot over their purview.
-- Care is deliberately not composable with any reporting role. Its only power is
-  the threat queue.
-- Every role can enter by LTI launch; leadership, Care, and Admin can also enter
-  by OIDC web login. Both doors resolve to the same identity and the same full
-  purview. The launch context resolves which section a link points at; it never
-  caps what a leadership user may see.
+- Care is deliberately not composable with any reporting role: a Care assignment
+  grants no reporting purview, and no reporting assignment grants Care. Its only
+  power is the threat queue. One *person* may nonetheless hold both — a Care
+  staffer who also teaches a section is unlikely but legitimate — so the two are
+  separate capabilities on the same person, never a union. Do not add a
+  constraint forbidding the combination; it is an accepted risk, governed by the
+  ethical obligations of the Office of Community Standards and by the identity
+  -access audit log.
+- **Entry doors are a property of the assignment, not the person.** Every
+  reporting role (instructor, lead faculty, chair, assistant dean, dean, VPAA)
+  can enter by LTI launch. Every role except instructor and student can *also*
+  enter by OIDC web login; leadership holds both doors, and Care and Admin are
+  web login only. Students enter by launch only. A person holding two
+  assignments uses whichever door fits the assignment they are acting under.
+- Both doors resolve to the same identity and the same full purview. The launch
+  context resolves which section a link points at; it never caps what a
+  leadership user may see.
 - LMS-owned data (courses, sections, section codes, enrollments, teaching
   instructors) is read-only in Pulse. Course level derives from the course
   number; section length and dates derive from the section code via the

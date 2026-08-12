@@ -23,8 +23,13 @@ that the launch context never caps what a leadership user sees), §6.3.
 - Authorization code flow with PKCE, signed ID tokens, and a JWKS endpoint whose
   key verifies them.
 - Seeded users covering every web-login role: VPAA, dean, chair, lead faculty,
-  Care, and admin. Care must be seeded separately, since §2.1 makes it
-  deliberately non-composable with any reporting role.
+  Care, and admin. Web login is available to every role **except instructor and
+  student**, who enter by launch only — do not seed either here.
+- Seed one person who holds **both** a Care assignment and an instructor
+  assignment. Unlikely in practice but legitimate, and it is the case that
+  proves the doors are a property of the assignment rather than the person: this
+  person logs in here for Care work and launches from the mock LMS for teaching.
+  E0-10 and E0-18 both reuse the fixture.
 - A login form simple enough for a Playwright test to drive without brittle
   selectors.
 - Configuration in `.env.example` so the tool can point at the mock, with
@@ -49,6 +54,11 @@ that the launch context never caps what a leadership user sees), §6.3.
 - [ ] A mismatched PKCE verifier is rejected.
 - [ ] Every seeded role can log in, and a test enumerates them so a missing role
       fails rather than going unnoticed.
+- [ ] An instructor-only or student-only identity **cannot** obtain a session
+      here — web login is not their door.
+- [ ] The Care-and-instructor person authenticates successfully, and a test
+      asserts the session exposes the Care capability without any reporting
+      purview attached.
 - [ ] No private key is committed; keys are generated at startup.
 
 ## Definition of done

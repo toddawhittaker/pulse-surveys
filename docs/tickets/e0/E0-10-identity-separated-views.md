@@ -94,7 +94,10 @@ suite), §13 (`views_sql/` ships as migrations, not ORM convention).
       the function.
 - [ ] Requesting a `pulse_care` session from outside the Care service module
       fails. A test asserts that a reporting-path caller cannot obtain one even
-      when the acting person also holds a `CARE` assignment.
+      when the acting person also holds a `CARE` assignment. **This is the
+      two-hat case and it is expected in production** — a Care staffer who also
+      teaches — so it is a required test, not a hypothetical one. Their
+      instructor requests must run on `pulse_app` with no path to identity.
 - [ ] A person with no live `CARE` assignment cannot reach identity through the
       function even if the Care service is somehow reached — the assignment
       check and the pool binding are independent.
