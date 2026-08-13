@@ -1,4 +1,4 @@
-"""The CI health gate names every service it is supposed to wait on — ticket E0-03.
+"""The CI health gate: which services it names, and where it names them — E0-03.
 
 Acceptance criterion 5: "The CI `docker` job waits on all three services and
 passes." The passing half is the job's own business and cannot be asserted from
@@ -16,6 +16,16 @@ than by naming them, and `test_compose_stack.py` holds those conditions for that
 reason. Nothing equivalent is available here: `api` does not depend on `worker`
 or `beat`, and it must not — the API has to come up whether or not the job
 runtime does.
+
+The second question this module asks is *where* the job waits, and it is a
+different question from what the wait names. `docker-compose.override.yml`
+mounts the checkout into `worker` and `beat`, so a merged `docker compose up`
+runs the working tree rather than the wheel in the image, and a packaging
+regression in `app/jobs` passes every merged gate while failing in every real
+deployment. The `docker` job therefore has a pass that starts the stack on the
+base file alone — and a pass that starts a stack without waiting on it verifies
+nothing, so the start and the wait are asserted together, about the same stack,
+rather than separately about the same job.
 
 This module is separate from `test_compose_stack.py` because its subject is the
 workflow rather than the Compose file, and separate from the image-pin module
@@ -75,6 +85,18 @@ DEFERRAL_NOTE = re.compile(r"joins? the argument list", re.IGNORECASE)
 # that is certainly in the workflow before its silence is believed.
 FLATTENING_CANARY = "wait_for_health.sh"
 
+# A compose invocation that starts a stack, and the files it was given. Only
+# `up` counts: a `build`, `down`, `ps` or `logs` run against the base file
+# creates nothing that could be waited on, and treating one as a stack start
+# would fail a job for a command that never brought anything up.
+COMPOSE_UP = re.compile(r"docker\s+compose\b(?P<flags>[^\n;|&]*?)\bup\b")
+
+# `-f FILE`, `--file FILE`, and the `=` spellings of both.
+COMPOSE_FILE_FLAG = re.compile(r"(?:^|\s)(?:-f|--file)[=\s]+(?P<path>\S+)")
+
+# The base Compose file, as the workflow spells it.
+BASE_COMPOSE_FILE = "docker-compose.yml"
+
 
 def run_scripts(node: Any) -> list[str]:
     """Every `run:` script anywhere inside a parsed workflow fragment.
@@ -112,18 +134,68 @@ def flattened(text: str) -> str:
     return re.sub(r"[\s#]+", " ", text)
 
 
+def wait_arguments(text: str) -> list[list[str]]:
+    """The service names passed to each `wait_for_health.sh` call in `text`."""
+    invocations: list[list[str]] = []
+    for match in INVOCATION.finditer(text):
+        words = match.group("arguments").split()
+        invocations.append([word for word in words if "=" not in word and not word.startswith("-")])
+    return invocations
+
+
 def health_wait_invocations(node: Any) -> list[list[str]]:
     """The service names passed to each `wait_for_health.sh` call in `node`."""
     invocations: list[list[str]] = []
     for script in run_scripts(node):
-        for match in INVOCATION.finditer(CONTINUATION.sub(" ", script)):
-            arguments = [
-                word
-                for word in match.group("arguments").split()
-                if "=" not in word and not word.startswith("-")
-            ]
-            invocations.append(arguments)
+        invocations.extend(wait_arguments(CONTINUATION.sub(" ", script)))
     return invocations
+
+
+def command_lines(node: Any) -> list[str]:
+    """Every line of every `run:` script in `node`, in the order the job runs them.
+
+    Order is what makes the difference between "this job waits on three services
+    somewhere" and "this job waits on three services *after starting this
+    particular stack*", and steps are a YAML list, so document order is
+    execution order. Continuations are joined first, so a command split across
+    lines stays one line here.
+    """
+    lines: list[str] = []
+    for script in run_scripts(node):
+        lines.extend(CONTINUATION.sub(" ", script).splitlines())
+    return lines
+
+
+def compose_files_named(flags: str) -> set[str]:
+    """The Compose files a `docker compose` invocation was given, if any.
+
+    Leading `./` is stripped so `-f ./docker-compose.yml` and
+    `-f docker-compose.yml` are the same file, which they are.
+    """
+    return {m.group("path").removeprefix("./") for m in COMPOSE_FILE_FLAG.finditer(flags)}
+
+
+def stack_events(node: Any) -> list[tuple[str, set[str]]]:
+    """Stack starts and health waits, in order, as `(kind, payload)` pairs.
+
+    `("up", {files})` for a compose invocation that starts a stack, with the
+    Compose files it named — an empty set meaning it named none and therefore
+    got the default merged pair. `("wait", {services})` for each
+    `wait_for_health.sh` call.
+
+    Both kinds are collected from the same ordered list of command lines rather
+    than from steps, so a job that puts the start and the wait in one `run:`
+    block and a job that splits them across two steps read identically. Within a
+    single line the start is recorded first, which is the only order it could
+    have been executed in.
+    """
+    events: list[tuple[str, set[str]]] = []
+    for line in command_lines(node):
+        for match in COMPOSE_UP.finditer(line):
+            events.append(("up", compose_files_named(match.group("flags"))))
+        for arguments in wait_arguments(line):
+            events.append(("wait", set(arguments)))
+    return events
 
 
 def test_the_docker_job_waits_on_api_worker_and_beat(
@@ -189,6 +261,105 @@ def test_the_docker_job_waits_on_api_worker_and_beat(
             "green with it crash-looping. Restore the full list — "
             f"`{WAIT_SCRIPT} {' '.join(REQUIRED_SERVICES)}` — at every wait in the job, the "
             "one after the restart loop included.",
+        ]
+    )
+
+
+def test_the_docker_job_waits_on_all_three_after_starting_the_base_file_alone(
+    ci_workflow_path: Path,
+    ci_workflow: dict[str, Any],
+) -> None:
+    """The base-file-only pass exists *and* is verified, in one assertion.
+
+    Why the pass exists: `docker-compose.override.yml` mounts the checkout into
+    `worker` and `beat`, so every merged `docker compose up` runs the working
+    tree rather than the wheel installed in the image. A packaging regression in
+    `app/jobs` — a module left out of the distribution, an import that only
+    resolves from the source tree — therefore passes every merged gate and fails
+    in every real deployment. The implementer proved that rather than asserting
+    it: an image whose task returned `STALE-IMAGE-BUILT-AT-T0` answered `pong`
+    through the merged round trip and went green, while the base-file-only pass
+    returned the stale value.
+
+    **Why both halves are one assertion.** The test above collects every wait in
+    the job and requires each to name all three, and that is exactly the guard
+    that missed this: a step with no wait at all contributes nothing to a
+    collection, and the job's other waits keep it non-empty, so the pass could be
+    cut back to `up -d` with nothing looking at it and the suite stayed green. It
+    is `docs/MISTAKES.md` entry 2 one level up — asking whether the collection is
+    empty overall rather than whether the step that matters contributed to it. So
+    the two halves cannot be asserted apart: a start with no wait verifies
+    nothing, and a wait after a merged start says nothing about packaging. Each
+    is satisfied by the other's absence.
+
+    **What counts as "the base file alone".** The files named by the invocation
+    must be exactly `{docker-compose.yml}` — the presence of that flag is not
+    enough on its own, because a second `-f` puts the override back and makes the
+    pass merged again while still containing the marker. Equality answers both
+    halves of the question the flag raises, which is why it is written that way
+    rather than as a membership test or as the absence of the override's name.
+
+    **What is not recognised, deliberately.** `docker compose up --wait` waits
+    natively, and this test does not count it: `wait_for_health.sh` is what the
+    repository standardised on and it is stricter, failing a service that
+    declares no health check at all. If the job ever moves to `--wait` this test
+    will fail, and the answer is to decide which guarantee is wanted rather than
+    to widen the pattern quietly. `COMPOSE_FILE` in the environment is not read
+    either; nothing in this workflow sets it.
+
+    The window is "until the next stack start", not "in this step", so splitting
+    the start and the wait across two steps is fine and reordering them is not.
+    """
+    assert ci_workflow, (
+        f"{ci_workflow_path} does not exist or parsed to nothing. The CI pipeline is what "
+        "makes the §14.2 definition of done enforceable, so it existing is a precondition "
+        "of this test meaning anything."
+    )
+
+    jobs = ci_workflow.get("jobs") or {}
+    job = jobs.get(DOCKER_JOB)
+    assert job, (
+        f"{ci_workflow_path} declares no `{DOCKER_JOB}` job (it declares {sorted(jobs)}). "
+        "If it has been renamed, rename it here too rather than leaving this test looking "
+        "for something that is gone."
+    )
+
+    events = stack_events(job)
+    starts = [(index, files) for index, (kind, files) in enumerate(events) if kind == "up"]
+    assert starts, (
+        f"The `{DOCKER_JOB}` job never brings a stack up at all, so this test is reading a "
+        "job that has changed shape rather than one missing a wait. Nothing below would "
+        "have anything to look at."
+    )
+
+    required = set(REQUIRED_SERVICES)
+    verified: list[list[str]] = []
+    unverified: list[list[str]] = []
+    for index, files in starts:
+        if files != {BASE_COMPOSE_FILE}:
+            continue
+        waited: set[str] = set()
+        for kind, payload in events[index + 1 :]:
+            if kind == "up":
+                break
+            waited |= payload
+        (verified if required <= waited else unverified).append(sorted(waited))
+
+    described = [sorted(files) or ["(no -f flag: the merged default)"] for _, files in starts]
+
+    assert verified, "\n".join(
+        [
+            f"The `{DOCKER_JOB}` job never starts the stack on `{BASE_COMPOSE_FILE}` alone "
+            f"and then waits on {list(REQUIRED_SERVICES)}.",
+            f"  stack starts in this job, by the files each named: {described}",
+            f"  base-file-only starts whose wait was short: {unverified or 'none'}",
+            "",
+            "The override mounts the checkout into `worker` and `beat`, so a merged `up` "
+            "runs the working tree and not the wheel in the image: a packaging regression "
+            "in `app/jobs` passes every merged gate and fails in every real deployment. The "
+            "base-file-only pass is the only thing that runs what actually ships — and only "
+            "if something waits on all three afterwards. A pass that starts a stack and "
+            "never looks at it verifies nothing while looking exactly like verification.",
         ]
     )
 

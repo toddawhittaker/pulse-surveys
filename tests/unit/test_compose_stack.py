@@ -14,11 +14,20 @@ check and are still wrong. There are three kinds:
 1.  **Host port publishing belongs to the dev override, not the base file.**
     The definition of done names an exposed port in the base Compose file as a
     security defect, and SPEC §7.2 puts the reverse proxy outside the compose
-    file entirely. No dynamic gate can see this: `docker compose up` merges
-    `docker-compose.override.yml` automatically, so CI and a developer's laptop
-    both exercise the merged topology and never the base file alone. A `ports:`
-    entry added to the base file publishes Postgres to the host of every
-    non-development deployment and breaks nothing anyone runs.
+    file entirely. No dynamic gate can see this. `docker compose up` merges
+    `docker-compose.override.yml` automatically, so a developer's laptop only
+    ever exercises the merged topology; the `docker` job now also brings the
+    stack up on the base file alone, but that pass exists to catch a packaging
+    regression — the override mounts the checkout over the installed wheel — and
+    it inspects health, not published ports. So a `ports:` entry added to the
+    base file publishes Postgres to the host of every non-development deployment
+    and still breaks nothing anyone runs.
+
+    (Until E0-03 this paragraph said CI never ran the base file alone. That was
+    true when it was written and the base-file-only pass made it false. The
+    assertion below is unaffected, which is the reason to correct the sentence
+    rather than the test: what changed is that CI *starts* that topology, not
+    that anything looks at its ports.)
 
 2.  **Declarations `wait_for_health.sh api` does not reach.** That script fails
     a service that declares no health check, which is why the api health check
