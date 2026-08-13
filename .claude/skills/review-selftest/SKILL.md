@@ -22,8 +22,15 @@ patch's leading comment block:
 ```
 # fixture: identity-column-in-view
 # reviewer: privacy-authz
+# ticket: E0-10 (identity-separated views)
 # expect: HIGH — user_identity column exposed through an instructor-readable view
 ```
+
+`ticket:` is the ticket the pretend pull request names. Pass it through verbatim.
+Where it reads `none`, tell the reviewer the pull request names no ticket and
+say why — **never substitute a ticket you picked yourself.** Two reviewers read
+the ticket before the diff, so a wrong number sends them auditing the wrong
+acceptance criteria and spends findings on your mistake.
 
 For each fixture:
 
@@ -40,9 +47,10 @@ For each fixture:
    identity column. As the codebase fills in, more fixtures will apply and the
    reviews get richer for free.
 3. Spawn the named reviewer against that diff, exactly as `/review-pr` would —
-   same prompt, same inputs. **Do not tell it a fixture is planted, and strip
-   the `# fixture:` header before passing it.** A reviewer told to look for a
-   bug finds one, which measures nothing.
+   same inputs: a pull request number, the diff, the `ticket:` from the header,
+   and the changed files. **Do not tell it a fixture is planted, and strip the
+   whole `#` comment block before passing the diff.** A reviewer told to look
+   for a bug finds one, which measures nothing.
 4. Record whether it reported a finding matching `expect`, at the right severity
    or higher.
 5. Remove the worktree if you made one.

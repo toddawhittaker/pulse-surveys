@@ -1,5 +1,8 @@
 # fixture: chart-without-data-table
 # reviewer: a11y-copy
+# ticket: none — the student results view belongs to E8 ("results UI"), which
+#         has no tickets written. Tell the reviewer the pull request names no
+#         ticket; do not invent one.
 # expect: HIGH — the chart carries no data-table equivalent, which SPEC §10 and
 #         the design brief make a floor rather than an enhancement.
 # note: several smaller defects are planted so the fixture also measures noise:

@@ -1,5 +1,6 @@
 # fixture: unpaged-nrps-loop
 # reviewer: lti-oidc
+# ticket: E0-15 (mock LMS NRPS and AGS)
 # expect: HIGH — the NRPS roster fetch reads the first page and stops. Link
 #         header paging is never followed, so any section with a roster larger
 #         than one page silently syncs a partial roster.

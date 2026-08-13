@@ -1,5 +1,9 @@
 # fixture: eval-floor-lowered
 # reviewer: prompt-eval
+# ticket: none — the recall floor belongs to E10 ("recall-floor eval work") and
+#         the moderation prompt to E6 ("moderation task + evals"). Neither epic
+#         has tickets written. Tell the reviewer the pull request names no
+#         ticket; do not invent one.
 # expect: HIGH — the threat/self-harm recall floor is lowered, in a pull
 #         request whose subject is a prompt change rather than a floor change.
 #         SPEC §9.3 makes this the strictest floor in the suite and CLAUDE.md
