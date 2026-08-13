@@ -170,7 +170,11 @@ markers = [
     # and treats a skip or an xfail as a failure — see
     # scripts/ci/check_invariants.py.
     "invariant: a SPEC §4.1 confidentiality invariant; may never be skipped",
-    "integration: needs a real Postgres via testcontainers",
+    # Widened in E0-03 from "needs a real Postgres": the Celery round-trip test
+    # needs a real broker, and a marker description that named only Postgres
+    # would have been a record asserting something the first integration test
+    # made false (docs/MISTAKES.md entry 1).
+    "integration: needs a real backing service via testcontainers (Postgres, Redis)",
     "lti: exercises signed LTI 1.3 launch fixtures",
     "slow: property-based or generative, measured in tens of seconds",
 ]
