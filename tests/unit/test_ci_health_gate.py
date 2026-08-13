@@ -39,6 +39,18 @@ test is about. It reads it through `flattened`, which collapses whitespace and
 comment markers, because the text a comment holds and the text a comment *looks
 like* are two different strings — the first version of that test searched for
 the second and found nothing.
+
+**So this module handles comments in two opposite ways on purpose, and they
+must not be unified.** `flattened` keeps comment text and joins it up, because
+its subject is a stale comment. `executed_lines` throws comment text away,
+because its subject is what the job runs, and a `#` inside a `run:` block is a
+line that ships without executing. The two `#` characters are at different
+layers: one is YAML's, discarded by the parser before either function sees it,
+and one is the shell's, sitting inside a string the parser hands over intact.
+Reviewer pass 3 found the second layer unguarded — three commented-out lines and
+an `echo "temporarily disabled"` left this module green with CI verifying
+nothing — one round after a commit message had congratulated the first layer's
+defence.
 """
 
 import re
@@ -97,6 +109,31 @@ COMPOSE_FILE_FLAG = re.compile(r"(?:^|\s)(?:-f|--file)[=\s]+(?P<path>\S+)")
 # The base Compose file, as the workflow spells it.
 BASE_COMPOSE_FILE = "docker-compose.yml"
 
+# A shell comment and everything after it on the line, removed before anything
+# below reads the line as a command.
+#
+# This is the hole reviewer pass 3 walked through, and it is worth stating
+# exactly because the defence written one round earlier was aimed one layer too
+# high. That round was pleased with itself for reading parsed `run:` values
+# rather than raw file text, so that a *YAML* comment mentioning
+# `docker compose up` could not fabricate an event. It could not — and then
+# every line of the `run:` block itself was read as a command, so a *shell*
+# comment could. Commenting out the three lines of the base-file-only pass and
+# leaving `echo "temporarily disabled"` behind kept this whole module green
+# while CI verified nothing, which is both the exact regression the test exists
+# to prevent and exactly how it would arrive in real life.
+#
+# The direction matters and is the reason this is a truncation rather than
+# something cleverer: removing text can only *lose* an event, and a lost event
+# fails red. Fabricating one from text that never runs fails green. A command
+# carrying a `#` inside quotes is truncated and so counted wrongly — in the safe
+# direction.
+SHELL_COMMENT = re.compile(r"#.*$")
+
+# Lines that only print. `echo "docker compose -f docker-compose.yml up -d"`
+# starts nothing, and an `echo` is what a disabled step leaves behind.
+PRINTING_COMMANDS = ("echo", "printf")
+
 
 def run_scripts(node: Any) -> list[str]:
     """Every `run:` script anywhere inside a parsed workflow fragment.
@@ -134,6 +171,23 @@ def flattened(text: str) -> str:
     return re.sub(r"[\s#]+", " ", text)
 
 
+def executed_lines(script: str) -> list[str]:
+    """The lines of a `run:` script that are commands, in the order they run.
+
+    Continuations are joined, comments are cut, and lines that only print are
+    dropped. What is left is not a shell parse and does not pretend to be — it
+    is the set of lines that could execute something, which is the question
+    every scan below is really asking.
+    """
+    lines: list[str] = []
+    for raw in CONTINUATION.sub(" ", script).splitlines():
+        line = SHELL_COMMENT.sub("", raw).strip()
+        if not line or line.split()[0] in PRINTING_COMMANDS:
+            continue
+        lines.append(line)
+    return lines
+
+
 def wait_arguments(text: str) -> list[list[str]]:
     """The service names passed to each `wait_for_health.sh` call in `text`."""
     invocations: list[list[str]] = []
@@ -144,26 +198,19 @@ def wait_arguments(text: str) -> list[list[str]]:
 
 
 def health_wait_invocations(node: Any) -> list[list[str]]:
-    """The service names passed to each `wait_for_health.sh` call in `node`."""
+    """The service names passed to each executed `wait_for_health.sh` call in `node`.
+
+    Executed, not written: a commented-out wait is not a wait. It reaches the
+    same `executed_lines` the base-file test uses, so the two cannot end up
+    disagreeing about what counts as a command — which is the disagreement that
+    let a commented-out step keep a collection non-empty and prop up the
+    "found any at all" guard below.
+    """
     invocations: list[list[str]] = []
     for script in run_scripts(node):
-        invocations.extend(wait_arguments(CONTINUATION.sub(" ", script)))
+        for line in executed_lines(script):
+            invocations.extend(wait_arguments(line))
     return invocations
-
-
-def command_lines(node: Any) -> list[str]:
-    """Every line of every `run:` script in `node`, in the order the job runs them.
-
-    Order is what makes the difference between "this job waits on three services
-    somewhere" and "this job waits on three services *after starting this
-    particular stack*", and steps are a YAML list, so document order is
-    execution order. Continuations are joined first, so a command split across
-    lines stays one line here.
-    """
-    lines: list[str] = []
-    for script in run_scripts(node):
-        lines.extend(CONTINUATION.sub(" ", script).splitlines())
-    return lines
 
 
 def compose_files_named(flags: str) -> set[str]:
@@ -175,22 +222,26 @@ def compose_files_named(flags: str) -> set[str]:
     return {m.group("path").removeprefix("./") for m in COMPOSE_FILE_FLAG.finditer(flags)}
 
 
-def stack_events(node: Any) -> list[tuple[str, set[str]]]:
-    """Stack starts and health waits, in order, as `(kind, payload)` pairs.
+def script_events(script: str) -> list[tuple[str, set[str]]]:
+    """Stack starts and health waits within one `run:` script, in order.
 
     `("up", {files})` for a compose invocation that starts a stack, with the
-    Compose files it named — an empty set meaning it named none and therefore
-    got the default merged pair. `("wait", {services})` for each
-    `wait_for_health.sh` call.
+    Compose files it named — an empty set meaning it named none and so got the
+    merged default. `("wait", {services})` for each health wait. Within a single
+    line the start is recorded first, which is the only order it could have
+    executed in.
 
-    Both kinds are collected from the same ordered list of command lines rather
-    than from steps, so a job that puts the start and the wait in one `run:`
-    block and a job that splits them across two steps read identically. Within a
-    single line the start is recorded first, which is the only order it could
-    have been executed in.
+    One script at a time, which is a narrowing from the previous version and the
+    answer to reviewer pass 3's structural objection. Reading the whole job as
+    one stream bought the ability to split a start and its wait across two
+    steps, nothing in this repository does that, and the generality was a
+    second surface for exactly the fabrication bug that round found. A pass that
+    starts a stack and then waits on it is one self-contained script here, and
+    saying so in the machinery costs a loud failure if anyone splits it — which
+    is a failure that gets read, unlike the alternative.
     """
     events: list[tuple[str, set[str]]] = []
-    for line in command_lines(node):
+    for line in executed_lines(script):
         for match in COMPOSE_UP.finditer(line):
             events.append(("up", compose_files_named(match.group("flags"))))
         for arguments in wait_arguments(line):
@@ -299,16 +350,28 @@ def test_the_docker_job_waits_on_all_three_after_starting_the_base_file_alone(
     halves of the question the flag raises, which is why it is written that way
     rather than as a membership test or as the absence of the override's name.
 
-    **What is not recognised, deliberately.** `docker compose up --wait` waits
-    natively, and this test does not count it: `wait_for_health.sh` is what the
-    repository standardised on and it is stricter, failing a service that
-    declares no health check at all. If the job ever moves to `--wait` this test
-    will fail, and the answer is to decide which guarantee is wanted rather than
-    to widen the pattern quietly. `COMPOSE_FILE` in the environment is not read
-    either; nothing in this workflow sets it.
+    **The unit is one `run:` script, and the window inside it runs until the
+    next stack start.** So the pass may put its `down -v`, its `up -d` and its
+    wait in any order that works, and may be followed by anything; what it may
+    not do is start the base-file stack and leave the waiting to a later step.
+    That is a narrowing, made in reviewer pass 3, and it costs the ability to
+    split the pass across two steps — nothing here does, and the failure if
+    anyone tries is a red with this docstring attached rather than a silence.
 
-    The window is "until the next stack start", not "in this step", so splitting
-    the start and the wait across two steps is fine and reordering them is not.
+    **What is not recognised, and why that is safe.** `docker compose up --wait`
+    waits natively and does not count, because `wait_for_health.sh` is what this
+    repository standardised on and is stricter — it fails a service that
+    declares no health check at all. `COMPOSE_FILE` in the environment is not
+    read; nothing sets it. A stack started from a Makefile target or a wrapper
+    script would not be seen either.
+
+    Every one of those fails *red*: an idiom this test cannot see is an idiom it
+    cannot find, so the base-file-only pass appears missing and the job fails
+    loudly with the list of what it did find. The failure that has to be
+    engineered against is the opposite one — an event fabricated from text that
+    never executes, which fails green and silently — and that is what
+    `executed_lines` exists for. When you extend this test, keep the asymmetry:
+    be reluctant to *add* events, and relaxed about missing them.
     """
     assert ci_workflow, (
         f"{ci_workflow_path} does not exist or parsed to nothing. The CI pipeline is what "
@@ -324,28 +387,30 @@ def test_the_docker_job_waits_on_all_three_after_starting_the_base_file_alone(
         "for something that is gone."
     )
 
-    events = stack_events(job)
-    starts = [(index, files) for index, (kind, files) in enumerate(events) if kind == "up"]
+    per_script = [script_events(script) for script in run_scripts(job)]
+    starts = [files for events in per_script for kind, files in events if kind == "up"]
     assert starts, (
-        f"The `{DOCKER_JOB}` job never brings a stack up at all, so this test is reading a "
-        "job that has changed shape rather than one missing a wait. Nothing below would "
-        "have anything to look at."
+        f"The `{DOCKER_JOB}` job runs no command that brings a stack up. Either it has "
+        "changed shape, or every such command has been commented out — the second is what "
+        "this assertion is really for, since a job whose steps are all disabled would "
+        "otherwise leave nothing for the rule below to disagree with."
     )
 
     required = set(REQUIRED_SERVICES)
     verified: list[list[str]] = []
     unverified: list[list[str]] = []
-    for index, files in starts:
-        if files != {BASE_COMPOSE_FILE}:
-            continue
-        waited: set[str] = set()
-        for kind, payload in events[index + 1 :]:
-            if kind == "up":
-                break
-            waited |= payload
-        (verified if required <= waited else unverified).append(sorted(waited))
+    for events in per_script:
+        for index, (kind, files) in enumerate(events):
+            if kind != "up" or files != {BASE_COMPOSE_FILE}:
+                continue
+            waited: set[str] = set()
+            for later_kind, payload in events[index + 1 :]:
+                if later_kind == "up":
+                    break
+                waited |= payload
+            (verified if required <= waited else unverified).append(sorted(waited))
 
-    described = [sorted(files) or ["(no -f flag: the merged default)"] for _, files in starts]
+    described = [sorted(files) or ["(no -f flag: the merged default)"] for files in starts]
 
     assert verified, "\n".join(
         [

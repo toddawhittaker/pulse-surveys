@@ -208,6 +208,20 @@ def compose_read_variables() -> set[str]:
 
 
 @pytest.fixture
+def interpolated_variables_in() -> Callable[[Any], set[str]]:
+    """Hand `interpolated_variables` to a test that needs it on one service.
+
+    `compose_read_variables` above answers "what does the whole stack read", and
+    a rule about one service holding one credential needs the same question
+    asked of one subtree. The same walker answers both, so the two cannot end up
+    disagreeing about what counts as reading a variable — `$$` escaped, defaults
+    and error forms unwrapped, commented-out interpolations already discarded by
+    the parser.
+    """
+    return interpolated_variables
+
+
+@pytest.fixture
 def env_example_path() -> Path:
     """Where `.env.example` must live (SPEC §13). Asserted by the test, not here."""
     return ENV_EXAMPLE_PATH

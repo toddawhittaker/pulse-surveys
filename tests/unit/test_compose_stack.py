@@ -97,29 +97,37 @@ The Compose files are parsed in `tests/conftest.py`, unmerged and one at a time,
 which is the whole point of item 1 — `docker compose config` would merge the
 override back in and hide it.
 
-Almost everything below reads the base file, because that is the one every
-deployment runs. One test reads the override as well, and the line between them
-is worth stating precisely, because the original reason for leaving the override
-alone still holds for every other test here.
+Most tests below read the base file, because that is the one every deployment
+runs. The three credential rules read both files, and the line between the two
+groups is worth stating precisely, because the original reason for leaving the
+override alone still holds everywhere else here.
 
 That reason was: judging the override means modelling Compose's merge rules for
 `env_file` and `environment`, and those are not rules to guess at without a
 daemon. It applies to any *relative* question — does this override entry
-overwrite that base entry, is this service still blanking what it inherits — and
-none of those are asked here.
+overwrite that base entry, does this service still publish the port the base
+file gave it — and none of those are asked of the override.
 
-It does not apply to one absolute question: whether any file in the repository
-hands a container a value it must never hold. A non-empty value is delivered
-whichever file writes it, so no merge model is needed to know that writing one is
-wrong. Reviewer pass 2 found that nothing read the override at all while
-`worker` and `beat` configuration had moved into it, and demonstrated the cost:
-one line in the shared `x-development-source` anchor puts the database superuser
-password into all three application containers, with every unit test green. The
-privilege test below cannot catch that and never could — it is relative to `api`,
-and a shared anchor reaches `api` too, so the comparison it makes is between a
-service and itself.
+It does not apply to a question whose answer is the same under every merge. A
+value written in either file is a value some container gets, so "no file may
+write this credential" needs no merge model; nor does "this service must be
+blanked somewhere", since a blank in the base file survives unless the override
+re-supplies, and re-supplying is what the other two rules forbid outright.
+
+Two reviewer passes shaped that. Pass 2 found nothing read the override at all
+while `worker` and `beat` configuration had moved into it: one line in the
+shared `x-development-source` anchor put the superuser password into all three
+application containers with every test green, and the privilege test below could
+never have caught it, being relative to `api` — a shared anchor reaches `api`
+too, so the comparison is between a service and itself. Pass 3 found the same
+hole twice more: the credential travelling inside *another key's value*
+(`ALEMBIC_DATABASE_URL: postgresql://${DB_SUPERUSER}:...`), and a service that
+inherits the whole of `.env` in the override, which the blanking rule was still
+reading the base file to find.
 """
 
+import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -129,6 +137,18 @@ import pytest
 # two are the subject of the rule rather than an incidental pair of variables;
 # a third would be a change to the ADR and should be a deliberate edit here too.
 SUPERUSER_VARIABLES = ("DB_SUPERUSER", "DB_SUPERUSER_PASSWORD")
+
+# The one service that must hold the superuser credential: it is the server that
+# `initdb` creates the role in, and it takes it as `POSTGRES_USER` and
+# `POSTGRES_PASSWORD` (ADR 0009, and `.env.example`'s note on the pair).
+#
+# This is the only exemption by name in this module, and it is here because it
+# cannot be derived. Every route to deriving it — "the service whose image is
+# postgres", "the service that declares POSTGRES_PASSWORD" — names the same
+# thing one step further away and reads as a rule when it is a list of one. A
+# second service needing the credential is an amendment to ADR 0009, and the
+# right way for that to arrive is this constant changing in a reviewed diff.
+CREDENTIAL_OWNING_SERVICE = "db"
 
 # The two services E0-03 adds. Both run the API image and both are compared
 # against `api`, so the service they are compared with is named once too.
@@ -160,17 +180,27 @@ SCHEDULE_FLAGS = ("-s", "--schedule")
 # in one token, relative to now. Bare `-newer` is deliberately absent: it
 # compares one file against another file, which is a comparison but not
 # necessarily against now, and `find -newer /tmp/static-marker` never goes stale.
-NOW_RELATIVE_FILE_PREDICATES = (
-    "-mmin",
-    "-mtime",
-    "-cmin",
-    "-ctime",
-    "-amin",
-    "-atime",
-    "-newermt",
-    "-newerat",
-    "-newerct",
-)
+NOW_RELATIVE_FILE_PREDICATES = ("-mmin", "-mtime", "-cmin", "-ctime", "-amin", "-atime")
+
+# `-newermt` and its siblings sat in that list until reviewer pass 3, and they
+# do not belong there: their reference is an argument, so the token alone says
+# nothing about now. `find <dir> -newermt '2020-01-01'` passed all fourteen
+# tests in this module — a check that reports healthy forever once the file has
+# been written once, which is the exact property bare `-newer` was excluded for
+# three lines above. The comment claimed now-relative and the code did not
+# check it.
+#
+# They count now only when the reference is itself relative to now. `\S+` is
+# enough to capture it: `'-2 minutes'` yields `'-2`, which is relative once the
+# quote comes off, and `'2020-01-01'` yields a year.
+TIMESTAMP_PREDICATE = re.compile(r"-newer[aBcm]?t\s+(?P<reference>\S+)", re.IGNORECASE)
+
+# What makes a `-newerXt` reference now-relative. A leading `-` or `+` is an
+# offset (`-2 minutes`); `now` and `ago` are GNU date's own words for it; `$(`
+# and a backtick are a command substitution, which is how `date` gets called.
+# **This list is the test's choice.** An absolute timestamp is not on it, and
+# that is the point.
+NOW_RELATIVE_REFERENCE_TOKENS = ("now", "ago", "$(", "`")
 
 # Reading the file's own clock: `stat -c %Y`, `find -printf '%T@'`,
 # `os.path.getmtime`, `os.stat(...).st_mtime`.
@@ -416,9 +446,30 @@ def test_api_waits_for_a_healthy_dependency(
     )
 
 
+ComposeDocuments = tuple[tuple[Path, dict[str, Any]], ...]
+ServiceBodies = dict[str, list[tuple[Path, dict[str, Any]]]]
+
+
+def services_across(documents: ComposeDocuments) -> ServiceBodies:
+    """Every service in either Compose file, keyed by name, bodies kept separate.
+
+    Not merged, because merging is the thing this module refuses to model. What
+    is collected is "everything both files say about the service called `worker`",
+    which is enough to ask a question of the form "is this true somewhere" or
+    "is this false anywhere" without deciding which file wins.
+    """
+    collected: ServiceBodies = {}
+    for path, document in documents:
+        for name, body in services_of(document).items():
+            collected.setdefault(name, []).append((path, body))
+    return collected
+
+
 def test_services_inheriting_the_env_file_do_not_hold_the_superuser_credential(
     base_compose_path: Path,
     base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
 ) -> None:
     """A container handed the whole of `.env` has the superuser pair taken back out.
 
@@ -427,44 +478,64 @@ def test_services_inheriting_the_env_file_do_not_hold_the_superuser_credential(
     configuration surface receives the superuser credential along with it and
     has to blank what it must not hold. `environment:` beats `env_file:` on
     every Compose version, and an *empty value* is what removes a variable;
-    omitting the entry leaves whatever `env_file` already set, which is why the
-    check below distinguishes an empty string from an absent key and from a
-    pass-through.
+    omitting the entry leaves whatever `env_file` already set.
 
-    `db` is not exempted and needs no exemption: it declares no `env_file` at
-    all, taking its credentials through explicit `${DB_SUPERUSER:?...}`
-    interpolation instead. So the rule reaches every service that inherits the
-    file, with nothing carved out of it by name. If `db` ever gains an
-    `env_file`, this test fails, and that failure is a question worth answering
-    rather than noise to silence.
+    **Both files, keyed by service name**, since reviewer pass 3. This rule read
+    the base file only, while its own docstring claimed it reached every service
+    with nothing carved out by name — and the override was carved out by
+    accident. A `pgweb` service added there with `env_file: - .env` and no
+    `environment:` block passed the whole suite while holding the credential.
+
+    Reading both files needs no merge model, and the shape of the question is
+    what keeps it out. A service must be blanked *somewhere*: blanking in the
+    base file survives into the merged configuration, so a service that gains an
+    `env_file` in the override and is blanked in the base is safe, and this rule
+    says so rather than demanding the blank be repeated. The other direction —
+    an override that *re-supplies* what the base blanked — is not this rule's to
+    catch and is covered absolutely by the two tests below, which forbid the
+    value outright in either file.
+
+    `db` is not exempted and needs no exemption *here*: it declares no
+    `env_file` in either file, taking what it needs through explicit
+    `${DB_SUPERUSER:?...}` interpolation, which is the subject of the next test
+    and is where its one exemption lives. If `db` ever gains an `env_file`, this
+    test fails, and that failure is a question worth answering rather than noise
+    to silence.
     """
-    assert base_compose, (
-        f"{base_compose_path} does not exist or declares nothing. E0-02 ships the base "
-        "Compose file at the repository root (SPEC §13)."
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
     )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. Both Compose files ship, and a file "
+            "that did not parse contributes no services — which would narrow this rule "
+            "silently rather than fail it."
+        )
 
     inheriting = {
-        name: body for name, body in services_of(base_compose).items() if declares_env_file(body)
+        name: bodies
+        for name, bodies in services_across(documents).items()
+        if any(declares_env_file(body) for _, body in bodies)
     }
 
     assert inheriting, (
-        f"No service in {base_compose_path.name} declares `env_file`, so every service "
-        "satisfies this test trivially and it has stopped checking anything. That may be "
-        "correct — a service that enumerates its variables one by one inherits nothing to "
-        "blank — but it is a change this test cannot interpret on its own. Work out which "
-        "services now receive the superuser pair, and rewrite the rule below to match."
+        "No service in either Compose file declares `env_file`, so every service satisfies "
+        "this test trivially and it has stopped checking anything. That may be correct — a "
+        "service that enumerates its variables one by one inherits nothing to blank — but it "
+        "is a change this test cannot interpret on its own. Work out which services now "
+        "receive the superuser pair, and rewrite the rule below to match."
     )
 
     problems: list[str] = []
-    for name, body in sorted(inheriting.items()):
-        environment = service_environment(body)
+    for name, bodies in sorted(inheriting.items()):
+        inherited_in = sorted(path.name for path, body in bodies if declares_env_file(body))
+        environments = [service_environment(body) for _, body in bodies]
         for variable in SUPERUSER_VARIABLES:
-            if variable not in environment:
-                problems.append(f"`{name}` inherits {variable} from .env and never blanks it")
-            elif environment[variable] != "":
+            if not any(environment.get(variable) == "" for environment in environments):
                 problems.append(
-                    f"`{name}` sets {variable} to {environment[variable]!r}, which supplies "
-                    "a value rather than removing one"
+                    f"`{name}` inherits the whole of .env (in {inherited_in}) and no Compose "
+                    f"file blanks {variable}"
                 )
 
     assert not problems, "\n".join(
@@ -573,6 +644,91 @@ def test_no_compose_file_hands_a_container_the_superuser_credential(
             "COPY ... FROM PROGRAM. Set it to an empty string, or do not name it. If a "
             "service genuinely needs the superuser, that is an amendment to ADR 0009 and an "
             "edit to this test, made on purpose and reviewed as such.",
+        ]
+    )
+
+
+def test_only_the_database_service_interpolates_the_superuser_credential(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+    interpolated_variables_in: Callable[[Any], set[str]],
+) -> None:
+    """The credential does not reach a container under some other name either.
+
+    The rule above asks whether `DB_SUPERUSER` is an environment *key*. That is
+    only one of the ways the value travels, and reviewer pass 3 found the other
+    one by writing the line E0-04 is actually going to want:
+
+        ALEMBIC_DATABASE_URL: postgresql://${DB_SUPERUSER}:${DB_SUPERUSER_PASSWORD}@db:5432/${DB_NAME}
+
+    on the `x-application` anchor. Three containers received the real superuser
+    password, under a key no rule was looking at, with the suite green. ADR
+    0009's bound is about the credential reaching an application container, not
+    about the spelling of the variable it arrives in.
+
+    So this reads *values* rather than keys, and it walks the whole service body
+    rather than an enumerated list of the places a value can hide.
+    `environment:`, `command:`, `build.args`, `labels:`, a `healthcheck` — an
+    enumeration would be a list to keep in step with Compose's schema, and a
+    list nobody re-reads is the failure `docs/MISTAKES.md` entry 1 is mostly
+    made of. A recursive walk needs no maintenance and cannot omit a key that
+    was added later.
+
+    The walker is `interpolated_variables`, the same one that decides which
+    variables `.env.example` must document, so the two cannot disagree about
+    what counts as reading a variable — and it works off the parsed document, so
+    a commented-out interpolation stops counting the moment it stops being one.
+    That last part is right rather than a gap: a `#`-prefixed line in a YAML
+    file is not configuration, which is the exact opposite of a `#`-prefixed
+    line inside a `run:` block, where the text is a comment but the step still
+    ships.
+
+    `db` is exempt, by name, and it is the only exemption in this module — see
+    `CREDENTIAL_OWNING_SERVICE` for why it cannot be derived.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. A file that did not parse holds no "
+            "interpolations, and a search that finds none reports every service clean."
+        )
+
+    bounded = set(SUPERUSER_VARIABLES)
+    owner = services_of(base_compose).get(CREDENTIAL_OWNING_SERVICE) or {}
+    assert bounded & interpolated_variables_in(owner), (
+        f"The `{CREDENTIAL_OWNING_SERVICE}` service interpolates neither of "
+        f"{list(SUPERUSER_VARIABLES)}, which is the one service that has to. Either the "
+        "walker is looking at the wrong thing or it is finding nothing at all, and a rule "
+        "that finds nothing calls every service clean. If the database has genuinely stopped "
+        "taking its credentials this way — a secrets file, say — this test needs rewriting "
+        "around whatever replaced it, not deleting."
+    )
+
+    problems: list[str] = []
+    for path, document in documents:
+        for name, body in sorted(services_of(document).items()):
+            if name == CREDENTIAL_OWNING_SERVICE:
+                continue
+            reached = sorted(bounded & interpolated_variables_in(body))
+            if reached:
+                problems.append(f"{path.name}: `{name}` interpolates {reached}")
+
+    assert not problems, "\n".join(
+        [
+            "A service other than the database reads the superuser credential (ADR 0009):",
+            *problems,
+            "",
+            "It does not matter which key it lands in — a connection URL, a build argument, "
+            "a label — the container holds the password either way, and `db:5432` is "
+            "reachable from all of them over scram. That role bypasses every grant, bypasses "
+            "row-level security, and can run COPY ... FROM PROGRAM. If this is the migration "
+            "identity E0-04 needs, ADR 0009 has a table for who provisions what: amend it, "
+            "then change `CREDENTIAL_OWNING_SERVICE` deliberately.",
         ]
     )
 
@@ -863,6 +1019,24 @@ def schedule_anchors(service: dict[str, Any]) -> set[str]:
     return {anchor for anchor in anchors if "/" in anchor}
 
 
+def now_relative_timestamp_predicates(command: str) -> list[str]:
+    """`-newerXt` predicates in `command` whose reference is relative to now.
+
+    One that names a fixed date is not freshness — it is "has this file ever
+    been written", asked in a way that looks like freshness — so it is not
+    returned, and a command whose only time-awareness is such a predicate fails
+    the assertion below.
+    """
+    found: list[str] = []
+    for match in TIMESTAMP_PREDICATE.finditer(command):
+        reference = match.group("reference").strip("'\"").lower()
+        relative = reference.startswith(("-", "+"))
+        relative = relative or any(token in reference for token in NOW_RELATIVE_REFERENCE_TOKENS)
+        if relative:
+            found.append(match.group(0))
+    return found
+
+
 def healthcheck_command(healthcheck: dict[str, Any]) -> str:
     """A service's health check as one string, in either of Compose's spellings."""
     declared = healthcheck.get("test")
@@ -898,14 +1072,21 @@ def test_the_beat_health_check_reads_the_schedule_file(
       - the command compares that file's age against now, which is what `test -f`
         fails, and what `stat <file>` fails too.
 
-    That second one is narrower than it was, and reviewer pass 2 is why. It
-    previously accepted any mention of `stat` or `date`, so
-    `stat /var/lib/celery/beat-schedule` passed: it reads the file's clock,
-    compares it to nothing, and reports healthy on a schedule last written in
-    March. Reading a clock is not checking a clock. The rule now is a find
-    predicate carrying its own now-relative threshold, or a file-time reader
-    *and* a wall-clock reader together — see the three lists at the top of this
-    module.
+    That second one is narrower than it was, twice over, and both narrowings
+    were bought by someone breaking it. Reviewer pass 2: it accepted any mention
+    of `stat` or `date`, so `stat /var/lib/celery/beat-schedule` passed — it
+    reads the file's clock, compares it to nothing, and reports healthy on a
+    schedule last written in March. Reading a clock is not checking a clock.
+    Reviewer pass 3: `find <dir> -newermt '2020-01-01'` passed, because
+    `-newermt` was listed as a now-relative predicate when its reference is an
+    argument that may be any date at all — the same "never goes stale" property
+    bare `-newer` had been excluded for, admitted three lines below the comment
+    explaining the exclusion.
+
+    The rule now is a find predicate that carries its own now-relative threshold
+    (`-mmin -2`), or a `-newerXt` whose *reference* is relative to now, or a
+    file-time reader and a wall-clock reader together — see the lists at the top
+    of this module.
 
     Neither assertion pins the command. The path is read out of what beat itself
     declares rather than written down here, so renaming the file or moving the
@@ -970,6 +1151,7 @@ def test_the_beat_health_check_reads_the_schedule_file(
 
     lowered = command.lower()
     predicates = sorted(token for token in NOW_RELATIVE_FILE_PREDICATES if token in lowered)
+    predicates += now_relative_timestamp_predicates(lowered)
     file_clock = sorted(token for token in FILE_TIME_READERS if token in lowered)
     wall_clock = sorted(token for token in CLOCK_READERS if token in lowered)
 
