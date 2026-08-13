@@ -13,13 +13,16 @@ The fields split into two groups, and the split is the point:
   production. The institution timezone is in this group because survey windows
   are timezone-bound (§3.1): a baked-in `America/New_York` opens the window at
   the wrong hour elsewhere and nothing says so.
-* **Values that carry a default** do so for one of two opposite reasons, and
-  the difference matters to whoever reads them next. The n-threshold is
-  settled: §4 makes it "configurable (default 5)", and a spec-given default is
-  not a silent fallback. The benchmark minimums are *not* settled — §11 open
-  question 1 leaves the numbers open and offers 3 and 15 as suggested starting
-  points — and they are defaulted precisely so that answering that question
-  stays a configuration change rather than a code change.
+* **Everything else carries a default** and is therefore optional.
+
+Why a particular setting has a default is written at the field and nowhere
+else. Three different reasons are in play — the spec settles the value, the
+spec has deliberately *not* settled it, or the spec never spoke to it — and
+they are easy to conflate because all three produce the same line of code.
+Every attempt so far to compress them into one summarizing sentence has
+produced a claim about the spec that the spec does not make, in this docstring,
+in the group header below, and in `.env.example`. The per-field comments have
+been right every time. They carry it alone now.
 
 **A credential never reaches a log through this class**, and there are two ways
 in, so there are two guarantees. `DATABASE_URL` and `REDIS_URL` carry passwords
@@ -205,16 +208,30 @@ class Settings(BaseSettings):
     )
     environment: str = Field(description="Deployment name, reported by /healthz. Free-form.")
 
-    # --- settled by the spec: defaulted --------------------------------------
+    # --- defaulted: optional, each for its own reason -------------------------
+    #
+    # The reason is on the field. It is not the same reason twice, and no
+    # heading here summarizes it — see the module docstring for why not.
+
+    # The spec never spoke to this one. §6.3 enumerates the configuration
+    # surface and no log level is in it; no other section mentions one. INFO is
+    # this project's choice, defaulted because a log level is not
+    # deployment-specific in the way the required group above is.
     log_level: str = Field(default="INFO", description="Root log level.")
+
+    # Settled by the spec: §4 makes the threshold "configurable (default 5)".
+    # A spec-given default is not a silent fallback.
     n_threshold_default: int = Field(
         default=5,
         ge=1,
         description="Responses below which raw comments stay hidden (§4).",
     )
-    # §11 open question 1: the benchmark mechanism is specced (§5.1) and the
-    # numbers are not. 3 and 15 are the suggested starting values, not settled
-    # ones — expect them to move once there is real data behind them.
+
+    # Deliberately *not* settled by the spec. §11 open question 1: the benchmark
+    # mechanism is specced (§5.1) and the numbers are not. 3 and 15 are the
+    # suggested starting values, not settled ones — expect them to move once
+    # there is real data behind them. Defaulted so that answering §11 stays a
+    # configuration change rather than a code change.
     benchmark_min_sections_default: int = Field(
         default=3,
         ge=1,
