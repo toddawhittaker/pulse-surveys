@@ -31,7 +31,7 @@ break toward the more expensive consequence.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 1**
+**Caught: 2**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -66,7 +66,7 @@ never written and the one that drifted out from under you.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 1**
+**Caught: 2**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -168,7 +168,7 @@ run `gh pr diff <n> --name-only` and check it against what you think you changed
 
 ## 6. Shell expansion inside a commit message
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** `git commit -m "…$$POSTGRES_USER…"` in double quotes. The
 shell expanded `$$` to its process id.
@@ -187,7 +187,7 @@ change. History is not force-pushed here, so it cannot be corrected.
 
 ## 7. A verification window equal to the thing's own debounce
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** Checking that a drifted database password made the container
 report unhealthy, the poll ran for exactly 60 seconds. Docker needs `retries: 12`
@@ -206,7 +206,7 @@ the debounce window is not a result.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and
@@ -294,3 +294,37 @@ wasteful, say so in the pull request and let the merge decision be made knowing
 it — the judgment is fine, the silence is not. This applies to the coordinating
 session too: verifying a fix yourself is evidence it does what you asked for, not
 evidence it is right.
+
+---
+
+## 11. A failure in another process, invisible in the traceback that reported it
+
+**Caught: 0**
+
+**What happened.** E0-03's round-trip test timed out after thirty seconds
+waiting for a task result. Its traceback pointed at `AsyncResult.get()` and said
+nothing else: the worker had started, the broker was the one the test itself
+started, and every assertion before the wait had passed. The worker runs in a
+thread with `WORKER_LOGLEVEL=error`, so what actually happened was not printed.
+Rerunning with `WORKER_LOGLEVEL=info` showed the task had *succeeded* and then
+died storing its result — `pyproject.toml`'s `error::DeprecationWarning` turned
+redis-py 8.1.0's notice about celery's `setex` call into an exception inside the
+task trace, so the result was never written.
+
+**Root cause.** A failure that happens in another thread or another container
+does not appear in the traceback of the thing that was waiting for it. What the
+waiter reports is the *absence* of an answer, which is the same shape whatever
+the cause — a broker that is unreachable, a worker that is not running, and a
+worker that ran perfectly and could not save its answer all read as a timeout.
+
+**Consequence.** Half an hour, and a wrong first hypothesis: the obvious reading
+of "the result never came back" is that the broker or the backend is
+misconfigured. Raising the timeout, changing the result backend, or adding a
+retry would each have looked reasonable and fixed nothing.
+
+**Rule.** When something on the other side of a queue, a socket, or a container
+boundary does not answer, get *its* log before theorizing about the channel. Turn
+its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
+`docker inspect` for a health check's output) and reproduce outside the harness
+if the harness is what is hiding it. A timeout is the absence of evidence, not
+evidence.
