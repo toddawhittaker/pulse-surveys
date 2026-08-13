@@ -25,9 +25,19 @@ service that declares no `HEALTHCHECK`, which is deliberate.
   change, so E0-04 autogenerates against the version that actually ships.
 - `docker-compose.override.yml` for development only: source bind-mount, hot
   reload, exposed ports.
-- A `HEALTHCHECK` on `api` that hits `/healthz`, plus health checks on `db`
-  (`pg_isready`) and `redis` (`redis-cli ping`). `api` declares
+- A `HEALTHCHECK` on `api` that hits `/healthz`, plus health checks on `db` and
+  `redis` (`redis-cli ping`). `api` declares
   `depends_on: {db: {condition: service_healthy}}`.
+
+  This ticket originally specified `pg_isready` for `db`. It ships an
+  authenticating `psql` probe instead, because `pg_isready` never authenticates:
+  it reports "accepting connections" for a role and a database that do not
+  exist, so a volume initialised under different credentials reported healthy
+  and the failure moved to E0-04's first connection. The probe also names a host
+  rather than using the local socket, which both reaches the `scram-sha-256`
+  rule in `pg_hba.conf` and stops a socket probe reporting healthy against the
+  temporary server `initdb` runs. Raised by the E0-02 security review; the
+  reasoning is at `docker-compose.yml`'s `db.healthcheck`.
 - Named volume for Postgres data; `docker compose down -v` gives a clean slate.
 - Enable the CI `docker` job, calling `wait_for_health.sh api` only — worker and
   beat arrive in E0-03 and the argument list grows there.

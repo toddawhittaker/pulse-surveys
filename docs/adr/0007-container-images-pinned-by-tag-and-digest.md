@@ -98,12 +98,22 @@ nobody can state gets applied inconsistently within two tickets.
   would be "visible in a diff on both sides", and that was wrong**: the
   mechanism that will cause the drift is a Dependabot `docker-compose` pull
   request, which by construction changes `docker-compose.yml` and nothing else,
-  so it shows one side only. Verified by mutation — the two references can be
-  set to different digests with every gate green. The safety net is a test
-  asserting the two are identical, comparing `services.postgres.image` in
-  `.github/workflows/ci.yml` against `services.db.image` in
-  `docker-compose.yml`. E0-04 activates that gate and is the natural place to reconsider
-  whether the job should start the Compose `db` service instead, which would
+  so it shows one side only. An earlier version of this bullet also claimed the
+  drift was unguarded and "verified by mutation"; that was true when written and
+  stopped being true two commits later, which is the hazard this whole
+  consequence is about.
+- **The agreement is now enforced**, by
+  `tests/unit/test_image_pins_agree.py`. Read the test rather than this
+  paragraph before changing it: it deliberately names no job and no service,
+  collecting every Postgres reference in either document wherever it sits and
+  asserting they are one string, so renaming the job costs nothing and adding a
+  second, different Postgres fails. It also asserts tag *and* digest in the same
+  test, because two files agreeing on a bare `postgres:17` would be agreeing
+  about something mutable — enforcing agreement alone would quietly record the
+  weaker rule as the one that holds. Adding a Postgres reference anywhere means
+  it must match, which is the point.
+- **E0-04 activates the drift gate** and is the natural place to reconsider
+  whether that job should start the Compose `db` service instead, which would
   delete the second reference rather than maintain it.
 - **This ADR does not govern the digests themselves.** They are values in the
   files that name them, and re-resolving one is not a decision.

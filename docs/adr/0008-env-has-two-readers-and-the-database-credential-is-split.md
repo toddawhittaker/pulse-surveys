@@ -133,13 +133,15 @@ separation nothing needs.
 **An entrypoint shim on `db` that parses `DATABASE_URL` in shell.** The only
 route that keeps `.env.example` to exactly the `Settings` fields, and it fails
 mechanically, not merely on taste. Variables exported by a custom entrypoint
-live in that process; the `CMD-SHELL pg_isready -U "$POSTGRES_USER"` probe runs
-as a separate exec that inherits the container's *configured* environment, which
-would not contain them. The probe would need its own copy of the parser, or
-would silently ask about a `postgres` role this stack never creates — a health
-check that passes while meaning nothing, under a CI gate
-(`scripts/ci/wait_for_health.sh`) built entirely on it meaning something. It
-also puts hand-rolled string slicing on the credential path.
+live in that process; the `db` health check runs as a separate exec that
+inherits the container's *configured* environment, which would not contain them.
+That was argued when the probe was `pg_isready` and the shim's failure was a
+check silently asking about a role this stack never creates. The probe is now an
+authenticating `psql` command, and the argument gets stronger rather than
+weaker: it needs a username, a database, and a password that the shim would have
+derived and not exported, so the check would fail outright on a healthy server —
+under a CI gate (`scripts/ci/wait_for_health.sh`) built entirely on it meaning
+something. The shim also puts hand-rolled string slicing on the credential path.
 
 ## Consequences
 
