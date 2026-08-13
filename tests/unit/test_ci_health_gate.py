@@ -367,11 +367,20 @@ def test_the_docker_job_waits_on_all_three_after_starting_the_base_file_alone(
 
     Every one of those fails *red*: an idiom this test cannot see is an idiom it
     cannot find, so the base-file-only pass appears missing and the job fails
-    loudly with the list of what it did find. The failure that has to be
-    engineered against is the opposite one — an event fabricated from text that
-    never executes, which fails green and silently — and that is what
-    `executed_lines` exists for. When you extend this test, keep the asymmetry:
-    be reluctant to *add* events, and relaxed about missing them.
+    loudly with the list of what it did find.
+
+    **The opposite direction is the dangerous one, and it is not closed.** An
+    event fabricated from text that never executes fails green and silently.
+    `executed_lines` closes the two spellings that have actually occurred — a
+    shell comment, and a line that only prints — and it does not close the
+    class. A start inside `if false; then ... fi`, one inside a heredoc body,
+    and one in a step carrying a `if:` condition that is false all still count
+    as executed here, because this is a line scanner and not a shell. Chasing
+    those with more parsing is deliberately not the plan: each would add
+    machinery whose own blind spots are the same shape. What holds instead is
+    the rule for anyone extending this — be reluctant to *add* events, relaxed
+    about missing them — and the fact that a disabled step is visible in review
+    in a way a missing assertion is not.
     """
     assert ci_workflow, (
         f"{ci_workflow_path} does not exist or parsed to nothing. The CI pipeline is what "

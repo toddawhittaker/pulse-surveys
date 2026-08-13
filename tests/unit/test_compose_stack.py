@@ -98,32 +98,53 @@ which is the whole point of item 1 — `docker compose config` would merge the
 override back in and hide it.
 
 Most tests below read the base file, because that is the one every deployment
-runs. The three credential rules read both files, and the line between the two
-groups is worth stating precisely, because the original reason for leaving the
-override alone still holds everywhere else here.
+runs. The credential rules read both files, and the line between the two groups
+is worth stating precisely, because the original reason for leaving the override
+alone still holds everywhere else here.
 
-That reason was: judging the override means modelling Compose's merge rules for
-`env_file` and `environment`, and those are not rules to guess at without a
-daemon. It applies to any *relative* question — does this override entry
-overwrite that base entry, does this service still publish the port the base
-file gave it — and none of those are asked of the override.
+That reason was: judging the override means modelling Compose's merge rules, and
+those are not rules to guess at without a daemon. It applies to any *relative*
+question — does this override entry overwrite that base entry, does this service
+still publish the port the base file gave it — and none of those are asked of
+the override.
 
 It does not apply to a question whose answer is the same under every merge. A
-value written in either file is a value some container gets, so "no file may
-write this credential" needs no merge model; nor does "this service must be
-blanked somewhere", since a blank in the base file survives unless the override
-re-supplies, and re-supplying is what the other two rules forbid outright.
+value written in either file is a value some container gets, so "nothing may
+read this credential" needs no merge model.
 
-Two reviewer passes shaped that. Pass 2 found nothing read the override at all
-while `worker` and `beat` configuration had moved into it: one line in the
-shared `x-development-source` anchor put the superuser password into all three
-application containers with every test green, and the privilege test below could
-never have caught it, being relative to `api` — a shared anchor reaches `api`
-too, so the comparison is between a service and itself. Pass 3 found the same
-hole twice more: the credential travelling inside *another key's value*
-(`ALEMBIC_DATABASE_URL: postgresql://${DB_SUPERUSER}:...`), and a service that
-inherits the whole of `.env` in the override, which the blanking rule was still
-reading the base file to find.
+**Where the credential rules come from, and why they now close a set rather than
+enumerate places to look.** Four reviewer passes each found the same hole one
+spelling further out. Pass 2: nothing read the override at all, so one line in a
+shared anchor put the superuser password into three containers with every test
+green. Pass 3: the credential travelling inside another key's *value*
+(`ALEMBIC_DATABASE_URL: postgresql://${DB_SUPERUSER}:...`), and a service
+inheriting the whole of `.env` in the override. Pass 4: one hop of indirection
+through `.env` itself, and — worse — that the pass-3 fix had *weakened* the
+blanking rule, because "blanked in either document" is unsound in one direction.
+
+The verdict was that this was structural rather than bad luck: every guard was
+anchored to a hand-picked subtree of a hand-picked pair of files, so each round
+added one more place to look and the next spelling was always just outside it.
+`labels`, then `extends`, then `include`, then top-level `secrets`. So the
+strategy changed, on Todd's ruling, and the shape below is the result:
+
+  - **The document is walked whole**, minus the one exempt service, rather than
+    service by service. Top-level sections, anchors, build arguments and labels
+    are covered by not being excluded, which is the opposite of covering them by
+    being listed.
+  - **Variables are resolved transitively through `.env.example`** before the
+    comparison, because Compose expands `${...}` inside dotenv values and the
+    repository already depends on that for `DATABASE_URL`.
+  - **The set of top-level keys is closed**, and `extends` is refused outright.
+    Those two are what make the first two sound: `include` pulls in a file
+    nothing here parses, a top-level `secrets` entry names a variable without
+    interpolating it, and `extends: {service: db}` makes the one exemption
+    transitive. Each is now a red that says "extend this module first" rather
+    than a spelling that slips past.
+
+The asymmetry between the two files is load-bearing in one rule and stated
+there: a blank in the base file survives into every deployment, and a blank in
+the override exists only where the override is read.
 """
 
 import re
@@ -149,6 +170,23 @@ SUPERUSER_VARIABLES = ("DB_SUPERUSER", "DB_SUPERUSER_PASSWORD")
 # second service needing the credential is an amendment to ADR 0009, and the
 # right way for that to arrive is this constant changing in a reviewed diff.
 CREDENTIAL_OWNING_SERVICE = "db"
+
+# The top-level sections these two Compose files may declare. Not a style
+# preference: the credential rules walk both documents whole, which makes them
+# complete over what is written here and blind to a section that moves
+# configuration into another file (`include:`) or names a variable without
+# interpolating it (`secrets:`, `configs:`). Each of those was a review finding
+# in turn, which is why the answer is a closed set rather than three more cases.
+#
+# `name`, `services`, `volumes` and `networks` are here because they are what
+# these files use and because a rule that walks values covers them. Anything
+# else is a deliberate edit to this module, made in the same change.
+ALLOWED_TOP_LEVEL_KEYS = ("name", "services", "volumes", "networks")
+
+# Compose gives `x-…` no meaning of its own, so an extension field is inert
+# until something merges it — and it is walked like every other value, so its
+# contents are not exempt from anything. The anchors live here.
+EXTENSION_FIELD_PREFIX = "x-"
 
 # The two services E0-03 adds. Both run the API image and both are compared
 # against `api`, so the service they are compared with is named once too.
@@ -480,20 +518,33 @@ def test_services_inheriting_the_env_file_do_not_hold_the_superuser_credential(
     every Compose version, and an *empty value* is what removes a variable;
     omitting the entry leaves whatever `env_file` already set.
 
-    **Both files, keyed by service name**, since reviewer pass 3. This rule read
-    the base file only, while its own docstring claimed it reached every service
-    with nothing carved out by name — and the override was carved out by
-    accident. A `pgweb` service added there with `env_file: - .env` and no
+    **Both files, keyed by service name, and asymmetrically.** Reviewer pass 3
+    found that this rule read the base file only, while its own docstring
+    claimed it reached every service with nothing carved out by name — a
+    `pgweb` service added to the override with `env_file: - .env` and no
     `environment:` block passed the whole suite while holding the credential.
 
-    Reading both files needs no merge model, and the shape of the question is
-    what keeps it out. A service must be blanked *somewhere*: blanking in the
-    base file survives into the merged configuration, so a service that gains an
-    `env_file` in the override and is blanked in the base is safe, and this rule
-    says so rather than demanding the blank be repeated. The other direction —
-    an override that *re-supplies* what the base blanked — is not this rule's to
-    catch and is covered absolutely by the two tests below, which forbid the
-    value outright in either file.
+    Pass 4 then found that the fix for that was a *regression*, and the reason is
+    worth keeping in front of anyone who edits this rule. The fix said a service
+    must be blanked *somewhere*. The two files are not symmetric, so that is
+    sound in one direction only: a blank in the base file is in every deployment,
+    while a blank in the override is absent from the stack the base file runs
+    alone — which is every real deployment and CI's own base-file-only pass.
+    Moving the two blanking lines out of the base anchor and into the override —
+    the natural "tidy the anchor" edit — put the real password into `api`,
+    `worker` and `beat` under `docker compose -f docker-compose.yml config`, with
+    73 tests passing and with the *previous* version of this rule catching it.
+
+    So the rule is asymmetric, and each half says what it is protecting:
+
+      - `env_file` declared **in the base file** must be blanked **in the base
+        file**, because that is the configuration a deployment reads.
+      - `env_file` declared **only in the override** may be blanked in either,
+        because the base-alone stack inherits nothing there to blank.
+
+    The other direction — an override that *re-supplies* what the base blanked —
+    is not this rule's to catch and is covered absolutely by the tests below,
+    which forbid the value outright in either file.
 
     `db` is not exempted and needs no exemption *here*: it declares no
     `env_file` in either file, taking what it needs through explicit
@@ -529,14 +580,37 @@ def test_services_inheriting_the_env_file_do_not_hold_the_superuser_credential(
 
     problems: list[str] = []
     for name, bodies in sorted(inheriting.items()):
-        inherited_in = sorted(path.name for path, body in bodies if declares_env_file(body))
-        environments = [service_environment(body) for _, body in bodies]
-        for variable in SUPERUSER_VARIABLES:
-            if not any(environment.get(variable) == "" for environment in environments):
+        in_base = [body for path, body in bodies if path == base_compose_path]
+        blanked_in_base = {
+            variable: any(service_environment(body).get(variable) == "" for body in in_base)
+            for variable in SUPERUSER_VARIABLES
+        }
+        blanked_anywhere = {
+            variable: any(service_environment(body).get(variable) == "" for _, body in bodies)
+            for variable in SUPERUSER_VARIABLES
+        }
+
+        if any(declares_env_file(body) for body in in_base):
+            for variable in SUPERUSER_VARIABLES:
+                if blanked_in_base[variable]:
+                    continue
+                note = ""
+                if blanked_anywhere[variable]:
+                    note = (
+                        " — the override blanks it, which does not help: the base file is what "
+                        "every deployment runs, and what CI's base-file-only pass runs alone"
+                    )
                 problems.append(
-                    f"`{name}` inherits the whole of .env (in {inherited_in}) and no Compose "
-                    f"file blanks {variable}"
+                    f"`{name}` inherits the whole of .env in {base_compose_path.name}, which "
+                    f"does not blank {variable}{note}"
                 )
+        else:
+            for variable in SUPERUSER_VARIABLES:
+                if not blanked_anywhere[variable]:
+                    problems.append(
+                        f"`{name}` inherits the whole of .env in "
+                        f"{override_compose_path.name} and neither file blanks {variable}"
+                    )
 
     assert not problems, "\n".join(
         [
@@ -648,45 +722,122 @@ def test_no_compose_file_hands_a_container_the_superuser_credential(
     )
 
 
-def test_only_the_database_service_interpolates_the_superuser_credential(
+def document_without(document: dict[str, Any], service_name: str) -> dict[str, Any]:
+    """The parsed document with one service's subtree taken out.
+
+    So the rule below can be "nothing in this file reads the credential" with a
+    single exception carved out structurally, instead of a loop that has to
+    remember to look everywhere a value can sit. Everything else in the document
+    — other services, top-level sections, the anchors — stays in.
+    """
+    remainder = {key: value for key, value in document.items() if key != "services"}
+    remainder["services"] = {
+        name: body for name, body in services_of(document).items() if name != service_name
+    }
+    return remainder
+
+
+def transitively_read(
+    node: Any,
+    walker: Callable[[Any], set[str]],
+    values: dict[str, str],
+) -> set[str]:
+    """Every variable `node` reads, following `.env.example` values one hop at a time.
+
+    Compose's dotenv loader expands `${...}` inside the values in `.env`, and
+    this repository already depends on that: `DATABASE_URL` is assembled from
+    `DB_APP_USER` and `DB_APP_PASSWORD` that way. So a Compose file that names
+    `${SUPERUSER_DATABASE_URL}` reads whatever *that* entry is built from, and a
+    rule comparing only the name spelled in the Compose file is looking one
+    level above where the credential is.
+
+    Reviewer pass 4 found exactly that, spelled the way someone spells it after
+    being told not to put `${DB_SUPERUSER}` in the Compose file directly — which
+    makes the next reader of the previous fix its most likely author.
+
+    One hop is followed at a time to a fixpoint, so a chain of any length is
+    covered and a cycle terminates.
+
+    **`.env.example` is the map, and the map has to be complete for this to be
+    sound.** It is documentation, not the deployed file, so a name it does not
+    carry resolves to nothing here and reads as clean — while the operator's
+    real `.env` sets it to whatever it likes. What closes that is
+    `test_env_example_sync.py::test_every_variable_the_compose_files_interpolate_is_documented`,
+    which refuses an interpolation of an undocumented name.
+
+    That test exists because this sentence used to assert it and it was not
+    true. The claim was written here as the premise this walk rests on, three
+    tickets after the direction it names had quietly not been implemented, and
+    the suite stayed green through the exact indirection it was supposed to
+    stop. Citing a test as a guarantee is citing a mechanism; run it against the
+    case you say it catches before you write the sentence — `docs/MISTAKES.md`
+    entry 9. The interlock is real now. It was prose then.
+    """
+    found = set(walker(node))
+    queue = list(found)
+    while queue:
+        name = queue.pop()
+        for other in walker(values.get(name, "")) - found:
+            found.add(other)
+            queue.append(other)
+    return found
+
+
+def test_nothing_outside_the_database_service_reads_the_superuser_credential(
     base_compose_path: Path,
     base_compose: dict[str, Any],
     override_compose_path: Path,
     override_compose: dict[str, Any],
+    documented_env: dict[str, str],
     interpolated_variables_in: Callable[[Any], set[str]],
 ) -> None:
-    """The credential does not reach a container under some other name either.
+    """The credential does not reach a container under some other name, or via `.env`.
 
     The rule above asks whether `DB_SUPERUSER` is an environment *key*. That is
-    only one of the ways the value travels, and reviewer pass 3 found the other
-    one by writing the line E0-04 is actually going to want:
+    one of the ways the value travels and not the only one, and two reviewer
+    passes found the others by writing the line E0-04 is actually going to want:
 
         ALEMBIC_DATABASE_URL: postgresql://${DB_SUPERUSER}:${DB_SUPERUSER_PASSWORD}@db:5432/${DB_NAME}
 
-    on the `x-application` anchor. Three containers received the real superuser
-    password, under a key no rule was looking at, with the suite green. ADR
-    0009's bound is about the credential reaching an application container, not
-    about the spelling of the variable it arrives in.
+    and then, once that was caught, the same thing one hop further out — a
+    Compose file naming `${SUPERUSER_DATABASE_URL}` and `.env.example` building
+    that entry out of the pair. Both put the real password in three containers
+    with the suite green. ADR 0009's bound is about the credential reaching an
+    application container; it is not about the spelling of the variable it
+    arrives in, or about how many hops it took.
 
-    So this reads *values* rather than keys, and it walks the whole service body
-    rather than an enumerated list of the places a value can hide.
-    `environment:`, `command:`, `build.args`, `labels:`, a `healthcheck` — an
-    enumeration would be a list to keep in step with Compose's schema, and a
-    list nobody re-reads is the failure `docs/MISTAKES.md` entry 1 is mostly
-    made of. A recursive walk needs no maintenance and cannot omit a key that
-    was added later.
+    So this rule is shaped to have no edge to step past:
+
+      - it reads *values* rather than keys;
+      - it walks the **whole document** with one service removed, rather than a
+        list of the places a value can hide. `environment:`, `command:`,
+        `build.args`, `labels:`, a top-level `secrets:` block, an anchor nothing
+        has merged yet — all covered by not being excluded. An enumeration would
+        be a list to keep in step with Compose's schema, and a list nobody
+        re-reads is what `docs/MISTAKES.md` entry 1 is mostly made of;
+      - it resolves names through `.env.example` transitively first.
+
+    Two other tests hold the edges this one cannot see on its own, and they are
+    the reason it is sound rather than merely wide: `include` and top-level
+    `secrets` are refused by the closed-set rule below, and `extends` is refused
+    outright — otherwise `extends: {service: db}` would inherit the exemption,
+    and its cross-file form would put the payload in a document nothing here
+    opens.
 
     The walker is `interpolated_variables`, the same one that decides which
     variables `.env.example` must document, so the two cannot disagree about
-    what counts as reading a variable — and it works off the parsed document, so
-    a commented-out interpolation stops counting the moment it stops being one.
-    That last part is right rather than a gap: a `#`-prefixed line in a YAML
-    file is not configuration, which is the exact opposite of a `#`-prefixed
-    line inside a `run:` block, where the text is a comment but the step still
-    ships.
+    what counts as reading a variable. It works off the parsed document, so a
+    commented-out interpolation stops counting the moment it stops being one —
+    right rather than a gap, because a `#` line in a YAML file is not
+    configuration. (That is the exact opposite of a `#` line inside a workflow's
+    `run:` block, where the text is a comment and the step still ships. The two
+    are at different layers; `test_ci_health_gate.py` says so at length.)
 
     `db` is exempt, by name, and it is the only exemption in this module — see
-    `CREDENTIAL_OWNING_SERVICE` for why it cannot be derived.
+    `CREDENTIAL_OWNING_SERVICE` for why it cannot be derived. The exemption is
+    the service body and nothing else: an anchor at the top level that holds the
+    credential is flagged even if only `db` merges it, because the top level is
+    one `<<:` away from every service. Put it in `services.db` directly.
     """
     documents = (
         (base_compose_path, base_compose),
@@ -695,40 +846,185 @@ def test_only_the_database_service_interpolates_the_superuser_credential(
     for path, document in documents:
         assert document, (
             f"{path} does not exist or declares nothing. A file that did not parse holds no "
-            "interpolations, and a search that finds none reports every service clean."
+            "interpolations, and a search that finds none reports every file clean."
         )
+    assert documented_env, (
+        ".env.example is missing or parsed to nothing, so the transitive step below resolves "
+        "no names at all and this rule silently degrades to the one that reviewer pass 4 "
+        "broke — the one that sees `${SUPERUSER_DATABASE_URL}` and asks no further."
+    )
 
+    values = {name.upper(): value for name, value in documented_env.items()}
     bounded = set(SUPERUSER_VARIABLES)
+
+    def reads(node: Any) -> set[str]:
+        return transitively_read(node, interpolated_variables_in, values)
+
     owner = services_of(base_compose).get(CREDENTIAL_OWNING_SERVICE) or {}
-    assert bounded & interpolated_variables_in(owner), (
-        f"The `{CREDENTIAL_OWNING_SERVICE}` service interpolates neither of "
+    assert bounded & reads(owner), (
+        f"The `{CREDENTIAL_OWNING_SERVICE}` service reads neither of "
         f"{list(SUPERUSER_VARIABLES)}, which is the one service that has to. Either the "
         "walker is looking at the wrong thing or it is finding nothing at all, and a rule "
-        "that finds nothing calls every service clean. If the database has genuinely stopped "
+        "that finds nothing calls every file clean. If the database has genuinely stopped "
         "taking its credentials this way — a secrets file, say — this test needs rewriting "
         "around whatever replaced it, not deleting."
     )
 
     problems: list[str] = []
     for path, document in documents:
-        for name, body in sorted(services_of(document).items()):
-            if name == CREDENTIAL_OWNING_SERVICE:
-                continue
-            reached = sorted(bounded & interpolated_variables_in(body))
-            if reached:
-                problems.append(f"{path.name}: `{name}` interpolates {reached}")
+        reached = sorted(bounded & reads(document_without(document, CREDENTIAL_OWNING_SERVICE)))
+        if not reached:
+            continue
+        # Attribution for the message only. The assertion is about the document,
+        # so a credential sitting in a top-level section or an unmerged anchor
+        # still fails with nothing named here — which is why the fallback says
+        # where else to look rather than "no services".
+        culprits = sorted(
+            name
+            for name, body in services_of(document).items()
+            if name != CREDENTIAL_OWNING_SERVICE and bounded & reads(body)
+        )
+        where = culprits or ["outside any service — a top-level section, or an anchor"]
+        problems.append(f"{path.name}: {reached} reaches {where}")
 
     assert not problems, "\n".join(
         [
-            "A service other than the database reads the superuser credential (ADR 0009):",
+            "Something other than the database reads the superuser credential (ADR 0009):",
             *problems,
             "",
             "It does not matter which key it lands in — a connection URL, a build argument, "
-            "a label — the container holds the password either way, and `db:5432` is "
-            "reachable from all of them over scram. That role bypasses every grant, bypasses "
-            "row-level security, and can run COPY ... FROM PROGRAM. If this is the migration "
-            "identity E0-04 needs, ADR 0009 has a table for who provisions what: amend it, "
-            "then change `CREDENTIAL_OWNING_SERVICE` deliberately.",
+            "a label — or how many `.env` entries it came through: the container holds the "
+            "password either way, and `db:5432` is reachable from all of them over scram. "
+            "That role bypasses every grant, bypasses row-level security, and can run "
+            "COPY ... FROM PROGRAM. If this is the migration identity E0-04 needs, ADR 0009 "
+            "has a table for who provisions what: amend it, then change "
+            "`CREDENTIAL_OWNING_SERVICE` deliberately.",
+        ]
+    )
+
+
+def test_neither_compose_file_uses_a_top_level_section_this_module_cannot_read(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """The set of top-level keys is closed, so a new one is a decision and not a slip.
+
+    This is the rule that stops the credential tests being a list of places
+    somebody thought of. They walk both parsed documents whole, so they cover
+    every section that *is* in these two files — and cover nothing at all about
+    a section that moves the configuration somewhere else, or that names a
+    variable without interpolating it. Three live examples:
+
+      - `include:` pulls in another Compose file entirely. Nothing in this module
+        opens it, so everything below it is unread.
+      - a top-level `secrets:` entry can be sourced from `environment:
+        DB_SUPERUSER_PASSWORD` — the variable named as a plain value, with no
+        `${...}` anywhere, which is invisible to an interpolation walker by
+        construction.
+      - `configs:` has the same shape as `secrets:`.
+
+    Each was found in a review pass as "the next spelling just past the edge",
+    which is why the answer is a closed set rather than a fourth special case.
+    Extension fields (`x-…`) stay allowed: they are where the anchors live, they
+    are walked like everything else, and Compose gives them no meaning of its
+    own.
+
+    Adding a top-level key is therefore a two-part change — the key, and the
+    reasoning here for why the credential rules still hold with it. That is the
+    intended cost.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. An empty document declares no "
+            "top-level keys, and a rule about which keys exist reports nothing wrong when "
+            "there are none."
+        )
+
+    problems: list[str] = []
+    for path, document in documents:
+        unreadable = sorted(
+            str(key)
+            for key in document
+            if str(key) not in ALLOWED_TOP_LEVEL_KEYS
+            and not str(key).startswith(EXTENSION_FIELD_PREFIX)
+        )
+        if unreadable:
+            problems.append(f"{path.name}: {unreadable}")
+
+    assert not problems, "\n".join(
+        [
+            "A Compose file declares a top-level section this module has not been taught to "
+            "read:",
+            *problems,
+            "",
+            f"Allowed today: {sorted(ALLOWED_TOP_LEVEL_KEYS)}, plus any "
+            f"`{EXTENSION_FIELD_PREFIX}` extension field. The credential rules above walk "
+            "these documents whole, which makes them complete over what is here and silent "
+            "about anything that moves configuration elsewhere or names a variable without "
+            "interpolating it — `include:` does the first, `secrets:` and `configs:` do the "
+            "second. So this is not a style rule: extend this module to cover the new "
+            "section, in the same change that adds it, and then add it to the list.",
+        ]
+    )
+
+
+def test_no_service_uses_extends(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """`extends:` is refused, because it would make the one exemption transitive.
+
+    `db` is exempt from the credential rule above — it is the server that owns
+    the role. `extends: {service: db}` on `worker` copies that service's
+    environment into `worker`, so the container ends up holding `POSTGRES_USER`
+    and `POSTGRES_PASSWORD` with all three credential rules passing: the walker
+    sees the interpolation only inside the subtree it was told to skip.
+
+    The cross-file form is worse. `extends: {file: shared.yml, service: base}`
+    puts the payload in a document nothing in this module opens, and unlike
+    `include:` it does it per service, so it would not even show up as a
+    top-level section.
+
+    Nothing here uses it and there is no reason it needs to: two services that
+    share configuration share a YAML anchor, which the parser resolves before
+    any of these rules run, so an anchor is visible where an `extends` is not.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing, so it declares no services and this "
+            "rule has nothing to disagree with."
+        )
+
+    problems = [
+        f"{path.name}: `{name}` extends {body['extends']!r}"
+        for path, document in documents
+        for name, body in sorted(services_of(document).items())
+        if "extends" in body
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A service uses `extends:`, which the credential rules in this module cannot see "
+            "through:",
+            *problems,
+            "",
+            f"`extends: {{service: {CREDENTIAL_OWNING_SERVICE}}}` inherits the one service "
+            "that is allowed to hold the superuser credential, and the `file:` form points "
+            "at a document nothing here parses. Use a YAML anchor instead: the parser "
+            "resolves it before any of these rules run, so what a service ends up with is "
+            "what they read.",
         ]
     )
 
