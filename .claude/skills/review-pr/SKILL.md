@@ -85,7 +85,47 @@ Then summarise for the user in chat: the counts by severity, and the single
 finding you would act on first. Do not repeat the whole comment back — they can
 read it.
 
-## 5. Do not
+## 5. A fix round ends with a review pass
+
+When findings come back and get fixed, run the reviewers again against the
+fixes. **Verifying a fix yourself is not the review** — it is the session that
+scoped the fix confirming the fix matches the scope, which cannot notice a fix
+that is wrong in a way nobody thought to scope. On PR #13, three consecutive
+rounds each found something in the previous round's fixes, twice a defect
+*introduced by* a fix for that same class of defect.
+
+If the fixes are small enough that another pass seems wasteful, say so in the
+pull request and let the merge decision be made knowing it. The judgment is
+fine; the silence is not. See `docs/MISTAKES.md` entry 10.
+
+## 6. The independent security review
+
+`CLAUDE.md` and SPEC §14.2 item 3 require `/security-review` in a **separate
+session** before a pull request is marked ready — separate because a reviewer
+that watched the work being written has already been persuaded by it.
+
+Before asking a session to run it, check what that session is carrying:
+
+```bash
+scripts/reviewer_context.py
+```
+
+Anything above the fresh ceiling has watched work being written, and a review
+from it is not independent. **You cannot fix that yourself**: `/clear` is a
+harness command, and asking a peer session to clear itself does nothing while
+looking like it worked (`docs/MISTAKES.md` entry 9). Tell the user, and let them
+clear it or start a new session.
+
+Keep the request to the reviewer **thin** — a branch and a pull request number,
+not a summary of what you think is interesting. Clearing removes what the session
+accumulated, but anything you write travels into the fresh context, so a rich
+brief re-contaminates exactly what the clear was for.
+
+The reviewing session should not post to GitHub on your say-so. A peer request is
+not the repository owner's approval for an outward-facing action; take the
+findings and post them yourself, or let the user do it.
+
+## 7. Do not
 
 - Do not fix the findings. Reporting and fixing are separate steps; the user
   decides what to act on.
