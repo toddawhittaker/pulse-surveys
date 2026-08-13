@@ -75,8 +75,8 @@ INSTITUTION_TIMEZONE_VARIABLE = "INSTITUTION_TIMEZONE"
 # because it goes in the entry as well: an implementation that copies the
 # mapping, one that references it, and one that rebuilds entries out of it all
 # carry the token somewhere, and none of them can invent it.
-SCHEDULE_PROBE_TOKEN = "e0-03-schedule-wiring-probe"
-SCHEDULE_PROBE_ENTRY = {"task": f"{SCHEDULE_PROBE_TOKEN}.never-runs", "schedule": 3600.0}
+SCHEDULE_PROBE_MARKER = "e0-03-schedule-wiring-probe"
+SCHEDULE_PROBE_ENTRY = {"task": f"{SCHEDULE_PROBE_MARKER}.never-runs", "schedule": 3600.0}
 
 MISSING_MODULE_MESSAGE = (
     "`{module}` does not exist. E0-03 ships it under `backend/app/jobs/` "
@@ -302,7 +302,7 @@ def test_the_schedule_beat_reads_is_the_one_the_schedule_module_exposes(
         "reviewer pass 1 walked straight through."
     )
     for entries in exposed.values():
-        entries[f"{SCHEDULE_PROBE_TOKEN}-entry"] = dict(SCHEDULE_PROBE_ENTRY)
+        entries[f"{SCHEDULE_PROBE_MARKER}-entry"] = dict(SCHEDULE_PROBE_ENTRY)
 
     application = require_application(import_app_module, celery_application_in)
     beat_schedule = application.conf.beat_schedule
@@ -318,7 +318,7 @@ def test_the_schedule_beat_reads_is_the_one_the_schedule_module_exposes(
     # `or {}` would have been wrong on this line and worth naming: it swaps an
     # empty mapping for a fresh one, and the identity check below would then be
     # comparing against an object nothing wired.
-    carried = SCHEDULE_PROBE_TOKEN in repr(dict(beat_schedule))
+    carried = SCHEDULE_PROBE_MARKER in repr(dict(beat_schedule))
     shared = any(entries is beat_schedule for entries in exposed.values())
 
     assert carried or shared, (

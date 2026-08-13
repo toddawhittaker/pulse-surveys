@@ -750,7 +750,7 @@ def test_the_beat_health_check_reads_the_schedule_file(
     below and reports healthy through two hours of a wedged scheduler. That is
     the dynamic side's to hold, by stopping the scheduler and watching the
     container go unhealthy — and by MISTAKES entry 7's rule, watching for longer
-    than `retries × interval` before believing the answer.
+    than `retries x interval` before believing the answer.
     """
     assert base_compose, (
         f"{base_compose_path} does not exist or declares nothing. E0-02 ships the base "
