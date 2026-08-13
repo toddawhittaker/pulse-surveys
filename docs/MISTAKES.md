@@ -213,19 +213,35 @@ property, say the property and let the implementer find the mechanism.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 0**
+**Caught: 1**
 
-**What happened.** A brief told the test author "a hook denies you writes
-elsewhere." No such hook existed — the hook matched `Read|Grep|Glob` and denied
-*reads* of implementation source. Separately, both hooks failed open when `jq`
-was absent, and one could be bypassed entirely with `cat` through `Bash`, while
-their own comments called one "the wall."
+**What happened.** Three times. A brief told the test author "a hook denies you
+writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
+denied *reads* of implementation source. Both hooks then turned out to fail open
+when `jq` was absent, and one could be bypassed entirely with `cat` through
+`Bash`, while their own comments called one "the wall."
 
-**Root cause.** Reading a hook's name and comment instead of running it.
+The third is the sharpest, and it is a coordination mechanism rather than a hook.
+A peer Claude session was asked to run `/clear` before a security review, so the
+review would start with fresh eyes. `/clear` is a harness command: nothing a peer
+sends can make it fire. The request also carried the line "I know you cannot
+report back, because this message goes with it" — which **pre-explained the
+silence the failure would produce**. Had the peer simply not replied, that would
+have read as confirmation, and the review request would have gone into a context
+still holding the previous review and the requester's framing of it. The peer
+caught it and said so.
 
-**Consequence.** Two rounds of work proceeded on a stated guarantee that was not
-enforced. The wording was corrected only after an external review.
+**Root cause.** Reading a mechanism's name and description instead of running it,
+then reasoning about what its output would look like instead of observing the
+output.
 
-**Rule.** Before citing a guard, execute it against the case you claim it stops,
-and against the case you claim it allows. A guard that has never been run is a
-comment.
+**Consequence.** Two rounds of work proceeded on a guarantee that was not
+enforced. The third would have produced a review that looked independent and was
+not — *worse than skipping the clear*, because the result would have been trusted
+more.
+
+**Rule.** Before citing a guard, execute it against the case you claim it stops
+and the case you claim it allows. A guard that has never been run is a comment.
+And never write a prediction that explains away the evidence of its own failure:
+if you find yourself saying "there will be no confirmation, and that is expected",
+you have removed the only signal that would have told you it did not work.
