@@ -17,27 +17,39 @@ The fields split into two groups, and the split is the point:
   "configurable (default 5)" in §4, and the benchmark minimums are §11 open
   question 1. A spec-given default is not a silent fallback.
 
-**No configuration value is ever quoted back.** When the environment is wrong,
-the failure is reported by naming the variables at fault, never by showing what
-they contained. The reason is that this failure happens at startup, where the
-only place it can go is the container log: `DATABASE_URL` and `REDIS_URL` carry
-passwords today, the masked AI provider key, the SMTP password, and the LTI
-private key are coming (§6.3), and SPEC §10 puts secrets in the environment
-precisely so they stay out of logs.
+**A credential never reaches a log through this class**, and there are two ways
+in, so there are two guarantees. `DATABASE_URL` and `REDIS_URL` carry passwords
+today; the AI provider key, the SMTP password, and the LTI private key are
+coming (§6.3), and SPEC §10 puts secrets in the environment precisely so they
+stay out of logs.
 
-That rule is enforced by construction rather than by remembering: `Settings`
-converts any validation failure into a `ConfigurationError` built only from
-field names, static field descriptions, and pydantic's error-type codes. A
-field added later is covered without anyone knowing this paragraph exists,
-which is the property that matters — a fix that enumerated today's
-password-bearing fields would not survive the next one.
+*When the configuration is refused*, no value is quoted back. The failure names
+the variables at fault and says what is wrong with each, and it happens at
+startup, where the only place it can go is the container log. This is enforced
+by construction rather than by remembering: `Settings` converts any validation
+failure into a `ConfigurationError` built only from field names, static field
+descriptions, and pydantic's error-type codes. A field added later is covered
+without anyone knowing this paragraph exists, which is the property that matters
+— a fix that enumerated today's password-bearing fields would not survive the
+next one.
+
+*When the configuration is accepted*, the object that results lives on
+`app.state` for the process lifetime and gets handed to whatever wants to
+describe the running configuration. There the guarantee cannot be blanket,
+because "hide everything" would make the object useless to the §6.3 admin
+configuration view it is meant to feed. So it is per-field and carried by the
+type: **a field that holds a credential is declared `SecretStr`**, which masks
+it in `repr()`, `str()`, `model_dump()`, `model_dump_json()`, `dict(settings)`,
+iteration, and the generated schema alike. The type travels with the value, so
+anything built out of one is masked too; a guard written on the model would have
+had to be repeated for every container the value can end up in.
 """
 
 from collections.abc import Iterable, Mapping
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -161,21 +173,27 @@ class Settings(BaseSettings):
 
         raise _configuration_error(problems)
 
-    def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
-        """Show which settings are configured, never what they are set to.
+    # --- deployment wiring, credential-bearing --------------------------------
+    #
+    # **Anything here that carries a credential is `SecretStr`, never `str`.**
+    # That single choice covers every standard way a pydantic model turns
+    # itself into data — `repr`, `str`, `model_dump`, `model_dump_json`,
+    # `dict()`, iteration, and the OpenAPI schema — because the mask lives on
+    # the value rather than on the model, so every container the value is
+    # copied into inherits it.
+    #
+    # Both URLs below carry a password in the same position. The AI provider
+    # key (§6.3, E0-13), the SMTP password, and the LTI private key belong in
+    # this group when they land.
+    #
+    # The cost is that reading one is `settings.database_url.get_secret_value()`
+    # rather than `settings.database_url`. That is the point: extracting a
+    # credential becomes an explicit act with a name a reviewer can search for,
+    # instead of something that happens by writing an attribute.
+    database_url: SecretStr = Field(description="SQLAlchemy URL for the application database.")
+    redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
 
-        Pydantic's default repr prints every field value, so one
-        `logger.info("config: %s", settings)` anywhere in the codebase puts the
-        database password in a log line. Both `str()` and `repr()` route
-        through here, so that line cannot be written by accident. Reading a
-        value still works — `settings.database_url` is unchanged — and asking
-        for it explicitly is the part a reviewer can see.
-        """
-        return [(name, "<set>") for name in type(self).model_fields]
-
-    # --- deployment wiring: required, no default -----------------------------
-    database_url: str = Field(description="SQLAlchemy URL for the application database.")
-    redis_url: str = Field(description="Redis URL for the Celery broker and result backend.")
+    # --- deployment wiring, no credential: required, no default ---------------
     ai_provider_base_url: str = Field(description="OpenAI-compatible API base URL (§7.4).")
     ai_model_name: str = Field(description="Model identifier passed to that provider.")
     institution_timezone: str = Field(
