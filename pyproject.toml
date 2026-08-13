@@ -2,8 +2,8 @@
 #
 # The tool configuration below predates the code it checks: it landed with the
 # CI pipeline so that the first backend commit was linted and typechecked on
-# arrival rather than retrofitted. The [project] table lands with the backend
-# scaffold in the E0-01 ticket.
+# arrival rather than retrofitted. The [project] table arrived later, with the
+# backend scaffold in E0-01.
 #
 # Direct dependencies are pinned exactly here; the full transitive closure,
 # with hashes, is locked in `requirements.txt` and `requirements-dev.txt`, and
