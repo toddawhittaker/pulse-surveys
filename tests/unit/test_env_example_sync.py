@@ -4,9 +4,23 @@
 in sync so a new setting cannot be added without documenting it."
 
 Both directions are asserted: a `Settings` field with no `.env.example` entry
-fails, and an `.env.example` entry that no `Settings` field reads fails. The
-second direction is what stops the file from rotting into a list of variables
-the application stopped reading two tickets ago.
+fails, and an `.env.example` entry that nothing reads fails. The second
+direction is what stops the file from rotting into a list of variables the
+application stopped reading two tickets ago.
+
+"Nothing reads it" is not the same rule as "no `Settings` field reads it", and
+this module asserted the second one until dispute E0-02-01 separated them. From
+E0-02, `.env` has two readers: `Settings`, and Compose, which needs `DB_USER`,
+`DB_PASSWORD`, and `DB_NAME` as discrete values because it cannot parse the
+`DATABASE_URL` it builds from them. Those entries are read on both paths, so
+calling them abandoned was false.
+
+The reader is established mechanically rather than by an allowlist of names: an
+entry passes if a `Settings` field reads it, or if a Compose file interpolates
+it. A list of exempt names would go on vouching for `DB_NAME` after
+`docker-compose.yml` stopped using it, which is the rot this direction exists to
+catch, so an exemption that no longer corresponds to a reader has to expire by
+itself. E0-14 and E0-16 add readers to the Compose files and need no edit here.
 
 The mapping from a field to its environment variable is `pydantic-settings`
 behaviour, not an implementation choice: the explicit alias if the field has
@@ -78,21 +92,34 @@ def test_every_settings_field_is_documented_in_env_example(
     )
 
 
-def test_every_env_example_variable_is_read_by_settings(
+def test_every_env_example_variable_has_a_reader(
     documented_env: dict[str, str],
+    compose_read_variables: set[str],
 ) -> None:
-    """An `.env.example` entry that no `Settings` field reads fails here."""
+    """An `.env.example` entry that neither `Settings` nor Compose reads fails here.
+
+    A reader is established by finding one, never by naming one: either a
+    `Settings` field resolves to the variable, or a Compose file interpolates it
+    as `${NAME}`. Delete the `${DB_NAME:?...}` from `docker-compose.yml` and
+    `DB_NAME` fails here on the next run, which is the property that a set of
+    exempt names could not have had.
+    """
     settings_cls = load_settings_class()
     readable: set[str] = set()
     for names in env_variable_candidates(settings_cls).values():
         readable |= names
+
+    readable |= compose_read_variables
 
     undeclared = sorted(name for name in documented_env if name.upper() not in readable)
 
     assert not undeclared, (
         f".env.example documents variables no Settings field reads: {undeclared}. "
         "Either add the field or drop the entry — a documented variable the "
-        "application ignores is worse than no documentation."
+        "application ignores is worse than no documentation. If the reader is "
+        "Compose rather than the application, interpolate the name in "
+        "docker-compose.yml where the service that needs it is declared; being "
+        "listed here is not on its own evidence that anything reads it."
     )
 
 
