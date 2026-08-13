@@ -51,6 +51,13 @@ dev = [
     "pytest-cov==7.1.0",
     "testcontainers==4.15.0",
     "hypothesis==6.165.5",
+    # Test-only. `tests/unit/test_compose_stack.py` asserts properties of the
+    # Compose files that no running stack can check — chiefly that host port
+    # publishing lives in the development override and not in the base file,
+    # which `docker compose up` hides by merging the two. Reading the base file
+    # on its own is the whole point, so `docker compose config` cannot do this
+    # job and a parser is needed. Nothing at runtime imports yaml.
+    "PyYAML==6.0.2",
     # Not a test dependency: this is the PEP 517 build backend from
     # `[build-system]` above, listed here so `pip-compile` locks it with a hash
     # and `pip install -e . --no-build-isolation` has a verified copy to build
