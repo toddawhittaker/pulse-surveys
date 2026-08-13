@@ -18,7 +18,11 @@ service that declares no `HEALTHCHECK`, which is deliberate.
 
 - `backend/Dockerfile` — multi-stage, non-root runtime user, no build toolchain
   in the final layer.
-- `docker-compose.yml` with `api`, `db` (Postgres 16), `redis`, and `mailpit`.
+- `docker-compose.yml` with `api`, `db` (Postgres 17), `redis`, and `mailpit`.
+  This ticket originally said Postgres 16, which contradicted SPEC §7.1 and
+  §7.2. The spec governs, so the ticket was corrected rather than the spec. The
+  `migration-drift` job in `.github/workflows/ci.yml` moves to 17 in the same
+  change, so E0-04 autogenerates against the version that actually ships.
 - `docker-compose.override.yml` for development only: source bind-mount, hot
   reload, exposed ports.
 - A `HEALTHCHECK` on `api` that hits `/healthz`, plus health checks on `db`

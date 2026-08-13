@@ -148,7 +148,11 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # Matches SPEC §7.2 and the `db` service in docker-compose.yml. This
+        # job autogenerates migrations against it from E0-04 on, so a different
+        # major version here would check the schema against a Postgres the
+        # project never deploys.
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
