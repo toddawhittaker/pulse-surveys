@@ -12,6 +12,8 @@ test's choice**, collected in one place so they are cheap to change — except
 `.github/workflows/ci.yml`.
 """
 
+import json
+
 import pytest
 
 # The surface the ticket enumerates, as environment variable names. Asserted as
@@ -72,12 +74,108 @@ DEFAULTED_VARIABLES = (
 N_THRESHOLD_VARIABLE = "N_THRESHOLD_DEFAULT"
 N_THRESHOLD_FIELD = "n_threshold_default"
 
+# Obvious fakes: nothing here resembles a real credential and nothing here was
+# copied from a working `.env` (CLAUDE.md, secrets). They are long and
+# unlikely-looking so that any fragment of one appearing in an error message is
+# unambiguously a leak and not a coincidence.
+#
+# Named `...CREDENTIAL` rather than `...PASSWORD` because ruff's S105 flags the
+# latter as a hardcoded password. Renaming keeps the rule doing its job here;
+# a `noqa` would have been a suppression to review on every future read.
+FAKE_DATABASE_CREDENTIAL = "fake-db-pw-Kq7ZrXb9Ld4MnPtVw"
+FAKE_REDIS_CREDENTIAL = "fake-redis-pw-Jh3TgYc5Rf8QsZm"
+
+CREDENTIAL_BEARING_URLS = {
+    "DATABASE_URL": f"postgresql+psycopg://pulse:{FAKE_DATABASE_CREDENTIAL}@db:5432/pulse",
+    "REDIS_URL": f"redis://:{FAKE_REDIS_CREDENTIAL}@redis:6379/0",
+}
+
+# Length of the contiguous run of a password that counts as leaked. Checking for
+# the whole password is not enough: pydantic elides the middle of a long repr,
+# so a leak can print all but one character of a secret and still not contain
+# the exact string. Truncation is not redaction.
+LEAK_FRAGMENT_LENGTH = 8
+
 
 def load_settings_class() -> type:
     """Import `Settings` inside the test, so a missing module fails one test loudly."""
     from app.config import Settings
 
     return Settings
+
+
+def leaked_fragments(text: str, secret: str, size: int = LEAK_FRAGMENT_LENGTH) -> list[str]:
+    """Every contiguous run of `secret` of length `size` that appears in `text`.
+
+    Searching for the whole secret is the check that misses: an elided repr can
+    print a secret one character short of complete and still not contain it as a
+    substring. Any run this long out of a password is a leak.
+    """
+    windows = (secret[start : start + size] for start in range(len(secret) - size + 1))
+    return sorted({window for window in windows if window in text})
+
+
+def assert_no_credential_in(text: str, where: str) -> None:
+    """Neither fake password may appear, in fragments, anywhere in `text`."""
+    for label, secret in (
+        ("DATABASE_URL password", FAKE_DATABASE_CREDENTIAL),
+        ("REDIS_URL password", FAKE_REDIS_CREDENTIAL),
+    ):
+        fragments = leaked_fragments(text, secret)
+        assert not fragments, (
+            f"The {label} leaked into {where}: {fragments}. A configuration error is "
+            f"printed to the container startup log, so this is a credential in a log "
+            f"(SPEC §10, privacy — secrets via environment/secret store). The full "
+            f"text was:\n{text}"
+        )
+
+
+def exception_chain(exc: BaseException) -> list[BaseException]:
+    """`exc` and everything it was raised from, `__cause__` and `__context__` alike.
+
+    A configuration error caught and re-raised with a cleaned-up message still
+    prints its cause in the startup traceback, so the chain is what reaches the
+    log, not the outermost exception alone.
+    """
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and not any(link is current for link in chain):
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def assert_no_credential_anywhere_in(exc: BaseException) -> None:
+    """No credential fragment in what the exception says, or in what it retains.
+
+    Three surfaces, because a fix can address one and miss the others. The
+    rendered message is what a traceback prints; the structured payload is what a
+    JSON error handler or structured logger would serialise; the chain is what
+    survives a catch-and-re-raise, because Python prints a cause's message too.
+
+    **This asserts a property, not a type.** It does not care whether what was
+    raised is a pydantic `ValidationError`, and it must not: the plausible fix is
+    to catch that and raise a configuration error carrying only field names, and
+    a test that reached for `ValidationError.errors()` would then break on the
+    fix rather than pass it. The structured payload is read only if the exception
+    offers one — an exception with no `errors()` has nothing structural to leak,
+    and passes on that basis, which is the correct outcome and not a gap.
+
+    A cause counts as much as the exception itself. `raise ConfigError(...) from
+    exc` leaves the original holding the values, and the startup traceback prints
+    both, so a chained cause carrying a credential is a credential in the log.
+    """
+    for link in exception_chain(exc):
+        name = type(link).__name__
+        assert_no_credential_in(str(link), f"str() of the raised {name}")
+        assert_no_credential_in(repr(link), f"repr() of the raised {name}")
+
+        errors = getattr(link, "errors", None)
+        if callable(errors):
+            assert_no_credential_in(
+                json.dumps(errors(), default=str),
+                f"the structured payload of {name}.errors()",
+            )
 
 
 def test_configuration_surface_the_ticket_enumerates_is_documented(
@@ -127,6 +225,71 @@ def test_absent_deployment_variable_raises_naming_the_variable(
     # import time raises there, and that is still "raises at startup".
     with pytest.raises(Exception, match=f"(?i){missing_variable}"):
         load_settings_class()()
+
+
+def test_startup_error_does_not_print_the_credentials_it_was_given(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configuration error names the missing variable without retaining the set ones.
+
+    The database and Redis URLs both carry a password in the same position. When
+    `Settings` refuses to build, the exception reaches the container startup log,
+    so anything it prints — or hands to a structured logger — about the variables
+    that *were* set is a credential in a log (SPEC §10, and the security-review
+    item in this ticket's definition of done).
+
+    **Read this before trusting a green result here.** When this test was
+    written, against an implementation that demonstrably leaked, its rendered
+    message came back clean: with ten variables set, pydantic's elision kept
+    seven characters of the head (`{'database_url': 'postgre...`) and a tail that
+    landed on a benchmark number, so both passwords fell in the elided middle.
+    Nothing about that is a property anyone can rely on — which characters
+    survive depends on how many other variables happen to be set and on where
+    each one sits in the repr. What made this test red was the structured
+    payload, where `errors()` carries the input dict in full and untruncated.
+
+    So this test distinguishes the two shapes of fix. A rendering-level fix — a
+    custom `__str__`, or catching and re-raising with a cleaned message — clears
+    the message and leaves the credential in the error payload and in the
+    `__cause__`; this test stays red. Only not retaining the value clears it.
+    `test_startup_error_with_almost_nothing_configured_does_not_print_credentials`
+    is the one that catches the message-level leak directly.
+    """
+    for name, url in CREDENTIAL_BEARING_URLS.items():
+        monkeypatch.setenv(name, url)
+    monkeypatch.delenv("AI_PROVIDER_BASE_URL", raising=False)
+
+    # `match` keeps criterion 2 alive: the fix for the leak cannot be to swallow
+    # the message, because an operator still has to learn which variable is missing.
+    with pytest.raises(Exception, match="(?i)AI_PROVIDER_BASE_URL") as exc_info:
+        load_settings_class()()
+
+    assert_no_credential_anywhere_in(exc_info.value)
+
+
+def test_startup_error_with_almost_nothing_configured_does_not_print_credentials(
+    configured_env: dict[str, str],
+    documented_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sharpest version: only the two credential-bearing URLs are set.
+
+    Whatever elision a library applies to a printed input value gets weaker as
+    the input shrinks — fewer variables set means more of each one survives
+    truncation. An operator bringing a new deployment up for the first time,
+    with almost nothing configured yet, is exactly this case, and it is the one
+    most likely to be pasted into a chat window while asking for help.
+    """
+    for name in documented_env:
+        monkeypatch.delenv(name, raising=False)
+    for name, url in CREDENTIAL_BEARING_URLS.items():
+        monkeypatch.setenv(name, url)
+
+    with pytest.raises(Exception, match="(?i)AI_PROVIDER_BASE_URL") as exc_info:
+        load_settings_class()()
+
+    assert_no_credential_anywhere_in(exc_info.value)
 
 
 @pytest.mark.parametrize("defaulted_variable", DEFAULTED_VARIABLES)
