@@ -68,7 +68,7 @@ container those names do not resolve. Either start the backing services with
 
 ```sh
 # in your own .env, replacing the two lines copied from .env.example
-DATABASE_URL=postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@localhost:5432/${DB_NAME}
+DATABASE_URL=postgresql+psycopg://${DB_APP_USER}:${DB_APP_PASSWORD}@localhost:5432/${DB_NAME}
 REDIS_URL=redis://localhost:6379/0
 ```
 
@@ -81,10 +81,18 @@ Configuration is entirely environment-driven and documented in
 `app.config.Settings`. Six variables have no default, because a working default
 for a deployment-specific value is a misconfiguration that starts successfully:
 the application refuses to start without them and names the one it is missing.
-`DB_USER`, `DB_PASSWORD`, and `DB_NAME` are in that file for Compose rather than
-for the application — Compose cannot parse a URL, so the `db` service is handed
-the three parts `DATABASE_URL` is built from, and the password stays written
-once.
+The `DB_*` entries are in that file for Compose rather than for the application
+— Compose cannot parse a URL, so the `db` service is handed the parts
+`DATABASE_URL` is built from, and each password stays written once.
+
+Two of them are two different roles, and the difference matters. `DB_SUPERUSER`
+is the role Postgres creates on first start, which is unavoidably the cluster
+superuser. `DB_APP_USER` is created alongside it by
+[`scripts/db-init`](scripts/db-init) and holds nothing but the right to connect;
+it is what `DATABASE_URL` points at, so an injection in application code cannot
+reach a shell in the database container or read past a row-level security
+policy. See [ADR 0001](docs/adr/0001-identity-separation-by-database-role.md).
+Nothing but administration should use `DB_SUPERUSER`.
 
 ```sh
 make ci             # every gate, in the same order as CI

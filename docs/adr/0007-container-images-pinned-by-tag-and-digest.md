@@ -87,5 +87,17 @@ nobody can state gets applied inconsistently within two tickets.
   lands somewhere neither ecosystem reads — a workflow `container:`, a
   Kubernetes manifest — it will be pinned and never updated, and nothing will
   say so. Adding the reference means adding the ecosystem in the same change.
+- **One such reference already exists, and it has no ecosystem to add.** The
+  `migration-drift` job in `.github/workflows/ci.yml` declares a `services.postgres.image`.
+  Dependabot's `github-actions` ecosystem updates `uses:` references and
+  explicitly not image references in a workflow, and the two ecosystems above
+  read `backend/Dockerfile` and `docker-compose.yml` only, so nothing updates
+  it. It is pinned to the identical reference as the `db` service and moves by
+  hand together with it; the comment beside it says so, and this is the whole
+  cost of the exemption. Two pinned patch versions that drift apart is a
+  smaller problem than a mutable tag, because the drift is visible in a diff on
+  both sides. E0-04 activates that gate and is the natural place to reconsider
+  whether the job should start the Compose `db` service instead, which would
+  delete the second reference rather than maintain it.
 - **This ADR does not govern the digests themselves.** They are values in the
   files that name them, and re-resolving one is not a decision.
