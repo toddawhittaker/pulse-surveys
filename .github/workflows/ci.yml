@@ -19,12 +19,17 @@ permissions:
 # Pinned deliberately (CLAUDE.md — "Pin dependency versions"). Dependabot's
 # github-actions and pip ecosystems bump these; nothing here floats.
 env:
-  PYTHON_VERSION: '3.12'
+  PYTHON_VERSION: '3.13'
   NODE_VERSION: '20'
   RUFF_VERSION: '0.6.9'
   MYPY_VERSION: '1.11.2'
   PIP_AUDIT_VERSION: '2.7.3'
-  PIP_LICENSES_VERSION: '5.0.0'
+  # 5.5.5 and not 5.0.0: the older release reads only the legacy `License`
+  # metadata field, and reported 30 of 77 real dependencies as "unknown
+  # license" — including fastapi and pydantic, which declare PEP 639
+  # `License-Expression`. An unknown license does not fail the build, so that
+  # was a license gate that could not see most of what it was scanning.
+  PIP_LICENSES_VERSION: '5.5.5'
 
 jobs:
   # --------------------------------------------------------------------------
@@ -36,7 +41,6 @@ jobs:
     name: Detect what exists
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.d.outputs.backend }}
       frontend: ${{ steps.d.outputs.frontend }}
       migrations: ${{ steps.d.outputs.migrations }}
       compose: ${{ steps.d.outputs.compose }}
@@ -52,10 +56,8 @@ jobs:
         run: |
           set -euo pipefail
           emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
-          has_py() { [ -d backend/app ] && compgen -G "backend/app/**/*.py" > /dev/null 2>&1; }
 
           echo "Probing repository layout (SPEC §13):"
-          if [ -d backend/app ]; then emit backend true; else emit backend false; fi
           if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
           if [ -f backend/alembic.ini ]; then emit migrations true; else emit migrations false; fi
           if [ -f docker-compose.yml ]; then emit compose true; else emit compose false; fi
@@ -74,7 +76,6 @@ jobs:
 
   lint-python:
     name: Fast · ruff + mypy
-    needs: detect
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,33 +88,26 @@ jobs:
         run: pip install "ruff==${RUFF_VERSION}" "mypy==${MYPY_VERSION}"
 
       - name: ruff check
-        run: |
-          if [ "${{ needs.detect.outputs.backend }}" != "true" ]; then
-            echo "::notice::No backend/app yet — ruff has nothing to check. Enforcing once e0/core-schema lands."
-            exit 0
-          fi
-          ruff check backend/ scripts/ mock-lms/ mock-idp/ tests/ 2>/dev/null || ruff check .
+        run: ruff check .
 
       - name: ruff format --check
+        run: ruff format --check .
+
+      # Installed from the committed lockfile, hashes and all
+      # (docs/adr/0005-dependency-locking.md), then the project itself with no
+      # dependency resolution of its own. mypy needs the third-party type
+      # information; nothing here may float.
+      - name: Install backend and dev dependencies (locked)
         run: |
-          if [ "${{ needs.detect.outputs.backend }}" != "true" ]; then
-            echo "::notice::No backend/app yet — skipping format check."
-            exit 0
-          fi
-          ruff format --check .
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
 
       # mypy runs over backend/, with the strict profile pinned to
       # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
       # the authorization chokepoint and the AI output contract; they carry the
       # confidentiality and eval guarantees, so they get no untyped escape.
       - name: mypy
-        run: |
-          if [ "${{ needs.detect.outputs.backend }}" != "true" ]; then
-            echo "::notice::No backend/app yet — mypy has nothing to check. Enforcing once e0/core-schema lands."
-            exit 0
-          fi
-          pip install -e ".[dev]" || pip install -r backend/requirements.txt || true
-          mypy
+        run: mypy
 
   lint-frontend:
     name: Fast · tsc + eslint
@@ -177,9 +171,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install backend
+      - name: Install backend (locked)
         if: needs.detect.outputs.migrations == 'true'
-        run: pip install -e ".[dev]"
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
 
       # `alembic check` autogenerates against the live schema and exits non-zero
       # if the models and the migrations have diverged. A model edited without a
@@ -236,9 +232,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install backend + test deps
+      - name: Install backend + test deps (locked)
         if: needs.detect.outputs.pytests == 'true'
-        run: pip install -e ".[dev]"
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
 
       # The invariant suite runs first and alone, so a failure here is
       # unambiguous and cheap. It then runs again inside the full suite; that
@@ -332,9 +330,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install backend
+      - name: Install backend (locked)
         if: needs.detect.outputs.evals == 'true'
-        run: pip install -e ".[dev]"
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
 
       # Per-task precision and recall floors live with the eval sets, not here,
       # so changing a floor is a visible diff in the suite it governs. The
@@ -430,14 +430,13 @@ jobs:
       - name: Install pinned audit tools
         run: pip install "pip-audit==${PIP_AUDIT_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
 
+      # Audits the lockfiles rather than an installed environment: the locked
+      # closure is what deploys, it is hash-pinned so nothing has to be
+      # resolved, and the project's own editable install — which is on no
+      # advisory feed and which `--strict` would otherwise refuse to skip — is
+      # not in the way.
       - name: pip-audit (fail on high/critical)
-        run: |
-          if [ ! -f pyproject.toml ] || ! grep -q '^\[project\]' pyproject.toml; then
-            echo "::notice::No declared Python dependencies yet — pip-audit has nothing to scan. Enforcing once e0/compose-stack pins the backend deps."
-            exit 0
-          fi
-          pip install -e .
-          pip-audit --strict --desc
+        run: pip-audit --strict --desc -r requirements.txt -r requirements-dev.txt
 
       - uses: actions/setup-node@v4
         if: needs.detect.outputs.frontend == 'true'
@@ -451,23 +450,25 @@ jobs:
           npm ci
           npm audit --audit-level=high
 
+      # pip-licenses reads installed distributions, so the runtime closure has
+      # to be on disk. The runtime lock and not the dev one: test dependencies
+      # are not distributed, and §10 is about what we ship. The audit tools
+      # installed above are in this environment too, so the scan is a superset
+      # of the shipped closure — stricter than §10 asks, deliberately
+      # (docs/adr/0005-dependency-locking.md).
+      - name: Install the runtime closure to scan (locked)
+        run: pip install --require-hashes -r requirements.txt
+
       # MIT distribution is a spec requirement (§10, "Licensing hygiene"), so a
       # copyleft dependency is a build break rather than a note for later.
       - name: License compatibility (MIT distribution)
         run: |
           mkdir -p reports
-          ARGS=""
-          if [ -f pyproject.toml ] && grep -q '^\[project\]' pyproject.toml; then
-            pip-licenses --format=json --with-urls > reports/py-licenses.json
-            ARGS="$ARGS --python-json reports/py-licenses.json"
-          fi
+          pip-licenses --format=json --with-urls > reports/py-licenses.json
+          ARGS="--python-json reports/py-licenses.json"
           if [ "${{ needs.detect.outputs.frontend }}" = "true" ]; then
             (cd frontend && npx --yes license-checker-rseidelsohn@4.3.0 --json > ../reports/npm-licenses.json)
             ARGS="$ARGS --npm-json reports/npm-licenses.json"
-          fi
-          if [ -z "$ARGS" ]; then
-            echo "::notice::No dependency manifests yet — license check has nothing to scan."
-            exit 0
           fi
           python scripts/ci/check_licenses.py $ARGS
 

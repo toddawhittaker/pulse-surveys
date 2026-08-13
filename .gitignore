@@ -16,6 +16,9 @@ venv/
 htmlcov/
 .coverage
 .coverage.*
+coverage.xml
+reports/
+*.egg-info/
 
 # Node
 node_modules/
@@ -33,3 +36,8 @@ build/
 # Claude Code local overrides
 .claude/settings.local.json
 .claude/*.local.json
+
+# Subagent memory (`memory: project` in .claude/agents/*.md). Local working
+# state, not a repository artifact — and left untracked it gets swept into
+# ticket commits by any agent running `git add -A`.
+.claude/agent-memory/

@@ -43,3 +43,5 @@ stays where it is with a line at the top pointing at its replacement.
 | [0002](0002-ci-gates-ship-tolerant.md) | CI gates ship tolerant and name the ticket that enforces them | Accepted, recorded retroactively |
 | [0003](0003-deferred-authz-seams-fail-closed.md) | Deferred authorization seams fail closed by raising | Accepted |
 | [0004](0004-agent-roster-mechanism.md) | Agent roster mechanism: hooks, computed gating, session-scoped warmth | Accepted |
+| [0005](0005-dependency-locking.md) | Python dependencies are locked with pip-compile, hashes and all | Accepted |
+| [0006](0006-settings-lifetime.md) | Settings are built inside `create_app()` and hung on `app.state` | Accepted |

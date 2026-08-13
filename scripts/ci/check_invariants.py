@@ -29,7 +29,7 @@ def main() -> int:
         help=(
             "Tolerate a suite that collected zero invariant tests. Only valid "
             "before the first invariant test lands; remove this flag as part "
-            "of the seam that adds one."
+            "of the ticket that adds one."
         ),
     )
     args = parser.parse_args()
@@ -42,13 +42,15 @@ def main() -> int:
             )
             return 0
         print(
-            f"FAIL: {args.junit_xml} was not written. The invariant suite did "
-            "not run.",
+            f"FAIL: {args.junit_xml} was not written. The invariant suite did not run.",
             file=sys.stderr,
         )
         return 1
 
-    root = ET.parse(args.junit_xml).getroot()
+    # S314: the input is the JUnit XML pytest just wrote in this job, not
+    # anything a user supplied. defusedxml would add a dependency to a script
+    # that must run before any dependency is installed.
+    root = ET.parse(args.junit_xml).getroot()  # noqa: S314
     cases = root.iter("testcase")
 
     total = 0
@@ -70,7 +72,7 @@ def main() -> int:
             print(
                 "note: the invariant suite collected 0 tests.\n"
                 "      Tolerated until the first §4.1 invariant lands; drop "
-                "--allow-empty in that seam."
+                "--allow-empty in that ticket."
             )
             return 0
         print(
