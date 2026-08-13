@@ -100,7 +100,7 @@ jobs:
       - name: Install backend and dev dependencies (locked)
         run: |
           pip install --require-hashes -r requirements-dev.txt
-          pip install -e . --no-deps
+          pip install -e . --no-deps --no-build-isolation
 
       # mypy runs over backend/, with the strict profile pinned to
       # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
@@ -175,7 +175,7 @@ jobs:
         if: needs.detect.outputs.migrations == 'true'
         run: |
           pip install --require-hashes -r requirements-dev.txt
-          pip install -e . --no-deps
+          pip install -e . --no-deps --no-build-isolation
 
       # `alembic check` autogenerates against the live schema and exits non-zero
       # if the models and the migrations have diverged. A model edited without a
@@ -236,7 +236,7 @@ jobs:
         if: needs.detect.outputs.pytests == 'true'
         run: |
           pip install --require-hashes -r requirements-dev.txt
-          pip install -e . --no-deps
+          pip install -e . --no-deps --no-build-isolation
 
       # The invariant suite runs first and alone, so a failure here is
       # unambiguous and cheap. It then runs again inside the full suite; that
@@ -334,7 +334,7 @@ jobs:
         if: needs.detect.outputs.evals == 'true'
         run: |
           pip install --require-hashes -r requirements-dev.txt
-          pip install -e . --no-deps
+          pip install -e . --no-deps --no-build-isolation
 
       # Per-task precision and recall floors live with the eval sets, not here,
       # so changing a floor is a visible diff in the suite it governs. The

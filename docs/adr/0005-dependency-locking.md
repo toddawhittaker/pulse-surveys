@@ -32,8 +32,28 @@ Direct dependencies are pinned exactly (`==`) in the `[project]` table of
 Both are generated with `--generate-hashes`, so every artifact is fixed by
 digest, and every CI job that needs the backend installs with
 `pip install --require-hashes -r requirements-dev.txt` followed by
-`pip install -e . --no-deps`. `make lock` regenerates both files; `make install`
-installs them.
+`pip install -e . --no-deps --no-build-isolation`. `make lock` regenerates both
+files; `make install` installs them.
+
+The PEP 517 build backend is part of "every artifact", and it is the one piece
+`--require-hashes` cannot reach on its own. `pip install -e .` normally builds
+in an isolated environment into which pip fetches whatever `[build-system]`
+`requires` resolves to, straight from the index and with no digest to check —
+and then runs that code. So three things move together:
+
+- `[build-system] requires` pins setuptools exactly, like every other
+  dependency, rather than as the floating `>=` range a build backend usually
+  gets.
+- setuptools is listed in the `dev` extra, which is not where a build
+  requirement belongs semantically but is what makes `pip-compile` lock it with
+  a hash. It stays out of `requirements.txt`, because nothing ships it.
+- Every install site passes `--no-build-isolation`, so the build uses the
+  hash-verified copy already installed rather than fetching its own.
+
+`make lock` passes `--allow-unsafe` for the same reason. The flag is named
+backwards: it pins the packages pip-tools otherwise leaves floating because pip
+itself depends on them. Pinning them is the stricter behaviour, and pip-tools'
+own documentation says it will become the default.
 
 The lockfiles are the audited artifact too: `pip-audit` reads them directly
 rather than scanning an installed environment. The license check needs
@@ -70,6 +90,15 @@ without a digest still trusts whatever the index serves under that version.
 Hashes cost one flag and a slower regeneration; they are the part of a lockfile
 that resists a compromised or substituted artifact.
 
+**Leaving the build backend on a floating range and building under isolation.**
+This is what the first version of this decision did, and it was wrong for the
+reason directly above: the range is a version constraint with no digest behind
+it, and the artifact it selects is not merely installed but *executed*, in the
+runner, with the checkout present. Closing it costs one pin, one lock entry, and
+one flag at each install site. That is cheap enough that "an ambient Python
+condition everyone lives with" is not a good enough answer when the surrounding
+claim is that every artifact is fixed by digest.
+
 **A single combined lockfile.** Rejected because the license gate must scan
 what ships and nothing else. §10 is about the distributed closure, and a lock
 that cannot separate `pytest` from `fastapi` cannot answer that question.
@@ -99,5 +128,19 @@ that cannot separate `pytest` from `fastapi` cannot answer that question.
   one, even with `--skip-editable`. Auditing the lockfiles sidesteps that
   entirely, and has the better property anyway: what is audited is what is
   pinned, whether or not it has been installed.
+- **`--no-build-isolation` means the build environment is the runtime
+  environment.** A future build requirement — a Cython or Rust toolchain for a
+  compiled dependency — has to be installed before the build rather than
+  declared and forgotten, and the failure when it is not will read as a missing
+  import rather than as a missing build requirement. The compensation is that
+  `[build-system] requires` and the `dev` extra must agree; pip checks the
+  requirement is satisfied and fails the install when they drift, so this is
+  loud rather than silent.
+- **Two places now name the setuptools version**, `[build-system]` and the `dev`
+  extra, and a Dependabot bump has to move both. Not deduplicated because
+  `[build-system]` is read by the build frontend before anything else in the
+  file exists, so it cannot reference a dependency group.
 - Every container image and every future CI job installs the same way, or the
-  guarantee is only as good as the sloppiest install line.
+  guarantee is only as good as the sloppiest install line. `--no-build-isolation`
+  is part of "the same way": one install line without it puts an unverified
+  build backend back in the pipeline.

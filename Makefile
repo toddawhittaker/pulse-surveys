@@ -211,18 +211,28 @@ tools: ## Install the pinned CI tools locally
 		"pip-audit==$(PIP_AUDIT_VERSION)" "pip-licenses==$(PIP_LICENSES_VERSION)" \
 		"pip-tools==$(PIP_TOOLS_VERSION)"
 
+# `--no-build-isolation` is the second half of `--require-hashes`. Without it,
+# pip builds this package in a throwaway environment into which it fetches the
+# `[build-system].requires` backend straight from PyPI, unhashed — the one
+# artifact the lockfiles would not cover. With it, the build uses the
+# hash-verified setuptools the line above just installed.
 .PHONY: install
 install: ## Install the locked dependencies and the backend, editable
 	pip install --require-hashes -r requirements-dev.txt
-	pip install -e . --no-deps
+	pip install -e . --no-deps --no-build-isolation
 
 # Run this after editing the dependencies in pyproject.toml, and commit both
 # files with the change. See docs/adr/0005-dependency-locking.md.
+#
+# `--allow-unsafe` is named backwards: it pins the packages pip-tools otherwise
+# leaves floating because pip itself depends on them — setuptools here. Pinning
+# them is the stricter behaviour, and it is what lets the build backend be
+# hash-verified. pip-tools' own documentation says it will become the default.
 .PHONY: lock
 lock: ## Recompile requirements.txt and requirements-dev.txt from pyproject.toml
-	pip-compile --quiet --generate-hashes --strip-extras \
+	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe \
 		--output-file=requirements.txt pyproject.toml
-	pip-compile --quiet --generate-hashes --strip-extras --extra dev \
+	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe --extra dev \
 		--output-file=requirements-dev.txt pyproject.toml
 
 .PHONY: fmt

@@ -10,7 +10,14 @@
 # `make lock` regenerates both. See docs/adr/0005-dependency-locking.md.
 
 [build-system]
-requires = ["setuptools>=77.0.3"]
+# Pinned exactly, like every other dependency. A floating range here is the one
+# artifact `--require-hashes` does not reach: under PEP 517 build isolation pip
+# fetches the newest matching setuptools from PyPI with no digest to check it
+# against, and then runs its build backend in the CI runner. Every site that
+# builds this project passes `--no-build-isolation` and uses the hash-locked
+# setuptools from `requirements-dev.txt` instead, so this pin and that lock
+# entry must move together. See docs/adr/0005-dependency-locking.md.
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -44,6 +51,12 @@ dev = [
     "pytest-cov==7.1.0",
     "testcontainers==4.15.0",
     "hypothesis==6.165.5",
+    # Not a test dependency: this is the PEP 517 build backend from
+    # `[build-system]` above, listed here so `pip-compile` locks it with a hash
+    # and `pip install -e . --no-build-isolation` has a verified copy to build
+    # against. It is deliberately absent from the runtime closure, because
+    # nothing ships it.
+    "setuptools==84.0.0",
 ]
 
 # ruff, mypy, pip-audit, and pip-licenses are deliberately not listed. They are
