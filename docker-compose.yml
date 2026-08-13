@@ -33,14 +33,27 @@ services:
     env_file:
       - .env
     environment:
-      # The one exception, and the reason is mechanical. `.env` builds
-      # DATABASE_URL out of DB_USER, DB_PASSWORD, and DB_NAME so the password is
-      # written once; Compose expands that here, when it reads `.env` as its own
-      # interpolation source. Whether `env_file:` expands it is a Compose
-      # version's business and has not always been the same answer, and an
-      # `environment:` entry beats `env_file:` on every version. So the
-      # container gets an expanded URL either way.
+      # Two overrides, both relying on `environment:` beating `env_file:` on
+      # every Compose version.
+      #
+      # First: `.env` builds DATABASE_URL out of DB_APP_USER, DB_APP_PASSWORD,
+      # and DB_NAME so the password is written once, and Compose expands that
+      # here, when it reads `.env` as its own interpolation source. Whether
+      # `env_file:` expands it is a Compose version's business and has not
+      # always been the same answer, so the container gets an expanded URL
+      # either way.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
+      # Second: `.env` also carries the superuser credential, because `db` needs
+      # it, and `env_file:` would hand the whole file to this container. The
+      # application must never hold it. `db:5432` is reachable from here and
+      # accepts that role over scram, so a credential sitting in this
+      # environment is a route back to everything scripts/db-init and ADR 0009
+      # exist to deny — bypass of every grant, bypass of row-level security, and
+      # COPY … FROM PROGRAM. Blanked rather than omitted: `env_file:` has
+      # already set them by the time this is applied, so an empty value is what
+      # removes them.
+      DB_SUPERUSER: ''
+      DB_SUPERUSER_PASSWORD: ''
     depends_on:
       # The mapping form, not the list. `depends_on: [db]` waits for the
       # container to start; this waits for Postgres to accept connections,
@@ -66,10 +79,14 @@ services:
     # two that can disagree. See docs/adr/0008.
     #
     # Two roles, and the split is the point. POSTGRES_USER is the role `initdb`
-    # creates, and it is unavoidably the cluster superuser. DB_APP_USER is the
-    # role the application connects as, created by scripts/db-init and holding
-    # nothing but CONNECT. ADR 0001: a runtime role that is superuser bypasses
-    # grants and row-level security entirely, which would make the whole
+    # creates; it is the cluster superuser, and ADR 0009 sanctions it for
+    # migrations and system-level tasks only. DB_APP_USER is the role the
+    # application connects as, created by scripts/db-init, and it is granted
+    # only CONNECT — it keeps whatever Postgres gives PUBLIC by default, which
+    # today is CONNECT on the other databases and TEMPORARY on this one, so it
+    # is not a role with no privileges at all. ADR 0001 line 71 still holds and
+    # is what this buys: a runtime role that is superuser bypasses grants and
+    # row-level security entirely, which would make the whole
     # identity-separation scheme decorative.
     environment:
       POSTGRES_USER: ${DB_SUPERUSER:?DB_SUPERUSER is not set — copy .env.example to .env}

@@ -2,26 +2,31 @@
 # Provision the role the application connects as — ticket E0-02.
 #
 # The Postgres image creates exactly one role, from POSTGRES_USER, and `initdb`
-# makes it the cluster superuser. That is unavoidable. What is avoidable is
-# pointing DATABASE_URL at it: a superuser bypasses grants and row-level
-# security entirely, and can run `COPY … FROM PROGRAM`, which is a shell in the
+# makes it the cluster superuser. docs/adr/0009 sanctions that role and says
+# what it is for: migrations and system-level tasks, and nothing else. This
+# script adds the second role — the one the application connects as day to day,
+# which must not be a superuser, because a superuser bypasses grants and
+# row-level security entirely and can run `COPY … FROM PROGRAM`, a shell in the
 # database container reachable from any SQL injection in the application.
 #
-# docs/adr/0001-identity-separation-by-database-role.md says so directly —
-# "Runtime roles must not own tables and must not be superuser. Both bypass
-# grants entirely, which would make the whole scheme decorative." E0-10 builds
-# the three-role scheme that ADR describes. This script does the one part that
-# cannot wait for it, because E0-04 opens the first connection and every ticket
-# between the two would have a superuser on the other end of it.
+# docs/adr/0001-identity-separation-by-database-role.md line 71 still governs
+# that half — "Runtime roles must not own tables and must not be superuser" —
+# and is untouched by ADR 0009. E0-10 builds the full three-role scheme on top
+# of this one; ADR 0009 records which mechanism provisions what, so the two do
+# not collide.
 #
 # Everything in `/docker-entrypoint-initdb.d` runs once, against an empty data
 # directory, before the server accepts a TCP connection. An existing
 # `postgres-data` volume never sees this file; `docker compose down -v` is what
-# discards one.
+# discards one. It runs only where that hook exists, which is the Compose stack
+# — a managed Postgres, CI's `services.postgres`, and E0-04's testcontainers
+# fixture each provision the role their own way. ADR 0009 has the table.
 #
-# The grant is deliberately only CONNECT. This role cannot create a table, so
-# `alembic upgrade head` cannot run as it — which is a question E0-04 has to
-# answer rather than a gap here, and E0-04's ticket carries it.
+# The only grant made here is CONNECT. That is not the same as "no privileges":
+# the role keeps Postgres's PUBLIC defaults, so it can also connect to the other
+# databases in the cluster and create temporary tables. What it cannot do is
+# create a table in this one, which is why migrations run as the superuser
+# identity (ADR 0009) rather than as this role.
 
 set -euo pipefail
 
@@ -54,4 +59,4 @@ CREATE ROLE :"app_user"
 GRANT CONNECT ON DATABASE :"db_name" TO :"app_user";
 SQL
 
-echo "Created application role '${DB_APP_USER}' (NOSUPERUSER, CONNECT only)."
+echo "Created application role '${DB_APP_USER}' (NOSUPERUSER; granted CONNECT)."
