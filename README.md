@@ -20,9 +20,11 @@ non-obvious requirements in the spec exist to protect one of those two beliefs.
 
 Early. The backend package exists — a FastAPI application factory, the
 environment-driven settings object, and a health endpoint — and it runs in a
-container alongside Postgres, Redis, and Mailpit. CI enforces lint, typing,
-dependency audit, license compatibility, and that the stack comes up healthy.
-There is no database schema, no background worker, and no frontend yet.
+container alongside a Celery worker, a Celery beat scheduler, Postgres, Redis,
+and Mailpit. CI enforces lint, typing, dependency audit, license compatibility,
+and that the stack comes up healthy. The job runtime is wired but does no work
+yet: the beat schedule is empty, and the only task is a `ping` that proves the
+round trip. There is no database schema and no frontend yet.
 
 ## Run it locally
 
@@ -47,6 +49,41 @@ Every other deployment runs the base file alone and publishes nothing.
 
 Copying `.env.example` is not optional: `docker-compose.yml` defaults no
 credential, so a missing variable stops the stack with a message naming it.
+
+## Background jobs
+
+`make up` starts the job runtime along with everything else: `worker` runs the
+Celery worker and `beat` runs the scheduler. Both run the API image over the
+same configuration, so a task is written once and reached the same way from an
+HTTP handler and from a job.
+
+```sh
+make logs                            # everything, interleaved
+docker compose logs -f worker        # just the worker: tasks received and their results
+docker compose logs -f beat          # just the scheduler: what it decided to fire, and when
+docker compose exec api python -c "from app.jobs.tasks import ping; print(ping.delay().get(timeout=30))"
+```
+
+That last line is the whole round trip — the API container enqueues, the worker
+executes, the result comes back through Redis — and it prints `pong`. Raise the
+detail in both services with `LOG_LEVEL=DEBUG` in your `.env`; the worker and
+beat commands read it.
+
+To run a worker outside Docker, against the containerized Redis:
+
+```sh
+make up
+celery --app app.jobs.celery_app worker --loglevel INFO
+```
+
+That needs `REDIS_URL` pointed at `localhost` in your own `.env`, for the same
+reason the section below gives about `DATABASE_URL`.
+
+The beat schedule ([`backend/app/jobs/schedules.py`](backend/app/jobs/schedules.py))
+is deliberately empty: every scheduled job — window open and close, the Monday
+report, roster sync, retention — belongs to a later epic. Beat keeps its
+schedule file on a named volume, so the last-run times survive a restart and a
+job that has already fired is not fired again when one of those entries lands.
 
 ## Working on the backend without containers
 
