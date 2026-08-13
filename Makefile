@@ -148,10 +148,15 @@ evals: ## AI eval runner with per-task precision/recall floors
 # ---------------------------------------------------------------------------
 
 # The checks after the health wait are E0-02's and E0-03's acceptance criteria,
-# in the same order as the `docker` job in .github/workflows/ci.yml. Three
-# services are named and five are covered: `api` waits on a healthy `db` and a
-# healthy `redis`, while `worker` and `beat` have nothing waiting on them and so
-# have to be named here.
+# in the same order as the `docker` job in .github/workflows/ci.yml, plus the
+# base-file-only pass that job ends with. Three services are named and five are
+# covered: `api` waits on a healthy `db` and a healthy `redis`, while `worker`
+# and `beat` have nothing waiting on them and so have to be named here.
+#
+# The base-file-only pass is the one that runs the application as installed in
+# the image; every other line here runs your checkout through the override's
+# bind mount. The workflow carries the full reasoning — this recipe exists to
+# match it, and when the two disagree the workflow is right.
 .PHONY: docker-build
 docker-build: ## Build the images and check the stack against E0-02's and E0-03's criteria
 	$(call banner,docker compose build)
@@ -170,6 +175,10 @@ docker-build: ## Build the images and check the stack against E0-02's and E0-03'
 	echo "    api runs as uid $$uid"; \
 	test "$$uid" != "0"; \
 	./scripts/ci/check_job_runtime.sh; \
+	echo "    base file alone (no override: no mounts, no host ports)"; \
+	$(COMPOSE) -f docker-compose.yml down -v >/dev/null; \
+	$(COMPOSE) -f docker-compose.yml up -d >/dev/null; \
+	./scripts/ci/wait_for_health.sh api worker beat >/dev/null; \
 	for attempt in 1 2; do \
 		echo "    down -v && up -d (attempt $$attempt)"; \
 		$(COMPOSE) down -v >/dev/null; \

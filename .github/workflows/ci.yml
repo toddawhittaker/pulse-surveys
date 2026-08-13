@@ -365,6 +365,10 @@ jobs:
   # E0-03 that no unit test can reach. They live here rather than in pytest
   # because each one needs a running daemon, and because a Compose file can
   # declare all of them correctly and still not work.
+  #
+  # One step is not an acceptance criterion of either ticket: the base-file-only
+  # pass near the end. It covers a gap the others opened rather than a criterion
+  # they left, and it says so where it stands.
   docker:
     name: Build · images + Compose health
     needs: [fast-gate]
@@ -422,6 +426,38 @@ jobs:
       # written out here.
       - name: Job runtime (ping round trip, beat restart, worker without Redis)
         run: ./scripts/ci/check_job_runtime.sh
+
+      # The only pass in this pipeline that runs what actually ships, and the
+      # reason it exists is not obvious from what it does — so read this before
+      # deleting it as a redundant third `up`.
+      #
+      # `docker compose up` merges docker-compose.override.yml automatically,
+      # and since E0-03 that override mounts the checkout over /app/backend in
+      # `api`, `worker` and `beat` alike. So every step above imports the
+      # application from the bind mount and none of them has ever executed the
+      # copy `pip install` put in the image. Measured, with an image deliberately
+      # built from older source than the checkout: the merged stack's round trip
+      # answered from the checkout and passed, while this pass answered from the
+      # image. A wheel that is missing or stale in `app/jobs` leaves the build,
+      # the round trip and all three health waits green, and then every
+      # deployment that runs the base file alone fails at worker startup.
+      #
+      # `-f docker-compose.yml` alone: no override, so no source mount and no
+      # published host port. That is what makes it cheap, and it is also why
+      # every check that talks to localhost lives above this step rather than
+      # inside it. `down -v` first, so the base file is proved from nothing —
+      # beat builds its schedule store on an empty volume here.
+      #
+      # All three services are named on purpose. `api` reaches `db` and `redis`
+      # through its depends_on conditions; nothing depends on `worker` or `beat`,
+      # so dropping either from this list would leave the pass green against a
+      # container that never started.
+      - name: Base file alone runs the installed application, not the mounted checkout
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml down -v
+          docker compose -f docker-compose.yml up -d
+          ./scripts/ci/wait_for_health.sh api worker beat
 
       # `down -v` discards the Postgres volume and beat's schedule volume, so
       # the second and third starts each initialise from nothing. This catches
