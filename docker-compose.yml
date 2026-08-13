@@ -61,20 +61,57 @@ services:
   db:
     image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
     # Compose cannot parse a URL, so the database's own credentials cannot be
-    # read out of DATABASE_URL. They are read from the three parts DATABASE_URL
-    # is built from instead, which keeps the password in one place rather than
-    # in two that can disagree.
+    # read out of DATABASE_URL. They are read from the parts DATABASE_URL is
+    # built from instead, which keeps each password in one place rather than in
+    # two that can disagree. See docs/adr/0008.
+    #
+    # Two roles, and the split is the point. POSTGRES_USER is the role `initdb`
+    # creates, and it is unavoidably the cluster superuser. DB_APP_USER is the
+    # role the application connects as, created by scripts/db-init and holding
+    # nothing but CONNECT. ADR 0001: a runtime role that is superuser bypasses
+    # grants and row-level security entirely, which would make the whole
+    # identity-separation scheme decorative.
     environment:
-      POSTGRES_USER: ${DB_USER:?DB_USER is not set — copy .env.example to .env}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set — copy .env.example to .env}
+      POSTGRES_USER: ${DB_SUPERUSER:?DB_SUPERUSER is not set — copy .env.example to .env}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:?DB_SUPERUSER_PASSWORD is not set — copy .env.example to .env}
       POSTGRES_DB: ${DB_NAME:?DB_NAME is not set — copy .env.example to .env}
+      DB_APP_USER: ${DB_APP_USER:?DB_APP_USER is not set — copy .env.example to .env}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD is not set — copy .env.example to .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Runs once, against an empty data directory. An existing volume never
+      # sees it — `down -v` is what discards one.
+      - ./scripts/db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
+      # `psql`, not `pg_isready`: that one reports whether the server answers and
+      # never authenticates, so it prints "accepting connections" for a role and
+      # a database that do not exist. This asks the question `depends_on`
+      # actually needs answered — can the application's role log in to the
+      # application's database — so a volume initialised under different
+      # credentials fails here instead of at E0-04's first connection.
+      #
+      # `--host=db` and not `127.0.0.1`, and the difference is not cosmetic. The
+      # image's generated `pg_hba.conf` ends with
+      # `host all all 127.0.0.1/32 trust`, so a loopback probe never checks the
+      # password; reaching the service by name resolves to this container's
+      # address on the Compose network, which falls to the final
+      # `host all all all scram-sha-256` rule — the same rule `api` authenticates
+      # under. Verified by connecting with a deliberately wrong password: over
+      # loopback it succeeds, by name it is refused.
+      #
+      # Naming a host at all also forces TCP. The temporary server `initdb` runs
+      # listens on the local socket only, so a socket probe can report healthy
+      # before the real server accepts a connection; a TCP probe cannot.
+      #
       # `$$` reaches the container as a single `$`, so the shell inside expands
-      # these rather than Compose. Without -U and -d, pg_isready asks about the
-      # `postgres` role and database, which this stack does not create.
-      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      # these out of the environment above rather than Compose expanding them
+      # out of `.env`.
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$DB_APP_PASSWORD" psql --host=db
+          --username="$$DB_APP_USER" --dbname="$$POSTGRES_DB"
+          --no-password --quiet --tuples-only --command="select 1" > /dev/null
       interval: 5s
       timeout: 5s
       retries: 12
