@@ -451,8 +451,11 @@ jobs:
           npm audit --audit-level=high
 
       # pip-licenses reads installed distributions, so the runtime closure has
-      # to be on disk. Runtime only: dev and CI tooling is not distributed, and
-      # §10 is about what we ship.
+      # to be on disk. The runtime lock and not the dev one: test dependencies
+      # are not distributed, and §10 is about what we ship. The audit tools
+      # installed above are in this environment too, so the scan is a superset
+      # of the shipped closure — stricter than §10 asks, deliberately
+      # (docs/adr/0005-dependency-locking.md).
       - name: Install the runtime closure to scan (locked)
         run: pip install --require-hashes -r requirements.txt
 

@@ -186,9 +186,10 @@ audit: ## Fail on high/critical dependency vulnerabilities
 	fi
 
 .PHONY: licenses
-# pip-licenses reads whatever is installed in the active environment. CI scans
-# the runtime closure alone; locally it also sees your dev and tooling
-# packages, so this can report more than CI does. It never reports less.
+# pip-licenses reads whatever is installed in the active environment. In CI
+# that is the runtime lock plus pip-audit and pip-licenses themselves; locally
+# it is your whole virtual environment, dev dependencies included. So this can
+# report more packages than CI does, and never fewer.
 licenses: ## Fail on dependencies incompatible with MIT distribution
 	$(call banner,license compatibility)
 	@mkdir -p reports

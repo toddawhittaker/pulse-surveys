@@ -36,8 +36,13 @@ digest, and every CI job that needs the backend installs with
 installs them.
 
 The lockfiles are the audited artifact too: `pip-audit` reads them directly
-rather than scanning an installed environment, and the license check installs
-the runtime closure alone before scanning.
+rather than scanning an installed environment. The license check needs
+installed distributions to read, so it installs `requirements.txt` — the
+runtime lock, not the dev one — into the supply-chain job and scans what is
+there. `pip-audit` and `pip-licenses` are installed in that same job, so the
+scan covers them and their dependencies as well as the runtime closure. That
+is a superset of what §10 governs, and the consequences below say why it is
+left that way.
 
 ## Alternatives rejected
 
@@ -79,6 +84,14 @@ that cannot separate `pytest` from `fastapi` cannot answer that question.
   diffing would close that gap, at the cost of a network resolution on every
   run; it is not worth it while the dependency set is this small, and it is the
   first thing to add if drift ever bites.
+- **The license scan reads more than we distribute.** `pip-licenses` reports
+  every distribution installed in the job, which includes `pip-audit`,
+  `pip-licenses`, and their dependencies. Deliberately not narrowed: separating
+  them means a second virtual environment for one scan, the extra packages are
+  permissively licensed and cost nothing today, and a strict gate that
+  occasionally flags a build tool is a better failure than a lenient one that
+  misses a shipped dependency. If a tool's dependency ever does trip it, the
+  fix is that second environment, and the reason will be obvious in the report.
 - **Dependabot updates get slower to review.** A minor bump rewrites hash blocks
   for every affected package, so the diff is large and mostly noise. Dependabot
   does regenerate hashes for pip-compile output, so it stays automatic.
