@@ -145,17 +145,32 @@ canary_before="$(docker compose exec -T beat cat "${CANARY_FILE}" | tr -d '\r')"
 birth_before="$(schedule_birth)"
 echo "  before: schedule created ${birth_before}, canary ${canary_before}"
 
-# Asserted before it is compared, because "unknown" is the one value that makes
-# both comparisons below pass without looking at anything (docs/MISTAKES.md
-# entry 3). ext4 records a birth time and the named volume lives on the host
-# filesystem; a filesystem that does not record one needs a different observable
-# here, not a comparison of two dashes.
+# Asserted before it is compared, because a value that means "unknown" is the one
+# value that makes both comparisons below pass without looking at anything
+# (docs/MISTAKES.md entry 3): all three readings come back the same placeholder,
+# and the file could have been rebuilt twice in between.
+#
+# Validated by what a birth time has to look like, rather than by listing the
+# ways it can be missing. A blacklist here would have to know every spelling of
+# failure, and the two that occur are not the two you would guess — measured,
+# both exiting 0: GNU coreutils prints `?` for a directive it does not
+# understand, and busybox `stat -c %w` prints the letter `w`. Neither is an
+# empty string and neither is a dash, so the blacklist this replaces would have
+# passed all three of them straight through, which is `docs/MISTAKES.md` entry 3
+# again — a pattern that matches nothing, silently.
+#
+# ext4 does record a birth time and the named volume lives on the host
+# filesystem, so this fires today only if that stops being true.
 case "${birth_before}" in
-  "" | "-")
-    fail "the filesystem behind ${SCHEDULE_DIRECTORY} does not record a birth time,
-      so the two comparisons below would compare '${birth_before}' with
-      '${birth_before}' and pass whatever happened to the file. Find an
-      observable that filesystem does keep before trusting criterion 3 here."
+  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]" "[0-9][0-9]:[0-9][0-9]:[0-9]*) ;;
+  *)
+    fail "the birth time of ${SCHEDULE_FILE} reads '${birth_before}', which is not a
+      date. Either the filesystem behind ${SCHEDULE_DIRECTORY} does not record
+      one — GNU stat prints '?', busybox prints 'w', and both exit 0 — or this
+      \`stat\` spells it differently. Both comparisons below would then compare
+      that placeholder with itself and pass whatever had happened to the file,
+      so criterion 3 needs an observable this filesystem keeps before it means
+      anything here."
     ;;
 esac
 
