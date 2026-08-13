@@ -116,6 +116,14 @@ endgroup
 # contents are identical whether it survived or was rebuilt, since E0-03's
 # schedule is empty by design.
 # ---------------------------------------------------------------------------
+# Empty rather than an error when the file is gone, which is the interesting
+# case: `set -o pipefail` would otherwise abort the script on `cat`'s exit code
+# and the comparison below — the one that can say what a missing canary means —
+# would never run.
+read_canary() {
+  docker compose exec -T beat cat "${CANARY_FILE}" 2>/dev/null | tr -d '\r' || true
+}
+
 group "Criterion 3: beat returns to healthy and keeps its schedule file"
 docker compose exec -T beat sh -c "date -u +%s%N > '${CANARY_FILE}'"
 canary_before="$(docker compose exec -T beat cat "${CANARY_FILE}" | tr -d '\r')"
@@ -126,7 +134,7 @@ docker compose restart beat
 "${here}/wait_for_health.sh" beat
 
 inode_after="$(docker compose exec -T beat stat -c '%i' "${SCHEDULE_FILE}" | tr -d '\r')"
-canary_after="$(docker compose exec -T beat cat "${CANARY_FILE}" | tr -d '\r')"
+canary_after="$(read_canary)"
 echo "  after restart: schedule inode ${inode_after}, canary ${canary_after}"
 [ "${inode_after}" = "${inode_before}" ] || fail "beat replaced its schedule file across a restart
       (inode ${inode_before} -> ${inode_after}). The file was recreated rather
@@ -136,14 +144,17 @@ echo "  after restart: schedule inode ${inode_after}, canary ${canary_after}"
 docker compose up -d --force-recreate --no-deps beat
 "${here}/wait_for_health.sh" beat
 
-canary_recreated="$(docker compose exec -T beat cat "${CANARY_FILE}" | tr -d '\r')"
+canary_recreated="$(read_canary)"
 inode_recreated="$(docker compose exec -T beat stat -c '%i' "${SCHEDULE_FILE}" | tr -d '\r')"
-echo "  after recreate: schedule inode ${inode_recreated}, canary ${canary_recreated}"
+echo "  after recreate: schedule inode ${inode_recreated}, canary ${canary_recreated:-<gone>}"
 [ "${canary_recreated}" = "${canary_before}" ] || fail "the beat schedule directory did not survive
       a container replacement: a file written before it read '${canary_before}'
-      and now reads '${canary_recreated}'. ${SCHEDULE_DIRECTORY} is not on a
-      named volume, so beat starts from an empty schedule whenever its
-      container is replaced."
+      and afterwards reads '${canary_recreated:-nothing — the file is gone}'.
+      ${SCHEDULE_DIRECTORY} is not on a named volume, so beat starts from an
+      empty schedule every time its container is replaced. Verified by
+      reproduction: with the volume taken off the service, the restart above
+      still passes — a restarted container keeps its own filesystem — and this
+      is the check that fails."
 
 docker compose exec -T beat rm -f "${CANARY_FILE}"
 endgroup
