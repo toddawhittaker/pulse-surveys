@@ -60,10 +60,22 @@ is superuser bypasses grants and row-level security entirely — and the names
 carry it because a variable called `DB_USER` that is not the user the
 application connects as is exactly how the two got conflated in the first place.
 
-**The parts must appear above `DATABASE_URL` in the file.** Both readers resolve
-top-down, so a part declared below the line that uses it expands to empty and
-the URL silently loses its credentials while `db` is still created correctly. A
-test asserts the file resolves rather than trusting the ordering.
+**The parts must appear above `DATABASE_URL` in the file**, and the reason is
+narrower than "the readers go top-down". The `${DB_SUPERUSER}` and
+`${DB_APP_USER}` references that configure the `db` service are written in
+`docker-compose.yml`, and Compose resolves those against the whole environment,
+so where they sit in `.env` does not matter to them at all. What is
+order-sensitive is the nested expansion inside `.env`'s own `DATABASE_URL`
+*value*, which both of its readers — Compose's interpolation and python-dotenv —
+resolve top-down.
+
+That makes the failure asymmetric, and the asymmetry is why it survives. Moving
+the block below the line was measured, not reasoned about: `db` is still created
+with the right user, password, and database, while both readers hand the
+application `postgresql+psycopg://:@db:5432/`. The two halves disagree, neither
+complains, `docker compose up` is green, and it surfaces as an authentication
+error at E0-04. A test asserts the file resolves rather than trusting the
+ordering.
 
 Both readers expand those references, which was verified rather than assumed:
 Compose expands them when it reads `.env` as its interpolation source, and
