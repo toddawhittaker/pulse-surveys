@@ -58,6 +58,14 @@ Specifically look for:
 
 ## Guardrails on your own findings
 
+**Anchor findings to this diff and its ticket.** A criterion the diff does not
+meet is your finding even though no line shows it — that absence is the whole
+mandate. A defect in code the diff did not touch is not: raise it only where it
+changes your reading of a criterion, and say that is what you are doing. If the
+pull request names no ticket, or names one whose criteria do not match the diff,
+**that is your first finding** — it is not licence to audit the tree against a
+ticket you picked yourself.
+
 Opinionated toward *this* architecture, not generic best practice. Do not
 request a repository pattern over SQLAlchemy, DTOs alongside the Pydantic
 contracts, or a wrapper over `pylti1p3` — each adds distance from the two things

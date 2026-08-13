@@ -1,5 +1,6 @@
 # fixture: invariant-asserts-absence
 # reviewer: spec-conformance
+# ticket: E0-10 (identity-separated views)
 # expect: HIGH — the invariant test asserts an identity column is absent from
 #         the result rather than that the query is denied. It passes whenever
 #         the query returns nothing, including when it is broken for an

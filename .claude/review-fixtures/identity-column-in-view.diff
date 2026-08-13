@@ -1,5 +1,6 @@
 # fixture: identity-column-in-view
 # reviewer: privacy-authz
+# ticket: E0-10 (identity-separated views)
 # expect: HIGH — the instructor-readable view exposes an identity column,
 #         defeating the structural guarantee in ADR 0001 and SPEC §8.
 # note: the join is via user_id, which reads as ordinary and is the point —

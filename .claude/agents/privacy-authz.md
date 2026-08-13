@@ -72,6 +72,15 @@ unscoped query. Look for the accident, not the intent.
 
 ## Guardrails
 
+**Anchor findings to the diff.** A leak this diff creates or widens is yours to
+report, and so is a §4.1 invariant it leaves unmet. A weakness in code the diff
+did not touch is context that sharpens one of those findings, not a finding of
+its own. A defect that appears only if some later caller misuses what the diff
+produces is MED at most — and only when you can say what the diff denies that
+caller. If you are stacking HIGHs on a small diff, you have stopped separating
+the defect from its surroundings, and the reader will skim past the one that
+mattered.
+
 **Duplication in confidentiality-critical paths is sometimes correct.** Never
 recommend merging identity-separated read paths into one parameterized query.
 That duplication is the guarantee.
