@@ -18,8 +18,45 @@ non-obvious requirements in the spec exist to protect one of those two beliefs.
 
 ## Status
 
-Early. This repository currently holds the specification, the design brief, and
-an exported design prototype. No application code has been written yet.
+Early. The backend package exists — a FastAPI application factory, the
+environment-driven settings object, and a health endpoint — and CI enforces
+lint, typing, dependency audit, and license compatibility against it. There is
+no database, no background worker, and no frontend yet.
+
+## Local development
+
+Python 3.12 or newer, and a virtual environment of your own making.
+
+```sh
+python3 -m venv .venv && source .venv/bin/activate
+make tools          # the pinned CI tools: ruff, mypy, pip-audit, pip-licenses, pip-tools
+make install        # the locked dependencies, plus this package, editable
+cp .env.example .env
+uvicorn app.main:create_app --factory --reload
+```
+
+`GET http://localhost:8000/healthz` answers with the service name, the version,
+and the environment it was configured with. The interactive API documentation
+is at `/docs`.
+
+Configuration is entirely environment-driven and documented in
+[`.env.example`](.env.example), which a unit test keeps in sync with
+`app.config.Settings` in both directions. Six variables have no default,
+because a working default for a deployment-specific value is a
+misconfiguration that starts successfully: the application refuses to start
+without them and names the one it is missing.
+
+```sh
+make ci             # every gate, in the same order as CI
+make lint           # ruff check + ruff format --check
+make typecheck      # mypy, strict over app/services/
+make test           # pytest with coverage
+make lock           # recompile the lockfiles after editing dependencies
+```
+
+`make ci` is the same set of gates as `.github/workflows/ci.yml`, so a green run
+here should mean a green run there. Where the two disagree, the workflow is
+right and the `Makefile` is the bug.
 
 ## Documents
 
