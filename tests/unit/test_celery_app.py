@@ -38,7 +38,6 @@ environment the test just set, rather than against whatever the environment
 held the first time some other test imported it.
 """
 
-import sys
 import zoneinfo
 from collections.abc import Callable
 from types import ModuleType
@@ -70,6 +69,14 @@ SENTINEL_TIMEZONE = "Pacific/Auckland"
 
 REDIS_URL_VARIABLE = "REDIS_URL"
 INSTITUTION_TIMEZONE_VARIABLE = "INSTITUTION_TIMEZONE"
+
+# Put into the schedule module by the wiring test and looked for on the other
+# side, in the schedule beat would actually read. A token rather than a bare key
+# because it goes in the entry as well: an implementation that copies the
+# mapping, one that references it, and one that rebuilds entries out of it all
+# carry the token somewhere, and none of them can invent it.
+SCHEDULE_PROBE_TOKEN = "e0-03-schedule-wiring-probe"
+SCHEDULE_PROBE_ENTRY = {"task": f"{SCHEDULE_PROBE_TOKEN}.never-runs", "schedule": 3600.0}
 
 MISSING_MODULE_MESSAGE = (
     "`{module}` does not exist. E0-03 ships it under `backend/app/jobs/` "
@@ -112,6 +119,23 @@ def timezone_key(value: Any) -> str:
     `Settings.institution_timezone` open on purpose.
     """
     return str(value)
+
+
+def public_mappings(module: ModuleType) -> dict[str, dict[Any, Any]]:
+    """Every public module-level mapping, by attribute name.
+
+    The schedule module holds its entries in a mapping, and E0-03 does not say
+    what that mapping is called. Collecting them by shape rather than by name
+    keeps the ticket's silence the ticket's, and it is not a loophole: the
+    wiring test mutates all of them and asserts the mutation arrives, so a
+    mapping that is not the beat schedule contributes nothing either way, and
+    one that is cannot be missed by having been renamed.
+    """
+    return {
+        name: value
+        for name, value in vars(module).items()
+        if not name.startswith("_") and isinstance(value, dict)
+    }
 
 
 def require_application(
@@ -228,7 +252,7 @@ def test_the_celery_timezone_follows_the_institution_timezone(
     )
 
 
-def test_the_celery_application_pulls_in_the_beat_schedule_module(
+def test_the_schedule_beat_reads_is_the_one_the_schedule_module_exposes(
     configured_env: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
@@ -236,32 +260,75 @@ def test_the_celery_application_pulls_in_the_beat_schedule_module(
     """E0-03 scope: the schedule module is "wired and importable", not just present.
 
     Importable alone is worth nothing here. `app.jobs.schedules` exists to be the
-    place a scheduled job goes, and if nothing connects it to the application
-    then the first entry E2 adds is loaded by no process: beat starts, reports
-    healthy, and runs an empty schedule. That failure has no symptom at all —
-    a window that never opens looks like a window nobody configured.
+    place a scheduled job goes, and if nothing connects its entries to
+    `conf.beat_schedule` then the first entry E2 adds is read by no process:
+    beat starts, reports healthy, and runs an empty schedule forever. That
+    failure has no symptom — a window that never opens looks like a window
+    nobody configured.
 
-    Two ways of connecting count, because the ticket does not choose between
-    them: the application's own module importing it (whatever it then does with
-    what it finds), or the application naming it in `imports`/`include` for the
-    worker and beat to load. `conf` is read first because
-    `config_from_object("app.jobs.schedules")` defers the import until the
-    configuration is resolved, and this test must not be the thing that decides
-    whether that counts.
+    **An earlier version of this test asserted that the module had been
+    imported, and that is not the same property.** Reviewer pass 1 on pull
+    request #16 demonstrated it by mutation: deleting the two lines that assign
+    the mapping to `conf.beat_schedule` and naming the module in the
+    application's `include=[...]` instead left this file entirely green.
+    `include` makes the *worker* import a module for its task registry and does
+    nothing whatever for the beat schedule. Both mechanisms mention the module,
+    so no assertion about the module can tell them apart.
+
+    So the mapping itself is followed end to end: put a probe entry into what
+    `schedules.py` exposes, then read the schedule the application hands beat
+    and require the probe to be in it. That asserts the property and not a
+    mechanism — assignment by reference, a copy taken at import, and entries
+    rebuilt through `add_periodic_task` all carry the probe across, and nothing
+    that merely imports the module can.
+
+    Ordering is load-bearing and is the reason this test does not use
+    `require_application`. `import_app_module` empties `app.*` out of
+    `sys.modules` before the body runs, so the schedule module must be imported
+    and mutated *first*: an implementation that copies the mapping at import
+    time copies whatever is in it at that moment, and importing the application
+    first would take the copy before the probe existed.
     """
+    schedules = import_app_module(SCHEDULES_MODULE)
+    assert schedules is not None, MISSING_MODULE_MESSAGE.format(module=SCHEDULES_MODULE)
+
+    exposed = public_mappings(schedules)
+    assert exposed, (
+        f"`{SCHEDULES_MODULE}` exposes no module-level mapping, so this test has nothing to "
+        "put a probe into and cannot tell a wired schedule from an unwired one. E0-03 has "
+        "the module hold the beat entries; if it has come to build them some other way — a "
+        "function, a signal handler — then rewrite this test around that, rather than "
+        "dropping back to asserting the module was imported, which is the assertion "
+        "reviewer pass 1 walked straight through."
+    )
+    for entries in exposed.values():
+        entries[f"{SCHEDULE_PROBE_TOKEN}-entry"] = dict(SCHEDULE_PROBE_ENTRY)
+
     application = require_application(import_app_module, celery_application_in)
-    conf = application.conf
+    beat_schedule = application.conf.beat_schedule
+    if beat_schedule is None:
+        beat_schedule = {}
 
-    declared = {str(name) for name in (conf.get("imports") or ())}
-    declared |= {str(name) for name in (conf.get("include") or ())}
-    wired = SCHEDULES_MODULE in sys.modules or SCHEDULES_MODULE in declared
+    # Identity is accepted as well as the probe arriving. The two answer the same
+    # question at different moments: an implementation that assigns the mapping
+    # by reference is wired whether or not the copy timing happened to suit the
+    # probe, and saying so here costs one line and removes a false failure that
+    # would be very hard to read.
+    #
+    # `or {}` would have been wrong on this line and worth naming: it swaps an
+    # empty mapping for a fresh one, and the identity check below would then be
+    # comparing against an object nothing wired.
+    carried = SCHEDULE_PROBE_TOKEN in repr(dict(beat_schedule))
+    shared = any(entries is beat_schedule for entries in exposed.values())
 
-    assert wired, (
-        f"Importing `{CELERY_APP_MODULE}` does not reach `{SCHEDULES_MODULE}`, and the "
-        f"application does not name it in `imports` or `include` (it names {sorted(declared)}). "
-        "So the beat schedule module is not wired to the application that beat runs: the "
-        "first entry added to it in E2 would be scheduled by nobody, with beat still "
-        "reporting healthy. E0-03 asks for it wired *and* importable for this reason."
+    assert carried or shared, (
+        f"The probe entry put into `{SCHEDULES_MODULE}` does not appear in the schedule the "
+        f"application hands beat, which holds {sorted(dict(beat_schedule))}. Nothing "
+        "connects the two: beat would read an empty schedule however many entries the "
+        "module grows. Naming the module in `include` or `imports` is not this — that "
+        "imports it for the worker's task registry and leaves `beat_schedule` untouched. "
+        "Assign what the module exposes to `conf.beat_schedule` (or feed it through "
+        "`add_periodic_task`)."
     )
 
 
@@ -286,8 +353,9 @@ def test_the_beat_schedule_holds_no_real_entries_yet(
     The empty assertion is the weak half of the pair and is not left to stand on
     its own: an empty schedule is exactly what a module that does not exist
     would produce, so `app.jobs.schedules` is imported first and asserted to be
-    real. The wiring — that the application can see the module at all — is
-    `test_the_celery_application_pulls_in_the_beat_schedule_module` above.
+    real. The wiring test above — that the entries this module holds are the
+    ones beat reads — is the other half, and without it "empty" here would be
+    indistinguishable from "connected to nothing".
     """
     schedules = import_app_module(SCHEDULES_MODULE)
     assert schedules is not None, MISSING_MODULE_MESSAGE.format(module=SCHEDULES_MODULE)

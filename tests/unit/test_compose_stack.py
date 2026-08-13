@@ -49,7 +49,12 @@ than into a fourth:
     `wait_for_health.sh` fails a service that declares no health check, so the
     `docker` job covers the merged view — and a health check that lives only in
     the development override satisfies that gate while every other deployment
-    runs a worker and a beat that report no health at all.
+    runs a worker and a beat that report no health at all. Beat's check also has
+    to *read the schedule file*, which is item 2 in its sharpest form: reviewer
+    pass 1 on pull request #16 replaced that check with `true` and every gate
+    stayed green, because a health gate can only ever exercise the direction
+    where the answer is yes. A check nobody has seen say no is a check nobody
+    has seen.
   - Neither takes privilege the `api` service does not, which is the E0-03
     security-review item. Nothing dynamic looks at it: a `privileged: true` or a
     `user: root` on the worker makes the stack come up exactly as before, and
@@ -103,7 +108,32 @@ SUPERUSER_VARIABLES = ("DB_SUPERUSER", "DB_SUPERUSER_PASSWORD")
 # The two services E0-03 adds. Both run the API image and both are compared
 # against `api`, so the service they are compared with is named once too.
 API_SERVICE = "api"
+BEAT_SERVICE = "beat"
 JOB_SERVICES = ("worker", "beat")
+
+# How beat says where its schedule file lives. Celery spells the flag
+# `-s, --schedule`; the two names are Celery's, not this test's choice. A
+# container-side volume path counts too, because a schedule file that survives
+# `docker compose restart beat` (criterion 3) has to be on one.
+SCHEDULE_FLAGS = ("-s", "--schedule")
+
+# Ways of reading a modification time. **This list is the test's choice** and is
+# meant to grow: it exists to separate a check that asks *when the schedule file
+# was last written* from one that asks only whether it is there. If a freshness
+# check arrives that reads mtime by some route not listed here, add the route —
+# the assertion that must not be weakened is that the check is time-aware.
+FRESHNESS_TOKENS = (
+    "-newer",
+    "-mmin",
+    "-mtime",
+    "-cmin",
+    "-ctime",
+    "stat",
+    "mtime",
+    "date",
+    "time.time",
+    "monotonic",
+)
 
 # Compose keys that give a container more than its image does. Each is a real
 # route out of the container or up to root, and none of them changes whether the
@@ -556,12 +586,15 @@ def test_job_service_declares_its_health_check_in_the_base_file(
     `beat`, and the scope list asks for a meaningful check on each: `celery
     inspect ping` for the worker, and schedule-file freshness for beat.
 
-    Whether the check is *meaningful* is not decided here and cannot be — the
-    two dynamic criteria are what settle it, and they need a daemon: the worker
-    goes unhealthy when Redis is stopped, and beat comes back healthy after
-    `docker compose restart beat`. What is decided here is narrower and is the
-    part no daemon sees. `wait_for_health.sh` already fails a service that
-    declares no health check, so the `docker` job covers the *merged* view; a
+    Whether the check is *meaningful* is decided elsewhere, in two places and
+    not in this one. Beat's is held statically by
+    `test_the_beat_health_check_reads_the_schedule_file` below, which reviewer
+    pass 1 required after `test: ["CMD", "true"]` passed every gate. The
+    worker's is held by the dynamic criterion that needs a daemon: it goes
+    unhealthy when Redis is stopped. What is decided here is narrower than
+    either and is the part no daemon sees. `wait_for_health.sh` already fails a
+    service that declares no health check, so the `docker` job covers the
+    *merged* view; a
     check declared in `docker-compose.override.yml` would satisfy that gate and
     be absent from every deployment that runs the base file alone.
 
@@ -601,6 +634,177 @@ def test_job_service_declares_its_health_check_in_the_base_file(
         f"`{service_name}` declares a health check that is switched off "
         f"({healthcheck!r}). A disabled check is not a check: the container reports no "
         "health at all, which is the state E0-03's first criterion exists to rule out."
+    )
+
+
+def command_tokens(service: dict[str, Any]) -> list[str]:
+    """Every whitespace-separated word of a service's entrypoint and command.
+
+    Both keys, and both of Compose's spellings for each, flattened into one list
+    of words. `command: celery -A app.jobs.celery_app beat -s /x` and
+    `command: ["celery", "-A", "app.jobs.celery_app", "beat", "-s", "/x"]` are
+    the same instruction, and a list entry may itself hold several words when a
+    service is started through `sh -c`.
+    """
+    words: list[str] = []
+    for key in ("entrypoint", "command"):
+        declared = service.get(key)
+        if isinstance(declared, str):
+            words.extend(declared.split())
+        elif isinstance(declared, list):
+            for item in declared:
+                words.extend(str(item).split())
+    return words
+
+
+def schedule_anchors(service: dict[str, Any]) -> set[str]:
+    """Paths at which this service says its beat schedule file lives.
+
+    Two sources, because a service may name the file on the command line or
+    place it by mounting the directory it goes in — and it usually does both.
+    Anything a health check can honestly be anchored to has to be declared
+    somewhere the service itself declares it, or the check and the file are two
+    independent guesses about a path.
+    """
+    anchors: set[str] = set()
+    tokens = command_tokens(service)
+    for index, token in enumerate(tokens):
+        for flag in SCHEDULE_FLAGS:
+            if token == flag and index + 1 < len(tokens):
+                anchors.add(tokens[index + 1])
+            elif token.startswith(f"{flag}="):
+                anchors.add(token.split("=", 1)[1])
+
+    for entry in service.get("volumes") or []:
+        if isinstance(entry, dict):
+            target = entry.get("target")
+            if isinstance(target, str):
+                anchors.add(target)
+        elif isinstance(entry, str):
+            parts = entry.split(":")
+            if len(parts) >= 2:
+                anchors.add(parts[1])
+
+    return {anchor for anchor in anchors if anchor and not anchor.startswith("-")}
+
+
+def reference_candidates(anchor: str) -> set[str]:
+    """The ways a health check might legitimately name `anchor`.
+
+    The path itself, and the directory holding it. Celery's `--schedule` names a
+    file while the shelve database it opens may be that name plus a suffix, so a
+    check written with `find <directory> -name 'celerybeat-schedule*'` is
+    reading exactly the right thing and never contains the file path as written.
+    Accepting the parent keeps this test from failing a correct check on a
+    detail of how the path was spelled.
+    """
+    candidates = {anchor}
+    parent = anchor.rsplit("/", 1)[0]
+    if parent and parent != anchor:
+        candidates.add(parent)
+    return candidates
+
+
+def healthcheck_command(healthcheck: dict[str, Any]) -> str:
+    """A service's health check as one string, in either of Compose's spellings."""
+    declared = healthcheck.get("test")
+    if isinstance(declared, str):
+        return declared
+    if isinstance(declared, list):
+        return " ".join(str(item) for item in declared)
+    return ""
+
+
+def test_the_beat_health_check_reads_the_schedule_file(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+) -> None:
+    """E0-03 scope: beat's liveness check is "based on schedule-file freshness".
+
+    The scope list says what the check must not be — "rather than mere process
+    existence" — because beat's failure mode is that the process is alive and
+    the scheduler inside it is not. A check that reports on the process reports
+    healthy through exactly the outage it exists to catch, and every gate in the
+    pipeline agrees with it: the container is up, `wait_for_health.sh` passes,
+    and no scheduled job has been missed yet because none exists to miss.
+
+    Reviewer pass 1 on pull request #16 measured this. Replacing beat's health
+    check with `test: ["CMD", "true"]` left every gate green, because presence
+    and not-disabled were all that was asserted, and the dynamic checks only
+    ever exercise the direction where the answer is yes.
+
+    Two assertions, and the split is the point:
+
+      - the command names the schedule file, which is what a process check, a
+        pidfile check and `true` all fail; and
+      - the command does something time-aware with it, which is what `test -f`
+        fails — a file that exists is not a file that is being written to.
+
+    Neither pins the command. The path is read out of what beat itself declares
+    rather than written down here, so renaming the file or moving the volume
+    needs no edit; the time-aware vocabulary is a named list that is meant to be
+    extended rather than argued with.
+
+    What is still not asserted here, and cannot be: whether the freshness window
+    is the right size. A check with a two-hour tolerance passes both assertions
+    below and reports healthy through two hours of a wedged scheduler. That is
+    the dynamic side's to hold, by stopping the scheduler and watching the
+    container go unhealthy — and by MISTAKES entry 7's rule, watching for longer
+    than `retries × interval` before believing the answer.
+    """
+    assert base_compose, (
+        f"{base_compose_path} does not exist or declares nothing. E0-02 ships the base "
+        "Compose file at the repository root (SPEC §13)."
+    )
+
+    beat = services_of(base_compose).get(BEAT_SERVICE)
+    assert beat is not None, (
+        f"docker-compose.yml declares no `{BEAT_SERVICE}` service. E0-03 adds it (SPEC §7.2 "
+        "— Celery beat: window open/close, Monday reports, retention)."
+    )
+
+    healthcheck = beat.get("healthcheck")
+    assert isinstance(healthcheck, dict) and healthcheck, (
+        f"`{BEAT_SERVICE}` declares no healthcheck, so there is no command for this test to "
+        "read and its silence below would mean nothing."
+    )
+    command = healthcheck_command(healthcheck)
+    assert command.strip(), (
+        f"`{BEAT_SERVICE}`'s healthcheck declares no `test:` command ({healthcheck!r}). An "
+        "empty command is not a check, and it would satisfy every search below by giving "
+        "them nothing to look at."
+    )
+
+    anchors = schedule_anchors(beat)
+    assert anchors, (
+        f"`{BEAT_SERVICE}` says nowhere what its schedule file is: its command passes no "
+        f"{' or '.join(SCHEDULE_FLAGS)} and it mounts no volume. A freshness check needs a "
+        "file at a known path, and criterion 3 needs that file to survive `docker compose "
+        "restart beat`, so both wants the same thing — name the schedule file explicitly "
+        "and put it somewhere that persists."
+    )
+
+    referenced = sorted(
+        anchor
+        for anchor in anchors
+        if any(candidate in command for candidate in reference_candidates(anchor))
+    )
+    assert referenced, (
+        f"`{BEAT_SERVICE}`'s health check never mentions its schedule file. It runs "
+        f"`{command}`, while the schedule lives at one of {sorted(anchors)}. A check that "
+        "does not look at the schedule file is a check on the process, and beat's failure "
+        "mode is a live process with a dead scheduler — `test: ['CMD', 'true']` and "
+        "`pgrep celery` both report healthy through exactly that."
+    )
+
+    time_aware = sorted(token for token in FRESHNESS_TOKENS if token in command.lower())
+    assert time_aware, (
+        f"`{BEAT_SERVICE}`'s health check reads {referenced} but never asks when it was "
+        f"last written. It runs `{command}`. The scope item is schedule-file *freshness*: "
+        "the file a wedged beat leaves behind still exists, so existence reports healthy "
+        "forever. Compare its modification time against now. If the mechanism used is not "
+        f"in {list(FRESHNESS_TOKENS)}, add it to that list — it is this test's choice and "
+        "is meant to grow — rather than dropping the assertion to existence."
     )
 
 
