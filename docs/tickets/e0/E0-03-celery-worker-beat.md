@@ -26,7 +26,18 @@ be scheduled), §10.
 - A meaningful `HEALTHCHECK` on each: `celery inspect ping` for the worker, and
   a beat liveness check based on schedule-file freshness rather than mere
   process existence.
+- A named volume for beat's schedule file, so last-run times survive a restart.
 - Restore `wait_for_health.sh api worker beat` in the CI `docker` job.
+
+## A note on criterion 3
+
+It originally read "restarts cleanly and does not double-schedule". That has no
+observable in this ticket: the same scope requires the beat schedule to be empty
+of real entries, so nothing exists that *could* fire twice. The criterion is
+narrowed above to the two things that are checkable now — beat returns to
+healthy, and its schedule file persists — because persistence is the mechanism
+that makes "does not double-schedule" true once E2 lands the first real entry.
+The property itself is first testable in E2 and should be asserted there.
 
 ## Out of scope
 
@@ -41,8 +52,9 @@ be scheduled), §10.
 - [ ] `docker compose up -d` reaches healthy on `api`, `worker`, and `beat`.
 - [ ] Calling the `ping` task from the API container returns its result through
       the Redis backend within a timeout.
-- [ ] `beat` restarts cleanly after `docker compose restart beat` and does not
-      double-schedule.
+- [ ] `beat` restarts cleanly after `docker compose restart beat`: it returns to
+      healthy, and its schedule file survives the restart rather than being
+      recreated empty.
 - [ ] The worker health check fails (not passes) when Redis is stopped —
       verify by stopping `redis` and observing the container go unhealthy.
 - [ ] The CI `docker` job waits on all three services and passes.
