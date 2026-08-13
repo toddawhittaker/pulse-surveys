@@ -17,15 +17,101 @@ The fields split into two groups, and the split is the point:
   "configurable (default 5)" in §4, and the benchmark minimums are §11 open
   question 1. A spec-given default is not a silent fallback.
 
-Nothing here is logged. `Settings` carries no secret today, and when it does
-(the masked AI provider key in §6.3), the rule that keeps it out of the logs is
-that this object is never printed, formatted, or dumped at startup.
+**No configuration value is ever quoted back.** When the environment is wrong,
+the failure is reported by naming the variables at fault, never by showing what
+they contained. The reason is that this failure happens at startup, where the
+only place it can go is the container log: `DATABASE_URL` and `REDIS_URL` carry
+passwords today, the masked AI provider key, the SMTP password, and the LTI
+private key are coming (§6.3), and SPEC §10 puts secrets in the environment
+precisely so they stay out of logs.
+
+That rule is enforced by construction rather than by remembering: `Settings`
+converts any validation failure into a `ConfigurationError` built only from
+field names, static field descriptions, and pydantic's error-type codes. A
+field added later is covered without anyone knowing this paragraph exists,
+which is the property that matters — a fix that enumerated today's
+password-bearing fields would not survive the next one.
 """
 
+from collections.abc import Iterable, Mapping
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationError, field_validator
+from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# What pydantic's error-type codes mean, in words an operator can act on. Keyed
+# on the code and never on the message, because a message is built from the
+# value that failed and a code never is. An unknown code falls back to the code
+# itself, which is a static string from the library.
+_PROBLEM_EXPLANATIONS = {
+    "missing": "not set",
+    "string_type": "not text",
+    "int_parsing": "not a whole number",
+    "int_type": "not a whole number",
+    "float_parsing": "not a number",
+    "bool_parsing": "not a true or false value",
+    "greater_than_equal": "below the smallest value this setting allows",
+    "less_than_equal": "above the largest value this setting allows",
+    "value_error": "rejected by this setting's own validation",
+}
+
+
+class ConfigurationError(Exception):
+    """The environment does not configure the application, and startup stops here.
+
+    Names the variables at fault and says what is wrong with each in general
+    terms. It holds no configuration value, exposes no structured payload to
+    serialize one into, and is raised with no exception chained behind it —
+    pydantic's `ValidationError` retains the input it was given in `errors()`
+    whatever is done to its rendering, and Python prints a chained cause's
+    message too, so the only way to keep a password out of the startup log is
+    for the exception that reaches it to have never held one.
+    """
+
+
+def _describe_invalid_settings(
+    error: ValidationError,
+    env_prefix: str,
+    fields: Mapping[str, FieldInfo],
+) -> list[str]:
+    """Turn a validation failure into one line per variable, with no values in it.
+
+    Every ingredient is static: the field name, the `description=` written in
+    the class body, and pydantic's error-type code. Nothing is read from the
+    input that failed, which is what makes this safe for a field nobody has
+    written yet.
+    """
+    lines: list[str] = []
+    for detail in error.errors():
+        location = detail.get("loc") or ()
+        field_name = str(location[0]) if location else ""
+        variable = f"{env_prefix}{field_name}".upper() if field_name else "(unknown variable)"
+
+        code = str(detail.get("type", ""))
+        explanation = _PROBLEM_EXPLANATIONS.get(code, code or "invalid")
+
+        field_info = fields.get(field_name) if field_name else None
+        description = getattr(field_info, "description", None)
+
+        lines.append(f"  {variable} — {explanation}")
+        if description:
+            lines.append(f"      {description}")
+    return lines
+
+
+def _configuration_error(problems: Iterable[str]) -> ConfigurationError:
+    """Assemble the error operators read at three in the morning."""
+    report = "\n".join(problems)
+    return ConfigurationError(
+        "The environment does not configure this application:\n"
+        f"{report}\n"
+        "Set each variable named above and start again. .env.example documents "
+        "all of them.\n"
+        "No values are shown here on purpose: this message goes to the startup "
+        "log, and the configuration carries credentials (SPEC §10)."
+    )
 
 
 class Settings(BaseSettings):
@@ -40,14 +126,61 @@ class Settings(BaseSettings):
         # file. Ignoring them keeps `.env` usable as one file without making
         # this class the union of everything anybody needs.
         extra="ignore",
+        # Belt to the braces below: it keeps values out of a `ValidationError`
+        # rendered by a path that bypasses `__init__`, such as
+        # `model_validate`. It is not the fix and cannot be — it cleans the
+        # message and leaves the input in `errors()`, one `json.dumps` away
+        # from any structured logger.
+        hide_input_in_errors=True,
     )
+
+    def __init__(self, **overrides: Any) -> None:
+        """Build from the environment, reporting a failure without quoting values.
+
+        The conversion happens here, in the constructor, rather than in a
+        factory a caller has to remember to use: `Settings()` is what every
+        entry point writes, and it is the shape the startup path takes.
+
+        The re-raise is deliberately outside the `except` block. Inside it,
+        Python would attach the `ValidationError` as `__context__` — and a
+        chained exception's message is printed in the traceback too, so the
+        credential would reach the log by the back door. `raise ... from None`
+        does not help: it suppresses the display but leaves `__context__` set
+        for anything that inspects the chain.
+        """
+        try:
+            super().__init__(**overrides)
+        except ValidationError as invalid:
+            problems = _describe_invalid_settings(
+                invalid,
+                str(type(self).model_config.get("env_prefix", "") or ""),
+                type(self).model_fields,
+            )
+        else:
+            return
+
+        raise _configuration_error(problems)
+
+    def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
+        """Show which settings are configured, never what they are set to.
+
+        Pydantic's default repr prints every field value, so one
+        `logger.info("config: %s", settings)` anywhere in the codebase puts the
+        database password in a log line. Both `str()` and `repr()` route
+        through here, so that line cannot be written by accident. Reading a
+        value still works — `settings.database_url` is unchanged — and asking
+        for it explicitly is the part a reviewer can see.
+        """
+        return [(name, "<set>") for name in type(self).model_fields]
 
     # --- deployment wiring: required, no default -----------------------------
     database_url: str = Field(description="SQLAlchemy URL for the application database.")
     redis_url: str = Field(description="Redis URL for the Celery broker and result backend.")
     ai_provider_base_url: str = Field(description="OpenAI-compatible API base URL (§7.4).")
     ai_model_name: str = Field(description="Model identifier passed to that provider.")
-    institution_timezone: str = Field(description="IANA timezone the survey window follows (§3.1).")
+    institution_timezone: str = Field(
+        description="IANA timezone the survey window follows (§3.1), such as America/New_York."
+    )
     environment: str = Field(description="Deployment name, reported by /healthz. Free-form.")
 
     # --- settled by the spec: defaulted --------------------------------------
@@ -78,11 +211,15 @@ class Settings(BaseSettings):
 
         A typo here does not fail anywhere near where it was made: the survey
         window simply opens at the wrong hour, on a Friday, in production.
+
+        The message does not quote the value it rejected, and no validator in
+        this class ever should. `__init__` already keeps validator messages out
+        of the startup log, but a validator on a future secret-bearing field —
+        the SMTP password, the LTI private key — would otherwise put the value
+        one bypassed code path away from a log line. Cheaper to never write it.
         """
         try:
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise ValueError(
-                f"{value!r} is not an IANA timezone name, such as America/New_York"
-            ) from exc
+            raise ValueError("not an IANA timezone name, such as America/New_York") from exc
         return value
