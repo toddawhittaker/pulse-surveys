@@ -1,10 +1,65 @@
-# Tooling configuration only.
+# Backend package metadata and tooling configuration.
 #
-# The [project] table — name, version, dependencies — lands with the backend
-# scaffold in the e0/compose-stack seam. Keeping tool config here now means the
-# CI gates and `make ci` are configured before there is code to run them
-# against, so the first backend commit is linted and typechecked on arrival
-# rather than retrofitted.
+# The tool configuration below predates the code it checks: it landed with the
+# CI pipeline so that the first backend commit was linted and typechecked on
+# arrival rather than retrofitted. The [project] table lands with the backend
+# scaffold in the E0-01 ticket.
+#
+# Direct dependencies are pinned exactly here; the full transitive closure,
+# with hashes, is locked in `requirements.txt` and `requirements-dev.txt`, and
+# `make lock` regenerates both. See docs/adr/0005-dependency-locking.md.
+
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulse-surveys"
+description = "Weekly course feedback over LTI 1.3, confidential by construction."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dynamic = ["version"]
+
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.52.1",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.15.0",
+    "SQLAlchemy==2.0.52",
+    "alembic==1.19.1",
+    "celery==5.6.3",
+    "redis==8.1.0",
+    "httpx==0.28.1",
+    # The IANA database as a package, so `zoneinfo` resolves
+    # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
+    # container that ships no system tzdata (§3.1 — windows are timezone-bound).
+    "tzdata==2026.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "testcontainers==4.15.0",
+    "hypothesis==6.165.5",
+]
+
+# ruff, mypy, pip-audit, and pip-licenses are deliberately not listed. They are
+# pinned once, in the Makefile and in the `env:` block of
+# .github/workflows/ci.yml, because those two run them; a second pin here would
+# be a second thing to keep in step.
+
+# `backend/` is the import root: modules are `app.<module>`, never
+# `backend.app.<module>`. `mypy_path` below and
+# `uvicorn app.main:create_app --factory` both depend on that.
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["app*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "app.__version__" }
 
 # ---------------------------------------------------------------------------
 # ruff — lint + format
@@ -85,6 +140,10 @@ extra_checks = true
 minversion = "8.0"
 testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
+# Async fixtures get a fresh event loop each test. Set explicitly because
+# pytest-asyncio warns when it is left implicit, and `filterwarnings` below
+# turns that warning into a failure.
+asyncio_default_fixture_loop_scope = "function"
 addopts = "--strict-markers --strict-config -ra"
 markers = [
     # The §4.1 confidentiality assertions. CI runs these in an isolated pass
