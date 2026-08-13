@@ -10,9 +10,27 @@ defaults") but does not spell the variables. The spellings below are **this
 test's choice**, collected in one place so they are cheap to change — except
 `DATABASE_URL`, which is already fixed by the migration-drift job in
 `.github/workflows/ci.yml`.
+
+Two more properties are asserted here, both from the review of pull request #11,
+and both of the same shape: behaviour that exists in the implementation and that
+nothing checked, so deleting it left the suite green.
+
+  - A settings object that built successfully does not hand its credentials to
+    any standard serialisation (SPEC §10, "no student PII in logs; secrets via
+    environment/secret store"). The failure-path version of this is already
+    covered above; this is the success path, which is the one a structured
+    logger or the §6.3 admin configuration view would hit.
+  - An institution timezone that no IANA database can resolve is refused at
+    startup. Survey windows are timezone-bound (SPEC §3.1 — "opens Friday 18:00
+    … in the institution timezone"), so a typo that is accepted opens the window
+    at the wrong hour rather than failing where it was made.
 """
 
+import contextlib
 import json
+import zoneinfo
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -95,6 +113,23 @@ CREDENTIAL_BEARING_URLS = {
 # so a leak can print all but one character of a secret and still not contain
 # the exact string. Truncation is not redaction.
 LEAK_FRAGMENT_LENGTH = 8
+
+# The fields the credential-bearing URLs arrive in. **This test's choice** of
+# spelling, following pydantic-settings' own field-name-to-variable convention,
+# and kept here so it is cheap to change.
+DATABASE_URL_FIELD = "database_url"
+REDIS_URL_FIELD = "redis_url"
+
+# The institution timezone, and two values no IANA database resolves. The first
+# is the realistic typo: a space where the IANA name has an underscore, which is
+# how a human writes the zone out. The second is well-formed and simply not a
+# real zone, so a check that only looks at the shape of the string still fails.
+INSTITUTION_TIMEZONE_VARIABLE = "INSTITUTION_TIMEZONE"
+UNRESOLVABLE_TIMEZONE_NAMES = ("America/New York", "America/Nwe_York")
+
+# A real zone that is not the `America/New_York` default in SPEC §3.1, so the
+# validator cannot pass this suite by accepting only the default.
+VALID_NON_DEFAULT_TIMEZONE = "Pacific/Auckland"
 
 
 def load_settings_class() -> type:
@@ -342,3 +377,174 @@ def test_non_numeric_n_threshold_is_rejected_naming_the_variable(
 
     with pytest.raises(Exception, match=f"(?i){N_THRESHOLD_VARIABLE}"):
         load_settings_class()()
+
+
+# ---------------------------------------------------------------------------
+# A settings object that built successfully keeps its credentials to itself.
+# ---------------------------------------------------------------------------
+
+
+def render(value: object) -> str:
+    """Both renderings of an arbitrary object, because a mask can cover one only.
+
+    A wrapper type whose `__str__` masks and whose `__repr__` does not is still a
+    leak, and so is the reverse: `logging` formats with `%s`, while `pprint` and
+    a bare `print` of a dict reach for `repr`. Rendering both means the assertion
+    does not depend on which one the guard happened to cover.
+    """
+    renderings = [repr(value)]
+    with contextlib.suppress(TypeError, ValueError):  # not JSON-serialisable
+        renderings.append(json.dumps(value, default=str))
+    return "\n".join(renderings)
+
+
+# Every standard way a pydantic model turns itself into data, each named as the
+# call site would spell it so a failure says which one leaked. These are not
+# hypothetical surfaces: a structured logger is handed `model_dump()`, a JSON
+# error handler `model_dump_json()`, `logger.info("config: %s", settings)` uses
+# `str()`, and generic code that walks a settings object uses `dict()` or
+# iterates it. The list is pydantic's public API, which the ticket chooses by
+# specifying pydantic-settings; it is not a guess at how masking is implemented.
+SERIALISATIONS: dict[str, Callable[[Any], str]] = {
+    "str(settings)": str,
+    "repr(settings)": repr,
+    "settings.model_dump()": lambda settings: render(settings.model_dump()),
+    'settings.model_dump(mode="json")': lambda settings: render(settings.model_dump(mode="json")),
+    "settings.model_dump_json()": lambda settings: str(settings.model_dump_json()),
+    "dict(settings)": lambda settings: render(dict(settings)),
+    "iteration over settings": lambda settings: render(list(settings)),
+}
+
+
+def build_settings_holding_credentials(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """A `Settings` that built successfully, holding a password in each URL."""
+    for name, url in CREDENTIAL_BEARING_URLS.items():
+        monkeypatch.setenv(name, url)
+    return load_settings_class()()
+
+
+@pytest.mark.parametrize("surface", list(SERIALISATIONS))
+def test_credentials_do_not_appear_in_settings_serialisation(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+) -> None:
+    """No credential fragment survives any standard serialisation of `Settings`.
+
+    The failure-path tests above cover what a *refused* configuration prints.
+    This covers the accepted one, which is the object that then lives on
+    `app.state` for the process lifetime and gets passed to whatever wants to
+    describe the running configuration: a structured log line at startup, an
+    error report, the §6.3 admin configuration view. SPEC §10 requires secrets to
+    stay in the environment or the secret store, and a settings object that
+    hands its password to `model_dump()` puts them in the log aggregator instead.
+
+    Asserted per surface rather than in one test, because a guard that covers
+    `str()` and not `model_dump()` should report exactly that, and because a
+    guard covering only some surfaces is the defect this test exists for.
+
+    Fragments, not whole passwords: a rendering that elides the middle of a value
+    can print all but one character of a password and still not contain it as a
+    substring. See `leaked_fragments`.
+    """
+    settings = build_settings_holding_credentials(monkeypatch)
+
+    assert_no_credential_in(SERIALISATIONS[surface](settings), surface)
+
+
+def revealed(value: object) -> str:
+    """The configured value, whatever the field wrapped it in.
+
+    Deliberately mechanism-agnostic within one limit worth naming: it reads a
+    plain value with `str()`, and anything offering pydantic's secret protocol
+    with `get_secret_value()`. It does not require either. If a field masks
+    itself some third way, this helper is what needs widening — not the
+    assertion, which is only that the application can still read what it was
+    configured with.
+    """
+    getter = getattr(value, "get_secret_value", None)
+    return getter() if callable(getter) else str(value)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "credential"),
+    [
+        (DATABASE_URL_FIELD, FAKE_DATABASE_CREDENTIAL),
+        (REDIS_URL_FIELD, FAKE_REDIS_CREDENTIAL),
+    ],
+)
+def test_credential_bearing_url_is_still_readable_by_the_application(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    credential: str,
+) -> None:
+    """Masking hides the value from serialisation, not from the code that needs it.
+
+    The other half of the property, and the reason it is not enough to assert
+    that a password is nowhere to be found: deleting the field, or storing a
+    permanently redacted string, would satisfy that on its own. E0-04 opens a
+    database connection with this value and E0-03 a broker connection, so it has
+    to survive intact.
+    """
+    settings = build_settings_holding_credentials(monkeypatch)
+
+    assert hasattr(settings, field_name), f"Settings has no `{field_name}` attribute."
+    assert credential in revealed(getattr(settings, field_name)), (
+        f"`settings.{field_name}` no longer carries the password it was configured "
+        "with. Hiding a credential from serialisation must not hide it from the "
+        "code that connects with it."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The institution timezone resolves, or startup stops.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("timezone_name", UNRESOLVABLE_TIMEZONE_NAMES)
+def test_unresolvable_institution_timezone_is_rejected_naming_the_variable(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    timezone_name: str,
+) -> None:
+    """A timezone no IANA database knows stops startup, and the message says which.
+
+    SPEC §3.1 puts every survey window in the institution timezone — opens Friday
+    18:00, closes Sunday 23:59:59 — so an unresolvable name has no safe reading.
+    Accepting it means either a silent fall back to some other zone or a crash
+    much later, at the moment a window is computed; both put the failure a long
+    way from the typo. `America/New York`, with a space where the IANA name has
+    an underscore, is how a person writes the zone out by hand.
+
+    The message must name the variable, for the same reason criterion 2 requires
+    it: the operator reading the container log has to know what to fix. It must
+    not need to quote the bad value back to do that, so nothing here asserts the
+    rejected string appears — SPEC §10 wants configuration values out of logs.
+    """
+    monkeypatch.setenv(INSTITUTION_TIMEZONE_VARIABLE, timezone_name)
+
+    with pytest.raises(Exception, match=f"(?i){INSTITUTION_TIMEZONE_VARIABLE}"):
+        load_settings_class()()
+
+
+def test_a_valid_institution_timezone_other_than_the_default_is_accepted(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half: a real zone is accepted, including one that is not the default.
+
+    Without this, "reject the typo" is satisfied by rejecting everything except
+    `America/New_York`, which SPEC §3.1 gives as a default and not as the only
+    permitted value. Nothing is asserted about what the field holds afterwards —
+    whether it stays a string or becomes a `ZoneInfo` is the implementer's call.
+    """
+    assert zoneinfo.ZoneInfo(VALID_NON_DEFAULT_TIMEZONE), (
+        f"This machine's IANA database does not resolve {VALID_NON_DEFAULT_TIMEZONE}, "
+        "so the test cannot tell a correct rejection from a missing tzdata package."
+    )
+    monkeypatch.setenv(INSTITUTION_TIMEZONE_VARIABLE, VALID_NON_DEFAULT_TIMEZONE)
+
+    settings = load_settings_class()()
+
+    assert settings is not None
