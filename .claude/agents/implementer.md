@@ -8,7 +8,7 @@ disallowedTools: Agent
 color: blue
 hooks:
   PreToolUse:
-    - matcher: "Write|Edit|NotebookEdit"
+    - matcher: "Write|Edit|NotebookEdit|Bash"
       hooks:
         - type: command
           command: "${CLAUDE_PROJECT_DIR}/.claude/hooks/deny-test-edits.sh"

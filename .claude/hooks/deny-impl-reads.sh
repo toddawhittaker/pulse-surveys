@@ -19,12 +19,31 @@
 
 set -euo pipefail
 
+# Fail closed when jq is missing. Every field below is read with jq, so without
+# it they all come back empty and the guard waves the call through. Worse, the
+# harness treats a non-zero exit that is not 2 as a hook *error*, which does not
+# block — so `set -e` killing this script on a missing jq (127) would let the
+# read proceed. The wall has to notice its own absence.
+if ! command -v jq >/dev/null 2>&1; then
+  # printf is a shell builtin; `cat` here would need a PATH this guard
+  # cannot assume, and a guard that dies while reporting its own failure
+  # exits 127, which does not block.
+  printf '%s\n' \
+    'BLOCKED: jq is not installed, so this guard cannot inspect the tool call.' \
+    '' \
+    'Refusing to fail open — without jq this hook cannot tell a spec read from an implementation read,' \
+    'and a guard that cannot see is not a guard. Install jq.' >&2
+  exit 2
+fi
+
 input=$(cat)
 tool=$(jq -r '.tool_name // empty' <<<"$input")
 
 # Read/Edit use file_path; Grep/Glob use path; Grep may also carry a glob filter.
 target=$(jq -r '.tool_input.file_path // .tool_input.path // empty' <<<"$input")
 pattern=$(jq -r '.tool_input.glob // .tool_input.pattern // empty' <<<"$input")
+# Bash carries its whole command line instead of a path.
+command_line=$(jq -r '.tool_input.command // empty' <<<"$input")
 
 repo_root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 
@@ -66,6 +85,18 @@ check "$target"
 # implementation directories.
 case "$pattern" in
   */backend/app/*|backend/app/*|*/frontend/src/*|frontend/src/*) blocked "$pattern" ;;
+esac
+
+# `cat backend/app/config.py` reaches the same bytes without going through Read.
+# The test author no longer holds Bash at all, which is the real fix; this is
+# here so that giving it back does not silently reopen the hole.
+#
+# Not a sandbox: a determined shell command can obfuscate a path past this. It
+# does not need to stop an adversary. The failure it exists to prevent is
+# gravity — reaching for the file because it is right there and the answer is in
+# it — and for that, refusing the obvious spelling is enough.
+case "$command_line" in
+  *backend/app/*|*frontend/src/*) blocked "shell command: $command_line" ;;
 esac
 
 exit 0
