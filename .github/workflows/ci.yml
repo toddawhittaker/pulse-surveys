@@ -144,11 +144,18 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        # Matches SPEC §7.2 and the `db` service in docker-compose.yml. This
-        # job autogenerates migrations against it from E0-04 on, so a different
-        # major version here would check the schema against a Postgres the
-        # project never deploys.
-        image: postgres:17
+        # Must match the `db` service in docker-compose.yml exactly, image
+        # reference and all. This job autogenerates migrations against it from
+        # E0-04 on, so a Postgres that differs from the deployed one checks the
+        # schema against a server the project never runs.
+        #
+        # Pinned by tag and digest like every other image in the repository
+        # (docs/adr/0007). This is the one reference no Dependabot ecosystem
+        # reads — `github-actions` updates `uses:` only, and the `docker` and
+        # `docker-compose` ecosystems read backend/Dockerfile and
+        # docker-compose.yml — so it moves by hand, together with the `db`
+        # service, and never on its own. ADR 0007 records that consequence.
+        image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
