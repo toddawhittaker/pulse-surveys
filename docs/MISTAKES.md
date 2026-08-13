@@ -49,11 +49,22 @@ measurement disproved. The ADR index silently omitted three ADRs the same branch
 shipped. Pull request #13's description spent a round describing a one-role
 database stack that no longer existed.
 
+A tenth, in E0-03, and it is the sharpest because of where it sat. The commit
+that removed a false claim from `README.md` — that the worker ran the same code
+as the API — put a new one in `docker-compose.override.yml` in the same diff: a
+comment saying a stale worker makes `get()` hang, when the measurement in that
+same commit's README said it raises `NotRegistered` for an added task and
+silently returns the old answer for a changed one. It cited this file for it.
+
 **Root cause.** Changing a mechanism and not asking what else in the repository
-makes a claim about it. Two of these were *introduced by a fix for this same
+makes a claim about it. Three of these were *introduced by a fix for this same
 class of defect* — the `.env.example` header rewritten to correct one false claim
 acquired a different one, that `LOG_LEVEL` is settled by the spec, which the spec
-never mentions.
+never mentions; and the override comment above was written by a session that had
+read this entry, bumped its counter, and used it to find four stale claims in
+files it was not editing. The sweep is outward-facing. It asks what *other*
+records say about the thing you changed, and a sentence you are writing right
+now is not yet a record, so it is not in the set you sweep.
 
 **Consequence.** A reader trusts the record over the code, because reading the
 record is cheaper. That is what a record is for, so a false one is worse than
@@ -65,6 +76,11 @@ something about that thing — comments, ADRs, tickets, indexes, READMEs, the pu
 request body, test docstrings. Indexes are the highest risk: written once, never
 re-read. "Re-read nearby prose" is not enough; it misses the record that was
 never written and the one that drifted out from under you.
+
+**And read the prose in your own diff as if someone else wrote it.** Every claim
+you have just written is a claim nobody has checked, including the ones written
+while correcting somebody else's. Where a sentence describes a behaviour, it has
+to match what you measured — not what you expected to measure before you ran it.
 
 ---
 
