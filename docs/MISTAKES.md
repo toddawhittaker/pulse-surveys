@@ -25,7 +25,11 @@ file and line, the pull request. A rule with no incident behind it is advice,
 and advice belongs in `CLAUDE.md`.
 
 **Re-ordering.** Sort by `Caught:` descending when you notice it is wrong. Ties
-break toward the more expensive consequence.
+break toward the more expensive consequence. **An entry keeps its number when it
+moves**, so the headings below are not in numerical order and are not meant to
+be. The number is the entry's name: code comments, commit messages and test
+docstrings cite "entry 7", and renumbering would silently repoint every one of
+them at a different incident.
 
 ---
 
@@ -124,48 +128,6 @@ string certainly present — so a search that has gone blind says so.
 
 ---
 
-## 4. `git add` swept untracked files into a commit
-
-**Caught: 0**
-
-**What happened.** Twice on one branch. `.claude/agent-memory/` was committed as
-its own `chore:` commit, dropped with a mixed reset, and then re-committed by the
-next `git add` — the second time *inside* a commit whose subject said
-documentation-only.
-
-**Root cause.** The directory was untracked and not ignored, so every `git add`
-re-collected it. Removing the commit recreated the cause.
-
-**Consequence.** A commit whose message and diff disagree, which is the shape
-that gets through review. Fixing it meant rewriting two commits.
-
-**Rule.** Run `git show --stat` on each commit before reporting, and read it
-against the subject line. If a fix leaves the cause in place, fix the cause —
-here, a `.gitignore` entry.
-
----
-
-## 5. A branch cut from the wrong base
-
-**Caught: 0**
-
-**What happened.** `e0/reviewer-hook-enforcement` was cut while standing on
-`e0/backend-skeleton` instead of on the epic branch.
-
-**Root cause.** Cutting a branch without checking out the base first, and not
-checking the resulting diff.
-
-**Consequence.** Pull request #12's diff was 35 files and ~3,960 additions rather
-than the 5-file hook change its description claimed. Merging it merged E0-01
-along with it, so pull request #11 merged as a no-op with no merge commit of its
-own. The history now shows one merge where the record says two.
-
-**Rule.** `git checkout <epic-branch>` before `git checkout -b`, then confirm
-with `git merge-base --is-ancestor`. Before writing a pull request description,
-run `gh pr diff <n> --name-only` and check it against what you think you changed.
-
----
-
 ## 6. Shell expansion inside a commit message
 
 **Caught: 1**
@@ -257,6 +219,48 @@ and the case you claim it allows. A guard that has never been run is a comment.
 And never write a prediction that explains away the evidence of its own failure:
 if you find yourself saying "there will be no confirmation, and that is expected",
 you have removed the only signal that would have told you it did not work.
+
+---
+
+## 4. `git add` swept untracked files into a commit
+
+**Caught: 0**
+
+**What happened.** Twice on one branch. `.claude/agent-memory/` was committed as
+its own `chore:` commit, dropped with a mixed reset, and then re-committed by the
+next `git add` — the second time *inside* a commit whose subject said
+documentation-only.
+
+**Root cause.** The directory was untracked and not ignored, so every `git add`
+re-collected it. Removing the commit recreated the cause.
+
+**Consequence.** A commit whose message and diff disagree, which is the shape
+that gets through review. Fixing it meant rewriting two commits.
+
+**Rule.** Run `git show --stat` on each commit before reporting, and read it
+against the subject line. If a fix leaves the cause in place, fix the cause —
+here, a `.gitignore` entry.
+
+---
+
+## 5. A branch cut from the wrong base
+
+**Caught: 0**
+
+**What happened.** `e0/reviewer-hook-enforcement` was cut while standing on
+`e0/backend-skeleton` instead of on the epic branch.
+
+**Root cause.** Cutting a branch without checking out the base first, and not
+checking the resulting diff.
+
+**Consequence.** Pull request #12's diff was 35 files and ~3,960 additions rather
+than the 5-file hook change its description claimed. Merging it merged E0-01
+along with it, so pull request #11 merged as a no-op with no merge commit of its
+own. The history now shows one merge where the record says two.
+
+**Rule.** `git checkout <epic-branch>` before `git checkout -b`, then confirm
+with `git merge-base --is-ancestor`. Before writing a pull request description,
+run `gh pr diff <n> --name-only` and check it against what you think you changed.
 
 ---
 
