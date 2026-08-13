@@ -1,0 +1,21 @@
+# Build context for backend/Dockerfile (ticket E0-02).
+#
+# Deny everything, then name what the build needs. The other way round — listing
+# what to exclude — fails open: a file added later is in the context until
+# someone remembers to exclude it, and `.env` is the file that matters most. It
+# is gitignored, so it exists on every developer's machine and in CI, and a
+# `COPY . .` would put a real credential into an image layer. Starting from `*`
+# makes that impossible rather than unlikely.
+
+*
+
+!pyproject.toml
+!README.md
+!requirements.txt
+!requirements-dev.txt
+!backend
+
+# Re-included above with the directory; none of it belongs in an image.
+backend/**/__pycache__
+backend/**/*.py[cod]
+backend/*.egg-info

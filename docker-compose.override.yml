@@ -1,0 +1,56 @@
+# Development wiring only (SPEC §13).
+#
+# `docker compose up` merges this file over docker-compose.yml automatically, so
+# everything here is on by default on a laptop and in CI — and absent from any
+# deployment that runs the base file alone. That is the whole reason the split
+# exists: host port publishing, hot reload, and a writable source mount are
+# development conveniences, and each one is a defect in production.
+#
+# Ports bind to 127.0.0.1 rather than to every interface, so a laptop on a
+# conference network is not serving its database to the room.
+
+services:
+  api:
+    # Reload on edit. StatReload polls, because `watchfiles` is not in the
+    # locked closure and the image ships exactly what the lockfile says; polling
+    # one directory is cheap and works across a bind mount, where inotify from
+    # inside a container often does not.
+    command:
+      - uvicorn
+      - app.main:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8000'
+      - --reload
+      - --reload-dir
+      - /app/backend
+    environment:
+      # The image installs the application into its virtualenv. PYTHONPATH comes
+      # before site-packages on `sys.path`, so the mounted source below is what
+      # gets imported and the installed copy is what production runs. Both lines
+      # move together — a mount with no PYTHONPATH would run the image's copy
+      # and look like a reloader that quietly does nothing.
+      PYTHONPATH: /app/backend
+    volumes:
+      # Read-only: the container never writes to your checkout, and nothing it
+      # creates ends up owned by uid 1001 on the host.
+      - ./backend:/app/backend:ro
+    ports:
+      - '127.0.0.1:8000:8000'
+
+  db:
+    ports:
+      # For psql and a GUI client against the development database.
+      - '127.0.0.1:5432:5432'
+
+  redis:
+    ports:
+      - '127.0.0.1:6379:6379'
+
+  mailpit:
+    ports:
+      # 8025 is the web interface; 1025 is the SMTP port the app will send to.
+      - '127.0.0.1:8025:8025'
+      - '127.0.0.1:1025:1025'

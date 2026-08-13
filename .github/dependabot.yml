@@ -54,6 +54,45 @@ updates:
       - dependency-name: react-dom
         update-types: [version-update:semver-major]
 
+  # ---- Container images ---------------------------------------------------
+  # Two ecosystems, because they read different files: `docker` reads the
+  # `FROM` lines in backend/Dockerfile, `docker-compose` reads the `image:`
+  # lines in docker-compose.yml. Every one of those references is pinned by
+  # tag *and* by digest (docs/adr/0007-container-images-pinned-by-tag-and-digest.md),
+  # which is the form Dependabot updates as a unit — it moves the tag and
+  # re-resolves the digest in the same pull request. A bare `postgres:17` would
+  # go stale silently instead.
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: 'deps(img)'
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: 'deps(img)'
+    ignore:
+      # SPEC §7.1 and §7.2 name these major versions. Moving off one is a spec
+      # change and a ticket, not a Monday morning batch.
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+      - dependency-name: redis
+        update-types: [version-update:semver-major]
+
   # ---- GitHub Actions -----------------------------------------------------
   # The only ecosystem with anything to update today. Actions are pinned by
   # major tag in ci.yml; this keeps them current.

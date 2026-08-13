@@ -1,0 +1,101 @@
+# Pulse Surveys — the stack every deployment runs (SPEC §7.2, §13).
+#
+# Three properties of this file are load-bearing.
+#
+# **Nothing here publishes a port to the host.** Host publishing is
+# development-only and lives in docker-compose.override.yml, which
+# `docker compose up` merges in automatically. A `ports:` entry added here is
+# published in every non-development deployment and breaks nothing anyone runs,
+# so `tests/unit/test_compose_stack.py` reads this file on its own to catch it.
+# §7.2 puts the reverse proxy outside the compose file, so there is nothing this
+# file needs to bind.
+#
+# **No credential is defaulted.** Every `${...:?}` below is required, so a
+# deployment that has not set it fails to start and says which variable is
+# missing. A default password here would be a working credential in production.
+#
+# **Every image is pinned by tag and by digest**, so what runs is fixed by
+# content and not by whatever the registry currently serves under a tag. See
+# docs/adr/0007-container-images-pinned-by-tag-and-digest.md.
+#
+# Configuration comes from `.env`; copy `.env.example` to `.env` first.
+
+name: pulse-surveys
+
+services:
+  # The FastAPI application (§7.1). `worker` and `beat` join it in E0-03.
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    # The whole §6.3 configuration surface, so a setting added in a later
+    # ticket reaches the container without editing this file.
+    env_file:
+      - .env
+    environment:
+      # The one exception, and the reason is mechanical. `.env` builds
+      # DATABASE_URL out of DB_USER, DB_PASSWORD, and DB_NAME so the password is
+      # written once; Compose expands that here, when it reads `.env` as its own
+      # interpolation source. Whether `env_file:` expands it is a Compose
+      # version's business and has not always been the same answer, and an
+      # `environment:` entry beats `env_file:` on every version. So the
+      # container gets an expanded URL either way.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
+    depends_on:
+      # The mapping form, not the list. `depends_on: [db]` waits for the
+      # container to start; this waits for Postgres to accept connections,
+      # which is a different guarantee and the one E0-04 needs.
+      db:
+        condition: service_healthy
+      # Redis is the Celery broker the API publishes to (§7.2). Waiting on it
+      # here is also what makes `wait_for_health.sh api` cover the whole of
+      # acceptance criterion 1 — api, db, and redis all healthy — with one wait.
+      redis:
+        condition: service_healthy
+    # Documentation, not publishing: reachable from the other services on this
+    # network, and from nothing on the host.
+    expose:
+      - '8000'
+
+  # PostgreSQL 17 (§7.1, §7.2).
+  db:
+    image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
+    # Compose cannot parse a URL, so the database's own credentials cannot be
+    # read out of DATABASE_URL. They are read from the three parts DATABASE_URL
+    # is built from instead, which keeps the password in one place rather than
+    # in two that can disagree.
+    environment:
+      POSTGRES_USER: ${DB_USER:?DB_USER is not set — copy .env.example to .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set — copy .env.example to .env}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is not set — copy .env.example to .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # `$$` reaches the container as a single `$`, so the shell inside expands
+      # these rather than Compose. Without -U and -d, pg_isready asks about the
+      # `postgres` role and database, which this stack does not create.
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Celery broker and result backend (§7.1, §7.2).
+  redis:
+    image: redis:7.4.10-bookworm@sha256:e9b2e45ecd47fbb69b877cf8d045d5cccaaaed52524b6e098b4abe8212994f73
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  # SMTP capture, so the Monday mail in §5.7 has somewhere to go that is not a
+  # real inbox. Its web interface is published by the development override.
+  mailpit:
+    image: axllent/mailpit:v1.30.7@sha256:d5ecbb067db3705fa953d79e1b7f81ef84038df67aba6c52825d8c02a1ea748a
+
+volumes:
+  # Named, so `docker compose down -v` is the only thing that discards the
+  # database and an ordinary `down` never does.
+  postgres-data:
