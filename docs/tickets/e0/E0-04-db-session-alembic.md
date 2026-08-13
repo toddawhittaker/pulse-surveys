@@ -16,6 +16,10 @@ Read first: SPEC §8, §13, and the `migration-drift` job in
 
 ## Scope
 
+- Pin the `psycopg` driver package. E0-01 shipped `SQLAlchemy` and `alembic`
+  without it, and both `.env.example` and the `migration-drift` job already name
+  a `postgresql+psycopg://` URL — so nothing can open a connection until this
+  ticket adds the driver. Raised by the E0-01 security review.
 - `backend/app/db.py` — SQLAlchemy 2.0 engine and session factory, a declarative
   `Base`, and a FastAPI dependency yielding a session per request.
 - `backend/alembic.ini` and `backend/migrations/` with `env.py` wired to
