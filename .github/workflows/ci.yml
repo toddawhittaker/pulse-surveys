@@ -19,7 +19,7 @@ permissions:
 # Pinned deliberately (CLAUDE.md — "Pin dependency versions"). Dependabot's
 # github-actions and pip ecosystems bump these; nothing here floats.
 env:
-  PYTHON_VERSION: '3.12'
+  PYTHON_VERSION: '3.13'
   NODE_VERSION: '20'
   RUFF_VERSION: '0.6.9'
   MYPY_VERSION: '1.11.2'
