@@ -7,24 +7,48 @@ something reads it. CI does `cp .env.example .env` and starts the stack from
 it, so an entry that parses and resolves to nothing is a broken file that looks
 fine.
 
-The hazard is specific and it has already bitten once, on review of E0-02.
-`DATABASE_URL` is built by interpolation from `DB_USER`, `DB_PASSWORD`, and
-`DB_NAME`, so that the password is written once:
+Two families of hazard live here, and both were found on review of E0-02.
 
-    DATABASE_URL=postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+**A value that resolves to nothing.** `DATABASE_URL` is built by interpolation
+from `DB_APP_USER`, `DB_APP_PASSWORD`, and `DB_NAME`, so that each password is
+written once:
+
+    DATABASE_URL=postgresql+psycopg://${DB_APP_USER}:${DB_APP_PASSWORD}@db:5432/${DB_NAME}
 
 python-dotenv substitutes in **file order**. A variable referenced above the
 line that declares it resolves to the empty string rather than failing, so
-moving the `DB_*` block below `DATABASE_URL` yields
-`postgresql+psycopg://:@db:5432/` — no user, no password, no database — while
-the `db` service is still created as `pulse`. Nothing in E0-02 opens a
-connection, so every gate stays green and it surfaces in E0-04 as an
-authentication error two tickets from the edit that caused it.
+moving the credential block below `DATABASE_URL` yields
+`postgresql+psycopg://:@db:5432/` — no user, no password, no database name.
 
-What is asserted here is the resolved outcome, never the line order. An
-ordering assertion would pin a file layout no ticket chose, and would go on
-passing against a file broken some other way — a typo'd reference, a deleted
-part, a change of interpolation mechanism. Reordering is only today's cause.
+The other reader does not fail with it, and that asymmetry is what makes this
+worth a test rather than a comment. Measured, not reasoned about: a reordered
+copy of the file through `docker compose --env-file ... config` reports
+
+    DATABASE_URL:      postgresql+psycopg://:@db:5432/   <- lost
+    POSTGRES_USER:     pulse_admin                       <- intact
+    POSTGRES_PASSWORD: replace-me-admin                  <- intact
+    POSTGRES_DB:       pulse                             <- intact
+
+Compose resolves the `${DB_SUPERUSER}` references written *in the compose file*
+against the whole environment, so where they sit in `.env` does not matter. Only
+the nested expansion inside `.env`'s own `DATABASE_URL` value is top-down, and
+only that one is lost. So the database is created with exactly the right
+credentials while the application is handed a URL with none. The two readers
+disagree silently, nothing in E0-02 opens a connection to notice, and it
+surfaces in E0-04 as an authentication error two tickets from the edit that
+caused it.
+
+**A value that resolves to the wrong identity.** `.env.example` declares two
+database roles, and only one of them may appear in `DATABASE_URL`. That rule
+was prose, and repointing the URL at the superuser passed every test in this
+repository and every gate in CI.
+
+What is asserted here is the resolved outcome, never the line order and never
+the variable names. An ordering assertion would pin a file layout no ticket
+chose, and would go on passing against a file broken some other way — a typo'd
+reference, a deleted part, a change of interpolation mechanism. Comparing names
+rather than values would miss a credential pasted in as a literal. Reordering
+and repointing are only today's causes.
 
 python-dotenv is the right reader to test through: `pydantic-settings` uses it
 for `env_file`, so this is literally the host path. `docker compose config`
@@ -32,9 +56,9 @@ would test the other reader, needs a daemon, and is the `docker` job's business.
 
 **The process environment is cleared first, and that is load-bearing.**
 python-dotenv falls back to `os.environ` for a name the file has not defined
-yet, so a developer who happens to export `DB_USER` would see a reordered file
-resolve perfectly and this suite pass. That is the same trap `configured_env`
-in `tests/conftest.py` guards against from the other direction.
+yet, so a developer who happens to export `DB_APP_USER` would see a reordered
+file resolve perfectly and this suite pass. That is the same trap
+`configured_env` in `tests/conftest.py` guards against from the other direction.
 """
 
 import re
@@ -173,4 +197,77 @@ def test_database_url_resolves_to_a_complete_url(
         f"{', no '.join(missing)}. Postgres would refuse the connection, but nothing in "
         "E0-02 opens one, so this reaches E0-04 as an authentication error a long way "
         "from whatever caused it."
+    )
+
+
+def test_database_url_does_not_connect_as_the_superuser(
+    resolved_env_example: dict[str, str | None],
+) -> None:
+    """The application's URL names the application's role, not the administrator's.
+
+    `.env.example` states the rule in prose — "Nothing but administration should
+    ever use DB_SUPERUSER, and DATABASE_URL below must never point at it" — and
+    Todd's ruling on ADR 0009 is that a superuser role is sanctioned for
+    migrations and genuinely-necessary admin work, while day-to-day use stays
+    security-scoped. A superuser bypasses every grant and every row-level
+    security policy, which is the material SPEC §4.1's identity separation is
+    built out of, so an application connecting as one makes that separation
+    decorative without changing a line of it.
+
+    Until now the rule was prose alone. Repointing `DATABASE_URL` at the
+    superuser passed every test in this repository and left the `docker` job
+    green, because the `db` health check authenticates as the application role
+    whatever the application itself uses. The sibling rule — that the two roles
+    must not share a name — is enforced mechanically in `scripts/db-init`; this
+    was the odd one out.
+
+    The comparison is against the resolved *value*, not the variable name, so
+    pasting the literal `pulse_admin` into the URL fails here too.
+    """
+    superuser = resolved_env_example.get("DB_SUPERUSER")
+    assert superuser, (
+        ".env.example does not resolve DB_SUPERUSER to anything, so this test has no "
+        "administrative identity to compare against and would pass whatever DATABASE_URL "
+        "names. If the superuser role has genuinely gone, delete this test deliberately "
+        "rather than leaving it here asserting nothing."
+    )
+
+    url = resolved_env_example.get("DATABASE_URL")
+    assert url, ".env.example does not resolve DATABASE_URL to anything."
+
+    assert urlsplit(url).username != superuser, (
+        f"DATABASE_URL connects as {superuser!r}, which is the DB_SUPERUSER role. The "
+        "application must connect as its own role: a superuser bypasses every grant and "
+        "every row-level security policy, so the §4.1 identity separation stops being "
+        "enforced by the database while still looking as though it is. Nothing else in "
+        "the suite or in CI catches this — the db health check authenticates as the "
+        "application role no matter what the application uses."
+    )
+
+
+def test_database_url_does_not_carry_the_superuser_password(
+    resolved_env_example: dict[str, str | None],
+) -> None:
+    """The URL's password is the application role's, not the administrator's.
+
+    Weaker than the test above and worth keeping separate for that reason. A URL
+    naming the application role with the administrator's password is a
+    misconfiguration rather than an escalation — Postgres refuses it — but it is
+    refused at the first connection, which is E0-04, and it invites the fix of
+    making the two passwords the same. That would hand the application role the
+    administrator's credential for real.
+    """
+    superuser_password = resolved_env_example.get("DB_SUPERUSER_PASSWORD")
+    assert superuser_password, (
+        ".env.example does not resolve DB_SUPERUSER_PASSWORD to anything, so this test "
+        "has nothing to compare against and would pass whatever DATABASE_URL carries."
+    )
+
+    url = resolved_env_example.get("DATABASE_URL")
+    assert url, ".env.example does not resolve DATABASE_URL to anything."
+
+    assert urlsplit(url).password != superuser_password, (
+        "DATABASE_URL carries the DB_SUPERUSER_PASSWORD value. Whatever role it names, "
+        "the credential it presents is the administrator's; the two roles hold separate "
+        "passwords so that neither can be reached with the other's."
     )

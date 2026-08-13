@@ -24,6 +24,7 @@ ENV_EXAMPLE_PATH = REPO_ROOT / ".env.example"
 BASE_COMPOSE_PATH = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_COMPOSE_PATH = REPO_ROOT / "docker-compose.override.yml"
 COMPOSE_PATHS = (BASE_COMPOSE_PATH, OVERRIDE_COMPOSE_PATH)
+CI_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 # Compose interpolation. The alternatives are ordered so that `$$` is consumed
 # first and registers nothing, which matters: the `$$POSTGRES_USER` in the `db`
@@ -70,20 +71,29 @@ def parse_dotenv(text: str) -> dict[str, str]:
     return entries
 
 
+def load_yaml(path: Path) -> dict[str, Any]:
+    """Parse a YAML file into a mapping.
+
+    Returns an empty mapping when the file is absent or holds something other
+    than a mapping, so a test reports a failed assertion naming the missing
+    deliverable rather than a fixture error. Every test that consumes one of
+    these asserts it is non-empty first, because "nothing in this file is wrong"
+    is true of a file that could not be read.
+    """
+    if not path.is_file():
+        return {}
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return document if isinstance(document, dict) else {}
+
+
 def load_compose(path: Path) -> dict[str, Any]:
     """Parse one Compose file on its own, with no override merged over it.
 
     Reading the files separately is deliberate and `docker compose config` is
     not a substitute: it merges the override back in, which hides the one
     property `tests/unit/test_compose_stack.py` exists to check.
-
-    Returns an empty mapping when the file is absent, so a test reports a failed
-    assertion naming the missing deliverable rather than a fixture error.
     """
-    if not path.is_file():
-        return {}
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return document if isinstance(document, dict) else {}
+    return load_yaml(path)
 
 
 def interpolated_variables(node: Any) -> set[str]:
@@ -123,6 +133,28 @@ def base_compose_path() -> Path:
 def base_compose() -> dict[str, Any]:
     """`docker-compose.yml` parsed alone, with no override merged in."""
     return load_compose(BASE_COMPOSE_PATH)
+
+
+@pytest.fixture
+def ci_workflow_path() -> Path:
+    """Where the CI workflow lives. Asserted by the test, not here."""
+    return CI_WORKFLOW_PATH
+
+
+@pytest.fixture
+def ci_workflow() -> dict[str, Any]:
+    """`.github/workflows/ci.yml`, parsed rather than grepped.
+
+    A regex over the text cannot tell a job service's `image:` from any other
+    line that spells the same word, and it keeps passing against a workflow
+    whose shape has changed underneath it — which is the failure the test that
+    uses this exists to make impossible.
+
+    One quirk to know before adding anything that reads a top-level key here:
+    PyYAML implements YAML 1.1, so the workflow's `on:` parses to the boolean
+    `True` rather than to the string `"on"`. Nothing currently needs it.
+    """
+    return load_yaml(CI_WORKFLOW_PATH)
 
 
 @pytest.fixture

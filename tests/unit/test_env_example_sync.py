@@ -10,10 +10,13 @@ application stopped reading two tickets ago.
 
 "Nothing reads it" is not the same rule as "no `Settings` field reads it", and
 this module asserted the second one until dispute E0-02-01 separated them. From
-E0-02, `.env` has two readers: `Settings`, and Compose, which needs `DB_USER`,
-`DB_PASSWORD`, and `DB_NAME` as discrete values because it cannot parse the
-`DATABASE_URL` it builds from them. Those entries are read on both paths, so
-calling them abandoned was false.
+E0-02, `.env` has two readers: `Settings`, and Compose, which cannot parse a URL
+and so needs the database credentials as discrete values — `DB_SUPERUSER` and
+`DB_SUPERUSER_PASSWORD` for the role `initdb` creates, `DB_APP_USER` and
+`DB_APP_PASSWORD` for the role the application connects as, and `DB_NAME`. No
+`Settings` field reads any of the five, and calling them abandoned was false:
+`docker-compose.yml` reads all five, and `DATABASE_URL` is interpolated from
+three of them.
 
 The reader is established mechanically rather than by an allowlist of names: an
 entry passes if a `Settings` field reads it, or if a Compose file interpolates
