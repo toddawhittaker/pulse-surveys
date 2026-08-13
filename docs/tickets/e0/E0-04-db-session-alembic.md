@@ -14,51 +14,47 @@ deploy-time surprise.
 Read first: SPEC §8, §13, and the `migration-drift` job in
 `.github/workflows/ci.yml`, which runs `alembic upgrade head && alembic check`.
 
-## Decide first: which identity runs migrations
+## Settled before you start: migrations run as the superuser identity
 
-E0-02 stopped the application connecting as the Postgres superuser, because a
-superuser bypasses every grant and every row-level security policy and can reach
-a shell in the database container — see
-[ADR 0001](../../adr/0001-identity-separation-by-database-role.md) and the E0-02
-security review. `DATABASE_URL` now points at an application role created by
-`scripts/db-init` that holds **`CONNECT` and nothing else**.
+This was an open question during E0-02 and is not one any more.
+[ADR 0009](../../adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
+decides it: **Alembic connects as `DB_SUPERUSER`, not as
+`Settings.database_url`.**
 
-That role deliberately cannot create a table:
+The reason it needed deciding: E0-02 stopped the application connecting as the
+Postgres superuser, so `DATABASE_URL` now points at an application role that is
+granted `CONNECT` and deliberately cannot create a table —
 
 ```
 ERROR:  permission denied for schema public
 ```
 
-So `alembic upgrade head` cannot run as `Settings.database_url`, and this ticket
-cannot simply grant it `CREATE` — ADR 0001 rules that out too ("runtime roles
-must not own tables"), and doing so quietly would undo E0-02's fix.
+— and this ticket must not grant it `CREATE` to work around that.
+[ADR 0001](../../adr/0001-identity-separation-by-database-role.md) line 71 still
+forbids a runtime role owning tables, and ADR 0009 reaffirms that half
+explicitly while sanctioning the superuser for migrations.
 
-This ticket has to choose, and record the choice:
+So this ticket needs a second database URL for Alembic, distinct from
+`Settings.database_url`, built from `DB_SUPERUSER` and `DB_SUPERUSER_PASSWORD`.
+Whether that is a new `Settings` field, an Alembic-only environment variable, or
+something `env.py` assembles is a construction choice this ticket makes — but
+*which identity* is no longer open, and no ADR is needed for that part.
 
-- **A separate migration identity.** A second URL — a `MIGRATION_DATABASE_URL`
-  setting, or the existing `DB_SUPERUSER` credentials — used by Alembic and by
-  nothing else. This is the direction ADR 0001 points, and it makes the owner of
-  the tables different from the role that queries them, which is what E0-10's
-  three-role scheme needs to already be true.
-- **Grant the application role what it needs and no more**, per object rather
-  than on the schema, once the tables exist. Cheaper now, and it puts the
-  runtime role back in the business of owning things.
+Three consequences of E0-02 land here as well:
 
-Whichever wins, `scripts/db-init/01-application-role.sh` is where a grant would
-be added, and an ADR is warranted: the spec does not settle it and a reasonable
-engineer would argue either way.
-
-Two smaller consequences of E0-02 land here as well:
-
-- The `migration-drift` job's own `services.postgres` block still declares
-  `POSTGRES_USER: postgres` and autogenerates as a superuser, so it would not
-  notice a permission problem the real stack has. Consider starting the Compose
-  `db` service instead, which would also delete the second pinned image
-  reference that [ADR 0007](../../adr/0007-container-images-pinned-by-tag-and-digest.md)
+- **The `migration-drift` job provisions no application role.**
+  `scripts/db-init` runs only where the Compose `initdb` hook exists, and
+  `services.postgres` has no such hook. ADR 0009's provisioning table names this
+  job as E0-04's to settle: give it the role, or start the Compose `db` service
+  instead — the second would also delete the duplicate pinned image reference
+  that [ADR 0007](../../adr/0007-container-images-pinned-by-tag-and-digest.md)
   records as maintained by hand.
-- The testcontainers fixture provisions its own Postgres and will need whatever
-  role split this ticket settles on, or its tests will pass under privileges
-  production does not have.
+- **The testcontainers fixture has the same gap** and needs the same answer, or
+  its tests pass under privileges production does not have.
+- The job currently autogenerates as `postgres`, a superuser, which is now the
+  correct identity for migrations — but it should use the same *database* shape
+  the stack deploys, application role included, or `alembic check` cannot see a
+  grant problem.
 
 ## Scope
 

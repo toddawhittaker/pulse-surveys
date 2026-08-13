@@ -85,14 +85,20 @@ The `DB_*` entries are in that file for Compose rather than for the application
 — Compose cannot parse a URL, so the `db` service is handed the parts
 `DATABASE_URL` is built from, and each password stays written once.
 
-Two of them are two different roles, and the difference matters. `DB_SUPERUSER`
-is the role Postgres creates on first start, which is unavoidably the cluster
-superuser. `DB_APP_USER` is created alongside it by
-[`scripts/db-init`](scripts/db-init) and holds nothing but the right to connect;
-it is what `DATABASE_URL` points at, so an injection in application code cannot
-reach a shell in the database container or read past a row-level security
-policy. See [ADR 0001](docs/adr/0001-identity-separation-by-database-role.md).
-Nothing but administration should use `DB_SUPERUSER`.
+They describe two database roles, and the difference matters. `DB_SUPERUSER` is
+the role Postgres creates on first start; it is the cluster superuser, and it is
+what migrations and system-level tasks use. `DB_APP_USER` is created alongside
+it by [`scripts/db-init`](scripts/db-init) and is granted only the right to
+connect. It is what `DATABASE_URL` points at, so an injection in application
+code cannot reach a shell in the database container or read past a row-level
+security policy.
+
+`DATABASE_URL` must never point at `DB_SUPERUSER`, and the Compose file keeps
+that credential out of the application container entirely. See
+[ADR 0009](docs/adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
+for which identity does what, and
+[ADR 0001](docs/adr/0001-identity-separation-by-database-role.md) for why the
+runtime role is scoped the way it is.
 
 ```sh
 make ci             # every gate, in the same order as CI

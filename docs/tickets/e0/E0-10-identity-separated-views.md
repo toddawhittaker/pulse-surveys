@@ -13,15 +13,56 @@ establishes that mechanism and lands the first §4.1 invariant assertions in CI.
 It is the ticket that turns confidentiality from a convention into a property.
 
 Read first: SPEC §4 and §4.1, §8 (identity separation), §9.1 (the invariant
-suite), §13 (`views_sql/` ships as migrations, not ORM convention).
+suite), §13 (`views_sql/` ships as migrations, not ORM convention), and
+[ADR 0009](../../adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md),
+which changes who provisions two of the three roles below.
+
+## Reconcile first: `pulse_app` already exists
+
+E0-02 provisions an application role before this ticket runs.
+`scripts/db-init/01-application-role.sh` creates it at `initdb`, and
+`.env.example` defaults `DB_APP_USER=pulse_app` — **the same name this ticket's
+migration creates**. On any database initialised by the Compose stack since
+E0-02, a plain `CREATE ROLE pulse_app` aborts the migration with:
+
+```
+ERROR:  role "pulse_app" already exists
+```
+
+Two things to settle, and neither is optional:
+
+1. **This ticket's role migration must be idempotent.** It has to tolerate a
+   role that already exists, and still end with the attributes and grants this
+   ticket requires — so `CREATE ROLE` guarded by a `pg_roles` lookup, followed
+   by the `ALTER ROLE` and `GRANT`/`REVOKE` statements applied unconditionally.
+   Creating it only when absent and assuming a bootstrap-created role is already
+   correct would leave the two mechanisms free to disagree.
+2. **`pulse_migrate` needs reconciling with ADR 0009.** The scope below gives
+   it schema ownership and the Alembic connection, but ADR 0009 decides that
+   migrations run as the bootstrap superuser identity (`DB_SUPERUSER`), which is
+   what E0-04 wires up. Either `pulse_migrate` *is* that identity under a
+   different name in `.env`, or this ticket is reintroducing a separate
+   non-superuser owner and ADR 0009 has to be amended in the same pull request
+   rather than contradicted quietly.
+
+**Provisioning is not uniform across environments**, and this ticket is where
+that stops being tolerable, because the invariant suite asserts properties of
+these roles. ADR 0009 carries the table: the Compose stack gets `pulse_app` from
+the `initdb` hook; `migration-drift`'s `services.postgres`, E0-04's
+testcontainers fixture, and any managed Postgres do not run that hook at all. If
+this ticket's migration is idempotent as above, it becomes the single mechanism
+that works everywhere and the bootstrap script becomes a convenience — which is
+the cleanest resolution, and worth stating in the pull request either way.
 
 ## Scope
 
 - `backend/app/views_sql/` with the first identity-separated views shipped as
   Alembic migrations: a section-roster view and an enrollment-count view that
   expose section membership and counts with **no** identity columns reachable.
-- **Three database roles**, established as migrations:
-  - `pulse_migrate` owns the schema and runs Alembic. Not used at runtime.
+- **Three database roles**, established as migrations — idempotently, and
+  reconciled with ADR 0009 as set out above:
+  - `pulse_migrate` owns the schema and runs Alembic. Not used at runtime. See
+    point 2 above before building this one.
   - `pulse_app` serves student, instructor, leadership, and admin requests. It
     has **no grant of any kind** on `user_identity` (E0-08). An instructor
     screen cannot leak a name because the connection it runs on cannot read the
