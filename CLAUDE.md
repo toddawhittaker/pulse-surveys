@@ -7,6 +7,7 @@ feature decisions, system behavior, rationale, status, or history.
 - Why a construction choice was made → `docs/adr/`
 - What is being built next → `docs/tickets/`
 - How it should look → `docs/DESIGN_BRIEF.md`, `design/`
+- What has already gone wrong here → `docs/MISTAKES.md`, read before you start
 
 Before adding a line here, ask whether it would still be true if the process
 changed. If yes, it belongs elsewhere. Do not append feature decisions, status,
@@ -105,8 +106,8 @@ resolved in the pull request body. On a ⚠ epic it supplements line-by-line hum
 review of the security-relevant diff; it never replaces it.
 
 **Pin dependency versions and commit lockfiles.** No floating ranges, no
-unpinned tool versions in CI. Dependabot proposes upgrades as pull requests that
-go through the same gates as anything else.
+unpinned tool versions in CI. Dependabot proposes upgrades through the same
+gates as anything else.
 
 **Do not weaken a gate to get past it.** An ignore rule, an exclusion, a
 `continue-on-error`, or a raised budget changes what the project guarantees, and
@@ -140,9 +141,8 @@ Ask, then wait for an answer; do not add it provisionally.
 
 Local secrets live in `.env`, which is gitignored and must stay that way.
 `.env.example` carries variable *names* and obviously-fake placeholders, never a
-real credential and never a value copied from a working `.env`. When a ticket adds
-a configuration variable, add its name to `.env.example` in the same pull
-request.
+real credential and never a value copied from a working `.env`. A ticket adding a
+configuration variable adds its name to `.env.example` in the same pull request.
 
 Do not print the contents of `.env`, paste a credential into a commit message or
 a pull request body, or write one into a test fixture, a seed script, or a log

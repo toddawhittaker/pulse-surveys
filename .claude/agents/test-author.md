@@ -23,7 +23,13 @@ suite then measures whether the code does what it does. Write from the ticket's
 acceptance criteria and the spec sections it names.
 
 Read: the ticket in `docs/tickets/`, the spec sections it names, `CLAUDE.md`,
-and existing tests for house style.
+`docs/MISTAKES.md`, and existing tests for house style.
+
+`docs/MISTAKES.md` records what has actually gone wrong here, most frequent
+first. Two entries are yours more than anyone's: *behaviour shipped with nothing
+asserting it*, and *a test passed for a reason unrelated to what it asserted*.
+When an entry changes what you write, increment its `Caught:` counter in the same
+change. When something goes wrong that is not there, append it.
 
 ## Where red-green applies
 

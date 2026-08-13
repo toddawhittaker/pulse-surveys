@@ -18,6 +18,17 @@ work must not have watched it being written — a reviewer that saw the
 reasoning has already been persuaded by it. The implementer, by contrast,
 benefits from remembering the approaches it already tried.
 
+**Mistakes are written down where the next agent will look, not remembered.**
+`docs/MISTAKES.md` holds what has actually gone wrong here — what happened, the
+root cause, the consequence, and the rule that prevents a repeat — ordered by how
+often each recurs. An agent reads it before starting, increments an entry's
+`Caught:` counter when that entry changes what it does, and appends a new entry
+when something goes wrong that is not yet there. The counter is the only ordering
+signal, which is why bumping it is part of the work rather than bookkeeping: an
+entry nobody bumps sinks, and the ones that keep saving people rise to the top.
+Every entry cites a real incident. A rule with no incident behind it is advice,
+and advice belongs in `CLAUDE.md`.
+
 **The test author must be blind to implementation.** If it can see
 implementation attempts, it writes tests the implementation passes, and
 red-green becomes theater.
