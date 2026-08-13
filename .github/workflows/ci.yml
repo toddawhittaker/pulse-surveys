@@ -431,22 +431,20 @@ jobs:
       # reason it exists is not obvious from what it does — so read this before
       # deleting it as a redundant third `up`.
       #
-      # `docker compose up` merges docker-compose.override.yml automatically,
-      # and since E0-03 that override mounts the checkout over /app/backend in
-      # `api`, `worker` and `beat` alike. So every step above imports the
-      # application from the bind mount and none of them has ever executed the
-      # copy `pip install` put in the image. Measured, with an image deliberately
-      # built from older source than the checkout: the merged stack's round trip
-      # answered from the checkout and passed, while this pass answered from the
-      # image. A wheel that is missing or stale in `app/jobs` leaves the build,
-      # the round trip and all three health waits green, and then every
-      # deployment that runs the base file alone fails at worker startup.
+      # `docker compose up` merges docker-compose.override.yml automatically, and
+      # that override replaces the installed application with the checkout in all
+      # three application containers. Every step above therefore imports from the
+      # bind mount, and none of them executes the copy `pip install` put in the
+      # image. A stale or missing wheel in `app/jobs` leaves the build, the round
+      # trip and all three health waits green, and then fails at worker startup
+      # in every deployment. That was reproduced, not assumed; the measurement,
+      # the alternatives, and what has to stay true are in
+      # docs/adr/0011-ci-validates-the-image-by-running-the-base-compose-file-alone.md.
       #
-      # `-f docker-compose.yml` alone: no override, so no source mount and no
-      # published host port. That is what makes it cheap, and it is also why
-      # every check that talks to localhost lives above this step rather than
-      # inside it. `down -v` first, so the base file is proved from nothing —
-      # beat builds its schedule store on an empty volume here.
+      # `-f docker-compose.yml` alone: no source mount and no published host
+      # port, which is why every check that talks to localhost lives above this
+      # step rather than inside it. `down -v` first, so the base file is proved
+      # from nothing — beat builds its schedule store on an empty volume here.
       #
       # All three services are named on purpose. `api` reaches `db` and `redis`
       # through its depends_on conditions; nothing depends on `worker` or `beat`,

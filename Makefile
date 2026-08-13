@@ -155,8 +155,8 @@ evals: ## AI eval runner with per-task precision/recall floors
 #
 # The base-file-only pass is the one that runs the application as installed in
 # the image; every other line here runs your checkout through the override's
-# bind mount. The workflow carries the full reasoning — this recipe exists to
-# match it, and when the two disagree the workflow is right.
+# bind mount. Why that pass exists is docs/adr/0011; this recipe exists to match
+# the workflow, and when the two disagree the workflow is right.
 .PHONY: docker-build
 docker-build: ## Build the images and check the stack against E0-02's and E0-03's criteria
 	$(call banner,docker compose build)

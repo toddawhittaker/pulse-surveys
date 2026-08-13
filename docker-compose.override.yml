@@ -10,7 +10,7 @@
 # One deliberate exception, and it is in CI rather than on a laptop: the `docker`
 # job runs a pass with `-f docker-compose.yml` alone. Because this file replaces
 # the installed application with your checkout, a merged stack proves nothing
-# about the image, and every other gate runs merged.
+# about the image, and every other gate runs merged. See docs/adr/0011.
 #
 # Ports bind to 127.0.0.1 rather than to every interface, so a laptop on a
 # conference network is not serving its database to the room.
