@@ -15,6 +15,51 @@ exercises both entry doors on every run (§9.2).
 Read first: SPEC §14.3 (E0's exit criterion), §9.2 (both doors exercised in
 every run), §2.1 (dual-door entry resolving to the same identity and purview).
 
+## Decide first: whether `/docs` and `/openapi.json` stay public
+
+`create_app()` builds `FastAPI(...)` without `docs_url` or `openapi_url`
+(`backend/app/main.py`), so `/docs`, `/redoc`, and `/openapi.json` are served to
+any unauthenticated caller. That has been harmless through all of E0 — the
+schema holds `/healthz` and a version string — and **this is the ticket where it
+stops being harmless**, because this is the first one to put a route behind
+authorization. The E0-02 independent security review raised it as a timing
+question rather than a defect, for exactly this reason.
+
+What a public schema gives away once real routes exist is not data but design:
+every path, every parameter name, and every request and response shape,
+including the ones the caller is not allowed to invoke. For this system that
+enumerates the Care re-identification surface (§6.2) and the leadership roll-up
+surface (§5.5) to anyone who can reach the tool — which, after an LTI launch,
+is every enrolled student's browser.
+
+**The obvious fix is wrong**, so do not take it without reading this. Setting
+`openapi_url=None` unconditionally breaks two things the spec depends on:
+`scripts/generate_client.sh` generates the frontend client from the backend
+OpenAPI (§13), and §7.1 keeps the schema specifically because the future MCP
+server (§7.5) is meant to reuse it. The schema has to remain *producible*; the
+decision is only about who can fetch it over HTTP.
+
+Options, in rough order of cost:
+
+- **Leave it public.** Defensible: the deployment is single-tenant, self-hosted,
+  and behind a TLS-terminating proxy (§7.2), and hiding a schema is not a
+  security control on its own. If this wins, say so in the pull request so the
+  next reviewer finds a decision rather than an oversight.
+- **Serve it only outside production**, keyed on the `ENVIRONMENT` setting
+  (§6.3) that `/healthz` already reports. Cheap, and it keeps `/docs` where
+  developers want it. Note that `ENVIRONMENT` is free-form, so this needs an
+  explicit rule about which values count.
+- **Serve it only to an authenticated actor**, through the E0-11 chokepoint.
+  Most consistent with the rest of the system, and the most work.
+
+Generation is unaffected either way: `scripts/generate_client.sh` can call
+`app.openapi()` in-process rather than fetching the route.
+
+Whichever wins, it is a construction decision the spec does not settle and a
+reasonable engineer might make differently, so it wants an ADR — and the
+decision belongs in E0's exit checklist below, since after this ticket the
+question stops being hypothetical for every epic that follows.
+
 ## Scope
 
 - Playwright configuration and `tests/e2e/`, running against the Compose stack.
@@ -63,6 +108,9 @@ every run), §2.1 (dual-door entry resolving to the same identity and purview).
 - [ ] A failing e2e run uploads a Playwright report artifact — verify by
       deliberately breaking an assertion once, then reverting.
 - [ ] `make ci` locally runs the same suite.
+- [ ] The `/docs` and `/openapi.json` exposure question above is answered, the
+      answer is recorded in an ADR, and the schema is still generatable for
+      `scripts/generate_client.sh` whatever the answer is.
 
 ## Definition of done
 
