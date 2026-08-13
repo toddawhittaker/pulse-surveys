@@ -12,11 +12,16 @@
 
 # Your checkout, in place of the copy the image installed. It goes to all three
 # application services and not just `api`, and that is the point rather than
-# tidiness: with it on `api` alone, editing a task gives you an API that
-# enqueues the new code and a worker still running the old, so a task the API
-# knows about is one the worker has never registered. What that looks like is a
-# `get()` that hangs to its timeout with nothing in the failure naming a cause
-# (docs/MISTAKES.md entry 11).
+# tidiness: with it on `api` alone, an edit reaches the API and not the worker,
+# so the two containers run different code. Both outcomes were measured against
+# the running stack, and the quiet one is the one to fear:
+#
+#   - A task you *change* comes back with the answer the old code gave. The API
+#     reads your edit, the worker answers out of what it imported at startup,
+#     and nothing anywhere reports a problem.
+#   - A task you *add* comes back as `NotRegistered: app.jobs.tasks.<name>`,
+#     because the worker stores a failure result for a name it does not know.
+#     That one at least says what happened.
 #
 # **Celery does not reload.** `api` picks an edit up by itself; `worker` and
 # `beat` need `docker compose restart worker beat`. README.md says so where it
