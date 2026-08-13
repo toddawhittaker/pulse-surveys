@@ -1,8 +1,15 @@
 # 0001 — Identity separation enforced by database role and grant
 
-**Status:** Accepted
+**Status:** Accepted — one consequence amended by
+[ADR 0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
 **Date:** 2026-08-12
 **Tickets:** E0-08, E0-10, E0-11
+
+> ADR 0009 sanctions a superuser identity for migrations and bootstrap, and
+> supersedes the "roles are created in migrations" consequence below for the
+> bootstrap and application roles. **The decision recorded here is unchanged,
+> and so is the first consequence** — runtime roles must not own tables and must
+> not be superuser. That is the rule ADR 0009 exists to protect, not to relax.
 
 ## Context
 
@@ -81,7 +88,10 @@ apart.
 - **Tests need a real Postgres**, not SQLite. Already true under §9.1, so no new
   cost.
 - **Local development gets more setup**: roles are created in migrations so a
-  fresh `docker compose up` still works in one command.
+  fresh `docker compose up` still works in one command. *(Amended by ADR 0009:
+  the bootstrap role comes from `initdb` and the application role from
+  `scripts/db-init`, because the identity a migration runs as cannot itself be
+  created by a migration. E0-10's read roles are still migrations.)*
 - **If a deployment target cannot create roles** — some managed databases
   restrict it — the guarantee degrades to views that merely omit the columns.
   E0-10 requires documenting that fallback plainly rather than implying the

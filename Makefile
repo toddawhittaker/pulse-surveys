@@ -146,16 +146,33 @@ evals: ## AI eval runner with per-task precision/recall floors
 # Build gates
 # ---------------------------------------------------------------------------
 
+# The four checks after the health wait are E0-02's acceptance criteria, in the
+# same order as the `docker` job in .github/workflows/ci.yml. `wait_for_health.sh
+# api` alone is deliberate: `api` waits on a healthy `db` and a healthy `redis`,
+# so one wait covers all three. `worker` and `beat` join that list in E0-03.
 .PHONY: docker-build
-docker-build: ## Build all images and check the stack comes up healthy
+docker-build: ## Build the images and check the stack against E0-02's criteria
 	$(call banner,docker compose build)
-	@if [ -f docker-compose.yml ]; then \
-		$(COMPOSE) build && $(COMPOSE) up -d && \
-		./scripts/ci/wait_for_health.sh api worker beat; \
-		status=$$?; $(COMPOSE) down -v >/dev/null 2>&1 || true; exit $$status; \
-	else \
-		$(call skip,no docker-compose.yml yet); \
-	fi
+	@test -f .env || { echo "    .env is missing — run: cp .env.example .env"; exit 1; }
+	@$(COMPOSE) build
+	$(call banner,compose stack health)
+	@set -e; \
+	trap '$(COMPOSE) down -v >/dev/null 2>&1 || true' EXIT; \
+	$(COMPOSE) up -d; \
+	./scripts/ci/wait_for_health.sh api; \
+	code=$$(curl --silent --show-error --max-time 10 --output /dev/null \
+		--write-out '%{http_code}' http://localhost:8000/healthz); \
+	echo "    GET /healthz -> $$code"; \
+	test "$$code" = "200"; \
+	uid=$$($(COMPOSE) exec -T api id -u | tr -d '\r'); \
+	echo "    api runs as uid $$uid"; \
+	test "$$uid" != "0"; \
+	for attempt in 1 2; do \
+		echo "    down -v && up -d (attempt $$attempt)"; \
+		$(COMPOSE) down -v >/dev/null; \
+		$(COMPOSE) up -d >/dev/null; \
+		./scripts/ci/wait_for_health.sh api >/dev/null; \
+	done
 
 .PHONY: frontend-build
 frontend-build: ## Production build + bundle budget
@@ -241,13 +258,11 @@ fmt: ## Apply formatting (the only target that writes to your files)
 
 .PHONY: up
 up: ## Bring the stack up with dev wiring
-	@if [ -f docker-compose.yml ]; then $(COMPOSE) up -d; \
-	else $(call skip,no docker-compose.yml yet); fi
+	@$(COMPOSE) up -d
 
 .PHONY: down
 down: ## Tear the stack down, including volumes
-	@if [ -f docker-compose.yml ]; then $(COMPOSE) down -v; \
-	else $(call skip,no docker-compose.yml yet); fi
+	@$(COMPOSE) down -v
 
 .PHONY: logs
 logs: ## Follow stack logs

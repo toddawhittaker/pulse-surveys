@@ -14,6 +14,48 @@ deploy-time surprise.
 Read first: SPEC §8, §13, and the `migration-drift` job in
 `.github/workflows/ci.yml`, which runs `alembic upgrade head && alembic check`.
 
+## Settled before you start: migrations run as the superuser identity
+
+This was an open question during E0-02 and is not one any more.
+[ADR 0009](../../adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
+decides it: **Alembic connects as `DB_SUPERUSER`, not as
+`Settings.database_url`.**
+
+The reason it needed deciding: E0-02 stopped the application connecting as the
+Postgres superuser, so `DATABASE_URL` now points at an application role that is
+granted `CONNECT` and deliberately cannot create a table —
+
+```
+ERROR:  permission denied for schema public
+```
+
+— and this ticket must not grant it `CREATE` to work around that.
+[ADR 0001](../../adr/0001-identity-separation-by-database-role.md) line 71 still
+forbids a runtime role owning tables, and ADR 0009 reaffirms that half
+explicitly while sanctioning the superuser for migrations.
+
+So this ticket needs a second database URL for Alembic, distinct from
+`Settings.database_url`, built from `DB_SUPERUSER` and `DB_SUPERUSER_PASSWORD`.
+Whether that is a new `Settings` field, an Alembic-only environment variable, or
+something `env.py` assembles is a construction choice this ticket makes — but
+*which identity* is no longer open, and no ADR is needed for that part.
+
+Three consequences of E0-02 land here as well:
+
+- **The `migration-drift` job provisions no application role.**
+  `scripts/db-init` runs only where the Compose `initdb` hook exists, and
+  `services.postgres` has no such hook. ADR 0009's provisioning table names this
+  job as E0-04's to settle: give it the role, or start the Compose `db` service
+  instead — the second would also delete the duplicate pinned image reference
+  that [ADR 0007](../../adr/0007-container-images-pinned-by-tag-and-digest.md)
+  records as maintained by hand.
+- **The testcontainers fixture has the same gap** and needs the same answer, or
+  its tests pass under privileges production does not have.
+- The job currently autogenerates as `postgres`, a superuser, which is now the
+  correct identity for migrations — but it should use the same *database* shape
+  the stack deploys, application role included, or `alembic check` cannot see a
+  grant problem.
+
 ## Scope
 
 - Pin the `psycopg` driver package. E0-01 shipped `SQLAlchemy` and `alembic`

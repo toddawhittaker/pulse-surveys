@@ -43,8 +43,6 @@ jobs:
     outputs:
       frontend: ${{ steps.d.outputs.frontend }}
       migrations: ${{ steps.d.outputs.migrations }}
-      compose: ${{ steps.d.outputs.compose }}
-      dockerfiles: ${{ steps.d.outputs.dockerfiles }}
       pytests: ${{ steps.d.outputs.pytests }}
       e2e: ${{ steps.d.outputs.e2e }}
       evals: ${{ steps.d.outputs.evals }}
@@ -60,8 +58,6 @@ jobs:
           echo "Probing repository layout (SPEC §13):"
           if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
           if [ -f backend/alembic.ini ]; then emit migrations true; else emit migrations false; fi
-          if [ -f docker-compose.yml ]; then emit compose true; else emit compose false; fi
-          if compgen -G "*/Dockerfile" > /dev/null 2>&1; then emit dockerfiles true; else emit dockerfiles false; fi
           if compgen -G "tests/unit/test_*.py" > /dev/null 2>&1 || compgen -G "tests/integration/test_*.py" > /dev/null 2>&1; then
             emit pytests true
           else
@@ -148,7 +144,18 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # Must match the `db` service in docker-compose.yml exactly, image
+        # reference and all. This job autogenerates migrations against it from
+        # E0-04 on, so a Postgres that differs from the deployed one checks the
+        # schema against a server the project never runs.
+        #
+        # Pinned by tag and digest like every other image in the repository
+        # (docs/adr/0007). This is the one reference no Dependabot ecosystem
+        # reads — `github-actions` updates `uses:` only, and the `docker` and
+        # `docker-compose` ecosystems read backend/Dockerfile and
+        # docker-compose.yml — so it moves by hand, together with the `db`
+        # service, and never on its own. ADR 0007 records that consequence.
+        image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -349,38 +356,82 @@ jobs:
   # BUILD GATES
   # ==========================================================================
 
+  # Enforcing since e0/compose-stack (E0-02): the Compose file and
+  # backend/Dockerfile exist, so this job no longer tolerates their absence.
+  #
+  # The four steps after the health wait are the acceptance criteria of E0-02
+  # that no unit test can reach. They live here rather than in pytest because
+  # each one needs a running daemon, and because a Compose file can declare all
+  # of them correctly and still not work.
   docker:
     name: Build · images + Compose health
-    needs: [detect, fast-gate]
+    needs: [fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Nothing to build yet
-        if: needs.detect.outputs.compose != 'true' || needs.detect.outputs.dockerfiles != 'true'
-        run: echo "::notice::No docker-compose.yml or Dockerfiles yet. Enforcing once e0/compose-stack lands."
-
       - uses: docker/setup-buildx-action@v3
-        if: needs.detect.outputs.compose == 'true' && needs.detect.outputs.dockerfiles == 'true'
 
       - name: Build all images
-        if: needs.detect.outputs.compose == 'true' && needs.detect.outputs.dockerfiles == 'true'
         run: |
           cp .env.example .env
           docker compose build
 
-      - name: Stack comes up healthy (api, worker, beat)
-        if: needs.detect.outputs.compose == 'true' && needs.detect.outputs.dockerfiles == 'true'
+      # `wait_for_health.sh api` alone, not api plus its dependencies: `api`
+      # declares `depends_on` on a healthy `db` and a healthy `redis`, so
+      # reaching healthy here means all three did. `worker` and `beat` join the
+      # argument list in E0-03.
+      - name: Stack comes up healthy (api, and through it db and redis)
         run: |
           docker compose up -d
-          ./scripts/ci/wait_for_health.sh api worker beat
+          ./scripts/ci/wait_for_health.sh api
+
+      # The container's own HEALTHCHECK proves the app answers itself. It says
+      # nothing about whether the development override publishes the port, which
+      # is what a developer following the README actually does first.
+      # Not `curl --fail`: that fails on 4xx and 5xx, so a redirect satisfies it
+      # and the criterion is 200. The code is captured and compared, and it is
+      # printed before the comparison so a failure says what was served rather
+      # than only that something was wrong.
+      - name: Health endpoint answers 200 on the published host port
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --max-time 10 \
+                       --output /dev/null --write-out '%{http_code}' \
+                       http://localhost:8000/healthz)"
+          echo "GET /healthz -> ${code}"
+          test "${code}" = "200"
+
+      # A root runtime user is the first item in E0-02's security review. Asked
+      # of the running container rather than read off the Dockerfile, because a
+      # `USER` instruction can name a user whose uid is 0.
+      - name: API container runs as a non-root user
+        run: |
+          set -euo pipefail
+          uid="$(docker compose exec -T api id -u | tr -d '\r')"
+          echo "api runs as uid ${uid}"
+          test "${uid}" != "0"
+
+      # `down -v` discards the Postgres volume, so the second and third starts
+      # each initialise a database from nothing. This catches the class of bug
+      # where the stack only comes up on a machine that has run it before.
+      - name: Teardown and restart leaves no manual cleanup, twice
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            echo "::group::down -v && up -d (attempt ${attempt})"
+            docker compose down -v
+            docker compose up -d
+            ./scripts/ci/wait_for_health.sh api
+            echo "::endgroup::"
+          done
 
       - name: Compose logs on failure
-        if: failure() && needs.detect.outputs.compose == 'true'
+        if: failure()
         run: docker compose logs --no-color --tail=200
 
       - name: Tear down
-        if: always() && needs.detect.outputs.compose == 'true'
+        if: always()
         run: docker compose down -v || true
 
   frontend-build:
