@@ -31,7 +31,7 @@ break toward the more expensive consequence.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -66,7 +66,7 @@ never written and the one that drifted out from under you.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -91,7 +91,7 @@ second case arrives.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -99,16 +99,28 @@ happened to be set and pydantic's repr elision landed between the two passwords.
 Separately, a set-equality test would have passed comparing two empty sets, if
 a workflow's shape changed so nothing was collected.
 
+A third, in E0-03, inside the test written to enforce entry 1 above. It asserted
+that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
+argument list in E0-03", by searching the file text for that phrase. The comment
+wraps at 80 columns, so between `join the` and `argument list` the file holds a
+newline, six spaces and a `#`. The pattern was written with a plain space. It
+matched nothing, and the test went green against the exact comment it existed to
+catch — reported as failing, because it had been read rather than run.
+
 **Root cause.** Asserting an absence. Absence is satisfied by the thing being
 broken in an unrelated way, by a fixture returning nothing, by a parser matching
-nothing.
+nothing. In the third case, by the difference between what a sentence looks like
+in a file and what it is as a string.
 
 **Consequence. ** A green suite is read as coverage. The first case would have
 been counted as proof the leak was fixed when it proved nothing about it.
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
-say in the message why that guard is not ceremony.
+say in the message why that guard is not ceremony. A pattern searched against a
+file is a case of this and looks like none: run it against the text you claim it
+catches *and* against the text you claim it allows, and give it a canary — a
+string certainly present — so a search that has gone blind says so.
 
 ---
 
