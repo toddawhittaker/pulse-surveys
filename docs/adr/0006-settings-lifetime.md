@@ -108,7 +108,10 @@ compatible change; it can be made when something wants it.
   yet: a worker's lifetime and a migration's lifetime are not obviously the same
   as a web application's, and guessing now would put a shape in the way of
   whoever finds out. This is the open question a future reader should expect to
-  find unanswered, not an omission.
+  find unanswered, not an omission. *(E0-03 has since answered the Celery half,
+  and answered it the other way — see
+  [ADR 0010](0010-the-celery-application-is-built-at-import-time.md). Alembic is
+  still open. Nothing in this record changed.)*
 - **`app.state` is untyped.** Starlette's `State` accepts any attribute, so
   `request.app.state.settings` typechecks as `Any` and a typo in the attribute
   name is an `AttributeError` at request time rather than a mypy error. The

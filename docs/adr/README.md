@@ -57,3 +57,4 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0007](0007-container-images-pinned-by-tag-and-digest.md) | Container images are pinned by tag and by digest | Accepted |
 | [0008](0008-env-has-two-readers-and-the-database-credential-is-split.md) | `.env` has two readers, and the database credential is split into parts | Accepted |
 | [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md) | A superuser identity is sanctioned for migrations and bootstrap | Accepted |
+| [0010](0010-the-celery-application-is-built-at-import-time.md) | The Celery application is built at import time, at module level | Accepted — answers for Celery the entry-point question [0006](0006-settings-lifetime.md) left open |
