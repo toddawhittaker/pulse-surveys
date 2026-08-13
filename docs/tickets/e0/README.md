@@ -65,13 +65,20 @@ that ticket includes removing its tolerance:
 
 | Gate | Becomes enforcing in |
 |---|---|
-| ruff, mypy, pip-audit, license check | 01 |
+| ruff, mypy, pip-audit, license check, pytest | 01 |
 | Docker build and Compose health (`api`) | 02 |
 | Compose health (`api`, `worker`, `beat`) | 03 |
-| migration drift, pytest | 04 |
+| migration drift | 04 |
 | §4.1 invariant suite — no skips permitted | 10 |
 | Playwright e2e | 18 |
 | AI eval floors | E2, not E0 — the last tolerance to survive this epic |
+
+The pytest row moved from 04 to 01 and is worth a word, because it tightened
+without anyone editing a tolerance. That gate is not gated on a flag; it is
+gated on the `detect` job finding `tests/unit/test_*.py`. Ticket 01 ships that
+directory, so `pytests` became `true` and the gate went live the moment the
+first test landed. Ticket 04 is still where the *integration* suite and the
+migration-drift gate arrive.
 
 The frontend gates (`tsc`, `eslint`, production build, bundle budget) stay
 tolerant through all of E0. No frontend exists until E1.

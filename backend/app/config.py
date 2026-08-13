@@ -13,9 +13,13 @@ The fields split into two groups, and the split is the point:
   production. The institution timezone is in this group because survey windows
   are timezone-bound (§3.1): a baked-in `America/New_York` opens the window at
   the wrong hour elsewhere and nothing says so.
-* **Values the spec settles** keep their default. The n-threshold is
-  "configurable (default 5)" in §4, and the benchmark minimums are §11 open
-  question 1. A spec-given default is not a silent fallback.
+* **Values that carry a default** do so for one of two opposite reasons, and
+  the difference matters to whoever reads them next. The n-threshold is
+  settled: §4 makes it "configurable (default 5)", and a spec-given default is
+  not a silent fallback. The benchmark minimums are *not* settled — §11 open
+  question 1 leaves the numbers open and offers 3 and 15 as suggested starting
+  points — and they are defaulted precisely so that answering that question
+  stays a configuration change rather than a code change.
 
 **A credential never reaches a log through this class**, and there are two ways
 in, so there are two guarantees. `DATABASE_URL` and `REDIS_URL` carry passwords

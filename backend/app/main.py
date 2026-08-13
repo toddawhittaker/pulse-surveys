@@ -16,8 +16,11 @@ from app.config import Settings
 def create_app() -> FastAPI:
     """Build the application.
 
-    Raises `pydantic.ValidationError` when a required environment variable is
-    absent or malformed — see `app.config.Settings`.
+    Raises `app.config.ConfigurationError` when a required environment variable
+    is absent or malformed. Not `pydantic.ValidationError`: `Settings.__init__`
+    converts that one and never lets it escape, because it retains the values it
+    was given and this failure is printed to the container startup log. Anything
+    catching a failed startup wants `ConfigurationError`.
     """
     settings = Settings()
 
