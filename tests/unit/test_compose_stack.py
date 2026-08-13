@@ -88,11 +88,27 @@ The Compose files are parsed in `tests/conftest.py`, unmerged and one at a time,
 which is the whole point of item 1 — `docker compose config` would merge the
 override back in and hide it.
 
-Everything below reads the base file, because that is the one every deployment
-runs and the one E0-03 will add services to. The override is out of scope
-deliberately: judging it would mean modelling Compose's merge rules for
-`env_file` and `environment`, and those rules are not something to guess at
-without a daemon to check the guess against.
+Almost everything below reads the base file, because that is the one every
+deployment runs. One test reads the override as well, and the line between them
+is worth stating precisely, because the original reason for leaving the override
+alone still holds for every other test here.
+
+That reason was: judging the override means modelling Compose's merge rules for
+`env_file` and `environment`, and those are not rules to guess at without a
+daemon. It applies to any *relative* question — does this override entry
+overwrite that base entry, is this service still blanking what it inherits — and
+none of those are asked here.
+
+It does not apply to one absolute question: whether any file in the repository
+hands a container a value it must never hold. A non-empty value is delivered
+whichever file writes it, so no merge model is needed to know that writing one is
+wrong. Reviewer pass 2 found that nothing read the override at all while
+`worker` and `beat` configuration had moved into it, and demonstrated the cost:
+one line in the shared `x-development-source` anchor puts the database superuser
+password into all three application containers, with every unit test green. The
+privilege test below cannot catch that and never could — it is relative to `api`,
+and a shared anchor reaches `api` too, so the comparison it makes is between a
+service and itself.
 """
 
 from pathlib import Path
@@ -117,21 +133,49 @@ JOB_SERVICES = ("worker", "beat")
 # `docker compose restart beat` (criterion 3) has to be on one.
 SCHEDULE_FLAGS = ("-s", "--schedule")
 
-# Ways of reading a modification time. **This list is the test's choice** and is
-# meant to grow: it exists to separate a check that asks *when the schedule file
-# was last written* from one that asks only whether it is there. If a freshness
-# check arrives that reads mtime by some route not listed here, add the route —
-# the assertion that must not be weakened is that the check is time-aware.
-FRESHNESS_TOKENS = (
-    "-newer",
+# Freshness is a *comparison*, and the three lists below exist to say so. An
+# earlier version had one list holding `stat` and `date`, and reviewer pass 2
+# broke it in one line: `stat <schedule-file>` reads the file's modification
+# time, matches, and compares it to nothing — it reports healthy on a schedule
+# last written in March. Reading a clock is not checking a clock.
+#
+# So a check qualifies two ways, and both are structural rather than a spelling:
+#
+#   1. it uses a find predicate that carries its own now-relative threshold, or
+#   2. it reads the file's modification time *and* asks what time it is now.
+#
+# **All three lists are the test's choice** and are meant to grow. What must not
+# be weakened is the shape: a mechanism that reads one clock is not freshness.
+
+# `-mmin -2` is "modified less than two minutes ago" — threshold and comparison
+# in one token, relative to now. Bare `-newer` is deliberately absent: it
+# compares one file against another file, which is a comparison but not
+# necessarily against now, and `find -newer /tmp/static-marker` never goes stale.
+NOW_RELATIVE_FILE_PREDICATES = (
     "-mmin",
     "-mtime",
     "-cmin",
     "-ctime",
-    "stat",
-    "mtime",
+    "-amin",
+    "-atime",
+    "-newermt",
+    "-newerat",
+    "-newerct",
+)
+
+# Reading the file's own clock: `stat -c %Y`, `find -printf '%T@'`,
+# `os.path.getmtime`, `os.stat(...).st_mtime`.
+FILE_TIME_READERS = ("stat", "getmtime", "st_mtime", "%t@", "-printf")
+
+# Reading the wall clock: `date +%s`, `time.time()`, `datetime.now()`, bash's
+# `$SECONDS`. This is the half `stat <file>` is missing.
+CLOCK_READERS = (
     "date",
     "time.time",
+    "datetime.now",
+    "utcnow",
+    "$seconds",
+    "epochseconds",
     "monotonic",
 )
 
@@ -429,6 +473,101 @@ def test_services_inheriting_the_env_file_do_not_hold_the_superuser_credential(
     )
 
 
+def test_no_compose_file_hands_a_container_the_superuser_credential(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """ADR 0009's bound, stated absolutely, across both files.
+
+    The test above it says a service that inherits the whole of `.env` must blank
+    the superuser pair. This one says something simpler and wider: no service in
+    any Compose file may *write* those variables into a container with a value in
+    them. The two are complementary — that one is about the credential arriving
+    implicitly through `env_file`, this one about it being handed over on
+    purpose — and neither implies the other.
+
+    **Absolute, and that is the whole point.** The privilege test in this module
+    compares `worker` and `beat` against `api`, which is right for privilege and
+    useless here: the override's `x-development-source` anchor is merged into all
+    three application services, so anything granted through it reaches `api` too
+    and a relative rule compares a service with itself. Reviewer pass 2 measured
+    it — adding `DB_SUPERUSER: ${DB_SUPERUSER}` to that anchor, which is the
+    natural one-line edit for "let the worker run a migration", delivered the
+    real password to three containers with the whole unit suite green.
+
+    No merge model is needed for this, which is why it is the one question this
+    module asks of the override at all. `environment:` beats `env_file:`, and the
+    override's `environment:` beats the base file's, so a non-empty value written
+    in either file is a value the container gets. The rule over-approximates in
+    the safe direction only: it can flag a value that some other file would have
+    blanked, and it cannot miss one that is delivered.
+
+    Three states, and only one of them is safe. An empty string removes what
+    `env_file` set. A value — literal, or `${DB_SUPERUSER}`, or
+    `${DB_SUPERUSER:-}` — supplies one. A *bare* name with no value is the one
+    that reads as harmless and is not: `- DB_SUPERUSER` in a list, or
+    `DB_SUPERUSER:` in a mapping, tells Compose to pass the variable through from
+    the host environment, which is exactly where the real credential lives.
+
+    `db` needs no exemption and gets none. It delivers `POSTGRES_USER` and
+    `POSTGRES_PASSWORD`, interpolating `${DB_SUPERUSER}` into them; the variable
+    it reads is not the variable it sets, and this rule is about what lands
+    inside the container. If a container ever does need the superuser — E0-04's
+    migrations are the live candidate — that is an ADR 0009 conversation and a
+    deliberate edit here, not a line that slips through in a shared anchor.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. Both Compose files ship — the base "
+            "file from E0-02 and the override alongside it — and a file that did not parse "
+            "supplies no services, which would make the search below silent rather than "
+            "clean."
+        )
+
+    assert services_of(override_compose), (
+        f"{override_compose_path.name} declares no services, so this test is no longer "
+        "reading the file the finding was about. `worker` and `beat` configuration lives "
+        "there as of ee2d496; if it has moved again, point this test at wherever it went "
+        "rather than letting it pass over an empty mapping."
+    )
+
+    problems: list[str] = []
+    for path, document in documents:
+        for name, body in sorted(services_of(document).items()):
+            environment = service_environment(body)
+            for variable in SUPERUSER_VARIABLES:
+                if variable not in environment:
+                    continue
+                value = environment[variable]
+                if value is None:
+                    problems.append(
+                        f"{path.name}: `{name}` passes {variable} through from the host "
+                        "environment, which is where the real credential is"
+                    )
+                elif value != "":
+                    problems.append(f"{path.name}: `{name}` sets {variable} to {value!r}")
+
+    assert not problems, "\n".join(
+        [
+            "A Compose file hands the database superuser credential to a container " "(ADR 0009):",
+            *problems,
+            "",
+            "`db:5432` is reachable from every service on this network and its pg_hba.conf "
+            "accepts that role over scram, so a container holding this is a working route to "
+            "a role that bypasses every grant, bypasses row-level security, and can run "
+            "COPY ... FROM PROGRAM. Set it to an empty string, or do not name it. If a "
+            "service genuinely needs the superuser, that is an amendment to ADR 0009 and an "
+            "edit to this test, made on purpose and reviewed as such.",
+        ]
+    )
+
+
 # ---------------------------------------------------------------------------
 # The job runtime: `worker` and `beat` — ticket E0-03.
 # ---------------------------------------------------------------------------
@@ -657,52 +796,62 @@ def command_tokens(service: dict[str, Any]) -> list[str]:
     return words
 
 
-def schedule_anchors(service: dict[str, Any]) -> set[str]:
-    """Paths at which this service says its beat schedule file lives.
-
-    Two sources, because a service may name the file on the command line or
-    place it by mounting the directory it goes in — and it usually does both.
-    Anything a health check can honestly be anchored to has to be declared
-    somewhere the service itself declares it, or the check and the file are two
-    independent guesses about a path.
-    """
-    anchors: set[str] = set()
+def scheduled_file_paths(service: dict[str, Any]) -> set[str]:
+    """Where this service's command says the beat schedule file is."""
+    paths: set[str] = set()
     tokens = command_tokens(service)
     for index, token in enumerate(tokens):
         for flag in SCHEDULE_FLAGS:
             if token == flag and index + 1 < len(tokens):
-                anchors.add(tokens[index + 1])
+                paths.add(tokens[index + 1])
             elif token.startswith(f"{flag}="):
-                anchors.add(token.split("=", 1)[1])
+                paths.add(token.split("=", 1)[1])
+    return {path for path in paths if path and not path.startswith("-")}
 
+
+def volume_targets(service: dict[str, Any]) -> set[str]:
+    """The container-side path of everything this service mounts."""
+    targets: set[str] = set()
     for entry in service.get("volumes") or []:
         if isinstance(entry, dict):
             target = entry.get("target")
             if isinstance(target, str):
-                anchors.add(target)
+                targets.add(target)
         elif isinstance(entry, str):
             parts = entry.split(":")
             if len(parts) >= 2:
-                anchors.add(parts[1])
+                targets.add(parts[1])
+    return {target for target in targets if target}
 
-    return {anchor for anchor in anchors if anchor and not anchor.startswith("-")}
 
+def schedule_anchors(service: dict[str, Any]) -> set[str]:
+    """Strings a health check can name the schedule file by, and no wider.
 
-def reference_candidates(anchor: str) -> set[str]:
-    """The ways a health check might legitimately name `anchor`.
+    Two sources: the file the command names, and the container-side path of
+    anything the service mounts — a schedule that survives `docker compose
+    restart beat` (criterion 3) is on a volume, so the mount is where it lives.
 
-    The path itself, and the directory holding it. Celery's `--schedule` names a
-    file while the shelve database it opens may be that name plus a suffix, so a
-    check written with `find <directory> -name 'celerybeat-schedule*'` is
-    reading exactly the right thing and never contains the file path as written.
-    Accepting the parent keeps this test from failing a correct check on a
-    detail of how the path was spelled.
+    **Only the command's file path is widened, and only to its own directory.**
+    Celery's `--schedule` names a shelve database, and the files on disk are that
+    name plus a suffix, so a check written as `find <directory> -name
+    'beat-schedule*'` is reading exactly the right thing and never contains the
+    path as spelled. That is the whole of the widening.
+
+    Reviewer pass 2 broke the earlier version, which widened *every* anchor to
+    its parent: a volume at `/var/lib/celery` made `/var/lib` count as naming the
+    schedule, and `pgrep … && stat /var/lib` passed a test whose subject is
+    whether the schedule file is being written. A mount point is already a
+    directory; widening it says the health check may name the directory above the
+    one the service asked for, which is a claim about a path nobody declared.
     """
-    candidates = {anchor}
-    parent = anchor.rsplit("/", 1)[0]
-    if parent and parent != anchor:
-        candidates.add(parent)
-    return candidates
+    anchors: set[str] = set()
+    for path in scheduled_file_paths(service):
+        anchors.add(path)
+        directory = path.rsplit("/", 1)[0]
+        if directory:
+            anchors.add(directory)
+    anchors |= volume_targets(service)
+    return {anchor for anchor in anchors if "/" in anchor}
 
 
 def healthcheck_command(healthcheck: dict[str, Any]) -> str:
@@ -737,13 +886,28 @@ def test_the_beat_health_check_reads_the_schedule_file(
 
       - the command names the schedule file, which is what a process check, a
         pidfile check and `true` all fail; and
-      - the command does something time-aware with it, which is what `test -f`
-        fails — a file that exists is not a file that is being written to.
+      - the command compares that file's age against now, which is what `test -f`
+        fails, and what `stat <file>` fails too.
 
-    Neither pins the command. The path is read out of what beat itself declares
-    rather than written down here, so renaming the file or moving the volume
-    needs no edit; the time-aware vocabulary is a named list that is meant to be
-    extended rather than argued with.
+    That second one is narrower than it was, and reviewer pass 2 is why. It
+    previously accepted any mention of `stat` or `date`, so
+    `stat /var/lib/celery/beat-schedule` passed: it reads the file's clock,
+    compares it to nothing, and reports healthy on a schedule last written in
+    March. Reading a clock is not checking a clock. The rule now is a find
+    predicate carrying its own now-relative threshold, or a file-time reader
+    *and* a wall-clock reader together — see the three lists at the top of this
+    module.
+
+    Neither assertion pins the command. The path is read out of what beat itself
+    declares rather than written down here, so renaming the file or moving the
+    volume needs no edit, and the vocabularies are named lists meant to be
+    extended when a mechanism arrives that they do not describe.
+
+    There is no denylist of process-existence commands and there does not need to
+    be. `pgrep -f 'celery.*beat'` names no schedule file and reads no clock, so it
+    fails both assertions on its own; a command that checks the process *and*
+    then checks the schedule file passes, which is correct — belt and braces is
+    not the defect.
 
     What is still not asserted here, and cannot be: whether the freshness window
     is the right size. A check with a two-hour tolerance passes both assertions
@@ -784,27 +948,49 @@ def test_the_beat_health_check_reads_the_schedule_file(
         "and put it somewhere that persists."
     )
 
-    referenced = sorted(
-        anchor
-        for anchor in anchors
-        if any(candidate in command for candidate in reference_candidates(anchor))
-    )
+    referenced = sorted(anchor for anchor in anchors if anchor in command)
     assert referenced, (
         f"`{BEAT_SERVICE}`'s health check never mentions its schedule file. It runs "
         f"`{command}`, while the schedule lives at one of {sorted(anchors)}. A check that "
         "does not look at the schedule file is a check on the process, and beat's failure "
         "mode is a live process with a dead scheduler — `test: ['CMD', 'true']` and "
-        "`pgrep celery` both report healthy through exactly that."
+        "`pgrep celery` both report healthy through exactly that. Naming a directory above "
+        "the one the service declares does not count either: `/var/lib` is not the schedule "
+        "file just because the schedule file is somewhere under it."
     )
 
-    time_aware = sorted(token for token in FRESHNESS_TOKENS if token in command.lower())
-    assert time_aware, (
-        f"`{BEAT_SERVICE}`'s health check reads {referenced} but never asks when it was "
-        f"last written. It runs `{command}`. The scope item is schedule-file *freshness*: "
-        "the file a wedged beat leaves behind still exists, so existence reports healthy "
-        "forever. Compare its modification time against now. If the mechanism used is not "
-        f"in {list(FRESHNESS_TOKENS)}, add it to that list — it is this test's choice and "
-        "is meant to grow — rather than dropping the assertion to existence."
+    lowered = command.lower()
+    predicates = sorted(token for token in NOW_RELATIVE_FILE_PREDICATES if token in lowered)
+    file_clock = sorted(token for token in FILE_TIME_READERS if token in lowered)
+    wall_clock = sorted(token for token in CLOCK_READERS if token in lowered)
+
+    if file_clock and not wall_clock:
+        diagnosis = (
+            f"It reads the file's modification time ({file_clock}) and then asks nobody what "
+            "time it is, so it cannot tell a schedule written a second ago from one written "
+            "last Tuesday."
+        )
+    elif wall_clock and not file_clock:
+        diagnosis = (
+            f"It reads the wall clock ({wall_clock}) but never the file's modification time, "
+            "so its answer does not depend on the schedule at all."
+        )
+    else:
+        diagnosis = "It reads neither the file's modification time nor the wall clock."
+
+    assert predicates or (file_clock and wall_clock), "\n".join(
+        [
+            f"`{BEAT_SERVICE}`'s health check reads {referenced} but never compares its age "
+            f"to now. It runs `{command}`.",
+            diagnosis,
+            "",
+            "The scope item is schedule-file *freshness*. The file a wedged beat leaves "
+            "behind still exists and still has an mtime; only its age says the scheduler "
+            "stopped. Use a find predicate that carries its own threshold "
+            f"({list(NOW_RELATIVE_FILE_PREDICATES)}), or read both clocks and subtract. If "
+            "the mechanism is real and simply not described by those lists, add it there and "
+            "say so — do not drop this assertion back to 'mentions a clock'.",
+        ]
     )
 
 

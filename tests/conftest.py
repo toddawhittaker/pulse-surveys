@@ -146,6 +146,30 @@ def base_compose() -> dict[str, Any]:
 
 
 @pytest.fixture
+def override_compose_path() -> Path:
+    """Where the development override lives. Asserted by the test, not here."""
+    return OVERRIDE_COMPOSE_PATH
+
+
+@pytest.fixture
+def override_compose() -> dict[str, Any]:
+    """`docker-compose.override.yml` parsed alone, with no base file under it.
+
+    Added in E0-03, after a reviewer found that nothing read this file at all
+    while `worker` and `beat` configuration had moved into it. Parsed on its own
+    for the same reason as the base file: the merged view is what every dynamic
+    check already sees, and the questions worth asking here are about what this
+    file says by itself.
+
+    YAML anchors are resolved by the parser, so a service that merges
+    `<<: *development-source` arrives here holding those keys. That is what makes
+    a rule about services reach a shared anchor without this fixture knowing
+    anchors exist.
+    """
+    return load_compose(OVERRIDE_COMPOSE_PATH)
+
+
+@pytest.fixture
 def ci_workflow_path() -> Path:
     """Where the CI workflow lives. Asserted by the test, not here."""
     return CI_WORKFLOW_PATH

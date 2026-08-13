@@ -78,6 +78,20 @@ INSTITUTION_TIMEZONE_VARIABLE = "INSTITUTION_TIMEZONE"
 SCHEDULE_PROBE_MARKER = "e0-03-schedule-wiring-probe"
 SCHEDULE_PROBE_ENTRY = {"task": f"{SCHEDULE_PROBE_MARKER}.never-runs", "schedule": 3600.0}
 
+# The mapping `app.jobs.schedules` exposes for beat. The E0-03 ticket does not
+# name it, and this test does not choose the name either — the module exports
+# it, annotated and documented above its declaration as Celery's `beat_schedule`
+# mapping. What a module exports is a fact about the module, not a guess at it.
+#
+# An earlier version found the mapping by shape, probing every public `dict` in
+# the module because the *ticket* named none. Reviewer pass 2 objected to the
+# trap rather than the style, and was right: the day `schedules.py` grows a
+# second public mapping — a lookup table, per-job option defaults — a by-shape
+# probe writes into that one too, on the theory that it might be the schedule.
+# Renaming the attribute now breaks one line here and says which line, which is
+# the better failure of the two.
+SCHEDULE_MAPPING_ATTRIBUTE = "BEAT_SCHEDULE"
+
 MISSING_MODULE_MESSAGE = (
     "`{module}` does not exist. E0-03 ships it under `backend/app/jobs/` "
     "(SPEC §13 — the `jobs/` package is celery_app.py, schedules.py, tasks.py). "
@@ -119,23 +133,6 @@ def timezone_key(value: Any) -> str:
     `Settings.institution_timezone` open on purpose.
     """
     return str(value)
-
-
-def public_mappings(module: ModuleType) -> dict[str, dict[Any, Any]]:
-    """Every public module-level mapping, by attribute name.
-
-    The schedule module holds its entries in a mapping, and E0-03 does not say
-    what that mapping is called. Collecting them by shape rather than by name
-    keeps the ticket's silence the ticket's, and it is not a loophole: the
-    wiring test mutates all of them and asserts the mutation arrives, so a
-    mapping that is not the beat schedule contributes nothing either way, and
-    one that is cannot be missed by having been renamed.
-    """
-    return {
-        name: value
-        for name, value in vars(module).items()
-        if not name.startswith("_") and isinstance(value, dict)
-    }
 
 
 def require_application(
@@ -292,17 +289,18 @@ def test_the_schedule_beat_reads_is_the_one_the_schedule_module_exposes(
     schedules = import_app_module(SCHEDULES_MODULE)
     assert schedules is not None, MISSING_MODULE_MESSAGE.format(module=SCHEDULES_MODULE)
 
-    exposed = public_mappings(schedules)
-    assert exposed, (
-        f"`{SCHEDULES_MODULE}` exposes no module-level mapping, so this test has nothing to "
-        "put a probe into and cannot tell a wired schedule from an unwired one. E0-03 has "
-        "the module hold the beat entries; if it has come to build them some other way — a "
-        "function, a signal handler — then rewrite this test around that, rather than "
-        "dropping back to asserting the module was imported, which is the assertion "
-        "reviewer pass 1 walked straight through."
+    exposed = getattr(schedules, SCHEDULE_MAPPING_ATTRIBUTE, None)
+    assert isinstance(exposed, dict), (
+        f"`{SCHEDULES_MODULE}.{SCHEDULE_MAPPING_ATTRIBUTE}` is {exposed!r} rather than a "
+        "mapping, so this test has nothing to put a probe into and cannot tell a wired "
+        "schedule from an unwired one. If the mapping has been renamed, point "
+        "`SCHEDULE_MAPPING_ATTRIBUTE` at the new name — one line, and the rename stays "
+        "visible in the diff. If the schedule is now built some other way — a function, a "
+        "signal handler — rewrite the probe around that. What must not happen is falling "
+        "back to asserting that the module was imported, which is the assertion reviewer "
+        "pass 1 walked straight through."
     )
-    for entries in exposed.values():
-        entries[f"{SCHEDULE_PROBE_MARKER}-entry"] = dict(SCHEDULE_PROBE_ENTRY)
+    exposed[f"{SCHEDULE_PROBE_MARKER}-entry"] = dict(SCHEDULE_PROBE_ENTRY)
 
     application = require_application(import_app_module, celery_application_in)
     beat_schedule = application.conf.beat_schedule
@@ -319,7 +317,7 @@ def test_the_schedule_beat_reads_is_the_one_the_schedule_module_exposes(
     # empty mapping for a fresh one, and the identity check below would then be
     # comparing against an object nothing wired.
     carried = SCHEDULE_PROBE_MARKER in repr(dict(beat_schedule))
-    shared = any(entries is beat_schedule for entries in exposed.values())
+    shared = exposed is beat_schedule
 
     assert carried or shared, (
         f"The probe entry put into `{SCHEDULES_MODULE}` does not appear in the schedule the "
