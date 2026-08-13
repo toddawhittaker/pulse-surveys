@@ -94,9 +94,15 @@ nobody can state gets applied inconsistently within two tickets.
   read `backend/Dockerfile` and `docker-compose.yml` only, so nothing updates
   it. It is pinned to the identical reference as the `db` service and moves by
   hand together with it; the comment beside it says so, and this is the whole
-  cost of the exemption. Two pinned patch versions that drift apart is a
-  smaller problem than a mutable tag, because the drift is visible in a diff on
-  both sides. E0-04 activates that gate and is the natural place to reconsider
+  cost of the exemption. **An earlier version of this line claimed the drift
+  would be "visible in a diff on both sides", and that was wrong**: the
+  mechanism that will cause the drift is a Dependabot `docker-compose` pull
+  request, which by construction changes `docker-compose.yml` and nothing else,
+  so it shows one side only. Verified by mutation — the two references can be
+  set to different digests with every gate green. The safety net is a test
+  asserting the two are identical, comparing `services.postgres.image` in
+  `.github/workflows/ci.yml` against `services.db.image` in
+  `docker-compose.yml`. E0-04 activates that gate and is the natural place to reconsider
   whether the job should start the Compose `db` service instead, which would
   delete the second reference rather than maintain it.
 - **This ADR does not govern the digests themselves.** They are values in the

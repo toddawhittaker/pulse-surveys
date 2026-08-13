@@ -94,7 +94,7 @@ entries. The obvious answer and the one this decision exists to avoid: two
 values that must agree, no mechanism that makes them agree, and a failure that
 surfaces as a connection refusal long after the edit that caused it.
 
-**A default in the Compose file**, `${DB_PASSWORD:-pulse}` or a literal.
+**A default in the Compose file**, `${DB_APP_PASSWORD:-pulse}` or a literal.
 Rejected by E0-02's definition of done. A default credential in the base file is
 inherited by every deployment that never sets one, and nothing reports it.
 
