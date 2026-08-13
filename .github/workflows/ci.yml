@@ -210,7 +210,9 @@ jobs:
       - name: Self-test the CI checkers
         run: python scripts/ci/test_ci_scripts.py
       - name: Shell scripts parse
-        run: bash -n scripts/ci/wait_for_health.sh
+        run: |
+          bash -n scripts/ci/wait_for_health.sh
+          bash -n scripts/ci/check_job_runtime.sh
 
   fast-gate:
     name: Fast gates passed
@@ -359,10 +361,10 @@ jobs:
   # Enforcing since e0/compose-stack (E0-02): the Compose file and
   # backend/Dockerfile exist, so this job no longer tolerates their absence.
   #
-  # The four steps after the health wait are the acceptance criteria of E0-02
-  # that no unit test can reach. They live here rather than in pytest because
-  # each one needs a running daemon, and because a Compose file can declare all
-  # of them correctly and still not work.
+  # The steps after the health wait are the acceptance criteria of E0-02 and
+  # E0-03 that no unit test can reach. They live here rather than in pytest
+  # because each one needs a running daemon, and because a Compose file can
+  # declare all of them correctly and still not work.
   docker:
     name: Build · images + Compose health
     needs: [fast-gate]
@@ -377,14 +379,15 @@ jobs:
           cp .env.example .env
           docker compose build
 
-      # `wait_for_health.sh api` alone, not api plus its dependencies: `api`
-      # declares `depends_on` on a healthy `db` and a healthy `redis`, so
-      # reaching healthy here means all three did. `worker` and `beat` join the
-      # argument list in E0-03.
-      - name: Stack comes up healthy (api, and through it db and redis)
+      # Three services named, five covered. `api` declares `depends_on` on a
+      # healthy `db` and a healthy `redis`, so reaching healthy here means those
+      # two did too. `worker` and `beat` have to be named: nothing depends on
+      # them — the API must come up whether or not the job runtime does — and a
+      # service nobody names is one this gate never looks at.
+      - name: Stack comes up healthy (api, worker, beat, and through them db and redis)
         run: |
           docker compose up -d
-          ./scripts/ci/wait_for_health.sh api
+          ./scripts/ci/wait_for_health.sh api worker beat
 
       # The container's own HEALTHCHECK proves the app answers itself. It says
       # nothing about whether the development override publishes the port, which
@@ -412,9 +415,18 @@ jobs:
           echo "api runs as uid ${uid}"
           test "${uid}" != "0"
 
-      # `down -v` discards the Postgres volume, so the second and third starts
-      # each initialise a database from nothing. This catches the class of bug
-      # where the stack only comes up on a machine that has run it before.
+      # E0-03's criteria 2, 3 and 4: the round trip from the API container, beat
+      # restarting without losing its schedule file, and the worker health check
+      # going red when Redis is taken away. The script is shared with the
+      # Makefile — see the comment at the top of it for why these three are not
+      # written out here.
+      - name: Job runtime (ping round trip, beat restart, worker without Redis)
+        run: ./scripts/ci/check_job_runtime.sh
+
+      # `down -v` discards the Postgres volume and beat's schedule volume, so
+      # the second and third starts each initialise from nothing. This catches
+      # the class of bug where the stack only comes up on a machine that has run
+      # it before.
       - name: Teardown and restart leaves no manual cleanup, twice
         run: |
           set -euo pipefail
@@ -422,7 +434,7 @@ jobs:
             echo "::group::down -v && up -d (attempt ${attempt})"
             docker compose down -v
             docker compose up -d
-            ./scripts/ci/wait_for_health.sh api
+            ./scripts/ci/wait_for_health.sh api worker beat
             echo "::endgroup::"
           done
 

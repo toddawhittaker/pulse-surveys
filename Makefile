@@ -58,6 +58,7 @@ selftest: ## Self-test the CI checker scripts
 	$(call banner,CI checker self-test)
 	@$(PYTHON) scripts/ci/test_ci_scripts.py
 	@bash -n scripts/ci/wait_for_health.sh && echo "    wait_for_health.sh parses"
+	@bash -n scripts/ci/check_job_runtime.sh && echo "    check_job_runtime.sh parses"
 
 .PHONY: test-gates
 test-gates: test e2e evals ## Test gates: pytest, Playwright, AI evals
@@ -146,12 +147,13 @@ evals: ## AI eval runner with per-task precision/recall floors
 # Build gates
 # ---------------------------------------------------------------------------
 
-# The four checks after the health wait are E0-02's acceptance criteria, in the
-# same order as the `docker` job in .github/workflows/ci.yml. `wait_for_health.sh
-# api` alone is deliberate: `api` waits on a healthy `db` and a healthy `redis`,
-# so one wait covers all three. `worker` and `beat` join that list in E0-03.
+# The checks after the health wait are E0-02's and E0-03's acceptance criteria,
+# in the same order as the `docker` job in .github/workflows/ci.yml. Three
+# services are named and five are covered: `api` waits on a healthy `db` and a
+# healthy `redis`, while `worker` and `beat` have nothing waiting on them and so
+# have to be named here.
 .PHONY: docker-build
-docker-build: ## Build the images and check the stack against E0-02's criteria
+docker-build: ## Build the images and check the stack against E0-02's and E0-03's criteria
 	$(call banner,docker compose build)
 	@test -f .env || { echo "    .env is missing — run: cp .env.example .env"; exit 1; }
 	@$(COMPOSE) build
@@ -159,7 +161,7 @@ docker-build: ## Build the images and check the stack against E0-02's criteria
 	@set -e; \
 	trap '$(COMPOSE) down -v >/dev/null 2>&1 || true' EXIT; \
 	$(COMPOSE) up -d; \
-	./scripts/ci/wait_for_health.sh api; \
+	./scripts/ci/wait_for_health.sh api worker beat; \
 	code=$$(curl --silent --show-error --max-time 10 --output /dev/null \
 		--write-out '%{http_code}' http://localhost:8000/healthz); \
 	echo "    GET /healthz -> $$code"; \
@@ -167,11 +169,12 @@ docker-build: ## Build the images and check the stack against E0-02's criteria
 	uid=$$($(COMPOSE) exec -T api id -u | tr -d '\r'); \
 	echo "    api runs as uid $$uid"; \
 	test "$$uid" != "0"; \
+	./scripts/ci/check_job_runtime.sh; \
 	for attempt in 1 2; do \
 		echo "    down -v && up -d (attempt $$attempt)"; \
 		$(COMPOSE) down -v >/dev/null; \
 		$(COMPOSE) up -d >/dev/null; \
-		./scripts/ci/wait_for_health.sh api >/dev/null; \
+		./scripts/ci/wait_for_health.sh api worker beat >/dev/null; \
 	done
 
 .PHONY: frontend-build
