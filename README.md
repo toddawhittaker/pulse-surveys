@@ -44,8 +44,10 @@ Redis are on their usual ports. All of them bind to `127.0.0.1` only.
 
 `docker compose up` merges [`docker-compose.override.yml`](docker-compose.override.yml)
 over the base file automatically, and that override is what publishes those
-ports, mounts your checkout into the API container, and turns on reload-on-edit.
-Every other deployment runs the base file alone and publishes nothing.
+ports, mounts your checkout into the three application containers — `api`,
+`worker` and `beat` — and turns on reload-on-edit for the API. Every other
+deployment runs the base file alone, publishes nothing, and runs the code baked
+into the image.
 
 Copying `.env.example` is not optional: `docker-compose.yml` defaults no
 credential, so a missing variable stops the stack with a message naming it.
@@ -54,8 +56,22 @@ credential, so a missing variable stops the stack with a message naming it.
 
 `make up` starts the job runtime along with everything else: `worker` runs the
 Celery worker and `beat` runs the scheduler. Both run the API image over the
-same configuration, so a task is written once and reached the same way from an
-HTTP handler and from a job.
+same configuration and, in development, over the same mounted checkout, so a
+task is written once and reached the same way from an HTTP handler and from a
+job.
+
+**After editing anything under `backend/`, restart the two job containers.**
+
+```sh
+docker compose restart worker beat    # about three seconds; no rebuild
+```
+
+The API reloads itself and Celery does not, so without this the API runs your
+edit while the worker runs the code it imported at startup. Neither one
+complains. A task you have just added comes back as
+`NotRegistered: app.jobs.tasks.your_task`, which at least names itself; a task
+you have just *changed* comes back with the old answer and no error at all,
+which is worse.
 
 ```sh
 make logs                            # everything, interleaved
