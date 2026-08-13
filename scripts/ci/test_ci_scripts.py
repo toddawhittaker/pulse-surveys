@@ -33,7 +33,9 @@ def check(label: str, got: object, want: object) -> None:
 
 
 def run(script: str, *args: str) -> int:
-    return subprocess.run(
+    # S603: the command is this interpreter and a checker script from this
+    # directory, both named in the source below. Nothing here comes from input.
+    return subprocess.run(  # noqa: S603
         [sys.executable, str(HERE / script), *args],
         capture_output=True,
         text=True,
@@ -91,17 +93,29 @@ with tempfile.TemporaryDirectory() as tmp:
     (d / "clean.json").write_text(
         json.dumps([{"Name": "fastapi", "Version": "0.115.0", "License": "MIT License"}])
     )
-    check("licenses: clean tree exits 0", run("check_licenses.py", "--python-json", str(d / "clean.json")), 0)
+    check(
+        "licenses: clean tree exits 0",
+        run("check_licenses.py", "--python-json", str(d / "clean.json")),
+        0,
+    )
 
     (d / "agpl.json").write_text(
         json.dumps(
             [{"Name": "bad", "Version": "1.0", "License": "GNU Affero General Public License v3"}]
         )
     )
-    check("licenses: AGPL fails the build", run("check_licenses.py", "--python-json", str(d / "agpl.json")), 1)
+    check(
+        "licenses: AGPL fails the build",
+        run("check_licenses.py", "--python-json", str(d / "agpl.json")),
+        1,
+    )
 
     (d / "npm.json").write_text(json.dumps({"mongo@1.0.0": {"licenses": "SSPL-1.0"}}))
-    check("licenses: SSPL fails the build", run("check_licenses.py", "--npm-json", str(d / "npm.json")), 1)
+    check(
+        "licenses: SSPL fails the build",
+        run("check_licenses.py", "--npm-json", str(d / "npm.json")),
+        1,
+    )
 
     check("licenses: nothing to scan exits 0", run("check_licenses.py"), 0)
 
@@ -139,8 +153,16 @@ with tempfile.TemporaryDirectory() as tmp:
 
     empty = junit(d / "empty.xml", "")
     check("invariants: empty suite fails by default", run("check_invariants.py", empty), 1)
-    check("invariants: empty suite tolerated with flag", run("check_invariants.py", empty, "--allow-empty"), 0)
-    check("invariants: missing file fails by default", run("check_invariants.py", str(d / "nope.xml")), 1)
+    check(
+        "invariants: empty suite tolerated with flag",
+        run("check_invariants.py", empty, "--allow-empty"),
+        0,
+    )
+    check(
+        "invariants: missing file fails by default",
+        run("check_invariants.py", str(d / "nope.xml")),
+        1,
+    )
     check(
         "invariants: missing file tolerated with flag",
         run("check_invariants.py", str(d / "nope.xml"), "--allow-empty"),
@@ -158,14 +180,23 @@ with tempfile.TemporaryDirectory() as tmp:
     # Random-ish bytes so gzip cannot collapse them to nothing.
     small = bytes(range(256)) * 8  # ~2 KB raw, compresses well under budget
     (dist / "assets" / "index-abc.js").write_bytes(small)
-    check("bundle: within budget exits 0", run("check_bundle_size.py", str(dist), "--budget", str(budget)), 0)
+    check(
+        "bundle: within budget exits 0",
+        run("check_bundle_size.py", str(dist), "--budget", str(budget)),
+        0,
+    )
 
     # Seeded, so the fixture is deterministic, but effectively incompressible —
     # a structured byte pattern gzips down below the budget and makes the
     # assertion vacuous.
-    big = random.Random(20260812).randbytes(120_000)
+    # S311: this is test data, not a key. A seeded generator is exactly right.
+    big = random.Random(20260812).randbytes(120_000)  # noqa: S311
     (dist / "assets" / "vendor-def.js").write_bytes(big)
-    check("bundle: over budget exits 1", run("check_bundle_size.py", str(dist), "--budget", str(budget)), 1)
+    check(
+        "bundle: over budget exits 1",
+        run("check_bundle_size.py", str(dist), "--budget", str(budget)),
+        1,
+    )
 
     check(
         "bundle: missing dist exits 0",
