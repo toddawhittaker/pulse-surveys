@@ -118,8 +118,14 @@ migrations. Todd's ruling says simplify, and this is the thing it simplifies.
   authentication error a long way from the cause.
 - **A superuser credential exists in `.env`**, and `.env` is one file with two
   readers (ADR 0008). Keeping it out of the application container is therefore a
-  per-service override rather than a property of the file, and one that has to
-  be repeated for `worker` and `beat` in E0-03.
+  per-service override rather than a property of the file, and every service
+  that inherits the file needs it. E0-03 brought `worker` and `beat`, and wrote
+  the override once instead of three times: `docker-compose.yml` carries the
+  shared part of the three application services in an `x-application` anchor
+  they all merge, so a service copied from another cannot arrive with the two
+  blanking lines dropped. A service written without the anchor still can, which
+  is why `tests/unit/test_compose_stack.py` asserts the rule over every service
+  declaring `env_file` rather than over a list of names.
 - **"The application must not connect as superuser" is now the load-bearing
   rule**, and it is enforced by a test rather than by there being no superuser to
   connect as. That is a weaker guarantee than the one ADR 0001 imagined, and it

@@ -22,38 +22,47 @@
 
 name: pulse-surveys
 
+# What `api`, `worker`, and `beat` have in common, written once. All three run
+# the same image over the same configuration and differ only in the command they
+# run and in how they report health, so the shared part is an anchor rather than
+# three copies: the superuser blanking below is two hand-written lines whose
+# absence is invisible in every dynamic check, and copying a service block is
+# exactly how they go missing.
+x-application: &application
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  # The whole §6.3 configuration surface, so a setting added in a later
+  # ticket reaches the container without editing this file.
+  env_file:
+    - .env
+  environment:
+    # Two overrides, both relying on `environment:` beating `env_file:` on
+    # every Compose version.
+    #
+    # First: `.env` builds DATABASE_URL out of DB_APP_USER, DB_APP_PASSWORD,
+    # and DB_NAME so the password is written once, and Compose expands that
+    # here, when it reads `.env` as its own interpolation source. Whether
+    # `env_file:` expands it is a Compose version's business and has not
+    # always been the same answer, so the container gets an expanded URL
+    # either way.
+    DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
+    # Second: `.env` also carries the superuser credential, because `db` needs
+    # it, and `env_file:` would hand the whole file to this container. No
+    # application container may hold it. `db:5432` is reachable from all three
+    # and accepts that role over scram, so a credential sitting in this
+    # environment is a route back to everything scripts/db-init and ADR 0009
+    # exist to deny — bypass of every grant, bypass of row-level security, and
+    # COPY … FROM PROGRAM. Blanked rather than omitted: `env_file:` has
+    # already set them by the time this is applied, so an empty value is what
+    # removes them.
+    DB_SUPERUSER: ''
+    DB_SUPERUSER_PASSWORD: ''
+
 services:
-  # The FastAPI application (§7.1). `worker` and `beat` join it in E0-03.
+  # The FastAPI application (§7.1).
   api:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    # The whole §6.3 configuration surface, so a setting added in a later
-    # ticket reaches the container without editing this file.
-    env_file:
-      - .env
-    environment:
-      # Two overrides, both relying on `environment:` beating `env_file:` on
-      # every Compose version.
-      #
-      # First: `.env` builds DATABASE_URL out of DB_APP_USER, DB_APP_PASSWORD,
-      # and DB_NAME so the password is written once, and Compose expands that
-      # here, when it reads `.env` as its own interpolation source. Whether
-      # `env_file:` expands it is a Compose version's business and has not
-      # always been the same answer, so the container gets an expanded URL
-      # either way.
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
-      # Second: `.env` also carries the superuser credential, because `db` needs
-      # it, and `env_file:` would hand the whole file to this container. The
-      # application must never hold it. `db:5432` is reachable from here and
-      # accepts that role over scram, so a credential sitting in this
-      # environment is a route back to everything scripts/db-init and ADR 0009
-      # exist to deny — bypass of every grant, bypass of row-level security, and
-      # COPY … FROM PROGRAM. Blanked rather than omitted: `env_file:` has
-      # already set them by the time this is applied, so an empty value is what
-      # removes them.
-      DB_SUPERUSER: ''
-      DB_SUPERUSER_PASSWORD: ''
+    <<: *application
     depends_on:
       # The mapping form, not the list. `depends_on: [db]` waits for the
       # container to start; this waits for Postgres to accept connections,
@@ -61,14 +70,121 @@ services:
       db:
         condition: service_healthy
       # Redis is the Celery broker the API publishes to (§7.2). Waiting on it
-      # here is also what makes `wait_for_health.sh api` cover the whole of
-      # acceptance criterion 1 — api, db, and redis all healthy — with one wait.
+      # here is also what carries `db` and `redis` into the health gate: CI
+      # names api, worker, and beat, and reaches the other two only through
+      # these two conditions.
       redis:
         condition: service_healthy
     # Documentation, not publishing: reachable from the other services on this
     # network, and from nothing on the host.
     expose:
       - '8000'
+
+  # The Celery worker — classification, summaries, passback (§7.2, §7.4).
+  worker:
+    <<: *application
+    # Log level from the same variable the application's own logging follows, so
+    # turning the stack up to DEBUG is one edit rather than two.
+    command:
+      - celery
+      - --app
+      - app.jobs.celery_app
+      - worker
+      - --loglevel
+      - ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # `celery inspect ping` sends a control message over the broker and waits
+      # for this worker to answer it. That is the point: it fails when Redis is
+      # gone, when the worker has stopped consuming, and when the application
+      # cannot be imported — which is more than "the process exists" and is
+      # E0-03's fourth acceptance criterion.
+      #
+      # `--destination` scopes the question to this container. Without it the
+      # probe is satisfied by *any* worker replying, so a second worker on the
+      # same broker would report this one healthy while it is wedged. `$$`
+      # reaches the container as a single `$`, so the shell inside it runs
+      # `hostname`; Celery's default node name is `celery@<hostname>`.
+      test:
+        - CMD-SHELL
+        - >-
+          celery --app app.jobs.celery_app inspect ping
+          --destination "celery@$$(hostname)" --timeout 5 > /dev/null
+      interval: 15s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # Celery beat — window open and close, Monday reports, retention (§7.2, §3.1).
+  beat:
+    <<: *application
+    # `--schedule` is not optional here: the default is `celerybeat-schedule` in
+    # the working directory, which is `/app` and owned by root, so beat would
+    # fail to start. The path is the named volume below.
+    command:
+      - celery
+      - --app
+      - app.jobs.celery_app
+      - beat
+      - --loglevel
+      - ${LOG_LEVEL:-INFO}
+      - --schedule
+      - /var/lib/celery/beat-schedule
+      # How long beat sleeps between iterations when nothing is due, and with an
+      # empty schedule that is every iteration. It is also what bounds how stale
+      # the schedule file gets: beat writes the store after a wake-up on which
+      # its own `sync_every` — 180 seconds — has elapsed, so a short loop makes
+      # the write land close to that figure rather than up to five minutes after
+      # it. Measured on the running container: 180 seconds between writes, 210
+      # in the worst case, where the wake lands just before the boundary.
+      - --max-interval
+      - '30'
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # Named, so the last-run times survive `docker compose restart beat` and a
+      # container replacement alike. That persistence is what will keep beat
+      # from re-firing a window it already fired once E2 puts a real entry in
+      # the schedule; today the schedule is empty and nothing could fire twice,
+      # so the volume is built now and the property is E2's to assert.
+      - beat-schedule:/var/lib/celery
+    healthcheck:
+      # Freshness of the schedule file, not the existence of a process. A beat
+      # whose loop has wedged, or which is stuck on a broker it cannot reach,
+      # goes on existing as a process and stops writing this file.
+      #
+      # 300 seconds against a write cadence measured at 180, worst case 210:
+      # about a minute and a half of slack over the worst ordinary write, so a
+      # slow one is not a flap, and well under two missed writes. Measured on a
+      # running beat rather than read out of celery's source
+      # (docs/MISTAKES.md entry 8). Three retries thirty seconds apart sit on
+      # top of that, so a wedged beat is reported in roughly six minutes.
+      #
+      # The glob rather than the exact name: the store is a `shelve`, and which
+      # files the interpreter's `dbm` implementation puts behind that name is
+      # not this file's business — on python 3.13 it is `dbm.sqlite3`, and the
+      # write that matters lands in `beat-schedule-wal` while `beat-schedule`
+      # itself keeps the mtime it was created with. Taking the youngest of them
+      # is what makes the check survive a different `dbm`. The age is printed
+      # because `docker inspect` keeps a health check's output, and "no schedule
+      # file" and "written 412s ago" are different faults.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import pathlib, sys, time;
+          ages = [time.time() - p.stat().st_mtime
+          for p in pathlib.Path("/var/lib/celery").glob("beat-schedule*")];
+          print("schedule file written %.0fs ago" % min(ages) if ages else "no schedule file");
+          sys.exit(0 if ages and min(ages) <= 300 else 1)
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # PostgreSQL 17 (§7.1, §7.2).
   db:
@@ -153,3 +269,6 @@ volumes:
   # Named, so `docker compose down -v` is the only thing that discards the
   # database and an ordinary `down` never does.
   postgres-data:
+  # The same bargain for beat's schedule store: a restart, a container
+  # replacement, and an image rebuild all keep it; `down -v` discards it.
+  beat-schedule:
