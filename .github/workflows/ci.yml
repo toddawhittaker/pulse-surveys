@@ -382,12 +382,18 @@ jobs:
       # The container's own HEALTHCHECK proves the app answers itself. It says
       # nothing about whether the development override publishes the port, which
       # is what a developer following the README actually does first.
-      - name: Health endpoint answers on the published host port
+      # Not `curl --fail`: that fails on 4xx and 5xx, so a redirect satisfies it
+      # and the criterion is 200. The code is captured and compared, and it is
+      # printed before the comparison so a failure says what was served rather
+      # than only that something was wrong.
+      - name: Health endpoint answers 200 on the published host port
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail --max-time 10 \
-               --output /dev/null --write-out 'GET /healthz -> %{http_code}\n' \
-               http://localhost:8000/healthz
+          code="$(curl --silent --show-error --max-time 10 \
+                       --output /dev/null --write-out '%{http_code}' \
+                       http://localhost:8000/healthz)"
+          echo "GET /healthz -> ${code}"
+          test "${code}" = "200"
 
       # A root runtime user is the first item in E0-02's security review. Asked
       # of the running container rather than read off the Dockerfile, because a

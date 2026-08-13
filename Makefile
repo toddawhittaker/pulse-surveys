@@ -160,8 +160,10 @@ docker-build: ## Build the images and check the stack against E0-02's criteria
 	trap '$(COMPOSE) down -v >/dev/null 2>&1 || true' EXIT; \
 	$(COMPOSE) up -d; \
 	./scripts/ci/wait_for_health.sh api; \
-	curl --silent --show-error --fail --max-time 10 --output /dev/null \
-		--write-out '    GET /healthz -> %{http_code}\n' http://localhost:8000/healthz; \
+	code=$$(curl --silent --show-error --max-time 10 --output /dev/null \
+		--write-out '%{http_code}' http://localhost:8000/healthz); \
+	echo "    GET /healthz -> $$code"; \
+	test "$$code" = "200"; \
 	uid=$$($(COMPOSE) exec -T api id -u | tr -d '\r'); \
 	echo "    api runs as uid $$uid"; \
 	test "$$uid" != "0"; \
