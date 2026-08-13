@@ -115,6 +115,14 @@ endgroup
 # is what makes the answer legible — the store itself is a `shelve` whose
 # contents are identical whether it survived or was rebuilt, since E0-03's
 # schedule is empty by design.
+#
+# Whether the *file* survived is asked by its birth time, and the first version
+# of this script asked by its inode instead, which was wrong in a way only
+# measurement showed. Corrupting the store with beat stopped makes celery take
+# `_destroy_open_corrupted_schedule`: it unlinks the file and creates another,
+# logging "Removing corrupted schedule file". ext4 then hands the new file the
+# inode the old one just freed, so the inode is unchanged across exactly the
+# event the comparison existed to catch. Birth time is not reused; it moved.
 # ---------------------------------------------------------------------------
 # Empty rather than an error when the file is gone, which is the interesting
 # case: `set -o pipefail` would otherwise abort the script on `cat`'s exit code
@@ -124,20 +132,41 @@ read_canary() {
   docker compose exec -T beat cat "${CANARY_FILE}" 2>/dev/null | tr -d '\r' || true
 }
 
+# When the file was created, to nanoseconds, or `-` where the filesystem does
+# not record it. Nanoseconds rather than `%W`'s whole seconds, so that an unlink
+# and a create inside the same second are still two different files.
+schedule_birth() {
+  docker compose exec -T beat stat -c '%w' "${SCHEDULE_FILE}" | tr -d '\r'
+}
+
 group "Criterion 3: beat returns to healthy and keeps its schedule file"
 docker compose exec -T beat sh -c "date -u +%s%N > '${CANARY_FILE}'"
 canary_before="$(docker compose exec -T beat cat "${CANARY_FILE}" | tr -d '\r')"
-inode_before="$(docker compose exec -T beat stat -c '%i' "${SCHEDULE_FILE}" | tr -d '\r')"
-echo "  before: schedule inode ${inode_before}, canary ${canary_before}"
+birth_before="$(schedule_birth)"
+echo "  before: schedule created ${birth_before}, canary ${canary_before}"
+
+# Asserted before it is compared, because "unknown" is the one value that makes
+# both comparisons below pass without looking at anything (docs/MISTAKES.md
+# entry 3). ext4 records a birth time and the named volume lives on the host
+# filesystem; a filesystem that does not record one needs a different observable
+# here, not a comparison of two dashes.
+case "${birth_before}" in
+  "" | "-")
+    fail "the filesystem behind ${SCHEDULE_DIRECTORY} does not record a birth time,
+      so the two comparisons below would compare '${birth_before}' with
+      '${birth_before}' and pass whatever happened to the file. Find an
+      observable that filesystem does keep before trusting criterion 3 here."
+    ;;
+esac
 
 docker compose restart beat
 "${here}/wait_for_health.sh" beat
 
-inode_after="$(docker compose exec -T beat stat -c '%i' "${SCHEDULE_FILE}" | tr -d '\r')"
+birth_after="$(schedule_birth)"
 canary_after="$(read_canary)"
-echo "  after restart: schedule inode ${inode_after}, canary ${canary_after}"
-[ "${inode_after}" = "${inode_before}" ] || fail "beat replaced its schedule file across a restart
-      (inode ${inode_before} -> ${inode_after}). The file was recreated rather
+echo "  after restart: schedule created ${birth_after}, canary ${canary_after}"
+[ "${birth_after}" = "${birth_before}" ] || fail "beat replaced its schedule file across a restart
+      (created ${birth_before}, now ${birth_after}). The file was rebuilt rather
       than reopened, so anything it held — the last-run times E2 depends on —
       is gone."
 
@@ -145,8 +174,8 @@ docker compose up -d --force-recreate --no-deps beat
 "${here}/wait_for_health.sh" beat
 
 canary_recreated="$(read_canary)"
-inode_recreated="$(docker compose exec -T beat stat -c '%i' "${SCHEDULE_FILE}" | tr -d '\r')"
-echo "  after recreate: schedule inode ${inode_recreated}, canary ${canary_recreated:-<gone>}"
+birth_recreated="$(schedule_birth)"
+echo "  after recreate: schedule created ${birth_recreated}, canary ${canary_recreated:-<gone>}"
 [ "${canary_recreated}" = "${canary_before}" ] || fail "the beat schedule directory did not survive
       a container replacement: a file written before it read '${canary_before}'
       and afterwards reads '${canary_recreated:-nothing — the file is gone}'.
@@ -155,6 +184,20 @@ echo "  after recreate: schedule inode ${inode_recreated}, canary ${canary_recre
       reproduction: with the volume taken off the service, the restart above
       still passes — a restarted container keeps its own filesystem — and this
       is the check that fails."
+
+# Second, and not the same question as the canary. The canary says the directory
+# came back; this says the schedule file in it is the same file rather than one
+# beat built again. They come apart when beat finds a store it cannot read and
+# takes `_destroy_open_corrupted_schedule` — the volume is intact, the last-run
+# times are gone, and a criterion 3 that only looked at the canary would call
+# that a pass. Reproduced: corrupt the store with beat stopped, and this is the
+# comparison that fails.
+[ "${birth_recreated}" = "${birth_before}" ] || fail "beat rebuilt its schedule file when its
+      container was replaced (created ${birth_before}, now ${birth_recreated}),
+      even though the volume itself survived — the canary above is intact. The
+      store was discarded and started again, so whatever it held is gone. beat
+      rebuilds a store it cannot read and says so in its log: 'Removing
+      corrupted schedule file'."
 
 docker compose exec -T beat rm -f "${CANARY_FILE}"
 endgroup
