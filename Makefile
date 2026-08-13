@@ -11,9 +11,11 @@ SHELL := /bin/bash
 PYTHON ?= python3
 COMPOSE ?= docker compose
 
-RUFF_VERSION       ?= 0.6.9
-MYPY_VERSION       ?= 1.11.2
-PIP_AUDIT_VERSION  ?= 2.7.3
+RUFF_VERSION         ?= 0.6.9
+MYPY_VERSION         ?= 1.11.2
+PIP_AUDIT_VERSION    ?= 2.7.3
+PIP_LICENSES_VERSION ?= 5.5.5
+PIP_TOOLS_VERSION    ?= 7.6.1
 
 # Green/dim only when attached to a terminal.
 ifneq (,$(findstring xterm,$(TERM)))
@@ -70,11 +72,7 @@ build-gates: docker-build frontend-build ## Build gates: images, Compose health,
 .PHONY: lint
 lint: ## ruff check + ruff format --check, eslint
 	$(call banner,ruff)
-	@if [ -d backend/app ]; then \
-		ruff check . && ruff format --check .; \
-	else \
-		$(call skip,no backend/app yet); \
-	fi
+	@ruff check . && ruff format --check .
 	$(call banner,eslint)
 	@if [ -f frontend/package.json ]; then \
 		cd frontend && npx eslint . --max-warnings=0; \
@@ -85,11 +83,7 @@ lint: ## ruff check + ruff format --check, eslint
 .PHONY: typecheck
 typecheck: ## mypy (strict on services/ and ai/contracts.py) + tsc --noEmit
 	$(call banner,mypy)
-	@if [ -d backend/app ]; then \
-		mypy; \
-	else \
-		$(call skip,no backend/app yet); \
-	fi
+	@mypy
 	$(call banner,tsc --noEmit)
 	@if [ -f frontend/package.json ]; then \
 		cd frontend && npx tsc --noEmit; \
@@ -183,11 +177,7 @@ supply-chain: audit licenses ## pip-audit, npm audit, license compatibility
 .PHONY: audit
 audit: ## Fail on high/critical dependency vulnerabilities
 	$(call banner,pip-audit)
-	@if grep -q '^\[project\]' pyproject.toml 2>/dev/null; then \
-		pip-audit --strict --desc; \
-	else \
-		$(call skip,no declared Python dependencies yet); \
-	fi
+	@pip-audit --strict --desc -r requirements.txt -r requirements-dev.txt
 	$(call banner,npm audit)
 	@if [ -f frontend/package.json ]; then \
 		cd frontend && npm audit --audit-level=high; \
@@ -196,23 +186,19 @@ audit: ## Fail on high/critical dependency vulnerabilities
 	fi
 
 .PHONY: licenses
+# pip-licenses reads whatever is installed in the active environment. CI scans
+# the runtime closure alone; locally it also sees your dev and tooling
+# packages, so this can report more than CI does. It never reports less.
 licenses: ## Fail on dependencies incompatible with MIT distribution
 	$(call banner,license compatibility)
 	@mkdir -p reports
-	@args=""; \
-	if grep -q '^\[project\]' pyproject.toml 2>/dev/null; then \
-		pip-licenses --format=json --with-urls > reports/py-licenses.json; \
-		args="$$args --python-json reports/py-licenses.json"; \
-	fi; \
+	@pip-licenses --format=json --with-urls > reports/py-licenses.json
+	@args="--python-json reports/py-licenses.json"; \
 	if [ -f frontend/package.json ]; then \
 		(cd frontend && npx --yes license-checker-rseidelsohn@4.3.0 --json > ../reports/npm-licenses.json); \
 		args="$$args --npm-json reports/npm-licenses.json"; \
 	fi; \
-	if [ -z "$$args" ]; then \
-		$(call skip,no dependency manifests yet); \
-	else \
-		$(PYTHON) scripts/ci/check_licenses.py $$args; \
-	fi
+	$(PYTHON) scripts/ci/check_licenses.py $$args
 
 # ---------------------------------------------------------------------------
 # Developer conveniences (SPEC §13)
@@ -221,12 +207,26 @@ licenses: ## Fail on dependencies incompatible with MIT distribution
 .PHONY: tools
 tools: ## Install the pinned CI tools locally
 	pip install "ruff==$(RUFF_VERSION)" "mypy==$(MYPY_VERSION)" \
-		"pip-audit==$(PIP_AUDIT_VERSION)" pip-licenses
+		"pip-audit==$(PIP_AUDIT_VERSION)" "pip-licenses==$(PIP_LICENSES_VERSION)" \
+		"pip-tools==$(PIP_TOOLS_VERSION)"
+
+.PHONY: install
+install: ## Install the locked dependencies and the backend, editable
+	pip install --require-hashes -r requirements-dev.txt
+	pip install -e . --no-deps
+
+# Run this after editing the dependencies in pyproject.toml, and commit both
+# files with the change. See docs/adr/0005-dependency-locking.md.
+.PHONY: lock
+lock: ## Recompile requirements.txt and requirements-dev.txt from pyproject.toml
+	pip-compile --quiet --generate-hashes --strip-extras \
+		--output-file=requirements.txt pyproject.toml
+	pip-compile --quiet --generate-hashes --strip-extras --extra dev \
+		--output-file=requirements-dev.txt pyproject.toml
 
 .PHONY: fmt
 fmt: ## Apply formatting (the only target that writes to your files)
-	@if [ -d backend/app ]; then ruff format . && ruff check --fix .; \
-	else $(call skip,no backend/app yet); fi
+	@ruff format . && ruff check --fix .
 
 .PHONY: up
 up: ## Bring the stack up with dev wiring
