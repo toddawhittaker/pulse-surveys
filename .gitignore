@@ -16,6 +16,8 @@ venv/
 htmlcov/
 .coverage
 .coverage.*
+coverage.xml
+reports/
 
 # Node
 node_modules/
