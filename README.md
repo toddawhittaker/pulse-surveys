@@ -19,11 +19,36 @@ non-obvious requirements in the spec exist to protect one of those two beliefs.
 ## Status
 
 Early. The backend package exists — a FastAPI application factory, the
-environment-driven settings object, and a health endpoint — and CI enforces
-lint, typing, dependency audit, and license compatibility against it. There is
-no database, no background worker, and no frontend yet.
+environment-driven settings object, and a health endpoint — and it runs in a
+container alongside Postgres, Redis, and Mailpit. CI enforces lint, typing,
+dependency audit, license compatibility, and that the stack comes up healthy.
+There is no database schema, no background worker, and no frontend yet.
 
-## Local development
+## Run it locally
+
+Docker, and nothing else.
+
+```sh
+cp .env.example .env
+make up             # docker compose up -d
+make logs           # follow the logs
+make down           # docker compose down -v — discards the database too
+```
+
+`GET http://localhost:8000/healthz` answers with the service name, the version,
+and the environment it was configured with. The interactive API documentation is
+at `/docs`, the captured mail is at <http://localhost:8025>, and Postgres and
+Redis are on their usual ports. All of them bind to `127.0.0.1` only.
+
+`docker compose up` merges [`docker-compose.override.yml`](docker-compose.override.yml)
+over the base file automatically, and that override is what publishes those
+ports, mounts your checkout into the API container, and turns on reload-on-edit.
+Every other deployment runs the base file alone and publishes nothing.
+
+Copying `.env.example` is not optional: `docker-compose.yml` defaults no
+credential, so a missing variable stops the stack with a message naming it.
+
+## Working on the backend without containers
 
 Python 3.13 or newer (SPEC §7.1), and a virtual environment of your own making.
 
@@ -35,16 +60,31 @@ cp .env.example .env
 uvicorn app.main:create_app --factory --reload
 ```
 
-`GET http://localhost:8000/healthz` answers with the service name, the version,
-and the environment it was configured with. The interactive API documentation
-is at `/docs`.
+One catch. `DATABASE_URL` and `REDIS_URL` in `.env.example` name the Compose
+services `db` and `redis`, because CI copies that file and starts the stack from
+it, so it has to be a file the stack can actually start from. Outside a
+container those names do not resolve. Either start the backing services with
+`make up` and point the two URLs at `localhost`:
+
+```sh
+# in your own .env, replacing the two lines copied from .env.example
+DATABASE_URL=postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@localhost:5432/${DB_NAME}
+REDIS_URL=redis://localhost:6379/0
+```
+
+— or just use `make up`, which needs no such edit. Nothing in the backend opens
+either connection yet (E0-04 is where that starts), so today this only matters
+if you are working ahead.
 
 Configuration is entirely environment-driven and documented in
 [`.env.example`](.env.example), which a unit test keeps in sync with
-`app.config.Settings` in both directions. Six variables have no default,
-because a working default for a deployment-specific value is a
-misconfiguration that starts successfully: the application refuses to start
-without them and names the one it is missing.
+`app.config.Settings`. Six variables have no default, because a working default
+for a deployment-specific value is a misconfiguration that starts successfully:
+the application refuses to start without them and names the one it is missing.
+`DB_USER`, `DB_PASSWORD`, and `DB_NAME` are in that file for Compose rather than
+for the application — Compose cannot parse a URL, so the `db` service is handed
+the three parts `DATABASE_URL` is built from, and the password stays written
+once.
 
 ```sh
 make ci             # every gate, in the same order as CI
@@ -53,6 +93,9 @@ make typecheck      # mypy, strict over app/services/
 make test           # pytest with coverage
 make lock           # recompile the lockfiles after editing dependencies
 ```
+
+`make ci` includes the Docker build gate, so it needs a running daemon, a free
+port 8000, and a `.env`.
 
 `make ci` is the same set of gates as `.github/workflows/ci.yml`, so a green run
 here should mean a green run there. Where the two disagree, the workflow is
