@@ -256,13 +256,11 @@ fmt: ## Apply formatting (the only target that writes to your files)
 
 .PHONY: up
 up: ## Bring the stack up with dev wiring
-	@if [ -f docker-compose.yml ]; then $(COMPOSE) up -d; \
-	else $(call skip,no docker-compose.yml yet); fi
+	@$(COMPOSE) up -d
 
 .PHONY: down
 down: ## Tear the stack down, including volumes
-	@if [ -f docker-compose.yml ]; then $(COMPOSE) down -v; \
-	else $(call skip,no docker-compose.yml yet); fi
+	@$(COMPOSE) down -v
 
 .PHONY: logs
 logs: ## Follow stack logs

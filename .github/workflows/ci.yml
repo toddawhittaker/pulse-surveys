@@ -43,8 +43,6 @@ jobs:
     outputs:
       frontend: ${{ steps.d.outputs.frontend }}
       migrations: ${{ steps.d.outputs.migrations }}
-      compose: ${{ steps.d.outputs.compose }}
-      dockerfiles: ${{ steps.d.outputs.dockerfiles }}
       pytests: ${{ steps.d.outputs.pytests }}
       e2e: ${{ steps.d.outputs.e2e }}
       evals: ${{ steps.d.outputs.evals }}
@@ -60,8 +58,6 @@ jobs:
           echo "Probing repository layout (SPEC §13):"
           if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
           if [ -f backend/alembic.ini ]; then emit migrations true; else emit migrations false; fi
-          if [ -f docker-compose.yml ]; then emit compose true; else emit compose false; fi
-          if compgen -G "*/Dockerfile" > /dev/null 2>&1; then emit dockerfiles true; else emit dockerfiles false; fi
           if compgen -G "tests/unit/test_*.py" > /dev/null 2>&1 || compgen -G "tests/integration/test_*.py" > /dev/null 2>&1; then
             emit pytests true
           else
