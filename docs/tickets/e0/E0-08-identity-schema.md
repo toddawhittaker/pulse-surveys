@@ -13,7 +13,15 @@ supervision graph; `user` and `enrollment` are LMS-owned. Keeping the two
 distinct here is what makes E0-10's view separation possible.
 
 Read first: SPEC §8, §2.1 (data-source ownership), §4 (confidentiality), §7.3
-(LTI specifics), `CLAUDE.md` (confidentiality invariants).
+(LTI specifics), `CLAUDE.md` (confidentiality invariants), and **"What the built
+tickets settled" in [the epic README](README.md)** — this ticket adds two model
+modules, so the registration, `Base` import, constraint-naming and fixture rules
+all apply.
+
+Note the configuration rule there before planning the key-handling variables in
+this ticket's definition of done: an `.env.example` entry earns its place only
+when a `Settings` field resolves to it or a Compose file interpolates it, and a
+unit test enforces that in both directions.
 
 ## Scope
 

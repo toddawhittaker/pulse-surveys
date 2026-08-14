@@ -137,8 +137,12 @@ would not.
 
 Confirm and record in the pull request:
 
-- [ ] Every CI gate that has something to check is enforcing. The only tolerant
-      job left is `evals`, and the pull request says why.
+- [ ] Every CI gate that has something to check is enforcing, and the pull
+      request names each one still tolerant with the reason. At this point that
+      should be `evals`, which waits for E2's first eval set, and the four
+      frontend gates (`tsc`, `eslint`, production build, bundle budget), which
+      wait for E1 — no frontend exists in E0. Anything else still tolerant is a
+      finding, not a footnote.
 - [ ] `docker compose up` from a clean checkout reaches a working system.
 - [ ] A student, an instructor, and a dean each land on the right empty view
       from whichever door applies to them.

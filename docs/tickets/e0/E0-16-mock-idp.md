@@ -12,7 +12,16 @@ and both doors must resolve to the same identity and the same full purview
 testable in CI with no institutional identity provider involved (§9.2).
 
 Read first: SPEC §9.2 (in-repo mock IdP), §2.1 (dual-door entry and the rule
-that the launch context never caps what a leadership user sees), §6.3.
+that the launch context never caps what a leadership user sees), §6.3, and the
+configuration rule in **"What the built tickets settled"** in [the epic
+README](README.md).
+
+That rule bears directly on this ticket's scope item about pointing the tool at
+the mock: an `.env.example` entry needs a reader — a `Settings` field or a
+Compose interpolation. If the mock IdP is a Compose service that interpolates its
+own configuration, the entry is fine as written. If the variable is read only by
+something outside both, it cannot be documented there as things stand, and the
+sync test will fail the ticket. Decide which before writing the entry.
 
 ## Scope
 

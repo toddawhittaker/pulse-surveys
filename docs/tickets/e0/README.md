@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Nineteen tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Twenty tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -37,6 +37,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
+| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Four gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, `alembic check` blind to server-default drift, and `echo=False` not being what keeps SQL out of the log. |
 
 ## Dependency graph
 
@@ -52,14 +53,81 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 07, 09, 15 ── 17 ───────────────────────────────── ┘
 
 02, 03 ── 19        (independent; blocks nothing)
+04 ── 20            (independent; blocks nothing)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Ticket 19 hangs off 03 and
-blocks nothing — it hardens tests rather than adding behaviour, so it can land
-any time after 03 and is not on the path to the E0 exit.
+chain and the mock LMS; ticket 18 needs everything. Tickets 19 and 20 hang off 03
+and 04 and block nothing — both harden tests rather than adding behaviour, so
+they can land any time afterwards and neither is on the path to the E0 exit.
+
+One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
+item is `alembic check` being blind to server-default drift, and E0-05 is where
+the first server default lands. Whoever builds 05 should settle that item first
+or knowingly accept it — see the pointer in E0-05's scope.
+
+## What the built tickets settled
+
+Tickets 01 to 04 were written before the code existed, and building them decided
+things the later tickets were written without knowing. Those decisions are now
+load-bearing, and most of them fail in a way that does not point at itself. This
+section is the short list; the tickets it affects carry a pointer to it rather
+than a copy, because a copy in six places drifts in five.
+
+**A model module must be imported in `backend/app/models/__init__.py`, in the
+same change that adds it.** `migrations/env.py` autogenerates against
+`Base.metadata`, and a table whose module nobody imported is not on that
+metadata. So `alembic check` reports no drift, the migration nobody wrote is
+never missed, and the table does not exist in any deployed database. Nothing
+fails at the time; E0-04 left the rule in that file's docstring, and E0-20's
+"gate fidelity" subject is exactly this class of silence.
+
+**Model modules import `Base` from `app.models.base`, never from `app.db`.**
+`app.db` re-exports `Base` and that is the import the *application* writes, but
+it also builds an engine out of `Settings()` when imported, which needs
+`AI_PROVIDER_BASE_URL` and four other variables that have nothing to do with a
+schema. CI's `migration-drift` job and the testcontainers fixture both supply the
+database variables alone. A model module reaching `Base` through `app.db`
+therefore works on a developer's machine, where `.env` has everything, and breaks
+in CI. The reasoning is in `backend/app/models/base.py`'s docstring.
+
+**Constraints are named by the convention, not by hand.** `Base.metadata` carries
+`NAMING_CONVENTION`, so autogenerate renders `op.f('pk_…')` and names are stable
+across regenerations. Do not hand-name a constraint to match a preferred style —
+`alembic check` will churn. Watch the 63-byte Postgres identifier limit when
+choosing table and column names, since the convention's templates concatenate.
+
+**The database fixtures already exist.** `tests/conftest.py` provides
+`postgres_container`, `provisioned_database`, `migrated_database`,
+`empty_database`, `migrated_engine`, `db_session` and `application_engine`. A
+schema ticket writes tests against these rather than standing up its own
+Postgres. The fixture provisions the same two-role shape a deployment has, so a
+test that passes under privileges production lacks is a test that fails.
+
+**Migrations run as `DB_SUPERUSER`, never as the application role** ([ADR
+0009](../../adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md),
+[ADR 0012](../../adr/0012-the-migration-environment-builds-its-own-superuser-connection.md)).
+`env.py` takes the address from `DATABASE_URL` and the identity from the
+superuser pair. No ticket needs to add a variable for this. `make migrate` runs
+on your host, so `DATABASE_URL` has to name `localhost` rather than the Compose
+service — `README.md` says where.
+
+**An `.env.example` entry needs a reader, or its test fails.** An entry earns its
+place because an `app.config.Settings` field resolves to it, or because a Compose
+file interpolates it as `${NAME}` ([ADR
+0008](../../adr/0008-env-has-two-readers-and-the-database-credential-is-split.md)).
+A variable read only by something else — a script, a mock service that is not a
+Compose service — cannot be documented there as things stand, and
+`tests/unit/test_env_example_sync.py` will say so. Tickets 08, 13 and 16 all add
+configuration and should expect this.
+
+**The session is synchronous** ([ADR
+0013](../../adr/0013-the-database-session-is-synchronous.md)). Handlers that
+touch the database are written `def`, not `async def`, and FastAPI runs them in
+its threadpool. The same session serves Celery tasks and `pylti1p3`, both of
+which are synchronous.
 
 ## How CI tightens
 
