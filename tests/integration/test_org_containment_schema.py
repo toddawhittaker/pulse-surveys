@@ -64,7 +64,6 @@ from sqlalchemy import (
     and_,
     delete,
     inspect,
-    select,
     update,
 )
 from sqlalchemy.exc import DatabaseError
@@ -360,18 +359,19 @@ def test_deleting_a_department_that_has_prefixes_is_refused(
     under it proves the delete path itself works, so the refusal that follows can
     only be about the prefix.
 
-    What separates a cascade from a refusal here is the `pytest.raises` — under
-    `ON DELETE CASCADE` the delete would succeed and this test would fail there,
-    for not raising. The surviving-prefix assertion that follows **cannot fail**,
-    and is not what is doing the work: the delete runs inside a
-    `begin_nested()`, so by the time the query runs the savepoint has rolled
-    back and the prefix is present whatever the foreign key does. It is kept as
-    a statement of the property being protected, not as a second guard, and it
-    is described that way because `docs/MISTAKES.md` entry 3 is about assertions
-    that cannot fail being read as though they could.
+    What separates a cascade from a refusal is the `pytest.raises` — under
+    `ON DELETE CASCADE` the delete succeeds and this test fails there, for not
+    raising.
+
+    An earlier version also queried the prefix afterwards and asserted it had
+    survived. That assertion could not fail: the delete runs inside a
+    `begin_nested()`, so by the time the query ran the savepoint had rolled back
+    and the prefix was present whatever the foreign key did. It was removed
+    rather than documented — `docs/MISTAKES.md` entry 3 is about assertions that
+    cannot fail being read as though they could, and a never-failing assertion
+    kept with a comment explaining that it never fails still teaches the pattern.
     """
     department = require_table(org_tables, "department")
-    prefix = require_table(org_tables, "prefix")
 
     childless = seed_row(db_session, org_tables, "department")
     with db_session.begin_nested():
@@ -385,18 +385,50 @@ def test_deleting_a_department_that_has_prefixes_is_refused(
     )
 
     chain: dict[str, Any] = {}
-    seeded_prefix = seed_row(db_session, org_tables, "prefix", chain)
+    # The return value is unused; what matters is that the department now has a
+    # prefix under it, which is what the delete below has to be refused for.
+    seed_row(db_session, org_tables, "prefix", chain)
     parent = chain["department"]
 
     with pytest.raises(DatabaseError), db_session.begin_nested():
         db_session.execute(delete(department).where(matching_primary_key(department, parent)))
 
-    query = select(prefix).where(matching_primary_key(prefix, seeded_prefix))
-    surviving = db_session.execute(query).mappings().all()
-    assert len(surviving) == 1, (
-        "The department delete was refused, and its prefix is gone anyway, so the refusal is "
-        "not what protected it. A department groups one or more prefixes (SPEC §2.1); losing "
-        "them silently loses every course and section underneath."
+
+def test_the_containment_foreign_keys_walked_by_parent_are_indexed(
+    migrated_engine: Any, org_tables: dict[str, Table]
+) -> None:
+    """`prefix.department_id` and `section.course_id` carry an index.
+
+    Both were unindexed when E0-05 was first reviewed, and nothing failed: a
+    missing index costs a sequential scan, which is invisible on the handful of
+    rows a test seeds and grows with every term. That is `docs/MISTAKES.md`
+    entry 2 in its performance form — behaviour shipped with nothing asserting
+    it — so the fix gets a regression test rather than only a migration.
+
+    The other three containment foreign keys are deliberately *not* asserted
+    here, and deliberately have no index: `college.institution_id`,
+    `department.college_id` and `course.prefix_id` each lead a composite unique
+    constraint, which already serves a lookup by parent. Measured, not assumed.
+    Asserting they have no index would be asserting an absence, which is entry
+    3's shape, and would go red for the right change.
+    """
+    expected = {("prefix", "department_id"), ("section", "course_id")}
+
+    with migrated_engine.connect() as connection:
+        indexed = {
+            (table_name, column)
+            for table_name, _ in expected
+            for index in inspect(connection).get_indexes(table_name)
+            for column in index["column_names"]
+            if column is not None
+        }
+
+    missing = expected - indexed
+    assert not missing, (
+        f"{sorted(missing)} are foreign keys with no index. A lookup by parent then reads the "
+        "whole table, which passes on seed data and degrades every term as sections accumulate. "
+        "See the comments in `app/models/org.py` for why the other three containment foreign "
+        "keys correctly have none."
     )
 
 

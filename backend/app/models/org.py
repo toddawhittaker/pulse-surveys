@@ -197,7 +197,8 @@ class Prefix(Base):
     # `course.prefix_id` are each the leading column of a composite unique
     # constraint, so Postgres already has a usable index for a lookup by
     # parent and a second one would be dead weight. `prefix` has no composite
-    # constraint, and E0-09's purview walk fetches prefixes by department.
+    # constraint, and prefixes are fetched by department by every roll-up that
+    # aggregates a department (SPEC §5.5), which is the common read here.
     department_id: Mapped[UUID] = mapped_column(
         ForeignKey("department.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -258,9 +259,21 @@ class Section(Base):
     )
     # Indexed for the same reason as `prefix.department_id`, and this is the one
     # that matters: `section` is the leaf table and it grows by a row per
-    # section per term, while E0-09's purview walk fetches sections by course
-    # inside a loop over the purview set. Unindexed that is a sequential scan
-    # per course, which is invisible on seed data and worsens every term.
+    # section per term, and every roll-up reaches sections by course. Unindexed
+    # that is a sequential scan per course, invisible on seed data and worse
+    # every term.
+    #
+    # This index does not imply a per-course loop, and nothing here should be
+    # read as endorsing one. A single batched join across the whole scope was
+    # measured at 22ms over 40,000 sections against hundreds of round trips for
+    # the loop, and the index serves the batched shape just as well. Purview
+    # itself is **not** computed by descending containment — SPEC §2.1 puts it
+    # on the supervision graph over role assignments, and this module's own
+    # docstring says why conflating the two is a category error. Only a chair's
+    # or dean's *own grant* is a containment subtree; a Lead Faculty's grant is
+    # the courses they lead, from `lead_faculty_mapping`. Expanding a lead's
+    # grant from a prefix instead would hand them every sibling lead's course,
+    # which is SPEC §4.1 invariant 2.
     # `college.institution_id`, `department.college_id` and `course.prefix_id`
     # get no index on purpose — each leads a composite unique constraint, which
     # already serves a lookup by parent.

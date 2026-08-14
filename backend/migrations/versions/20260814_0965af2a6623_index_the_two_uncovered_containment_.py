@@ -7,9 +7,15 @@ Create Date: 2026-08-14 18:10:31.173199
 `prefix.department_id` and `section.course_id`, from the review of E0-05.
 Postgres indexes a primary key and a unique constraint and nothing else, so a
 foreign key is unindexed unless something says otherwise, and both of these are
-walked by parent: E0-09 computes purview by descending the containment tree, and
-`section` is the leaf table that grows by a row per section per term. Unindexed
-that is a sequential scan per parent — invisible on seed data, worse every term.
+walked by parent: every leadership roll-up (SPEC §5.5) aggregates a department's
+prefixes and a course's sections, and `section` is the leaf table that grows by
+a row per section per term. Unindexed that is a sequential scan per parent —
+invisible on seed data, worse every term.
+
+Not to be read as "purview descends containment", which SPEC §2.1 explicitly
+denies: purview comes from the supervision graph over role assignments. These
+indexes serve aggregation, and they serve a single batched join at least as well
+as a per-parent loop — the batched shape was the faster of the two when measured.
 
 **Three other containment foreign keys deliberately get nothing here.**
 `college.institution_id`, `department.college_id` and `course.prefix_id` each

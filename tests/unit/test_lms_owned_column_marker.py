@@ -1,8 +1,14 @@
 """LMS-owned columns are marked by an `lms_` name prefix — ticket E0-05.
 
-Acceptance criterion: "Every LMS-owned column carries the `lms_` prefix, asserted
-by walking `Base.metadata` rather than by reading the model — so a later ticket
-that adds an unprefixed LMS column fails instead of passing silently."
+Acceptance criterion: "Every LMS-owned column **this ticket creates** carries the
+`lms_` prefix, and no Pulse-owned table carries the prefix, both asserted by
+walking `Base.metadata` rather than by reading the model."
+
+That wording is narrower than an earlier draft, which promised that "a later
+ticket that adds an unprefixed LMS column fails instead of passing silently".
+It does not, and cannot — see below. The criterion was corrected rather than the
+promise kept, and this module asserts the narrow version exactly: all three
+columns E0-05 creates, not a subset.
 
 The marker exists so that the authorization layer can tell, from the name alone,
 which columns a write path may never touch (SPEC §2.1: courses, sections and
@@ -30,10 +36,21 @@ the metadata records no such fact once the prefix is missing: an unprefixed
 walks the metadata, from a column Pulse owns outright. Closing that would mean
 either enumerating the implementer's columns here, which decides the schema from
 the test suite, or asking the model to declare its LMS-owned set separately,
-which is the second source of truth the `lms_` prefix was chosen over. The
-enforcing test belongs where the write path is — E0-11's authz chokepoint — and
-what this module can do is make the named cases fail loudly and stop the obvious
+which is the second source of truth the `lms_` prefix was chosen over. What this
+module can do is make the named cases fail loudly and stop the obvious
 regression, an unprefixed twin appearing beside a prefixed column.
+
+**Where the enforcing check belongs is an open question, not E0-11 by default.**
+An earlier draft of this docstring said E0-11's chokepoint closes it. That rests
+on the chokepoint knowing LMS ownership only from the prefix, and SPEC §2.1 does
+not work that way: its ownership list is *courses, sections, section codes,
+enrollments, teaching instructors*, every item of which lives on `course`,
+`section` or `enrollment`. A chokepoint that refuses writes to those **tables**
+answers §2.1 without reading a column name at all, and would catch the
+unprefixed `external_id` this module cannot. Table grain has its own failure —
+it breaks the day a Pulse-owned writable column lands on one of those tables —
+so E0-11 has a real choice to make rather than an inherited limit.
+[E0-21](../../docs/tickets/e0/E0-21-review-debt.md) carries it.
 
 **Why the metadata and not the migration.** The criterion says `Base.metadata`,
 and it is the right side to read: the authz layer will resolve a column through
@@ -50,6 +67,7 @@ LMS_PREFIX = "lms_"
 # The two the ticket spells outright, as `(table, column)`.
 MARKED_COLUMNS = (
     ("course", "lms_number"),
+    ("course", "lms_title"),
     ("section", "lms_section_code"),
 )
 
