@@ -37,7 +37,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
-| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Four gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, `alembic check` blind to server-default drift, and `echo=False` not being what keeps SQL out of the log. |
+| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
 
 ## Dependency graph
 
@@ -64,9 +64,12 @@ and 04 and block nothing — both harden tests rather than adding behaviour, so
 they can land any time afterwards and neither is on the path to the E0 exit.
 
 One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
-item is `alembic check` being blind to server-default drift, and E0-05 is where
-the first server default lands. Whoever builds 05 should settle that item first
-or knowingly accept it — see the pointer in E0-05's scope.
+item was `alembic check` being blind to server-default drift, and E0-05 is where
+the first server defaults landed. **E0-05 closed that item** — `env.py` now sets
+`compare_server_default=True` on both paths — so 20 is down to three, and it
+gained a narrower fourth in the same place: a *generated* column's expression can
+still drift with `alembic check` green, because Alembic warns rather than
+failing. Details in E0-20 item 3.
 
 ## What the built tickets settled
 

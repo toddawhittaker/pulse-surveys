@@ -19,10 +19,13 @@ registering that module, importing `Base`, constraint naming, and the existing
 database fixtures all apply.
 
 One of them bites here specifically: `week` and `survey_window` are
-timezone-bound (§3.1), so they carry server defaults or generated columns, and
-`alembic check` is currently blind to server-default drift. See
-[E0-20](E0-20-gate-fidelity.md) item 3 — if E0-05 has not already settled it,
-settle it here.
+timezone-bound (§3.1), so they carry server defaults or generated columns.
+E0-05 settled the server-default half — `env.py` sets
+`compare_server_default=True` on both paths, so a changed default with no
+migration behind it now fails `alembic check`. The *generated column* half is
+still open and is E0-05's finding: Alembic emits a warning and exits zero when a
+generation expression drifts, so a `week` or `survey_window` column computed in
+the database has no drift gate. See [E0-20](E0-20-gate-fidelity.md) item 3.
 
 ## Scope
 
@@ -37,6 +40,15 @@ settle it here.
 - `survey_window` models the weekly open and close, keyed to a section and a
   week, with timezone-aware timestamps. Columns exist and are constrained; the
   scheduling logic that fills them is E2.
+- **`section.term_id` lands here**, non-nullable and referencing `term`, along
+  with the uniqueness rule that needs it: a section code identifies a section
+  within a course *and* term, so the constraint is over
+  `(course_id, term_id, lms_section_code)` and could not be written before this
+  ticket without forbidding the same code recurring next term. E0-05 chose this
+  of the two orderings its scope offered — it created `section` with the course
+  foreign key alone rather than ordering its own migration behind a `term` stub.
+  SPEC §8's "sections belong to exactly one course and one term" is only half
+  enforced until this lands.
 - All timestamps timezone-aware. The `DTZ` ruff rules are already on; do not
   suppress them.
 

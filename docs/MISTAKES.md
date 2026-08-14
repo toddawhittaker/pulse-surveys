@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -60,7 +60,7 @@ second case arrives.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -348,3 +348,34 @@ its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
 `docker inspect` for a health check's output) and reproduce outside the harness
 if the harness is what is hiding it. A timeout is the absence of evidence, not
 evidence.
+
+---
+
+## 12. A mutation was reverted on disk and not in the interpreter
+
+**Caught: 0**
+
+**What happened.** In E0-05, checking that `alembic check` warns when a generated
+column's expression drifts: edit `app/models/org.py` to change one band edge from
+`499` to `498`, run the check, edit it back, run it again. The warning was there
+both times. Ten minutes went into the model, the migration and the database
+before `grep` showed the file on disk said `499` while the module Python imported
+said `498`.
+
+**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
+file's size and mtime **truncated to the second**. Reverting a mutation of equal
+length inside the same second leaves the cache valid, so the stale bytecode is
+what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
+revert is invisible to the interpreter.
+
+**Consequence.** The reverted run and the mutated run produce identical output,
+which reads as "the mutation made no difference" — the conclusion that kills the
+finding. Here it would have been "matching the server's own rendering does not
+silence the warning, so do not bother", and the drift signal E0-20 now depends on
+would have been dropped as not working.
+
+**Rule.** When mutating and reverting source between runs, clear the caches in
+the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
+export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
+the interpreter rather than in the file: print the value the module actually
+holds. `grep` proves what is on disk, which is not what ran.
