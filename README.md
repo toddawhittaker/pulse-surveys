@@ -19,12 +19,14 @@ non-obvious requirements in the spec exist to protect one of those two beliefs.
 ## Status
 
 Early. The backend package exists — a FastAPI application factory, the
-environment-driven settings object, and a health endpoint — and it runs in a
-container alongside a Celery worker, a Celery beat scheduler, Postgres, Redis,
-and Mailpit. CI enforces lint, typing, dependency audit, license compatibility,
-and that the stack comes up healthy. The job runtime is wired but does no work
-yet: the beat schedule is empty, and the only task is a `ping` that proves the
-round trip. There is no database schema and no frontend yet.
+environment-driven settings object, a health endpoint, and now a database engine
+with a session per request — and it runs in a container alongside a Celery
+worker, a Celery beat scheduler, Postgres, Redis, and Mailpit. CI enforces lint,
+typing, the test suite, migration drift, dependency audit, license
+compatibility, and that the stack comes up healthy. The job runtime is wired but
+does no work yet: the beat schedule is empty, and the only task is a `ping` that
+proves the round trip. The migration chain exists and creates nothing — there
+are no tables yet, and no frontend.
 
 ## Run it locally
 
@@ -125,9 +127,9 @@ DATABASE_URL=postgresql+psycopg://${DB_APP_USER}:${DB_APP_PASSWORD}@localhost:54
 REDIS_URL=redis://localhost:6379/0
 ```
 
-— or just use `make up`, which needs no such edit. Nothing in the backend opens
-either connection yet (E0-04 is where that starts), so today this only matters
-if you are working ahead.
+— or just use `make up`, which needs no such edit for the application. It is not
+optional for migrations: `make migrate` and `make migration-check` run `alembic`
+here on your machine, and `db` is a name only the Compose network resolves.
 
 Configuration is entirely environment-driven and documented in
 [`.env.example`](.env.example), which a unit test keeps in sync with
@@ -158,15 +160,58 @@ make ci             # every gate, in the same order as CI
 make lint           # ruff check + ruff format --check
 make typecheck      # mypy, strict over app/services/
 make test           # pytest with coverage
+make migrate        # alembic upgrade head, against the running stack
 make lock           # recompile the lockfiles after editing dependencies
 ```
 
 `make ci` includes the Docker build gate, so it needs a running daemon, a free
-port 8000, and a `.env`.
+port 8000, and a `.env`. It also includes the migration drift gate, so it needs a
+database to migrate — `make up`, with `DATABASE_URL` pointed at `localhost` as
+above.
 
 `make ci` is the same set of gates as `.github/workflows/ci.yml`, so a green run
 here should mean a green run there. Where the two disagree, the workflow is
 right and the `Makefile` is the bug.
+
+## How to create a migration
+
+Every table in the schema is created by a migration, and the models are the
+source those migrations are generated from. After editing anything under
+[`backend/app/models/`](backend/app/models):
+
+```sh
+make up                                              # the database has to be running
+cd backend
+alembic revision --autogenerate -m "what you changed"
+```
+
+Read the generated file before committing it. Autogenerate is a good first
+draft and not an answer: it does not see a rename (it emits a drop and an add,
+which discards the data), and it cannot know what to backfill.
+
+```sh
+make migrate        # apply it: alembic upgrade head
+make migration-check  # what CI runs: upgrade, then `alembic check`
+```
+
+**A model change with no migration behind it fails the build.** The
+`migration-drift` job runs `alembic upgrade head && alembic check` against a
+Postgres of its own, and `alembic check` exits non-zero when the tables the
+models describe differ from the tables the migrations produce. That is a build
+failure on the pull request rather than a surprise at deploy time, and it is why
+the two commits belong together.
+
+Two things worth knowing before writing one:
+
+- **Migrations connect as `DB_SUPERUSER`, not as the role in `DATABASE_URL`.**
+  That role is granted `CONNECT` and deliberately cannot create a table, so a
+  migration run under it stops with `permission denied for schema public`. See
+  [ADR 0009](docs/adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
+  and [ADR 0012](docs/adr/0012-the-migration-environment-builds-its-own-superuser-connection.md).
+- **A model module nobody imports is invisible to autogenerate.** Adding
+  `backend/app/models/<aggregate>.py` means adding it to that package's
+  `__init__.py` in the same change, or `alembic check` will cheerfully report no
+  drift for a table that exists in no database.
 
 ## Documents
 
