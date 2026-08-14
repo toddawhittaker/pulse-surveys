@@ -33,6 +33,31 @@ them at a different incident.
 
 ---
 
+## 2. Behaviour shipped with nothing asserting it
+
+**Caught: 3**
+
+**What happened.** Four times. `__repr_args__` was added to keep credentials out
+of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
+validator could be deleted whole with the suite green. "`DATABASE_URL` must never
+point at the superuser" was prose, and repointing it passed all 50 tests and the
+`docker` gate. The two Postgres image digests could be set to different values
+with every gate green.
+
+**Root cause.** Fixing the defect and stopping there. The fix is visible in the
+diff, so it feels done; nothing makes the absence of a guard visible.
+
+**Consequence.** The next person deletes it during an unrelated refactor and
+every gate stays green. For the superuser case, the exact defect the pull request
+existed to fix was reintroducible without any signal.
+
+**Rule.** After fixing something, try to reintroduce it. If the suite stays
+green, you have written a convention, not a guarantee. Prefer asserting the
+*forbidden* state over the permitted one — it keeps working when a legitimate
+second case arrives.
+
+---
+
 ## 1. A record went on asserting something the change had made false
 
 **Caught: 2**
@@ -84,34 +109,9 @@ to match what you measured — not what you expected to measure before you ran i
 
 ---
 
-## 2. Behaviour shipped with nothing asserting it
-
-**Caught: 2**
-
-**What happened.** Four times. `__repr_args__` was added to keep credentials out
-of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
-validator could be deleted whole with the suite green. "`DATABASE_URL` must never
-point at the superuser" was prose, and repointing it passed all 50 tests and the
-`docker` gate. The two Postgres image digests could be set to different values
-with every gate green.
-
-**Root cause.** Fixing the defect and stopping there. The fix is visible in the
-diff, so it feels done; nothing makes the absence of a guard visible.
-
-**Consequence.** The next person deletes it during an unrelated refactor and
-every gate stays green. For the superuser case, the exact defect the pull request
-existed to fix was reintroducible without any signal.
-
-**Rule.** After fixing something, try to reintroduce it. If the suite stays
-green, you have written a convention, not a guarantee. Prefer asserting the
-*forbidden* state over the permitted one — it keeps working when a legitimate
-second case arrives.
-
----
-
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 1**
+**Caught: 2**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
