@@ -61,6 +61,13 @@ with the whole suite green. They are not hypotheticals.
   three containers. `tests/unit/test_env_example_resolves.py` already compares
   resolved values, but only for `DATABASE_URL`; extend it to every documented
   entry a Compose file delivers to a non-`db` container.
+- **Normalise a bind source before matching it.** `SENSITIVE_BIND_SOURCES` is
+  compared against the string as declared, so the same location under another
+  spelling misses: `/var/run/docker.sock` is caught, while `/var/run/./docker.sock`,
+  `//var/run/docker.sock`, and a relative path climbing out of a service's
+  `working_dir` are not. This is the same class as the allowlist item above and
+  probably wants the same answer rather than a fourth denylist entry.
+
 - **An ADR for the constraints E0-03 imposed.** The closed top-level key set and
   the outright refusal of `extends:` constrain everyone who edits a Compose file
   from now on, and the reasoning lives in a test module docstring — the one place
@@ -91,7 +98,19 @@ with the whole suite green. They are not hypotheticals.
       any service other than `db`.
 - [ ] Each rule is verified by mutation, and the mutation set includes the
       nearest passing case, not only the obvious failure.
+- [ ] A sensitive bind source spelled with a redundant separator, a `.` segment,
+      or relatively still fails.
 - [ ] `docs/adr/NNNN` records the closed-set decision, with the alternatives.
+
+## One decision to make once, not twice by accident
+
+The mount allowlist and the `driver_opts` resolution both touch `bind_sources`,
+which today feeds only the *relative* privilege comparison — "does this service
+take anything `api` does not". An allowlist needs the absolute form, and with it
+the same asymmetry the blanking rule needed in E0-03: what the base file may
+mount is not what the development override may mount, because the override is
+absent from every deployment. Decide that once, explicitly, and say so where the
+rule lives.
 
 ## Definition of done
 
