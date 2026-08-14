@@ -52,7 +52,11 @@ each with a stated job:
 
 **Migrations run as the bootstrap identity.** That answers the question E0-04
 was carrying: Alembic uses `DB_SUPERUSER`, not `Settings.database_url`, and the
-application role is never granted `CREATE`.
+application role is never granted `CREATE`. *How* the connection is assembled
+was left to E0-04 and is
+[ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md):
+the address comes from `DATABASE_URL`, the identity from `DB_SUPERUSER` and
+`DB_SUPERUSER_PASSWORD`.
 
 **What is still forbidden**, and this is the whole of "day-to-day use will
 continue to be security-scoped":
@@ -72,8 +76,8 @@ and this is what previously had two mechanisms and no owner:
 | Where | Provisioned by | Note |
 |---|---|---|
 | The Compose stack | `scripts/db-init`, via `/docker-entrypoint-initdb.d` | Runs once, on an empty volume |
-| `migration-drift` in CI | Nothing yet — `services.postgres` has no init hook | E0-04 activates that job and must provision it, or start the Compose `db` service instead |
-| E0-04's testcontainers fixture | Nothing yet | E0-04 owns it; without it, tests run under privileges production does not have |
+| `migration-drift` in CI | `scripts/db-init/01-application-role.sh`, run as a job step over TCP | Settled by E0-04 ([ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md)). The same script the stack runs, not a second copy; the job keeps its own `services.postgres` |
+| E0-04's testcontainers fixture | `provision_application_role` in `tests/conftest.py` | Settled by E0-04. A container started by testcontainers has no init hook, so the fixture creates the role itself, `NOSUPERUSER` and `CONNECT` only |
 | A managed Postgres | The operator | No `initdb` hook exists. Documented in E13's operator guide, with ADR 0001's degradation note |
 
 **E0-10's migration must tolerate a role that already exists.** `.env.example`

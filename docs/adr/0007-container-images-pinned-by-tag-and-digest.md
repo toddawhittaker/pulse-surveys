@@ -112,8 +112,12 @@ nobody can state gets applied inconsistently within two tickets.
   about something mutable — enforcing agreement alone would quietly record the
   weaker rule as the one that holds. Adding a Postgres reference anywhere means
   it must match, which is the point.
-- **E0-04 activates the drift gate** and is the natural place to reconsider
-  whether that job should start the Compose `db` service instead, which would
-  delete the second reference rather than maintain it.
+- **E0-04 activated the drift gate and kept the second reference.** Starting the
+  Compose `db` service in that job was reconsidered there and rejected: the
+  agreement test above asserts that *both* documents name a Postgres image, so
+  deleting the workflow's copy would leave it comparing an empty set, and the
+  guard against silent drift is worth more than the one hand-maintained line.
+  The job provisions the application role with a step instead
+  ([ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md)).
 - **This ADR does not govern the digests themselves.** They are values in the
   files that name them, and re-resolving one is not a decision.

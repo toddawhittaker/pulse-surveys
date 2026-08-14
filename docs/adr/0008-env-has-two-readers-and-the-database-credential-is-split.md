@@ -3,6 +3,12 @@
 **Status:** Accepted
 **Date:** 2026-08-12
 **Tickets:** E0-02
+**Amended by:** [ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md) —
+the *count* only. `.env` has three readers from E0-04:
+`backend/migrations/env.py` reads it too, through `python-dotenv` with
+`override=False`. Everything this record decides — the credential split, the
+ordering requirement, and a reader being found rather than named — is unchanged,
+and `env.py` reads only variables that already had readers.
 
 ## Context
 
@@ -36,7 +42,10 @@ a reasonable engineer might answer either one differently.
 
 **`.env` is one file with two readers**: `app.config.Settings` and the Compose
 files. `Settings` sets `extra="ignore"` so a variable it does not read is not an
-error, which is what makes one file possible.
+error, which is what makes one file possible. *(Three from E0-04 — see the
+amendment above. The property that matters is unchanged: every reader of this
+file reads variables the file documents, and the process environment beats the
+file for all three.)*
 
 **The database credential is stored in parts, and the URL is derived.**
 `.env.example` declares the parts and builds the URL from them:
