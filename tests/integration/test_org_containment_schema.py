@@ -360,9 +360,15 @@ def test_deleting_a_department_that_has_prefixes_is_refused(
     under it proves the delete path itself works, so the refusal that follows can
     only be about the prefix.
 
-    The surviving-prefix assertion at the end separates the two outcomes the
-    criterion distinguishes. A cascade and a refusal both leave the department
-    gone; only a refusal leaves the prefix there.
+    What separates a cascade from a refusal here is the `pytest.raises` — under
+    `ON DELETE CASCADE` the delete would succeed and this test would fail there,
+    for not raising. The surviving-prefix assertion that follows **cannot fail**,
+    and is not what is doing the work: the delete runs inside a
+    `begin_nested()`, so by the time the query runs the savepoint has rolled
+    back and the prefix is present whatever the foreign key does. It is kept as
+    a statement of the property being protected, not as a second guard, and it
+    is described that way because `docs/MISTAKES.md` entry 3 is about assertions
+    that cannot fail being read as though they could.
     """
     department = require_table(org_tables, "department")
     prefix = require_table(org_tables, "prefix")
