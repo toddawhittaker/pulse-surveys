@@ -57,11 +57,25 @@ pages fill less densely than a sequence would. Invisible at E0's volumes;
 `response` and `answer` in E2 are where it could be measured, and where UUIDv7
 becomes worth the upgrade.
 
-Ids are safe to put in URLs and in logs — they identify a row and say nothing
-about who or how many. They are **not** a confidentiality mechanism: nothing
-should ever be readable *because* its id is hard to guess, since [SPEC
-§4.1](../SPEC.md) puts that guarantee in the views and the authorization
-chokepoint.
+**Containment and configuration ids are safe to put in URLs and in logs** — an
+`institution`, `college`, `department`, `prefix`, `course` or `section` id
+identifies a row and says nothing about who or how many.
+
+**Ids that identify a person or a response are not**, and this decision does not
+make them so. `user.id` and `response.id` are governed by the rule above — every
+primary key is a UUID — but a UUID is a *stable* pseudonym, and stability is the
+property that matters here. An instructor who sees the same id against a comment
+in week 3 and again in week 7 can group a term's comments by author without ever
+joining to an identity column. [SPEC §4](../SPEC.md) spends randomized comment
+order and suppressed timestamps preventing exactly that linkage, and §4.1
+invariant 6 forbids any view widening it. So those ids do not go into a URL, an
+export column, a log line, or anything an instructor or a leadership role can
+read, and E1 and E2 should treat this paragraph rather than the one above it as
+the governing case.
+
+Ids are **not** a confidentiality mechanism in either direction: nothing should
+ever be readable *because* its id is hard to guess, since §4.1 puts that
+guarantee in the views and the authorization chokepoint.
 
 A test or a fixture cannot predict an id before inserting. Rows are seeded and
 their ids read back, which `tests/integration/test_org_containment_schema.py`

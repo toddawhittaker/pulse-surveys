@@ -91,9 +91,17 @@ than rediscovered. [E0-20](E0-20-gate-fidelity.md) item 3 has the detail.
 - [ ] A course number in no band fails to insert: `800` and `999` at three
       digits, `1000` and `7999` at four, a four-digit number below `1000` such
       as `0099`, and a number that is not three or four digits at all.
-- [ ] Every LMS-owned column carries the `lms_` prefix, asserted by walking
-      `Base.metadata` rather than by reading the model — so a later ticket that
-      adds an unprefixed LMS column fails instead of passing silently.
+- [ ] Every LMS-owned column this ticket creates carries the `lms_` prefix, and
+      no Pulse-owned table carries the prefix, both asserted by walking
+      `Base.metadata` rather than by reading the model. **This is narrower than
+      "a later ticket that adds an unprefixed LMS column fails", and the wording
+      is deliberate** — that property is not assertable from the metadata at
+      all. Once a prefix is missing, nothing distinguishes an LMS-owned column
+      from a Pulse-owned one, so the suite carries a trap-line of unprefixed
+      spellings that must not appear beside the marked ones, which catches the
+      regression and not the omission. [ADR
+      0014](../../adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)
+      states the gap and [E0-21](E0-21-review-debt.md) carries what closes it.
 - [ ] Course level cannot be set independently of the course number — an attempt
       either fails or is ignored in favor of the derived value.
 - [ ] Deleting a department with prefixes attached fails rather than cascading.

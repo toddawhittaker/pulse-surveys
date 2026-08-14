@@ -21,11 +21,13 @@ here rather than fixed there, because the reviewer pass reports and the merge
 decision chooses. Sizes differ a lot: the first is a few lines, the last is a
 judgement call about logging that nothing yet depends on.
 
-**Three remain.** Item 3 landed in E0-05, which is where the first server
-defaults arrived; it is kept below with what it settled, because the reasoning
-is worth finding, and closing it exposed a narrower gap in the same place that
-this ticket now carries — a generated column's expression can drift with
-`alembic check` green.
+**Four open: three of the original four, plus one this ticket gained.** Item 3
+landed in E0-05, which is where the first server defaults arrived; it is kept
+below with what it settled, because the reasoning is worth finding. Closing it
+exposed a narrower gap in the same place, which this ticket now carries as a
+fourth item — a generated column's expression can drift with `alembic check`
+green, because Alembic cannot `ALTER` a generated column and so warns instead of
+failing.
 
 Read first: `.github/workflows/ci.yml`, `docs/adr/0002-ci-gates-ship-tolerant.md`,
 and `docs/MISTAKES.md` entries 2 and 3.
