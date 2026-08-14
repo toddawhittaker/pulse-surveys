@@ -37,25 +37,30 @@ is missing, nothing in the metadata distinguishes an LMS-owned column from a
 Pulse-owned one. `course.canvas_id` or `section.instructor_external_id` would
 sail through every test in the suite today.
 
-**Why E0-11 does not close it, despite an earlier draft saying so.** The
-authorization chokepoint's only way to know a column is LMS-owned is the same
-prefix. So E0-11 enforces the marker where it is present and is blind to one
-that is absent, exactly as the metadata tests are. Relocating the check does not
-close it, and E0-11's criterion has been reworded to stop claiming otherwise.
+**Two ways to close it, and the choice belongs to E0-11.**
 
-**What can close it.** The sync path that writes LMS data is the only thing that
-knows which fields it received from the platform. A roster sync or a launch
-ingestion that writes a field it got from NRPS or from the `id_token` into a
-column with no `lms_` prefix is detectable at that seam, because both halves are
-in view at once. That code arrives with tool-side roster sync in **E1**, so this
-item is most cheaply done there — a check at the point of assignment, plus a
-test that adds an unmarked column and watches it fail.
+*Table grain.* SPEC §2.1's ownership list is *courses, sections, section codes,
+enrollments, teaching instructors*, and every item on it lives on `course`,
+`section` or `enrollment`. A chokepoint that refuses application writes to those
+**tables** answers §2.1 without reading a column name, and catches the unprefixed
+`canvas_id` that no name-based check can. What it does not catch is the reverse:
+the day a Pulse-owned writable column lands on one of those tables, a table-grain
+rule refuses a write that should be allowed. `course.level` is already a
+non-LMS column on an LMS-owned table, saved only by being unwritable.
 
-If E1 passes without picking it up, the fallback is weaker but real: assert that
-the set of `lms_`-prefixed columns matches an explicit list in the test suite, so
-adding an LMS-owned column forces a deliberate edit to that list. That is a
-second source of truth, which is what ADR 0014 chose the name prefix to avoid —
-take it only if the seam-based check does not happen.
+*The write seam.* The sync path is the only thing that sees both halves at once —
+which field came from the platform, and which column it went into. A write of an
+`id_token` or NRPS field into a column with no `lms_` prefix is detectable
+there. The limit is that the sync is **not the only writer of platform-sourced
+data**: launch-time ingestion, AGS, and the seed script all write it too, so a
+check at one seam covers one seam.
+
+An earlier draft of this ticket offered a third option — assert that the set of
+`lms_`-prefixed columns matches an explicit list. **That does not work and is not
+on the table.** Adding `course.canvas_id` leaves the prefixed set unchanged, so
+the assertion stays green while the gap opens; it also contradicts this ticket's
+own first acceptance criterion, which forbids asserting against a list of
+columns that already exist. It is recorded here only so it is not re-proposed.
 
 ### 2. Assert that a prefix belongs to a department
 
@@ -83,10 +88,27 @@ already holds the containment tests.
 
 **Removing `course.lms_title`.** `spec-conformance` rated it MED and argued it
 should land with the ticket that has a value to put in it. Todd decided to keep
-it. It is recorded here so the decision is visible rather than looking like an
-oversight — the column stays, and [E0-14](E0-14-mock-lms-launch.md) carries the
-consequence that the LTI context claim's `title` is optional while the column is
-`NOT NULL`, so ingestion needs a fallback.
+it. Recorded here so the decision is visible rather than looking like an
+oversight — and recorded with its full cost, because the first draft of this
+paragraph named one third of it:
+
+1. The LTI context claim's `title` is optional while the column is `NOT NULL`,
+   so ingestion needs a fallback. [E0-14](E0-14-mock-lms-launch.md) carries it.
+2. **E0-15's NRPS sync and E0-17's seed must supply a title for every course
+   they insert**, or the write fails. Neither ticket says so yet.
+3. **The fallback and the marker contradict each other.** E0-14 tells the
+   ingestion path to invent a title — `label`, or the prefix and number — when
+   the platform sends none, and write it into a column whose `lms_` name asserts
+   that Pulse does not own the value ([ADR
+   0014](../../adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)). That
+   is the distinction E0-05 drew when it refused to mark `level`: a value Pulse
+   computes carries no prefix. So keeping `NOT NULL` costs either a nullable
+   column later or a marker that lies about one row in every course the platform
+   under-describes.
+
+None of that reverses the decision, which is Todd's. It is here so that whoever
+hits item 3 finds it already named rather than discovering it as a
+contradiction.
 
 ## Acceptance criteria
 

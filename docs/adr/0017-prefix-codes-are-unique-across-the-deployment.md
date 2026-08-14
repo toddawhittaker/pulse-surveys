@@ -24,9 +24,11 @@ and two independent reviewers read the original docstring as claiming it was.
 deployment, owned by one department.
 
 The docstring says so plainly and names the assumption it rests on: a deployment
-serves one institution. `app.config.Settings` already carries
-`INSTITUTION_TIMEZONE` as a single deployment-level value, which is the same
-assumption stated elsewhere.
+serves one institution. That assumption is **latent, not enforced**, and this
+record does not pretend otherwise. `app.config.Settings` carrying a single
+`INSTITUTION_TIMEZONE` is consistent with it and is not evidence for it — a
+configuration default is not a statement that only one `institution` row may
+exist.
 
 ## Alternatives rejected
 
@@ -37,6 +39,18 @@ departments makes `BIOL 215` ambiguous, and a course number is how every other
 part of the product names a course. Scoping to the parent is right when the
 parent disambiguates the child; here it does not, because nothing downstream
 carries the department alongside the prefix.
+
+**Enforce the single-institution assumption instead of leaving it latent** — a
+constraint permitting at most one `institution` row, at which point global
+uniqueness and institution-scoped uniqueness are the same rule and the
+incoherence below disappears. This is the cheapest of the three and it was not
+considered when the decision was first written, which is the gap this paragraph
+exists to close. It is not taken here because it decides something wider than
+E0-05: whether the product is single-tenant by construction is a statement about
+what Pulse *is*, the spec does not make it, and a schema ticket should not make
+it by side effect. It is the right answer if the spec ever says so, and it would
+turn a confusing `uq_prefix_code` violation into an error at the row that is
+actually wrong.
 
 **Scope to the institution — `UniqueConstraint("institution_id", "code")`.**
 The literal reading of the original docstring, and the correct rule if a

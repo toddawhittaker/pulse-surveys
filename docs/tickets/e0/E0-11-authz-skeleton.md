@@ -69,16 +69,26 @@ thin), §4.1, and the roles section of `CLAUDE.md`.
       refusal is asserted per column rather than once. E0-05 marks those
       columns with an `lms_` prefix ([ADR
       0014](../../adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)).
-      **This enforces the marker where it is present and does not detect one
-      that is missing** — the wording matters, because an earlier draft of this
-      criterion claimed it closed ADR 0014's open half and it does not. The
-      chokepoint's only way to know a column is LMS-owned is the `lms_` prefix,
-      which is the ADR's stated reason for choosing a name over an `info={}`
-      dict. So this assertion ranges over the marked set, and a later ticket
-      that adds an LMS-owned column without the prefix still gets an edit path
-      with nothing failing. Detecting the omission needs the sync path that
-      writes LMS data, because that is the only thing that knows which fields it
-      received; [E0-21](E0-21-review-debt.md) carries it.
+      **Choose the grain deliberately; do not inherit it from the marker.** Two
+      earlier drafts of this criterion each got this wrong in a different
+      direction — the first claimed the chokepoint closes ADR 0014's open half,
+      the second claimed the prefix is the chokepoint's only possible signal.
+      Neither is right, and the second is the more dangerous, because it records
+      an unprefixed LMS-owned column slipping through as expected behaviour.
+
+      SPEC §2.1's ownership list is *courses, sections, section codes,
+      enrollments, teaching instructors*, and every item on it lives on
+      `course`, `section` or `enrollment`. So a **table-grained** refusal
+      answers §2.1 without reading a column name, and would catch the unprefixed
+      column a name-based check cannot. Its failure mode is the opposite one: it
+      breaks the day a Pulse-owned writable column lands on one of those tables,
+      and `course.level` is already an example of a non-LMS column there, saved
+      only by being unwritable. A **column-grained** refusal over the `lms_`
+      prefix has the omission gap instead.
+
+      Pick one, say which in the pull request, and say what the chosen grain
+      does not catch. [E0-21](E0-21-review-debt.md) carries the residue of
+      whichever is chosen.
 - [ ] mypy strict passes on `app/services/authz.py`.
 
 ## Definition of done

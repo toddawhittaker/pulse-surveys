@@ -49,6 +49,17 @@ the database has no drift gate. See [E0-20](E0-20-gate-fidelity.md) item 3.
   foreign key alone rather than ordering its own migration behind a `term` stub.
   SPEC §8's "sections belong to exactly one course and one term" is only half
   enforced until this lands.
+
+  **Drop `ix_section_course_id` in the same migration, if — and only if — that
+  constraint lands leading with `course_id`.** E0-05's review added that index
+  because `section.course_id` was an unindexed foreign key. A composite unique
+  index over `(course_id, term_id, lms_section_code)` already serves an equality
+  lookup on `course_id` alone, measured, which is the same reasoning that leaves
+  `college.institution_id`, `department.college_id` and `course.prefix_id`
+  deliberately unindexed. Keeping both would cost a write on every section
+  insert for no read benefit. If you order the constraint's columns differently,
+  the index stays and this bullet is wrong rather than the index being
+  redundant — check before deleting.
 - All timestamps timezone-aware. The `DTZ` ruff rules are already on; do not
   suppress them.
 

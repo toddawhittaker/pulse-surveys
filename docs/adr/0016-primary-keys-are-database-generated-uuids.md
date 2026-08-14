@@ -42,10 +42,22 @@ in force for writes that go through the ORM; a migration, a seed script or the
 mock LMS bypassing it would insert a `NULL`. A server default holds for every
 writer.
 
-**UUIDv7, for time-ordered keys with the locality `bigint` has.** The genuinely
-better answer for the high-volume tables E2 adds (`response`, `answer`), and it
-is rejected only for now: `uuidv7()` is a Postgres 18 function and the pinned
-image is `postgres:17.10` ([ADR 0007](0007-container-images-pinned-by-tag-and-digest.md)).
+**UUIDv7, for time-ordered keys with the locality `bigint` has.** Better for the
+high-volume tables E2 adds on index-locality grounds alone, and rejected for two
+reasons rather than one.
+
+**It must not be used for `response` or `answer`, and that is not a "for now".**
+A v7 key encodes its creation millisecond, so ordering or paging by primary key
+returns rows in submission order. A comment list rendered in "arbitrary" primary
+key order is then rendered in the order students submitted, and in a small
+section an instructor who knows roughly when people launched can attribute
+comments — the exact linkage [SPEC §4](../SPEC.md) buys by randomizing comment
+display order and never showing timestamps. The leak does not need the id to
+leave the server, so the exposure rule below does not catch it. Any table whose
+rows are student-authored keeps a v4 key.
+
+For everything else it is deferred rather than rejected: `uuidv7()` is a
+Postgres 18 function and the pinned image is `postgres:17.10` ([ADR 0007](0007-container-images-pinned-by-tag-and-digest.md)).
 Vendoring a PL/pgSQL implementation to get it early would put a hand-written
 random-bit generator in the schema, which is more risk than the index locality
 is worth at E0's row counts. Revisit when the image moves.
@@ -54,12 +66,19 @@ is worth at E0's row counts. Revisit when the image moves.
 
 Sixteen bytes per key and per foreign key, and random insert order, so index
 pages fill less densely than a sequence would. Invisible at E0's volumes;
-`response` and `answer` in E2 are where it could be measured, and where UUIDv7
-becomes worth the upgrade.
+`response` and `answer` in E2 are where it could be measured — and where UUIDv7
+is nonetheless ruled out, for the ordering reason above. If that locality is ever
+needed on those two tables, it has to come from an explicit index, not from the
+key.
 
-**Containment and configuration ids are safe to put in URLs and in logs** — an
-`institution`, `college`, `department`, `prefix`, `course` or `section` id
-identifies a row and says nothing about who or how many.
+**Containment ids are safe to put in URLs and in logs** — an `institution`,
+`college`, `department`, `prefix`, `course` or `section` id identifies a row and
+says nothing about who or how many. That list is exhaustive, not illustrative.
+An earlier draft said "containment **and configuration** ids" and then named only
+these six, which granted the configuration tables without bounding them:
+`person`, `role_assignment` and `lead_faculty_mapping` are staff rows rather than
+student identity, but they are people, and this paragraph is not the place that
+decides they are safe to log.
 
 **Ids that identify a person or a response are not**, and this decision does not
 make them so. `user.id` and `response.id` are governed by the rule above — every
