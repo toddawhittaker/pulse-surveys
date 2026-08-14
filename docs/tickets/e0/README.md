@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Eighteen tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Nineteen tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -36,6 +36,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 16 | [Mock OIDC identity provider](E0-16-mock-idp.md) | 02, 08 | Discovery, authorize, token, JWKS, PKCE, seeded leadership, Care, and admin users. |
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
+| 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, and the ADR for E0-03's closed-set rules. |
 
 ## Dependency graph
 
@@ -49,12 +50,16 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 01 ── 12 ── 13 ─────────────────────────────────── ┤
 02 ── 16 ───────────────────────────────────────── ┤
 07, 09, 15 ── 17 ───────────────────────────────── ┘
+
+02, 03 ── 19        (independent; blocks nothing)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything.
+chain and the mock LMS; ticket 18 needs everything. Ticket 19 hangs off 03 and
+blocks nothing — it hardens tests rather than adding behaviour, so it can land
+any time after 03 and is not on the path to the E0 exit.
 
 ## How CI tightens
 
@@ -106,6 +111,13 @@ Where this differs from the ticket list in §14.3, and why:
   is a named per-platform deviation in §7.3.
 - **18 is new** — §14.3 implies E0's exit criterion but lists no ticket that
   proves it. Without it the e2e gate would stay tolerant into E1.
+- **19 is new, and came out of building 03** rather than out of §14.3. Five
+  reviewer passes on the E0-03 pull request found route after route by which a
+  future edit could hand an application container the Postgres superuser
+  credential that ADR 0009 exists to withhold from it. Most were closed there;
+  the three that remained are a coherent subject of their own and were splitting
+  a Celery ticket in half, so they became a ticket. It adds no behaviour and
+  blocks nothing.
 
 The illustrative ticket names in `CONTRIBUTING.md` predate this file. Where the
 two differ, these ticket branch names win.
