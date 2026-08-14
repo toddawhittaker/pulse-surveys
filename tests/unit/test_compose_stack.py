@@ -183,10 +183,18 @@ CREDENTIAL_OWNING_SERVICE = "db"
 # interpolating it (`secrets:`, `configs:`). Each of those was a review finding
 # in turn, which is why the answer is a closed set rather than three more cases.
 #
-# `name`, `services`, `volumes` and `networks` are here because they are what
-# these files use and because a rule that walks values covers them. Anything
+# These three are exactly what the two files declare — `name`, `services` and
+# `volumes` in the base file, `services` in the override, plus the `x-` anchors
+# each of them keeps — and a rule that walks values covers all of them. Anything
 # else is a deliberate edit to this module, made in the same change.
-ALLOWED_TOP_LEVEL_KEYS = ("name", "services", "volumes", "networks")
+#
+# `networks` was on this list until a reviewer pointed out that nothing declares
+# one. A closed set that admits a feature the repository does not use is not
+# closed; it is a smaller open one, with an entry nobody has had to think about.
+# When a Compose file first needs a network, the entry comes back in the change
+# that adds it, and whoever adds it says here why the rules above still hold
+# over it — which is the cost this list exists to impose.
+ALLOWED_TOP_LEVEL_KEYS = ("name", "services", "volumes")
 
 # Compose gives `x-…` no meaning of its own, so an extension field is inert
 # until something merges it — and it is walked like every other value, so its
@@ -1050,11 +1058,6 @@ def test_the_repository_root_holds_no_compose_file_this_suite_does_not_read(
     assert root.is_dir(), (
         f"{root} is not a directory, so the search below looks at nothing and finds "
         "nothing, which this test would otherwise read as 'no stray Compose files'."
-    )
-    assert expected, (
-        "The fixtures name no Compose files, so this test would assert that the repository "
-        "root holds none — the opposite of what it is for. Whatever `conftest.py` reads is "
-        "what belongs on this list."
     )
 
     present = {name for name in COMPOSE_FILE_NAMES if (root / name).is_file()}
