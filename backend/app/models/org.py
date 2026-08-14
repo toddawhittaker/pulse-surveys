@@ -170,11 +170,21 @@ class Department(Base):
 class Prefix(Base):
     """A course prefix (e.g. BIOL), belonging to exactly one department.
 
-    `code` is unique across the institution rather than within the department:
-    SPEC §2.1's example is a Math department holding MATH, STAT and MIS, so a
-    prefix names a subject once and one department owns it. A prefix appearing
-    under two departments would make `MATH 101` ambiguous, which is the thing
-    "a department groups one or more prefixes" rules out.
+    **`code` is unique across the whole table**, which is what `unique=True`
+    enforces — not "unique per institution", which is what an earlier draft of
+    this docstring claimed. The two coincide only while exactly one
+    `institution` row exists, and this schema supports more than one, since
+    `college` is unique per `institution_id` rather than globally. So the
+    constraint carries a **single-institution assumption**: a second institution
+    with its own MATH would be refused, and that is a migration to make, not a
+    surprise to discover.
+
+    It is deliberate. Scoping to the department instead would let `BIOL` sit
+    under two departments and make `BIOL 215` ambiguous — the thing "a
+    department groups one or more prefixes" (SPEC §2.1) rules out — and scoping
+    to the institution would need `institution_id` denormalised onto this table,
+    which is the second ancestor reference this module's docstring argues
+    against. See ADR 0017.
     """
 
     __tablename__ = "prefix"
@@ -199,9 +209,15 @@ class Course(Base):
 
     LMS-owned and read-only in Pulse (SPEC §2.1), which is what the `lms_` names
     say. The number is text, not an integer: `MATH 040`'s leading zero is
-    significant, and `0099` and `099` are two different courses rather than one
-    read twice (SPEC §8). `level` derives from it; see
-    `COURSE_LEVEL_DERIVATION` above.
+    significant and an integer cannot hold it (SPEC §8). `level` derives from
+    it; see `COURSE_LEVEL_DERIVATION` above.
+
+    An earlier draft justified the same choice with "`0099` and `099` are two
+    different courses", which this schema does not allow: `0099` is four digits
+    and four digits are valid only in `8000`-`9999`, so it is refused at write
+    time. SPEC §8 uses that pair to say what a numeric comparison *would* do
+    without the width rule, which is an argument for the width rule rather than
+    an example of two storable courses.
     """
 
     __tablename__ = "course"
