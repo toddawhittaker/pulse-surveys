@@ -68,7 +68,7 @@ View behavior:
 
 **Data sources — who owns what:**
 
-- **LMS-owned (read-only in Pulse; hourly roster sync + launch-time ingestion):** courses, sections, section codes, enrollments, teaching instructors. Course **level** (UG/GR/DR) derives from the course number; section **length and start date** derive from the section code (§2.2). A read-only course-catalog viewer in the admin console shows what synced and when.
+- **LMS-owned (read-only in Pulse; hourly roster sync + launch-time ingestion):** courses, sections, section codes, enrollments, teaching instructors. Course **level** (DEV/UG/UGGR/GR/DR) derives from the course number, by the bands §8 sets out; section **length and start date** derive from the section code (§2.2). A read-only course-catalog viewer in the admin console shows what synced and when.
 - **Pulse-owned — people graph:** person records (name, category) plus reports-to edges. The LMS has no equivalent; purview is computed from this graph. Built top-down in the admin console (a new person's reports-to selector lists only people already in the graph).
 - **Pulse-owned — Lead Faculty mapping:** a mapping of individuals to the courses they lead (people and courses are not 1:1), maintained in the admin console with CSV import/export. Imports always show a dry-run diff before applying (e.g., "2 mappings added · 1 changed · BIOL 4410 unmapped, falls to chair"). A course with no mapping falls to its department chair.
 
@@ -300,7 +300,18 @@ The Claude Design prototype is the visual and interaction contract; the frontend
 
 Selected constraints:
 
-- Containment: `college → department → prefix → course → section` per §2.1; a department groups one or more prefixes; courses belong to exactly one prefix; sections to exactly one course and one term. Course `level` (UG/GR/DR) derives from the course number; section `length_weeks` and start/end dates derive from the section code via `start_letter_map` — LMS-owned data is never hand-edited in Pulse.
+- Containment: `college → department → prefix → course → section` per §2.1; a department groups one or more prefixes; courses belong to exactly one prefix; sections to exactly one course and one term. Course `level` derives from the course number and is never set independently of it; section `length_weeks` and start/end dates derive from the section code via `start_letter_map` — LMS-owned data is never hand-edited in Pulse.
+- Course number is stored as text, not as an integer, because a developmental number carries a significant leading zero (`MATH 040`) that an integer cannot hold. It is three or four digits, and `level` derives from it by these bands:
+
+  | Number | `level` | |
+  |---|---|---|
+  | `000`–`099` | `DEV` | developmental |
+  | `100`–`499` | `UG` | undergraduate |
+  | `500`–`599` | `UGGR` | dual undergraduate/graduate credit |
+  | `600`–`799` | `GR` | graduate |
+  | `8000`–`9999` | `DR` | doctoral |
+
+  Numbers outside those bands — three-digit `800`–`999`, and four-digit `1000`–`7999` — are rejected at write time rather than stored with an absent or guessed level. A roster sync carrying an unexpected number is a defect to see, not a row to accept.
 - `person` and `role_assignment` implement §2.1: an assignment carries `person_id`, `role`, `scope_node_id`, and a nullable `reports_to` referencing another **assignment** (never a person or org node). The graph is a forest/DAG over assignments; assignment-level cycles are rejected at write time. Purview is computed from this graph, not from containment.
 - `lead_faculty_mapping` maps a person to the courses they lead (one lead per course); a course with no mapping resolves to its department chair.
 - `response` is unique per (student, section, week); `answer` rows link to versioned `question` rows; workload is stored as a decimal.

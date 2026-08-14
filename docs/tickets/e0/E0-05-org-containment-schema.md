@@ -36,9 +36,15 @@ than rediscovered. [E0-20](E0-20-gate-fidelity.md) item 3 has the detail.
 - A department groups one or more prefixes; a course belongs to exactly one
   prefix; a section belongs to exactly one course and one term. Enforce each as
   a database constraint, not an application convention.
-- Course `level` (UG / GR / DR) **derived from the course number**, stored as a
-  generated or trigger-maintained column so it cannot drift from the number.
-  Document the number-to-level rule in the model docstring.
+- Course `level` **derived from the course number**, stored as a generated or
+  trigger-maintained column so it cannot drift from the number. SPEC §8 carries
+  the bands and they are not restated here — `DEV`, `UG`, `UGGR`, `GR`, `DR`,
+  with `800`–`999` and `1000`–`7999` rejected at write time. Two things about
+  them are easy to get wrong: the number is **text**, because `MATH 040`'s
+  leading zero is significant and an integer cannot hold it, so the derivation
+  casts; and the bands mix widths, so a three-digit `850` is invalid while the
+  four-digit `8500` is doctoral. The model docstring cites §8 rather than
+  copying the table.
 - Mark LMS-owned columns explicitly (courses, sections, section codes) so a
   later ticket cannot casually add an edit path. A comment is not enough — add a
   model-level marker or a naming convention the authz layer can read.
@@ -60,7 +66,11 @@ than rediscovered. [E0-20](E0-20-gate-fidelity.md) item 3 has the detail.
 - [ ] Inserting a course under a prefix in a different department's subtree
       fails at the database level.
 - [ ] Course level derives correctly for a table of representative course
-      numbers spanning UG, GR, and DR, including boundary numbers.
+      numbers spanning all five levels, and asserts both edges of every band —
+      `099`/`100`, `499`/`500`, `599`/`600`, `799`, `8000`, `9999`.
+- [ ] A course number in no band fails to insert: `800` and `999` at three
+      digits, `1000` and `7999` at four, and a number that is not three or four
+      digits at all.
 - [ ] Course level cannot be set independently of the course number — an attempt
       either fails or is ignored in favor of the derived value.
 - [ ] Deleting a department with prefixes attached fails rather than cascading.
