@@ -13,7 +13,16 @@ which length and start date. This ticket stores that configuration; E0-07 reads
 it to derive section dates.
 
 Read first: SPEC §2.2 (terms, section codes, the Fall 2026 seed map), §6.3
-(configuration surface), §8.
+(configuration surface), §8, and **"What the built tickets settled" in [the epic
+README](README.md)** — this ticket adds a model module, so its rules on
+registering that module, importing `Base`, constraint naming, and the existing
+database fixtures all apply.
+
+One of them bites here specifically: `week` and `survey_window` are
+timezone-bound (§3.1), so they carry server defaults or generated columns, and
+`alembic check` is currently blind to server-default drift. See
+[E0-20](E0-20-gate-fidelity.md) item 3 — if E0-05 has not already settled it,
+settle it here.
 
 ## Scope
 

@@ -68,6 +68,67 @@ item is `alembic check` being blind to server-default drift, and E0-05 is where
 the first server default lands. Whoever builds 05 should settle that item first
 or knowingly accept it — see the pointer in E0-05's scope.
 
+## What the built tickets settled
+
+Tickets 01 to 04 were written before the code existed, and building them decided
+things the later tickets were written without knowing. Those decisions are now
+load-bearing, and most of them fail in a way that does not point at itself. This
+section is the short list; the tickets it affects carry a pointer to it rather
+than a copy, because a copy in six places drifts in five.
+
+**A model module must be imported in `backend/app/models/__init__.py`, in the
+same change that adds it.** `migrations/env.py` autogenerates against
+`Base.metadata`, and a table whose module nobody imported is not on that
+metadata. So `alembic check` reports no drift, the migration nobody wrote is
+never missed, and the table does not exist in any deployed database. Nothing
+fails at the time; E0-04 left the rule in that file's docstring, and E0-20's
+"gate fidelity" subject is exactly this class of silence.
+
+**Model modules import `Base` from `app.models.base`, never from `app.db`.**
+`app.db` re-exports `Base` and that is the import the *application* writes, but
+it also builds an engine out of `Settings()` when imported, which needs
+`AI_PROVIDER_BASE_URL` and four other variables that have nothing to do with a
+schema. CI's `migration-drift` job and the testcontainers fixture both supply the
+database variables alone. A model module reaching `Base` through `app.db`
+therefore works on a developer's machine, where `.env` has everything, and breaks
+in CI. The reasoning is in `backend/app/models/base.py`'s docstring.
+
+**Constraints are named by the convention, not by hand.** `Base.metadata` carries
+`NAMING_CONVENTION`, so autogenerate renders `op.f('pk_…')` and names are stable
+across regenerations. Do not hand-name a constraint to match a preferred style —
+`alembic check` will churn. Watch the 63-byte Postgres identifier limit when
+choosing table and column names, since the convention's templates concatenate.
+
+**The database fixtures already exist.** `tests/conftest.py` provides
+`postgres_container`, `provisioned_database`, `migrated_database`,
+`empty_database`, `migrated_engine`, `db_session` and `application_engine`. A
+schema ticket writes tests against these rather than standing up its own
+Postgres. The fixture provisions the same two-role shape a deployment has, so a
+test that passes under privileges production lacks is a test that fails.
+
+**Migrations run as `DB_SUPERUSER`, never as the application role** ([ADR
+0009](../../adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md),
+[ADR 0012](../../adr/0012-the-migration-environment-builds-its-own-superuser-connection.md)).
+`env.py` takes the address from `DATABASE_URL` and the identity from the
+superuser pair. No ticket needs to add a variable for this. `make migrate` runs
+on your host, so `DATABASE_URL` has to name `localhost` rather than the Compose
+service — `README.md` says where.
+
+**An `.env.example` entry needs a reader, or its test fails.** An entry earns its
+place because an `app.config.Settings` field resolves to it, or because a Compose
+file interpolates it as `${NAME}` ([ADR
+0008](../../adr/0008-env-has-two-readers-and-the-database-credential-is-split.md)).
+A variable read only by something else — a script, a mock service that is not a
+Compose service — cannot be documented there as things stand, and
+`tests/unit/test_env_example_sync.py` will say so. Tickets 08, 13 and 16 all add
+configuration and should expect this.
+
+**The session is synchronous** ([ADR
+0013](../../adr/0013-the-database-session-is-synchronous.md)). Handlers that
+touch the database are written `def`, not `async def`, and FastAPI runs them in
+its threadpool. The same session serves Celery tasks and `pylti1p3`, both of
+which are synchronous.
+
 ## How CI tightens
 
 Most CI gates ship tolerant because nothing they check exists yet — see

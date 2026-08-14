@@ -14,7 +14,14 @@ fast-moving, so the interface must stay replaceable in about a day's work
 
 Read first: SPEC §7.4 (single-shot boundary, typed contracts, the note on
 pinning `pydantic-ai`), §3.3 (validity gating and fail-open), §6.3 (AI provider
-configuration), and the AI boundary section of `CLAUDE.md`.
+configuration), the AI boundary section of `CLAUDE.md`, and **"What the built
+tickets settled" in [the epic README](README.md)**.
+
+Two of those rules reach this ticket. The `classification` table means a model
+module, so it needs registering in `app/models/__init__.py` and must import
+`Base` from `app.models.base`. And the AI provider variables need `Settings`
+fields to resolve them before `.env.example` can document them — which this
+ticket is adding anyway, so the order is what matters, not the work.
 
 ## Scope
 

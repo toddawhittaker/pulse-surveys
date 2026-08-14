@@ -13,7 +13,10 @@ expressible and sibling-lead isolation enforceable. Getting the edge endpoints
 wrong here would quietly break purview for the whole product.
 
 Read first: SPEC §2.1 in full — especially the purview definition and the
-assistant-dean worked example — plus §8 and the roles section of `CLAUDE.md`.
+assistant-dean worked example — plus §8, the roles section of `CLAUDE.md`, and
+**"What the built tickets settled" in [the epic README](README.md)**, whose model
+registration, `Base` import, constraint-naming and fixture rules apply to the
+tables this ticket adds.
 
 ## Scope
 

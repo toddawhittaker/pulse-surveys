@@ -17,6 +17,17 @@ suite), §13 (`views_sql/` ships as migrations, not ORM convention), and
 [ADR 0009](../../adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md),
 which changes who provisions two of the three roles below.
 
+Also **"What the built tickets settled" in [the epic README](README.md)**. Two
+items reach this ticket. `tests/conftest.py` already provides an
+`application_engine` fixture connected as the non-superuser application role,
+which is the connection most of this ticket's invariants need to be asserted
+over — E0-04 built it so that tests cannot pass under privileges production
+lacks, which is precisely the failure mode §4.1 exists to prevent. And
+`test_application_role_privileges.py` already asserts that role is not a
+superuser and cannot create a table; this ticket's "neither runtime role owns any
+table, and neither is a superuser" criterion extends that guard rather than
+starting it.
+
 ## Reconcile first: `pulse_app` already exists
 
 E0-02 provisions an application role before this ticket runs.

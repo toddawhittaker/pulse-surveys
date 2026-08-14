@@ -13,7 +13,12 @@ graph in E0-09. Getting the separation right in the schema is what keeps the two
 from quietly merging later.
 
 Read first: SPEC §2.1 (containment, and the data-source ownership list), §8
-(selected constraints), `CLAUDE.md` (roles and purview).
+(selected constraints), `CLAUDE.md` (roles and purview), and **"What the built
+tickets settled" in [the epic README](README.md)** — this is the first ticket to
+add a model module, so every rule in that section applies here first: registering
+the module in `app/models/__init__.py`, importing `Base` from `app.models.base`
+rather than `app.db`, leaving constraint names to the convention, and using the
+fixtures `tests/conftest.py` already provides.
 
 ## Scope
 
