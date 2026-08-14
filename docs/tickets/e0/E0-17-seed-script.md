@@ -34,6 +34,10 @@ Fall 2026 start-letter map), §13 (`scripts/seed.py`), §6.3.
   expect them to disagree with every screenshot in `design/`. Renumbering that
   corpus, or deciding it stays as illustration, is a separate call — raise it
   rather than quietly reconciling one side to the other.
+
+  **Every seeded course also needs a title.** `course.lms_title` is `NOT NULL`
+  (E0-05, kept deliberately — see [E0-21](E0-21-review-debt.md)), so a course
+  inserted without one fails.
 - A Fall 2026 term with the §2.2 start-letter map seeded as data, and sections
   spanning several start letters, both modalities, and at least three different
   lengths.

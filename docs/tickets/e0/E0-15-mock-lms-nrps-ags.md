@@ -27,6 +27,14 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
 - Seed data: a small institution with a handful of courses and sections whose
   codes exercise more than one start letter and both modalities, plus students,
   instructors, and enrollments including at least one mid-term add and one drop.
+
+  **Every seeded course needs a title and a number in SPEC §8's bands.**
+  `course.lms_title` is `NOT NULL` (E0-05, kept deliberately — see
+  [E0-21](E0-21-review-debt.md)), so a course inserted without one fails, and
+  course numbers outside the bands are refused at write time. Note that the
+  numbers written across `design/` — `BIOL 2150` and the rest — are all invalid
+  under those bands; 24 of the 25 in the repository are. Pick numbers against §8
+  rather than from a prototype screen.
 - An endpoint or fixture hook that lets a test inspect posted scores.
 
 ## Out of scope
