@@ -21,6 +21,14 @@ here rather than fixed there, because the reviewer pass reports and the merge
 decision chooses. Sizes differ a lot: the first is a few lines, the last is a
 judgement call about logging that nothing yet depends on.
 
+**Four open: three of the original four, plus one this ticket gained.** Item 3
+landed in E0-05, which is where the first server defaults arrived; it is kept
+below with what it settled, because the reasoning is worth finding. Closing it
+exposed a narrower gap in the same place, which this ticket now carries as a
+fourth item — a generated column's expression can drift with `alembic check`
+green, because Alembic cannot `ALTER` a generated column and so warns instead of
+failing.
+
 Read first: `.github/workflows/ci.yml`, `docs/adr/0002-ci-gates-ship-tolerant.md`,
 and `docs/MISTAKES.md` entries 2 and 3.
 
@@ -67,25 +75,33 @@ The `env.py` half *is* guarded: reverting its `.set(username=…, password=…)`
 turns three integration tests red and errors five more. Only the CI job's half is
 unasserted.
 
-### 3. `alembic check` is blind to server-default drift
+### 3. `alembic check` is blind to server-default drift — **closed in E0-05**
 
 `backend/migrations/env.py`, both the online path and the offline path.
-`context.configure` sets `compare_type=True` but not `compare_server_default`,
+`context.configure` set `compare_type=True` but not `compare_server_default`,
 which defaults to `False`.
 
-From E0-05 the models carry server defaults — `created_at` defaulting to `now()`,
-flags on `moderation_action`, the append-only `classification` and `audit_log`
-rows. Editing one without writing the migration reports no drift, so the
-acceptance criterion E0-04 exists to establish does not hold for that class of
-change.
+From E0-05 the models carry server defaults — `gen_random_uuid()` on every
+containment primary key, and later `created_at` defaulting to `now()`, flags on
+`moderation_action`, the append-only `classification` and `audit_log` rows.
+Editing one without writing the migration reported no drift, so the acceptance
+criterion E0-04 exists to establish did not hold for that class of change.
 
-Either turn it on, or write down why not. The usual reason to leave it off is
-false positives from Postgres normalising `text()` defaults — that is a real
-cost, and if it is the answer it belongs in `env.py`'s docstring, because
-otherwise a later ticket hits it and re-derives the whole question.
+**E0-05 turned it on**, on both paths, with the reasoning in `env.py`'s docstring
+and `tests/integration/test_migration_comparison_settings.py` asserting both
+settings so it cannot be switched off silently. The feared false positives from
+Postgres normalising `text()` defaults did not appear against the six new tables;
+if they do later, the answer is to spell the model's default the way the server
+stores it, not to switch the comparison back off.
 
-**Whoever builds E0-05 should settle this first**, since E0-05 is where the first
-server default lands.
+**One thing this does not reach, found while closing it.** A *generated* column
+is compared differently: Alembic has no `ALTER` to emit for one, so
+`_compare_computed_default` normalises both expressions, emits a `UserWarning`
+when they differ, and `alembic check` still exits zero. E0-05 spells
+`course.level`'s expression the way Postgres deparses it, so the warning now
+fires only on real drift rather than on every run — but a warning is not a gate,
+and a changed generation expression with no migration behind it still passes CI.
+That is this ticket's own subject and is added to its criteria below.
 
 ### 4. `echo=False` is not what keeps SQL out of the log
 
@@ -160,8 +176,18 @@ passing while every statement is being logged.
       reading the YAML.
 - [ ] Deleting the drift job's provisioning step, or repointing its
       `DATABASE_URL` at the superuser, fails something.
-- [ ] A model whose `server_default` changed without a migration fails
-      `alembic check`, or `env.py` records why that is deliberate.
+- [x] A model whose `server_default` changed without a migration fails
+      `alembic check`, or `env.py` records why that is deliberate. **Done in
+      E0-05**, and verified by mutation both ways: with the flag on, adding a
+      `server_default` to `institution.name` fails `alembic check`; with the
+      online path's flag removed, the same drift reports "No new upgrade
+      operations detected".
+- [ ] A model whose *generated* column expression changed without a migration
+      fails something. It does not today: `alembic check` warns and exits zero
+      (see item 3). The cheap form is a test that reads `pg_get_expr` off the
+      migrated database and compares it, normalised, with the model's
+      `Computed` text — one assertion, and it is the only drift signal a
+      generated column has.
 - [ ] With `sqlalchemy.engine` set to INFO by name, no bound parameter reaches
       the log outside development.
 - [ ] Every fix above is verified by mutation — reintroduce the defect and watch

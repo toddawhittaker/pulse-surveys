@@ -52,7 +52,7 @@ Institution
 └── College                 (e.g., College of Sciences)
     └── Department          (groups one or more prefixes: Math may hold MATH, STAT, MIS)
         └── Prefix          (e.g., BIOL)
-            └── Course      (e.g., BIOL 2150)
+            └── Course      (e.g., BIOL 215)
                 └── Section (term instance, e.g., R3WW in Fall 2026)
 ```
 
@@ -68,9 +68,9 @@ View behavior:
 
 **Data sources — who owns what:**
 
-- **LMS-owned (read-only in Pulse; hourly roster sync + launch-time ingestion):** courses, sections, section codes, enrollments, teaching instructors. Course **level** (UG/GR/DR) derives from the course number; section **length and start date** derive from the section code (§2.2). A read-only course-catalog viewer in the admin console shows what synced and when.
+- **LMS-owned (read-only in Pulse; hourly roster sync + launch-time ingestion):** courses, sections, section codes, enrollments, teaching instructors. Course **level** (DEV/UG/UGGR/GR/DR) derives from the course number, by the bands §8 sets out; section **length and start date** derive from the section code (§2.2). A read-only course-catalog viewer in the admin console shows what synced and when.
 - **Pulse-owned — people graph:** person records (name, category) plus reports-to edges. The LMS has no equivalent; purview is computed from this graph. Built top-down in the admin console (a new person's reports-to selector lists only people already in the graph).
-- **Pulse-owned — Lead Faculty mapping:** a mapping of individuals to the courses they lead (people and courses are not 1:1), maintained in the admin console with CSV import/export. Imports always show a dry-run diff before applying (e.g., "2 mappings added · 1 changed · BIOL 4410 unmapped, falls to chair"). A course with no mapping falls to its department chair.
+- **Pulse-owned — Lead Faculty mapping:** a mapping of individuals to the courses they lead (people and courses are not 1:1), maintained in the admin console with CSV import/export. Imports always show a dry-run diff before applying (e.g., "2 mappings added · 1 changed · BIOL 441 unmapped, falls to chair"). A course with no mapping falls to its department chair.
 
 ### 2.2 Terms, section codes, and course weeks
 
@@ -143,7 +143,7 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 - De-identified comments **grouped under "About the instructor" / "About the course," each group led by its own AI summary**; empty groups show a one-line notice, not a hidden heading. Comments carry their moderation status (§5.2), subject to §4 small-N rules.
 - AI summaries per stream: preserve clearly critical themes (never sanded off), state the response count they draw from, exclude flagged-held content (above small-N they may note "one comment is held for review" with type only), and are generated **even in small-N weeks** — there, the summary is the only comment signal.
 
-**Comparison sets.** To be comparable, sections must match on **both** length (§2.2's length set) *and* level (UG / GR / DR) — an 8-week graduate course is never averaged against a 12-week undergraduate one. Benchmarks are **past-referencing**: week N of a 12-week section is compared against week N of 12-week sections of the same level in the current *and prior* terms, regardless of start date. The default comparison set is the same Lead Faculty's courses filtered to matching length+level; leadership can define named sets, and set-definition UI makes invalid combinations impossible rather than erroring on them. The university-wide line is all same-length+level sections institution-wide. Benchmark lines have their own minimum (distinct from the per-section n-threshold): computed from fewer than the configured number of sections, the line is suppressed rather than shown thin.
+**Comparison sets.** To be comparable, sections must match on **both** length (§2.2's length set) *and* level (§8's set: `DEV`, `UG`, `UGGR`, `GR`, `DR`) — an 8-week graduate course is never averaged against a 12-week undergraduate one. Levels match **exactly**; no level is folded into another. A `UGGR` section is compared against other `UGGR` sections and not against `UG` or `GR` ones, and a `DEV` section only against `DEV`. This is deliberate rather than an omission: the dual-credit and developmental populations are the two whose experience is least like the undergraduate mean, so averaging them into it would hide exactly the signal the product exists to surface. Splitting three levels into five makes a thin comparison set the common case rather than the edge, and **the benchmark minimum defined below does not currently cover all of it**: as written it suppresses a benchmark *line*, while this section also requires workload mean and median against comparison-set figures, which are numbers and are not covered. A mean over one or two sections is a number about those sections — the same inference small-N suppression exists to prevent, reachable here through a benchmark rather than through a comment. **This is an open question, not a settled rule**: extending the minimum to every comparison-set figure is the likely answer and would make it a §4.1 confidentiality invariant with a test behind it, but that is a product decision and is not made here. Whatever is decided, suppression is the right outcome for a thin set and is not a reason to widen the level match. Benchmarks are **past-referencing**: week N of a 12-week section is compared against week N of 12-week sections of the same level in the current *and prior* terms, regardless of start date. The default comparison set is the same Lead Faculty's courses filtered to matching length+level; leadership can define named sets, and set-definition UI makes invalid combinations impossible rather than erroring on them. The university-wide line is all same-length+level sections institution-wide. Benchmark lines have their own minimum (distinct from the per-section n-threshold): computed from fewer than the configured number of sections, the line is suppressed rather than shown thin.
 
 ### 5.2 Comment moderation
 
@@ -300,7 +300,18 @@ The Claude Design prototype is the visual and interaction contract; the frontend
 
 Selected constraints:
 
-- Containment: `college → department → prefix → course → section` per §2.1; a department groups one or more prefixes; courses belong to exactly one prefix; sections to exactly one course and one term. Course `level` (UG/GR/DR) derives from the course number; section `length_weeks` and start/end dates derive from the section code via `start_letter_map` — LMS-owned data is never hand-edited in Pulse.
+- Containment: `college → department → prefix → course → section` per §2.1; a department groups one or more prefixes; courses belong to exactly one prefix; sections to exactly one course and one term. Course `level` derives from the course number and is never set independently of it; section `length_weeks` and start/end dates derive from the section code via `start_letter_map` — LMS-owned data is never hand-edited in Pulse.
+- Course number is stored as text, not as an integer, because a developmental number carries a significant leading zero (`MATH 040`) that an integer cannot hold. It is three or four digits, and `level` derives from it by these bands:
+
+  | Number | `level` | |
+  |---|---|---|
+  | `000`–`099` | `DEV` | developmental |
+  | `100`–`499` | `UG` | undergraduate |
+  | `500`–`599` | `UGGR` | dual undergraduate/graduate credit |
+  | `600`–`799` | `GR` | graduate |
+  | `8000`–`9999` | `DR` | doctoral |
+
+  Width is part of the rule, not an accident of it: a three-digit number is valid only in `000`–`799`, and a four-digit number only in `8000`–`9999`. So `800` and `999` are rejected, and so are `1000`–`7999` and any four-digit number below `1000`. That last case is why width is stated rather than left to the arithmetic — `0099` and `099` are different strings that a numeric comparison would read as the same course, which is how one course acquires two spellings and two rows. Numbers outside the bands are rejected at write time rather than stored with an absent or guessed level. A roster sync carrying an unexpected number is a defect to see, not a row to accept.
 - `person` and `role_assignment` implement §2.1: an assignment carries `person_id`, `role`, `scope_node_id`, and a nullable `reports_to` referencing another **assignment** (never a person or org node). The graph is a forest/DAG over assignments; assignment-level cycles are rejected at write time. Purview is computed from this graph, not from containment.
 - `lead_faculty_mapping` maps a person to the courses they lead (one lead per course); a course with no mapping resolves to its department chair.
 - `response` is unique per (student, section, week); `answer` rows link to versioned `question` rows; workload is stored as a decimal.

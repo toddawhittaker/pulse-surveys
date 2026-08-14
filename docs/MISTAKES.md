@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 3**
+**Caught: 5**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -55,6 +55,41 @@ existed to fix was reintroducible without any signal.
 green, you have written a convention, not a guarantee. Prefer asserting the
 *forbidden* state over the permitted one — it keeps working when a legitimate
 second case arrives.
+
+---
+
+## 3. A test passed for a reason unrelated to what it asserted
+
+**Caught: 5**
+
+**What happened.** A test asserting that a startup error carries no credential
+passed against a demonstrably leaking implementation, because ten variables
+happened to be set and pydantic's repr elision landed between the two passwords.
+Separately, a set-equality test would have passed comparing two empty sets, if
+a workflow's shape changed so nothing was collected.
+
+A third, in E0-03, inside the test written to enforce entry 1 below. It asserted
+that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
+argument list in E0-03", by searching the file text for that phrase. The comment
+wraps at 80 columns, so between `join the` and `argument list` the file holds a
+newline, six spaces and a `#`. The pattern was written with a plain space. It
+matched nothing, and the test went green against the exact comment it existed to
+catch — reported as failing, because it had been read rather than run.
+
+**Root cause.** Asserting an absence. Absence is satisfied by the thing being
+broken in an unrelated way, by a fixture returning nothing, by a parser matching
+nothing. In the third case, by the difference between what a sentence looks like
+in a file and what it is as a string.
+
+**Consequence. ** A green suite is read as coverage. The first case would have
+been counted as proof the leak was fixed when it proved nothing about it.
+
+**Rule.** Verify by mutation, not by reading: break the thing and watch the test
+fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
+say in the message why that guard is not ceremony. A pattern searched against a
+file is a case of this and looks like none: run it against the text you claim it
+catches *and* against the text you claim it allows, and give it a canary — a
+string certainly present — so a search that has gone blind says so.
 
 ---
 
@@ -106,41 +141,6 @@ never written and the one that drifted out from under you.
 you have just written is a claim nobody has checked, including the ones written
 while correcting somebody else's. Where a sentence describes a behaviour, it has
 to match what you measured — not what you expected to measure before you ran it.
-
----
-
-## 3. A test passed for a reason unrelated to what it asserted
-
-**Caught: 3**
-
-**What happened.** A test asserting that a startup error carries no credential
-passed against a demonstrably leaking implementation, because ten variables
-happened to be set and pydantic's repr elision landed between the two passwords.
-Separately, a set-equality test would have passed comparing two empty sets, if
-a workflow's shape changed so nothing was collected.
-
-A third, in E0-03, inside the test written to enforce entry 1 above. It asserted
-that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
-argument list in E0-03", by searching the file text for that phrase. The comment
-wraps at 80 columns, so between `join the` and `argument list` the file holds a
-newline, six spaces and a `#`. The pattern was written with a plain space. It
-matched nothing, and the test went green against the exact comment it existed to
-catch — reported as failing, because it had been read rather than run.
-
-**Root cause.** Asserting an absence. Absence is satisfied by the thing being
-broken in an unrelated way, by a fixture returning nothing, by a parser matching
-nothing. In the third case, by the difference between what a sentence looks like
-in a file and what it is as a string.
-
-**Consequence. ** A green suite is read as coverage. The first case would have
-been counted as proof the leak was fixed when it proved nothing about it.
-
-**Rule.** Verify by mutation, not by reading: break the thing and watch the test
-fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
-say in the message why that guard is not ceremony. A pattern searched against a
-file is a case of this and looks like none: run it against the text you claim it
-catches *and* against the text you claim it allows, and give it a canary — a
-string certainly present — so a search that has gone blind says so.
 
 ---
 
@@ -348,3 +348,34 @@ its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
 `docker inspect` for a health check's output) and reproduce outside the harness
 if the harness is what is hiding it. A timeout is the absence of evidence, not
 evidence.
+
+---
+
+## 12. A mutation was reverted on disk and not in the interpreter
+
+**Caught: 0**
+
+**What happened.** In E0-05, checking that `alembic check` warns when a generated
+column's expression drifts: edit `app/models/org.py` to change one band edge from
+`499` to `498`, run the check, edit it back, run it again. The warning was there
+both times. Ten minutes went into the model, the migration and the database
+before `grep` showed the file on disk said `499` while the module Python imported
+said `498`.
+
+**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
+file's size and mtime **truncated to the second**. Reverting a mutation of equal
+length inside the same second leaves the cache valid, so the stale bytecode is
+what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
+revert is invisible to the interpreter.
+
+**Consequence.** The reverted run and the mutated run produce identical output,
+which reads as "the mutation made no difference" — the conclusion that kills the
+finding. Here it would have been "matching the server's own rendering does not
+silence the warning, so do not bother", and the drift signal E0-20 now depends on
+would have been dropped as not working.
+
+**Rule.** When mutating and reverting source between runs, clear the caches in
+the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
+export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
+the interpreter rather than in the file: print the value the module actually
+holds. `grep` proves what is on disk, which is not what ran.

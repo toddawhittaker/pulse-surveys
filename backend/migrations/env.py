@@ -111,12 +111,21 @@ def migration_url() -> URL:
 
 
 def run_migrations_offline() -> None:
-    """Render the migrations as SQL rather than running them (`alembic --sql`)."""
+    """Render the migrations as SQL rather than running them (`alembic --sql`).
+
+    The two comparison settings are inert on this path — offline mode emits SQL
+    without a connection, so there is nothing to compare the models against.
+    They are set anyway, because this call and the one in
+    `run_migrations_online` are two copies of the same configuration, and a pair
+    that drifts teaches whoever reads the wrong copy the wrong rule.
+    """
     context.configure(
         url=migration_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
@@ -129,10 +138,23 @@ def run_migrations_online() -> None:
     `NullPool` because a migration opens one connection, uses it, and exits;
     pooling would keep a superuser connection open for a process that is done.
 
-    `compare_type=True` so that changing a column's type in a model without
-    writing a migration is drift rather than something `alembic check` shrugs
-    at. That is the gate this ticket turns on: the point is that a *model
-    change* breaks the build.
+    `compare_type=True` and `compare_server_default=True` so that changing a
+    column's type or its server default in a model without writing a migration
+    is drift rather than something `alembic check` shrugs at. That is the gate
+    E0-04 turned on: the point is that a *model change* breaks the build, and
+    `alembic check` compares only what it is told to. Both are off by default,
+    and a default of "compares less" is the shape E0-20 catalogues — a gate that
+    reports green while the thing it exists to detect is happening.
+
+    The server-default half was E0-20 item 3 and landed in E0-05, which is where
+    the first server defaults did (`gen_random_uuid()` on every containment
+    primary key). The usual reason to leave it off is that Postgres normalises a
+    `text()` default and reports drift against a model that never changed; that
+    is real, and the answer when it happens is to spell the model's default the
+    way the server stores it, not to switch the comparison back off.
+    `tests/integration/test_migration_comparison_settings.py` asserts both
+    settings on both paths, so switching one off is a red test rather than a
+    silent loss of coverage.
     """
     connectable = create_engine(migration_url(), poolclass=pool.NullPool)
     try:
@@ -141,6 +163,7 @@ def run_migrations_online() -> None:
                 connection=connection,
                 target_metadata=target_metadata,
                 compare_type=True,
+                compare_server_default=True,
             )
 
             with context.begin_transaction():

@@ -25,8 +25,13 @@ parsing across the full start-letter map), §8.
 - Modality mapping: `WW` online, `FF` face-to-face. Unknown suffixes are an
   error, not a silent default.
 - Handle the 3-week case, which §2.2 numbers 2–7 rather than lettering.
-- Populate the derived section columns from E0-05 through this service, so there
-  is exactly one path that sets them.
+- Add the derived section columns and populate them through this service, so
+  there is exactly one path that sets them. **They are not on `section` yet.**
+  E0-05 shipped that table with its course foreign key and `lms_section_code`
+  and nothing else: a length or a start date has no value it could be given
+  until this parser exists, and a start date additionally needs the term
+  foreign key, which E0-06 adds. So the columns arrive with the code that fills
+  them rather than as four nullable columns waiting for it.
 - Hypothesis property tests across the full letter map: every letter in a seeded
   map round-trips to a length and a start date inside its term.
 

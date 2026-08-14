@@ -61,3 +61,7 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0011](0011-ci-validates-the-image-by-running-the-base-compose-file-alone.md) | CI validates the image by running the base Compose file alone | Accepted |
 | [0012](0012-the-migration-environment-builds-its-own-superuser-connection.md) | The migration environment builds its own superuser connection | Accepted — settles the two open rows in [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)'s provisioning table |
 | [0013](0013-the-database-session-is-synchronous.md) | The database session is synchronous, and the engine is built at import | Accepted — answers for the database the entry-point question [0006](0006-settings-lifetime.md) left open |
+| [0014](0014-lms-owned-columns-are-marked-by-a-name-prefix.md) | LMS-owned columns are marked by an `lms_` name prefix | Accepted — a convention, with the enforcing check deferred to E0-11 |
+| [0015](0015-course-level-is-a-stored-generated-column.md) | Course level is a stored generated column, and the bands are its only authority | Accepted |
+| [0016](0016-primary-keys-are-database-generated-uuids.md) | Primary keys are database-generated UUIDs | Accepted — UUIDv7 revisited when the Postgres image moves to 18 |
+| [0017](0017-prefix-codes-are-unique-across-the-deployment.md) | Prefix codes are unique across the deployment, not per institution | Accepted — rests on one institution per deployment, stated in the record |

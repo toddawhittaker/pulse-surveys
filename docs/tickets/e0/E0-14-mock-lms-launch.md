@@ -25,6 +25,18 @@ cookie survival), §2.1 (what the launch claims must carry), §13 (`mock-lms/`).
 - A signed `id_token` carrying the LTI 1.3 core claims: message type, version,
   deployment ID, target link URI, resource link, context (course and section),
   and roles.
+
+  **The context claim's `title` is optional, and `course.lms_title` is
+  `NOT NULL`.** In LTI 1.3 the context claim requires only `id`; `label`, `title`
+  and `type` are all optional, so a conformant platform may send a course with no
+  human-readable name at all. E0-05 shipped `course.lms_title` non-nullable, which
+  was a deliberate call — it is trivially relaxed with `DROP NOT NULL` and
+  expensive to tighten later — but it means tool-side ingestion needs a fallback
+  rather than an assumption. Have this mock exercise both shapes: at least one
+  seeded context with a title and one with `id` alone, so whoever writes the
+  ingestion path in E1 meets the empty case in a test rather than in a
+  deployment. The fallback itself is E1's to choose; `label`, or the prefix and
+  number, are the obvious candidates.
 - A launch page that posts the form to the tool, so a browser-driven test can
   click through a realistic launch.
 - Seeded platform registration values matching what `lti_platform` from E0-08

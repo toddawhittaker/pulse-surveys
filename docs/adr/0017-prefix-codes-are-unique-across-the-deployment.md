@@ -1,0 +1,78 @@
+# 0017 — Prefix codes are unique across the deployment, not per institution
+
+**Status:** Accepted
+**Date:** 2026-08-14
+**Tickets:** E0-05
+
+## Context
+
+[SPEC §2.1](../SPEC.md) puts `prefix` under `department` and says a department
+groups one or more prefixes — Math may hold MATH, STAT and MIS. It does not say
+what makes a prefix code unique, and [§8](../SPEC.md) restates the containment
+rule without settling it either.
+
+E0-05 has to choose, because the constraint goes in the first migration and
+changing a uniqueness rule after rows exist is a data migration rather than an
+edit. Every sibling column in the same module is scoped to its parent —
+`college.name` is unique per `institution_id`, `department.name` per
+`college_id` — so a reader reasonably expects `prefix.code` to be scoped too,
+and two independent reviewers read the original docstring as claiming it was.
+
+## Decision
+
+`prefix.code` is unique across the whole table. One `BIOL` exists in a
+deployment, owned by one department.
+
+The docstring says so plainly and names the assumption it rests on: a deployment
+serves one institution. That assumption is **latent, not enforced**, and this
+record does not pretend otherwise. `app.config.Settings` carrying a single
+`INSTITUTION_TIMEZONE` is consistent with it and is not evidence for it — a
+configuration default is not a statement that only one `institution` row may
+exist.
+
+## Alternatives rejected
+
+**Scope to the department — `UniqueConstraint("department_id", "code")`.** The
+obvious parallel to `college.name` and `department.name`. Rejected because it
+permits the thing the containment model exists to forbid: `BIOL` under two
+departments makes `BIOL 215` ambiguous, and a course number is how every other
+part of the product names a course. Scoping to the parent is right when the
+parent disambiguates the child; here it does not, because nothing downstream
+carries the department alongside the prefix.
+
+**Enforce the single-institution assumption instead of leaving it latent** — a
+constraint permitting at most one `institution` row, at which point global
+uniqueness and institution-scoped uniqueness are the same rule and the
+incoherence below disappears. This is the cheapest of the three and it was not
+considered when the decision was first written, which is the gap this paragraph
+exists to close. It is not taken here because it decides something wider than
+E0-05: whether the product is single-tenant by construction is a statement about
+what Pulse *is*, the spec does not make it, and a schema ticket should not make
+it by side effect. It is the right answer if the spec ever says so, and it would
+turn a confusing `uq_prefix_code` violation into an error at the row that is
+actually wrong.
+
+**Scope to the institution — `UniqueConstraint("institution_id", "code")`.**
+The literal reading of the original docstring, and the correct rule if a
+deployment ever serves more than one institution. Rejected because `prefix` has
+no `institution_id` and adding one is the second ancestor reference that
+`backend/app/models/org.py`'s own module docstring argues against: a course
+reaches a department by exactly one path, and a prefix should reach an
+institution the same way. Denormalising the institution onto `prefix` to support
+a case no deployment has would buy a hypothetical at the cost of the invariant.
+
+## Consequences
+
+**A second institution row breaks prefix insertion, and does so unhelpfully.**
+The schema permits more than one `institution` — `college` is unique per
+`institution_id` — so nothing stops a second one being seeded. Its `BIOL` is
+then refused by `uq_prefix_code` with an error naming a constraint and no
+institution. This is the accepted cost, and it is recorded here rather than
+discovered: multi-institution is not a supported configuration, and the day it
+becomes one, this constraint and `INSTITUTION_TIMEZONE` both have to move, which
+is the honest signal that the change is larger than a schema edit.
+
+**The asymmetry with `college.name` and `department.name` is deliberate.** A
+reader who notices it and "fixes" it by scoping to the department reintroduces
+the ambiguous-course-number case. The docstring at the constraint says why, so
+that the reasoning is where the temptation is.

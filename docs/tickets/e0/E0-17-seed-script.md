@@ -21,7 +21,23 @@ Fall 2026 start-letter map), §13 (`scripts/seed.py`), §6.3.
   state rather than duplicating rows.
 - A demo institution with at least two colleges, several departments, a
   department grouping more than one prefix (the Math / MATH-STAT-MIS case from
-  §2.1), and courses across UG, GR, and DR levels.
+  §2.1), and courses across all five levels.
+
+  **The design prototype's course numbers cannot be seeded, and this is where
+  that lands.** E0-05 settled the number-to-level bands (SPEC §8), and 24 of the
+  25 course numbers written across `design/` fail them — every four-digit
+  number below `8000`, which is all of `BIOL 2150`, `CHEM 1210`, `MATH 1610`,
+  `PSYC 1010` and the rest. Only `MATH 040` survives. SPEC §2.1's own two
+  examples were renumbered when the bands landed; the `design/` corpus was
+  deliberately not, because it is a design deliverable rather than schema.
+  Whoever builds this ticket picks the seed numbers against §8 and should
+  expect them to disagree with every screenshot in `design/`. Renumbering that
+  corpus, or deciding it stays as illustration, is a separate call — raise it
+  rather than quietly reconciling one side to the other.
+
+  **Every seeded course also needs a title.** `course.lms_title` is `NOT NULL`
+  (E0-05, kept deliberately — see [E0-21](E0-21-review-debt.md)), so a course
+  inserted without one fails.
 - A Fall 2026 term with the §2.2 start-letter map seeded as data, and sections
   spanning several start letters, both modalities, and at least three different
   lengths.

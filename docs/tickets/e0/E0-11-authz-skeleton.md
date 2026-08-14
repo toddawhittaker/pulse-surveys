@@ -65,6 +65,40 @@ thin), §4.1, and the roles section of `CLAUDE.md`.
       access" and look like it works. The module docstring explains why it
       raises, per [ADR 0003](../../adr/0003-deferred-authz-seams-fail-closed.md);
       without that, the next contributor "fixes" it.
+- [ ] A write to an LMS-owned column is refused at the chokepoint, and the
+      refusal is asserted per column rather than once. E0-05 marks those
+      columns with an `lms_` prefix ([ADR
+      0014](../../adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)).
+      **Choose the grain deliberately; do not inherit it from the marker.** Two
+      earlier drafts of this criterion each got this wrong in a different
+      direction — the first claimed the chokepoint closes ADR 0014's open half,
+      the second claimed the prefix is the chokepoint's only possible signal.
+      Neither is right, and the second is the more dangerous, because it records
+      an unprefixed LMS-owned column slipping through as expected behaviour.
+
+      SPEC §2.1's ownership list is *courses, sections, section codes,
+      enrollments, teaching instructors*. Four of those five live on `course`,
+      `section` or `enrollment`, so a **table-grained** refusal answers most of
+      §2.1 without reading a column name, and would catch the unprefixed column
+      a name-based check cannot.
+
+      **Establish where the teaching-instructor link lands before choosing.**
+      It is the item that may not live on those three tables: §2.1's chain is
+      `INSTRUCTOR(section) → LEAD_FACULTY(course) → …` over **role assignments**,
+      and §8 puts those on `role_assignment`. If the link is an assignment row,
+      a table-grained refusal over `{course, section, enrollment}` leaves an
+      application write path able to create or edit an LMS-sourced `INSTRUCTOR`
+      assignment — and that is not a stale attribute, it is a **purview grant**,
+      since §2.1 computes purview from exactly those rows. Table grain's other
+      failure is the mirror of column grain's: it breaks the day a Pulse-owned
+      writable column lands on one of those tables, and `course.level` is
+      already a non-LMS column there, saved only by being unwritable. A
+      **column-grained** refusal over the `lms_` prefix has the omission gap
+      instead.
+
+      Pick one, say which in the pull request, and say what the chosen grain
+      does not catch. [E0-21](E0-21-review-debt.md) carries the residue of
+      whichever is chosen.
 - [ ] mypy strict passes on `app/services/authz.py`.
 
 ## Definition of done
