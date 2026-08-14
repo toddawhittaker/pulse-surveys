@@ -51,7 +51,17 @@ than rediscovered. [E0-20](E0-20-gate-fidelity.md) item 3 has the detail.
   marker because a name cannot be forgotten the way an `info` dict can, and it
   is visible at every call site rather than only at the definition. The cost is
   accepted: the prefix is noisy in queries, and a column that stops being
-  LMS-owned needs a migration to rename it.
+  LMS-owned needs a migration to rename it. See [ADR
+  0014](../../adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md).
+
+  Two boundaries of the rule, because both were guessed at once already.
+  **`section.lms_section_code` is this ticket's column**, not E0-07's — E0-07
+  derives length, dates and modality *from* it and creates nothing. And
+  **`level` carries no prefix.** SPEC §2.1 lists course level among the
+  LMS-owned facts, which is true of the value but not of the column: the LMS
+  supplies the number, Pulse derives the level from it, and a generated column
+  cannot be written by anyone at all — which is the thing the marker exists to
+  prevent. Marking it would advertise a sync that does not happen.
 - Migration with the constraint names from E0-04's convention.
 
 ## Out of scope

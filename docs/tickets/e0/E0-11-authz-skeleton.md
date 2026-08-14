@@ -65,6 +65,17 @@ thin), §4.1, and the roles section of `CLAUDE.md`.
       access" and look like it works. The module docstring explains why it
       raises, per [ADR 0003](../../adr/0003-deferred-authz-seams-fail-closed.md);
       without that, the next contributor "fixes" it.
+- [ ] A write to an LMS-owned column is refused at the chokepoint, and the
+      refusal is asserted per column rather than once. E0-05 marks those
+      columns with an `lms_` prefix ([ADR
+      0014](../../adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md))
+      and that ADR is explicit that the marker is a convention its own tests
+      cannot enforce: walking `Base.metadata` can show that the columns named
+      so far are prefixed, but an unprefixed LMS-owned column arriving later
+      leaves no trace there. **This ticket is where that becomes answerable**,
+      because the question stops being "is the column labelled correctly" and
+      becomes "does the chokepoint refuse the write" — which is the form SPEC
+      §2.1's "read-only in Pulse" is actually asked in.
 - [ ] mypy strict passes on `app/services/authz.py`.
 
 ## Definition of done
