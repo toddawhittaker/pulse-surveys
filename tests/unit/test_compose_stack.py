@@ -141,6 +141,11 @@ strategy changed, on Todd's ruling, and the shape below is the result:
     interpolating it, and `extends: {service: db}` makes the one exemption
     transitive. Each is now a red that says "extend this module first" rather
     than a spelling that slips past.
+  - **The set of Compose files is closed too**, which is the same move one level
+    out. Everything above reads two hand-picked files; Docker reads whichever of
+    eight recognised names it finds, preferring `compose.yaml` over
+    `docker-compose.yml`. One added file redirects the entire stack away from
+    everything this module describes, without a single assertion changing.
 
 The asymmetry between the two files is load-bearing in one rule and stated
 there: a blank in the base file survives into every deployment, and a blank in
@@ -187,6 +192,35 @@ ALLOWED_TOP_LEVEL_KEYS = ("name", "services", "volumes", "networks")
 # until something merges it — and it is walked like every other value, so its
 # contents are not exempt from anything. The anchors live here.
 EXTENSION_FIELD_PREFIX = "x-"
+
+# Every file name Docker Compose will pick up at the root of a project: the four
+# base names, then the four override names. The source is compose-go's
+# `DefaultFileNames` and `DefaultOverrideFileNames`, which is the list
+# `docker compose` consults before it has read anything.
+#
+# **This tuple is a claim about Docker's behaviour, not about this repository**,
+# and it is the only thing here that can go stale without anyone touching the
+# repository: if a future Compose release recognises a ninth name, this list is
+# wrong and nothing local will say so. The symptom would be a file the stack
+# reads and this suite does not — which is exactly the failure the rule using it
+# exists to prevent, so re-check it against the Compose release notes rather
+# than against the tests.
+#
+# The order below is compose-go's, and only *membership* is load-bearing: the
+# rule compares sets. Precedence is why a stray file is dangerous rather than
+# merely untidy — `compose.yaml` is preferred over `docker-compose.yml`, which
+# was measured against the daemon — but nothing here depends on getting the
+# order of any pair right.
+COMPOSE_FILE_NAMES = (
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.override.yml",
+    "compose.override.yaml",
+    "docker-compose.override.yml",
+    "docker-compose.override.yaml",
+)
 
 # The two services E0-03 adds. Both run the API image and both are compared
 # against `api`, so the service they are compared with is named once too.
@@ -970,6 +1004,75 @@ def test_neither_compose_file_uses_a_top_level_section_this_module_cannot_read(
             "interpolating it — `include:` does the first, `secrets:` and `configs:` do the "
             "second. So this is not a style rule: extend this module to cover the new "
             "section, in the same change that adds it, and then add it to the list.",
+        ]
+    )
+
+
+def test_the_repository_root_holds_no_compose_file_this_suite_does_not_read(
+    base_compose_path: Path,
+    override_compose_path: Path,
+) -> None:
+    """The set of Compose files is closed, the same way the set of top-level keys is.
+
+    Every rule in this module reads two hand-picked files. Docker does not pick
+    them: it looks for the names in `COMPOSE_FILE_NAMES` in its own order of
+    precedence, and `compose.yaml` — the modern preferred spelling — beats
+    `docker-compose.yml`. Dropping one at the repository root produces
+
+        warning: Found multiple config files with supported names: compose.yaml,
+        docker-compose.yml
+        warning: Using .../compose.yaml
+
+    measured against the real daemon in reviewer pass 5, with all 76 tests still
+    green. `docker-compose.yml` is then read by nobody and every guard written
+    for this stack describes a file it no longer runs — the credential rules,
+    the health checks, the privilege comparison, the base-file-only pass, all of
+    them at once, in one edit that looks like tidying.
+
+    It is the same shape as `include:` and it gets the same answer: a document
+    nothing here opens is refused rather than chased. A third file is a decision
+    that fails loudly, with this test naming it, instead of a silent redirection
+    of the whole stack.
+
+    The expected set comes from the fixtures the rest of the suite reads, not
+    from names written down here, so the two cannot drift: whatever this suite
+    opens is what Docker must find, and nothing else.
+
+    **The root only, deliberately.** Compose searches its working directory and
+    then upwards, never downwards, and every invocation in this repository runs
+    from the root — the Makefile, the `docker` job, the `e2e` job. So a Compose
+    file in a subdirectory is a different stack (the mock platforms may each get
+    one) and is not this rule's business.
+    """
+    root = base_compose_path.parent
+    expected = {base_compose_path.name, override_compose_path.name}
+
+    assert root.is_dir(), (
+        f"{root} is not a directory, so the search below looks at nothing and finds "
+        "nothing, which this test would otherwise read as 'no stray Compose files'."
+    )
+    assert expected, (
+        "The fixtures name no Compose files, so this test would assert that the repository "
+        "root holds none — the opposite of what it is for. Whatever `conftest.py` reads is "
+        "what belongs on this list."
+    )
+
+    present = {name for name in COMPOSE_FILE_NAMES if (root / name).is_file()}
+    unread = sorted(present - expected)
+    missing = sorted(expected - present)
+
+    assert present == expected, "\n".join(
+        [
+            "The Compose files Docker would read are not the ones this suite reads.",
+            f"  Docker would also read, and no test opens: {unread or 'none'}",
+            f"  This suite reads, and the root does not hold: {missing or 'none'}",
+            "",
+            "Docker picks by name, in its own order of precedence, and `compose.yaml` wins "
+            "over `docker-compose.yml`. So an extra file at the root does not add a stack — "
+            "it replaces the one every rule in this module describes, silently, while every "
+            "test stays green. If the project is genuinely moving to the modern name, move "
+            "it: rename the files and point `conftest.py` at them, in one change, so the "
+            "suite follows the stack. Adding a second base file is not a rename.",
         ]
     )
 
