@@ -9,10 +9,13 @@ apart is to ask the database.
 is reflected out of the migrated database rather than imported from
 `app.models.org`. Two reasons. The criteria are about what Postgres enforces,
 and a reflected table is what Postgres holds; and the ticket names six *table*
-names but no ORM class names, so importing would mean inventing them.
-`tests/unit/test_org_models_registered.py` holds the one thing reflection cannot
-see — that the module is registered on `Base.metadata`, which the epic README
-makes load-bearing because its absence fails silently.
+names but no ORM class names, so importing would mean inventing them. Two unit
+modules hold what belongs on the other side of that line:
+`tests/unit/test_org_models_registered.py`, because a module nobody imported is
+on no metadata and reflection cannot see the difference, and
+`tests/unit/test_lms_owned_column_marker.py`, because the criterion about the
+`lms_` marker says `Base.metadata` and means it — a marker the ORM does not carry
+is not one the authz layer can read.
 
 **Criterion 1's second half is not repeated here.** "`alembic check` is clean"
 is already asserted by `tests/integration/test_alembic_baseline.py`, which runs
@@ -20,12 +23,14 @@ is already asserted by `tests/integration/test_alembic_baseline.py`, which runs
 that same chain, so that test starts covering it the moment this one does.
 Duplicating it would give two failures for one defect.
 
-**Two names the ticket does not spell**, both marked below and both cheap to
-change: the column holding the course number (`COURSE_NUMBER_COLUMNS`, resolved
-from candidates) and the level column (`COURSE_LEVEL_COLUMN`, which SPEC §8 does
-spell, in backticks). `tests/conftest.py`'s own docstring set this precedent for
-E0-01: where a criterion needs a name the ticket does not give, the choice is
-made once, in a named constant, marked as the test's choice.
+**The two column names this file needs are both spelled by the ticket now**, and
+each is a single named constant so a rename is a one-line change. `lms_number`
+comes from the ticket's marker decision — the LMS-owned marker is an `lms_` name
+prefix, and the course number is LMS-owned — and `level` from SPEC §8, which
+writes it in backticks. An earlier draft of this file guessed at both, following
+`tests/conftest.py`'s precedent of making such a choice once and marking it; that
+guess was wrong about the number, which is why the constant survives even though
+the guessing does not.
 
 **Why there is a row-seeding helper rather than literal INSERTs.** A course sits
 five levels down a containment chain, and none of the columns on the way are
@@ -69,11 +74,13 @@ pytestmark = pytest.mark.integration
 # The six tables E0-05's scope names, in containment order (SPEC §2.1).
 CONTAINMENT_TABLES = ("institution", "college", "department", "prefix", "course", "section")
 
-# **This suite's choice.** SPEC §8 says the course number "is stored as text" but
-# never spells the column, so both plausible spellings are accepted and the first
-# one present wins. If the implementation spells it a third way, add it here;
-# nothing else moves.
-COURSE_NUMBER_COLUMNS = ("number", "course_number")
+# The ticket spells this one: the LMS-owned marker is an `lms_` name prefix, and
+# it gives `lms_number` as the example. Left as a tuple because `require_column`
+# takes candidates, and because one place to change a column name is worth
+# keeping — an earlier draft of this file guessed `number` and was wrong.
+# `tests/unit/test_lms_owned_column_marker.py` is where the prefix itself is
+# asserted; here the name is just a name.
+COURSE_NUMBER_COLUMNS = ("lms_number",)
 
 # Not this suite's choice: SPEC §8 writes "Course `level`" in backticks, and the
 # ticket repeats it.
@@ -100,13 +107,20 @@ LEVELS_BY_NUMBER = (
     ("9999", "DR"),
 )
 
-# SPEC §8: "Numbers outside those bands — three-digit `800`-`999`, and four-digit
-# `1000`-`7999` — are rejected at write time rather than stored with an absent or
-# guessed level." The last three are the criterion's "not three or four digits at
-# all". `40` is the sharpest of them: read as an integer it is a perfectly good
-# developmental number, so a derivation that casts first and never checks the
-# width accepts it.
-REJECTED_NUMBERS = ("800", "999", "1000", "7999", "40", "10000", "12A")
+# SPEC §8: "a three-digit number is valid only in `000`-`799`, and a four-digit
+# number only in `8000`-`9999`." Everything else is refused at write time rather
+# than stored with an absent or guessed level.
+#
+# Four of these seven catch the same defect from four directions, and it is the
+# defect §8 spends a paragraph on: a derivation that casts the text to an integer
+# and compares numerically, with no check on the width. Such an implementation
+# accepts `40` (a good developmental number once the two digits become 40),
+# `0099` (99, developmental — §8's own example of the two spellings that would
+# become two rows for one course) and `0100` (100, undergraduate — the same trap
+# in the band where nearly every real course lives). `10000` and `12A` are the
+# criterion's "not three or four digits at all"; `800`, `999`, `1000` and `7999`
+# are the four band edges the criterion names.
+REJECTED_NUMBERS = ("800", "999", "1000", "7999", "0099", "0100", "40", "10000", "12A")
 
 # A course number well inside a band, used as the control wherever a test needs
 # to prove the insert path works before asserting that something is refused.
@@ -161,9 +175,9 @@ def require_column(table: Table, candidates: tuple[str, ...]) -> str:
             return candidate
     present = [column.name for column in table.columns]
     pytest.fail(
-        f"`{table.name}` has none of the columns {list(candidates)} — it has {present}. Where "
-        "the name is this suite's choice it is a module constant at the top of this file, and "
-        "adding the spelling the implementation uses is a one-line change."
+        f"`{table.name}` has none of the columns {list(candidates)} — it has {present}. Both "
+        "names this file needs are spelled by the ticket or by SPEC §8, and both are module "
+        "constants at the top of this file, so a deliberate rename is a one-line change here."
     )
 
 
@@ -383,20 +397,22 @@ def test_deleting_a_department_that_has_prefixes_is_refused(
 def test_a_course_reaches_a_department_only_through_its_prefix(
     db_session: Any, org_tables: dict[str, Table]
 ) -> None:
-    """Criterion 2: a course under a prefix in another department's subtree is refused.
+    """Criterion 2: a course reaches a department by exactly one path, through its prefix.
 
-    The criterion presupposes that the contradiction can be *expressed*, and
-    whether it can depends on a schema choice the ticket leaves open. If `course`
-    references nothing but its prefix, a course is in exactly the department its
-    prefix is in and there is no row to insert that says otherwise — the
-    strongest form of the criterion, and what this asserts in that case. If the
-    schema does name an ancestor a second time — a `department_id` on `course`, or
-    the composite key `course (department_id, prefix_id) → prefix (department_id,
-    id)` — then the contradiction is a row, and the database must refuse it.
+    The criterion's own reading is that in a strict tree the violation *cannot be
+    expressed* — no row says a course is in a department its prefix is not in —
+    and that this is the stronger outcome, not a gap. So the assertion that runs
+    every time is the tree itself: one foreign key into `prefix`, not nullable,
+    and no second one. The ticket is explicit that a second ancestor reference
+    should not be added in order to have something to constrain.
 
-    Both branches assert. The control insert in the second branch is the same
-    guard as everywhere else in this file: an insert that raises proves nothing
-    unless the consistent version of the same insert succeeds.
+    The second branch is kept for the case where such a reference exists anyway,
+    for some reason of its own — a `department_id` on `course`, or the composite
+    key `course (department_id, prefix_id) → prefix (department_id, id)`. Then the
+    contradiction is a row that can be written down, and the database has to
+    refuse it. That branch's control insert is the same guard as everywhere else
+    in this file: an insert that raises proves nothing unless the consistent
+    version of the same insert succeeds.
     """
     course = require_table(org_tables, "course")
     prefix = require_table(org_tables, "prefix")
@@ -414,12 +430,20 @@ def test_a_course_reaches_a_department_only_through_its_prefix(
         "sit under no prefix at all. 'Exactly one prefix' is two constraints, and this is the "
         "half a foreign key does not give you."
     )
+    paths = {key.constraint for key in to_prefix}
+    assert len(paths) == 1, (
+        f"`course` has {len(paths)} separate foreign keys into `prefix`, so it reaches a "
+        "department by more than one path and the two can disagree. Constraints are counted "
+        "rather than columns, because a composite key spanning two columns is still one path. "
+        "The criterion asks for exactly one."
+    )
 
     contradictory = [key for key in course.foreign_keys if department_identifying(prefix, key)]
     if not contradictory:
         # Nothing on `course` names a department except by way of its prefix, so
-        # the contradictory row this criterion describes cannot be written down
-        # at all. The two assertions above are the whole guarantee in that case.
+        # the contradictory row cannot be written down at all. That is the strict
+        # tree the criterion asks for, and the three assertions above are the
+        # whole of it: one path, not nullable, not duplicated.
         return
 
     number_column = require_column(course, COURSE_NUMBER_COLUMNS)
