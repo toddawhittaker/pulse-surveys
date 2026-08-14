@@ -34,8 +34,10 @@ produced.
 
 ## Scope
 
-Each of these was demonstrated against the running daemon during E0-03's review,
-with the whole suite green. They are not hypotheticals.
+The first three were demonstrated against the running daemon during E0-03's
+review, with the whole suite green. They are not hypotheticals. The fourth was
+found by reading, while writing E0-03's last test, and says so where it is
+described — measure it before you build against it.
 
 - **A host-mount allowlist rather than a denylist.** `SENSITIVE_BIND_SOURCES`
   enumerates bad sources. Adding `- ./:/app/repo:ro` to `worker` — the edit
@@ -64,13 +66,28 @@ with the whole suite green. They are not hypotheticals.
 - **Normalise a bind source before matching it.** `SENSITIVE_BIND_SOURCES` is
   compared against the string as declared, so the same location under another
   spelling misses: `/var/run/docker.sock` is caught, while `/var/run/./docker.sock`,
-  `//var/run/docker.sock`, and a relative path climbing out of a service's
-  `working_dir` are not. This is the same class as the allowlist item above and
-  probably wants the same answer rather than a fourth denylist entry.
+  `//var/run/docker.sock`, and a relative source such as `- ../secret:/x:ro` are
+  not. Note the base directory before you normalise anything: Compose resolves a
+  relative bind source against the **project directory** — where the Compose file
+  is — and not against the service's `working_dir`. Measured during E0-03's
+  review with `working_dir: /opt/app`, where it had no effect on resolution.
+  Normalising against the wrong base clears a mount that reaches the host and
+  rejects one that does not. Unlike the three above, this route was found by
+  reading rather than run; the non-normalisation itself is measured (both
+  spellings survive verbatim into `docker compose config`), the reachability is
+  not. This is the same class as the allowlist item above and probably wants the
+  same answer rather than a fourth denylist entry.
 
-- **An ADR for the constraints E0-03 imposed.** The closed top-level key set and
-  the outright refusal of `extends:` constrain everyone who edits a Compose file
-  from now on, and the reasoning lives in a test module docstring — the one place
+- **An ADR for the constraints E0-03 imposed.** Three of them, not two: the
+  closed top-level key set, the outright refusal of `extends:`, and the rule that
+  the repository root may hold no Compose-named file this suite does not read.
+  That third one landed last and is the one most likely to be met by surprise —
+  an author renaming `docker-compose.yml` to Docker's preferred `compose.yaml`
+  gets a red test from a module they did not touch. The contestable alternative is
+  the same for all three and should be recorded: read whichever Compose-named
+  files the root holds and run every rule against all of them, which needs no ban
+  and no coordinated `conftest.py` edit on a rename. They constrain everyone who
+  edits a Compose file from now on, and the reasoning lives in a test module docstring — the one place
   the person it constrains has no reason to open. An E0-04 author adding
   `secrets:` for a Docker-secret migration credential gets a red test from a
   module they did not touch and no record of why. The spec is silent and the

@@ -36,7 +36,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 16 | [Mock OIDC identity provider](E0-16-mock-idp.md) | 02, 08 | Discovery, authorize, token, JWKS, PKCE, seeded leadership, Care, and admin users. |
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
-| 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, and the ADR for E0-03's closed-set rules. |
+| 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
 
 ## Dependency graph
 
@@ -115,9 +115,10 @@ Where this differs from the ticket list in §14.3, and why:
   reviewer passes on the E0-03 pull request found route after route by which a
   future edit could hand an application container the Postgres superuser
   credential that ADR 0009 exists to withhold from it. Most were closed there;
-  the three that remained are a coherent subject of their own and were splitting
-  a Celery ticket in half, so they became a ticket. It adds no behaviour and
-  blocks nothing.
+  the four that remained are a coherent subject of their own and were splitting a
+  Celery ticket in half, so they became a ticket, along with the ADR E0-03 owes
+  for the three constraints it imposed on anyone editing a Compose file. It adds
+  no behaviour and blocks nothing.
 
 The illustrative ticket names in `CONTRIBUTING.md` predate this file. Where the
 two differ, these ticket branch names win.
