@@ -35,6 +35,21 @@ dependencies = [
     "pydantic-settings==2.15.0",
     "SQLAlchemy==2.0.52",
     "alembic==1.19.1",
+    # The driver `DATABASE_URL` names, `postgresql+psycopg://`. The `binary`
+    # extra is what makes it work in the image: the runtime stage is
+    # python:3.13-slim with no libpq and no compiler, so the pure-Python
+    # distribution would import and then fail to find the library it wraps.
+    # `--strip-extras` in `make lock` resolves the extra into an explicit
+    # `psycopg-binary` line in both lockfiles, so what ships is still named and
+    # hashed. psycopg is LGPL-3.0: the license gate classifies it "review —
+    # weak copyleft, linkage matters", which is the right answer for a library
+    # imported unmodified from a wheel rather than vendored into our source.
+    "psycopg[binary]==3.3.4",
+    # Already in the closure under pydantic-settings, and declared here because
+    # `backend/migrations/env.py` imports it directly: `alembic` is not started
+    # by `Settings`, so it reads `.env` itself, and an import we write is a
+    # dependency we declare rather than one we inherit. See docs/adr/0012.
+    "python-dotenv==1.2.2",
     "celery==5.6.3",
     "redis==8.1.0",
     "httpx==0.28.1",
@@ -120,6 +135,15 @@ ignore = [
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+# `app` is this project's own package, and it lives under `backend/` rather than
+# at the repository root — so ruff cannot infer it from the layout for a file
+# that is not itself inside the package. Without this, imports of `app.*` are
+# sorted into the third-party block in `backend/migrations/env.py` and into the
+# first-party block everywhere else, and the difference is invisible until you
+# read two files side by side.
+known-first-party = ["app"]
 
 # ---------------------------------------------------------------------------
 # mypy

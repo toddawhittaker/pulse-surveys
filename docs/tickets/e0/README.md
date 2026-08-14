@@ -70,7 +70,7 @@ that ticket includes removing its tolerance:
 
 | Gate | Becomes enforcing in |
 |---|---|
-| ruff, mypy, pip-audit, license check, pytest | 01 |
+| ruff, mypy, pip-audit, license check, pytest | 01 (and see below — its last tolerance went in 04) |
 | Docker build and Compose health (`api`) | 02 |
 | Compose health (`api`, `worker`, `beat`) | 03 |
 | migration drift | 04 |
@@ -78,12 +78,14 @@ that ticket includes removing its tolerance:
 | Playwright e2e | 18 |
 | AI eval floors | E2, not E0 — the last tolerance to survive this epic |
 
-The pytest row moved from 04 to 01 and is worth a word, because it tightened
-without anyone editing a tolerance. That gate is not gated on a flag; it is
-gated on the `detect` job finding `tests/unit/test_*.py`. Ticket 01 ships that
-directory, so `pytests` became `true` and the gate went live the moment the
-first test landed. Ticket 04 is still where the *integration* suite and the
-migration-drift gate arrive.
+The pytest row moved from 04 to 01 and is worth a word, because it tightened in
+two steps rather than one. It was never gated on a flag; it was gated on the
+`detect` job finding `tests/unit/test_*.py`, and ticket 01 shipped that
+directory, so the gate went live the moment the first test landed. What that
+left was a gate that could switch *itself* off again — delete the directory,
+break collection, and `pytests` goes back to `false` with a green check. Ticket
+04 removed the condition, so both the pytest and migration-drift jobs now run
+unconditionally, and the `detect` job no longer probes for either.
 
 The frontend gates (`tsc`, `eslint`, production build, bundle budget) stay
 tolerant through all of E0. No frontend exists until E1.

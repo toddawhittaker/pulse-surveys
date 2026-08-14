@@ -33,9 +33,34 @@ them at a different incident.
 
 ---
 
+## 2. Behaviour shipped with nothing asserting it
+
+**Caught: 3**
+
+**What happened.** Four times. `__repr_args__` was added to keep credentials out
+of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
+validator could be deleted whole with the suite green. "`DATABASE_URL` must never
+point at the superuser" was prose, and repointing it passed all 50 tests and the
+`docker` gate. The two Postgres image digests could be set to different values
+with every gate green.
+
+**Root cause.** Fixing the defect and stopping there. The fix is visible in the
+diff, so it feels done; nothing makes the absence of a guard visible.
+
+**Consequence.** The next person deletes it during an unrelated refactor and
+every gate stays green. For the superuser case, the exact defect the pull request
+existed to fix was reintroducible without any signal.
+
+**Rule.** After fixing something, try to reintroduce it. If the suite stays
+green, you have written a convention, not a guarantee. Prefer asserting the
+*forbidden* state over the permitted one — it keeps working when a legitimate
+second case arrives.
+
+---
+
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 2**
+**Caught: 3**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -84,34 +109,9 @@ to match what you measured — not what you expected to measure before you ran i
 
 ---
 
-## 2. Behaviour shipped with nothing asserting it
-
-**Caught: 2**
-
-**What happened.** Four times. `__repr_args__` was added to keep credentials out
-of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
-validator could be deleted whole with the suite green. "`DATABASE_URL` must never
-point at the superuser" was prose, and repointing it passed all 50 tests and the
-`docker` gate. The two Postgres image digests could be set to different values
-with every gate green.
-
-**Root cause.** Fixing the defect and stopping there. The fix is visible in the
-diff, so it feels done; nothing makes the absence of a guard visible.
-
-**Consequence.** The next person deletes it during an unrelated refactor and
-every gate stays green. For the superuser case, the exact defect the pull request
-existed to fix was reintroducible without any signal.
-
-**Rule.** After fixing something, try to reintroduce it. If the suite stays
-green, you have written a convention, not a guarantee. Prefer asserting the
-*forbidden* state over the permitted one — it keeps working when a legitimate
-second case arrives.
-
----
-
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 1**
+**Caught: 3**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -141,6 +141,43 @@ say in the message why that guard is not ceremony. A pattern searched against a
 file is a case of this and looks like none: run it against the text you claim it
 catches *and* against the text you claim it allows, and give it a canary — a
 string certainly present — so a search that has gone blind says so.
+
+---
+
+## 9. Citing a guard as a guarantee without executing it
+
+**Caught: 2**
+
+**What happened.** Three times. A brief told the test author "a hook denies you
+writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
+denied *reads* of implementation source. Both hooks then turned out to fail open
+when `jq` was absent, and one could be bypassed entirely with `cat` through
+`Bash`, while their own comments called one "the wall."
+
+The third is the sharpest, and it is a coordination mechanism rather than a hook.
+A peer Claude session was asked to run `/clear` before a security review, so the
+review would start with fresh eyes. `/clear` is a harness command: nothing a peer
+sends can make it fire. The request also carried the line "I know you cannot
+report back, because this message goes with it" — which **pre-explained the
+silence the failure would produce**. Had the peer simply not replied, that would
+have read as confirmation, and the review request would have gone into a context
+still holding the previous review and the requester's framing of it. The peer
+caught it and said so.
+
+**Root cause.** Reading a mechanism's name and description instead of running it,
+then reasoning about what its output would look like instead of observing the
+output.
+
+**Consequence.** Two rounds of work proceeded on a guarantee that was not
+enforced. The third would have produced a review that looked independent and was
+not — *worse than skipping the clear*, because the result would have been trusted
+more.
+
+**Rule.** Before citing a guard, execute it against the case you claim it stops
+and the case you claim it allows. A guard that has never been run is a comment.
+And never write a prediction that explains away the evidence of its own failure:
+if you find yourself saying "there will be no confirmation, and that is expected",
+you have removed the only signal that would have told you it did not work.
 
 ---
 
@@ -198,43 +235,6 @@ leaving the credential one `json.dumps` from any structured logger.
 
 **Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
 property, say the property and let the implementer find the mechanism.
-
----
-
-## 9. Citing a guard as a guarantee without executing it
-
-**Caught: 1**
-
-**What happened.** Three times. A brief told the test author "a hook denies you
-writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
-denied *reads* of implementation source. Both hooks then turned out to fail open
-when `jq` was absent, and one could be bypassed entirely with `cat` through
-`Bash`, while their own comments called one "the wall."
-
-The third is the sharpest, and it is a coordination mechanism rather than a hook.
-A peer Claude session was asked to run `/clear` before a security review, so the
-review would start with fresh eyes. `/clear` is a harness command: nothing a peer
-sends can make it fire. The request also carried the line "I know you cannot
-report back, because this message goes with it" — which **pre-explained the
-silence the failure would produce**. Had the peer simply not replied, that would
-have read as confirmation, and the review request would have gone into a context
-still holding the previous review and the requester's framing of it. The peer
-caught it and said so.
-
-**Root cause.** Reading a mechanism's name and description instead of running it,
-then reasoning about what its output would look like instead of observing the
-output.
-
-**Consequence.** Two rounds of work proceeded on a guarantee that was not
-enforced. The third would have produced a review that looked independent and was
-not — *worse than skipping the clear*, because the result would have been trusted
-more.
-
-**Rule.** Before citing a guard, execute it against the case you claim it stops
-and the case you claim it allows. A guard that has never been run is a comment.
-And never write a prediction that explains away the evidence of its own failure:
-if you find yourself saying "there will be no confirmation, and that is expected",
-you have removed the only signal that would have told you it did not work.
 
 ---
 

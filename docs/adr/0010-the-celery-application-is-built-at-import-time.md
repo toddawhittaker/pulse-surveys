@@ -96,3 +96,10 @@ inherit it through the fork.
   different — a migration runs once, under a different database identity
   ([ADR 0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md))
   — and guessing at it now would put a shape in the way of whoever finds out.
+  *(E0-04 has since answered it, and answered it away from `Settings` entirely:
+  `migrations/env.py` reads three environment variables directly and builds no
+  `Settings` at all, because a migration needs a database and none of the rest
+  of the §6.3 surface —
+  [ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md).
+  The engine `app.db` exposes is module-level like the Celery application, for
+  the reasons in [ADR 0013](0013-the-database-session-is-synchronous.md).)*

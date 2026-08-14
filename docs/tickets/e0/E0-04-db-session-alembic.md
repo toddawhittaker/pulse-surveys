@@ -65,7 +65,9 @@ Three consequences of E0-02 land here as well:
 - `backend/app/db.py` — SQLAlchemy 2.0 engine and session factory, a declarative
   `Base`, and a FastAPI dependency yielding a session per request.
 - `backend/alembic.ini` and `backend/migrations/` with `env.py` wired to
-  `Base.metadata` and to `Settings.database_url`, so autogenerate sees the ORM.
+  `Base.metadata`, so autogenerate sees the ORM, and to the **superuser**
+  connection described above — never to `Settings.database_url`, which points at
+  the application role and cannot create a table (ADR 0009).
 - One baseline migration that creates nothing, establishing the revision chain.
 - A naming convention for constraints and indexes on `Base.metadata`, so
   autogenerate produces stable names and `alembic check` does not churn.

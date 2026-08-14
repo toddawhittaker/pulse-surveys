@@ -110,8 +110,13 @@ compatible change; it can be made when something wants it.
   whoever finds out. This is the open question a future reader should expect to
   find unanswered, not an omission. *(E0-03 has since answered the Celery half,
   and answered it the other way — see
-  [ADR 0010](0010-the-celery-application-is-built-at-import-time.md). Alembic is
-  still open. Nothing in this record changed.)*
+  [ADR 0010](0010-the-celery-application-is-built-at-import-time.md). E0-04
+  answered the Alembic half by not building a `Settings` there at all
+  ([ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md)),
+  and gave `app.db` a module-level engine built from its own `Settings()`
+  ([ADR 0013](0013-the-database-session-is-synchronous.md)) — the one place this
+  record's "no module-level singleton" argument is knowingly traded away, and
+  that record says what for. Nothing in this record changed.)*
 - **`app.state` is untyped.** Starlette's `State` accepts any attribute, so
   `request.app.state.settings` typechecks as `Any` and a typo in the attribute
   name is an `AttributeError` at request time rather than a mypy error. The

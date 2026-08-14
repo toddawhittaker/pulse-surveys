@@ -16,15 +16,39 @@ E0-03 adds two fixtures of a different kind — `import_app_module` and
 unit tests and the integration test both need them, and two copies of a rule
 about how a module is imported, or about where a Celery application is found,
 could drift apart and leave the two suites checking different things.
+
+E0-04 adds the database fixtures, at the bottom of this file: a testcontainers
+Postgres on the image the stack deploys, the application role provisioned into
+it, `alembic upgrade head` applied once per session, and a transaction-rollback
+fixture for per-test isolation. They are the ticket's own deliverable, so what
+they choose and what they refuse to choose is written on each one. Two things
+are worth knowing before using them:
+
+  - **The container carries production's role shape**, a bootstrap superuser and
+    a separate application role that cannot create a table, because
+    [ADR 0009](../docs/adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
+    names this fixture as the owner of its own provisioning. Without it, tests
+    pass under privileges no deployment has.
+  - **The environment a migration runs under is assembled in one function**,
+    `migration_environment` below, and the name it invents for the Alembic
+    superuser URL is **this suite's choice** rather than the ticket's — E0-04
+    leaves the mechanism open between a `Settings` field, an Alembic-only
+    variable, and something `env.py` assembles. So the function supplies the
+    container's coordinates under every spelling those three could read, and
+    changing the name is one constant.
 """
 
 import importlib
+import os
 import re
 import sys
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, NamedTuple
+from urllib.parse import urlsplit
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -35,6 +59,10 @@ BASE_COMPOSE_PATH = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_COMPOSE_PATH = REPO_ROOT / "docker-compose.override.yml"
 COMPOSE_PATHS = (BASE_COMPOSE_PATH, OVERRIDE_COMPOSE_PATH)
 CI_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+BACKEND_DIR = REPO_ROOT / "backend"
+ALEMBIC_INI_PATH = BACKEND_DIR / "alembic.ini"
+MIGRATIONS_DIR = BACKEND_DIR / "migrations"
 
 # Compose interpolation. The alternatives are ordered so that `$$` is consumed
 # first and registers nothing, which matters: the `$$POSTGRES_USER` in the `db`
@@ -337,3 +365,350 @@ def configured_env(
     for name, value in documented_env.items():
         monkeypatch.setenv(name, value)
     return dict(documented_env)
+
+
+# ---------------------------------------------------------------------------
+# E0-04 — a real Postgres, with production's role shape, migrated once.
+# ---------------------------------------------------------------------------
+
+# The service whose image the container runs. Read out of `docker-compose.yml`
+# rather than pinned here for the reason `test_image_pins_agree.py` gives: a
+# schema proved against a Postgres the project does not deploy is a proof about
+# a different system.
+DB_SERVICE_NAME = "db"
+POSTGRES_CONTAINER_PORT = 5432
+
+# Credentials for a container that exists for the length of one pytest session
+# and is then destroyed. Nothing here was copied from a working `.env` and
+# nothing here resembles a real credential (CLAUDE.md, secrets). Named
+# `...CREDENTIAL` rather than `...PASSWORD` so ruff's S105 keeps flagging the
+# real thing; `tests/unit/test_config_settings.py` made the same choice.
+TEST_SUPERUSER = "pulse_test_admin"
+TEST_SUPERUSER_CREDENTIAL = "test-only-admin-9d41c7ba"
+TEST_APP_USER = "pulse_test_app"
+TEST_APP_CREDENTIAL = "test-only-app-4b8e0257"
+TEST_DATABASE = "pulse_test"
+
+DATABASE_URL_VARIABLE = "DATABASE_URL"
+
+# **This suite's choice**, and the one name in this file that a construction
+# decision could displace. E0-04 settles *which identity* runs migrations —
+# `DB_SUPERUSER`, never `Settings.database_url` (ADR 0009) — and deliberately
+# leaves the mechanism open: a new `Settings` field, an Alembic-only variable,
+# or something `env.py` assembles from the parts. `migration_environment` below
+# therefore sets this *and* the parts *and* `DATABASE_URL`, so an `env.py`
+# written any of those three ways finds the container. If the implementation
+# spells the variable differently, change this constant; nothing else moves.
+ALEMBIC_SUPERUSER_URL_VARIABLE = "ALEMBIC_DATABASE_URL"
+
+
+class DatabaseUnderTest(NamedTuple):
+    """One database in the test container, addressed as each of the two roles.
+
+    Both URLs name the same database on the same server. Which one a caller
+    reaches for is the whole subject of ADR 0009: migrations and bootstrap use
+    `superuser_url`, and everything the application does uses `application_url`.
+    """
+
+    superuser_url: str
+    application_url: str
+
+
+def container_url(container: Any, *, username: str, credential: str, database: str) -> str:
+    """A `postgresql+psycopg://` URL for one role against one database."""
+    host = container.get_container_host_ip()
+    port = container.get_exposed_port(POSTGRES_CONTAINER_PORT)
+    return f"postgresql+psycopg://{username}:{credential}@{host}:{port}/{database}"
+
+
+def migration_environment(database: DatabaseUnderTest) -> dict[str, str]:
+    """Every environment variable an `env.py` could need to reach `database`.
+
+    Deliberately over-supplies. E0-04 leaves it open whether Alembic learns the
+    superuser connection from a whole URL or assembles one from the parts
+    `.env.example` already declares, and a fixture that supplied only one of
+    those would make that choice for the implementer — quietly, by failing the
+    other option. So the parts and the URL are both set, and they agree: same
+    host, same port, same database.
+
+    `DATABASE_URL` is set to the *application* role, exactly as it is in
+    production. An `env.py` that uses it to connect will fail to create a table,
+    which is the failure ADR 0009 exists to keep visible.
+    """
+    superuser = urlsplit(database.superuser_url)
+    application = urlsplit(database.application_url)
+    return {
+        ALEMBIC_SUPERUSER_URL_VARIABLE: database.superuser_url,
+        DATABASE_URL_VARIABLE: database.application_url,
+        "DB_SUPERUSER": superuser.username or "",
+        "DB_SUPERUSER_PASSWORD": superuser.password or "",
+        "DB_APP_USER": application.username or "",
+        "DB_APP_PASSWORD": application.password or "",
+        "DB_NAME": superuser.path.lstrip("/"),
+    }
+
+
+@contextmanager
+def environment(values: dict[str, str]) -> Iterator[None]:
+    """Set `values` in `os.environ` and put the previous contents back after.
+
+    `monkeypatch` would be the idiom, and it is function-scoped, so the
+    session-scoped fixture that applies migrations once cannot use it.
+    """
+    saved = {name: os.environ.get(name) for name in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for name, previous in saved.items():
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
+
+
+def alembic_config() -> Any:
+    """The project's own Alembic configuration, pointed at its script directory.
+
+    `script_location` is set rather than read, and that is not the test choosing
+    where migrations live: SPEC §13 and E0-04 both put them at
+    `backend/migrations/`. A relative `script_location` in `alembic.ini`
+    resolves against the working directory, which is `backend/` for
+    `make migrate` and the repository root for pytest, so leaving it unset would
+    fail on where pytest happens to be standing rather than on anything the
+    ticket is about.
+    """
+    from alembic.config import Config
+
+    if not ALEMBIC_INI_PATH.is_file():
+        pytest.fail(
+            f"{ALEMBIC_INI_PATH} does not exist. E0-04 ships `backend/alembic.ini` and "
+            "`backend/migrations/` with `env.py` wired to `Base.metadata` and to the "
+            "superuser connection (SPEC §13, ADR 0009)."
+        )
+    if not MIGRATIONS_DIR.is_dir():
+        pytest.fail(
+            f"{MIGRATIONS_DIR} does not exist. E0-04 ships the migration environment and one "
+            "baseline revision that creates nothing, establishing the revision chain."
+        )
+
+    config = Config(str(ALEMBIC_INI_PATH))
+    config.set_main_option("script_location", str(MIGRATIONS_DIR))
+    return config
+
+
+def provision_application_role(superuser_url: str, database: str) -> None:
+    """Create the role the application connects as, as `scripts/db-init` does.
+
+    ADR 0009's provisioning table gives this fixture its own row, and E0-04 owns
+    it: `scripts/db-init` runs only where the Compose `initdb` hook exists, and
+    a container started by testcontainers has no such hook. Without this, every
+    test would run as the cluster superuser — bypassing every grant and every
+    row-level security policy — and the suite would be measuring privileges no
+    deployment has.
+
+    `NOSUPERUSER` and `CONNECT` and nothing else, matching
+    `scripts/db-init/01-application-role.sh`. The credential is inlined into the
+    statement because Postgres does not accept bind parameters in `CREATE ROLE`;
+    that script uses `\\password` instead, for a reason that does not apply to a
+    throwaway container whose credential is in this file.
+    """
+    from sqlalchemy import create_engine, text
+
+    create_role = (
+        f'CREATE ROLE "{TEST_APP_USER}" LOGIN'
+        f" PASSWORD '{TEST_APP_CREDENTIAL}'"
+        " NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+    )
+    grant_connect = f'GRANT CONNECT ON DATABASE "{database}" TO "{TEST_APP_USER}"'
+
+    engine = create_engine(superuser_url, isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as connection:
+            connection.execute(text(create_role))
+            connection.execute(text(grant_connect))
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def postgres_container() -> Iterator[Any]:
+    """A Postgres container on the image `docker-compose.yml` deploys.
+
+    Session-scoped: starting one costs seconds, and the isolation every test
+    needs comes from `db_session` rolling its transaction back rather than from
+    a fresh server. The `with` block is what tears it down, on the way out of a
+    passing run and out of a failing one alike.
+
+    `testcontainers.community.postgres`, not `testcontainers.postgres`: on the
+    locked testcontainers 4.15.0 the shorter path raises a DeprecationWarning at
+    import, and `filterwarnings = ["error::DeprecationWarning"]` in
+    `pyproject.toml` turns that into a collection error.
+    """
+    from testcontainers.community.postgres import PostgresContainer
+
+    services = load_compose(BASE_COMPOSE_PATH).get("services") or {}
+    service = services.get(DB_SERVICE_NAME) or {}
+    image = service.get("image") if isinstance(service, dict) else None
+
+    if not isinstance(image, str) or not image:
+        pytest.fail(
+            f"{BASE_COMPOSE_PATH} declares no image for the `{DB_SERVICE_NAME}` service, so "
+            "these tests have no Postgres image to run and cannot fall back to one without "
+            "checking the schema against a server the project never deploys."
+        )
+
+    with PostgresContainer(
+        image=image,
+        username=TEST_SUPERUSER,
+        password=TEST_SUPERUSER_CREDENTIAL,
+        dbname=TEST_DATABASE,
+        driver="psycopg",
+    ) as container:
+        yield container
+
+
+@pytest.fixture(scope="session")
+def provisioned_database(postgres_container: Any) -> DatabaseUnderTest:
+    """The container's database, with both roles, before any migration runs."""
+    urls = DatabaseUnderTest(
+        superuser_url=container_url(
+            postgres_container,
+            username=TEST_SUPERUSER,
+            credential=TEST_SUPERUSER_CREDENTIAL,
+            database=TEST_DATABASE,
+        ),
+        application_url=container_url(
+            postgres_container,
+            username=TEST_APP_USER,
+            credential=TEST_APP_CREDENTIAL,
+            database=TEST_DATABASE,
+        ),
+    )
+    provision_application_role(urls.superuser_url, TEST_DATABASE)
+    return urls
+
+
+@pytest.fixture(scope="session")
+def migrated_database(provisioned_database: DatabaseUnderTest) -> DatabaseUnderTest:
+    """`alembic upgrade head`, applied once for the whole session."""
+    from alembic import command
+
+    with environment(migration_environment(provisioned_database)):
+        command.upgrade(alembic_config(), "head")
+    return provisioned_database
+
+
+@pytest.fixture
+def empty_database(
+    postgres_container: Any,
+    provisioned_database: DatabaseUnderTest,
+) -> Iterator[DatabaseUnderTest]:
+    """A database with nothing in it at all, for one test, then dropped.
+
+    "`alembic upgrade head` succeeds against an empty database" is a claim about
+    an empty one, and the session database stops being empty the moment the
+    first migration lands on it. A second database in the same container is far
+    cheaper than a second container, and roles are cluster-wide, so both URLs
+    still name the two roles ADR 0009 separates.
+    """
+    from sqlalchemy import create_engine, text
+
+    name = f"e0_04_{uuid4().hex[:12]}"
+    admin = create_engine(provisioned_database.superuser_url, isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as connection:
+            connection.execute(text(f'CREATE DATABASE "{name}"'))
+        yield DatabaseUnderTest(
+            superuser_url=container_url(
+                postgres_container,
+                username=TEST_SUPERUSER,
+                credential=TEST_SUPERUSER_CREDENTIAL,
+                database=name,
+            ),
+            application_url=container_url(
+                postgres_container,
+                username=TEST_APP_USER,
+                credential=TEST_APP_CREDENTIAL,
+                database=name,
+            ),
+        )
+    finally:
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()
+
+
+@pytest.fixture
+def alembic_config_pointed_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[DatabaseUnderTest], Any]:
+    """Point Alembic at one database and hand back a `Config` to run commands with.
+
+    The commands stay in the test — `command.upgrade`, `command.check` — because
+    which one is being run is the subject of the test that runs it, and a
+    fixture that ran them would move the assertion's verb into this file.
+    """
+
+    def prepare(database: DatabaseUnderTest) -> Any:
+        for name, value in migration_environment(database).items():
+            monkeypatch.setenv(name, value)
+        return alembic_config()
+
+    return prepare
+
+
+@pytest.fixture(scope="session")
+def migrated_engine(migrated_database: DatabaseUnderTest) -> Iterator[Any]:
+    """An engine on the migrated database, connected as the bootstrap identity.
+
+    The bootstrap identity and not the application one, and the reason is worth
+    stating because it looks like the wrong choice. Tests seed the rows they
+    read back, and the application role deliberately holds nothing but `CONNECT`
+    (ADR 0001 line 71, ADR 0009) — so a fixture that seeded as the application
+    role would either fail or need a grant this project does not make.
+    `app.db`'s own engine connects as the application role, which is what
+    `tests/integration/test_db_session.py` exercises.
+    """
+    from sqlalchemy import create_engine
+
+    engine = create_engine(migrated_database.superuser_url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def db_session(migrated_engine: Any) -> Iterator[Any]:
+    """A session whose every write is rolled back when the test ends.
+
+    The transaction is opened on the connection *outside* the session, and the
+    session joins it by creating a savepoint, so a test that commits still ends
+    up inside a transaction this fixture can roll back. That is what makes the
+    isolation hold against test code that does not know about it — which is the
+    only kind of isolation worth having, since a test that has to cooperate to
+    stay isolated will eventually not.
+
+    Postgres puts DDL inside the transaction too, so a table created in a test
+    is gone with the rest of it.
+    """
+    from sqlalchemy.orm import Session
+
+    connection = migrated_engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection, join_transaction_mode="create_savepoint")
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
+
+
+@pytest.fixture(scope="session")
+def application_engine(provisioned_database: DatabaseUnderTest) -> Iterator[Any]:
+    """An engine connected as the application role, holding only what it is granted."""
+    from sqlalchemy import create_engine
+
+    engine = create_engine(provisioned_database.application_url)
+    yield engine
+    engine.dispose()
