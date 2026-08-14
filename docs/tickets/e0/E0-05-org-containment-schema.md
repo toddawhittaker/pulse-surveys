@@ -46,8 +46,12 @@ than rediscovered. [E0-20](E0-20-gate-fidelity.md) item 3 has the detail.
   four-digit `8500` is doctoral. The model docstring cites §8 rather than
   copying the table.
 - Mark LMS-owned columns explicitly (courses, sections, section codes) so a
-  later ticket cannot casually add an edit path. A comment is not enough — add a
-  model-level marker or a naming convention the authz layer can read.
+  later ticket cannot casually add an edit path. **The marker is an `lms_` name
+  prefix** — `lms_number`, `lms_section_code` — chosen over a model-level
+  marker because a name cannot be forgotten the way an `info` dict can, and it
+  is visible at every call site rather than only at the definition. The cost is
+  accepted: the prefix is noisy in queries, and a column that stops being
+  LMS-owned needs a migration to rename it.
 - Migration with the constraint names from E0-04's convention.
 
 ## Out of scope
@@ -63,14 +67,23 @@ than rediscovered. [E0-20](E0-20-gate-fidelity.md) item 3 has the detail.
 ## Acceptance criteria
 
 - [ ] `alembic upgrade head` creates all six tables; `alembic check` is clean.
-- [ ] Inserting a course under a prefix in a different department's subtree
-      fails at the database level.
+- [ ] A course reaches a department by exactly one path — through its prefix,
+      via a non-nullable foreign key. Note that in a strict tree this criterion
+      is met by construction and *no row can express* the violation, which is
+      the stronger outcome and is what SPEC §8's "courses belong to exactly one
+      prefix" asks for. It only becomes a live constraint if the schema names an
+      ancestor twice (a `department_id` on `course`, say), and then the
+      contradictory row must be refused by the database. Do not add the second
+      reference in order to have something to constrain.
 - [ ] Course level derives correctly for a table of representative course
       numbers spanning all five levels, and asserts both edges of every band —
       `099`/`100`, `499`/`500`, `599`/`600`, `799`, `8000`, `9999`.
 - [ ] A course number in no band fails to insert: `800` and `999` at three
-      digits, `1000` and `7999` at four, and a number that is not three or four
-      digits at all.
+      digits, `1000` and `7999` at four, a four-digit number below `1000` such
+      as `0099`, and a number that is not three or four digits at all.
+- [ ] Every LMS-owned column carries the `lms_` prefix, asserted by walking
+      `Base.metadata` rather than by reading the model — so a later ticket that
+      adds an unprefixed LMS column fails instead of passing silently.
 - [ ] Course level cannot be set independently of the course number — an attempt
       either fails or is ignored in favor of the derived value.
 - [ ] Deleting a department with prefixes attached fails rather than cascading.

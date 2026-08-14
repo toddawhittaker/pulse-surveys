@@ -52,7 +52,7 @@ Institution
 └── College                 (e.g., College of Sciences)
     └── Department          (groups one or more prefixes: Math may hold MATH, STAT, MIS)
         └── Prefix          (e.g., BIOL)
-            └── Course      (e.g., BIOL 2150)
+            └── Course      (e.g., BIOL 215)
                 └── Section (term instance, e.g., R3WW in Fall 2026)
 ```
 
@@ -70,7 +70,7 @@ View behavior:
 
 - **LMS-owned (read-only in Pulse; hourly roster sync + launch-time ingestion):** courses, sections, section codes, enrollments, teaching instructors. Course **level** (DEV/UG/UGGR/GR/DR) derives from the course number, by the bands §8 sets out; section **length and start date** derive from the section code (§2.2). A read-only course-catalog viewer in the admin console shows what synced and when.
 - **Pulse-owned — people graph:** person records (name, category) plus reports-to edges. The LMS has no equivalent; purview is computed from this graph. Built top-down in the admin console (a new person's reports-to selector lists only people already in the graph).
-- **Pulse-owned — Lead Faculty mapping:** a mapping of individuals to the courses they lead (people and courses are not 1:1), maintained in the admin console with CSV import/export. Imports always show a dry-run diff before applying (e.g., "2 mappings added · 1 changed · BIOL 4410 unmapped, falls to chair"). A course with no mapping falls to its department chair.
+- **Pulse-owned — Lead Faculty mapping:** a mapping of individuals to the courses they lead (people and courses are not 1:1), maintained in the admin console with CSV import/export. Imports always show a dry-run diff before applying (e.g., "2 mappings added · 1 changed · BIOL 441 unmapped, falls to chair"). A course with no mapping falls to its department chair.
 
 ### 2.2 Terms, section codes, and course weeks
 
@@ -311,7 +311,7 @@ Selected constraints:
   | `600`–`799` | `GR` | graduate |
   | `8000`–`9999` | `DR` | doctoral |
 
-  Numbers outside those bands — three-digit `800`–`999`, and four-digit `1000`–`7999` — are rejected at write time rather than stored with an absent or guessed level. A roster sync carrying an unexpected number is a defect to see, not a row to accept.
+  Width is part of the rule, not an accident of it: a three-digit number is valid only in `000`–`799`, and a four-digit number only in `8000`–`9999`. So `800` and `999` are rejected, and so are `1000`–`7999` and any four-digit number below `1000`. That last case is why width is stated rather than left to the arithmetic — `0099` and `099` are different strings that a numeric comparison would read as the same course, which is how one course acquires two spellings and two rows. Numbers outside the bands are rejected at write time rather than stored with an absent or guessed level. A roster sync carrying an unexpected number is a defect to see, not a row to accept.
 - `person` and `role_assignment` implement §2.1: an assignment carries `person_id`, `role`, `scope_node_id`, and a nullable `reports_to` referencing another **assignment** (never a person or org node). The graph is a forest/DAG over assignments; assignment-level cycles are rejected at write time. Purview is computed from this graph, not from containment.
 - `lead_faculty_mapping` maps a person to the courses they lead (one lead per course); a course with no mapping resolves to its department chair.
 - `response` is unique per (student, section, week); `answer` rows link to versioned `question` rows; workload is stored as a decimal.
