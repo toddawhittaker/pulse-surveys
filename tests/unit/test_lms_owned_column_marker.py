@@ -44,12 +44,13 @@ regression, an unprefixed twin appearing beside a prefixed column.
 An earlier draft of this docstring said E0-11's chokepoint closes it. That rests
 on the chokepoint knowing LMS ownership only from the prefix, and SPEC §2.1 does
 not work that way: its ownership list is *courses, sections, section codes,
-enrollments, teaching instructors*, every item of which lives on `course`,
-`section` or `enrollment`. A chokepoint that refuses writes to those **tables**
-answers §2.1 without reading a column name at all, and would catch the
-unprefixed `external_id` this module cannot. Table grain has its own failure —
-it breaks the day a Pulse-owned writable column lands on one of those tables —
-so E0-11 has a real choice to make rather than an inherited limit.
+enrollments, teaching instructors*, four of which live on `course`, `section` or
+`enrollment`. A chokepoint that refuses writes to those **tables** answers most
+of §2.1 without reading a column name at all, and would catch the unprefixed
+`external_id` this module cannot. Table grain has its own failures — it breaks
+when a Pulse-owned writable column lands on one of those tables, and the fifth
+item, the teaching-instructor link, may live on `role_assignment` rather than on
+any of them — so E0-11 has a real choice to make rather than an inherited limit.
 [E0-21](../../docs/tickets/e0/E0-21-review-debt.md) carries it.
 
 **Why the metadata and not the migration.** The criterion says `Base.metadata`,

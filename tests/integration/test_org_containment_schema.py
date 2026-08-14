@@ -405,30 +405,41 @@ def test_the_containment_foreign_keys_walked_by_parent_are_indexed(
     entry 2 in its performance form — behaviour shipped with nothing asserting
     it — so the fix gets a regression test rather than only a migration.
 
-    The other three containment foreign keys are deliberately *not* asserted
-    here, and deliberately have no index: `college.institution_id`,
-    `department.college_id` and `course.prefix_id` each lead a composite unique
-    constraint, which already serves a lookup by parent. Measured, not assumed.
-    Asserting they have no index would be asserting an absence, which is entry
-    3's shape, and would go red for the right change.
+    **Leading position, not membership.** The column has to be first in some
+    index, and an earlier version of this test only checked that it appeared
+    somewhere in one. Those differ: a B-tree over `(term_id, course_id)` contains
+    `course_id`, and Postgres 17 has no skip scan, so it does not serve an
+    equality lookup on `course_id` alone. A future "let us not have two indexes
+    on section" cleanup could fold this index into a composite ordered the other
+    way, restore the exact defect, and leave the suite green — which is the
+    leftmost-prefix rule that also decides whether the other three foreign keys
+    need an index of their own.
+
+    Those three are deliberately *not* asserted here, and deliberately have no
+    index: `college.institution_id`, `department.college_id` and
+    `course.prefix_id` each lead a composite unique constraint, which already
+    serves a lookup by parent. Measured, not assumed. Asserting they have *no*
+    index would be asserting an absence, which is entry 3's shape, and would go
+    red for the right change.
     """
     expected = {("prefix", "department_id"), ("section", "course_id")}
 
     with migrated_engine.connect() as connection:
-        indexed = {
-            (table_name, column)
+        leading = {
+            (table_name, index["column_names"][0])
             for table_name, _ in expected
             for index in inspect(connection).get_indexes(table_name)
-            for column in index["column_names"]
-            if column is not None
+            if index["column_names"] and index["column_names"][0] is not None
         }
 
-    missing = expected - indexed
+    missing = expected - leading
     assert not missing, (
-        f"{sorted(missing)} are foreign keys with no index. A lookup by parent then reads the "
-        "whole table, which passes on seed data and degrades every term as sections accumulate. "
-        "See the comments in `app/models/org.py` for why the other three containment foreign "
-        "keys correctly have none."
+        f"{sorted(missing)} are foreign keys that no index leads with. A lookup by parent then "
+        "reads the whole table, which passes on seed data and degrades every term as sections "
+        "accumulate. Note that an index merely *containing* the column is not enough — Postgres "
+        "does not skip-scan, so only a leading column serves an equality lookup on its own. See "
+        "the comments in `app/models/org.py` for why the other three containment foreign keys "
+        "correctly have no index."
     )
 
 

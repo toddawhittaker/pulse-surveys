@@ -77,14 +77,24 @@ thin), §4.1, and the roles section of `CLAUDE.md`.
       an unprefixed LMS-owned column slipping through as expected behaviour.
 
       SPEC §2.1's ownership list is *courses, sections, section codes,
-      enrollments, teaching instructors*, and every item on it lives on
-      `course`, `section` or `enrollment`. So a **table-grained** refusal
-      answers §2.1 without reading a column name, and would catch the unprefixed
-      column a name-based check cannot. Its failure mode is the opposite one: it
-      breaks the day a Pulse-owned writable column lands on one of those tables,
-      and `course.level` is already an example of a non-LMS column there, saved
-      only by being unwritable. A **column-grained** refusal over the `lms_`
-      prefix has the omission gap instead.
+      enrollments, teaching instructors*. Four of those five live on `course`,
+      `section` or `enrollment`, so a **table-grained** refusal answers most of
+      §2.1 without reading a column name, and would catch the unprefixed column
+      a name-based check cannot.
+
+      **Establish where the teaching-instructor link lands before choosing.**
+      It is the item that may not live on those three tables: §2.1's chain is
+      `INSTRUCTOR(section) → LEAD_FACULTY(course) → …` over **role assignments**,
+      and §8 puts those on `role_assignment`. If the link is an assignment row,
+      a table-grained refusal over `{course, section, enrollment}` leaves an
+      application write path able to create or edit an LMS-sourced `INSTRUCTOR`
+      assignment — and that is not a stale attribute, it is a **purview grant**,
+      since §2.1 computes purview from exactly those rows. Table grain's other
+      failure is the mirror of column grain's: it breaks the day a Pulse-owned
+      writable column lands on one of those tables, and `course.level` is
+      already a non-LMS column there, saved only by being unwritable. A
+      **column-grained** refusal over the `lms_` prefix has the omission gap
+      instead.
 
       Pick one, say which in the pull request, and say what the chosen grain
       does not catch. [E0-21](E0-21-review-debt.md) carries the residue of

@@ -14,8 +14,8 @@ invisible on seed data, worse every term.
 
 Not to be read as "purview descends containment", which SPEC §2.1 explicitly
 denies: purview comes from the supervision graph over role assignments. These
-indexes serve aggregation, and they serve a single batched join at least as well
-as a per-parent loop — the batched shape was the faster of the two when measured.
+indexes serve aggregation, and they serve a single batched join as well as they
+serve a per-parent probe — the batched shape is the one to write.
 
 **Three other containment foreign keys deliberately get nothing here.**
 `college.institution_id`, `department.college_id` and `course.prefix_id` each

@@ -46,15 +46,26 @@ writer.
 high-volume tables E2 adds on index-locality grounds alone, and rejected for two
 reasons rather than one.
 
-**It must not be used for `response` or `answer`, and that is not a "for now".**
-A v7 key encodes its creation millisecond, so ordering or paging by primary key
-returns rows in submission order. A comment list rendered in "arbitrary" primary
-key order is then rendered in the order students submitted, and in a small
-section an instructor who knows roughly when people launched can attribute
-comments — the exact linkage [SPEC §4](../SPEC.md) buys by randomizing comment
-display order and never showing timestamps. The leak does not need the id to
-leave the server, so the exposure rule below does not catch it. Any table whose
-rows are student-authored keeps a v4 key.
+**It must not be used for any table with one row per student submission, and
+that is not a "for now".** A v7 key encodes its creation millisecond, so
+ordering or paging by primary key returns rows in submission order. A comment
+list rendered in "arbitrary" primary key order is then rendered in the order
+students submitted, and in a small section an instructor who knows roughly when
+people launched can attribute comments — the exact linkage [SPEC §4](../SPEC.md)
+buys by randomizing comment display order and never showing timestamps. The leak
+does not need the id to leave the server, so the exposure rule below does not
+catch it.
+
+**The test is one-row-per-submission, not "authored by a student"**, and the
+difference is not academic. `classification` is written by the model rather than
+by a student, and [§7.4](../SPEC.md) runs comment validity *synchronously at
+submit*, so a classification's creation millisecond **is** a submission
+millisecond. A report path that joins a classification to its comment and pages
+by the classification id leaks the same order. `threat_case` and `notification`
+have the same shape. So `response`, `answer`, `classification`, `threat_case` and
+`notification` all keep a v4 key, and any later table created once per submission
+joins that list — the question to ask of a new table is how many rows it gets per
+student submission, not who authored them.
 
 For everything else it is deferred rather than rejected: `uuidv7()` is a
 Postgres 18 function and the pinned image is `postgres:17.10` ([ADR 0007](0007-container-images-pinned-by-tag-and-digest.md)).

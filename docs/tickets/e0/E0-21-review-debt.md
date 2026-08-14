@@ -40,13 +40,17 @@ sail through every test in the suite today.
 **Two ways to close it, and the choice belongs to E0-11.**
 
 *Table grain.* SPEC §2.1's ownership list is *courses, sections, section codes,
-enrollments, teaching instructors*, and every item on it lives on `course`,
-`section` or `enrollment`. A chokepoint that refuses application writes to those
-**tables** answers §2.1 without reading a column name, and catches the unprefixed
-`canvas_id` that no name-based check can. What it does not catch is the reverse:
-the day a Pulse-owned writable column lands on one of those tables, a table-grain
-rule refuses a write that should be allowed. `course.level` is already a
-non-LMS column on an LMS-owned table, saved only by being unwritable.
+enrollments, teaching instructors*. Four of the five live on `course`, `section`
+or `enrollment`, so a chokepoint refusing application writes to those **tables**
+answers most of §2.1 without reading a column name, and catches the unprefixed
+`canvas_id` that no name-based check can. Two things it does not catch. The day a
+Pulse-owned writable column lands on one of those tables, a table-grain rule
+refuses a write that should be allowed — `course.level` is already a non-LMS
+column on an LMS-owned table, saved only by being unwritable. And the
+teaching-instructor link may not be on those tables at all: §2.1's chain runs
+over role assignments and §8 puts those on `role_assignment`, so if the link is
+an assignment row, table grain leaves it writable — which is a purview grant
+rather than a stale attribute, since purview is computed from those rows.
 
 *The write seam.* The sync path is the only thing that sees both halves at once —
 which field came from the platform, and which column it went into. A write of an
@@ -122,9 +126,12 @@ contradiction.
 
 **Tests apply**, and they are the whole ticket.
 
-**Docs apply** only if item 1 takes the fallback rather than the seam check, in
-which case ADR 0014 gains a line saying the second source of truth was accepted
-and why.
+**Docs apply if item 1 is closed by table grain**, in which case ADR 0014 gains
+a line: the marker stops being the enforcement mechanism and becomes
+documentation, which retires one of the two reasons that ADR gives for choosing
+a name prefix over an `info={}` dict. (An earlier version of this line made the
+docs conditional on taking an explicit-list fallback, which is no longer on the
+table at all.)
 
 **AI evals do not apply. Accessibility does not apply.**
 

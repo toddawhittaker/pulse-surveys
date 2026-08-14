@@ -264,9 +264,12 @@ class Section(Base):
     # every term.
     #
     # This index does not imply a per-course loop, and nothing here should be
-    # read as endorsing one. A single batched join across the whole scope was
-    # measured at 22ms over 40,000 sections against hundreds of round trips for
-    # the loop, and the index serves the batched shape just as well. Purview
+    # read as endorsing one — a single batched join across the whole scope is
+    # the shape to write, and this index serves it as well as it serves a probe.
+    # (An earlier version of this comment quoted a millisecond figure for that
+    # comparison. It came from a review conversation and is recorded nowhere a
+    # reader could check, which is the same fault as the claim it replaced.)
+    # Purview
     # itself is **not** computed by descending containment — SPEC §2.1 puts it
     # on the supervision graph over role assignments, and this module's own
     # docstring says why conflating the two is a category error. Only a chair's
