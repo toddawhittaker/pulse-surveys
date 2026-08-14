@@ -182,8 +182,14 @@ class Prefix(Base):
     id: Mapped[UUID] = mapped_column(
         Uuid, primary_key=True, server_default=text("gen_random_uuid()")
     )
+    # Indexed, unlike the other containment foreign keys, because nothing else
+    # covers it: `college.institution_id`, `department.college_id` and
+    # `course.prefix_id` are each the leading column of a composite unique
+    # constraint, so Postgres already has a usable index for a lookup by
+    # parent and a second one would be dead weight. `prefix` has no composite
+    # constraint, and E0-09's purview walk fetches prefixes by department.
     department_id: Mapped[UUID] = mapped_column(
-        ForeignKey("department.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("department.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     code: Mapped[str] = mapped_column(String(16), nullable=False, unique=True)
 
@@ -234,7 +240,20 @@ class Section(Base):
     id: Mapped[UUID] = mapped_column(
         Uuid, primary_key=True, server_default=text("gen_random_uuid()")
     )
+    # Indexed for the same reason as `prefix.department_id`, and this is the one
+    # that matters: `section` is the leaf table and it grows by a row per
+    # section per term, while E0-09's purview walk fetches sections by course
+    # inside a loop over the purview set. Unindexed that is a sequential scan
+    # per course, which is invisible on seed data and worsens every term.
+    # `college.institution_id`, `department.college_id` and `course.prefix_id`
+    # get no index on purpose — each leads a composite unique constraint, which
+    # already serves a lookup by parent.
+    #
+    # E0-06 adds `term_id` here with a composite unique constraint over
+    # `(course_id, term_id, lms_section_code)`. If it lands leading with
+    # `course_id`, as that ticket's scope has it, this index becomes the dead
+    # weight described above and that migration should drop it.
     course_id: Mapped[UUID] = mapped_column(
-        ForeignKey("course.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("course.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     lms_section_code: Mapped[str] = mapped_column(String(16), nullable=False)
