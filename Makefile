@@ -1,9 +1,15 @@
 # Pulse Surveys
 #
 # `make ci` runs the same gates as .github/workflows/ci.yml, in the same order,
-# with the same tolerance for parts of the tree that do not exist yet. If it
-# passes here it should pass there; when the two drift, the workflow is the
-# source of truth and this file is the bug.
+# with the same tolerance for parts of the tree that do not exist yet — the
+# frontend, the e2e specs, and the eval sets. The migration and test gates lost
+# theirs in E0-04 and now run unconditionally in both places. If it passes here
+# it should pass there; when the two drift, the workflow is the source of truth
+# and this file is the bug.
+#
+# Two gates need something running: `test` needs a Docker daemon for
+# testcontainers, and `migration-check` needs a database this machine can reach
+# (`make up`, with DATABASE_URL pointed at localhost — see README.md).
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -92,38 +98,37 @@ typecheck: ## mypy (strict on services/ and ai/contracts.py) + tsc --noEmit
 		$(call skip,no frontend/package.json yet); \
 	fi
 
+# Needs a database to migrate: `make up` first. CI has its own Postgres service
+# for this job, provisioned with the same two roles the stack deploys.
+#
+# `alembic` reads `.env` itself (backend/migrations/env.py), so nothing has to
+# be exported here — but DATABASE_URL has to name a host this machine can
+# resolve. `.env.example` names the Compose service `db`, which resolves inside
+# the network and not on your laptop; README.md says where to point it.
 .PHONY: migration-check
 migration-check: ## Fail if the models have drifted from the migrations
-	$(call banner,alembic check)
-	@if [ -f backend/alembic.ini ]; then \
-		cd backend && alembic upgrade head && alembic check; \
-	else \
-		$(call skip,no backend/alembic.ini yet); \
-	fi
+	$(call banner,alembic upgrade head && alembic check)
+	@cd backend && alembic upgrade head && alembic check
 
 # ---------------------------------------------------------------------------
 # Test gates
 # ---------------------------------------------------------------------------
 
+# `--allow-empty` stays until E0-10 adds the first §4.1 invariant; the workflow
+# passes it too, and the two move together.
 .PHONY: invariants
 invariants: ## Run the §4.1 invariant suite alone; a skip is a failure
 	$(call banner,invariant suite (SPEC §4.1))
 	@mkdir -p reports
-	@if compgen -G "tests/unit/test_*.py" > /dev/null 2>&1 || compgen -G "tests/integration/test_*.py" > /dev/null 2>&1; then \
-		pytest -m invariant --junitxml=reports/invariants.xml || true; \
-		$(PYTHON) scripts/ci/check_invariants.py reports/invariants.xml --allow-empty; \
-	else \
-		$(call skip,no test suite yet); \
-	fi
+	@pytest -m invariant --junitxml=reports/invariants.xml || true
+	@$(PYTHON) scripts/ci/check_invariants.py reports/invariants.xml --allow-empty
 
+# The integration tests start their own Postgres through testcontainers, so this
+# needs a running Docker daemon but not the Compose stack.
 .PHONY: test
 test: invariants ## pytest unit + integration with coverage
 	$(call banner,pytest unit + integration)
-	@if compgen -G "tests/unit/test_*.py" > /dev/null 2>&1 || compgen -G "tests/integration/test_*.py" > /dev/null 2>&1; then \
-		pytest tests/unit tests/integration --cov=backend/app --cov-report=term-missing; \
-	else \
-		$(call skip,no test suite yet); \
-	fi
+	@pytest tests/unit tests/integration --cov=backend/app --cov-report=term-missing
 
 .PHONY: e2e
 e2e: ## Playwright against the Compose stack
@@ -280,10 +285,11 @@ down: ## Tear the stack down, including volumes
 logs: ## Follow stack logs
 	@$(COMPOSE) logs -f
 
+# Same two conditions as `migration-check` above: a database to talk to, and a
+# DATABASE_URL that resolves from here.
 .PHONY: migrate
 migrate: ## Apply migrations to the running database
-	@if [ -f backend/alembic.ini ]; then cd backend && alembic upgrade head; \
-	else $(call skip,no backend/alembic.ini yet); fi
+	@cd backend && alembic upgrade head
 
 .PHONY: seed
 seed: ## Load the demo institution, hierarchy, term, and sections

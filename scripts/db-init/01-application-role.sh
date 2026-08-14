@@ -18,9 +18,17 @@
 # Everything in `/docker-entrypoint-initdb.d` runs once, against an empty data
 # directory, before the server accepts a TCP connection. An existing
 # `postgres-data` volume never sees this file; `docker compose down -v` is what
-# discards one. It runs only where that hook exists, which is the Compose stack
-# — a managed Postgres, CI's `services.postgres`, and E0-04's testcontainers
-# fixture each provision the role their own way. ADR 0009 has the table.
+# discards one.
+#
+# **This script has a second caller.** CI's `migration-drift` job runs it as an
+# ordinary step against its `services.postgres` container, which has no init
+# hook, so the drift gate checks the schema against the role shape a deployment
+# has rather than against a bare superuser cluster (ADR 0009's provisioning
+# table, settled by ADR 0012). That caller reaches the server over TCP and
+# supplies PGHOST, PGPORT and PGPASSWORD; everything else it passes is what the
+# Compose `db` service passes. Nothing here may assume a local socket or a
+# trusted connection. A managed Postgres and E0-04's testcontainers fixture
+# still provision the role their own way.
 #
 # The only grant made here is CONNECT. That is not the same as "no privileges":
 # the role keeps Postgres's PUBLIC defaults, so it can also connect to the other

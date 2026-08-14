@@ -33,17 +33,19 @@ env:
 
 jobs:
   # --------------------------------------------------------------------------
-  # What exists yet? Every downstream job is tolerant of a tree that has not
-  # been built. As each E0 ticket lands, flip the matching `allow-missing` step
-  # in that job from tolerant to enforcing — the job body is already written.
+  # What exists yet? The jobs still listed here are tolerant of a tree that has
+  # not been built. As each E0 ticket lands, flip the matching `allow-missing`
+  # step in that job from tolerant to enforcing — the job body is already
+  # written — and drop the probe with it, so this list shrinks to nothing.
+  #
+  # Gone already: `migrations` and `pytests`. E0-04 turned the `migration-drift`
+  # and `test` jobs on, and they now run unconditionally.
   # --------------------------------------------------------------------------
   detect:
     name: Detect what exists
     runs-on: ubuntu-latest
     outputs:
       frontend: ${{ steps.d.outputs.frontend }}
-      migrations: ${{ steps.d.outputs.migrations }}
-      pytests: ${{ steps.d.outputs.pytests }}
       e2e: ${{ steps.d.outputs.e2e }}
       evals: ${{ steps.d.outputs.evals }}
     steps:
@@ -57,12 +59,6 @@ jobs:
 
           echo "Probing repository layout (SPEC §13):"
           if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
-          if [ -f backend/alembic.ini ]; then emit migrations true; else emit migrations false; fi
-          if compgen -G "tests/unit/test_*.py" > /dev/null 2>&1 || compgen -G "tests/integration/test_*.py" > /dev/null 2>&1; then
-            emit pytests true
-          else
-            emit pytests false
-          fi
           if compgen -G "tests/e2e/*.spec.ts" > /dev/null 2>&1; then emit e2e true; else emit e2e false; fi
           if [ -d tests/evals ] && compgen -G "tests/evals/**/*.py" > /dev/null 2>&1; then emit evals true; else emit evals false; fi
 
@@ -138,9 +134,17 @@ jobs:
         working-directory: frontend
         run: npx eslint . --max-warnings=0
 
+  # Enforcing since e0/db-session-alembic (E0-04): `backend/alembic.ini` and the
+  # revision chain exist, so this job no longer tolerates their absence.
+  #
+  # It runs against the role shape a deployment has rather than against a bare
+  # superuser cluster, because a drift gate that connects as a role no
+  # deployment uses cannot see a grant problem. `services.postgres` has no
+  # `/docker-entrypoint-initdb.d`, so the application role is provisioned by a
+  # step below, running the same script the Compose stack runs at first start
+  # (docs/adr/0009's provisioning table, settled by docs/adr/0012).
   migration-drift:
     name: Fast · migration drift
-    needs: detect
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -169,29 +173,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Nothing to check yet
-        if: needs.detect.outputs.migrations != 'true'
-        run: echo "::notice::No backend/alembic.ini yet — migration drift has nothing to check. Enforcing once e0/core-schema lands."
-
       - uses: actions/setup-python@v5
-        if: needs.detect.outputs.migrations == 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install backend (locked)
-        if: needs.detect.outputs.migrations == 'true'
         run: |
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
 
+      # The same script `/docker-entrypoint-initdb.d` runs on the Compose stack,
+      # rather than a second copy of the SQL that could drift from it. It talks
+      # to the service container over TCP, so the connection parameters come
+      # from PG* variables; everything else it reads is what the `db` service
+      # passes it.
+      #
+      # psql ships in the GitHub runner image. The install line is there so that
+      # a runner image which drops it fails with an apt error rather than with
+      # "command not found" three steps of debugging later.
+      - name: Provision the application role (docs/adr/0009)
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGPASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: pulse_ci
+          DB_APP_USER: pulse_app
+          DB_APP_PASSWORD: ci-only-application-role-password
+        run: |
+          set -euo pipefail
+          command -v psql > /dev/null || { sudo apt-get update && sudo apt-get install -y postgresql-client; }
+          ./scripts/db-init/01-application-role.sh
+
       # `alembic check` autogenerates against the live schema and exits non-zero
       # if the models and the migrations have diverged. A model edited without a
       # migration fails here rather than at deploy time.
+      #
+      # The three variables are the deployed split, not a convenience: DATABASE_URL
+      # names the application role, which cannot create a table, and
+      # DB_SUPERUSER/DB_SUPERUSER_PASSWORD are the identity `migrations/env.py`
+      # actually connects as (docs/adr/0009, docs/adr/0012). An `env.py` that
+      # quietly used DATABASE_URL fails this job on `permission denied for schema
+      # public` instead of passing under privileges no deployment grants.
       - name: alembic upgrade head && alembic check
-        if: needs.detect.outputs.migrations == 'true'
         working-directory: backend
         env:
-          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/pulse_ci
+          DATABASE_URL: postgresql+psycopg://pulse_app:ci-only-application-role-password@localhost:5432/pulse_ci
+          DB_SUPERUSER: postgres
+          DB_SUPERUSER_PASSWORD: postgres
         run: |
           alembic upgrade head
           alembic check
@@ -225,24 +254,21 @@ jobs:
   # TEST GATES
   # ==========================================================================
 
+  # Enforcing since e0/db-session-alembic (E0-04): the suite exists, so this job
+  # no longer tolerates its absence. A change that breaks collection now fails
+  # this gate instead of switching it off.
   test:
     name: Test · pytest + invariants
-    needs: [detect, fast-gate]
+    needs: [fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: No suite yet
-        if: needs.detect.outputs.pytests != 'true'
-        run: echo "::notice::No tests/unit or tests/integration yet. Enforcing once the first ticket ships tests (SPEC §14.2 item 1)."
-
       - uses: actions/setup-python@v5
-        if: needs.detect.outputs.pytests == 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install backend + test deps (locked)
-        if: needs.detect.outputs.pytests == 'true'
         run: |
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
@@ -256,14 +282,12 @@ jobs:
       # green checkmark, so the checker treats skip, xfail, and empty
       # collection as failures — not as skips.
       - name: Invariant suite (§4.1) — no skips permitted
-        if: needs.detect.outputs.pytests == 'true'
         run: |
           mkdir -p reports
           pytest -m invariant --junitxml=reports/invariants.xml || true
           python scripts/ci/check_invariants.py reports/invariants.xml --allow-empty
 
       - name: Unit + integration with coverage
-        if: needs.detect.outputs.pytests == 'true'
         env:
           # testcontainers drives its own Postgres; the runner's Docker daemon
           # is what it talks to.
@@ -274,7 +298,6 @@ jobs:
             --junitxml=reports/pytest.xml
 
       - name: Upload coverage
-        if: needs.detect.outputs.pytests == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
