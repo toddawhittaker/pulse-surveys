@@ -17,6 +17,15 @@ Read first: SPEC §2.1 (containment, and the data-source ownership list), §8
 
 ## Scope
 
+**Settle one thing from E0-20 first.** `backend/migrations/env.py` sets
+`compare_type=True` but not `compare_server_default`, which defaults to `False`,
+so `alembic check` cannot see a server default that changed without a migration.
+This ticket is where the first server defaults land, so it is where that blind
+spot starts to cost something. Turn it on, or accept it knowingly and record why
+in `env.py`'s docstring — the usual reason is false positives from Postgres
+normalising `text()` defaults, which is real but should be written down rather
+than rediscovered. [E0-20](E0-20-gate-fidelity.md) item 3 has the detail.
+
 - Models in `backend/app/models/org.py`: `institution`, `college`, `department`,
   `prefix`, `course`, `section`.
 - A department groups one or more prefixes; a course belongs to exactly one

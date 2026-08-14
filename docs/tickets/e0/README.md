@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Nineteen tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Twenty tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -37,6 +37,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
+| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Four gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, `alembic check` blind to server-default drift, and `echo=False` not being what keeps SQL out of the log. |
 
 ## Dependency graph
 
@@ -52,14 +53,20 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 07, 09, 15 ── 17 ───────────────────────────────── ┘
 
 02, 03 ── 19        (independent; blocks nothing)
+04 ── 20            (independent; blocks nothing)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Ticket 19 hangs off 03 and
-blocks nothing — it hardens tests rather than adding behaviour, so it can land
-any time after 03 and is not on the path to the E0 exit.
+chain and the mock LMS; ticket 18 needs everything. Tickets 19 and 20 hang off 03
+and 04 and block nothing — both harden tests rather than adding behaviour, so
+they can land any time afterwards and neither is on the path to the E0 exit.
+
+One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
+item is `alembic check` being blind to server-default drift, and E0-05 is where
+the first server default lands. Whoever builds 05 should settle that item first
+or knowingly accept it — see the pointer in E0-05's scope.
 
 ## How CI tightens
 
