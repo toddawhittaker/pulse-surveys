@@ -10,10 +10,20 @@ it is cheap to change.
 The helpers below parse both sides of that, and they parse the Compose files
 once, here, so that two test modules cannot end up disagreeing about what a
 Compose file says.
+
+E0-03 adds two fixtures of a different kind — `import_app_module` and
+`celery_application_in`. They are here for the same reason as the parsers: the
+unit tests and the integration test both need them, and two copies of a rule
+about how a module is imported, or about where a Celery application is found,
+could drift apart and leave the two suites checking different things.
 """
 
+import importlib
 import re
+import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -136,6 +146,30 @@ def base_compose() -> dict[str, Any]:
 
 
 @pytest.fixture
+def override_compose_path() -> Path:
+    """Where the development override lives. Asserted by the test, not here."""
+    return OVERRIDE_COMPOSE_PATH
+
+
+@pytest.fixture
+def override_compose() -> dict[str, Any]:
+    """`docker-compose.override.yml` parsed alone, with no base file under it.
+
+    Added in E0-03, after a reviewer found that nothing read this file at all
+    while `worker` and `beat` configuration had moved into it. Parsed on its own
+    for the same reason as the base file: the merged view is what every dynamic
+    check already sees, and the questions worth asking here are about what this
+    file says by itself.
+
+    YAML anchors are resolved by the parser, so a service that merges
+    `<<: *development-source` arrives here holding those keys. That is what makes
+    a rule about services reach a shared anchor without this fixture knowing
+    anchors exist.
+    """
+    return load_compose(OVERRIDE_COMPOSE_PATH)
+
+
+@pytest.fixture
 def ci_workflow_path() -> Path:
     """Where the CI workflow lives. Asserted by the test, not here."""
     return CI_WORKFLOW_PATH
@@ -174,6 +208,20 @@ def compose_read_variables() -> set[str]:
 
 
 @pytest.fixture
+def interpolated_variables_in() -> Callable[[Any], set[str]]:
+    """Hand `interpolated_variables` to a test that needs it on one service.
+
+    `compose_read_variables` above answers "what does the whole stack read", and
+    a rule about one service holding one credential needs the same question
+    asked of one subtree. The same walker answers both, so the two cannot end up
+    disagreeing about what counts as reading a variable — `$$` escaped, defaults
+    and error forms unwrapped, commented-out interpolations already discarded by
+    the parser.
+    """
+    return interpolated_variables
+
+
+@pytest.fixture
 def env_example_path() -> Path:
     """Where `.env.example` must live (SPEC §13). Asserted by the test, not here."""
     return ENV_EXAMPLE_PATH
@@ -191,6 +239,86 @@ def documented_env() -> dict[str, str]:
     if not ENV_EXAMPLE_PATH.is_file():
         return {}
     return parse_dotenv(ENV_EXAMPLE_PATH.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def import_app_module() -> Iterator[Callable[[str], ModuleType | None]]:
+    """Import an `app.*` module against the environment the test has just set.
+
+    A module that builds something out of `Settings` reads the environment once,
+    at import time, and `sys.modules` then keeps the result for the rest of the
+    session. So a test that sets `REDIS_URL` and imports `app.jobs.celery_app`
+    gets the value it set only if nothing imported that module earlier — and if
+    something did, the test passes or fails for a reason it did not choose,
+    which is `docs/MISTAKES.md` entry 3 in its purest form. Every `app.*` module
+    is therefore dropped from `sys.modules` before the test body runs, and the
+    set that was there is put back afterwards, so the interpreter is left as it
+    was found.
+
+    The returned callable answers `None` for a module that does not exist, so a
+    test reports a failed assertion naming the missing deliverable rather than a
+    collection error — the same choice `load_yaml` makes above, for the same
+    reason. An `ImportError` raised *inside* a module that does exist propagates
+    untouched: a module that is broken and a module that was never written need
+    different fixes, and a test must not report them as the same thing.
+    """
+    saved = {
+        name: module
+        for name, module in list(sys.modules.items())
+        if name == "app" or name.startswith("app.")
+    }
+    for name in saved:
+        sys.modules.pop(name, None)
+
+    def import_module(name: str) -> ModuleType | None:
+        try:
+            return importlib.import_module(name)
+        except ModuleNotFoundError as exc:
+            absent = exc.name
+            if absent is not None and (name == absent or name.startswith(f"{absent}.")):
+                return None
+            raise
+
+    try:
+        yield import_module
+    finally:
+        for name in [n for n in list(sys.modules) if n == "app" or n.startswith("app.")]:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+
+@pytest.fixture
+def celery_application_in() -> Callable[[ModuleType], Any]:
+    """Find the Celery application a module exposes, whatever it is named.
+
+    This mirrors what `celery -A <module>` itself does — `celery.app.utils.
+    find_app` looks for an attribute called `app`, then one called `celery`,
+    and failing both scans the module for a `Celery` instance — because the
+    worker and beat services reach the application that way and the E0-03 ticket
+    names no attribute. Pinning a name here would turn the ticket's silence into
+    this test suite's decision.
+
+    What is *not* left open is that the application has to be reachable at module
+    level: a factory that has to be called is not something `-A` can use, so a
+    module that exposes only one answers `None` here and the test that asked
+    fails saying so.
+
+    Returns `None` rather than asserting, so the test does the asserting.
+    """
+    from celery import Celery
+
+    def find(module: ModuleType) -> Any:
+        for name in ("app", "celery", "celery_app"):
+            candidate = getattr(module, name, None)
+            if isinstance(candidate, Celery):
+                return candidate
+        for name in sorted(vars(module)):
+            candidate = getattr(module, name, None)
+            if isinstance(candidate, Celery):
+                return candidate
+        return None
+
+    return find
 
 
 @pytest.fixture

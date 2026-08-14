@@ -170,11 +170,36 @@ markers = [
     # and treats a skip or an xfail as a failure — see
     # scripts/ci/check_invariants.py.
     "invariant: a SPEC §4.1 confidentiality invariant; may never be skipped",
-    "integration: needs a real Postgres via testcontainers",
+    # Widened in E0-03 from "needs a real Postgres": the Celery round-trip test
+    # needs a real broker, and a marker description that named only Postgres
+    # would have been a record asserting something the first integration test
+    # made false (docs/MISTAKES.md entry 1).
+    "integration: needs a real backing service via testcontainers (Postgres, Redis)",
     "lti: exercises signed LTI 1.3 launch fixtures",
     "slow: property-based or generative, measured in tens of seconds",
 ]
-filterwarnings = ["error::DeprecationWarning"]
+# A deprecated call our own code makes is a defect, so the default is to fail
+# on one. The single exemption below is not ours to fix and is not a defect.
+#
+# celery 5.6.3's Redis result backend stores every task result with
+# `pipe.setex(key, expires, value)`. redis-py 8.1.0 marks `setex` deprecated,
+# mirroring the Redis *server*, which has preferred `SET key value EX seconds`
+# since 2.6.12 — the command still works and celery's call is correct. Under
+# `error::DeprecationWarning` that warning is raised inside the worker's task
+# trace, so the result is never written and the round-trip test times out
+# thirty seconds later with nothing in the failure naming a warning. Measured,
+# not guessed: with `WORKER_LOGLEVEL=info` the worker logs
+# "Exception raised outside body: DeprecationWarning(...)" and the task itself
+# succeeded.
+#
+# Narrowed to that one message from that one module, so any other deprecated
+# call — including a second one from celery — still fails the suite. It goes
+# when celery stops calling `setex` or redis-py withdraws the notice; nothing
+# in this project calls it.
+filterwarnings = [
+    "error::DeprecationWarning",
+    'ignore:Call to deprecated setex\.:DeprecationWarning:celery.backends.redis',
+]
 
 # ---------------------------------------------------------------------------
 # coverage

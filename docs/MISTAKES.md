@@ -25,13 +25,17 @@ file and line, the pull request. A rule with no incident behind it is advice,
 and advice belongs in `CLAUDE.md`.
 
 **Re-ordering.** Sort by `Caught:` descending when you notice it is wrong. Ties
-break toward the more expensive consequence.
+break toward the more expensive consequence. **An entry keeps its number when it
+moves**, so the headings below are not in numerical order and are not meant to
+be. The number is the entry's name: code comments, commit messages and test
+docstrings cite "entry 7", and renumbering would silently repoint every one of
+them at a different incident.
 
 ---
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 0**
+**Caught: 2**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -45,11 +49,22 @@ measurement disproved. The ADR index silently omitted three ADRs the same branch
 shipped. Pull request #13's description spent a round describing a one-role
 database stack that no longer existed.
 
+A tenth, in E0-03, and it is the sharpest because of where it sat. The commit
+that removed a false claim from `README.md` — that the worker ran the same code
+as the API — put a new one in `docker-compose.override.yml` in the same diff: a
+comment saying a stale worker makes `get()` hang, when the measurement in that
+same commit's README said it raises `NotRegistered` for an added task and
+silently returns the old answer for a changed one. It cited this file for it.
+
 **Root cause.** Changing a mechanism and not asking what else in the repository
-makes a claim about it. Two of these were *introduced by a fix for this same
+makes a claim about it. Three of these were *introduced by a fix for this same
 class of defect* — the `.env.example` header rewritten to correct one false claim
 acquired a different one, that `LOG_LEVEL` is settled by the spec, which the spec
-never mentions.
+never mentions; and the override comment above was written by a session that had
+read this entry, bumped its counter, and used it to find four stale claims in
+files it was not editing. The sweep is outward-facing. It asks what *other*
+records say about the thing you changed, and a sentence you are writing right
+now is not yet a record, so it is not in the set you sweep.
 
 **Consequence.** A reader trusts the record over the code, because reading the
 record is cheaper. That is what a record is for, so a false one is worse than
@@ -62,11 +77,16 @@ request body, test docstrings. Indexes are the highest risk: written once, never
 re-read. "Re-read nearby prose" is not enough; it misses the record that was
 never written and the one that drifted out from under you.
 
+**And read the prose in your own diff as if someone else wrote it.** Every claim
+you have just written is a claim nobody has checked, including the ones written
+while correcting somebody else's. Where a sentence describes a behaviour, it has
+to match what you measured — not what you expected to measure before you ran it.
+
 ---
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 0**
+**Caught: 2**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -91,7 +111,7 @@ second case arrives.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -99,64 +119,34 @@ happened to be set and pydantic's repr elision landed between the two passwords.
 Separately, a set-equality test would have passed comparing two empty sets, if
 a workflow's shape changed so nothing was collected.
 
+A third, in E0-03, inside the test written to enforce entry 1 above. It asserted
+that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
+argument list in E0-03", by searching the file text for that phrase. The comment
+wraps at 80 columns, so between `join the` and `argument list` the file holds a
+newline, six spaces and a `#`. The pattern was written with a plain space. It
+matched nothing, and the test went green against the exact comment it existed to
+catch — reported as failing, because it had been read rather than run.
+
 **Root cause.** Asserting an absence. Absence is satisfied by the thing being
 broken in an unrelated way, by a fixture returning nothing, by a parser matching
-nothing.
+nothing. In the third case, by the difference between what a sentence looks like
+in a file and what it is as a string.
 
 **Consequence. ** A green suite is read as coverage. The first case would have
 been counted as proof the leak was fixed when it proved nothing about it.
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
-say in the message why that guard is not ceremony.
-
----
-
-## 4. `git add` swept untracked files into a commit
-
-**Caught: 0**
-
-**What happened.** Twice on one branch. `.claude/agent-memory/` was committed as
-its own `chore:` commit, dropped with a mixed reset, and then re-committed by the
-next `git add` — the second time *inside* a commit whose subject said
-documentation-only.
-
-**Root cause.** The directory was untracked and not ignored, so every `git add`
-re-collected it. Removing the commit recreated the cause.
-
-**Consequence.** A commit whose message and diff disagree, which is the shape
-that gets through review. Fixing it meant rewriting two commits.
-
-**Rule.** Run `git show --stat` on each commit before reporting, and read it
-against the subject line. If a fix leaves the cause in place, fix the cause —
-here, a `.gitignore` entry.
-
----
-
-## 5. A branch cut from the wrong base
-
-**Caught: 0**
-
-**What happened.** `e0/reviewer-hook-enforcement` was cut while standing on
-`e0/backend-skeleton` instead of on the epic branch.
-
-**Root cause.** Cutting a branch without checking out the base first, and not
-checking the resulting diff.
-
-**Consequence.** Pull request #12's diff was 35 files and ~3,960 additions rather
-than the 5-file hook change its description claimed. Merging it merged E0-01
-along with it, so pull request #11 merged as a no-op with no merge commit of its
-own. The history now shows one merge where the record says two.
-
-**Rule.** `git checkout <epic-branch>` before `git checkout -b`, then confirm
-with `git merge-base --is-ancestor`. Before writing a pull request description,
-run `gh pr diff <n> --name-only` and check it against what you think you changed.
+say in the message why that guard is not ceremony. A pattern searched against a
+file is a case of this and looks like none: run it against the text you claim it
+catches *and* against the text you claim it allows, and give it a canary — a
+string certainly present — so a search that has gone blind says so.
 
 ---
 
 ## 6. Shell expansion inside a commit message
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** `git commit -m "…$$POSTGRES_USER…"` in double quotes. The
 shell expanded `$$` to its process id.
@@ -175,7 +165,7 @@ change. History is not force-pushed here, so it cannot be corrected.
 
 ## 7. A verification window equal to the thing's own debounce
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** Checking that a drifted database password made the container
 report unhealthy, the poll ran for exactly 60 seconds. Docker needs `retries: 12`
@@ -194,7 +184,7 @@ the debounce window is not a result.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and
@@ -248,6 +238,48 @@ you have removed the only signal that would have told you it did not work.
 
 ---
 
+## 4. `git add` swept untracked files into a commit
+
+**Caught: 0**
+
+**What happened.** Twice on one branch. `.claude/agent-memory/` was committed as
+its own `chore:` commit, dropped with a mixed reset, and then re-committed by the
+next `git add` — the second time *inside* a commit whose subject said
+documentation-only.
+
+**Root cause.** The directory was untracked and not ignored, so every `git add`
+re-collected it. Removing the commit recreated the cause.
+
+**Consequence.** A commit whose message and diff disagree, which is the shape
+that gets through review. Fixing it meant rewriting two commits.
+
+**Rule.** Run `git show --stat` on each commit before reporting, and read it
+against the subject line. If a fix leaves the cause in place, fix the cause —
+here, a `.gitignore` entry.
+
+---
+
+## 5. A branch cut from the wrong base
+
+**Caught: 0**
+
+**What happened.** `e0/reviewer-hook-enforcement` was cut while standing on
+`e0/backend-skeleton` instead of on the epic branch.
+
+**Root cause.** Cutting a branch without checking out the base first, and not
+checking the resulting diff.
+
+**Consequence.** Pull request #12's diff was 35 files and ~3,960 additions rather
+than the 5-file hook change its description claimed. Merging it merged E0-01
+along with it, so pull request #11 merged as a no-op with no merge commit of its
+own. The history now shows one merge where the record says two.
+
+**Rule.** `git checkout <epic-branch>` before `git checkout -b`, then confirm
+with `git merge-base --is-ancestor`. Before writing a pull request description,
+run `gh pr diff <n> --name-only` and check it against what you think you changed.
+
+---
+
 ## 10. Merged with the review loop one round short
 
 **Caught: 0**
@@ -282,3 +314,37 @@ wasteful, say so in the pull request and let the merge decision be made knowing
 it — the judgment is fine, the silence is not. This applies to the coordinating
 session too: verifying a fix yourself is evidence it does what you asked for, not
 evidence it is right.
+
+---
+
+## 11. A failure in another process, invisible in the traceback that reported it
+
+**Caught: 0**
+
+**What happened.** E0-03's round-trip test timed out after thirty seconds
+waiting for a task result. Its traceback pointed at `AsyncResult.get()` and said
+nothing else: the worker had started, the broker was the one the test itself
+started, and every assertion before the wait had passed. The worker runs in a
+thread with `WORKER_LOGLEVEL=error`, so what actually happened was not printed.
+Rerunning with `WORKER_LOGLEVEL=info` showed the task had *succeeded* and then
+died storing its result — `pyproject.toml`'s `error::DeprecationWarning` turned
+redis-py 8.1.0's notice about celery's `setex` call into an exception inside the
+task trace, so the result was never written.
+
+**Root cause.** A failure that happens in another thread or another container
+does not appear in the traceback of the thing that was waiting for it. What the
+waiter reports is the *absence* of an answer, which is the same shape whatever
+the cause — a broker that is unreachable, a worker that is not running, and a
+worker that ran perfectly and could not save its answer all read as a timeout.
+
+**Consequence.** Half an hour, and a wrong first hypothesis: the obvious reading
+of "the result never came back" is that the broker or the backend is
+misconfigured. Raising the timeout, changing the result backend, or adding a
+retry would each have looked reasonable and fixed nothing.
+
+**Rule.** When something on the other side of a queue, a socket, or a container
+boundary does not answer, get *its* log before theorizing about the channel. Turn
+its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
+`docker inspect` for a health check's output) and reproduce outside the harness
+if the harness is what is hiding it. A timeout is the absence of evidence, not
+evidence.

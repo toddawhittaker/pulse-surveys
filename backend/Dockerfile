@@ -62,6 +62,18 @@ RUN groupadd --system --gid 1001 pulse \
 
 COPY --from=builder --chown=root:root /opt/venv /opt/venv
 
+# Somewhere writable for Celery beat's schedule file. `/app` is owned by root so
+# that nothing this image runs can rewrite its own code, and beat has to write
+# its store somewhere; the Compose `beat` service mounts a named volume here so
+# the last-run times survive a restart.
+#
+# The directory is created *in the image* rather than left to Docker, and that
+# is the whole point of the line: a named volume mounted over a path that exists
+# in the image inherits that path's ownership, while a volume mounted over a
+# path that does not exist is created root-owned and mode 0755, which uid 1001
+# cannot write to. Beat then exits at startup with a permission error.
+RUN install --directory --owner=pulse --group=pulse --mode=0750 /var/lib/celery
+
 WORKDIR /app
 USER pulse
 EXPOSE 8000
