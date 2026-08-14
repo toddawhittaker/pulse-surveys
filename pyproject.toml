@@ -136,6 +136,15 @@ ignore = [
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
 
+[tool.ruff.lint.isort]
+# `app` is this project's own package, and it lives under `backend/` rather than
+# at the repository root — so ruff cannot infer it from the layout for a file
+# that is not itself inside the package. Without this, imports of `app.*` are
+# sorted into the third-party block in `backend/migrations/env.py` and into the
+# first-party block everywhere else, and the difference is invisible until you
+# read two files side by side.
+known-first-party = ["app"]
+
 # ---------------------------------------------------------------------------
 # mypy
 # ---------------------------------------------------------------------------
