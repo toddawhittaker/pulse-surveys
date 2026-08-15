@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 7**
+**Caught: 8**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -80,7 +80,7 @@ string certainly present — so a search that has gone blind says so.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 6**
+**Caught: 7**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -215,6 +215,40 @@ leaving the credential one `json.dumps` from any structured logger.
 
 **Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
 property, say the property and let the implementer find the mechanism.
+
+---
+
+## 13. A hazard was written down and worked around in only one of the two places facing it
+
+**Caught: 1**
+
+**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
+columns by reflecting from Postgres, and its docstring said why: "a column whose
+type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
+is not an instance of `DateTime` and would be missed." The row-seeding helper in
+the same file dispatched `isinstance` against the **declared** column type and
+got no such accommodation. When the implementation did what the docstring
+predicted, both criterion-4 tests died inside the fixture on
+`survey_window.closes_at`, before either reached an assertion. It took a dispute
+round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
+
+**Root cause.** Meeting a hazard at the call site where it first bit, instead of
+asking which other call sites ask the same question. The write-up made it look
+handled: the file named the hazard, in prose, one screen above the code that fell
+to it.
+
+**Consequence.** Two tests that could not pass against any implementation the
+criterion admits, reported as a defect in the implementation. A round of the
+loop, and — the expensive shape — an implementer under pressure to satisfy a
+fixture rather than a criterion. Two of the four implementations tried in
+response would have satisfied the helper *by removing the guard*, and one of them
+is what the schema would have shipped.
+
+**Rule.** When you work around a quirk of a type, a parser or an API, grep for
+every place that asks the same question and route them through one helper, in the
+same change. A docstring explaining the quirk is not a fix for the code that does
+not call the fix. And when a test fails inside its own fixture, suspect the
+fixture first — the message this one printed said exactly that, and was right.
 
 ---
 
@@ -434,37 +468,3 @@ the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
 export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
 the interpreter rather than in the file: print the value the module actually
 holds. `grep` proves what is on disk, which is not what ran.
-
----
-
-## 13. A hazard was written down and worked around in only one of the two places facing it
-
-**Caught: 0**
-
-**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
-columns by reflecting from Postgres, and its docstring said why: "a column whose
-type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
-is not an instance of `DateTime` and would be missed." The row-seeding helper in
-the same file dispatched `isinstance` against the **declared** column type and
-got no such accommodation. When the implementation did what the docstring
-predicted, both criterion-4 tests died inside the fixture on
-`survey_window.closes_at`, before either reached an assertion. It took a dispute
-round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
-
-**Root cause.** Meeting a hazard at the call site where it first bit, instead of
-asking which other call sites ask the same question. The write-up made it look
-handled: the file named the hazard, in prose, one screen above the code that fell
-to it.
-
-**Consequence.** Two tests that could not pass against any implementation the
-criterion admits, reported as a defect in the implementation. A round of the
-loop, and — the expensive shape — an implementer under pressure to satisfy a
-fixture rather than a criterion. Two of the four implementations tried in
-response would have satisfied the helper *by removing the guard*, and one of them
-is what the schema would have shipped.
-
-**Rule.** When you work around a quirk of a type, a parser or an API, grep for
-every place that asks the same question and route them through one helper, in the
-same change. A docstring explaining the quirk is not a fix for the code that does
-not call the fix. And when a test fails inside its own fixture, suspect the
-fixture first — the message this one printed said exactly that, and was right.
