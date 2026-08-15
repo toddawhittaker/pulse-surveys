@@ -14,11 +14,17 @@ ships, because contiguity is not expressible as a row-level constraint in
 Postgres. **The producer is the one identifier in this file that no ticket
 spells, and it is found rather than named** — see `week_producer` below.
 
-**Nothing here asserts the mechanism of the cross-table rule.** The ticket leaves
-the choice between a trigger, a composite foreign key carrying the term's length,
-and something else open, and owes an ADR for it. So no test here names a
-constraint, and criterion 5's tests do nothing but write a row and see whether
-the database keeps it.
+**No test here names a constraint.** When the criteria were written the ticket
+left the cross-table mechanism open between a trigger, a composite foreign key
+carrying the term's length, and something else, so nothing asserted about it
+could be more than "the database refused the row". [ADR
+0018](../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)
+has since settled it, and two tests below do hold that mechanism — the copy of
+its term's length that a `week` row carries, and what happens to that copy when
+the term is edited. They still name no constraint: a name here is produced by
+`Base.metadata`'s convention rather than chosen, so holding one would report a
+rename as a regression. Criterion 5's own tests are untouched by the ADR and
+still do nothing but write a row and see whether the database keeps it.
 
 **What this module reads, and what it deliberately does not.** Two views of the
 same schema, used for different questions, and the split is not the one E0-05
@@ -98,6 +104,7 @@ from sqlalchemy import (
     inspect,
     select,
     text,
+    update,
 )
 from sqlalchemy.exc import DatabaseError, StatementError
 from sqlalchemy.types import TypeDecorator
@@ -288,29 +295,67 @@ def require_column(table: Table, candidates: tuple[str, ...]) -> str:
     )
 
 
-def foreign_key_column(table: Table, target: str) -> str:
-    """The one column on `table` whose foreign key points at `target`.
+def single_primary_key(table: Table) -> str:
+    """The name of `table`'s one primary key column.
+
+    One, because [ADR 0016](../../docs/adr/0016-primary-keys-are-database-generated-uuids.md)
+    makes every primary key in this schema a single server-generated uuid. A
+    composite key would mean that decision had changed, which is worth a failure
+    rather than a silent first-column-wins.
+    """
+    columns = list(table.primary_key.columns)
+    if len(columns) != 1:
+        pytest.fail(
+            f"`{table.name}` has {len(columns)} primary key columns "
+            f"({[column.name for column in columns]}). ADR 0016 makes every primary key one uuid "
+            "with a server default, and this module addresses rows by it."
+        )
+    return columns[0].name
+
+
+def foreign_key_column(table: Table, target: str, target_column: str) -> str:
+    """The one column on `table` whose foreign key points at `target.target_column`.
 
     Found by following the key rather than by guessing a name, so a reference
-    spelled any way at all is picked up. Two separate references to the same
-    table would make "the term this row belongs to" ambiguous, so that is a
-    failure rather than a choice this helper makes silently.
+    spelled any way at all is picked up.
+
+    **The referenced column is part of the question, not decoration.** An earlier
+    version of this helper asked only which *table* was referenced, and that
+    became wrong the moment [ADR
+    0018](../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)
+    landed: `week` now references `term` from two columns — the term's key and a
+    carried copy of its length — so "the column that points at `term`" has two
+    answers and this helper failed on every call. Asking for the referenced
+    column distinguishes them, and is how the two tests below reach each one
+    without naming either.
     """
     matches = sorted(
-        {key.parent.name for key in table.foreign_keys if key.column.table.name == target}
+        {
+            key.parent.name
+            for key in table.foreign_keys
+            if key.column.table.name == target and key.column.name == target_column
+        }
     )
     if not matches:
-        referenced = sorted({key.column.table.name for key in table.foreign_keys})
+        referenced = sorted(
+            f"{key.column.table.name}.{key.column.name}" for key in table.foreign_keys
+        )
         pytest.fail(
-            f"`{table.name}` has no foreign key to `{target}` — it references {referenced}. "
-            f"E0-06 keys `{table.name}` to a term."
+            f"No column on `{table.name}` references `{target}.{target_column}` — the table "
+            f"references {referenced}."
         )
     if len(matches) > 1:
         pytest.fail(
-            f"`{table.name}` references `{target}` from more than one column ({matches}), so "
-            "there is no single answer to which term a row belongs to and the two can disagree."
+            f"`{table.name}` references `{target}.{target_column}` from more than one column "
+            f"({matches}), so there is no single answer to which of them carries it."
         )
     return matches[0]
+
+
+def matching_primary_key(table: Table, row: Any) -> Any:
+    """A WHERE clause selecting exactly `row`."""
+    key = single_primary_key(table)
+    return table.c[key] == row[key]
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +595,41 @@ def seed_term(session: Any, tables: dict[str, Table], chain: dict[str, Any], wee
     return seed_row(session, tables, "term", chain, **values)
 
 
+def seed_weeks(session: Any, tables: dict[str, Table], chain: dict[str, Any], through: int) -> None:
+    """Weeks 1 to `through` for the term already in `chain`.
+
+    Each row's copy of the term's length is filled by `seed_row` following the
+    composite foreign key, not by this helper — which is the same route any other
+    writer takes and the reason the copy is right without anyone maintaining it
+    ([ADR 0018](../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)).
+    """
+    for number in range(1, through + 1):
+        seed_row(session, tables, "week", chain, **{WEEK_NUMBER_COLUMN: number})
+
+
+def carried_term_lengths(session: Any, tables: dict[str, Table], term_row: Any) -> list[int]:
+    """What every `week` row of one term currently says its term's length is.
+
+    Both columns are reached by following the composite foreign key to the
+    `term` column each references — its primary key, and its length — so nothing
+    here spells `term_id` or `term_length_weeks`. ADR 0018 names them; this
+    module's rule is to find what it can find, so that a rename is a schema
+    change rather than a test failure.
+
+    The term row is matched on the primary key alone and deliberately not on the
+    length: the caller reads this before and after changing that length, and a
+    filter that included the old value would match nothing afterwards and return
+    an empty list, which is the shape `docs/MISTAKES.md` entry 3 records.
+    """
+    week = require_table(tables, "week")
+    term = require_table(tables, "term")
+    key = single_primary_key(term)
+    term_column = foreign_key_column(week, "term", key)
+    carried = foreign_key_column(week, "term", require_column(term, TERM_LENGTH_COLUMNS))
+    rows = session.execute(select(week.c[carried]).where(week.c[term_column] == term_row[key]))
+    return sorted(rows.scalars())
+
+
 def week_producer() -> Any:
     """The function E0-06 ships to produce a term's week rows.
 
@@ -617,10 +697,10 @@ def week_numbers_produced(
         )
 
     if produced is None:
-        term_column = foreign_key_column(week, "term")
-        referenced = next(iter(week.c[term_column].foreign_keys)).column
+        key = single_primary_key(require_table(tables, "term"))
+        term_column = foreign_key_column(week, "term", key)
         rows = session.execute(
-            select(week.c[WEEK_NUMBER_COLUMN]).where(week.c[term_column] == term[referenced.name])
+            select(week.c[WEEK_NUMBER_COLUMN]).where(week.c[term_column] == term[key])
         )
         return sorted(rows.scalars())
 
@@ -1037,6 +1117,192 @@ def test_the_week_producer_covers_one_to_the_term_length_with_no_gaps(
         )
     finally:
         savepoint.rollback()
+
+
+# ---------------------------------------------------------------------------
+# ADR 0018 — the composite foreign key keeps the carried length true, so the
+# local CHECK is not a weaker check. Neither of these holds an acceptance
+# criterion: they hold the record that decided how criteria 3 and 5 are
+# enforced, and without them the whole trigger-versus-key argument rests on a
+# measurement nobody re-runs (`docs/MISTAKES.md` entry 2).
+# ---------------------------------------------------------------------------
+
+
+def test_shortening_a_term_that_strands_no_week_rewrites_the_carried_lengths(
+    db_session: Any, declared_tables: dict[str, Table]
+) -> None:
+    """ADR 0018: `ON UPDATE CASCADE` rewrites the copy when the term's length changes.
+
+    The decision's own words: the foreign key "is what makes `term_length_weeks`
+    mean 'this row's term's length' instead of 'a number this row supplied'", and
+    `ON UPDATE CASCADE` "rewrites it when the term's length changes". Everything
+    else in this module writes that copy through `seed_row` at insert time, so
+    every other test would pass just as well against an ordinary column nobody
+    maintains. This is the one that asks whether it is *kept* true.
+
+    **It is the mechanism guard, and it is why the sibling test below does not
+    need to name a constraint.** Swap the key for the trigger ADR 0018 rejected
+    and there is no carried column to read, so this fails at discovery. Swap
+    `CASCADE` for `RESTRICT` and it fails at the update. Keep the column and drop
+    the key and it fails on the last assertion, because nothing rewrites it.
+
+    **Written in the shortening direction on purpose.** Lengthening cascades too,
+    and asserting that here would be the more obvious test — but ADR 0018 records
+    lengthening as the direction with a known gap, left to E2 or E11, and an
+    assertion about it would be coupled to whether a bare lengthening is still
+    accepted once that gap is closed. Shortening a term that strands nothing has
+    no gap: the weeks are 1..N before and 1..N after, and nothing any later
+    ticket does should change what the database makes of it. Nothing here says
+    the resulting term is *desirable* — only what the cascade does to the copies.
+
+    The before-assertion is not ceremony. "The copies read 11 afterwards" is
+    equally true of a column that has always read 11 and of one nothing ever
+    wrote, so the copies are required to start at the term's original length
+    before their changing is allowed to mean anything (`docs/MISTAKES.md` entry
+    3).
+    """
+    term = require_table(declared_tables, "term")
+    length_column = require_column(term, TERM_LENGTH_COLUMNS)
+    shorter = SUMMER_TERM_WEEKS - 1
+
+    chain: dict[str, Any] = {}
+    seeded = seed_term(db_session, declared_tables, chain, SUMMER_TERM_WEEKS)
+    seed_weeks(db_session, declared_tables, chain, shorter)
+
+    before = carried_term_lengths(db_session, declared_tables, seeded)
+    assert before == [SUMMER_TERM_WEEKS] * shorter, (
+        f"The {shorter} week rows of a {SUMMER_TERM_WEEKS}-week term carry {before}, not "
+        f"{[SUMMER_TERM_WEEKS] * shorter}. They are filled by following the composite foreign "
+        "key at insert, so either the seeding did not happen or the copy does not start out "
+        "agreeing with the term — and until it does, the assertion below cannot tell a cascade "
+        "from a column that already held the answer."
+    )
+
+    shortening = (
+        update(term).where(matching_primary_key(term, seeded)).values(**{length_column: shorter})
+    )
+    try:
+        applied = db_session.execute(shortening)
+    except DatabaseError as refused:
+        pytest.fail(
+            f"Shortening a {SUMMER_TERM_WEEKS}-week term to {shorter} weeks was refused: "
+            f"{refused}. The term holds weeks 1 to {shorter}, so nothing is stranded and there "
+            "is nothing for the check on the cascaded rows to reject. A refusal here is either "
+            "`ON UPDATE RESTRICT` where ADR 0018 specifies `CASCADE`, or a rule tying the "
+            "length to the dates that the term's own dates no longer satisfy."
+        )
+
+    assert applied.rowcount == 1, (
+        f"The update matched {applied.rowcount} rows rather than 1, so it changed no term and "
+        "the reading below would report the copies as they always were."
+    )
+
+    after = carried_term_lengths(db_session, declared_tables, seeded)
+    assert after == [shorter] * shorter, (
+        f"After the term's length changed from {SUMMER_TERM_WEEKS} to {shorter}, its week rows "
+        f"carry {after}. ADR 0018 puts a copy of the term's length on every `week` row and keeps "
+        "it true with `ON UPDATE CASCADE`, so that the range check comparing a week's number "
+        "against it is comparing against the term's real length. A copy that does not follow is "
+        "a number the row supplied, and the local check becomes exactly the weaker check the "
+        "ADR argues it is not."
+    )
+
+
+def test_shortening_a_term_below_a_week_it_holds_is_refused(
+    db_session: Any, declared_tables: dict[str, Table]
+) -> None:
+    """ADR 0018's central claim: the shortening is refused at the moment of the shortening.
+
+    The decision's measurement table has it as a row — "shortening 18 → 12 with a
+    week 18 present: refused" — and the whole argument against the trigger
+    alternative rests on it. The trigger version accepts both halves under
+    `READ COMMITTED` and leaves "a 6-week term holding weeks [12]", a row no
+    query will ever complain about; the key version refuses, because the cascade
+    rewrites the week row and the check on that row is re-evaluated. A calendar
+    editor that shortens a term is E11, and §6.3 says admins edit the calendar,
+    so this is an edit that happens rather than a hypothetical.
+
+    **The control is the same edit, by the same amount, on a term whose last week
+    is the one it is being shortened to.** Nothing is stranded there, so it has
+    to be accepted, and it rules out every reason a shortening could be refused
+    that has nothing to do with the weeks: a check tying the length to the dates,
+    which E0-06 permits and does not require; and `ON UPDATE RESTRICT`, which
+    would refuse any change to a term a week references. The two halves differ in
+    exactly one row — whether week 12 exists.
+
+    **No constraint is named, and that is a decision rather than an inheritance
+    of the module's earlier rule.** The rule was "assert the criterion, not the
+    mechanism", and it applied while the mechanism was the implementer's to
+    choose; ADR 0018 settled that, so naming would be defensible now. It is still
+    not what this asserts, for two reasons. A constraint's name here is produced
+    by `Base.metadata`'s naming convention from a name in the model, and the epic
+    README's rule is that names follow the convention rather than being chosen —
+    so a rename is a refactor, and a test holding one reports it as a regression.
+    And the mechanism does not go unheld: the sibling test above reads the
+    carried length and watches it follow the term, which no other mechanism
+    produces at all. What is left for this test is the claim itself, which is
+    about an outcome.
+
+    **What a single session cannot show**, and what therefore is not claimed
+    here: the concurrency difference. A trigger implementation would pass this
+    test, because it refuses the same edit in the same transaction; it differs
+    only when the shortening and the insert are two transactions, which needs two
+    connections and is the ADR's own measurement rather than this suite's.
+
+    There is no "and afterwards the term still reads 12 weeks" assertion. The
+    refused update runs inside `begin_nested()`, so by the time anything could
+    query, the savepoint has rolled back and the term reads 12 whatever the
+    database did — an assertion that cannot fail, which is the shape
+    `docs/MISTAKES.md` entry 3 records and which
+    `tests/integration/test_org_containment_schema.py` removed for the same
+    reason. What the after-state is good for is the failure message, so it is
+    read inside the savepoint and reported there.
+    """
+    term = require_table(declared_tables, "term")
+    length_column = require_column(term, TERM_LENGTH_COLUMNS)
+    shorter = SUMMER_TERM_WEEKS - 1
+
+    spare: dict[str, Any] = {}
+    control = seed_term(db_session, declared_tables, spare, SUMMER_TERM_WEEKS)
+    seed_weeks(db_session, declared_tables, spare, shorter)
+    relaxing = (
+        update(term).where(matching_primary_key(term, control)).values(**{length_column: shorter})
+    )
+    try:
+        db_session.execute(relaxing)
+    except DatabaseError as refused:
+        pytest.fail(
+            f"The control shortening — a {SUMMER_TERM_WEEKS}-week term holding weeks 1 to "
+            f"{shorter}, shortened to {shorter} — was refused: {refused}. Nothing is stranded by "
+            "it, so a schema that refuses it refuses shortening for some reason other than the "
+            "weeks, and the refusal below would say nothing about week 12."
+        )
+
+    chain = branch_from(spare, "institution")
+    seeded = seed_term(db_session, declared_tables, chain, SUMMER_TERM_WEEKS)
+    seed_weeks(db_session, declared_tables, chain, SUMMER_TERM_WEEKS)
+
+    shortening = (
+        update(term).where(matching_primary_key(term, seeded)).values(**{length_column: shorter})
+    )
+    refused_shortening = False
+    left_behind: list[int] = []
+    try:
+        with db_session.begin_nested():
+            db_session.execute(shortening)
+            left_behind = carried_term_lengths(db_session, declared_tables, seeded)
+    except DatabaseError:
+        refused_shortening = True
+
+    assert refused_shortening, (
+        f"A {SUMMER_TERM_WEEKS}-week term holding weeks 1 to {SUMMER_TERM_WEEKS} was shortened "
+        f"to {shorter} weeks and the database accepted it; its week rows then carried "
+        f"{left_behind}. Week {SUMMER_TERM_WEEKS} is now outside its own term, and no later "
+        "query will complain, because every rule that could is written against the copy the "
+        "cascade has just rewritten. ADR 0018 refuses this at the moment of the shortening — "
+        "that is the property it chose the composite foreign key for, over a trigger that "
+        "commits the same violation whenever the two edits arrive in different transactions."
+    )
 
 
 # ---------------------------------------------------------------------------

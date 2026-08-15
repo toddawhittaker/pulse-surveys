@@ -33,6 +33,51 @@ them at a different incident.
 
 ---
 
+## 3. A test passed for a reason unrelated to what it asserted
+
+**Caught: 7**
+
+**What happened.** A test asserting that a startup error carries no credential
+passed against a demonstrably leaking implementation, because ten variables
+happened to be set and pydantic's repr elision landed between the two passwords.
+Separately, a set-equality test would have passed comparing two empty sets, if
+a workflow's shape changed so nothing was collected.
+
+A third, in E0-03, inside the test written to enforce entry 1 below. It asserted
+that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
+argument list in E0-03", by searching the file text for that phrase. The comment
+wraps at 80 columns, so between `join the` and `argument list` the file holds a
+newline, six spaces and a `#`. The pattern was written with a plain space. It
+matched nothing, and the test went green against the exact comment it existed to
+catch — reported as failing, because it had been read rather than run.
+
+A fourth, caught before it landed, and recorded because of where it came from
+rather than what it cost. A reviewer's sketch for the E0-06 test holding ADR 0018
+ended "assert that afterwards the term still reads N weeks with week N still
+present". The refused `UPDATE` runs inside `begin_nested()`, so by the time
+anything could query, the savepoint has rolled back and the term reads N whatever
+the database did — the assertion cannot fail. It is the same assertion
+`tests/integration/test_org_containment_schema.py` deleted for the same reason
+during E0-05, proposed again by a careful reader one ticket later. The shape is
+attractive because it reads like thoroughness.
+
+**Root cause.** Asserting an absence. Absence is satisfied by the thing being
+broken in an unrelated way, by a fixture returning nothing, by a parser matching
+nothing. In the third case, by the difference between what a sentence looks like
+in a file and what it is as a string.
+
+**Consequence. ** A green suite is read as coverage. The first case would have
+been counted as proof the leak was fixed when it proved nothing about it.
+
+**Rule.** Verify by mutation, not by reading: break the thing and watch the test
+fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
+say in the message why that guard is not ceremony. A pattern searched against a
+file is a case of this and looks like none: run it against the text you claim it
+catches *and* against the text you claim it allows, and give it a canary — a
+string certainly present — so a search that has gone blind says so.
+
+---
+
 ## 2. Behaviour shipped with nothing asserting it
 
 **Caught: 6**
@@ -55,41 +100,6 @@ existed to fix was reintroducible without any signal.
 green, you have written a convention, not a guarantee. Prefer asserting the
 *forbidden* state over the permitted one — it keeps working when a legitimate
 second case arrives.
-
----
-
-## 3. A test passed for a reason unrelated to what it asserted
-
-**Caught: 6**
-
-**What happened.** A test asserting that a startup error carries no credential
-passed against a demonstrably leaking implementation, because ten variables
-happened to be set and pydantic's repr elision landed between the two passwords.
-Separately, a set-equality test would have passed comparing two empty sets, if
-a workflow's shape changed so nothing was collected.
-
-A third, in E0-03, inside the test written to enforce entry 1 below. It asserted
-that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
-argument list in E0-03", by searching the file text for that phrase. The comment
-wraps at 80 columns, so between `join the` and `argument list` the file holds a
-newline, six spaces and a `#`. The pattern was written with a plain space. It
-matched nothing, and the test went green against the exact comment it existed to
-catch — reported as failing, because it had been read rather than run.
-
-**Root cause.** Asserting an absence. Absence is satisfied by the thing being
-broken in an unrelated way, by a fixture returning nothing, by a parser matching
-nothing. In the third case, by the difference between what a sentence looks like
-in a file and what it is as a string.
-
-**Consequence. ** A green suite is read as coverage. The first case would have
-been counted as proof the leak was fixed when it proved nothing about it.
-
-**Rule.** Verify by mutation, not by reading: break the thing and watch the test
-fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
-say in the message why that guard is not ceremony. A pattern searched against a
-file is a case of this and looks like none: run it against the text you claim it
-catches *and* against the text you claim it allows, and give it a canary — a
-string certainly present — so a search that has gone blind says so.
 
 ---
 
