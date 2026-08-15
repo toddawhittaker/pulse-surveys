@@ -40,6 +40,15 @@ made:
 Both views name the same tables, so nothing here needs an ORM class name — the
 ticket names four tables and no classes.
 
+**Both views also agree about what a column's type is**, and they have to. Every
+question this module asks of a type goes through `stored_type`, which resolves a
+declared `TypeDecorator` through to the type it decorates. Reflection never sees
+a decorator and so was always right by accident; the seeding helper read the
+declared class and was not, which stopped both criterion-4 tests inside their own
+fixture against the very implementation the criterion forces
+([E0-06-01](../../docs/disputes/E0-06-01.md)). One helper now answers for both,
+so the next edit cannot re-split them.
+
 **Two column names in this file are guesses and are marked as ones.** The ticket
 gives both `term` and `start_letter_map` a "length in weeks" without spelling
 either column, so each is a named constant with a candidate list, following the
@@ -91,6 +100,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.exc import DatabaseError, StatementError
+from sqlalchemy.types import TypeDecorator
 
 pytestmark = pytest.mark.integration
 
@@ -371,18 +381,45 @@ def integer_hint(table_name: str, column_name: str) -> int:
     return 1 + (next(counter) - 1) % WEEK_NUMBER_CEILING
 
 
+def stored_type(column: Any) -> Any:
+    """The type a column actually stores, with any `TypeDecorator` resolved away.
+
+    **The one place this module decides what a column holds**, used by both the
+    seeding helper and the timestamp discovery below, so the two cannot answer
+    the question differently. They once did, and it cost a dispute
+    ([E0-06-01](../../docs/disputes/E0-06-01.md)): discovery reflected from
+    Postgres and so was immune, while seeding read the declared type and
+    dispatched `isinstance` against it. A `TypeDecorator` is not an instance of
+    the type it decorates, so `survey_window.closes_at` — declared as the guard
+    criterion 4 forces — matched nothing and stopped both timestamp tests inside
+    their own fixture, before either reached an assertion.
+
+    Unwrapping is done in a loop because one decorator can wrap another. It names
+    nothing from `app.models` and pins no interface, which is the point: the
+    guard's class is the implementer's to choose, and a helper that recognised it
+    by name would be this file deciding it.
+    """
+    kind = column.type
+    while isinstance(kind, TypeDecorator):
+        kind = kind.impl_instance
+    return kind
+
+
 def invented_value(table: Table, column: Any) -> Any:
     """Something a NOT NULL column of unknown purpose will accept.
 
     Deliberately dumb about meaning and careful about type. A column this cannot
     answer for stops the test with a message naming it, rather than inserting
     `None` and failing later somewhere that reads like a schema defect.
+
+    Dispatch is on what the column *stores*, not on the class the model declares
+    — see `stored_type` above.
     """
     maker = COLUMN_VALUES.get((table.name, column.name))
     if maker is not None:
         return maker()
 
-    kind = column.type
+    kind = stored_type(column)
     if isinstance(kind, Enum):
         values = list(getattr(kind, "enums", ()) or ())
         if values:
@@ -406,11 +443,14 @@ def invented_value(table: Table, column: Any) -> Any:
                 return hint
         return letters(limit)
 
+    # `column.type` and not the unwrapped `kind`: the declared type is what a
+    # reader will find in the model, and it is the string that diagnosed
+    # E0-06-01. The wording is unchanged from the version that did so.
     pytest.fail(
         f"The seeding helper in this module cannot invent a value for `{table.name}."
-        f"{column.name}`, which is NOT NULL, has no default, and is of type {kind!r}. That is "
-        "this test file needing a case added, not a defect in the schema — add the type to "
-        "`invented_value`."
+        f"{column.name}`, which is NOT NULL, has no default, and is of type {column.type!r}. "
+        "That is this test file needing a case added, not a defect in the schema — add the type "
+        "to `invented_value`."
     )
 
 
@@ -605,10 +645,17 @@ def week_numbers_produced(
 def timestamp_columns(reflected: dict[str, Table]) -> list[tuple[str, str]]:
     """Every timestamp column on the four calendar tables, as `(table, column)`.
 
-    Discovered from the reflected schema rather than the declared one, because a
-    column whose type is a `TypeDecorator` — the natural place for the criterion
-    4 guard to live — is not an instance of `DateTime` and would be missed. What
-    Postgres calls a timestamp is unambiguous.
+    Discovered from the reflected schema because what Postgres calls a timestamp
+    is unambiguous, and because these two tests are about columns rather than
+    about what the ORM says of them.
+
+    An earlier version of this docstring gave a second reason — that a declared
+    `TypeDecorator` "is not an instance of `DateTime` and would be missed" — and
+    that is no longer true of this module: the check goes through `stored_type`,
+    which resolves a decorator away, so reflected and declared now answer alike.
+    Keeping the two in step is the point. When they disagreed, this side was
+    immune and the seeding side was not, which is exactly the failure
+    [E0-06-01](../../docs/disputes/E0-06-01.md) records.
     """
     found: list[tuple[str, str]] = []
     for name in CALENDAR_TABLES:
@@ -616,7 +663,9 @@ def timestamp_columns(reflected: dict[str, Table]) -> list[tuple[str, str]]:
         if table is None:
             continue
         found.extend(
-            (name, column.name) for column in table.columns if isinstance(column.type, DateTime)
+            (name, column.name)
+            for column in table.columns
+            if isinstance(stored_type(column), DateTime)
         )
     return found
 
