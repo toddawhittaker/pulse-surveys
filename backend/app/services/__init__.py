@@ -1,7 +1,11 @@
 """Domain logic (SPEC §13).
 
-Empty until E0-11 lands `authz.py`. The package exists now because the strict
-mypy profile in `pyproject.toml` is pinned to `app.services.*`: the module that
-will hold the authorization chokepoint gets no untyped escape from its first
-line, rather than from whenever someone remembers to tighten it.
+`section_codes` reads a section code against its term's start-letter map and
+derives the section's length, dates and modality (§2.2, E0-07). `authz.py`, the
+authorization chokepoint every entry point passes through, arrives with E0-11.
+
+The package was created before either of them, because the strict mypy profile
+in `pyproject.toml` is pinned to `app.services.*`: the modules that hold the
+guarantees get no untyped escape from their first line, rather than from
+whenever someone remembers to tighten it.
 """
