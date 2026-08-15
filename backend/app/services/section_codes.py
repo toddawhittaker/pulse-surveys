@@ -60,8 +60,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.org import Modality, Section
+from app.models.org import SECTION_CODE_MAX_LENGTH, Modality, Section
 from app.models.term import StartLetterMap, Term, TermRow
+
+# How much of a code a failure message may quote. A refused code is echoed back
+# to whoever is reading a roster sync, and a message that pastes four thousand
+# characters into a log line buries the sentence that explains it.
+_QUOTED_CHARACTERS = 12
 
 # §2.2's grammar, and the whole of what is structural about a code: one start
 # position, an ordinal, a modality suffix. The three groups are deliberately
@@ -180,7 +185,30 @@ def parse_section_code(code: str) -> ParsedSectionCode:
     The grammar only. Whether the start position means anything is a question
     about a term's start-letter map, and it is asked by
     `derive_section_calendar` below, which has one.
+
+    **The length is checked before anything is read**, and that order is the
+    whole of it. `int()` raises a `ValueError` past
+    `sys.get_int_max_str_digits()` digits — 4300 by default, and settable per
+    process — so an unbounded parser turns a long enough roster value into an
+    unhandled exception and a 500, which is the one thing E0-07's definition of
+    done rules out. `String(16)` does not save it: SQLAlchemy does not enforce a
+    column's length in Python, and a section's derived columns are `NOT NULL`,
+    so the parse always happens before any row is written.
+
+    The bound is the column's own width (`SECTION_CODE_MAX_LENGTH`) rather than
+    a limit on the ordinal's digits, because that is the one bound already in
+    the system: a code that cannot be stored is not a code to derive a calendar
+    from, whatever it is made of. §2.2 does not say how wide an ordinal may be,
+    and this deliberately does not decide it beyond what the schema already has
+    — a 13-digit ordinal parses.
     """
+    if len(code) > SECTION_CODE_MAX_LENGTH:
+        raise MalformedSectionCodeError(
+            f"Section code {_summarise(code)} is longer than the "
+            f"{SECTION_CODE_MAX_LENGTH} characters `section.lms_section_code` holds, so it is "
+            "not a code this institution could store even if it could be read (SPEC §2.2)."
+        )
+
     match = _STRUCTURE.fullmatch(code)
     if match is None:
         raise MalformedSectionCodeError(
@@ -306,6 +334,20 @@ def apply_section_code(session: Session, section: Section) -> Section:
     section.end_date = calendar.end_date
     section.modality = calendar.modality
     return section
+
+
+def _summarise(code: str) -> str:
+    """A code short enough to put in a message, with its length said out loud.
+
+    Only the length refusal needs this. Every other message here is raised after
+    the length check, so the code it quotes is at most
+    `SECTION_CODE_MAX_LENGTH` characters — but the one refusal that *is* about
+    an over-long code is exactly the one that must not paste it into a log line
+    or an operator's screen.
+    """
+    if len(code) <= _QUOTED_CHARACTERS * 2:
+        return repr(code)
+    return f"{code[:_QUOTED_CHARACTERS]!r}... ({len(code)} characters)"
 
 
 def _term_dates(term: TermRow) -> tuple[UUID, date, date]:

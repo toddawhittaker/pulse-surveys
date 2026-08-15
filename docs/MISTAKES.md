@@ -218,6 +218,57 @@ property, say the property and let the implementer find the mechanism.
 
 ---
 
+## 15. A property test's generator excluded the case its own docstring named
+
+**Caught: 1**
+
+**What happened.** E0-07's parsing suite carries a property for the definition of
+done's "parsing is total: no exception type that escapes as a 500". Its docstring
+listed the leaks it refuses and put `ValueError` out of `int()` first. It
+generated `st.text(max_size=12)`.
+
+The string that produces that `ValueError` is a start letter, more than four
+thousand digits and a modality suffix: CPython caps integer-from-string
+conversion at `sys.get_int_max_str_digits()`, 4300 by default, and
+`parse_section_code("R" + "9" * 4301 + "WW")` raises `builtins.ValueError`
+rather than the service's own error. Section codes come from the LMS roster feed,
+so it is reachable input, and nothing shortens the value on the way in — a
+`String(16)` column is not enforced in Python, and the derived columns are
+`NOT NULL`, so the parse always runs before any row exists. The suite was green.
+`/security-review` found it.
+
+**Root cause.** The bound on the generator and the claim in the docstring were
+written at different moments and never read against each other. Twelve characters
+is a reasonable size for a section code, which is exactly why it looked like a
+detail rather than a decision: it silently redefined "arbitrary text" as "text
+short enough to be a section code", and the counterexample lives on the other
+side of that line. A property test states its claim in the docstring and its
+scope in the strategy, and only the second one runs.
+
+It is entry 3's family — a test that passed for a reason unrelated to what it
+asserted — but the mechanism is its own and worth naming separately: not an
+absence that something else satisfied, and not a pattern that matched nothing. An
+input space narrowed to where the assertion happens to hold.
+
+**Consequence.** A guarantee about untrusted input, asserted by a test named for
+it, over a space that could not contain the failure. Had it shipped, the first
+malformed roster value of that shape would have been a 500 on the sync, with the
+suite still reporting the case as covered. The repair was not simply a larger
+`max_size` either: `st.text()` will not assemble that string by chance in three
+hundred examples, so widening the bound would have put the counterexample inside
+the declared space and left it just as unreachable — the same defect behind a
+bigger number.
+
+**Rule.** For every property, read the strategy against the docstring and ask
+which named case the generator cannot produce. If the claim is about a boundary —
+a limit in the standard library, a column width, a protocol maximum — generate
+*around that boundary explicitly*, drawing from a band that straddles it, rather
+than trusting a wide range to wander into it. Where a bound stays, say in the
+docstring what it does not reach; a stated bound is a scope, and an unstated one
+is a false claim of totality.
+
+---
+
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
 **Caught: 1**
@@ -287,57 +338,6 @@ said `password authentication failed`; only the status had not caught up.
 **Rule.** When verifying a debounced state change, wait past the debounce and
 read the underlying log as well as the summary status. A negative result inside
 the debounce window is not a result.
-
----
-
-## 15. A property test's generator excluded the case its own docstring named
-
-**Caught: 0**
-
-**What happened.** E0-07's parsing suite carries a property for the definition of
-done's "parsing is total: no exception type that escapes as a 500". Its docstring
-listed the leaks it refuses and put `ValueError` out of `int()` first. It
-generated `st.text(max_size=12)`.
-
-The string that produces that `ValueError` is a start letter, more than four
-thousand digits and a modality suffix: CPython caps integer-from-string
-conversion at `sys.get_int_max_str_digits()`, 4300 by default, and
-`parse_section_code("R" + "9" * 4301 + "WW")` raises `builtins.ValueError`
-rather than the service's own error. Section codes come from the LMS roster feed,
-so it is reachable input, and nothing shortens the value on the way in — a
-`String(16)` column is not enforced in Python, and the derived columns are
-`NOT NULL`, so the parse always runs before any row exists. The suite was green.
-`/security-review` found it.
-
-**Root cause.** The bound on the generator and the claim in the docstring were
-written at different moments and never read against each other. Twelve characters
-is a reasonable size for a section code, which is exactly why it looked like a
-detail rather than a decision: it silently redefined "arbitrary text" as "text
-short enough to be a section code", and the counterexample lives on the other
-side of that line. A property test states its claim in the docstring and its
-scope in the strategy, and only the second one runs.
-
-It is entry 3's family — a test that passed for a reason unrelated to what it
-asserted — but the mechanism is its own and worth naming separately: not an
-absence that something else satisfied, and not a pattern that matched nothing. An
-input space narrowed to where the assertion happens to hold.
-
-**Consequence.** A guarantee about untrusted input, asserted by a test named for
-it, over a space that could not contain the failure. Had it shipped, the first
-malformed roster value of that shape would have been a 500 on the sync, with the
-suite still reporting the case as covered. The repair was not simply a larger
-`max_size` either: `st.text()` will not assemble that string by chance in three
-hundred examples, so widening the bound would have put the counterexample inside
-the declared space and left it just as unreachable — the same defect behind a
-bigger number.
-
-**Rule.** For every property, read the strategy against the docstring and ask
-which named case the generator cannot produce. If the claim is about a boundary —
-a limit in the standard library, a column width, a protocol maximum — generate
-*around that boundary explicitly*, drawing from a band that straddles it, rather
-than trusting a wide range to wander into it. Where a bound stays, say in the
-docstring what it does not reach; a stated bound is a scope, and an unstated one
-is a false claim of totality.
 
 ---
 

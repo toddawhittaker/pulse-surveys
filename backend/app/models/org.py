@@ -96,6 +96,17 @@ class Modality(StrEnum):
     FACE_TO_FACE = "FACE_TO_FACE"
 
 
+# The width of `section.lms_section_code`, and so the longest section code this
+# deployment can hold. It is a named constant rather than a literal on the
+# column because `app.services.section_codes` refuses a longer code *before* it
+# reads any part of it: a code that cannot be stored is not a code to derive a
+# calendar from, and the parser needs some bound in order to be total — CPython
+# raises `ValueError` out of `int()` past `sys.get_int_max_str_digits()` digits,
+# and a roster feed can send a string that long. One definition, so the bound
+# the parser enforces cannot drift from the column it comes from.
+SECTION_CODE_MAX_LENGTH = 16
+
+
 # SPEC §8's bands, as the one expression that holds them. Read that section for
 # the table; it is not copied here, and the arms below are in its order.
 #
@@ -357,7 +368,9 @@ class Section(Base):
     term_id: Mapped[UUID] = mapped_column(
         ForeignKey("term.id", ondelete="RESTRICT"), nullable=False
     )
-    lms_section_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    # `SECTION_CODE_MAX_LENGTH` and not a literal: the parser refuses a longer
+    # code before it reads any part of it, and that bound has to be this one.
+    lms_section_code: Mapped[str] = mapped_column(String(SECTION_CODE_MAX_LENGTH), nullable=False)
     # The four values the code derives to, in the vocabulary SPEC §8 uses for
     # them. `length_weeks` and the two dates are the section's own axis; §5.1
     # compares a section only against others of the same length and level, and
