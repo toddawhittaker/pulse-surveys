@@ -32,6 +32,18 @@ the widening rather than edited under its old name: it was called
 name that lies about its own constraint is the shape of `docs/MISTAKES.md`
 entry 1.
 
+**So the downgrade stops working once a real start-letter map is loaded**, and
+it is meant to. Re-narrowing to `^[A-Z]$` is validated against the rows already
+there, so with §2.2's Fall 2026 map in the table it aborts on the first of the
+six numbered positions. Measured, with one such row present: `check constraint
+"ck_start_letter_map_letter_is_one_upper_case_letter" of relation
+"start_letter_map" is violated by some row`, and the whole revision rolls back —
+the version stays at this one and the four columns stay on `section`. That is
+the loud direction: the alternative
+would be a downgrade that quietly leaves a constraint the data contradicts. A
+rollback past this revision therefore means deciding what happens to the 3-week
+cohorts first, which is a data question and not one this file can answer.
+
 Every constraint name comes from `op.f(...)`, which is the naming convention on
 `Base.metadata` rendering it. None is hand-written; see `app/models/base.py`.
 """
