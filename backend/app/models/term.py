@@ -20,6 +20,18 @@ copy the foreign key keeps in step: `ON UPDATE CASCADE` rewrites it when the ter
 changes, and the local CHECK then refuses the change if some row no longer fits.
 A row that misstates it is refused by the foreign key rather than stored.
 
+**Editing a term's length is guarded in one direction only, and this is the
+paragraph that has to say so**, because whoever edits one — E11's configuration
+surface (§6.3) — does it through `term` and never calls the producer at the
+bottom of this module. *Shortening* is refused, loudly and by name: the cascade
+rewrites the copies, the local CHECK re-evaluates, and the edit fails while any
+week sits past the new end. *Lengthening* is accepted and silent. Nothing creates
+the weeks the term has just grown, so an 18-week term goes on holding twelve week
+rows — each one internally consistent, since the cascade rewrote it — and only a
+count against `length_weeks` shows the gap. E0-06 ships no reconciler and
+`week_rows_for_term` cannot be one; ADR 0018's consequences carry the whole of it
+and route it to E2 and E11.
+
 **Timestamps are timezone-aware and refuse a naive value** (§3.1: a window opens
 Friday 18:00 and closes Sunday 23:59:59 in the institution timezone). Postgres
 does not refuse a naive datetime on its own — it reads one in the session's
