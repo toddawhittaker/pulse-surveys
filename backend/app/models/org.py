@@ -31,10 +31,10 @@ alone that Pulse does not own the value (SPEC §2.1's ownership list; ADR 0014).
 `level` carries no prefix: the LMS supplies the number and Pulse derives the
 level, and a generated column cannot be written by anyone in any case.
 
-**Not here, on purpose.** `section` has no term foreign key yet — `term` is
-E0-06's table, and the foreign key lands with it. Section length, start and end
-dates and modality derive from `lms_section_code` and are E0-07's. Relationship
-attributes are left until a query needs one.
+**Not here, on purpose.** The calendar `section.term_id` points at — term, week,
+start_letter_map, survey_window — is `app.models.term` (E0-06). Section length,
+start and end dates and modality derive from `lms_section_code` and are E0-07's.
+Relationship attributes are left until a query needs one.
 """
 
 from enum import StrEnum
@@ -242,50 +242,64 @@ class Course(Base):
 class Section(Base):
     """A term instance of a course, identified by its LMS section code (e.g. R3WW).
 
-    Sections belong to exactly one course and one term (SPEC §8). The course is
-    here; the term foreign key arrives with the `term` table in E0-06, and so
-    does the uniqueness rule that goes with it — a section code identifies a
-    section within a course *and term*, and a constraint written now without the
-    term column would forbid the same code recurring next term.
+    Sections belong to exactly one course and one term (SPEC §8), and both
+    foreign keys are here: E0-05 shipped the course half, E0-06 added the term
+    half with the `term` table and the uniqueness rule that needed it.
+
+    **A section code identifies a section within a course *and* term.** Hence
+    `(course_id, term_id, lms_section_code)` rather than a pair: `BIOL 215 R3WW`
+    runs again next fall, and a rule without the term forbids it. Without the
+    course it would be worse still — nothing in a code names its course, so
+    every course in a term draws from the same small alphabet of start letters.
 
     Length, start and end dates and modality all derive from
     `lms_section_code` via the start-letter map (SPEC §2.2) and are E0-07's.
     """
 
     __tablename__ = "section"
+    __table_args__ = (UniqueConstraint("course_id", "term_id", "lms_section_code"),)
 
     id: Mapped[UUID] = mapped_column(
         Uuid, primary_key=True, server_default=text("gen_random_uuid()")
     )
-    # Indexed for the same reason as `prefix.department_id`, and this is the one
-    # that matters: `section` is the leaf table and it grows by a row per
-    # section per term, and every roll-up reaches sections by course. Unindexed
-    # that is a sequential scan per course, invisible on seed data and worse
-    # every term.
-    #
-    # This index does not imply a per-course loop, and nothing here should be
-    # read as endorsing one — a single batched join across the whole scope is
-    # the shape to write, and this index serves it as well as it serves a probe.
-    # (An earlier version of this comment quoted a millisecond figure for that
-    # comparison. It came from a review conversation and is recorded nowhere a
-    # reader could check, which is the same fault as the claim it replaced.)
-    # Purview
-    # itself is **not** computed by descending containment — SPEC §2.1 puts it
-    # on the supervision graph over role assignments, and this module's own
-    # docstring says why conflating the two is a category error. Only a chair's
-    # or dean's *own grant* is a containment subtree; a Lead Faculty's grant is
-    # the courses they lead, from `lead_faculty_mapping`. Expanding a lead's
-    # grant from a prefix instead would hand them every sibling lead's course,
-    # which is SPEC §4.1 invariant 2.
+    # Reaching sections by course has to be indexed: `section` is the leaf table
+    # and it grows by a row per section per term, so a sequential scan here is
+    # invisible on seed data and worse every term. It is *served* by the unique
+    # constraint above, which leads with this column — so this column carries no
+    # index of its own, and E0-06 dropped the `ix_section_course_id` E0-05 added,
+    # which would have cost a write on every section insert for no read it was
+    # the only index for. That is the same reasoning that leaves
     # `college.institution_id`, `department.college_id` and `course.prefix_id`
-    # get no index on purpose — each leads a composite unique constraint, which
-    # already serves a lookup by parent.
+    # deliberately unindexed: each leads a composite unique constraint.
     #
-    # E0-06 adds `term_id` here with a composite unique constraint over
-    # `(course_id, term_id, lms_section_code)`. If it lands leading with
-    # `course_id`, as that ticket's scope has it, this index becomes the dead
-    # weight described above and that migration should drop it.
+    # Leading position is the whole of it. Postgres 17 has no skip scan, so an
+    # index that merely contains `course_id` serves no lookup by course — which
+    # is why the constraint's column order is not free, and why reordering it
+    # means putting the index back.
+    #
+    # None of this implies a per-course loop, and nothing here should be read as
+    # endorsing one — a single batched join across the whole scope is the shape
+    # to write, and this serves it as well as it serves a probe. (An earlier
+    # version of this comment quoted a millisecond figure for that comparison.
+    # It came from a review conversation and is recorded nowhere a reader could
+    # check, which is the same fault as the claim it replaced.) Purview itself is
+    # **not** computed by descending containment — SPEC §2.1 puts it on the
+    # supervision graph over role assignments, and this module's own docstring
+    # says why conflating the two is a category error. Only a chair's or dean's
+    # *own grant* is a containment subtree; a Lead Faculty's grant is the courses
+    # they lead, from `lead_faculty_mapping`. Expanding a lead's grant from a
+    # prefix instead would hand them every sibling lead's course, which is SPEC
+    # §4.1 invariant 2.
     course_id: Mapped[UUID] = mapped_column(
-        ForeignKey("course.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("course.id", ondelete="RESTRICT"), nullable=False
+    )
+    # A section belongs to exactly one term (SPEC §8), and the calendar is what
+    # `lms_section_code` is read against: the same code means a different length
+    # and a different start date in a different term (SPEC §2.2). Not indexed on
+    # its own — it sits second in the unique constraint, and a lookup of every
+    # section in a term is a report-generation scan rather than a hot path. E2
+    # adds an index here if one turns out to be needed, with a measurement.
+    term_id: Mapped[UUID] = mapped_column(
+        ForeignKey("term.id", ondelete="RESTRICT"), nullable=False
     )
     lms_section_code: Mapped[str] = mapped_column(String(16), nullable=False)
