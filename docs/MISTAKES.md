@@ -146,7 +146,7 @@ to match what you measured — not what you expected to measure before you ran i
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 3**
+**Caught: 4**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -235,6 +235,43 @@ said `password authentication failed`; only the status had not caught up.
 **Rule.** When verifying a debounced state change, wait past the debounce and
 read the underlying log as well as the summary status. A negative result inside
 the debounce window is not a result.
+
+---
+
+## 14. An enumeration was reported as an impossibility
+
+**Caught: 0**
+
+**What happened.** In E0-06, the guard that refuses a naive datetime has to sit
+on the column type, and the test module's fixture could not seed a decorated
+type. Four implementations were tried and measured — a `TypeDecorator`, a
+`DateTime` subclass, a hybrid of the two, and putting the guard in a service —
+and the objection filed in `docs/disputes/E0-06-01.md` generalised from them:
+"no implementation that satisfies criterion 4 can get past `invented_value`."
+
+That is false. A type subclassing psycopg's `_PGTimeStamp` survives
+`adapt_type`, so the `isinstance` check passes *and* the guard runs, and the
+module passes 18 for 18 with no fixture change. The arbitrator found it by
+reading `adapt_type` and running it — the same method the objection had used for
+its own four options and abandoned at the moment it generalised.
+
+**Root cause.** Treating a search that stopped as a search that finished. Each
+of the four options was measured honestly; the sentence joining them was not
+measured at all, because there was nothing to run — which is exactly why it went
+in unchecked while the four claims around it were verified.
+
+**Consequence.** A false universal in a durable record. The dispute file is read
+by a fresh arbitrator with no context, and had it been believed, the ruling would
+have rested on it. The correct position was available and narrower — the only
+implementation the fixture admitted was built on a private, driver-specific class
+— and it won the dispute on its own. The overclaim added nothing and cost the
+record a correction.
+
+**Rule.** Do not write "no X can" from a list of the X you tried. Say what you
+tried and what it did, and let the boundary of the search be visible: "four
+shapes, all measured, all fail" is honest and is usually enough to decide. If a
+universal is genuinely load-bearing, it needs an argument from the mechanism —
+here, from what `adapt_type` does — not a longer list.
 
 ---
 

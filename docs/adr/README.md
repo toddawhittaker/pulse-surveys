@@ -66,3 +66,4 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0016](0016-primary-keys-are-database-generated-uuids.md) | Primary keys are database-generated UUIDs | Accepted — UUIDv7 revisited when the Postgres image moves to 18 |
 | [0017](0017-prefix-codes-are-unique-across-the-deployment.md) | Prefix codes are unique across the deployment, not per institution | Accepted — rests on one institution per deployment, stated in the record |
 | [0018](0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md) | Cross-table length rules are enforced by a composite foreign key carrying the term's length | Accepted |
+| [0019](0019-a-naive-datetime-is-refused-by-the-column-type.md) | A naive datetime is refused by the column type, not by Postgres or a service | Accepted |

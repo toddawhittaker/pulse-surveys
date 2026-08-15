@@ -84,6 +84,12 @@ class AwareDateTime(TypeDecorator[datetime]):
 
     `utcoffset()` rather than `tzinfo is not None`, because a `tzinfo` whose
     `utcoffset` returns `None` is naive in every way that matters.
+
+    ADR 0019 records the choice: what a `DateTime` subclass does instead (the
+    dialect adapts the guard away and it silently stops running), the two other
+    places the guard could sit and why a Core write walks past both, and the cost
+    of this one — a decorated type is not an instance of what it decorates, so
+    anything reading declared types has to unwrap first.
     """
 
     impl = DateTime(timezone=True)

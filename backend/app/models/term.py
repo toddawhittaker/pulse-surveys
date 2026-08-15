@@ -24,7 +24,8 @@ A row that misstates it is refused by the foreign key rather than stored.
 Friday 18:00 and closes Sunday 23:59:59 in the institution timezone). Postgres
 does not refuse a naive datetime on its own — it reads one in the session's
 `TimeZone` and stores whatever instant that names — so the guard sits on the
-column type, `AwareDateTime` in `app.models.base`, where every writer meets it.
+column type, `AwareDateTime` in `app.models.base`, where every writer meets it
+([ADR 0019](../../../docs/adr/0019-a-naive-datetime-is-refused-by-the-column-type.md)).
 
 **Where the institution timezone itself lives.** In `app.config.Settings`, as
 `INSTITUTION_TIMEZONE`, which is E0-05's decision recorded in `Institution`'s
