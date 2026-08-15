@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Twenty-two tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Twenty-three tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -40,6 +40,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
 | 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | Two findings from PR #19 that editing E0-05 cannot close: detecting an LMS-owned column that was never marked, and asserting that a prefix belongs to a department. |
 | 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | Does the benchmark minimum cover comparison-set numbers or only lines, and is one institution per deployment enforced or merely assumed. Both are product decisions a schema ticket declined to make. |
+| 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | Which launches may trigger a roster sync, whether the service URL is stored, and what an operator sees when a section has never had a roster. A spec edit E1 needs answered before it builds the sync. |
 
 ## Dependency graph
 
@@ -57,20 +58,25 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 02, 03 ── 19        (independent; blocks nothing)
 04 ── 20            (independent; blocks nothing)
 05 ── 21, 22        (independent; block nothing)
+      23            (independent; blocks nothing in E0, gates E1's roster sync)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 22 hang
-off 03, 04 and 05 and block nothing — they harden tests or settle records rather
-than adding behaviour, so they can land any time afterwards and none is on the
-path to the E0 exit. Ticket 21 in particular is cheapest done while passing
-through for another reason: its first item is most naturally closed by E1's
-roster sync, which is the only code that knows which fields came from the
-platform. Ticket 22 is the exception to "no hurry" among these: its first
-question is a confidentiality rule that is currently unenforced, and E4 builds
-the reports it governs.
+chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 23 hang
+off 03, 04 and 05 or off nothing at all, and block nothing — they harden tests or
+settle records rather than adding behaviour, so they can land any time afterwards
+and none is on the path to the E0 exit. Ticket 21 in particular is cheapest done
+while passing through for another reason: its first item is most naturally closed
+by E1's roster sync, which is the only code that knows which fields came from the
+platform.
+
+Two of them are exceptions to "no hurry". Ticket 22's first question is a
+confidentiality rule that is currently unenforced, and E4 builds the reports it
+governs. Ticket 23 blocks nothing inside E0 but is a question E1's roster sync
+has to have answered before it can be built, so it wants settling by the end of
+this epic rather than at the start of the next one.
 
 One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
 item was `alembic check` being blind to server-default drift, and E0-05 is where
