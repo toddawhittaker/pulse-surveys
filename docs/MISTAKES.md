@@ -33,9 +33,54 @@ them at a different incident.
 
 ---
 
+## 3. A test passed for a reason unrelated to what it asserted
+
+**Caught: 7**
+
+**What happened.** A test asserting that a startup error carries no credential
+passed against a demonstrably leaking implementation, because ten variables
+happened to be set and pydantic's repr elision landed between the two passwords.
+Separately, a set-equality test would have passed comparing two empty sets, if
+a workflow's shape changed so nothing was collected.
+
+A third, in E0-03, inside the test written to enforce entry 1 below. It asserted
+that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
+argument list in E0-03", by searching the file text for that phrase. The comment
+wraps at 80 columns, so between `join the` and `argument list` the file holds a
+newline, six spaces and a `#`. The pattern was written with a plain space. It
+matched nothing, and the test went green against the exact comment it existed to
+catch — reported as failing, because it had been read rather than run.
+
+A fourth, caught before it landed, and recorded because of where it came from
+rather than what it cost. A reviewer's sketch for the E0-06 test holding ADR 0018
+ended "assert that afterwards the term still reads N weeks with week N still
+present". The refused `UPDATE` runs inside `begin_nested()`, so by the time
+anything could query, the savepoint has rolled back and the term reads N whatever
+the database did — the assertion cannot fail. It is the same assertion
+`tests/integration/test_org_containment_schema.py` deleted for the same reason
+during E0-05, proposed again by a careful reader one ticket later. The shape is
+attractive because it reads like thoroughness.
+
+**Root cause.** Asserting an absence. Absence is satisfied by the thing being
+broken in an unrelated way, by a fixture returning nothing, by a parser matching
+nothing. In the third case, by the difference between what a sentence looks like
+in a file and what it is as a string.
+
+**Consequence. ** A green suite is read as coverage. The first case would have
+been counted as proof the leak was fixed when it proved nothing about it.
+
+**Rule.** Verify by mutation, not by reading: break the thing and watch the test
+fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
+say in the message why that guard is not ceremony. A pattern searched against a
+file is a case of this and looks like none: run it against the text you claim it
+catches *and* against the text you claim it allows, and give it a canary — a
+string certainly present — so a search that has gone blind says so.
+
+---
+
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 5**
+**Caught: 6**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -58,44 +103,9 @@ second case arrives.
 
 ---
 
-## 3. A test passed for a reason unrelated to what it asserted
-
-**Caught: 5**
-
-**What happened.** A test asserting that a startup error carries no credential
-passed against a demonstrably leaking implementation, because ten variables
-happened to be set and pydantic's repr elision landed between the two passwords.
-Separately, a set-equality test would have passed comparing two empty sets, if
-a workflow's shape changed so nothing was collected.
-
-A third, in E0-03, inside the test written to enforce entry 1 below. It asserted
-that `ci.yml` no longer carries E0-02's note that "`worker` and `beat` join the
-argument list in E0-03", by searching the file text for that phrase. The comment
-wraps at 80 columns, so between `join the` and `argument list` the file holds a
-newline, six spaces and a `#`. The pattern was written with a plain space. It
-matched nothing, and the test went green against the exact comment it existed to
-catch — reported as failing, because it had been read rather than run.
-
-**Root cause.** Asserting an absence. Absence is satisfied by the thing being
-broken in an unrelated way, by a fixture returning nothing, by a parser matching
-nothing. In the third case, by the difference between what a sentence looks like
-in a file and what it is as a string.
-
-**Consequence. ** A green suite is read as coverage. The first case would have
-been counted as proof the leak was fixed when it proved nothing about it.
-
-**Rule.** Verify by mutation, not by reading: break the thing and watch the test
-fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
-say in the message why that guard is not ceremony. A pattern searched against a
-file is a case of this and looks like none: run it against the text you claim it
-catches *and* against the text you claim it allows, and give it a canary — a
-string certainly present — so a search that has gone blind says so.
-
----
-
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 3**
+**Caught: 4**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -142,11 +152,19 @@ you have just written is a claim nobody has checked, including the ones written
 while correcting somebody else's. Where a sentence describes a behaviour, it has
 to match what you measured — not what you expected to measure before you ran it.
 
+**A count in prose is a record with a scheduled expiry**, so prefer not writing
+one. Two of these were counts — the ADR index that omitted three ADRs, and "the
+two tests below" in `tests/integration/test_term_calendar_schema.py`, left behind
+by the commit that added a third and updated the identical count one docstring
+over. The fix is to delete the number rather than correct it: "the tests below"
+cannot go stale, and a sentence that needs the number usually wants a different
+sentence.
+
 ---
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 2**
+**Caught: 4**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -178,6 +196,25 @@ and the case you claim it allows. A guard that has never been run is a comment.
 And never write a prediction that explains away the evidence of its own failure:
 if you find yourself saying "there will be no confirmation, and that is expected",
 you have removed the only signal that would have told you it did not work.
+
+---
+
+## 8. Prescribing a fix without probing it
+
+**Caught: 2**
+
+**What happened.** `hide_input_in_errors=True` was the obvious fix for a
+credential appearing in a pydantic validation error. It cleans `str(exc)` and
+leaves the credential in `errors()`.
+
+**Root cause.** The fix was plausible and cheap, so it went into the brief
+without being run.
+
+**Consequence.** Would have shipped green against the one test that existed,
+leaving the credential one `json.dumps` from any structured logger.
+
+**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
+property, say the property and let the implementer find the mechanism.
 
 ---
 
@@ -219,22 +256,40 @@ the debounce window is not a result.
 
 ---
 
-## 8. Prescribing a fix without probing it
+## 14. An enumeration was reported as an impossibility
 
-**Caught: 1**
+**Caught: 0**
 
-**What happened.** `hide_input_in_errors=True` was the obvious fix for a
-credential appearing in a pydantic validation error. It cleans `str(exc)` and
-leaves the credential in `errors()`.
+**What happened.** In E0-06, the guard that refuses a naive datetime has to sit
+on the column type, and the test module's fixture could not seed a decorated
+type. Four implementations were tried and measured — a `TypeDecorator`, a
+`DateTime` subclass, a hybrid of the two, and putting the guard in a service —
+and the objection filed in `docs/disputes/E0-06-01.md` generalised from them:
+"no implementation that satisfies criterion 4 can get past `invented_value`."
 
-**Root cause.** The fix was plausible and cheap, so it went into the brief
-without being run.
+That is false. A type subclassing psycopg's `_PGTimeStamp` survives
+`adapt_type`, so the `isinstance` check passes *and* the guard runs, and the
+module passes 18 for 18 with no fixture change. The arbitrator found it by
+reading `adapt_type` and running it — the same method the objection had used for
+its own four options and abandoned at the moment it generalised.
 
-**Consequence.** Would have shipped green against the one test that existed,
-leaving the credential one `json.dumps` from any structured logger.
+**Root cause.** Treating a search that stopped as a search that finished. Each
+of the four options was measured honestly; the sentence joining them was not
+measured at all, because there was nothing to run — which is exactly why it went
+in unchecked while the four claims around it were verified.
 
-**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
-property, say the property and let the implementer find the mechanism.
+**Consequence.** A false universal in a durable record. The dispute file is read
+by a fresh arbitrator with no context, and had it been believed, the ruling would
+have rested on it. The correct position was available and narrower — the only
+implementation the fixture admitted was built on a private, driver-specific class
+— and it won the dispute on its own. The overclaim added nothing and cost the
+record a correction.
+
+**Rule.** Do not write "no X can" from a list of the X you tried. Say what you
+tried and what it did, and let the boundary of the search be visible: "four
+shapes, all measured, all fail" is honest and is usually enough to decide. If a
+universal is genuinely load-bearing, it needs an argument from the mechanism —
+here, from what `adapt_type` does — not a longer list.
 
 ---
 
@@ -379,3 +434,37 @@ the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
 export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
 the interpreter rather than in the file: print the value the module actually
 holds. `grep` proves what is on disk, which is not what ran.
+
+---
+
+## 13. A hazard was written down and worked around in only one of the two places facing it
+
+**Caught: 0**
+
+**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
+columns by reflecting from Postgres, and its docstring said why: "a column whose
+type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
+is not an instance of `DateTime` and would be missed." The row-seeding helper in
+the same file dispatched `isinstance` against the **declared** column type and
+got no such accommodation. When the implementation did what the docstring
+predicted, both criterion-4 tests died inside the fixture on
+`survey_window.closes_at`, before either reached an assertion. It took a dispute
+round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
+
+**Root cause.** Meeting a hazard at the call site where it first bit, instead of
+asking which other call sites ask the same question. The write-up made it look
+handled: the file named the hazard, in prose, one screen above the code that fell
+to it.
+
+**Consequence.** Two tests that could not pass against any implementation the
+criterion admits, reported as a defect in the implementation. A round of the
+loop, and — the expensive shape — an implementer under pressure to satisfy a
+fixture rather than a criterion. Two of the four implementations tried in
+response would have satisfied the helper *by removing the guard*, and one of them
+is what the schema would have shipped.
+
+**Rule.** When you work around a quirk of a type, a parser or an API, grep for
+every place that asks the same question and route them through one helper, in the
+same change. A docstring explaining the quirk is not a fix for the code that does
+not call the fix. And when a test fails inside its own fixture, suspect the
+fixture first — the message this one printed said exactly that, and was right.

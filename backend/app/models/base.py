@@ -1,4 +1,4 @@
-"""The declarative base every ORM table hangs off, and the names its constraints get.
+"""The declarative base every ORM table hangs off, the names its constraints get, and the timestamp type.
 
 **Nothing in this module reads configuration or opens a connection**, and that
 is the reason it is a module of its own rather than three lines in `app.db`.
@@ -23,10 +23,22 @@ can write without hand-copying a server-generated identifier.
 SQLAlchemy's own default covers `ix` and nothing else, so "a convention is set"
 is not the question — every kind SQLAlchemy can name has to have a template, or
 that kind falls through to the server.
+
+**Why the timestamp type is here too.** `AwareDateTime` below is a schema-wide
+rule (SPEC §3.1: every moment in this product is a moment in the institution
+timezone), and it belongs beside the other schema-wide rule for the same reason
+this module exists at all — it needs no configuration and no connection, so any
+model module can import it without dragging an engine in. E0-06 is the first
+ticket with timestamp columns; the ones that follow use the same type rather than
+a second copy of the same guard.
 """
 
-from sqlalchemy import MetaData
+from datetime import datetime
+
+from sqlalchemy import DateTime, MetaData
+from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.types import TypeDecorator
 
 # One template per constraint kind SQLAlchemy names (`sqlalchemy/sql/naming.py`
 # maps exactly these five to Index, PrimaryKeyConstraint, CheckConstraint,
@@ -52,6 +64,47 @@ NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
+
+class AwareDateTime(TypeDecorator[datetime]):
+    """`timestamp with time zone`, refusing a value that carries no offset.
+
+    **Postgres will not refuse one for you.** A naive datetime bound to a
+    `timestamptz` column is accepted and interpreted in the session's `TimeZone`,
+    so the same value means two different instants on two differently configured
+    connections — and the row that results looks perfectly ordinary. SPEC §3.1
+    puts every survey window at a wall-clock time in the institution timezone, so
+    a moment whose offset was guessed at write time is a wrong answer that never
+    announces itself.
+
+    The check is therefore at the bind boundary, where every writer passes:
+    ORM, Core, a seed script, a Celery task. SQLAlchemy wraps what is raised here
+    in `StatementError`, which quotes the statement — not the offending column,
+    so the message below says what was wrong with the value.
+
+    `utcoffset()` rather than `tzinfo is not None`, because a `tzinfo` whose
+    `utcoffset` returns `None` is naive in every way that matters.
+
+    ADR 0019 records the choice: what a `DateTime` subclass does instead (the
+    dialect adapts the guard away and it silently stops running), the two other
+    places the guard could sit and why a Core write walks past both, and the cost
+    of this one — a decorated type is not an instance of what it decorates, so
+    anything reading declared types has to unwrap first.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        """Let an aware value through; refuse a naive one before it reaches the server."""
+        if value is not None and value.utcoffset() is None:
+            raise ValueError(
+                f"{value!r} has no UTC offset. Every timestamp in this schema is a moment, "
+                "not a wall-clock reading (SPEC §3.1): Postgres would accept this and resolve "
+                "it against whatever timezone the connection happens to be set to. Attach the "
+                "institution timezone, or UTC, at the point the value is created."
+            )
+        return value
 
 
 class Base(DeclarativeBase):

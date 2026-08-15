@@ -1,8 +1,9 @@
 """ORM tables (SPEC §8, §13), one module per aggregate.
 
 `org` holds the containment hierarchy — institution, college, department,
-prefix, course, section (E0-05). The other aggregates §13 lists arrive with the
-tickets that need them.
+prefix, course, section (E0-05). `term` holds the academic calendar — term,
+week, start_letter_map, survey_window (E0-06). The other aggregates §13 lists
+arrive with the tickets that need them.
 
 **Importing this package must import every model module.** `backend/migrations/
 env.py` autogenerates against `Base.metadata`, and a table whose module nobody
@@ -15,7 +16,7 @@ The module is imported for that side effect, so it is re-exported in `__all__`
 rather than left to look like an unused import that a later cleanup can delete.
 """
 
-from app.models import org
-from app.models.base import NAMING_CONVENTION, Base
+from app.models import org, term
+from app.models.base import NAMING_CONVENTION, AwareDateTime, Base
 
-__all__ = ["NAMING_CONVENTION", "Base", "org"]
+__all__ = ["NAMING_CONVENTION", "AwareDateTime", "Base", "org", "term"]
