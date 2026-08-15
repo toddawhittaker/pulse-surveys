@@ -79,7 +79,8 @@ class AwareDateTime(TypeDecorator[datetime]):
 
     The check is therefore at the bind boundary, where every writer passes:
     ORM, Core, a seed script, a Celery task. SQLAlchemy wraps what is raised here
-    in `StatementError`, naming the statement and the column.
+    in `StatementError`, which quotes the statement — not the offending column,
+    so the message below says what was wrong with the value.
 
     `utcoffset()` rather than `tzinfo is not None`, because a `tzinfo` whose
     `utcoffset` returns `None` is naive in every way that matters.

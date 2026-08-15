@@ -195,8 +195,11 @@ class SurveyWindow(Base):
     a value with no offset means two different moments on two differently
     configured connections.
 
-    One window per section per week — students see exactly one open survey at a
-    time per section (§3.1) — which `UNIQUE (section_id, week_id)` is.
+    One window per section per week, which is what `UNIQUE (section_id, week_id)`
+    says and the whole of what it says. §3.1's stronger rule — a student sees
+    exactly one open survey at a time per section — also needs the windows not to
+    overlap in time, which no constraint here expresses; that falls to the
+    scheduling in E2, which is the only thing that sets these two columns.
 
     **Nothing here schedules anything.** E2 computes these instants; this table
     is where they land, with the constraints that make a nonsensical row

@@ -99,10 +99,11 @@ will ever complain about. Admins edit the calendar (§6.3), so shortening a term
 is a thing that happens, not a hypothetical.
 
 *It is procedural code with no drift gate.* A trigger lives as raw SQL in a
-migration; `alembic check` compares tables, columns, constraints and indexes,
-and would not notice a trigger dropped by hand or lost in a restore. The
-constraint and the key are both in `Base.metadata`, so removing either shows up
-as drift. That is E0-20's subject, and it argued against adding to the set of
+migration and is invisible to `alembic check`. Measured: a trigger created by
+hand on `week`, in no migration and on no metadata, leaves `alembic check`
+reporting "No new upgrade operations detected". So a trigger dropped by hand or
+lost in a restore is a rule that silently stops existing, while the key and the
+check are both on `Base.metadata` and removing either shows up as drift. That is E0-20's subject, and it argued against adding to the set of
 things no gate watches.
 
 *It is a second language in the schema.* A plpgsql function is the first one
