@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 7**
+**Caught: 8**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -80,7 +80,7 @@ string certainly present — so a search that has gone blind says so.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 6**
+**Caught: 7**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -105,7 +105,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -258,7 +258,7 @@ the debounce window is not a result.
 
 ## 14. An enumeration was reported as an impossibility
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** In E0-06, the guard that refuses a naive datetime has to sit
 on the column type, and the test module's fixture could not seed a decorated
@@ -439,7 +439,7 @@ holds. `grep` proves what is on disk, which is not what ran.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 0**
+**Caught: 1**
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
