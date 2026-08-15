@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 5**
+**Caught: 6**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -60,7 +60,7 @@ second case arrives.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 5**
+**Caught: 6**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
