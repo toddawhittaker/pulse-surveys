@@ -95,7 +95,7 @@ string certainly present — so a search that has gone blind says so.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 3**
+**Caught: 4**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -146,7 +146,7 @@ to match what you measured — not what you expected to measure before you ran i
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 2**
+**Caught: 3**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -178,6 +178,25 @@ and the case you claim it allows. A guard that has never been run is a comment.
 And never write a prediction that explains away the evidence of its own failure:
 if you find yourself saying "there will be no confirmation, and that is expected",
 you have removed the only signal that would have told you it did not work.
+
+---
+
+## 8. Prescribing a fix without probing it
+
+**Caught: 2**
+
+**What happened.** `hide_input_in_errors=True` was the obvious fix for a
+credential appearing in a pydantic validation error. It cleans `str(exc)` and
+leaves the credential in `errors()`.
+
+**Root cause.** The fix was plausible and cheap, so it went into the brief
+without being run.
+
+**Consequence.** Would have shipped green against the one test that existed,
+leaving the credential one `json.dumps` from any structured logger.
+
+**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
+property, say the property and let the implementer find the mechanism.
 
 ---
 
@@ -216,25 +235,6 @@ said `password authentication failed`; only the status had not caught up.
 **Rule.** When verifying a debounced state change, wait past the debounce and
 read the underlying log as well as the summary status. A negative result inside
 the debounce window is not a result.
-
----
-
-## 8. Prescribing a fix without probing it
-
-**Caught: 1**
-
-**What happened.** `hide_input_in_errors=True` was the obvious fix for a
-credential appearing in a pydantic validation error. It cleans `str(exc)` and
-leaves the credential in `errors()`.
-
-**Root cause.** The fix was plausible and cheap, so it went into the brief
-without being run.
-
-**Consequence.** Would have shipped green against the one test that existed,
-leaving the credential one `json.dumps` from any structured logger.
-
-**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
-property, say the property and let the implementer find the mechanism.
 
 ---
 
