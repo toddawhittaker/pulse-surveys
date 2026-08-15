@@ -71,6 +71,18 @@ start position. E1's roster sync therefore has a failure it must surface —
 "this section could not be read" — rather than a row it can quietly store, and
 E0-17's seed script must create a term's map before its sections.
 
+**The parser has to be total, because it runs before any row exists.** `NOT
+NULL` columns mean nothing can be inserted and fixed up later, so the code is
+read while it is still whatever the platform sent — `String(16)` is a column
+width and SQLAlchemy does not enforce it in Python. That is what makes an
+unbounded parse a 500 rather than a truncation, and it is why
+`parse_section_code` refuses a code longer than `SECTION_CODE_MAX_LENGTH`
+before reading any part of it: past `sys.get_int_max_str_digits()` digits,
+`int()` raises a `ValueError` nobody can catch on purpose. The bound is the
+column's own width rather than a limit on the ordinal, so it decides nothing
+§2.2 leaves open. A security review found the leak on this branch; the incident
+is `docs/MISTAKES.md` entry 15.
+
 **Editing a term's map does not re-derive the sections already derived from
 it.** Nothing reconciles them, and no gate reports the gap: a section keeps the
 dates it was written with, and only a comparison against the map would show
