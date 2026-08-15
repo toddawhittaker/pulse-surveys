@@ -19,12 +19,13 @@ left the cross-table mechanism open between a trigger, a composite foreign key
 carrying the term's length, and something else, so nothing asserted about it
 could be more than "the database refused the row". [ADR
 0018](../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)
-has since settled it, and two tests below do hold that mechanism — the copy of
-its term's length that a `week` row carries, and what happens to that copy when
-the term is edited. They still name no constraint: a name here is produced by
-`Base.metadata`'s convention rather than chosen, so holding one would report a
-rename as a regression. Criterion 5's own tests are untouched by the ADR and
-still do nothing but write a row and see whether the database keeps it.
+has since settled it, and three tests below do hold that mechanism — the copy of
+its term's length that a `week` row carries, that a row may not supply it freely,
+and what happens to it when the term is edited. They still name no constraint: a
+name here is produced by `Base.metadata`'s convention rather than chosen, so
+holding one would report a rename as a regression. Criterion 5's own tests are
+untouched by the ADR and still do nothing but write a row and see whether the
+database keeps it.
 
 **What this module reads, and what it deliberately does not.** Two views of the
 same schema, used for different questions, and the split is not the one E0-05
@@ -159,6 +160,11 @@ LETTER_FITTING_THE_TERM = 12
 LETTER_LONGER_THAN_THE_TERM = 15
 FITTING_LETTER = "Q"
 OVERLONG_LETTER = "V"
+
+# SPEC §2.2's other reference length: fall and spring run 18 weeks. Used where a
+# test needs a term in which a row that is wrong for a summer term would be
+# perfectly ordinary.
+FALL_TERM_WEEKS = 18
 
 # The institution timezone SPEC §3.1 defaults to. Used to prove an aware value
 # keeps its instant across a write when the offset is not zero.
@@ -607,14 +613,22 @@ def seed_weeks(session: Any, tables: dict[str, Table], chain: dict[str, Any], th
         seed_row(session, tables, "week", chain, **{WEEK_NUMBER_COLUMN: number})
 
 
+def carried_length_column(tables: dict[str, Table]) -> str:
+    """The `week` column carrying a copy of its term's length.
+
+    Reached by following the composite foreign key to the `term` column it
+    references, so nothing here spells `term_length_weeks`.
+    [ADR 0018](../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)
+    names it; this module's rule is to find what it can find, so that a rename is
+    a schema change rather than a test failure.
+    """
+    week = require_table(tables, "week")
+    term = require_table(tables, "term")
+    return foreign_key_column(week, "term", require_column(term, TERM_LENGTH_COLUMNS))
+
+
 def carried_term_lengths(session: Any, tables: dict[str, Table], term_row: Any) -> list[int]:
     """What every `week` row of one term currently says its term's length is.
-
-    Both columns are reached by following the composite foreign key to the
-    `term` column each references — its primary key, and its length — so nothing
-    here spells `term_id` or `term_length_weeks`. ADR 0018 names them; this
-    module's rule is to find what it can find, so that a rename is a schema
-    change rather than a test failure.
 
     The term row is matched on the primary key alone and deliberately not on the
     length: the caller reads this before and after changing that length, and a
@@ -625,7 +639,7 @@ def carried_term_lengths(session: Any, tables: dict[str, Table], term_row: Any) 
     term = require_table(tables, "term")
     key = single_primary_key(term)
     term_column = foreign_key_column(week, "term", key)
-    carried = foreign_key_column(week, "term", require_column(term, TERM_LENGTH_COLUMNS))
+    carried = carried_length_column(tables)
     rows = session.execute(select(week.c[carried]).where(week.c[term_column] == term_row[key]))
     return sorted(rows.scalars())
 
@@ -1121,11 +1135,89 @@ def test_the_week_producer_covers_one_to_the_term_length_with_no_gaps(
 
 # ---------------------------------------------------------------------------
 # ADR 0018 — the composite foreign key keeps the carried length true, so the
-# local CHECK is not a weaker check. Neither of these holds an acceptance
+# local CHECK is not a weaker check. None of these three holds an acceptance
 # criterion: they hold the record that decided how criteria 3 and 5 are
 # enforced, and without them the whole trigger-versus-key argument rests on a
-# measurement nobody re-runs (`docs/MISTAKES.md` entry 2).
+# measurement nobody re-runs (`docs/MISTAKES.md` entry 2). The first is the
+# carried length being checked when a row is written; the other two are its
+# being kept true when the term is edited.
 # ---------------------------------------------------------------------------
+
+
+def test_a_week_row_that_misstates_its_terms_length_is_refused(
+    db_session: Any, declared_tables: dict[str, Table]
+) -> None:
+    """ADR 0018's fourth measurement row, the one it calls "the one that matters".
+
+    The decision's words: "a row that *lies* about its term's length is refused
+    by the key, so the local check is not a weaker check." That sentence is what
+    the whole design rests on. The local check compares two columns of one row,
+    and a check like that is only as good as the second column: if a writer may
+    put any number in the carried length, the rule reduces to "a week's number is
+    at most whatever the row says", which forbids nothing. The composite foreign
+    key is what makes that column mean "this row's term's length", and this is
+    the test of that.
+
+    **The row refused here passes the local check.** A 12-week term, week 13,
+    claiming a term length of 18: 13 is at most 18, so the check is satisfied and
+    the only thing left to refuse it is the key, which finds no term with that id
+    and that length. **A row that also failed the local check would prove
+    nothing** — insert week 13 claiming 12 and it is refused by the check alone,
+    exactly as it would be with no key in the schema at all, and that is already
+    asserted by `test_a_week_number_beyond_the_term_length_is_refused`. So the
+    three numbers are not interchangeable: the claimed length must be at least
+    the week number, so that the check passes, and different from the term's real
+    length, so that the key does not. Anyone simplifying this test by making the
+    claimed and real lengths agree has deleted it.
+
+    **The control is the same row in a term that really is 18 weeks**, carrying
+    the same claimed length and the same number. The two inserts are identical in
+    every value except which term they sit in, so the refusal below cannot be
+    about week 13 being an odd number to write, or about the carried column being
+    supplied explicitly at all.
+
+    Supplying the false value is a per-call override and changes nothing about
+    how anything else here seeds: `seed_row` still fills the carried column by
+    following the foreign key to the term already in the chain, which is honest
+    by construction, and every other test in this module goes on relying on that.
+    """
+    carried = carried_length_column(declared_tables)
+    outside_the_summer_term = SUMMER_TERM_WEEKS + 1
+    claimed = {WEEK_NUMBER_COLUMN: outside_the_summer_term, carried: FALL_TERM_WEEKS}
+
+    honest: dict[str, Any] = {}
+    seed_term(db_session, declared_tables, honest, FALL_TERM_WEEKS)
+    try:
+        with db_session.begin_nested():
+            seed_row(db_session, declared_tables, "week", honest, **claimed)
+    except DatabaseError as refused:
+        pytest.fail(
+            f"Week {outside_the_summer_term} of a {FALL_TERM_WEEKS}-week term, carrying "
+            f"{FALL_TERM_WEEKS} as its term's length, was refused: {refused}. That row is honest "
+            "and inside its term, so it has to insert — and until it does, the refusal below "
+            "says nothing about the claim being false."
+        )
+
+    lying = branch_from(honest, "institution")
+    seed_term(db_session, declared_tables, lying, SUMMER_TERM_WEEKS)
+
+    refused_lie = False
+    try:
+        with db_session.begin_nested():
+            seed_row(db_session, declared_tables, "week", lying, **claimed)
+    except DatabaseError:
+        refused_lie = True
+
+    assert refused_lie, (
+        f"A week row was written into a {SUMMER_TERM_WEEKS}-week term claiming its term is "
+        f"{FALL_TERM_WEEKS} weeks long, and carrying week {outside_the_summer_term} — which is "
+        "outside that term. The local check passed it, because "
+        f"{outside_the_summer_term} is at most {FALL_TERM_WEEKS}; ADR 0018 has the composite "
+        "foreign key refuse it, because no term has that id and that length. Without the key "
+        "the carried column is a number the row supplied rather than its term's length, and the "
+        "range rule in criterion 3 stops constraining anything: every row that would violate it "
+        "can claim a longer term instead."
+    )
 
 
 def test_shortening_a_term_that_strands_no_week_rewrites_the_carried_lengths(
