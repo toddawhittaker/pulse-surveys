@@ -19,7 +19,7 @@ left the cross-table mechanism open between a trigger, a composite foreign key
 carrying the term's length, and something else, so nothing asserted about it
 could be more than "the database refused the row". [ADR
 0018](../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)
-has since settled it, and three tests below do hold that mechanism — the copy of
+has since settled it, and the tests below do hold that mechanism — the copy of
 its term's length that a `week` row carries, that a row may not supply it freely,
 and what happens to it when the term is edited. They still name no constraint: a
 name here is produced by `Base.metadata`'s convention rather than chosen, so
@@ -332,8 +332,8 @@ def foreign_key_column(table: Table, target: str, target_column: str) -> str:
     landed: `week` now references `term` from two columns — the term's key and a
     carried copy of its length — so "the column that points at `term`" has two
     answers and this helper failed on every call. Asking for the referenced
-    column distinguishes them, and is how the two tests below reach each one
-    without naming either.
+    column distinguishes them, and is how the tests below reach each one without
+    naming either.
     """
     matches = sorted(
         {
@@ -1233,10 +1233,34 @@ def test_shortening_a_term_that_strands_no_week_rewrites_the_carried_lengths(
     maintains. This is the one that asks whether it is *kept* true.
 
     **It is the mechanism guard, and it is why the sibling test below does not
-    need to name a constraint.** Swap the key for the trigger ADR 0018 rejected
-    and there is no carried column to read, so this fails at discovery. Swap
-    `CASCADE` for `RESTRICT` and it fails at the update. Keep the column and drop
-    the key and it fails on the last assertion, because nothing rewrites it.
+    need to name a constraint.** All three of the following were run against a
+    mutated schema in PR #21's third reviewer round, and the third is here in the
+    form the running corrected it to:
+
+      - Swap the key for the trigger ADR 0018 rejected, which keeps the carried
+        column and fills it from a trigger instead: this fails at discovery,
+        because the column is left with no key behind it.
+      - Swap `ON UPDATE CASCADE` for `RESTRICT`, and it fails at the update.
+      - Keep the column and drop the key, and it **also** fails at discovery, not
+        on the last assertion. The paragraph used to say the latter, reasoned
+        rather than measured, and the reasoning skipped a step: this module never
+        spells the carried column, it finds it by following the key to
+        `term.length_weeks`, so dropping the key removes the only handle it has.
+        A column nobody references is one `carried_length_column` cannot name.
+
+    Two of the three therefore report through `foreign_key_column` rather than
+    through an assertion here, and they report the same symptom from two
+    different schemas. That is still a red naming the missing thing, but it is
+    worth knowing before reading a mutation run: this test says "the copy does
+    not track" only where there is a key for it to track through.
+
+    One more thing that run turned up, because it is easy to misread the other
+    direction. Dropping the key also reds criterion 3's range test, and not for a
+    reason that test is about: with no key to copy from, `seed_row` falls through
+    to `invented_value`, which hands any column whose name mentions a length
+    `DEFAULT_LENGTH_WEEKS`, so a week 13 arrives claiming an 18-week term and
+    satisfies the local check. The range test is not a second guard on the key —
+    it is a fixture default meeting a schema that no longer constrains it.
 
     **Written in the shortening direction on purpose.** Lengthening cascades too,
     and asserting that here would be the more obvious test — but ADR 0018 records

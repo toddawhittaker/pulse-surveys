@@ -152,6 +152,14 @@ you have just written is a claim nobody has checked, including the ones written
 while correcting somebody else's. Where a sentence describes a behaviour, it has
 to match what you measured — not what you expected to measure before you ran it.
 
+**A count in prose is a record with a scheduled expiry**, so prefer not writing
+one. Two of these were counts — the ADR index that omitted three ADRs, and "the
+two tests below" in `tests/integration/test_term_calendar_schema.py`, left behind
+by the commit that added a third and updated the identical count one docstring
+over. The fix is to delete the number rather than correct it: "the tests below"
+cannot go stale, and a sentence that needs the number usually wants a different
+sentence.
+
 ---
 
 ## 9. Citing a guard as a guarantee without executing it
