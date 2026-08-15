@@ -22,6 +22,15 @@ no result shape. `tests/conftest.py`'s `SectionCodeService` does the finding and
 says at length why; what is left here is a small constant listing the names a
 part might be carried under, which is this file's choice and a one-line change.
 
+**One case here is about the standard library rather than about the spec.**
+`test_an_ordinal_too_long_for_the_interpreter_to_convert_is_refused` exists
+because CPython refuses to build an integer from more than
+`sys.get_int_max_str_digits()` digits, so an unbounded `int(ordinal)` turns a
+long enough roster value into a `builtins.ValueError` and a 500. It is the
+worked example behind whatever length rule the parser ends up carrying, and the
+totality property below generates the same shape rather than leaving the one
+string we happen to know about as the only cover.
+
 **The full start-letter map is a property, not a list of examples.** SPEC §9.1
 puts "section-code parsing tests across the full start-letter map" in the
 invariant suite, and the Fall 2026 seed map has twenty start positions across
@@ -33,6 +42,7 @@ digit is the one place where a parser can read the start position as the ordinal
 and produce a well-formed answer to the wrong question.
 """
 
+import sys
 from typing import Any
 
 import pytest
@@ -94,10 +104,35 @@ MALFORMED_CODES = (
     "R33WWFF",
 )
 
+# CPython refuses to build an integer from a string of more than
+# `sys.get_int_max_str_digits()` digits — 4300 by default — so `int(ordinal)` on
+# a long enough run of digits raises `builtins.ValueError` rather than anything
+# the service decided.
+#
+# **Read from the interpreter rather than written as 4300**, because the limit is
+# configurable per process (`-X int_max_str_digits`, `PYTHONINTMAXSTRDIGITS`,
+# `sys.set_int_max_str_digits`). A hardcoded width under a raised limit would
+# generate a long ordinal that converts perfectly, and the test would pass by
+# missing the boundary rather than by clearing it — `docs/MISTAKES.md` entry 3,
+# and the reason this constant exists at all is entry 15. Zero means the limit is
+# switched off; the fallback keeps the case a very long ordinal either way.
+INTEGER_STRING_DIGIT_LIMIT = sys.get_int_max_str_digits() or 4300
+OVER_LONG_ORDINAL_DIGITS = INTEGER_STRING_DIGIT_LIMIT + 1
+
 
 def parse(section_codes: Any, code: str) -> Any:
     """Parse `code`, or fail saying which call shape the service refused."""
     return section_codes.call(section_codes.parse, code=code)
+
+
+def summarise(code: str) -> str:
+    """A code short enough to read in a failure message.
+
+    The codes below run to thousands of characters, and a failure that prints
+    one in full buries the sentence explaining it. The length is part of the
+    summary because for these cases the length is the whole subject.
+    """
+    return repr(code) if len(code) <= 24 else f"{code[:12]!r}… ({len(code)} characters)"
 
 
 def refusal(section_codes: Any, code: str) -> BaseException:
@@ -115,11 +150,11 @@ def refusal(section_codes: Any, code: str) -> BaseException:
     except Exception as raised:
         return raised
     pytest.fail(
-        f"Parsing {code!r} returned {parsed!r} instead of raising. E0-07: 'reject malformed "
-        "codes with a specific error naming what failed', and the definition of done asks for "
-        "no code path where a malformed code silently produces a valid-looking section. A code "
-        "that parses to something is a section with a length, a start date and an end date "
-        "derived from nothing."
+        f"Parsing {summarise(code)} returned a result instead of raising. E0-07: 'reject "
+        "malformed codes with a specific error naming what failed', and the definition of done "
+        "asks for no code path where a malformed code silently produces a valid-looking section. "
+        "A code that parses to something is a section with a length, a start date and an end "
+        f"date derived from nothing. What came back: {str(parsed)[:200]!r}."
     )
 
 
@@ -460,6 +495,114 @@ def test_every_start_position_in_the_fall_2026_map_survives_the_round_trip(
     ), f"{code!r} parsed to a modality that does not read as {expected!r}: {meaning!r}."
 
 
+def test_an_ordinal_too_long_for_the_interpreter_to_convert_is_refused(
+    configured_env: dict[str, str], section_codes: Any
+) -> None:
+    """The one boundary in this file that the standard library moves for you.
+
+    `R` followed by `sys.get_int_max_str_digits() + 1` nines and `WW`. CPython
+    caps integer-from-string conversion, so `int(ordinal)` on that many digits
+    raises `builtins.ValueError` — "Exceeds the limit (4300 digits) for integer
+    string conversion" — and a parser that converts the ordinal without bounding
+    it first hands FastAPI an unhandled exception. E0-07's definition of done
+    refuses exactly that: "no exception type that escapes as a 500".
+
+    **It is reachable input, not a curiosity.** Section codes arrive from the LMS
+    roster feed and from launch claims (§2.1: sections and section codes are
+    LMS-owned). Nothing between the feed and the parser shortens the string:
+    SQLAlchemy does not enforce a `String` column's length in Python, and the
+    derived columns have to be filled before a row can be written at all, so the
+    parse always sees the value the platform sent.
+
+    **The control is the same code with a one-digit ordinal**, so a refusal below
+    cannot be about `R`, about `WW`, or about the code having an ordinal at all.
+
+    **What this test decides, since the ticket does not.** §2.2's grammar puts an
+    ordinal in a section code and never bounds its width, so "refused" rather
+    than "parsed" is a reading. It is this file's, and the argument is the third
+    clause of the same sentence in the definition of done — "no code path where a
+    malformed code silently produces a valid-looking section". An ordinal with
+    more digits than there are sections in the world is a malformed code, and a
+    parser that accepts it produces a section numbered past anything that can be
+    stored or displayed. If the implementer would rather accept unbounded
+    ordinals and never convert them, this is the test to argue with, and the
+    argument belongs in the pull request rather than in a quiet widening here.
+    """
+    control = f"R9{ONLINE_SUFFIX}"
+    try:
+        parse(section_codes, control)
+    except Exception as raised:
+        pytest.fail(
+            f"The control code {control!r} was refused: {raised!r}. It differs from the code "
+            "below only in how many digits its ordinal has, so until it parses, the refusal "
+            "below says nothing about length."
+        )
+
+    code = f"R{'9' * OVER_LONG_ORDINAL_DIGITS}{ONLINE_SUFFIX}"
+    failure = refusal(section_codes, code)
+
+    assert section_codes.raised_by_the_service(failure), (
+        f"Parsing {summarise(code)} raised {type(failure).__name__}, which "
+        f"`{type(failure).__module__}` defines rather than this project: {str(failure)[:200]!r}. "
+        f"Its ordinal is {OVER_LONG_ORDINAL_DIGITS} digits and this interpreter converts at most "
+        f"{INTEGER_STRING_DIGIT_LIMIT}, so an unbounded `int(ordinal)` raises `ValueError` here "
+        "and it reaches the operator as a 500 on a roster sync rather than as 'this section code "
+        "could not be read'. Bound the code before converting any part of it."
+    )
+
+
+# Digit counts for a generated ordinal. **Two bands, and the second is the whole
+# point**: the ordinary widths a roster feed sends, and the widths straddling the
+# interpreter's own conversion limit.
+#
+# Widening the old `st.text(max_size=12)` to some large size would have been the
+# obvious repair and would not have worked. `st.text()` will not assemble a start
+# letter, four thousand digits and a known suffix by chance, so the
+# counterexample would have been inside the declared space and still unreachable
+# — the same failure in a costume. Generating the *shape* of a code and drawing
+# the ordinal's width from a band around the limit is what puts the case in
+# reach. Two of that band's five widths are over the limit, and Hypothesis draws
+# from both arms across a run; the old strategy could not have produced the case
+# at any number of examples, and this one produces it in an ordinary one.
+ORDINAL_DIGIT_COUNTS = st.one_of(
+    st.integers(min_value=0, max_value=12),
+    st.integers(
+        min_value=INTEGER_STRING_DIGIT_LIMIT - 2,
+        max_value=INTEGER_STRING_DIGIT_LIMIT + 2,
+    ),
+)
+
+# Start characters and suffixes worth combining with those widths: every position
+# in §2.2's seed map, an unmapped letter, the digits either side of the numbered
+# range, and the empty and non-alphanumeric cases; the two real suffixes, their
+# one-character near misses, and a truncated and an absent one.
+GENERATED_STARTS = (*SEED_MAP_STARTS, "A", "1", "8", "", "%", "r")
+GENERATED_SUFFIXES = (ONLINE_SUFFIX, FACE_TO_FACE_SUFFIX, "WF", "ZZ", "W", "", "WWW")
+
+# The ordinal is a run of one repeated digit rather than a free digit string, so
+# that a four-thousand-digit ordinal costs two small draws — a width and a digit —
+# instead of four thousand character draws. Hypothesis may well tolerate the
+# latter; the point is that this file should not depend on the answer, because
+# the way it fails is by discarding the oversized examples, which would leave the
+# wide cases ungenerated with the strategy still reading as though it covered
+# them. That is the defect being repaired here, and it must not be reintroduced
+# by the repair.
+#
+# What the narrowing costs is digit variety — `R1234WW` is not generated by this
+# arm. Short ordinals are covered by the round-trip property above and by the
+# examples; what this arm is for is the width.
+STRUCTURED_CODES = st.builds(
+    lambda start, digits, suffix: f"{start}{digits}{suffix}",
+    st.sampled_from(GENERATED_STARTS),
+    st.builds(
+        lambda width, digit: digit * width,
+        ORDINAL_DIGIT_COUNTS,
+        st.sampled_from("0123456789"),
+    ),
+    st.sampled_from(GENERATED_SUFFIXES),
+)
+
+
 @settings(
     max_examples=300,
     # Two seconds per example, against a function that does no I/O. This is the
@@ -469,11 +612,12 @@ def test_every_start_position_in_the_fall_2026_map_survives_the_round_trip(
     # test failure rather than a hung CI job. Two seconds and not two hundred
     # milliseconds because the number that matters is the difference between
     # "slow on a loaded runner" and "not coming back", and a tight deadline here
-    # buys a flake rather than a finding.
+    # buys a flake rather than a finding. It also has to cover an `int()` over
+    # four thousand digits, which is the slowest thing any example here does.
     deadline=2000,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-@given(code=st.text(max_size=12))
+@given(code=st.one_of(st.text(max_size=64), STRUCTURED_CODES))
 def test_parsing_arbitrary_text_either_answers_or_raises_the_services_own_error(
     configured_env: dict[str, str], section_codes: Any, code: str
 ) -> None:
@@ -492,17 +636,39 @@ def test_parsing_arbitrary_text_either_answers_or_raises_the_services_own_error(
     reaches FastAPI as an unhandled exception and leaves the operator with a 500
     where they should have had "this section code could not be read".
 
-    The property deliberately does not say which strings parse. `st.text()`
-    generates valid codes now and then, and a parser that accepts them is right
+    **This property once named that `ValueError` and could not reach it.** It
+    generated `st.text(max_size=12)`, and the string that produces the leak is a
+    start letter followed by more than four thousand digits: the claim was
+    asserted over a space chosen so its own counterexample could not appear, and
+    a security review found what the green suite said was impossible
+    (`docs/MISTAKES.md` entry 15). The strategy above is the repair — the shape
+    of a code, with the ordinal's width drawn from a band around
+    `sys.get_int_max_str_digits()` — and the comment on `ORDINAL_DIGIT_COUNTS`
+    says why simply raising `max_size` would have left the same hole behind a
+    larger number.
+
+    **What the space still does not reach**, said plainly rather than left to be
+    assumed: ordinals of between thirteen and roughly four thousand digits;
+    anything longer than the limit plus two; ordinals whose digits are not all
+    the same, which the comment on `STRUCTURED_CODES` explains and pays for; long
+    runs of *non*-digits, since the free-text arm stops at 64 characters; and
+    codes whose start position is outside the small set above. Each is a bound
+    this file chose, not a bound the input has, and the case for each is that it
+    is the width of the ordinal rather than the length of the string or the value
+    of its digits that moves the standard library.
+
+    The property deliberately does not say which strings parse. Both arms
+    generate valid codes now and then, and a parser that accepts them is right
     to.
     """
     try:
         section_codes.call(section_codes.parse, code=code)
     except Exception as failure:
         assert section_codes.raised_by_the_service(failure), (
-            f"Parsing {code!r} raised {failure!r}, defined by "
-            f"`{type(failure).__module__}` rather than by this project. E0-07's definition of "
-            "done asks for no exception type that escapes as a 500. This one is not a decision "
-            "the service made about a code it could not read — it is the shape of the "
-            "implementation showing through, and the caller has nothing to catch."
+            f"Parsing {summarise(code)} raised {type(failure).__name__}, defined by "
+            f"`{type(failure).__module__}` rather than by this project: "
+            f"{str(failure)[:200]!r}. E0-07's definition of done asks for no exception type that "
+            "escapes as a 500. This one is not a decision the service made about a code it could "
+            "not read — it is the shape of the implementation showing through, and the caller "
+            "has nothing to catch."
         )
