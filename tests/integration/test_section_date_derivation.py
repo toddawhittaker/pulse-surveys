@@ -1,9 +1,9 @@
 """A section's calendar comes from its code and its term's map — ticket E0-07.
 
 Acceptance criteria 1, 3 (the half that needs a map), 4, 5, 6 and 7, plus the
-scope item that puts the four derived columns on `section`. Criterion 2 and the
-grammar are in `tests/unit/test_section_code_parsing.py`, which needs no
-database.
+scope item that puts the four derived columns on `section` and populates them
+through this service. Criterion 2 and the grammar are in
+`tests/unit/test_section_code_parsing.py`, which needs no database.
 
 **Why these need a real Postgres.** The derivation reads `start_letter_map`, and
 that is the whole point of the ticket: a section's length and start date are per
@@ -45,7 +45,7 @@ cost of editing a shipped module's fixtures.
 """
 
 import string
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -69,6 +69,7 @@ from sqlalchemy import (
     String,
     Table,
     Uuid,
+    select,
 )
 from sqlalchemy.exc import DatabaseError
 from sqlalchemy.types import TypeDecorator
@@ -148,6 +149,19 @@ BELOW_THE_NUMBERED_RANGE = "1"
 ABOVE_THE_NUMBERED_RANGE = "8"
 
 ONLINE_SUFFIX = "WW"
+FACE_TO_FACE_SUFFIX = "FF"
+
+# A calendar that is internally consistent, legal in the Fall 2026 term, and the
+# answer to no start position in its map — 6 weeks from 8/24, when every position
+# in the seed map starts 0, 3, 4, 6, 8, 9, 12 or 15 weeks in. It is what a
+# section's derived columns are seeded with before the service writes them, so
+# that "the columns hold the derived values afterwards" cannot be true of a row
+# that held them all along (`docs/MISTAKES.md` entry 3). Consistent on purpose:
+# a placeholder whose end date disagreed with its own length and start could be
+# refused by a check constraint E0-07 is free to add, and the test would die in
+# its own seeding.
+PLACEHOLDER_LENGTH_WEEKS = 6
+PLACEHOLDER_START = FALL_2026_START + timedelta(weeks=1)
 
 # ---------------------------------------------------------------------------
 # Column names.
@@ -178,6 +192,12 @@ DERIVED_START = "start_date"
 DERIVED_END = "end_date"
 DERIVED_MODALITY = "modality"
 SECTION_DERIVED_COLUMNS = (DERIVED_LENGTH, DERIVED_START, DERIVED_END, DERIVED_MODALITY)
+
+# Not this file's choice: E0-05 created `section.lms_section_code` and
+# `course.lms_number` under those names, and E0-05's own criterion is that
+# LMS-owned columns carry the prefix.
+SECTION_CODE_COLUMN = "lms_section_code"
+COURSE_NUMBER_COLUMN = "lms_number"
 
 # **This file's choice**, matching the unit module's: criterion 3 wants an error
 # "naming the offending part", and a message is prose.
@@ -332,6 +352,22 @@ def letters(limit: int | None) -> str:
     return "".join(reversed(out))
 
 
+def invented_section_code() -> str:
+    """A well-formed section code per §2.2, unique within this session."""
+    return f"{letters(1)}3{ONLINE_SUFFIX}"
+
+
+# Values keyed to a column that a type alone cannot answer for. Both are schema
+# rules E0-05 already enforces, so a value the walker invented freely would be
+# refused by a constraint that has nothing to do with E0-07: SPEC §8's
+# course-number bands, and §2.2's section-code shape. The same two entries, for
+# the same reason, as in `tests/integration/test_term_calendar_schema.py`.
+COLUMN_VALUES: dict[tuple[str, str], Callable[[], Any]] = {
+    ("course", COURSE_NUMBER_COLUMN): lambda: "150",
+    ("section", SECTION_CODE_COLUMN): invented_section_code,
+}
+
+
 def stored_type(column: Any) -> Any:
     """The type a column actually stores, with any `TypeDecorator` resolved away.
 
@@ -355,6 +391,10 @@ def invented_value(table: Table, column: Any) -> Any:
     answer for stops the test with a message naming it, rather than inserting
     `None` and failing later somewhere that reads like a schema defect.
     """
+    maker = COLUMN_VALUES.get((table.name, column.name))
+    if maker is not None:
+        return maker()
+
     kind = stored_type(column)
     if isinstance(kind, Enum):
         values = list(getattr(kind, "enums", ()) or ())
@@ -562,6 +602,105 @@ def derived_parts(section_codes: Any, derived: Any) -> tuple[int, date, date]:
         section_codes.part(derived, (DERIVED_START,), "derived start date"),
         section_codes.part(derived, (DERIVED_END,), "derived end date"),
     )
+
+
+def modality_text(value: Any) -> str:
+    """A modality as comparable text, whether it is an enum member or a string.
+
+    Both sides of every modality comparison go through this, so the assertion is
+    about the two agreeing rather than about which representation E0-07 chose —
+    a question the ticket does not answer. An enum member and its own value
+    normalise to the same text, which is what makes "what the column holds" and
+    "what the derivation returned" comparable without either being named.
+    """
+    return str(getattr(value, "value", value)).lower()
+
+
+def instance_of(session: Any, tables: dict[str, Table], name: str, row: Any) -> Any:
+    """The mapped instance behind one seeded row, loaded by its primary key."""
+    table = require_table(tables, name)
+    key = single_primary_key(table)
+    instance = session.get(model_for(name), row[key])
+    if instance is None:
+        pytest.fail(
+            f"The seeded `{name}` row could not be loaded through its mapped class. It was "
+            "inserted through `Base.metadata` on this session's connection, so a miss here means "
+            "the mapped class and the table have come apart."
+        )
+    return instance
+
+
+def seed_placeholder_section(
+    session: Any,
+    tables: dict[str, Table],
+    chain: dict[str, Any],
+    *,
+    code: str,
+    modality: Any,
+) -> Any:
+    """A section carrying `code` and a calendar that is not the one it implies.
+
+    The four derived columns are set to `PLACEHOLDER_*` — a legal, internally
+    consistent calendar that no start position in the seeded map derives — so
+    that finding the derived values there afterwards means something was written
+    (`docs/MISTAKES.md` entry 3). The modality comes from the caller, which takes
+    it from the service's own derivation of the *other* suffix: whatever the
+    service returns for a modality is by construction something this column can
+    hold, which nothing this file could invent would be.
+    """
+    return seed_row(
+        session,
+        tables,
+        "section",
+        chain,
+        **{
+            SECTION_CODE_COLUMN: code,
+            DERIVED_LENGTH: PLACEHOLDER_LENGTH_WEEKS,
+            DERIVED_START: PLACEHOLDER_START,
+            DERIVED_END: expected_end(PLACEHOLDER_START, PLACEHOLDER_LENGTH_WEEKS),
+            DERIVED_MODALITY: modality,
+        },
+    )
+
+
+def apply_code_to_section(
+    section_codes: Any,
+    session: Any,
+    tables: dict[str, Table],
+    term_row: Any,
+    section: Any,
+    code: str,
+) -> Any:
+    """Run the service's writer against one seeded section.
+
+    Offers the same roles `derive` does plus the section itself, and lets
+    `SectionCodeService.call` fill whatever the signature asks for. E0-07 spells
+    no signature for this either.
+    """
+    term_key = single_primary_key(require_table(tables, "term"))
+    return section_codes.call(
+        section_codes.writer,
+        session=session,
+        code=code,
+        term=instance_of(session, tables, "term", term_row),
+        term_id=term_row[term_key],
+        section=instance_of(session, tables, "section", section),
+    )
+
+
+def stored_section(session: Any, tables: dict[str, Table], section: Any) -> Any:
+    """One section as the database holds it now, read back through Core.
+
+    Through Core and after a flush, so that both shapes a writer could take are
+    covered: one that mutates the mapped instance and leaves the unit of work to
+    persist it, and one that issues an UPDATE itself. Reading an attribute off
+    the instance instead would report the first as a success while nothing had
+    reached the database, which is the difference E0-20's subject is about.
+    """
+    table = require_table(tables, "section")
+    key = single_primary_key(table)
+    session.flush()
+    return session.execute(select(table).where(table.c[key] == section[key])).mappings().one()
 
 
 def refusal(
@@ -1278,6 +1417,171 @@ def test_the_section_table_carries_the_four_derived_columns(
         "length in weeks is an integer and a start or end date is a date — §2.2 derives them "
         "from the letter map, whose own columns E0-06 gave those types. A date stored as a "
         "timestamp acquires a time of day nothing sets and a timezone every reader has to guess."
+    )
+
+
+def test_the_service_writes_all_four_derived_columns_onto_a_section(
+    db_session: Any, declared_tables: dict[str, Table], section_codes: Any
+) -> None:
+    """E0-07's scope: the derived columns are populated through this service.
+
+    A section is seeded carrying `R1WW` and a calendar that belongs to no start
+    position in its term's map — the hand-set state the ticket refuses — the
+    service's writer is run against it, and the row is read back. Afterwards all
+    four columns hold what the service's own derivation says for that code in
+    that term.
+
+    **The before-assertion is not ceremony.** "The columns hold the derived
+    values" is equally true of a row that held them all along, so each of the
+    four is required to differ first (`docs/MISTAKES.md` entry 3). The
+    placeholder modality is taken from the service's derivation of `R1FF`, which
+    is why it is both certainly storable in that column and certainly not the
+    answer for `R1WW` — that last part resting on
+    `test_the_two_modality_suffixes_do_not_parse_to_the_same_value` in the unit
+    module, which is where a service that maps both suffixes to one value fails.
+
+    **The expected values come from the derivation rather than from this file.**
+    That is the property the ticket's sentence is really about: "exactly one path
+    that sets them" means the columns cannot say something the derivation does
+    not. Comparing against constants would pass a writer that computes its own
+    answer and happens to agree here; comparing against the derivation is what
+    holds the two together, and the sibling test below does it across the whole
+    map, where a second implementation is most likely to diverge.
+
+    **What this does not cover, and cannot from outside.**
+
+      - *That there is no second writer.* A test can see what the columns hold
+        after the service runs; it cannot see that nothing else in the codebase
+        assigns them. Closing that needs something the implementation declares —
+        a mapper-level guard, or an authz rule at the E0-11 chokepoint — and
+        E0-07 leaves the mechanism open, so asserting one here would choose it.
+      - *That the columns are `NOT NULL`.* Whether a section may exist for a
+        moment without its calendar is a decision the ticket leaves open.
+      - *That anything calls the writer.* Roster sync is E1; what is asserted
+        here is that the path exists and is the one that produces the values.
+    """
+    chain: dict[str, Any] = {}
+    term = seed_fall_2026(db_session, declared_tables, chain)
+    code = code_for("R")
+
+    wanted = derive(section_codes, db_session, declared_tables, term, code)
+    wanted_length, wanted_start, wanted_end = derived_parts(section_codes, wanted)
+    wanted_modality = section_codes.part(wanted, (DERIVED_MODALITY,), "derived modality")
+
+    face_to_face = derive(
+        section_codes,
+        db_session,
+        declared_tables,
+        term,
+        code_for("R", suffix=FACE_TO_FACE_SUFFIX),
+    )
+    placeholder_modality = section_codes.part(face_to_face, (DERIVED_MODALITY,), "derived modality")
+
+    section = seed_placeholder_section(
+        db_session, declared_tables, chain, code=code, modality=placeholder_modality
+    )
+
+    already_right = [
+        name
+        for name, wanted_value in (
+            (DERIVED_LENGTH, wanted_length),
+            (DERIVED_START, wanted_start),
+            (DERIVED_END, wanted_end),
+        )
+        if section[name] == wanted_value
+    ]
+    if modality_text(section[DERIVED_MODALITY]) == modality_text(wanted_modality):
+        already_right.append(DERIVED_MODALITY)
+    assert not already_right, (
+        f"The seeded section already holds the derived values in {already_right} before the "
+        f"service has run: it was seeded with {PLACEHOLDER_LENGTH_WEEKS} weeks from "
+        f"{PLACEHOLDER_START} and the face-to-face modality, and {code} derives "
+        f"{(wanted_length, wanted_start, wanted_end)} online. Until they differ, finding the "
+        "derived values afterwards says nothing about anything having been written."
+    )
+
+    apply_code_to_section(section_codes, db_session, declared_tables, term, section, code)
+    stored = stored_section(db_session, declared_tables, section)
+
+    wrong = {
+        name: (stored[name], wanted_value)
+        for name, wanted_value in (
+            (DERIVED_LENGTH, wanted_length),
+            (DERIVED_START, wanted_start),
+            (DERIVED_END, wanted_end),
+        )
+        if stored[name] != wanted_value
+    }
+    if modality_text(stored[DERIVED_MODALITY]) != modality_text(wanted_modality):
+        wrong[DERIVED_MODALITY] = (stored[DERIVED_MODALITY], wanted_modality)
+
+    assert not wrong, (
+        f"After the service ran against a section carrying {code}, these columns hold (stored, "
+        f"expected from the derivation): {wrong}. E0-07 adds the four derived columns and "
+        "populates them 'through this service, so there is exactly one path that sets them'. A "
+        "column left holding the placeholder is one the writer does not touch, and it will be "
+        "hand-set by whatever needs it next — which is the state SPEC §2.2 rules out: 'Section "
+        "start/end dates derive from the letter + term calendar; nothing is hand-entered per "
+        "section.'"
+    )
+
+
+def test_the_written_columns_agree_with_the_derivation_for_every_position_in_the_map(
+    db_session: Any, declared_tables: dict[str, Table], section_codes: Any
+) -> None:
+    """The other half of "exactly one path": the writer cannot have its own arithmetic.
+
+    A writer that re-derives the calendar itself rather than going through the
+    derivation is a second path in everything but name, and the test above cannot
+    see it — one section, one letter, and any re-implementation that is correct
+    for `R` agrees. Where two implementations of the same rule come apart is at
+    the edges: the 3-week positions §2.2 numbers rather than letters, the 16-week
+    cohort that fills the term, the letter whose section ends on the term's last
+    day. So every start position in the seed map is written and compared.
+
+    It is the shape a greedy start-position parse has — right for the lettered
+    positions, wrong for every numbered one — which the map-wide tests above
+    catch in the derivation and this one catches on the way to the column.
+
+    This still cannot see a second writer that agrees. What it refuses is a
+    second writer that disagrees, which is the drift the ticket's "exactly one
+    path" exists to prevent, and it is the strongest form of that claim available
+    from outside the implementation.
+    """
+    chain: dict[str, Any] = {}
+    term = seed_fall_2026(db_session, declared_tables, chain)
+
+    face_to_face = derive(
+        section_codes,
+        db_session,
+        declared_tables,
+        term,
+        code_for("R", suffix=FACE_TO_FACE_SUFFIX),
+    )
+    placeholder_modality = section_codes.part(face_to_face, (DERIVED_MODALITY,), "derived modality")
+
+    wrong: dict[str, Any] = {}
+    for start_position, _, _ in FALL_2026_SEED_MAP:
+        code = code_for(start_position)
+        wanted = derived_parts(
+            section_codes, derive(section_codes, db_session, declared_tables, term, code)
+        )
+        section = seed_placeholder_section(
+            db_session, declared_tables, chain, code=code, modality=placeholder_modality
+        )
+        apply_code_to_section(section_codes, db_session, declared_tables, term, section, code)
+        stored = stored_section(db_session, declared_tables, section)
+        found = (stored[DERIVED_LENGTH], stored[DERIVED_START], stored[DERIVED_END])
+        if found != wanted:
+            wrong[start_position] = (found, wanted)
+
+    assert not wrong, (
+        f"For these start positions the columns the service wrote disagree with what the same "
+        f"service derives for the same code and term (stored, derived): {wrong}. Two answers to "
+        "one question mean the writer has arithmetic of its own, and E0-07 puts the derived "
+        "columns behind this service precisely so that there is one. The reports read the "
+        "columns and the comparison sets read the derivation (SPEC §5.1), so a disagreement here "
+        "is a section benchmarked against a cohort its own dates say it is not in."
     )
 
 

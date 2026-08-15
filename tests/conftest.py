@@ -889,6 +889,24 @@ class SectionCodeService:
         )
 
     @property
+    def writer(self) -> Any:
+        """The callable that puts a derived calendar onto a section.
+
+        E0-07's scope: "Add the derived section columns and populate them through
+        this service, so there is exactly one path that sets them." That sentence
+        names a writer and, like everything else here, does not name the
+        function — so it is found the same way, by a fragment of its name, with
+        "apply" first because applying a code to a section is what the ticket
+        describes it doing.
+        """
+        return self.callable_named_after(
+            ("apply", "populate", "assign", "fill", "write"),
+            "writes a derived calendar onto a section",
+            "'Add the derived section columns and populate them through this service, so there "
+            "is exactly one path that sets them'.",
+        )
+
+    @property
     def offset(self) -> Any:
         """The callable that relates a section's course weeks to its term's weeks."""
         return self.callable_named_after(
