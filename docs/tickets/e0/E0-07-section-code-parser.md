@@ -50,8 +50,19 @@ parsing across the full start-letter map), §8.
 - [ ] `R3WW` and `Q2FF` parse to the values §2.2 describes.
 - [ ] A code with an unknown start letter, an unknown modality, or a missing
       ordinal raises a distinct error naming the offending part.
-- [ ] `end_date` equals `start_date` plus `length_weeks`, landing on the correct
-      weekday, for every letter in the map.
+- [ ] `end_date` is the section's **last day**, inclusive: `start_date` plus
+      `7 × length_weeks` minus one day, landing on the correct weekday, for
+      every letter in the map.
+
+      The original wording said only "plus `length_weeks`", which left the
+      inclusive and exclusive readings open. §2.2's own seed map settles it, and
+      only one reading survives. Fall 2026 runs 18 calendar weeks from Monday
+      8/17, and `Q` is a 12-week start letter beginning 9/28. Inclusive, the
+      term ends Sunday 12/20 and `Q` ends Sunday 12/20 — its last day is the
+      term's last day. Exclusive, `Q` ends Monday 12/21, one day outside the
+      term, and the next criterion would then require the service to reject a
+      start letter the spec seeds by name. Monday start to Sunday end also
+      agrees with §3.1's Sunday survey-window close.
 - [ ] A section whose derived end date falls outside its term's dates is
       rejected, with a test covering it.
 - [ ] Hypothesis generates letter-map and code combinations without finding a
