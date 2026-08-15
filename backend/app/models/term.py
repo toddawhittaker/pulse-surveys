@@ -255,9 +255,33 @@ def week_rows_for_term(term: TermRow) -> list[Week]:
     every query that walks the term axis skips it silently, and a range that
     starts at 0 or stops one short is an off-by-one nothing else would catch.
 
-    Returns unsaved rows rather than writing them, so the caller decides the
-    session, the transaction and whether this is a fresh term or a repair.
-    `session.add_all(week_rows_for_term(term))` is the whole usage.
+    Returns unsaved rows rather than writing them, so the caller owns the session
+    and the transaction. `session.add_all(week_rows_for_term(term))` is the whole
+    usage.
+
+    **For a term that has no weeks yet.** The result always starts at 1, so
+    adding it to a term that already has week rows is refused by
+    `uq_week_term_id_number` on the first number that exists — measured, and it
+    is week 1 that reports it. No argument changes that: this function is handed
+    a term and nothing else, so it cannot see what is already in the table.
+
+    **Changing a term's length afterwards leaves this table behind, and nothing
+    complains.** Measured: lengthening a 12-week term to 18 is accepted, and the
+    foreign key cascades so every existing row now says `term_length_weeks = 18`.
+    Each row looks right; only a count shows the term is six weeks short of
+    itself. Shortening is the loud direction — the same cascade drives the local
+    CHECK, so the edit is refused while a week sits past the new end
+    ([ADR 0018](../../../docs/adr/0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)).
+
+    **Nothing in E0-06 reconciles that, and this is not the place to fix it.**
+    Emitting only the missing weeks means seeing the rows that exist, which means
+    a session; and the questions an edit raises — whether shortening deletes the
+    weeks past the new end, and what becomes of a `survey_window` keyed to one —
+    are scheduling and admin policy. They belong to E2 and to E11's calendar
+    editor (§6.3), which is where a term's length gets edited in the first place.
+    Whoever builds that owns the reconciliation, and owns the assertion this
+    function cannot make: that a term's weeks are 1..N *after* an edit, not only
+    at creation.
 
     `term_length_weeks` is set here because a new row has to state the length it
     was checked against; from then on the foreign key's cascade owns it.

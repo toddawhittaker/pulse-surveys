@@ -60,7 +60,7 @@ written; the transcript is in `docs/tickets/e0/.attempts/E0-06.md`:
 | week 13 in a 12-week term | refused, `ck_week_number_is_inside_the_term` |
 | week 0 | refused, same constraint |
 | week 13 claiming an 18-week term | refused, `fk_week_term_id_term_length_weeks_term` |
-| lengthening the term 12 → 18 | accepted, and the copies cascade |
+| lengthening the term 12 → 18 | accepted, and the copies cascade — which is not the whole of what it does; see "Lengthening is the silent direction" below |
 | shortening 18 → 12 with a week 18 present | refused |
 | deleting a term that still has weeks | refused, `ON DELETE RESTRICT` |
 
@@ -137,6 +137,27 @@ declared, and the module docstring says it again.
 That is the correct behaviour — a 12-week term cannot hold a week 18 — but the
 error names the child table, not the edit. When E11 ships the calendar editor,
 it should catch this and say which weeks are in the way.
+
+**Lengthening is the silent direction, and it leaves the term short of weeks.**
+The two directions are not symmetric, and the asymmetry is the mechanism's:
+shortening is refused because the cascade rewrites a row the CHECK then rejects,
+and lengthening has nothing to reject, because the weeks that ought to exist do
+not exist yet. Measured (PR #21's spec-conformance review found it; the
+reproduction is in `docs/tickets/e0/.attempts/E0-06.md`, attempt 7): a 12-week
+term with weeks 1–12 lengthened to 18 is accepted, the cascade sets
+`term_length_weeks = 18` on all twelve rows, and the result is an 18-week term
+holding twelve weeks with no error, no log line, and every surviving row looking
+correct. Criterion 3's contiguity holds at creation and is broken by an ordinary
+edit.
+
+**E0-06 ships no reconciler, and `week_rows_for_term` cannot be one** — it always
+emits 1..N, so a second call is refused by `uq_week_term_id_number`. Filling the
+gap needs to see the existing rows, and deciding what shortening does to the
+weeks past the new end (and to any `survey_window` keyed to one) is scheduling
+and admin policy. That belongs to E2 and to E11's calendar editor (§6.3), which
+is where a length is edited. This ADR is where the hazard is recorded so it
+reaches them; the assertion that a term's weeks are 1..N *after* an edit belongs
+to whichever of them closes it.
 
 **Deleting a term requires deleting its weeks first** (`ON DELETE RESTRICT`,
 matching every containment key in `app/models/org.py`). Deliberate: losing a term
