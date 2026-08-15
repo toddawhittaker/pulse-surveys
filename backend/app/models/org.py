@@ -33,14 +33,28 @@ level, and a generated column cannot be written by anyone in any case.
 
 **Not here, on purpose.** The calendar `section.term_id` points at — term, week,
 start_letter_map, survey_window — is `app.models.term` (E0-06). Section length,
-start and end dates and modality derive from `lms_section_code` and are E0-07's.
-Relationship attributes are left until a query needs one.
+start and end dates and modality are columns here (E0-07) but nothing in this
+module derives them: they come from `lms_section_code` read against the term's
+start-letter map, which is `app.services.section_codes`. Relationship attributes
+are left until a query needs one.
 """
 
+from datetime import date
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import Computed, Enum, ForeignKey, String, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import (
+    Computed,
+    Date,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -58,6 +72,28 @@ class CourseLevel(StrEnum):
     UGGR = "UGGR"
     GR = "GR"
     DR = "DR"
+
+
+class Modality(StrEnum):
+    """How a section meets: SPEC §2.2's `WW` online and `FF` face-to-face.
+
+    Stored as a Postgres enum type for the same reason `CourseLevel` is — the
+    closed set belongs in the database rather than in a convention every later
+    view has to remember. §5.1 compares a section against others like it, and a
+    third modality nobody defined would quietly widen that population.
+
+    **The members are named for the two meanings and not for the two suffixes.**
+    `WW` and `FF` are the spelling one LMS uses inside a section code; they are
+    read by `app.services.section_codes` and go no further. A column holding
+    `WW` would make every later reader carry the mapping in their head, and a
+    second institution spelling it differently would have nowhere to put it.
+
+    Each member's value is its name, as `CourseLevel`'s are: one spelling in
+    Python and in the database, rather than two that have to be kept in step.
+    """
+
+    ONLINE = "ONLINE"
+    FACE_TO_FACE = "FACE_TO_FACE"
 
 
 # SPEC §8's bands, as the one expression that holds them. Read that section for
@@ -252,8 +288,27 @@ class Section(Base):
     course it would be worse still — nothing in a code names its course, so
     every course in a term draws from the same small alphabet of start letters.
 
-    Length, start and end dates and modality all derive from
-    `lms_section_code` via the start-letter map (SPEC §2.2) and are E0-07's.
+    **The four derived columns are set by exactly one thing.** Length, start and
+    end dates and modality all derive from `lms_section_code` read against the
+    term's start-letter map (SPEC §2.2, §8), and
+    `app.services.section_codes.apply_section_code` is the only path that writes
+    them. They carry no `lms_` prefix: the LMS owns the code, and Pulse derives
+    these from it, which is the same split `course.level` sits on (ADR 0014).
+
+    **They are NOT NULL**, so a section cannot exist without the calendar its
+    code implies. The alternative — four nullable columns filled in later —
+    makes a section with no dates writable, and such a row is invisible to every
+    comparison set and every week axis without anything reporting that it is
+    missing. A code the term's map cannot resolve is refused by the service
+    (§2.2), which is the loud failure this leaves in place of the quiet one.
+
+    **No CHECK ties the three calendar columns to each other**, though one
+    could: `end_date = start_date + length_weeks * 7 - 1` is the convention
+    E0-07 settled. It is left out for the reason `Term` leaves out the same
+    constraint — the arithmetic belongs to the one service path that derives
+    these values from an already-constrained map row, and a copy of it in the
+    schema is a second place for one rule to live. Nothing can write a row past
+    that path in any case.
     """
 
     __tablename__ = "section"
@@ -303,3 +358,15 @@ class Section(Base):
         ForeignKey("term.id", ondelete="RESTRICT"), nullable=False
     )
     lms_section_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    # The four values the code derives to, in the vocabulary SPEC §8 uses for
+    # them. `length_weeks` and the two dates are the section's own axis; §5.1
+    # compares a section only against others of the same length and level, and
+    # §3.1 opens a survey window in each week between these two dates.
+    length_weeks: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # The section's last day, inclusive: `start_date + 7 * length_weeks - 1`.
+    # A `Date` and not a timestamp — a section ends on a day, and a timestamp
+    # would acquire a time of day nothing sets and a timezone every reader has
+    # to guess.
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    modality: Mapped[Modality] = mapped_column(Enum(Modality, name="modality"), nullable=False)

@@ -168,6 +168,19 @@ class StartLetterMap(Base):
     LMS-owned columns; this map is admin-configured Pulse-owned configuration
     (§6.3). The letter that appears *inside* a section code is LMS-owned, and
     that column is `section.lms_section_code`.
+
+    **A start position is one character, and it is not always a letter.** §2.2
+    numbers the 3-week sections 2 through 7 while every other length is
+    lettered, so six of the twenty positions in the Fall 2026 seed map are
+    digits. E0-06 shipped this check as `^[A-Z]$`, which refuses all six; E0-07
+    widened it to `^[A-Z0-9]$` when it built the parser that reads them. The
+    constraint is deliberately not narrowed to `^[A-Z2-7]$`: which positions a
+    term uses is admin configuration, and 2 through 7 is what §2.2's *Fall 2026
+    seed* uses, not a rule about every term. What makes a position legal is a
+    row here, which is why `1` and `8` are refused by the derivation finding no
+    row rather than by a range check that would have to be kept in step with
+    someone's calendar. The column keeps the name `letter`: it is what E0-06's
+    ticket spells, and §2.2 calls the thing a start letter throughout.
     """
 
     __tablename__ = "start_letter_map"
@@ -179,7 +192,7 @@ class StartLetterMap(Base):
             ondelete="RESTRICT",
         ),
         UniqueConstraint("term_id", "letter"),
-        CheckConstraint("letter ~ '^[A-Z]$'", name="letter_is_one_upper_case_letter"),
+        CheckConstraint("letter ~ '^[A-Z0-9]$'", name="letter_is_one_start_position"),
         CheckConstraint(
             "length_weeks >= 1 AND length_weeks <= term_length_weeks",
             name="length_weeks_fits_inside_the_term",

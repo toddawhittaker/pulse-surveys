@@ -105,7 +105,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
