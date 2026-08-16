@@ -42,6 +42,59 @@ trigger takes a transaction-scoped advisory lock keyed on the table's own oid,
 Errors are raised with `ERRCODE = 'check_violation'` and messages naming what the
 writer did.
 
+Every relation the function names is **schema-qualified**, and the function
+carries `SET search_path = pg_catalog, public, pg_temp`.
+
+### Schema qualification is the security control, not a style choice
+
+Postgres searches the temporary schema **first** for relation names, and it does
+so whether or not `pg_temp` appears in `search_path` — being unlisted is what
+puts it first, not what skips it. An unqualified `role_assignment` inside a
+trigger body is therefore a table the *caller* chooses.
+
+Measured on the pinned Postgres as a `NOSUPERUSER NOCREATEDB NOCREATEROLE` role
+holding only the DML grants, with no `CREATE` on `public` — creating a temporary
+table needs the `TEMPORARY` privilege, which Postgres grants to `PUBLIC` by
+default, so this is reachable by the application role the day it can write these
+rows at all. With an empty `pg_temp.role_assignment` in the session, all three
+guards read the temp table, and the two-assignment cycle and the edge into a
+`CARE` assignment that the same role had been refused seconds earlier both
+committed. `'role_assignment'::regclass` resolved to the temp table's oid too, so
+the advisory-lock key moved with it and the serialisation above went with it.
+
+Four variants, same probe, cycle and Care edge each:
+
+| Function | shadow cycle | shadow edge into `CARE` |
+|---|---|---|
+| qualified relations + `pg_temp` named last (shipped) | refused | refused |
+| unqualified + `pg_temp` named last | refused | refused |
+| unqualified + `SET search_path = pg_catalog, public` | **stored** | **stored** |
+| unqualified + no `SET search_path` | **stored** | **stored** |
+
+Either mechanism closes it alone, and the distinction that decides it is **naming
+`pg_temp` explicitly and last**: a `search_path` that merely omits it — the usual
+advice — leaves the hijack open, because the omission is what puts it first. Both
+ship. The qualification survives somebody later dropping the `SET` clause; the
+`SET` clause survives somebody later adding an unqualified table reference.
+
+Nothing can reach this today, because `pulse_app` holds only `CONNECT`. **E0-10
+is the ticket that grants the DML**, and without this the bypass would have
+arrived with those grants, silently.
+
+**Nothing asserts it.** Removing the `public.` prefixes leaves all 276 tests
+green, because no fixture creates a temporary table. That makes it the sharpest
+instance in this ticket of `docs/MISTAKES.md` entry 2, and a regression test is
+worth more here than any of the four the review prompted elsewhere:
+`CREATE TEMP TABLE role_assignment (id uuid, role assignment_role, reports_to
+uuid)` on the session, then the cycle write that must still be refused.
+
+The rest of the schema is not exposed to this, and that was measured rather than
+reasoned from "constraints resolve at DDL time": with `pg_temp` shadows of
+`role_assignment`, `course` and `person` in place, E0-05's course-number
+derivation, E0-08's `person → user` foreign key and all three of this ticket's
+`CHECK` constraints still refused the rows they are there to refuse, five for
+five. This trigger is the only late-bound SQL in the migration tree.
+
 ### The isolation level is part of the guarantee, so it is enforced rather than assumed
 
 Both cross-row rules are read-then-write, so the guard is only as good as what
