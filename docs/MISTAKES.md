@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 7**
+**Caught: 8**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -80,7 +80,7 @@ string certainly present — so a search that has gone blind says so.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 6**
+**Caught: 7**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -105,7 +105,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -215,6 +215,91 @@ leaving the credential one `json.dumps` from any structured logger.
 
 **Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
 property, say the property and let the implementer find the mechanism.
+
+---
+
+## 15. A property test's generator excluded the case its own docstring named
+
+**Caught: 1**
+
+**What happened.** E0-07's parsing suite carries a property for the definition of
+done's "parsing is total: no exception type that escapes as a 500". Its docstring
+listed the leaks it refuses and put `ValueError` out of `int()` first. It
+generated `st.text(max_size=12)`.
+
+The string that produces that `ValueError` is a start letter, more than four
+thousand digits and a modality suffix: CPython caps integer-from-string
+conversion at `sys.get_int_max_str_digits()`, 4300 by default, and
+`parse_section_code("R" + "9" * 4301 + "WW")` raises `builtins.ValueError`
+rather than the service's own error. Section codes come from the LMS roster feed,
+so it is reachable input, and nothing shortens the value on the way in — a
+`String(16)` column is not enforced in Python, and the derived columns are
+`NOT NULL`, so the parse always runs before any row exists. The suite was green.
+`/security-review` found it.
+
+**Root cause.** The bound on the generator and the claim in the docstring were
+written at different moments and never read against each other. Twelve characters
+is a reasonable size for a section code, which is exactly why it looked like a
+detail rather than a decision: it silently redefined "arbitrary text" as "text
+short enough to be a section code", and the counterexample lives on the other
+side of that line. A property test states its claim in the docstring and its
+scope in the strategy, and only the second one runs.
+
+It is entry 3's family — a test that passed for a reason unrelated to what it
+asserted — but the mechanism is its own and worth naming separately: not an
+absence that something else satisfied, and not a pattern that matched nothing. An
+input space narrowed to where the assertion happens to hold.
+
+**Consequence.** A guarantee about untrusted input, asserted by a test named for
+it, over a space that could not contain the failure. Had it shipped, the first
+malformed roster value of that shape would have been a 500 on the sync, with the
+suite still reporting the case as covered. The repair was not simply a larger
+`max_size` either: `st.text()` will not assemble that string by chance in three
+hundred examples, so widening the bound would have put the counterexample inside
+the declared space and left it just as unreachable — the same defect behind a
+bigger number.
+
+**Rule.** For every property, read the strategy against the docstring and ask
+which named case the generator cannot produce. If the claim is about a boundary —
+a limit in the standard library, a column width, a protocol maximum — generate
+*around that boundary explicitly*, drawing from a band that straddles it, rather
+than trusting a wide range to wander into it. Where a bound stays, say in the
+docstring what it does not reach; a stated bound is a scope, and an unstated one
+is a false claim of totality.
+
+---
+
+## 13. A hazard was written down and worked around in only one of the two places facing it
+
+**Caught: 1**
+
+**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
+columns by reflecting from Postgres, and its docstring said why: "a column whose
+type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
+is not an instance of `DateTime` and would be missed." The row-seeding helper in
+the same file dispatched `isinstance` against the **declared** column type and
+got no such accommodation. When the implementation did what the docstring
+predicted, both criterion-4 tests died inside the fixture on
+`survey_window.closes_at`, before either reached an assertion. It took a dispute
+round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
+
+**Root cause.** Meeting a hazard at the call site where it first bit, instead of
+asking which other call sites ask the same question. The write-up made it look
+handled: the file named the hazard, in prose, one screen above the code that fell
+to it.
+
+**Consequence.** Two tests that could not pass against any implementation the
+criterion admits, reported as a defect in the implementation. A round of the
+loop, and — the expensive shape — an implementer under pressure to satisfy a
+fixture rather than a criterion. Two of the four implementations tried in
+response would have satisfied the helper *by removing the guard*, and one of them
+is what the schema would have shipped.
+
+**Rule.** When you work around a quirk of a type, a parser or an API, grep for
+every place that asks the same question and route them through one helper, in the
+same change. A docstring explaining the quirk is not a fix for the code that does
+not call the fix. And when a test fails inside its own fixture, suspect the
+fixture first — the message this one printed said exactly that, and was right.
 
 ---
 
@@ -434,37 +519,3 @@ the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
 export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
 the interpreter rather than in the file: print the value the module actually
 holds. `grep` proves what is on disk, which is not what ran.
-
----
-
-## 13. A hazard was written down and worked around in only one of the two places facing it
-
-**Caught: 0**
-
-**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
-columns by reflecting from Postgres, and its docstring said why: "a column whose
-type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
-is not an instance of `DateTime` and would be missed." The row-seeding helper in
-the same file dispatched `isinstance` against the **declared** column type and
-got no such accommodation. When the implementation did what the docstring
-predicted, both criterion-4 tests died inside the fixture on
-`survey_window.closes_at`, before either reached an assertion. It took a dispute
-round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
-
-**Root cause.** Meeting a hazard at the call site where it first bit, instead of
-asking which other call sites ask the same question. The write-up made it look
-handled: the file named the hazard, in prose, one screen above the code that fell
-to it.
-
-**Consequence.** Two tests that could not pass against any implementation the
-criterion admits, reported as a defect in the implementation. A round of the
-loop, and — the expensive shape — an implementer under pressure to satisfy a
-fixture rather than a criterion. Two of the four implementations tried in
-response would have satisfied the helper *by removing the guard*, and one of them
-is what the schema would have shipped.
-
-**Rule.** When you work around a quirk of a type, a parser or an API, grep for
-every place that asks the same question and route them through one helper, in the
-same change. A docstring explaining the quirk is not a fix for the code that does
-not call the fix. And when a test fails inside its own fixture, suspect the
-fixture first — the message this one printed said exactly that, and was right.
