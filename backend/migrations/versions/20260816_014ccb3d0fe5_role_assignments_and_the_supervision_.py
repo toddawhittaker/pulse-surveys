@@ -124,7 +124,7 @@ role = ANY (ARRAY[
 """
 
 # The two cross-row rules of SPEC §2.1's supervision graph, as one trigger
-# function. Four details of it are load-bearing and none is obvious.
+# function. Five details of it are load-bearing and none is obvious.
 #
 # **It is an `AFTER` trigger, and that is what catches the shortest cycle.**
 # Postgres checks a row's foreign keys after the row exists, so
@@ -165,6 +165,17 @@ role = ANY (ARRAY[
 # People editor (§6.3) and rows in a CSV import, so the contention is a handful
 # of writes by one person at a time.
 #
+# **The lock serialises the writers; it does not give them a fresh snapshot, so
+# REPEATABLE READ is refused outright.** The lock makes the second writer wait,
+# but under REPEATABLE READ its snapshot was fixed at its first statement, so the
+# walk still reads a graph without the first writer's edge and the cycle is
+# stored anyway — measured, 3 attempts out of 3, at two and at three assignments.
+# Rather than leave that as a footnote nothing enforces, a write that needs the
+# cross-row checks is refused at this isolation level. READ COMMITTED (each
+# statement re-snapshots) and SERIALIZABLE (SSI aborts one side) both hold, and
+# both are measured. ADR 0027 carries the table and says what would lift the
+# restriction.
+#
 # The messages name what the writer did, because the write this refuses is an
 # administrator re-pointing somebody's reporting line in the People editor
 # (§6.3): "you have created a reporting loop" is actionable and "duplicate key
@@ -176,6 +187,16 @@ DECLARE
     closes_a_cycle boolean;
 BEGIN
     IF NEW.reports_to IS NOT NULL OR NEW.role = 'CARE' THEN
+        IF current_setting('transaction_isolation') = 'repeatable read' THEN
+            RAISE EXCEPTION
+                'role assignment % carries a supervision edge or the CARE role, and this '
+                'transaction is REPEATABLE READ. The guard that refuses reporting cycles reads '
+                'the rest of the graph, and at this isolation level that read uses a snapshot '
+                'taken before any concurrent edge was committed, so a cycle written by two '
+                'transactions at once would be stored. Use READ COMMITTED or SERIALIZABLE.',
+                NEW.id
+                USING ERRCODE = 'check_violation';
+        END IF;
         PERFORM pg_advisory_xact_lock('role_assignment'::regclass::oid::bigint);
     END IF;
 
