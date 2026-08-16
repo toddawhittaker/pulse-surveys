@@ -151,8 +151,26 @@ comment saying a stale worker makes `get()` hang, when the measurement in that
 same commit's README said it raises `NotRegistered` for an added task and
 silently returns the old answer for a changed one. It cited this file for it.
 
+An eleventh and twelfth, in E0-12, in the same pull request, and both are the
+variant where the record was **never** true rather than made false by a change.
+ADR 0031 said a provider volunteering its own `model_id` "is refused rather than
+trusted" because the contracts set `extra="forbid"`. `extra="forbid"` refuses
+*undeclared* keys; `model_id` is a declared field, so a provider-supplied value
+validates and round-trips, and which one survives depends on a merge order the
+next ticket has not written yet. ADR 0030 said the hyphenated `self-harm` "stays
+in the spec and in the prompt text" — but the enum's value is `self_harm` and
+`"self-harm"` is refused, so a prompt author acting on that sentence would ship
+a moderation prompt that fails on the one verdict §9.3 gates hardest. Neither
+claim was ever run. Both were reasoned from what a setting is *for*, written down
+in a record whose whole audience is the ticket that has to implement against it,
+and found by an independent reviewer.
+
 **Root cause.** Changing a mechanism and not asking what else in the repository
-makes a claim about it. Three of these were *introduced by a fix for this same
+makes a claim about it. In the E0-12 pair, a second root cause with the same
+consequence: reasoning about what a configuration option does instead of running
+it. `extra="forbid"` and "forbid an extra value for a field" are one short step
+apart in English and are different rules, and prose is where that step is
+invisible — the code was correct in both cases and only the record was wrong. Three of these were *introduced by a fix for this same
 class of defect* — the `.env.example` header rewritten to correct one false claim
 acquired a different one, that `LOG_LEVEL` is settled by the spec, which the spec
 never mentions; and the override comment above was written by a session that had
@@ -176,6 +194,17 @@ never written and the one that drifted out from under you.
 you have just written is a claim nobody has checked, including the ones written
 while correcting somebody else's. Where a sentence describes a behaviour, it has
 to match what you measured — not what you expected to measure before you ran it.
+
+This paragraph already existed when the E0-12 pair was written, and it is the
+rule that would have caught both. It failed because "what you measured" reads as
+being about experiments, and neither sentence felt like an experiment: one
+described a library setting, the other a spelling. So, stated without the escape
+hatch — **a claim about what a setting, a flag or a type refuses is a claim about
+behaviour, and costs one line in a REPL to check.** If a record says something is
+rejected, reject it before writing the sentence. This is entry 9 arriving through
+prose rather than through a guard, and it is worth the two entries agreeing: the
+expensive records are the ones a later ticket implements against, where the code
+is right and only the sentence is wrong, so nothing goes red.
 
 **A count in prose is a record with a scheduled expiry**, so prefer not writing
 one. Two of these were counts — the ADR index that omitted three ADRs, and "the
