@@ -22,6 +22,21 @@ There is no `latest.md` and no unversioned `validity.md`, deliberately. A name
 that points at a moving target is a name whose next edit rewrites what every
 stored classification claims to have come from.
 
+**Prompts are Markdown, and this directory is flat.** Both halves are part of the
+scheme rather than incidental, and the Markdown half is load-bearing: a stored
+`prompt_version` is a *stem*, and a stem names exactly one file only while the
+extension is fixed. Put `validity.v1.md` and `validity.v1.jinja` side by side and
+`validity.v1` stops identifying anything — which is the whole property §7.4 asks
+a version to carry. A prompt that needs variables interpolated is still Markdown;
+nothing about templating requires its own extension.
+
+If you are about to break either half, that is a real argument to have, and it is
+an argument about [ADR 0032](../../../../docs/adr/0032-a-prompt-file-is-immutable-once-a-classification-cites-it.md)
+rather than something to do quietly. **The packaging will not stop you**, on
+purpose: `pyproject.toml` ships everything under this directory at any depth and
+any extension, so a file that breaks the scheme fails loudly in review instead of
+vanishing from the container while the repository looks entirely correct.
+
 ## The rule that makes a version mean something
 
 **A prompt file is immutable once it is committed.** To change a prompt, add the
