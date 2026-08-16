@@ -50,7 +50,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Boolean, inspect
+from sqlalchemy import Boolean, inspect, text
 from sqlalchemy.types import TypeDecorator
 
 pytestmark = pytest.mark.integration
@@ -763,6 +763,234 @@ def test_a_lead_faculty_assignment_scoped_above_its_course_is_refused(
 
 
 # ---------------------------------------------------------------------------
+# Criterion 6, the half a wrong *pairing* does not reach: an assignment names
+# exactly one node, and the rule that pairs role with node names every role.
+# ---------------------------------------------------------------------------
+
+# Read out of the server's catalog rather than out of `Base.metadata`. What a
+# migration left in Postgres is what refuses a row at three in the morning, and
+# the model is only a claim about it — the same reason
+# `test_generated_constraint_names.py` reads `pg_constraint` instead of the
+# migration text.
+CHECK_CONSTRAINTS = text(
+    "SELECT conname, pg_get_constraintdef(oid) AS definition"
+    " FROM pg_constraint WHERE conrelid = to_regclass(:table) AND contype = 'c'"
+)
+ROLE_ENUM_LABELS = text(
+    "SELECT e.enumlabel FROM pg_attribute a JOIN pg_enum e ON e.enumtypid = a.atttypid"
+    " WHERE a.attrelid = to_regclass(:table) AND a.attname = :column"
+    " ORDER BY e.enumsortorder"
+)
+TRIGGER_NAMES = text(
+    "SELECT tgname FROM pg_trigger WHERE tgrelid = to_regclass(:table) AND NOT tgisinternal"
+)
+
+
+def scope_columns(graph: Any) -> list[str]:
+    """Every column this schema uses to say which node an assignment is scoped to.
+
+    Asked of the builder rather than spelled here, because what a scope is made
+    of is the one thing E0-09 leaves open and `SupervisionGraph` is where that
+    question already lives.
+    """
+    shape, detail = graph.scope_shape()
+    if shape == "per_kind":
+        return sorted(detail.values())
+    if shape == "kind_and_id":
+        return sorted(detail)
+    return [detail]
+
+
+def test_an_assignment_carrying_two_scope_columns_is_refused(supervision_graph: Any) -> None:
+    """A chair scoped to its department *and* to the institution is refused.
+
+    **The failure this catches is a widening, not an error**, which is what makes
+    it worth a test of its own. Every other row this module refuses announces
+    itself: a cycle hangs a walk, a bad pairing is a role somewhere it does not
+    belong. This one is an ordinary-looking chair with one extra column set, and
+    [ADR 0025](../../docs/adr/0025-an-assignments-scope-is-one-nullable-foreign-key-per-level.md)
+    says every reader of "the node this is scoped to" must coalesce the scope
+    columns — "E0-11 and E9 will write that expression, probably once, in the
+    purview resolver". A coalesce takes the first non-null, so the chair holds the
+    institution: SPEC §2.1's own grant, restricted by role grain, becomes the whole
+    university. Nothing errors and nobody is in a position to notice.
+
+    The criterion behind it is E0-09's role grain rule — "an assignment's
+    `scope_node_id` must reference a node of the right kind for its role" —
+    singular, and the tests above it only ever check that the *wrong* kind is
+    refused. A row naming the right kind and one more satisfies every one of them.
+
+    **The control is the same chair without the extra column**, written through
+    the same helper in the same transaction, so a refusal below is known to be
+    about the second scope column rather than about the insert path or the grain
+    arm. A schema that cannot spell two scope columns at all — one id column,
+    whatever names its kind — cannot widen this way, and the assertion says so
+    rather than pretending to have tested it.
+    """
+    graph = supervision_graph
+    shape, detail = graph.scope_shape()
+
+    written(graph, lambda: graph.node("CHAIR"), "A chair assignment scoped to one department")
+
+    two_columns = shape == "per_kind" and {"department", "institution"} <= set(detail)
+    also_the_institution = (
+        graph.scope_overrides("institution", graph.scope("institution")) if two_columns else {}
+    )
+    refused = (
+        graph.refusal(
+            lambda: graph.assign(
+                "CHAIR",
+                scope=graph.fresh_scope("department"),
+                person=graph.person(),
+                **also_the_institution,
+            )
+        )
+        if two_columns
+        else None
+    )
+    assert not two_columns or refused is not None, (
+        "A chair assignment was stored holding both a department and the institution. The row is "
+        "not wrong on its face and no query fails: ADR 0025 makes the scope of an assignment a "
+        "coalesce over the scope columns, so the resolver E0-11 writes takes the first non-null "
+        "and this chair holds every college in the university. That is SPEC §2.1's role grain — "
+        "'a chair's grant is the department subtree' — widened to institution-wide by one extra "
+        "column, silently. The rule that says an assignment names exactly one of "
+        f"{scope_columns(graph)} is what refuses it; relaxed from 'exactly one' to 'at least "
+        "one', this row is accepted and everything else in this module stays green."
+    )
+
+
+def test_an_assignment_carrying_no_scope_column_is_refused(supervision_graph: Any) -> None:
+    """The other side of "exactly one": a chair scoped to nothing is refused too.
+
+    E0-09 gives every role a node — "a chair scoped to a department, a dean to a
+    college, a lead to a course, **Care and Admin to the institution**" — and SPEC
+    §2.1 computes the own grant from that node. An assignment with no node has no
+    own grant to restrict, and whether that reads as a grant over nothing or as a
+    grant over everything depends on how the coalesce above is consumed, which is
+    a decision E0-11 would be making by accident.
+
+    **Two rules can refuse this row and a behavioural test cannot say which**
+    (`docs/MISTAKES.md` entry 3): the count of populated scope columns, and the
+    grain arm requiring the role's own column to be populated. So this one does
+    not bite when a single clause is loosened — the test that does that job is the
+    two-column one above, and the *stated* half is the catalog test below. What it
+    catches is the whole rule going away, and the grain rule being written in the
+    one direction that reads as equivalent and is not: "a department column implies
+    a chair" permits an unscoped chair, and "a chair implies a department column"
+    does not.
+    """
+    graph = supervision_graph
+
+    written(graph, lambda: graph.node("CHAIR"), "A chair assignment scoped to a department")
+
+    own_level = graph.scope_overrides("department", graph.scope("department"))
+    cleared = dict.fromkeys(own_level, None)
+    refused = graph.refusal(lambda: graph.assign("CHAIR", person=graph.person(), **cleared))
+    assert refused is not None, (
+        "A chair assignment was stored naming no scope node at all — every one of "
+        f"{scope_columns(graph)} left null. E0-09 gives each role a node and SPEC §2.1 computes "
+        "the own grant from it, so this row is an authorization decision with nothing under it. "
+        "ADR 0025 states the rule as 'an assignment is scoped to exactly one node'; exactly, not "
+        "at most."
+    )
+
+
+def test_every_role_the_database_can_hold_is_named_in_the_scope_grain_rule(
+    supervision_graph: Any,
+) -> None:
+    """The grain rule enumerates every role, so its fallthrough arm stays unreachable.
+
+    This is the one assertion in this module about what a constraint *says* rather
+    than about what the database *does*, and the reason is that the failure has no
+    row to write. E0-09's grain rule pairs each role with the node kind it may be
+    scoped to; a role the rule has no arm for falls through to whatever the rule
+    ends in. Ending it closed — no legal scope for an unnamed role — is the right
+    direction of failure, and ADR 0025 says so: "adding a role means editing this
+    constraint, and forgetting to makes the role unwritable rather than
+    unrestricted."
+
+    But a closed fallthrough is a backstop for a mistake, not a licence to rely on
+    it, and it cannot be reached from a test: writing a row for a role the enum
+    does not hold is not something this suite can do without adding an enum label
+    at runtime. What *is* assertable is the property that makes the fallthrough
+    unreachable — every label the type holds is named in the rule. That is also
+    the shape of the real failure, which is not "somebody changed the `ELSE`" but
+    "somebody added a ninth role and did not come back here". ADR 0028 already
+    describes that migration: "a migration adding an enum label and a `CASE` arm".
+    This test is what makes the second half of that sentence enforced.
+
+    **A label deliberately given no scope is still named, not omitted.** If a role
+    is meant to be unwritable, an arm saying so states it; leaving it out states
+    the same thing only for as long as nobody widens the fallthrough, and that is
+    a rule held in place by a reader's memory.
+
+    **Scope of the check**, since a property is only as wide as what it reads: it
+    looks at CHECK constraints on `role_assignment` that mention the role column
+    and at least one scope column, and asks that between them they name every
+    label. Both non-vacuity guards are asserted first, because "no label is
+    missing" is true of a table with no labels and of a table with no constraints
+    (`docs/MISTAKES.md` entry 3).
+    """
+    graph = supervision_graph
+    columns = scope_columns(graph)
+
+    labels = [
+        row[0]
+        for row in graph.session.execute(
+            ROLE_ENUM_LABELS, {"table": ASSIGNMENTS, "column": graph.role_column}
+        )
+    ]
+    assert labels, (
+        f"`{ASSIGNMENTS}.{graph.role_column}` is not an enumerated type, so this test cannot "
+        "list the roles the database is able to hold and would otherwise pass having checked "
+        "nothing. That is this test needing rewriting rather than the schema being wrong: a role "
+        "column constrained some other way still has a set of legal roles, and the property — "
+        "every one of them named in the grain rule — is the same. Say in the pull request what "
+        "enumerates them and point this query at it."
+    )
+
+    definitions = {
+        row.conname: row.definition
+        for row in graph.session.execute(CHECK_CONSTRAINTS, {"table": ASSIGNMENTS})
+    }
+    stating = {
+        name: definition
+        for name, definition in definitions.items()
+        if graph.role_column in definition and any(column in definition for column in columns)
+    }
+    trigger_names = sorted(
+        row[0] for row in graph.session.execute(TRIGGER_NAMES, {"table": ASSIGNMENTS})
+    )
+    assert stating, (
+        f"No CHECK constraint on `{ASSIGNMENTS}` mentions both `{graph.role_column}` and one of "
+        f"{columns}, so nothing found here states E0-09's role grain rule. The table's check "
+        f"constraints are {sorted(definitions)} and its triggers are {trigger_names}. "
+        "If the rule is enforced by one of those triggers instead, this test has to read "
+        "`pg_proc.prosrc` for it and should be changed to — the behavioural half is the grain "
+        "tests above, and this half is what says the rule exists at all rather than that today's "
+        "rows happen to be refused (`docs/MISTAKES.md` entry 3)."
+    )
+
+    unnamed = [
+        label
+        for label in labels
+        if not any(f"'{label}'" in definition for definition in stating.values())
+    ]
+    assert not unnamed, (
+        f"{unnamed} are roles the database can hold that {sorted(stating)} never names, so the "
+        "scope grain rule has nothing to say about them and they fall through to whatever it ends "
+        "in. E0-09: 'an assignment's `scope_node_id` must reference a node of the right kind for "
+        "its role… Enforce it rather than trusting callers' — a role the rule does not mention is "
+        "a role trusting the caller. Today's fallthrough may well refuse them, which is the safe "
+        "direction and is the only reason this is a missing arm rather than an open grant; the arm "
+        "is what keeps it that way when somebody later reads the fallthrough as dead code. If one "
+        "of these is deliberately unwritable — ADR 0028 makes that case for a student — say it in "
+        "the rule rather than by leaving it out."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Criteria 7 and 8 — Care sits at the institution and outside the graph.
 # ---------------------------------------------------------------------------
 
@@ -868,6 +1096,100 @@ def test_nothing_can_report_to_a_care_assignment(supervision_graph: Any) -> None
         "everything transitively reporting to an assignment, so a child here gives Care a "
         "reporting purview — the one thing §6.2 says the role does not have, and the composition "
         "§2.1 calls deliberately impossible."
+    )
+
+
+def scoped_to_the_institution(graph: Any) -> dict[str, Any]:
+    """The column values that move an existing assignment's scope to the institution.
+
+    Every other scope column is cleared in the same statement, because "scoped to
+    the institution" is a statement about all of them: leaving the old level set
+    would make the update carry two scope columns, and the test below would then
+    be refused by the rule the two-column test above owns rather than by the one
+    it is about (`docs/MISTAKES.md` entry 3).
+    """
+    shape, detail = graph.scope_shape()
+    cleared = dict.fromkeys(detail.values(), None) if shape == "per_kind" else {}
+    return {**cleared, **graph.scope_overrides("institution", graph.scope("institution"))}
+
+
+def become_care(graph: Any, row: Any) -> None:
+    """Turn one existing assignment into a legal Care assignment, in one UPDATE.
+
+    Legal in every respect the schema can check on the row itself: the role is
+    Care, the scope is the institution that criterion 7 requires, and it reports
+    to nobody. The only thing that can be wrong with the result is what points at
+    it from elsewhere.
+    """
+    table = graph.assignments
+    key = graph.assignment_key
+    values = {graph.role_column: graph.role_value("CARE"), **scoped_to_the_institution(graph)}
+    graph.session.execute(table.update().where(table.c[key] == row[key]).values(**values))
+
+
+def test_an_assignment_others_report_to_cannot_be_turned_into_a_care_assignment(
+    supervision_graph: Any,
+) -> None:
+    """Criterion 8, second half, by the third path into the same stored state.
+
+    The two tests above cover a Care row written *with* an edge and an edge
+    pointed *at* a Care row. This is the update that arrives from the other
+    direction: the row is an ordinary supervisor with people reporting to it, and
+    it is the row itself that changes. Nothing new points at Care; what changes is
+    what the existing edges are pointing at. A guard that inspects the edge being
+    written — the natural place to put it, and enough for both tests above — never
+    runs here, and the end state is the one §2.1 and §6.2 refuse: a Care
+    assignment with a reporting purview under it.
+
+    That end state is the reason this branch is worth its own test rather than
+    being counted as covered. §6.2: "comment content and identity access are
+    visible to no other role, including Admin and the VPAA. This separation is
+    enforced in code, not just convention." SPEC §2.1 computes purview as the
+    union of everything transitively reporting to an assignment, so a Care
+    assignment with children is the single role that can re-identify a student
+    holding oversight of a chain of sections — and it got there through an admin
+    editing somebody's role in the People editor, which is the ordinary way a role
+    changes.
+
+    **The control is the same update on an assignment nothing reports to**, and it
+    is what makes the refusal attributable. Flipping a chair to Care moves the
+    role, the scope and the derived entry doors all at once, so a bare
+    `pytest.raises` here would pass against a schema that refuses *any* such
+    update — for the grain rule, for a door, for a scope column left behind. The
+    two updates below differ in exactly one thing: whether anything reports to the
+    row.
+    """
+    graph = supervision_graph
+    key = graph.assignment_key
+
+    childless = written(
+        graph,
+        lambda: graph.node("CHAIR"),
+        "A chair assignment nothing reports to",
+    )
+    supervisor = written(graph, lambda: graph.node("CHAIR"), "A second chair assignment")
+    written(
+        graph,
+        lambda: graph.node("LEAD_FACULTY", reports_to=supervisor[key]),
+        "A lead reporting to that second chair",
+    )
+
+    written(
+        graph,
+        lambda: become_care(graph, childless),
+        "Turning the chair nobody reports to into a Care assignment",
+    )
+
+    refused = graph.refusal(lambda: become_care(graph, supervisor))
+    assert refused is not None, (
+        "An assignment with a lead reporting to it was turned into a Care assignment. E0-09 "
+        "criterion 8: a Care assignment 'is never the target of one', and its scope says Care "
+        "'sits outside the supervision graph entirely'. The stored state is the same one "
+        "`test_nothing_can_report_to_a_care_assignment` refuses — a Care row with children — "
+        "reached by changing the parent instead of the edge, so a guard that looks only at the "
+        "edge being written leaves this path open while that test stays green. What sits under it "
+        "is a purview: §2.1 unions everything transitively reporting to an assignment, and §6.2 "
+        "gives Care the one power in the product that re-identifies a student."
     )
 
 
