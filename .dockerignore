@@ -55,5 +55,29 @@ backend/**/__pycache__
 backend/**/*.py[cod]
 backend/*.egg-info
 
+<<<<<<< HEAD
 mock-lms/**/__pycache__
 mock-lms/**/*.py[cod]
+=======
+# Editor and merge debris. E0-12 made this reachable: `pyproject.toml` ships
+# `app/ai/prompts/**/*` as package data, so any non-hidden file left in that
+# directory is copied into the build context, packaged into the wheel, and
+# installed into the runtime image. Before that entry the image held installed
+# `.py` modules and nothing else. A `validity.v1.md~` or a `validity.v1.md.orig`
+# is untracked, invisible in review, and sitting on the machine that runs
+# `make docker-build` — so a key parked beside a prompt while debugging ends up
+# in an image layer.
+#
+# The glob stays wide on purpose (ADR 0032: packaging decides what reaches
+# production, the naming scheme decides what a file is called, and a glob that
+# enforces the scheme does it by making files vanish from containers). This is
+# the other end of that trade, and it is **this file's header warning applied in
+# the direction that fails open**: a suffix nobody thought of is in the context
+# until someone remembers to add it. It is the weaker half of the guarantee, and
+# it is here rather than in the glob because narrowing the glob costs a silent
+# production failure while missing a suffix costs a stray file.
+backend/**/*~
+backend/**/*.orig
+backend/**/*.rej
+backend/**/*.bak
+>>>>>>> origin/epic/e0-foundations
