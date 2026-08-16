@@ -69,3 +69,6 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0019](0019-a-naive-datetime-is-refused-by-the-column-type.md) | A naive datetime is refused by the column type, not by Postgres or a service | Accepted |
 | [0020](0020-a-sections-end-date-is-its-last-day.md) | A section's end date is its last day, inclusive | Accepted |
 | [0021](0021-a-sections-derived-calendar-has-one-writer.md) | A section's derived calendar is NOT NULL and has exactly one writer | Accepted |
+| [0022](0022-identity-bearing-columns-are-marked-by-a-name-prefix.md) | Identity-bearing columns are marked by an `identity_` name prefix | Accepted — follows [0014](0014-lms-owned-columns-are-marked-by-a-name-prefix.md), and takes the name where the two markers meet |
+| [0023](0023-overlapping-enrollments-are-refused-by-an-exclusion-constraint.md) | Overlapping enrollment windows are refused, by a GiST exclusion constraint | Accepted — settles the choice E0-08's criterion 5 leaves open |
+| [0024](0024-the-person-to-user-link-is-carried-by-person.md) | The person-to-user link is carried by `person`, and is one to one | Accepted — rests on one registered platform per person, stated in the record |
