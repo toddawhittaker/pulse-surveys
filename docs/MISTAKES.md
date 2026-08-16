@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 11**
+**Caught: 12**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -105,7 +105,7 @@ cannot see whether it exists.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 10**
+**Caught: 11**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -130,7 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 8**
+**Caught: 9**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -189,7 +189,7 @@ sentence.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -545,3 +545,38 @@ its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
 if the harness is what is hiding it. A timeout is the absence of evidence, not
 evidence.
 
+
+---
+
+## 16. A deliverable existed in the source tree and not in the built artifact
+
+**Caught: 0**
+
+**What happened.** E0-12 shipped `backend/app/ai/prompts/validity.v1.md`, the
+prompt SPEC §7.4 requires a classification to name. Every gate was green: the
+unit tests read the file off disk, ruff and mypy had nothing to say about a
+`.md`, and it was committed and visible in the diff. Building the wheel the
+Dockerfile installs — `pip wheel . --no-deps --no-build-isolation` — produced
+`app/ai/__init__.py` and `app/ai/contracts.py` and no `prompts/` at all.
+setuptools includes Python modules in a wheel; a data file inside a package
+needs `[tool.setuptools.package-data]` and had none.
+
+**Root cause.** Two different ideas of where the code lives. Every test in this
+repository runs against the source tree, where the file is simply there. The
+container installs a wheel into `/opt/venv` and has no source tree, so
+"the file is in the repository" and "the file is in the running system" are
+separate facts, and nothing connected them.
+
+**Consequence.** As caught, none — the packaging entry went in with the ticket.
+Unrecognised, E0-13's gateway would have loaded the prompt on a developer's
+machine and raised on the first real launch in a container, with a green CI run
+and a passing Compose health check behind it, because the health check answers
+before any AI task is called. The same trap is waiting for four later epics: E2,
+E4, E6 and E7 each add a prompt file here, and each will pass every gate.
+
+**Rule.** When a ticket ships a non-Python file that code will read at runtime,
+build the artifact and look inside it — `pip wheel . --no-deps
+--no-build-isolation` then `unzip -l`. A green test suite proves the file is in
+the repository and says nothing about whether it is in the image. This is entry
+9 in a new place: the guard is the packaging configuration, and reading it is
+not executing it.
