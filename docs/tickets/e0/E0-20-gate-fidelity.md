@@ -21,13 +21,21 @@ here rather than fixed there, because the reviewer pass reports and the merge
 decision chooses. Sizes differ a lot: the first is a few lines, the last is a
 judgement call about logging that nothing yet depends on.
 
-**Four open: three of the original four, plus one this ticket gained.** Item 3
+**Five open: three of the original four, plus two this ticket gained.** Item 3
 landed in E0-05, which is where the first server defaults arrived; it is kept
 below with what it settled, because the reasoning is worth finding. Closing it
 exposed a narrower gap in the same place, which this ticket now carries as a
 fourth item — a generated column's expression can drift with `alembic check`
 green, because Alembic cannot `ALTER` a generated column and so warns instead of
 failing.
+
+The fifth arrived from E0-07 and E0-08 (item 3a): `alembic check` compares
+neither check-constraint expressions nor exclusion constraints. That one is no
+longer hypothetical — E0-06 shipped a check constraint that refused six of the
+twenty start positions §2.2 seeds, and nobody found out until E0-07 wrote code
+that needed one. It is the clearest evidence this ticket's subject is worth more
+than its "blocks nothing" label suggests: **every serious defect found while
+building E0-07 and E0-08 was sitting behind a test or a gate that was green.**
 
 Read first: `.github/workflows/ci.yml`, `docs/adr/0002-ci-gates-ship-tolerant.md`,
 and `docs/MISTAKES.md` entries 2 and 3.
@@ -102,6 +110,41 @@ when they differ, and `alembic check` still exits zero. E0-05 spells
 fires only on real drift rather than on every run — but a warning is not a gate,
 and a changed generation expression with no migration behind it still passes CI.
 That is this ticket's own subject and is added to its criteria below.
+
+### 3a. `alembic check` compares neither check-constraint expressions nor exclusion constraints
+
+Found in E0-07, then measured in E0-08, on the pinned Alembic 1.19. Same class as
+item 3 through a different door, and worth stating separately because both were
+found the same way: a constraint that was wrong or missing while the gate said
+clean.
+
+E0-06 shipped `start_letter_map` with `CheckConstraint("letter ~ '^[A-Z]$'")`.
+§2.2 numbers the 3-week sections 2 through 7, so **six of the twenty positions in
+the spec's own Fall 2026 seed map could never be inserted**. Nothing caught it,
+because nothing tried to write a numbered position until E0-07's parser existed.
+Correcting the model alone would not have been caught either — autogenerate does
+not compare `CheckConstraint` expressions, so E0-07's migration hand-writes the
+drop and recreate in both directions.
+
+E0-08 measured the boundary against a freshly upgraded container, mutating the
+model only:
+
+| Mutation | `alembic check` |
+|---|---|
+| exclusion constraint removed | **clean** |
+| check-constraint expression changed | **clean** |
+| check constraint renamed | detected (1.19's `checkconstraint_byname`) |
+| column dropped | detected — the canary, so "clean" is distinguishable from a comparison that has gone blind |
+
+The rename half is closed by the pinned version; the expression half is not, and
+an exclusion constraint is invisible entirely. Both matter now rather than
+theoretically: E0-08's enrollment overlap rule *is* an exclusion constraint and
+its window-ordering rule *is* a check constraint.
+
+The trap to name in whatever this ticket builds: **a constraint rendered into the
+migration that creates its table reads like coverage and is not.** E0-08 asserts
+both of its rules against a real server instead, which is the pattern to
+generalise.
 
 ### 4. `echo=False` is not what keeps SQL out of the log
 
@@ -188,6 +231,13 @@ passing while every statement is being logged.
       migrated database and compares it, normalised, with the model's
       `Computed` text — one assertion, and it is the only drift signal a
       generated column has.
+- [ ] A model whose *check-constraint expression* changed without a migration
+      fails something, and a *removed exclusion constraint* fails something.
+      Neither does today (see item 3a), and both rules exist in E0-08's schema
+      now. The cheap form is the one E0-08 already uses for its own two: read
+      the constraint out of the catalog — `get_check_constraints`, and `pg_constraint`
+      for `contype = 'x'` — and assert against it, rather than trusting the gate.
+      Do not accept "it is in the creating migration" as coverage.
 - [ ] With `sqlalchemy.engine` set to INFO by name, no bound parameter reaches
       the log outside development.
 - [ ] Every fix above is verified by mutation — reintroduce the defect and watch
