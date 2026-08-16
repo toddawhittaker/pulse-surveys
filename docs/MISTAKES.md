@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 8**
+**Caught: 9**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -80,7 +80,7 @@ string certainly present — so a search that has gone blind says so.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 7**
+**Caught: 8**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -105,7 +105,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 5**
+**Caught: 6**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -293,6 +293,71 @@ here, from what `adapt_type` does — not a longer list.
 
 ---
 
+## 13. A hazard was written down and worked around in only one of the two places facing it
+
+**Caught: 1**
+
+**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
+columns by reflecting from Postgres, and its docstring said why: "a column whose
+type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
+is not an instance of `DateTime` and would be missed." The row-seeding helper in
+the same file dispatched `isinstance` against the **declared** column type and
+got no such accommodation. When the implementation did what the docstring
+predicted, both criterion-4 tests died inside the fixture on
+`survey_window.closes_at`, before either reached an assertion. It took a dispute
+round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
+
+**Root cause.** Meeting a hazard at the call site where it first bit, instead of
+asking which other call sites ask the same question. The write-up made it look
+handled: the file named the hazard, in prose, one screen above the code that fell
+to it.
+
+**Consequence.** Two tests that could not pass against any implementation the
+criterion admits, reported as a defect in the implementation. A round of the
+loop, and — the expensive shape — an implementer under pressure to satisfy a
+fixture rather than a criterion. Two of the four implementations tried in
+response would have satisfied the helper *by removing the guard*, and one of them
+is what the schema would have shipped.
+
+**Rule.** When you work around a quirk of a type, a parser or an API, grep for
+every place that asks the same question and route them through one helper, in the
+same change. A docstring explaining the quirk is not a fix for the code that does
+not call the fix. And when a test fails inside its own fixture, suspect the
+fixture first — the message this one printed said exactly that, and was right.
+
+---
+
+## 12. A mutation was reverted on disk and not in the interpreter
+
+**Caught: 1**
+
+**What happened.** In E0-05, checking that `alembic check` warns when a generated
+column's expression drifts: edit `app/models/org.py` to change one band edge from
+`499` to `498`, run the check, edit it back, run it again. The warning was there
+both times. Ten minutes went into the model, the migration and the database
+before `grep` showed the file on disk said `499` while the module Python imported
+said `498`.
+
+**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
+file's size and mtime **truncated to the second**. Reverting a mutation of equal
+length inside the same second leaves the cache valid, so the stale bytecode is
+what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
+revert is invisible to the interpreter.
+
+**Consequence.** The reverted run and the mutated run produce identical output,
+which reads as "the mutation made no difference" — the conclusion that kills the
+finding. Here it would have been "matching the server's own rendering does not
+silence the warning, so do not bother", and the drift signal E0-20 now depends on
+would have been dropped as not working.
+
+**Rule.** When mutating and reverting source between runs, clear the caches in
+the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
+export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
+the interpreter rather than in the file: print the value the module actually
+holds. `grep` proves what is on disk, which is not what ran.
+
+---
+
 ## 4. `git add` swept untracked files into a commit
 
 **Caught: 0**
@@ -404,67 +469,3 @@ its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
 if the harness is what is hiding it. A timeout is the absence of evidence, not
 evidence.
 
----
-
-## 12. A mutation was reverted on disk and not in the interpreter
-
-**Caught: 0**
-
-**What happened.** In E0-05, checking that `alembic check` warns when a generated
-column's expression drifts: edit `app/models/org.py` to change one band edge from
-`499` to `498`, run the check, edit it back, run it again. The warning was there
-both times. Ten minutes went into the model, the migration and the database
-before `grep` showed the file on disk said `499` while the module Python imported
-said `498`.
-
-**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
-file's size and mtime **truncated to the second**. Reverting a mutation of equal
-length inside the same second leaves the cache valid, so the stale bytecode is
-what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
-revert is invisible to the interpreter.
-
-**Consequence.** The reverted run and the mutated run produce identical output,
-which reads as "the mutation made no difference" — the conclusion that kills the
-finding. Here it would have been "matching the server's own rendering does not
-silence the warning, so do not bother", and the drift signal E0-20 now depends on
-would have been dropped as not working.
-
-**Rule.** When mutating and reverting source between runs, clear the caches in
-the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
-export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
-the interpreter rather than in the file: print the value the module actually
-holds. `grep` proves what is on disk, which is not what ran.
-
----
-
-## 13. A hazard was written down and worked around in only one of the two places facing it
-
-**Caught: 1**
-
-**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
-columns by reflecting from Postgres, and its docstring said why: "a column whose
-type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
-is not an instance of `DateTime` and would be missed." The row-seeding helper in
-the same file dispatched `isinstance` against the **declared** column type and
-got no such accommodation. When the implementation did what the docstring
-predicted, both criterion-4 tests died inside the fixture on
-`survey_window.closes_at`, before either reached an assertion. It took a dispute
-round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
-
-**Root cause.** Meeting a hazard at the call site where it first bit, instead of
-asking which other call sites ask the same question. The write-up made it look
-handled: the file named the hazard, in prose, one screen above the code that fell
-to it.
-
-**Consequence.** Two tests that could not pass against any implementation the
-criterion admits, reported as a defect in the implementation. A round of the
-loop, and — the expensive shape — an implementer under pressure to satisfy a
-fixture rather than a criterion. Two of the four implementations tried in
-response would have satisfied the helper *by removing the guard*, and one of them
-is what the schema would have shipped.
-
-**Rule.** When you work around a quirk of a type, a parser or an API, grep for
-every place that asks the same question and route them through one helper, in the
-same change. A docstring explaining the quirk is not a fix for the code that does
-not call the fix. And when a test fails inside its own fixture, suspect the
-fixture first — the message this one printed said exactly that, and was right.
