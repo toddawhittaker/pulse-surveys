@@ -16,6 +16,19 @@ does supply is a constant marked as this suite's choice, because pinning one her
 would make the implementer build to this file instead of to the ticket. The same
 mechanism, and the same reason, as `SectionCodeService` in `tests/conftest.py`.
 
+**The task table and the verdict sets are read from `docs/SPEC.md`, not copied
+into this file.** They were copied once, and an eval-gate review showed the cost:
+the assertions are generic, driven by whatever the constant holds, so folding
+self-harm into threat needed no defeat of a test — deleting the member from the
+enum and from the tuple in the same change left the whole suite green
+(`docs/MISTAKES.md` entry 17). An expectation stored beside the code it checks is
+inside the blast radius of the change it exists to catch. Reading §7.4's own
+table means losing a verdict now requires editing the spec, which is a reviewed
+act with rules of its own. Three literals survive that policy on purpose, and say
+so where they are written: they are the second, independent statement of the
+threat and self-harm distinction, and a second opinion that shares a source is
+not one.
+
 **What the tests are built from, since it is not the implementation.** Each
 contract is exercised through a payload assembled from its *own* declared fields:
 a JSON-ready value per field, chosen by type. That is scaffolding, not an
@@ -40,6 +53,7 @@ import datetime as dt
 import decimal
 import enum
 import json
+import re
 import tomllib
 import types
 import typing
@@ -54,6 +68,7 @@ from pydantic import BaseModel, ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+SPEC_PATH = REPO_ROOT / "docs" / "SPEC.md"
 
 # Spelled by E0-12's scope — "`backend/app/ai/contracts.py`" — and by SPEC §13,
 # which gives `ai/contracts.py` the three jobs. The package root is `backend/`,
@@ -121,11 +136,43 @@ TASKS = (
 
 TASKS_BY_KEY = {task.key: task for task in TASKS}
 
-# SPEC §7.4's Output column for the two classifier tasks, and E0-12's scope
-# repeats both: "Validity returns substantive / insufficient / nonsense.
-# Moderation returns clear / harmful / privacy / nonsense / threat / self-harm."
-VALIDITY_VERDICTS = ("substantive", "insufficient", "nonsense")
-MODERATION_VERDICTS = ("clear", "harmful", "privacy", "nonsense", "threat", "self-harm")
+# **The verdict sets are read out of `docs/SPEC.md`, not written here.** They
+# used to be two tuples copied from §7.4's Output column, and an eval-gate review
+# showed what that costs: the assertion below is generic, driven by whichever
+# tuple it is handed, and this file's own idiom invites editing its constants
+# ("the one line that changes"). So folding self-harm into threat did not have to
+# defeat the test — deleting the member from the enum *and* from the tuple left
+# the whole suite green. A copy of the spec that lives beside the code is not a
+# second opinion; it is the same opinion, and the fold edits both.
+#
+# Reading the table instead means the spec and the contract have to agree. Losing
+# a verdict now takes an edit to `docs/SPEC.md`, which is a reviewed act with its
+# own rules (CLAUDE.md: a change that contradicts the spec is raised, not worked
+# around), rather than a plausible-looking fixture tweak.
+SPEC_TASK_TABLE_HEADING = "### 7.4"
+SPEC_TASK_TABLE_HEADER = ("Task", "Trigger", "Output")
+
+# What a verdict looks like in that Output cell: one lowercase word, possibly
+# hyphenated. The guard that stops a prose cell — "Per-stream, per-node themed
+# summaries…" — or a table whose punctuation changed from being read as a closed
+# set of verdicts. A parse that goes wrong has to fail loudly rather than hand
+# back something plausible.
+VERDICT_TOKEN = re.compile(r"^[a-z][a-z-]{2,19}$")
+
+# **Deliberately literal, and the only literals of their kind in this file.**
+# `test_the_moderation_contract_keeps_threat_and_self_harm_as_two_distinct_verdicts`
+# exists to be a second, independent statement of the distinction §6.2's queue
+# and §9.3's recall floor are built on, so it must not share a source with the
+# derived set above — two assertions reading the same value are one assertion.
+# The point is that a fold has to defeat a test whose name says what was lost.
+THREAT_VERDICT = "threat"
+SELF_HARM_VERDICT = "self-harm"
+MODERATION_VERDICT_COUNT = 6
+
+# A key no contract declares. Sent to prove the model refuses what it does not
+# know about, which is what `extra="forbid"` buys and what §7.4 has the gateway
+# retry on.
+UNDECLARED_PROVIDER_KEY = "e0_12_undeclared_provider_key"
 
 
 class AuditField(NamedTuple):
@@ -266,6 +313,100 @@ class UnbuildableError(Exception):
         super().__init__(f"no example value for `{where}`, annotated {annotation!r}")
         self.where = where
         self.annotation = annotation
+
+
+# ---------------------------------------------------------------------------
+# Reading §7.4's task table out of the spec
+# ---------------------------------------------------------------------------
+
+
+def spec_task_table() -> dict[str, str]:
+    """§7.4's table, as task label to Output cell, read from `docs/SPEC.md`.
+
+    Scoped to the §7.4 section rather than swept from the whole document,
+    because SPEC.md holds other three-column tables — §7.1's stack, §8's course
+    number bands — and a sweep that happened to match one of those would be
+    reading a different table with the same shape.
+
+    **This is a search over a file, which is the shape that fails silently**
+    (`docs/MISTAKES.md` entry 3). Two guards, both of which stop rather than
+    return something plausible: the section must contain the
+    `| Task | Trigger | Output |` header — the canary, a string certainly
+    present in the table this is looking for — and it must yield at least one
+    row. An empty parse would otherwise flow into a set comparison and be read
+    as a contract with the wrong verdicts.
+    """
+    if not SPEC_PATH.is_file():
+        pytest.fail(
+            f"{SPEC_PATH} does not exist, so the verdict sets asserted below have no source. "
+            "They are read from §7.4's table rather than copied into this file on purpose."
+        )
+
+    lines = SPEC_PATH.read_text(encoding="utf-8").splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if line.startswith(SPEC_TASK_TABLE_HEADING)),
+        None,
+    )
+    if start is None:
+        pytest.fail(
+            f"{SPEC_PATH} has no heading starting {SPEC_TASK_TABLE_HEADING!r}, so §7.4's task "
+            "inventory could not be found. If the section was renumbered, this constant is what "
+            "changes — and every task-set assertion in this file is downstream of it."
+        )
+
+    rows: dict[str, str] = {}
+    header_seen = False
+    for line in lines[start + 1 :]:
+        if line.startswith("#"):
+            break
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) != 3:
+            continue
+        if tuple(cells) == SPEC_TASK_TABLE_HEADER:
+            header_seen = True
+            continue
+        if all(cell and set(cell) <= {"-", ":"} for cell in cells):
+            continue
+        rows[cells[0]] = cells[2]
+
+    if not header_seen:
+        pytest.fail(
+            f"The §7.4 section of {SPEC_PATH} holds no "
+            f"`| {' | '.join(SPEC_TASK_TABLE_HEADER)} |` header row. That header is this "
+            "reader's canary: without it, the parse below has found something other than the "
+            "task table, and a search that has gone blind reports the same emptiness as a table "
+            "with no rows in it."
+        )
+    if not rows:
+        pytest.fail(f"The §7.4 task table in {SPEC_PATH} parsed to no rows at all.")
+    return rows
+
+
+def spec_verdicts(task: AiTask) -> tuple[str, ...]:
+    """The closed set §7.4's Output column gives `task`, read from the spec."""
+    table = spec_task_table()
+    if task.label not in table:
+        pytest.fail(
+            f"§7.4's task table in {SPEC_PATH} has no row for '{task.label}'; it names "
+            f"{sorted(table)}. Either the spec renamed the task — in which case `TASKS` in this "
+            "file follows it — or the task was removed, which is a spec change this contract "
+            "suite should be red about."
+        )
+
+    cell = table[task.label]
+    verdicts = tuple(part.strip().lower() for part in cell.split("/") if part.strip())
+
+    if len(verdicts) < 2 or not all(VERDICT_TOKEN.match(verdict) for verdict in verdicts):
+        pytest.fail(
+            f"§7.4's Output cell for '{task.label}' is {cell!r}, which does not read as a closed "
+            f"set of verdicts — it parsed to {list(verdicts)}. Only the two classifier tasks have "
+            "one; the other three rows carry prose, and asserting an enum against prose would be "
+            "this file misreading the table rather than the contract being wrong."
+        )
+    return verdicts
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +893,47 @@ def refusal(model: type[BaseModel], payload: dict[str, Any], expectation: str) -
 # ---------------------------------------------------------------------------
 
 
+def test_the_task_inventory_this_file_transcribes_is_the_one_the_spec_publishes() -> None:
+    """`TASKS` is §7.4's table, and this is what makes that claim checkable.
+
+    Every per-task assertion in this file is parametrised over `TASKS`, so the
+    tuple decides what "complete" means. A hand transcription that the spec has
+    moved past is a suite that reports full coverage of a table it invented:
+    if §7.4 grows a sixth task, nothing else here notices, because a
+    parametrisation cannot fail for a case it was never given.
+
+    Both halves are asserted. The task set, so a task added to or removed from
+    the inventory shows up as a missing or surplus contract rather than as
+    silence. And the Output column, because this file quotes it into failure
+    messages — a message that tells the implementer what §7.4 requires, while
+    quoting a version of the table that no longer exists, is `docs/MISTAKES.md`
+    entry 1 aimed at exactly the person trying to fix something.
+    """
+    published = spec_task_table()
+    transcribed = {task.label: task.output for task in TASKS}
+
+    assert set(published) == set(transcribed), (
+        f"§7.4's table in {SPEC_PATH} names {sorted(published)}; this file transcribes "
+        f"{sorted(transcribed)}. Missing here: {sorted(set(published) - set(transcribed))}. Not "
+        f"in the spec: {sorted(set(transcribed) - set(published))}. A task in the spec and not in "
+        "`TASKS` is a model call nothing in this suite asks for a contract for; a task in `TASKS` "
+        "and not in the spec is a contract required by a table that no longer says so."
+    )
+
+    misquoted = {
+        label: (transcribed[label], published[label])
+        for label in transcribed
+        if label in published and transcribed[label] != published[label]
+    }
+
+    assert not misquoted, (
+        f"These Output cells are transcribed differently from {SPEC_PATH} — "
+        f"{{task: (this file, the spec)}}: {misquoted}. The transcription is quoted into the "
+        "failure messages this suite produces, so a stale copy misinforms the person reading a "
+        "red test about what the contract is supposed to return."
+    )
+
+
 @pytest.mark.parametrize("task", TASKS, ids=[task.key for task in TASKS])
 def test_the_task_table_has_exactly_one_contract_for_each_of_its_tasks(
     configured_env: dict[str, str],
@@ -1063,10 +1245,11 @@ def test_the_validity_contract_offers_exactly_the_three_verdicts_the_task_table_
     so a fourth verdict nobody specified is a value the gating code has no branch
     for, and a missing one is an answer the model is asked for and cannot give.
     """
+    task = TASKS_BY_KEY["validity"]
     module = contracts_module(import_app_module)
-    model = one_contract(module, TASKS_BY_KEY["validity"])
+    model = one_contract(module, task)
 
-    assert_closed_verdict_set(model, TASKS_BY_KEY["validity"], VALIDITY_VERDICTS)
+    assert_closed_verdict_set(model, task, spec_verdicts(task))
 
 
 def test_the_moderation_contract_offers_exactly_the_six_verdicts_the_task_table_names(
@@ -1089,10 +1272,77 @@ def test_the_moderation_contract_offers_exactly_the_six_verdicts_the_task_table_
     merged label is measuring something else. That is the reason this is asserted
     as an exact set rather than as "at least the six".
     """
+    task = TASKS_BY_KEY["moderation"]
     module = contracts_module(import_app_module)
-    model = one_contract(module, TASKS_BY_KEY["moderation"])
+    model = one_contract(module, task)
 
-    assert_closed_verdict_set(model, TASKS_BY_KEY["moderation"], MODERATION_VERDICTS)
+    assert_closed_verdict_set(model, task, spec_verdicts(task))
+
+
+def test_the_moderation_contract_keeps_threat_and_self_harm_as_two_distinct_verdicts(
+    configured_env: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+) -> None:
+    """Threat and self-harm are two verdicts, and nothing else in this suite says so twice.
+
+    The set comparison above already fails when one of them goes. This exists
+    because of *how* it fails: it is a generic assertion driven by a set, so a
+    fold arrives as a diff between two sorted lists, which reads like a fixture
+    that needs updating. The failure someone acts on correctly is one whose test
+    name says what was lost.
+
+    It is also the second line of defence, and deliberately does not share a
+    source with the first. The set above is derived from §7.4's table; the three
+    values below are literals in this file. Two assertions reading the same value
+    are one assertion, and the eval-gate review found exactly that: the old
+    hand-copied tuple meant a fold could edit the enum and the expectation
+    together and stay green.
+
+    **Why this pair specifically.** §5.2 routes self-harm to Care immediately and
+    abuse aimed at the instructor to the Lead Faculty queue — different
+    destinations for different harms. §6.2 gives threat-of-harm and self-harm
+    risk a queue suppressed from every instructor and leadership view. §9.3 makes
+    the threat and self-harm recall floor the strictest gate in the suite because
+    false negatives are the expensive error. A single merged verdict satisfies
+    "the contract has a harm value" and quietly makes that floor a measurement
+    over a label the spec does not have.
+
+    **The durable second half of this is behavioural and is not here.** E6 owns
+    §5.2's routing and should assert a threat and a self-harm classification each
+    reach Care as distinct cases; E10 sets the recall floor and must report
+    recall per verdict rather than over a merged label. This test is a contract
+    assertion and cannot reach either.
+    """
+    task = TASKS_BY_KEY["moderation"]
+    module = contracts_module(import_app_module)
+    model = one_contract(module, task)
+    _, verdicts, _ = verdict_field(model, task)
+    members = list(verdicts)
+
+    threat = [member for member in members if THREAT_VERDICT in spellings(member)]
+    self_harm = [member for member in members if SELF_HARM_VERDICT in spellings(member)]
+
+    assert len(threat) == 1 and len(self_harm) == 1, (
+        f"`{verdicts.__name__}` does not carry {THREAT_VERDICT!r} and {SELF_HARM_VERDICT!r} as "
+        f"one member each: it offers {[member.name for member in members]} with values "
+        f"{[member.value for member in members]}, matching {[m.name for m in threat]} for threat "
+        f"and {[m.name for m in self_harm]} for self-harm. §7.4's table names both. Folding them "
+        "into one verdict — or making one an alias of the other, which leaves it out of the "
+        "canonical members iterated here — means §6.2's Care queue cannot tell a threat from a "
+        "student at risk, and §9.3's recall floor measures a label the spec does not have."
+    )
+    assert threat[0] is not self_harm[0], (
+        f"`{verdicts.__name__}.{threat[0].name}` and `{verdicts.__name__}.{self_harm[0].name}` "
+        "are the same member. An enum with two names for one value routes both harms to "
+        "whichever branch is written first, and every `is` comparison in §5.2's routing agrees "
+        "with itself while being wrong."
+    )
+    assert len(members) == MODERATION_VERDICT_COUNT, (
+        f"`{verdicts.__name__}` has {len(members)} canonical members "
+        f"({[member.name for member in members]}), not {MODERATION_VERDICT_COUNT}. §7.4's table "
+        "gives moderation six. This count is written here rather than derived on purpose: it is "
+        "the check that survives an edit to the spec table and to the enum in the same change."
+    )
 
 
 CLASSIFIER_TASKS = (TASKS_BY_KEY["validity"], TASKS_BY_KEY["moderation"])
@@ -1168,6 +1418,166 @@ def test_a_payload_with_no_verdict_is_refused_rather_than_defaulted(
         f"default. Criterion 4 refuses that: a missing field raises `ValidationError` rather than "
         f"coercing. A defaulted `{verdicts.__name__}` turns a provider response with no verdict "
         f"into a stored '{task.label}' answer that no retry and no eval case will ever see.",
+    )
+
+
+@pytest.mark.parametrize("task", CLASSIFIER_TASKS, ids=[task.key for task in CLASSIFIER_TASKS])
+def test_a_null_verdict_is_refused_rather_than_stored_as_no_finding(
+    configured_env: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    task: AiTask,
+) -> None:
+    """An explicit `null` is refused, not only an absent key.
+
+    The test above removes the key. This one sends it as `null`, and they are
+    different implementations: a verdict typed `ModerationVerdict | None` with no
+    default is *required* — omitting it raises, so the test above passes — and
+    `{"verdict": null}` validates, round-trips, and satisfies every other
+    assertion in this file. An eval-gate review found it by retyping the field
+    and watching the whole suite stay green.
+
+    The end state is the one the defaulted-`CLEAR` shape produces, reached by a
+    different route. No `is THREAT` and no `is SELF_HARM` branch matches a null,
+    so under §5.2 the comment publishes and never reaches Care (§6.2), and
+    §9.3's recall cannot see it either: an eval set holds verdicts and never a
+    null, so the case that produces this is not in the measurement. A provider
+    that answers `{"verdict": null}` on a comment it found difficult is the
+    single most plausible malformed response there is, and it is the one that
+    must raise so the gateway retries (§7.4).
+
+    Optionality is the thing being refused, not the value, so this is a claim
+    about the annotation: `X | None` cannot be the type of a verdict drawn from a
+    closed set, because the set has no member meaning "no finding".
+    """
+    module = contracts_module(import_app_module)
+    model = one_contract(module, task)
+    payload = representative_payload(model)
+    assert_the_control_validates(model, payload)
+
+    name, verdicts, _ = verdict_field(model, task)
+
+    refusal(
+        model,
+        replaced(payload, (name,), None),
+        f"`{model.__name__}` validated a payload whose `{name}` is null, so its verdict is "
+        f"optional — `{verdicts.__name__} | None` or equivalent. §7.4 gives '{task.label}' the "
+        f"closed set `{task.output}`, and none of those members means 'no finding'. A null "
+        "reaches §5.2's routing as a value no branch matches, so the comment publishes rather "
+        "than reaching Care, and §9.3's recall floor never sees the case because an eval set "
+        "holds verdicts and never a null. Removing the key already raises; this is the same "
+        "absence spelled a way the model currently accepts.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# The model configuration the contracts rest on
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("task", TASKS, ids=[task.key for task in TASKS])
+def test_a_contract_refuses_a_key_it_does_not_declare(
+    configured_env: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    task: AiTask,
+) -> None:
+    """An undeclared key is a shape violation, not something to ignore.
+
+    `extra="forbid"` is what makes that true, and until now nothing asserted it:
+    an eval-gate review rewrote the shared `model_config` to `extra="ignore"` and
+    every contract test stayed green. That configuration is load-bearing in a way
+    the other settings are not. §7.4: "The gateway validates against that model,
+    retries on shape violations, and surfaces persistent failures as errors
+    rather than letting a malformed classification propagate." A model that
+    silently drops keys it does not recognise has no shape violation to report
+    for anything a provider *invents* — a `confidence`, a `reason`, a
+    `verdict_2`, a misspelled field name — so the retry never fires and the
+    classification stored is a partial reading of a response nobody looked at.
+
+    It is asserted **behaviourally and on every contract**, not by reading
+    `model_config` off the base class. A later contract can set its own config,
+    and reading the base would report a guarantee the subclass had already
+    dropped. The payload differs from the control by one key.
+
+    The value sent is a string, so this cannot be passing because of a type
+    error: the only thing wrong with the payload is that the model does not
+    declare the key.
+    """
+    module = contracts_module(import_app_module)
+    model = one_contract(module, task)
+    payload = representative_payload(model)
+    assert_the_control_validates(model, payload)
+
+    assert UNDECLARED_PROVIDER_KEY not in all_field_names(model), (
+        f"`{model.__name__}` declares a field called {UNDECLARED_PROVIDER_KEY!r}, which this test "
+        "sends precisely because no contract should. Rename the constant at the top of this file."
+    )
+
+    refusal(
+        model,
+        {**payload, UNDECLARED_PROVIDER_KEY: "a key no contract declares"},
+        f"`{model.__name__}` accepted a payload carrying {UNDECLARED_PROVIDER_KEY!r}, a key it "
+        "does not declare, so its model configuration is `extra='ignore'` or `extra='allow'` "
+        "rather than `extra='forbid'`. §7.4 has the gateway retry on shape violations and "
+        "surface persistent ones as errors; a contract that quietly discards what it does not "
+        "recognise turns a provider returning the wrong shape into a classification that looks "
+        "clean. Set on the base or per contract — this asserts the behaviour, not where it is "
+        "written.",
+    )
+
+
+@pytest.mark.parametrize("task", TASKS, ids=[task.key for task in TASKS])
+def test_a_validated_contract_cannot_be_changed_afterwards(
+    configured_env: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    task: AiTask,
+) -> None:
+    """`frozen=True`, asserted by trying to write to a validated object.
+
+    The same review flipped `frozen=True` to `frozen=False` with the suite green.
+    What it buys is that a contract means one thing for its whole life: §7.4
+    makes this object the runtime value, the API response and the eval fixture at
+    once, and every one of those readings assumes that what was validated is what
+    is read. A mutable contract lets a caller adjust a verdict — or a prompt
+    version, or a model ID — after validation, and the auditability §7.4 rests on
+    ("a specific prompt version and model ID produced a specific classification")
+    becomes a claim about whatever was written last. Nothing would raise, and the
+    stored row and the validated object would simply differ.
+
+    **The value assigned is the one the field already holds**, so the assignment
+    cannot be refused for being invalid. The only thing wrong with it is that it
+    is an assignment. Asserted per contract for the same reason as the test
+    above: a subclass can set its own config.
+
+    Any of the three refusals pydantic can raise counts — the property is that
+    the write does not land, not which exception carries the news.
+    """
+    module = contracts_module(import_app_module)
+    model = one_contract(module, task)
+    payload = representative_payload(model)
+    validated = assert_the_control_validates(model, payload)
+
+    fields = list(model.model_fields)
+    assert fields, (
+        f"`{model.__name__}` declares no fields, so there is nothing to try to write to and this "
+        "test would report it immutable whatever the truth is."
+    )
+
+    name = fields[0]
+    unchanged = getattr(validated, name)
+
+    try:
+        setattr(validated, name, unchanged)
+    except (ValidationError, TypeError, AttributeError):
+        return
+
+    pytest.fail(
+        f"`{model.__name__}.{name}` could be assigned after validation, so the contract is not "
+        "frozen. §7.4 makes this one object the runtime contract, the API response schema and "
+        "the eval fixture, and all three readers assume it still says what it said when it was "
+        "validated. A verdict, a prompt version or a model ID that can be rewritten in place "
+        "means the classification record and the object it came from can disagree with nothing "
+        "raising — and the value assigned here was the field's own, so nothing but the write "
+        "itself was wrong with it."
     )
 
 
