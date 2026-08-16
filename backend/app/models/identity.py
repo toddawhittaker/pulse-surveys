@@ -14,7 +14,7 @@ migration voiding the guarantee with nothing going red. E0-10 builds the views
 and the grants; this ticket builds the split they need.
 
 **Identity-bearing columns carry an `identity_` name prefix**
-(ADR 0020) — `user_identity.identity_name`, `user_identity.identity_email`,
+(ADR 0022) — `user_identity.identity_name`, `user_identity.identity_email`,
 `person.identity_name`. The prefix says what the column *holds*; it does not say
 who may read it, which is E0-10's decision and a separate one.
 `tests/integration/test_identity_column_marker.py` is the tripwire: it sweeps the
@@ -23,7 +23,7 @@ address and which carries no marker.
 
 **Two ownership markers meet on `user_identity` and only one can be the prefix.**
 A display name and an email address reach Pulse from the platform, so ADR 0014
-would prefix them `lms_`; ADR 0020 records why the identity marker wins the name
+would prefix them `lms_`; ADR 0022 records why the identity marker wins the name
 instead. Nothing else in this module is LMS-owned in ADR 0014's sense except
 `user.lms_user_id`, which is the `sub` claim verbatim.
 
@@ -200,7 +200,7 @@ class Enrollment(Base):
     `UNIQUE (user_id, section_id)` is the constraint that suggests itself and it
     is the wrong one: it refuses the drop-and-re-add above, which the LMS sends
     and E0-15 seeds deliberately. What is needed is "no two windows for this pair
-    overlap", which Postgres expresses as the exclusion constraint below. ADR 0021
+    overlap", which Postgres expresses as the exclusion constraint below. ADR 0023
     records the alternatives and what this one costs.
 
     **`alembic check` does not vouch for that constraint.** Autogenerate rendered

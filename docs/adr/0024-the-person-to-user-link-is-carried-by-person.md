@@ -1,4 +1,4 @@
-# 0022 — The person-to-user link is carried by `person`, and is one to one
+# 0024 — The person-to-user link is carried by `person`, and is one to one
 
 **Status:** Accepted
 **Date:** 2026-08-16

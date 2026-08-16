@@ -1,4 +1,4 @@
-# 0020 — Identity-bearing columns are marked by an `identity_` name prefix
+# 0022 — Identity-bearing columns are marked by an `identity_` name prefix
 
 **Status:** Accepted
 **Date:** 2026-08-16

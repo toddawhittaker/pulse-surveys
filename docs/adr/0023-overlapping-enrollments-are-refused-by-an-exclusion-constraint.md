@@ -1,4 +1,4 @@
-# 0021 — Overlapping enrollment windows are refused, by a GiST exclusion constraint
+# 0023 — Overlapping enrollment windows are refused, by a GiST exclusion constraint
 
 **Status:** Accepted
 **Date:** 2026-08-16

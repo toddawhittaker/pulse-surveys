@@ -29,7 +29,7 @@ reflected index set (`correct_for_autogen_constraints`), and nothing compares
 `pg_constraint` rows of type `x`. Change the rule in `app/models/identity.py`
 without writing a migration and the check stays green.
 `tests/integration/test_identity_schema.py` asserts the behaviour against a real
-server, which is the only thing that can. ADR 0021 records the decision and the
+server, which is the only thing that can. ADR 0023 records the decision and the
 measurement.
 
 The check constraint below is half-covered, which is worth knowing separately.
