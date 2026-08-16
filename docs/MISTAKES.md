@@ -130,7 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 10**
+**Caught: 11**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -218,7 +218,7 @@ sentence.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 5**
+**Caught: 6**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
