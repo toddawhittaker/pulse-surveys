@@ -308,10 +308,24 @@ predicted, both criterion-4 tests died inside the fixture on
 `survey_window.closes_at`, before either reached an assertion. It took a dispute
 round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
 
+A second, in E0-09, three tickets later, and it cost another dispute round
+([`docs/disputes/E0-09-01.md`](disputes/E0-09-01.md)). The E0-09 seeding helper
+pins two column values so that a freely invented one cannot trip a rule from an
+earlier ticket. The section code is drawn fresh per call, because E0-06 made
+`(course, term, code)` unique; the course number one line above it was the
+constant `"150"`, because SPEC §8 bands the number — and E0-05 also made
+`(prefix, number)` unique. So the second course any test seeded under one prefix
+was refused, and the three tests that need a sibling lead died inside the fixture
+before any assertion ran. The two entries sit in the same dictionary, four lines
+apart, and one of them already had the answer.
+
 **Root cause.** Meeting a hazard at the call site where it first bit, instead of
 asking which other call sites ask the same question. The write-up made it look
 handled: the file named the hazard, in prose, one screen above the code that fell
-to it.
+to it. In the E0-09 case it was narrower still — the two values face *two* rules
+each, a format rule and a uniqueness rule, and satisfying the format rule with a
+constant is what violates the uniqueness one. Checking the entry against one rule
+and stopping is the same shape as checking one call site and stopping.
 
 **Consequence.** Two tests that could not pass against any implementation the
 criterion admits, reported as a defect in the implementation. A round of the
@@ -325,6 +339,15 @@ every place that asks the same question and route them through one helper, in th
 same change. A docstring explaining the quirk is not a fix for the code that does
 not call the fix. And when a test fails inside its own fixture, suspect the
 fixture first — the message this one printed said exactly that, and was right.
+
+**A fixture value has to satisfy every rule the column carries, not the one you
+pinned it for.** Ask what makes the row *unique* as well as what makes it
+well-formed, and prefer a generator over a literal wherever a second row of the
+same kind is a shape any test might want. The `"150"` course number still sits in
+the private copies of that dictionary in `test_identity_schema.py`,
+`test_section_date_derivation.py` and `test_term_calendar_schema.py`; it is
+latent there rather than active, because none of them seeds two courses under one
+prefix yet.
 
 ---
 

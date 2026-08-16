@@ -1149,11 +1149,33 @@ GRAPH_DATETIME_HINTS = (
 )
 GRAPH_LENGTH_FRAGMENTS = ("length", "weeks", "duration")
 
-# Two schema rules E0-05 already enforces, so a value invented freely would be
-# refused by a constraint that has nothing to do with E0-09: SPEC §8's
-# course-number bands and §2.2's section-code shape.
+# Two columns whose value this file has to choose deliberately, because each is
+# governed by **two** rules from an earlier ticket and satisfying one of them is
+# what breaks the other. A course number has to sit inside SPEC §8's bands *and*
+# be unique within its prefix (E0-05's `uq_course_prefix_id_lms_number`); a
+# section code has to match §2.2's shape *and* be unique within its course and
+# term (E0-06's `UniqueConstraint("course_id", "term_id", "lms_section_code")`).
+#
+# An earlier version of this file pinned the course number to the constant
+# `"150"`, which met the band rule and violated the uniqueness one the moment a
+# test asked for a second course under one prefix — `fresh_scope("course")` keeps
+# the shared `prefix` row on purpose, because two courses under one prefix is
+# what a sibling lead *is*. Three tests were blocked before any assertion ran and
+# it took a dispute to settle ([E0-09-01](../docs/disputes/E0-09-01.md)). Both
+# values are now drawn fresh per call.
 GRAPH_SECTION_CODE_COLUMN = "lms_section_code"
 GRAPH_COURSE_NUMBER_COLUMN = "lms_number"
+
+# The band a generated course number is drawn from: three digits, `100`-`799`,
+# which SPEC §8 splits into UG, UGGR and GR. Staying inside a band matters more
+# than which band, because the bands are not enforced by a `CHECK`: `course.level`
+# is a stored generated column ([ADR 0015](../docs/adr/0015-course-level-is-a-stored-generated-column.md))
+# and an out-of-band number derives `NULL::course_level`, so the row is refused by
+# that column's `NOT NULL` and the error names the level rather than the number.
+# `000`-`099` is left out only because it needs zero padding to stay three digits,
+# and a padded number is a case E0-05's own tests own rather than this fixture's.
+GRAPH_COURSE_NUMBER_FIRST = 100
+GRAPH_COURSE_NUMBER_LAST = 799
 
 _GRAPH_UNIQUE = count(1)
 _GRAPH_INTEGER_COUNTERS: dict[tuple[str, str], Any] = {}
@@ -1195,8 +1217,52 @@ GRAPH_STRING_HINTS = (
     ("jwks", graph_unique_url),
 )
 
+
+def graph_course_number() -> str:
+    """A course number no other course in this test carries, inside SPEC §8's bands.
+
+    Counts up from `GRAPH_COURSE_NUMBER_FIRST` rather than wrapping around it, and
+    the difference is the whole repair: a generator that wrapped would hand out a
+    duplicate again once a test asked for enough courses, and the failure would
+    look exactly like the one this replaces — a unique violation on an E0-05
+    constraint, raised inside a fixture, from a statement naming no column E0-09
+    owns.
+
+    **Per test rather than per session**, which is enough here and is the reason
+    it borrows `_GRAPH_INTEGER_COUNTERS`: that dict is cleared by the
+    `supervision_graph` fixture for every test, and `db_session` rolls every write
+    back at the end of one, so two tests cannot see each other's courses. One
+    reset mechanism serves both counters, rather than a second one beside it that
+    could drift out of step (`docs/MISTAKES.md` entry 13).
+
+    **Not `graph_letters`, which is what the section code beside it uses.** That
+    draws from a session-wide counter one letter wide, so it repeats every 26
+    calls; a course number built the same way would reintroduce a rarer and
+    order-dependent version of this same defect, and rarer is worse — it would
+    surface as a flake in somebody else's ticket.
+    """
+    counter = _GRAPH_INTEGER_COUNTERS.setdefault(
+        ("course", GRAPH_COURSE_NUMBER_COLUMN), count(GRAPH_COURSE_NUMBER_FIRST)
+    )
+    number = next(counter)
+    if number > GRAPH_COURSE_NUMBER_LAST:
+        available = GRAPH_COURSE_NUMBER_LAST - GRAPH_COURSE_NUMBER_FIRST + 1
+        pytest.fail(
+            f"This test asked for more than {available} courses, so the seeding helper has run "
+            f"out of three-digit numbers inside SPEC §8's bands. It stops here rather than "
+            f"starting again at {GRAPH_COURSE_NUMBER_FIRST}: reusing a number would write a "
+            "second course with the same number under the same prefix, which E0-05's "
+            "`uq_course_prefix_id_lms_number` refuses — and that failure would be a unique "
+            "violation raised inside a fixture rather than a message naming its cause, which is "
+            "the shape this generator exists to leave behind. If a test genuinely needs this many "
+            "courses, widen the band in tests/conftest.py: `000`-`099` is available with zero "
+            "padding."
+        )
+    return str(number)
+
+
 GRAPH_COLUMN_VALUES = {
-    ("course", GRAPH_COURSE_NUMBER_COLUMN): lambda: "150",
+    ("course", GRAPH_COURSE_NUMBER_COLUMN): graph_course_number,
     ("section", GRAPH_SECTION_CODE_COLUMN): lambda: f"{graph_letters(1)}3WW",
 }
 
@@ -1954,10 +2020,13 @@ def metadata_tables(migrated_database: DatabaseUnderTest) -> dict[str, Any]:
 def supervision_graph(db_session: Any, metadata_tables: dict[str, Any]) -> SupervisionGraph:
     """E0-09's graph builder, on a session whose writes are rolled back after the test.
 
-    The integer counters are restarted per test so that an ordinal the seeding
-    helper invents lands inside an 18-week term rather than at 47 — without it
-    they climb across the session and eventually fail a later test inside its own
-    seeding, for a reason that test is not about.
+    The integer counters are restarted per test, and two things now depend on it.
+    An ordinal the seeding helper invents has to land inside an 18-week term
+    rather than at 47; and `graph_course_number` draws from the same dict, so the
+    restart is what keeps its 700 numbers a per-test budget rather than a
+    session-wide one. Without the restart both climb across the session and
+    eventually fail a later test inside its own seeding, for a reason that test is
+    not about.
     """
     _GRAPH_INTEGER_COUNTERS.clear()
     return SupervisionGraph(db_session, metadata_tables)
