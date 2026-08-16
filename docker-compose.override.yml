@@ -90,3 +90,15 @@ services:
       # 8025 is the web interface; 1025 is the SMTP port the app will send to.
       - '127.0.0.1:8025:8025'
       - '127.0.0.1:1025:1025'
+
+  # The mock LTI platform's launch page, so a developer can click through a
+  # launch in a browser. 8080 on the host because 8000 is `api`; inside the
+  # container it is 8000 like every other Python service here.
+  #
+  # No source mount and no reload flag: the development anchor above sets
+  # PYTHONPATH to `/app/backend`, which is the backend's import root and not this
+  # service's. Editing the mock means `docker compose up -d --build mock-lms`,
+  # and README.md says so where it tells you how to reach it.
+  mock-lms:
+    ports:
+      - '127.0.0.1:8080:8000'

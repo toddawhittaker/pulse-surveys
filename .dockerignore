@@ -1,4 +1,7 @@
-# Build context for backend/Dockerfile (ticket E0-02).
+# Build context for the two images this repository builds: backend/Dockerfile
+# (ticket E0-02) and mock-lms/Dockerfile (ticket E0-14). One file serves both,
+# because Docker reads it per build *context* and both are built from the
+# repository root.
 #
 # Deny everything, then name what the build needs. The other way round — listing
 # what to exclude — fails open: a file added later is in the context until
@@ -9,11 +12,18 @@
 # The guarantee is exact, and it is worth stating exactly. At the repository
 # root nothing is in the context unless it is named below. Re-including a
 # *directory*, though, re-includes everything beneath it — so inside `backend/`
-# the deny-all does not apply and the patterns have to be re-stated. That is not
-# hypothetical: `.gitignore`'s `.env`, `*.pem`, and `*.key` patterns are
-# unanchored, so `backend/.env` is untracked, invisible in review, and was
-# reaching the builder stage until the re-exclusions below were added. Verified
-# by planting all three and rebuilding.
+# and `mock-lms/` the deny-all does not apply and the patterns have to be
+# re-stated. That is not hypothetical: `.gitignore`'s `.env`, `*.pem`, and
+# `*.key` patterns are unanchored, so `backend/.env` is untracked, invisible in
+# review, and was reaching the builder stage until the re-exclusions below were
+# added. Verified by planting all three and rebuilding.
+#
+# `mock-lms/` gets the same re-exclusions for the same reasons, and one more
+# reason of its own: it is the service that holds a signing key, so a `*.pem` or
+# `*.key` appearing under it is the exact file E0-14 criterion 3 says must never
+# exist. The key is generated per process and never written to disk, so these
+# patterns should never match anything — they are here so that the day one does,
+# it does not reach a layer.
 
 *
 
@@ -22,8 +32,9 @@
 !requirements.txt
 !requirements-dev.txt
 !backend
+!mock-lms
 
-# Re-excluded inside the one directory re-included above. Secrets first: these
+# Re-excluded inside the directories re-included above. Secrets first: these
 # mirror .gitignore, so a file git refuses to track cannot reach a layer either.
 backend/.env
 backend/.env.*
@@ -32,7 +43,17 @@ backend/**/.env.*
 backend/**/*.pem
 backend/**/*.key
 
+mock-lms/.env
+mock-lms/.env.*
+mock-lms/**/.env
+mock-lms/**/.env.*
+mock-lms/**/*.pem
+mock-lms/**/*.key
+
 # Build and test debris; none of it belongs in an image.
 backend/**/__pycache__
 backend/**/*.py[cod]
 backend/*.egg-info
+
+mock-lms/**/__pycache__
+mock-lms/**/*.py[cod]
