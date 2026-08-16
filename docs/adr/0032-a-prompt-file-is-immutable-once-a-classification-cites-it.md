@@ -32,6 +32,22 @@ counted per task rather than globally. The file's stem — `validity.v1` — is 
 string a contract stores as its `prompt_version`, so the stored value resolves to
 a file with no lookup table between them.
 
+**The `.md` is part of the scheme rather than decoration.** Because the stored
+version is a stem, a stem identifies exactly one file only while the extension is
+fixed: `validity.v1.md` beside `validity.v1.jinja` makes `validity.v1` ambiguous
+and gives up the reproducibility this record exists to protect. A prompt needing
+interpolation is still Markdown — templating does not require its own extension.
+Markdown also renders in review, which matters more here than usual, because
+reading a prompt is the only quality gate it passes until §9.3's eval floors
+exist.
+
+**The packaging that carries prompts into production is deliberately wider than
+this scheme and does not enforce it.** `pyproject.toml` ships everything under
+the directory, at any depth and any extension; the scheme is enforced by review,
+by this record, and by `test_every_prompt_file_carries_a_version_in_its_path`.
+The reasoning is in the consequences below, and it is the half of this record
+that shipped with a defect in it.
+
 **Rule: a prompt file is immutable once committed.** Changing a prompt means
 adding the next version beside it and leaving the old file alone. Both then exist
 in the tree, and a classification recorded against `validity.v1` can still be
@@ -104,6 +120,30 @@ Once classifications cite `validity.v1`, deleting the file breaks their audit
 trail, so it may only go when the rows citing it have gone under §4's retention
 period. Nothing checks this today.
 
-**Prompt files ship as package data.** `pyproject.toml` names
-`"app.ai" = ["prompts/*.md"]`, because the Dockerfile installs a wheel and
-nothing else; without it the runtime image holds the contracts and no prompt.
+**Prompt files ship as package data, and the glob is wider than the scheme on
+purpose.** `pyproject.toml` names `"app.ai" = ["prompts/**/*"]`, because the
+Dockerfile installs a wheel and nothing else; without an entry at all, the
+runtime image holds the contracts and no prompt (`docs/MISTAKES.md` entry 16).
+
+The first version of that entry was `prompts/*.md`, matching this scheme exactly,
+and matching the scheme was the mistake. Two layouts it silently dropped were
+measured by planting a file and building the wheel: `prompts/v2/moderation.md`,
+because the glob does not descend, and `draft.v1.jinja`, because it fixes the
+extension. `prompts/**/*` covers flat files as well as nested ones — also
+measured, since `**` matching zero segments is the part that gets assumed.
+
+The principle, stated so a later reader does not "tidy" the glob back down to the
+scheme: **packaging decides what reaches production; the scheme decides what a
+file is called, and the two must not be the same mechanism.** A glob that
+enforces a naming rule enforces it by making the offending file absent from every
+container, which is the worst available way to report a broken convention. A
+prompt that breaks this scheme should produce a red test and an argument about
+this record, and should still ship while the argument is had.
+
+**The packaging test cannot force this on its own**, which is why the reasoning
+above matters rather than the test alone.
+`test_every_prompt_in_the_source_tree_reaches_the_built_package` compares the
+source tree against the built wheel, so it only fires once a file exists that the
+glob misses. Measured: with `validity.v1.md` the sole prompt on disk, the narrow
+`prompts/*.md` passes it. The test is a guard on the property, not a proof that
+the glob is right today.

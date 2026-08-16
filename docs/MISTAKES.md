@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 12**
+**Caught: 13**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -130,7 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 9**
+**Caught: 10**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -604,6 +604,24 @@ For this directory the check is no longer manual:
 `tests/unit/test_prompt_directory_layout.py` builds the wheel and asserts every
 prompt in the source tree is inside it, so the four later epics get the failure
 without knowing this entry exists. Asserting the `package-data` line instead
-would not have worked — the glob shipped here is `prompts/*.md`, which is
+would not have worked — the glob first shipped here was `prompts/*.md`, which is
 present, correct-looking, and matches neither a prompt in a subdirectory nor one
 with another extension.
+
+**And that fix was itself wrong, which is the part worth keeping.**
+`prompts/*.md` was written to match ADR 0032's naming scheme exactly, and
+matching the scheme was the error: a packaging glob that encodes a naming rule
+enforces that rule by making the offending file absent from every container,
+which is the worst available way to report a broken convention. It was widened to
+`prompts/**/*` — the whole directory, any depth, any extension — so that
+packaging decides only what reaches production, while the scheme stays enforced
+by review and by the version test. Both narrow cases were measured by planting a
+file and building rather than argued: `prompts/v2/moderation.md` and
+`draft.v1.jinja` were each dropped in silence.
+
+**Second rule, from that.** A fix to packaging, to an ignore rule, or to any
+other glob-shaped configuration is not finished when the case in front of you
+passes. Ask what the surrounding tests already *permit* — here, a sibling test
+deliberately accepts a version held in a directory — and make the configuration
+admit all of it. A glob narrower than the layouts the suite allows is a trap
+primed for whoever first uses one of them, and it will look correct in review.
