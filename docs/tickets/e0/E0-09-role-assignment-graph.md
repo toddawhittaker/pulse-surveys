@@ -36,6 +36,19 @@ tables this ticket adds.
   of the right kind for its role — a chair scoped to a department, a dean to a
   college, a lead to a course, **Care and Admin to the institution**. Enforce it
   rather than trusting callers.
+
+  **`scope_node_id` is written here in the singular, and there is no single
+  table for it to reference.** This ticket was written before E0-05 built
+  containment, and E0-05 built six separate tables — `institution`, `college`,
+  `department`, `prefix`, `course`, `section` — with no unified `org_node`. So
+  the shape is an open construction decision, and it is the largest one in this
+  ticket. It **needs an ADR in the same pull request**, because the spec does not
+  settle it and a reasonable engineer could choose differently. Three shapes are
+  workable — a nullable foreign key per kind, a kind column beside an id, or a
+  new unified node table — and a fourth, an opaque id whose kind is implied by
+  the role, is not: the sentence above says *enforce*, and an id with no kind
+  beside it gives a constraint nothing to compare against. Whichever shape is
+  chosen must leave the grain rule enforceable in the database.
 - **Care is Pulse-owned and assigned only here.** No LTI claim, no OIDC claim,
   and no LMS role may ever produce a `CARE` assignment. The launch or login
   establishes who someone is; this table establishes what they may do, and for
@@ -87,6 +100,15 @@ tables this ticket adds.
       into a constraint. The fixture is reused by E0-10 and E0-18.
 - [ ] Assignments record which entry doors they permit: launch for every
       reporting role, web login for every role except instructor and student.
+
+      **Decide whether the doors are stored per assignment or derived from the
+      role, and record it in an ADR.** The two are not equivalent and the ticket
+      does not say which it means. The rule as written is stated purely in terms
+      of *role*, so a derived value cannot disagree with it; a stored value can,
+      which means a row may claim a door its role does not permit and nothing
+      would notice. That is an argument for deriving, not a decision — make it
+      deliberately either way, and if the doors are stored, say what keeps a row
+      from contradicting its own role.
 - [ ] The assistant-dean shape from §2.1 — lead courses plus supervised chairs —
       can be constructed in a fixture, even though computing its purview is E9.
 
