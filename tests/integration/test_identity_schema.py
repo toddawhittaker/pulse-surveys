@@ -22,11 +22,12 @@ Duplicating it would give two failures for one defect.
 **Two views of the schema, used for different questions.**
 
   - **Reflected** — what Postgres holds, read through the inspector. Used for the
-    existence criterion and for criterion 3. Criterion 3 says a test must assert
-    the split "so the split cannot erode", and a model attribute list is the
-    wrong side to read: a column that exists in the database and not in the model
-    is invisible there, and the erosion this guards against is a table being
-    rewritten in a later migration.
+    existence criterion, for criterion 3, and for the half of criterion 4 that is
+    about the table rather than about what it accepts. Criterion 3 says a test
+    must assert the split "so the split cannot erode", and a model attribute list
+    is the wrong side to read: a column that exists in the database and not in
+    the model is invisible there, and the erosion this guards against is a table
+    being rewritten in a later migration.
   - **Declared** — `Base.metadata`, reached through `app.models`. Used for every
     write, following E0-06's precedent. It matters most for criterion 7: if a
     client secret is protected by a `TypeDecorator` that encrypts on the way in,
@@ -55,6 +56,7 @@ refactor that would have to edit two other tickets' modules.
 """
 
 import base64
+import re
 import string
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -1041,6 +1043,85 @@ def test_an_enrollment_that_starts_and_ends_on_the_same_day_is_accepted(
             "before it, and a student who adds and drops in one day is a real row a roster sync "
             "has to be able to write."
         )
+
+
+def test_the_enrollment_window_ordering_is_stated_as_its_own_check_constraint(
+    migrated_engine: Any, declared_tables: dict[str, Table]
+) -> None:
+    """Criterion 4, asserted as a constraint rather than as a behaviour.
+
+    **Why a second test for one criterion, and why this one reads the catalog.**
+    The behavioural test above cannot fail. Criterion 5 is enforced by an
+    exclusion constraint over `daterange(start, end, '[]')`, and Postgres refuses
+    to *construct* a range whose end precedes its start — the error is raised
+    evaluating the expression, before any constraint is consulted. So a backwards
+    window is refused whether or not anything states criterion 4's rule, and
+    deleting the check constraint leaves every other test in this module green.
+    That is `docs/MISTAKES.md` entry 3 in a shape the entry did not yet have: not
+    an absence asserted, and not a missing control — the controls are all there
+    and correct — but a refusal supplied by the implementation of a *different*
+    rule. The implementer found it and declared it; nothing in this file did.
+
+    So this asks Postgres what the table carries, not what it does. The rule has
+    to be stated in its own right, because the day someone changes how overlap is
+    enforced — an application-level check, a trigger, a different range bound —
+    criterion 4 goes with it silently.
+
+    **What is asserted:** `enrollment` carries at least one CHECK constraint
+    whose expression mentions both window columns and contains a relational
+    operator. Nothing about its name (the naming convention generates those, and
+    a rename is not a regression), nothing about which side of the comparison
+    each column sits on, and nothing about `>=` versus `>` — the same-day test
+    above is what settles that, and it settles it by behaviour, which is the
+    right side to settle it from.
+
+    **What it does not cover**, so that nobody reads it as more than it is
+    (`docs/MISTAKES.md` entry 14):
+
+      - **It requires a CHECK constraint specifically.** A trigger, or a domain
+        carrying the rule, would satisfy criterion 4 and fail here. That is a
+        mechanism this test pins and the ticket does not, and it is pinned
+        because a CHECK is the only one of the three that Postgres reports as a
+        property *of the table*. If the rule is deliberately stated some other
+        way, say so in the pull request and change this test with it.
+      - **It does not read the comparison.** A two-column CHECK that compares
+        them for something other than ordering would pass. Parsing the
+        expression far enough to tell those apart would mean pinning its shape,
+        which would fail a perfectly good `COALESCE(ended_on, 'infinity') >=
+        started_on` written for a nullable end.
+      - **It cannot tell a constraint that is stated from one that is
+        redundant.** Whether the check is doing work is a question about the
+        other constraint, and criterion 4 does not ask it: the rule is worth
+        stating whether or not something else currently implies it.
+    """
+    enrollment = require_table(declared_tables, "enrollment")
+    start_column, end_column = enrollment_window_columns(enrollment)
+
+    constraints = inspect(migrated_engine).get_check_constraints("enrollment")
+    stating = []
+    for constraint in constraints:
+        expression = constraint.get("sqltext") or ""
+        mentions_both = all(
+            re.search(rf"\b{re.escape(column)}\b", expression)
+            for column in (start_column, end_column)
+        )
+        # `<>` is removed before looking for a comparison so that an inequality
+        # test does not read as an ordering one. Both `<` and `>` of it would
+        # otherwise match.
+        compares = re.search(r"[<>]", re.sub(r"<>", "", expression))
+        if mentions_both and compares:
+            stating.append(expression)
+
+    assert stating, (
+        f"No CHECK constraint on `enrollment` relates `{start_column}` and `{end_column}` by a "
+        f"comparison. What the table carries: {[c.get('sqltext') for c in constraints]}. E0-08 "
+        "criterion 4: '`enrollment` rejects an end date before its start date.' Note that the "
+        "behavioural test in this module passes without this constraint — the exclusion "
+        "constraint enforcing criterion 5 refuses a backwards window on its own, because "
+        "Postgres will not build a `daterange` whose end precedes its start. So the rule is "
+        "currently enforced as a side effect of a different rule, and it disappears the moment "
+        "overlap is enforced some other way. State it: a CHECK comparing the two window columns."
+    )
 
 
 # ---------------------------------------------------------------------------

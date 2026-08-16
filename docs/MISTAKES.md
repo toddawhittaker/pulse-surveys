@@ -61,13 +61,31 @@ the database did — the assertion cannot fail. It is the same assertion
 during E0-05, proposed again by a careful reader one ticket later. The shape is
 attractive because it reads like thoroughness.
 
+A fifth, in E0-08, and it is a shape none of the four above has. The test for
+"an enrollment rejects an end date before its start date" wrote a backwards
+window and asserted the database refused it. It could not fail. The *other*
+criterion in the same ticket is enforced by an exclusion constraint over
+`daterange(started_on, ended_on, '[]')`, and Postgres will not construct a range
+whose end precedes its start — the error comes from evaluating the expression,
+before any constraint is consulted. So the refusal arrived whether or not
+anything stated criterion 4's rule, and deleting the check constraint left all
+fifteen tests in the module green. Every control that test needed was present and
+correct: controls stop a refusal being unrelated to the *row*, and this refusal
+was unrelated to the *constraint*. The implementer found it in its own work and
+declared it.
+
 **Root cause.** Asserting an absence. Absence is satisfied by the thing being
 broken in an unrelated way, by a fixture returning nothing, by a parser matching
 nothing. In the third case, by the difference between what a sentence looks like
-in a file and what it is as a string.
+in a file and what it is as a string. In the fifth, by a second mechanism in the
+same schema that refuses the same row for its own reasons — "the database said
+no" does not say which part of it said so.
 
 **Consequence. ** A green suite is read as coverage. The first case would have
-been counted as proof the leak was fixed when it proved nothing about it.
+been counted as proof the leak was fixed when it proved nothing about it. The
+fifth would have let a later ticket delete a constraint as redundant, with the
+rule it states surviving only as a side effect of how overlap happens to be
+enforced today.
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -75,6 +93,13 @@ say in the message why that guard is not ceremony. A pattern searched against a
 file is a case of this and looks like none: run it against the text you claim it
 catches *and* against the text you claim it allows, and give it a canary — a
 string certainly present — so a search that has gone blind says so.
+
+**Where two rules can refuse the same row, a behavioural test cannot tell you
+which one did.** Mutation is what exposes it — delete the constraint and see
+whether anything goes red — and the fix is to assert the rule is *stated*, out of
+what the catalog reports, as well as that the row is refused. Both, not either:
+the catalog test cannot see whether the rule works and the behavioural test
+cannot see whether it exists.
 
 ---
 
