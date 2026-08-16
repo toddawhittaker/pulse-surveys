@@ -93,6 +93,33 @@ dev = [
 where = ["backend"]
 include = ["app*"]
 
+# The only non-Python files inside the package, and they are not optional: the
+# prompt a classification names is the text that produced it (SPEC §7.4). The
+# Dockerfile installs a wheel built from this project and nothing else, so
+# without this line the runtime image holds `app/ai/contracts.py` and no prompt
+# beside it — measured, not assumed: `pip wheel . --no-deps` before this entry
+# produced a wheel containing the two `.py` files alone. E0-13 is the first
+# caller, and it would fail in the container while passing on a developer's
+# machine, where the source tree is still there to read from.
+#
+# **The glob ships the whole directory on purpose, and is deliberately wider
+# than the naming scheme.** `prompts/*.md` was the first version of this line
+# and it was wrong twice: it does not descend, so a version held in a directory
+# (`prompts/v2/moderation.md`) is silently dropped, and it fixes the extension,
+# so a template named anything else is silently dropped. Both were measured by
+# building the wheel with such a file planted. `prompts/**/*` matches flat files
+# as well as nested ones — also measured, since `**` matching zero segments is
+# the part people get wrong.
+#
+# Prompts are Markdown by rule and flat by rule (ADR 0032), but that rule is
+# **not enforced here**, and the distinction is the point. This entry decides
+# what reaches production; the scheme decides what a file is called. If a future
+# prompt breaks the scheme, the right outcome is a red test and an argument
+# about ADR 0032 — not a file that is absent from every container while
+# `pyproject.toml` looks entirely correct.
+[tool.setuptools.package-data]
+"app.ai" = ["prompts/**/*"]
+
 [tool.setuptools.dynamic]
 version = { attr = "app.__version__" }
 

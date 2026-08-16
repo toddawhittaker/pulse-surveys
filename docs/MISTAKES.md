@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 13**
+**Caught: 17**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -105,7 +105,7 @@ cannot see whether it exists.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 12**
+**Caught: 14**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -130,7 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 9**
+**Caught: 13**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -151,8 +151,26 @@ comment saying a stale worker makes `get()` hang, when the measurement in that
 same commit's README said it raises `NotRegistered` for an added task and
 silently returns the old answer for a changed one. It cited this file for it.
 
+An eleventh and twelfth, in E0-12, in the same pull request, and both are the
+variant where the record was **never** true rather than made false by a change.
+ADR 0031 said a provider volunteering its own `model_id` "is refused rather than
+trusted" because the contracts set `extra="forbid"`. `extra="forbid"` refuses
+*undeclared* keys; `model_id` is a declared field, so a provider-supplied value
+validates and round-trips, and which one survives depends on a merge order the
+next ticket has not written yet. ADR 0030 said the hyphenated `self-harm` "stays
+in the spec and in the prompt text" — but the enum's value is `self_harm` and
+`"self-harm"` is refused, so a prompt author acting on that sentence would ship
+a moderation prompt that fails on the one verdict §9.3 gates hardest. Neither
+claim was ever run. Both were reasoned from what a setting is *for*, written down
+in a record whose whole audience is the ticket that has to implement against it,
+and found by an independent reviewer.
+
 **Root cause.** Changing a mechanism and not asking what else in the repository
-makes a claim about it. Three of these were *introduced by a fix for this same
+makes a claim about it. In the E0-12 pair, a second root cause with the same
+consequence: reasoning about what a configuration option does instead of running
+it. `extra="forbid"` and "forbid an extra value for a field" are one short step
+apart in English and are different rules, and prose is where that step is
+invisible — the code was correct in both cases and only the record was wrong. Three of these were *introduced by a fix for this same
 class of defect* — the `.env.example` header rewritten to correct one false claim
 acquired a different one, that `LOG_LEVEL` is settled by the spec, which the spec
 never mentions; and the override comment above was written by a session that had
@@ -177,6 +195,17 @@ you have just written is a claim nobody has checked, including the ones written
 while correcting somebody else's. Where a sentence describes a behaviour, it has
 to match what you measured — not what you expected to measure before you ran it.
 
+This paragraph already existed when the E0-12 pair was written, and it is the
+rule that would have caught both. It failed because "what you measured" reads as
+being about experiments, and neither sentence felt like an experiment: one
+described a library setting, the other a spelling. So, stated without the escape
+hatch — **a claim about what a setting, a flag or a type refuses is a claim about
+behaviour, and costs one line in a REPL to check.** If a record says something is
+rejected, reject it before writing the sentence. This is entry 9 arriving through
+prose rather than through a guard, and it is worth the two entries agreeing: the
+expensive records are the ones a later ticket implements against, where the code
+is right and only the sentence is wrong, so nothing goes red.
+
 **A count in prose is a record with a scheduled expiry**, so prefer not writing
 one. Two of these were counts — the ADR index that omitted three ADRs, and "the
 two tests below" in `tests/integration/test_term_calendar_schema.py`, left behind
@@ -189,7 +218,7 @@ sentence.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 6**
+**Caught: 8**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -296,7 +325,7 @@ is a false claim of totality.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 2**
+**Caught: 3**
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
@@ -426,9 +455,9 @@ here, from what `adapt_type` does — not a longer list.
 
 ---
 
-## 12. A mutation was reverted on disk and not in the interpreter
+## 12. A stale build of the thing under test was reused, and the run looked clean
 
-**Caught: 2**
+**Caught: 3**
 
 **What happened.** In E0-05, checking that `alembic check` warns when a generated
 column's expression drifts: edit `app/models/org.py` to change one band edge from
@@ -437,23 +466,42 @@ both times. Ten minutes went into the model, the migration and the database
 before `grep` showed the file on disk said `499` while the module Python imported
 said `498`.
 
+A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
+missing from the built wheel entirely — that defect is entry 16; this is what
+happened while verifying its fix. The fix was a
+`[tool.setuptools.package-data]` entry. Verifying it
+meant removing the entry and rebuilding, which produced a wheel that still
+contained the prompts: setuptools had reused the `build/` directory and the
+egg-info left by the previous build, so the wheel described the *previous*
+configuration. Deleting both first showed the real answer, an empty package.
+
 **Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
 file's size and mtime **truncated to the second**. Reverting a mutation of equal
 length inside the same second leaves the cache valid, so the stale bytecode is
 what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
-revert is invisible to the interpreter.
+revert is invisible to the interpreter. The build tree is the same mechanism with
+a longer memory and no invalidation rule worth the name: `build/` and
+`*.egg-info` persist until something removes them, and no tool warns that it is
+answering from them.
 
 **Consequence.** The reverted run and the mutated run produce identical output,
 which reads as "the mutation made no difference" — the conclusion that kills the
-finding. Here it would have been "matching the server's own rendering does not
+finding. In E0-05 it would have been "matching the server's own rendering does not
 silence the warning, so do not bother", and the drift signal E0-20 now depends on
-would have been dropped as not working.
+would have been dropped as not working. In E0-12 it would have been "the
+`package-data` entry makes no difference", against a defect that empties the
+prompt directory in every container the project ships.
 
-**Rule.** When mutating and reverting source between runs, clear the caches in
-the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
-export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
-the interpreter rather than in the file: print the value the module actually
-holds. `grep` proves what is on disk, which is not what ran.
+**Rule.** When mutating and reverting between runs, destroy the caches in the
+same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
+`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
+rebuild — and confirm the revert in the thing that ran rather than in the file:
+print the value the module holds, list the archive. `grep` proves what is on
+disk, which is not what ran. **In a test, prefer making the reuse impossible over
+undoing it**: build in a copy that has never been built in, and there is no stale
+artifact to remember to delete, no working tree to reach into, and nothing to get
+wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
+does this.
 
 ---
 
@@ -676,3 +724,108 @@ the hijack open, and that difference was measured rather than assumed. And verif
 it the way it is exploited: stand up the shadow table as a non-superuser role and
 watch the write be refused, rather than reading the SQL and agreeing with it.
 
+
+---
+
+## 18. A deliverable existed in the source tree and not in the built artifact
+
+**Caught: 0**
+
+**What happened.** E0-12 shipped `backend/app/ai/prompts/validity.v1.md`, the
+prompt SPEC §7.4 requires a classification to name. Every gate was green: the
+unit tests read the file off disk, ruff and mypy had nothing to say about a
+`.md`, and it was committed and visible in the diff. Building the wheel the
+Dockerfile installs — `pip wheel . --no-deps --no-build-isolation` — produced
+`app/ai/__init__.py` and `app/ai/contracts.py` and no `prompts/` at all.
+setuptools includes Python modules in a wheel; a data file inside a package
+needs `[tool.setuptools.package-data]` and had none.
+
+**Root cause.** Two different ideas of where the code lives. Every test in this
+repository runs against the source tree, where the file is simply there. The
+container installs a wheel into `/opt/venv` and has no source tree, so
+"the file is in the repository" and "the file is in the running system" are
+separate facts, and nothing connected them.
+
+**Consequence.** As caught, none — the packaging entry went in with the ticket.
+Unrecognised, E0-13's gateway would have loaded the prompt on a developer's
+machine and raised on the first real launch in a container, with a green CI run
+and a passing Compose health check behind it, because the health check answers
+before any AI task is called. The same trap is waiting for four later epics: E2,
+E4, E6 and E7 each add a prompt file here, and each will pass every gate.
+
+**Rule.** When a ticket ships a non-Python file that code will read at runtime,
+build the artifact and look inside it — `pip wheel . --no-deps
+--no-build-isolation` then `unzip -l`. A green test suite proves the file is in
+the repository and says nothing about whether it is in the image. This is entry
+9 in a new place: the guard is the packaging configuration, and reading it is
+not executing it.
+
+For this directory the check is no longer manual:
+`tests/unit/test_prompt_directory_layout.py` builds the wheel and asserts every
+prompt in the source tree is inside it, so the four later epics get the failure
+without knowing this entry exists. Asserting the `package-data` line instead
+would not have worked — the glob first shipped here was `prompts/*.md`, which is
+present, correct-looking, and matches neither a prompt in a subdirectory nor one
+with another extension.
+
+**And that fix was itself wrong, which is the part worth keeping.**
+`prompts/*.md` was written to match ADR 0032's naming scheme exactly, and
+matching the scheme was the error: a packaging glob that encodes a naming rule
+enforces that rule by making the offending file absent from every container,
+which is the worst available way to report a broken convention. It was widened to
+`prompts/**/*` — the whole directory, any depth, any extension — so that
+packaging decides only what reaches production, while the scheme stays enforced
+by review and by the version test. Both narrow cases were measured by planting a
+file and building rather than argued: `prompts/v2/moderation.md` and
+`draft.v1.jinja` were each dropped in silence.
+
+**Second rule, from that.** A fix to packaging, to an ignore rule, or to any
+other glob-shaped configuration is not finished when the case in front of you
+passes. Ask what the surrounding tests already *permit* — here, a sibling test
+deliberately accepts a version held in a directory — and make the configuration
+admit all of it. A glob narrower than the layouts the suite allows is a trap
+primed for whoever first uses one of them, and it will look correct in review.
+
+---
+
+## 19. A test held its expectation in a copy of the thing it was checking
+
+**Caught: 0**
+
+**What happened.** E0-12's moderation contract test asserted that the verdict
+enum offers exactly the six values SPEC §7.4's table names. The six lived in a
+tuple at the top of the test file, hand-copied from the spec, and the assertion
+was a generic helper driven by whichever tuple it was handed. So the test did not
+have to be defeated to lose a verdict: deleting `SELF_HARM` from the enum *and*
+from the tuple left all 169 unit tests green. An eval-gate review found it by
+doing exactly that.
+
+The same file taught the edit. Every discovery constant in it carries a comment
+saying it is this suite's choice and that a rename is "the one line that
+changes", which is right for the constants that guess at class and field names
+and wrong for the one that holds the spec's own words — and nothing distinguished
+them.
+
+**Root cause.** Two copies of one fact, both inside the blast radius of a single
+change. A test that reads its expectation from a file the change also edits is
+checking the code against itself. It is not entry 3 — the assertion ran, and
+compared what it said it compared — and not entry 2, because the behaviour *was*
+asserted. What failed is the independence of the expectation.
+
+**Consequence.** As caught, none. Unrecognised, the merge of threat and self-harm
+into one verdict would have passed CI with a diff that reads as tidying: one enum
+member and one tuple entry. §6.2's Care queue distinguishes threat-of-harm from
+self-harm risk, and §9.3 makes threat and self-harm recall the strictest floor in
+the suite — a floor measured over a merged label is measuring something the spec
+does not have, while reporting a number that looks like compliance.
+
+**Rule.** When a test asserts that code matches a document, read the document.
+`docs/SPEC.md` is parseable and is the authority; a constant beside the test is
+neither. Where a value genuinely has to be written into the test — a count, a
+pair of names that a second assertion exists to protect — say in the comment that
+it is deliberately *not* derived and why, so the next reader can tell it apart
+from a fixture that is free to move. And give a distinction that safety rests on
+its own named test: a fold that fails a set comparison reads as a fixture needing
+an update, while a fold that fails
+`test_the_moderation_contract_keeps_threat_and_self_harm_as_two_distinct_verdicts`
+says what was lost in the line the runner prints.
