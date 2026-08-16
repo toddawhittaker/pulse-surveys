@@ -23,6 +23,16 @@ says beyond checking it is not empty. The one thing worth stating plainly:
 nothing in this file can make §9.3's threat and self-harm recall floor easier to
 pass, because nothing here asserts anything about a classification.
 
+**The directory also has to survive being packaged, which nothing else in this
+module can see.** Every other test here reads the source tree, and the container
+does not ship the source tree: `backend/Dockerfile` builds a wheel with
+`pip wheel . --no-deps --no-build-isolation` and installs that wheel into the
+runtime virtualenv. setuptools puts *modules* in a wheel and leaves every other
+file out unless `[tool.setuptools.package-data]` names it, so the prompts
+directory can be correctly laid out, correctly documented, correctly versioned,
+and absent from the image — which is the only place E0-13's caller ever runs. The
+last test in this file builds the wheel and looks inside it.
+
 **Two of these tests search text for a pattern, which is a shape that fails
 silently** (`docs/MISTAKES.md` entry 3, third case — a regex that matched nothing
 and went green against the exact text it existed to catch). Both carry a canary:
@@ -31,12 +41,51 @@ the search that matters, so a search over the wrong file or over an empty string
 says so instead of passing.
 """
 
+import shutil
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# `backend/` is the import root, so a file at `backend/app/ai/prompts/x.md` is
+# `app/ai/prompts/x.md` inside the built package.
+BACKEND_DIR = REPO_ROOT / "backend"
+
 # E0-12's scope and SPEC §13 both spell the directory.
 PROMPTS_DIR = REPO_ROOT / "backend" / "app" / "ai" / "prompts"
+
+# Exactly what `backend/Dockerfile` copies into its builder stage before running
+# `pip wheel .` — `COPY pyproject.toml README.md ./` and `COPY backend ./backend`.
+# Matching that list rather than copying the whole repository is what makes the
+# wheel this test inspects the wheel the image installs, instead of a similar one
+# built from a different set of files. LICENSE is absent from both, deliberately.
+BUILD_INPUTS = ("pyproject.toml", "README.md", "backend")
+
+# Never copied into the staging directory, so the build cannot reuse one. See
+# `staged_source` for why this is the whole of the artifact hygiene here.
+STALE_BUILD_ARTIFACTS = ("__pycache__", "*.pyc", "*.egg-info", "build", "dist", "*.whl", ".venv")
+
+# A module that is certainly in the wheel, because setuptools ships `.py` files
+# under a found package without being asked. The canary for the archive listing:
+# if this is missing, the build produced something other than this project's
+# package and every prompt would be reported missing for a reason that has
+# nothing to do with `package-data`.
+WHEEL_CANARY = "app/ai/contracts.py"
+
+# A pure-Python wheel of this size builds in a few seconds. The timeout is here
+# so that a build which hangs fails with a message rather than holding CI open.
+BUILD_TIMEOUT_SECONDS = 300
+
+# The PEP 517 hook every builder calls: `pip wheel`, `python -m build`, and the
+# Dockerfile's line 46 all end up here, so this is the build's own entry point
+# rather than a stand-in for it. Run in a subprocess, which keeps setuptools'
+# warnings out of a suite configured with `error::DeprecationWarning` and keeps
+# its `sys.path` edits out of this interpreter.
+BUILD_SCRIPT = "import sys; from setuptools import build_meta; build_meta.build_wheel(sys.argv[1])"
 
 # §7.4's first task, and the only one whose prompt E0-12 ships — the other four
 # are "out of scope: prompt *content* beyond a first draft for the validity task
@@ -329,4 +378,162 @@ def test_the_token_reader_finds_a_version_in_a_name_and_in_a_directory_and_not_e
         f"`path_tokens` read `validity.md` as {nowhere} rather than [{VALIDITY_TASK_WORD!r}]. "
         "That file is the wrong implementation this module exists to refuse — a single prompt "
         "per task, overwritten in place — and a reader that finds a version in it would pass it."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reaching the package that actually ships
+# ---------------------------------------------------------------------------
+
+
+def staged_source(destination: Path) -> Path:
+    """A copy of the build's inputs, with no build artifact anywhere in it.
+
+    **No cleaning step, because there is nothing to clean.** A stale `build/` or
+    `*.egg-info` beside `pyproject.toml` is reused by setuptools, so a wheel
+    built over one reports what the *previous* build decided and looks entirely
+    correct — `docs/MISTAKES.md` entry 12 one level up, where the thing that went
+    stale is a build tree rather than a `.pyc`, and the reverted run and the
+    mutated run again produce identical output. Deleting the two directories in
+    the repository would work and would also reach into a working tree this test
+    does not own, mid-run, while an editable install points at it. Copying the
+    inputs into a directory that has never been built in makes the reuse
+    impossible instead of undone.
+
+    The copied set is the Dockerfile's own `COPY` lines. A test that built from
+    the whole repository would be building something the image never builds.
+    """
+    source = destination / "source"
+    source.mkdir(parents=True)
+    for name in BUILD_INPUTS:
+        origin = REPO_ROOT / name
+        if not origin.exists():
+            pytest.fail(
+                f"{origin} does not exist, so the wheel this test builds would not be the wheel "
+                f"`backend/Dockerfile` builds — it copies {list(BUILD_INPUTS)} and nothing else. "
+                "This is a gap in this file or a change to the image's build inputs, not a "
+                "failed criterion."
+            )
+        if origin.is_dir():
+            shutil.copytree(
+                origin, source / name, ignore=shutil.ignore_patterns(*STALE_BUILD_ARTIFACTS)
+            )
+        else:
+            shutil.copy2(origin, source / name)
+    return source
+
+
+def build_the_wheel(source: Path, wheel_directory: Path) -> Path:
+    """Build a wheel from `source` and return it, or fail with the build's own output."""
+    wheel_directory.mkdir(parents=True)
+    # S603: the command is this interpreter and the literal script above. Nothing
+    # in it comes from input, and the one argument is a path this test made.
+    try:
+        completed = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", BUILD_SCRIPT, str(wheel_directory)],
+            cwd=source,
+            capture_output=True,
+            text=True,
+            timeout=BUILD_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"Building a wheel from {source} did not finish in {BUILD_TIMEOUT_SECONDS} seconds. "
+            "That is a gap in this file or a broken build environment rather than a failed "
+            "criterion — a pure-Python wheel of this size takes a few seconds."
+        )
+
+    wheels = sorted(wheel_directory.glob("*.whl"))
+    if not wheels:
+        pytest.fail(
+            f"No wheel was produced from {source} (exit status {completed.returncode}).\n"
+            f"stdout:\n{completed.stdout[-2000:]}\nstderr:\n{completed.stderr[-2000:]}\n"
+            "The project could not be built at all, which is a different failure from a prompt "
+            "not being packaged, and it would stop the image being built too."
+        )
+    return wheels[0]
+
+
+def test_every_prompt_in_the_source_tree_reaches_the_built_package(tmp_path: Path) -> None:
+    """A prompt that exists in the repository and not in the wheel does not exist in production.
+
+    Every other test in this module reads the source tree. The runtime image does
+    not have the source tree: `backend/Dockerfile` builds a wheel and installs
+    it, and setuptools packages `.py` modules and nothing else unless
+    `[tool.setuptools.package-data]` says otherwise. So the whole of this module
+    could be green — a versioned validity prompt, a README documenting the
+    scheme — with the container holding `app/ai/contracts.py` and no prompt
+    beside it. That is not hypothetical: it is what this ticket shipped until the
+    wheel was opened, and it is `docs/MISTAKES.md` entry 16. This test is that
+    entry's rule made automatic, because the rule as written is a thing a person
+    has to remember to do, and entry 2 is what happens to a fix in
+    `pyproject.toml` that nothing asserts — any later edit undoes it with every
+    gate still green. It matters past this ticket because E2, E4, E6 and E7 each
+    add a prompt to this directory.
+
+    **The wrong implementations it catches**, in the order they are likely:
+
+      - No `package-data` entry at all — every prompt missing, the defect as
+        found.
+      - A glob that does not cover the extension a later prompt uses.
+        `prompts/*.md` is what is there now, and a `.txt`, `.jinja` or
+        `.prompt` template added by E4 ships as nothing.
+      - **A glob that does not descend.** `prompts/*.md` does not match
+        `prompts/v2/validity.md`, and the version-in-a-directory layout is one
+        this module's other tests deliberately admit. The pair of tests is the
+        statement: lay the directory out however you like, and make the packaging
+        follow it. Nothing in `pyproject.toml` reports this — the entry is
+        present and correct-looking, and the file is simply not there.
+
+    This is why the test builds rather than reading the configuration. An
+    assertion that the `package-data` line exists would pass against every one of
+    the last three, because each of them has the line.
+
+    **What it does not cover**, since it reads stronger than it is otherwise:
+
+      - It builds a wheel; it does not build or run the image. If the Dockerfile
+        stops installing this wheel, nothing here notices — that is the `docker`
+        gate's ground.
+      - It asserts the file is *in the archive*, not that E0-13's loader can read
+        it at the path it will look under. `importlib.resources` and a path
+        derived from `__file__` fail differently, and the loader does not exist
+        yet.
+      - It asserts source ⊆ wheel, not the reverse. A prompt in the wheel that is
+        no longer in the repository is not something this sees.
+      - It costs a real build — seconds, not milliseconds, and the only test in
+        this suite that shells out to one.
+    """
+    assert_the_directory_exists()
+    prompts = prompt_files()
+
+    assert prompts, (
+        f"{PROMPTS_DIR} holds no prompt files, so this test would confirm that all of them ship "
+        "without having built anything. The first test in this module owns that failure."
+    )
+
+    wheel = build_the_wheel(staged_source(tmp_path), tmp_path / "wheels")
+    with zipfile.ZipFile(wheel) as archive:
+        members = set(archive.namelist())
+
+    assert WHEEL_CANARY in members, (
+        f"The wheel built from this project does not contain {WHEEL_CANARY!r}; it contains "
+        f"{sorted(members)[:20]}. setuptools ships a found package's modules without being asked, "
+        "so a wheel missing that file is not this project's package — the assertion below would "
+        "report every prompt as unpackaged for a reason that has nothing to do with prompts."
+    )
+
+    expected = [path.relative_to(BACKEND_DIR).as_posix() for path in prompts]
+    missing = sorted(name for name in expected if name not in members)
+
+    assert not missing, (
+        f"These prompts are in the source tree and not in the wheel: {missing}. The wheel holds "
+        f"{sorted(name for name in members if '/prompts/' in name)}. `backend/Dockerfile` builds "
+        "this wheel and installs it into the runtime virtualenv, so a prompt that does not reach "
+        "it does not exist in any container — while every other test in this module, and the "
+        "whole of a developer's machine, still reads it straight off disk. SPEC §7.4: a "
+        "classification records the prompt version that produced it, and the text behind that "
+        "version has to be somewhere the process can read. `[tool.setuptools.package-data]` in "
+        "`pyproject.toml` is what decides this; the glob has to cover the extension and the "
+        "depth of the layout actually used."
     )

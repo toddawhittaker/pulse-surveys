@@ -403,9 +403,9 @@ here, from what `adapt_type` does — not a longer list.
 
 ---
 
-## 12. A mutation was reverted on disk and not in the interpreter
+## 12. A stale build of the thing under test was reused, and the run looked clean
 
-**Caught: 1**
+**Caught: 2**
 
 **What happened.** In E0-05, checking that `alembic check` warns when a generated
 column's expression drifts: edit `app/models/org.py` to change one band edge from
@@ -414,23 +414,42 @@ both times. Ten minutes went into the model, the migration and the database
 before `grep` showed the file on disk said `499` while the module Python imported
 said `498`.
 
+A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
+missing from the built wheel entirely — that defect is entry 16; this is what
+happened while verifying its fix. The fix was a
+`[tool.setuptools.package-data]` entry. Verifying it
+meant removing the entry and rebuilding, which produced a wheel that still
+contained the prompts: setuptools had reused the `build/` directory and the
+egg-info left by the previous build, so the wheel described the *previous*
+configuration. Deleting both first showed the real answer, an empty package.
+
 **Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
 file's size and mtime **truncated to the second**. Reverting a mutation of equal
 length inside the same second leaves the cache valid, so the stale bytecode is
 what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
-revert is invisible to the interpreter.
+revert is invisible to the interpreter. The build tree is the same mechanism with
+a longer memory and no invalidation rule worth the name: `build/` and
+`*.egg-info` persist until something removes them, and no tool warns that it is
+answering from them.
 
 **Consequence.** The reverted run and the mutated run produce identical output,
 which reads as "the mutation made no difference" — the conclusion that kills the
-finding. Here it would have been "matching the server's own rendering does not
+finding. In E0-05 it would have been "matching the server's own rendering does not
 silence the warning, so do not bother", and the drift signal E0-20 now depends on
-would have been dropped as not working.
+would have been dropped as not working. In E0-12 it would have been "the
+`package-data` entry makes no difference", against a defect that empties the
+prompt directory in every container the project ships.
 
-**Rule.** When mutating and reverting source between runs, clear the caches in
-the same command (`find <pkg> -name __pycache__ -type d -exec rm -rf {} +`, or
-export `PYTHONDONTWRITEBYTECODE=1` for the whole loop). And confirm the revert in
-the interpreter rather than in the file: print the value the module actually
-holds. `grep` proves what is on disk, which is not what ran.
+**Rule.** When mutating and reverting between runs, destroy the caches in the
+same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
+`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
+rebuild — and confirm the revert in the thing that ran rather than in the file:
+print the value the module holds, list the archive. `grep` proves what is on
+disk, which is not what ran. **In a test, prefer making the reuse impossible over
+undoing it**: build in a copy that has never been built in, and there is no stale
+artifact to remember to delete, no working tree to reach into, and nothing to get
+wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
+does this.
 
 ---
 
@@ -580,3 +599,11 @@ build the artifact and look inside it — `pip wheel . --no-deps
 the repository and says nothing about whether it is in the image. This is entry
 9 in a new place: the guard is the packaging configuration, and reading it is
 not executing it.
+
+For this directory the check is no longer manual:
+`tests/unit/test_prompt_directory_layout.py` builds the wheel and asserts every
+prompt in the source tree is inside it, so the four later epics get the failure
+without knowing this entry exists. Asserting the `package-data` line instead
+would not have worked — the glob shipped here is `prompts/*.md`, which is
+present, correct-looking, and matches neither a prompt in a subdirectory nor one
+with another extension.
