@@ -67,3 +67,6 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0017](0017-prefix-codes-are-unique-across-the-deployment.md) | Prefix codes are unique across the deployment, not per institution | Accepted — rests on one institution per deployment, stated in the record |
 | [0018](0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md) | Cross-table length rules are enforced by a composite foreign key carrying the term's length | Accepted |
 | [0019](0019-a-naive-datetime-is-refused-by-the-column-type.md) | A naive datetime is refused by the column type, not by Postgres or a service | Accepted |
+| [0020](0020-identity-bearing-columns-are-marked-by-a-name-prefix.md) | Identity-bearing columns are marked by an `identity_` name prefix | Accepted — follows [0014](0014-lms-owned-columns-are-marked-by-a-name-prefix.md), and takes the name where the two markers meet |
+| [0021](0021-overlapping-enrollments-are-refused-by-an-exclusion-constraint.md) | Overlapping enrollment windows are refused, by a GiST exclusion constraint | Accepted — settles the choice E0-08's criterion 5 leaves open |
+| [0022](0022-the-person-to-user-link-is-carried-by-person.md) | The person-to-user link is carried by `person`, and is one to one | Accepted — rests on one registered platform per person, stated in the record |
