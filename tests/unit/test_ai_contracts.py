@@ -21,7 +21,7 @@ into this file.** They were copied once, and an eval-gate review showed the cost
 the assertions are generic, driven by whatever the constant holds, so folding
 self-harm into threat needed no defeat of a test — deleting the member from the
 enum and from the tuple in the same change left the whole suite green
-(`docs/MISTAKES.md` entry 17). An expectation stored beside the code it checks is
+(`docs/MISTAKES.md` entry 19). An expectation stored beside the code it checks is
 inside the blast radius of the change it exists to catch. Reading §7.4's own
 table means losing a verdict now requires editing the spec, which is a reviewed
 act with rules of its own. Three literals survive that policy on purpose, and say
