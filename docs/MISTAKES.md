@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 11**
+**Caught: 12**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -105,7 +105,7 @@ cannot see whether it exists.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 10**
+**Caught: 11**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -130,7 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 8**
+**Caught: 9**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -189,7 +189,7 @@ sentence.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -405,7 +405,7 @@ here, from what `adapt_type` does — not a longer list.
 
 ## 12. A mutation was reverted on disk and not in the interpreter
 
-**Caught: 1**
+**Caught: 2**
 
 **What happened.** In E0-05, checking that `alembic check` warns when a generated
 column's expression drifts: edit `app/models/org.py` to change one band edge from
@@ -544,4 +544,55 @@ its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
 `docker inspect` for a health check's output) and reproduce outside the harness
 if the harness is what is hiding it. A timeout is the absence of evidence, not
 evidence.
+
+---
+
+## 16. A mutation harness reported kills it had not made
+
+**Caught: 0**
+
+**What happened.** In E0-09, eight guards were mutated one at a time to check
+that each was load-bearing — the cycle walk, the two Care rules, the role grain
+rule, both entry doors. The harness ran the suite after each mutation and called
+the mutation killed if the run came back non-zero. All eight reported killed.
+
+Six of the eight reports were worthless and two were wrong.
+
+Three tests in that module were **already failing**, for a reason unrelated to
+the schema — a defect in the shared fixture, now `docs/disputes/E0-09-01.md`. The
+harness ran with `-x`, so every run stopped at the first of those, and the
+mutation under test was frequently never reached. Eight mutations, one identical
+summary line: "1 failed, 10 passed".
+
+Worse, two of the mutations mutated nothing. `AND CASE role ...` was "removed" by
+replacing it with `AND true AND CASE role ...`, which leaves the `CASE` exactly
+where it was. Those two would have reported SURVIVED against a correct harness
+and been read as "this guard is untested", which is the opposite of the truth: on
+a second run that deleted the whole `CASE`, fifteen tests went red, and loosening
+any single arm turned its own test red.
+
+A third mutation compared an enum column against a string that is not one of its
+labels. Postgres raises on the comparison itself, so every row in the module
+failed — a kill for a reason that had nothing to do with the guard.
+
+**Root cause.** Measuring "did the run fail" instead of "did *this* fail", from a
+baseline that was not green. A mutation harness is a test of the tests, and it
+was written with none of the care the tests themselves get: no baseline, no
+check that the mutation applied, no check that it applied *semantically*, and a
+flag (`-x`) whose whole purpose is to stop before the interesting part.
+
+**Consequence.** Caught before anything rested on it, because eight identical
+summary lines is a suspicious shape. Had it not been, the pull request would have
+claimed every guard verified by mutation, with three of the eight claims false
+and two guards recorded as tested that no test touches. That is worse than not
+mutating at all — the claim would have discouraged the next person from checking.
+
+**Rule.** A mutation harness needs its own controls, and they are cheap. Record
+the baseline failures first and report the failures a mutation **adds** to that
+set, never the exit code. Never use `-x`. Assert the mutated text was found
+before replacing it, and assert the revert restored the file byte for byte. And
+read each mutation for whether it changes *meaning*: adding `AND true` in front
+of a condition, or widening a value the code never reads, produces a diff and no
+mutation. If several mutations report the same result, suspect the harness before
+believing them.
 
