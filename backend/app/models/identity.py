@@ -1,4 +1,4 @@
-"""Who someone is: the LMS user key, the identity split off from it, the people graph, enrollment.
+"""Who someone is, and what they may do: users, identity, the people graph, and role assignments.
 
 SPEC §4, §2.1 and §8. This is the module the confidentiality guarantees exist to
 protect, so what is *not* here matters as much as what is.
@@ -41,18 +41,30 @@ script, a Celery task or a roster sync cannot write a row that breaks them:
     section may not overlap. See `Enrollment` for that one, which is the only
     rule here that needs an instrument other than a unique or check constraint.
 
-**Not here, on purpose.** `role_assignment`, `lead_faculty_mapping` and the
-supervision graph are E0-09; the identity-separated views and the three database
-roles are E0-10; the Care re-identification path and its audit log are E10. The
-LTI registration tables `user` points at are `app.models.lti`.
+**The supervision graph is here too, at the bottom** — `role_assignment` and
+`lead_faculty_mapping` (E0-09), which SPEC §13 puts in this module. They are what
+turns a person into a purview, so they sit on the other side of the same line
+`user` and `user_identity` sit on: this module holds both who somebody is and
+what they may do, and it is the one place where confusing the two would be
+expensive. `RoleAssignment`'s docstring says which rules the database refuses
+and why each is where it is.
+
+**Not here, on purpose.** The identity-separated views and the three database
+roles are E0-10; purview computation over the graph is E0-11 and E9; the Care
+re-identification path and its audit log are E10. The LTI registration tables
+`user` points at are `app.models.lti`.
 """
 
 from datetime import date
+from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
+    Computed,
     Date,
+    Enum,
     ForeignKey,
     String,
     Text,
@@ -277,3 +289,315 @@ class Enrollment(Base):
     )
     started_on: Mapped[date] = mapped_column(Date, nullable=False)
     ended_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class AssignmentRole(StrEnum):
+    """The roles SPEC §2.1's table grants, as a Postgres enum type.
+
+    Eight of the nine rows in that table. **`STUDENT` is deliberately absent**: a
+    student is attached to "own responses" rather than to a node in the org
+    hierarchy, and nothing in the spec or in any ticket gives a student a
+    `role_assignment` row. Adding one would need a scope grain for it, and the
+    honest answer to "which node is a student scoped to" is none of them — so the
+    row is left unwritable rather than given an invented answer.
+
+    **`CARE` is in this enumeration and reachable from nowhere else.** SPEC §6.2
+    makes Care the only role that can re-identify a student, and E0-09 keeps the
+    grant strictly here: no LTI claim, no OIDC claim and no LMS role may produce
+    it, because the administrator of the platform controls what a claim says and
+    a claim-to-Care mapping would hand them identity access.
+    `tests/unit/test_care_is_not_reachable_from_a_claim.py` sweeps the syntax tree
+    of every module under `app/` for a module that both reads a claim and names
+    this role. That is why the name belongs to a shared enumeration in the model
+    layer: a door that needs to exclude Care can exclude *this* member, and the
+    exclusion is then a fact about the role rather than a literal in the door.
+
+    Each member's value is its name, as `CourseLevel`'s and `Modality`'s are:
+    one spelling in Python and in the database, rather than two to keep in step.
+    """
+
+    INSTRUCTOR = "INSTRUCTOR"
+    LEAD_FACULTY = "LEAD_FACULTY"
+    CHAIR = "CHAIR"
+    ASSISTANT_DEAN = "ASSISTANT_DEAN"
+    DEAN = "DEAN"
+    VP_ACADEMICS = "VP_ACADEMICS"
+    CARE = "CARE"
+    ADMIN = "ADMIN"
+
+
+# SPEC §2.1's "Scope attachment" column, as the one expression that holds it, and
+# the reason `role_assignment` carries five nullable scope references rather than
+# the single `scope_node_id` SPEC §8 writes in the singular (ADR 0025).
+#
+# Two clauses, and both are load-bearing.
+#
+# **`num_nonnulls(...) = 1`** says an assignment is scoped to exactly one node.
+# Without it a row could name a department *and* a college, and the second one
+# would be a grant nobody could see in any query written against the first.
+#
+# **The `CASE` says which one**, per role, out of SPEC §2.1's table: instructor
+# to a section, lead faculty to a course, chair to a department, assistant dean
+# and dean to a college ("the same node as the dean — authority comes from the
+# supervision graph, not the scope"), VP of Academics, Care and Admin to the
+# institution.
+#
+# **`ELSE false` is what makes this fail closed.** `role` is `NOT NULL` and the
+# enum has exactly the eight labels the `CASE` names, so the `ELSE` is
+# unreachable today. It is here for the day somebody adds a ninth: an unmatched
+# `CASE` returns `NULL`, a `CHECK` that evaluates to `NULL` *passes*, and the new
+# role would silently be scopeable to anything at all. With the `ELSE`, a role
+# nobody has given a grain to cannot be written down until somebody does.
+#
+# There is deliberately no `prefix_id`. No role in SPEC §2.1's table is scoped to
+# a prefix, so the column would exist only to be refused by this constraint —
+# and a scope that cannot be spelled at all is a stronger rule than one that is
+# spelled and rejected.
+SCOPE_GRAIN_RULE = """
+num_nonnulls(institution_id, college_id, department_id, course_id, section_id) = 1
+AND CASE role
+        WHEN 'INSTRUCTOR' THEN section_id IS NOT NULL
+        WHEN 'LEAD_FACULTY' THEN course_id IS NOT NULL
+        WHEN 'CHAIR' THEN department_id IS NOT NULL
+        WHEN 'ASSISTANT_DEAN' THEN college_id IS NOT NULL
+        WHEN 'DEAN' THEN college_id IS NOT NULL
+        WHEN 'VP_ACADEMICS' THEN institution_id IS NOT NULL
+        WHEN 'CARE' THEN institution_id IS NOT NULL
+        WHEN 'ADMIN' THEN institution_id IS NOT NULL
+        ELSE false
+    END
+"""
+
+# SPEC §2.1's "Entry point" column, as two stored generated columns (ADR 0026).
+#
+# "Every *reporting* role — instructor, lead faculty, chair, assistant dean,
+# dean, VP of Academics — can enter through an LTI launch, including leadership.
+# Every role except instructor and student can *also* enter by web login; Care
+# and Admin are web login only (their work has no launch context), and students
+# enter by launch only."
+#
+# **Derived from the role and not stored per row**, which is the whole decision:
+# the rule §2.1 states is a rule about roles, so a value computed from the role
+# cannot disagree with it. A writable column could — a Care assignment with
+# `permits_launch` set is a row that contradicts its own role, and nothing would
+# notice until a launch honoured it. A generated column has no write path at all,
+# for a seed script, an admin console or a superuser session alike.
+#
+# **Each door is enumerated positively**, rather than `permits_web_login` being
+# written as `role <> 'INSTRUCTOR'`. The negative spelling is shorter and it
+# fails open: a ninth role added to `AssignmentRole` would acquire web login by
+# default, from a line nobody revisited. Enumerated, a new role gets no door
+# until someone writes it into one of these lists, which is the failure that
+# reports itself the first time somebody tries to log in.
+#
+# **Spelled the way Postgres deparses it** — `= ANY (ARRAY[...])` with the enum
+# cast on each literal — for the reason `app/models/org.py` gives at length about
+# `COURSE_LEVEL_DERIVATION`: Alembic cannot alter a generated column, so its
+# whole response to a changed expression is one normalised string comparison and
+# a warning, and a comparison that never matches warns on every run. Editing
+# either expression means writing a migration and pasting the server's own
+# rendering back here; `pg_get_expr` on `pg_attrdef` prints it.
+LAUNCH_DOOR_DERIVATION = """
+role = ANY (ARRAY[
+    'INSTRUCTOR'::assignment_role,
+    'LEAD_FACULTY'::assignment_role,
+    'CHAIR'::assignment_role,
+    'ASSISTANT_DEAN'::assignment_role,
+    'DEAN'::assignment_role,
+    'VP_ACADEMICS'::assignment_role
+])
+"""
+
+WEB_LOGIN_DOOR_DERIVATION = """
+role = ANY (ARRAY[
+    'LEAD_FACULTY'::assignment_role,
+    'CHAIR'::assignment_role,
+    'ASSISTANT_DEAN'::assignment_role,
+    'DEAN'::assignment_role,
+    'VP_ACADEMICS'::assignment_role,
+    'CARE'::assignment_role,
+    'ADMIN'::assignment_role
+])
+"""
+
+
+class RoleAssignment(Base):
+    """One grant: this person, in this role, over this node (SPEC §2.1, §8).
+
+    **People are not roles.** A person holds one or more assignments and every
+    view is resolved from an assignment or a union of them, never from a person
+    "type". Purview is computed over the `reports_to` edges between the rows of
+    this table, so each row here is a grant of access to somebody's data, and
+    every rule below is in the database rather than in `app/services/` for that
+    reason: a seed script, a roster sync or a future admin console cannot write a
+    row that breaks one.
+
+    **`reports_to` references another assignment, never a person and never an org
+    node** (SPEC §2.1, in bold). The distinction is invisible until somebody holds
+    two hats: a chair who also leads a course has two assignments answering to two
+    different supervisors, and an edge between *people* has one slot for the two
+    of them. The failure is silent — the purview it computes is simply wrong, and
+    it looks like an answer.
+
+    **What the database refuses, and by which instrument.**
+
+      - *A scope node of the wrong kind for the role* — the `CHECK` built from
+        `SCOPE_GRAIN_RULE` above. A lead faculty scoped to a prefix holds every
+        sibling lead's course, which is SPEC §4.1 invariant 2 broken in the schema
+        before any query is written.
+      - *A Care assignment with a `reports_to` edge* — the second `CHECK` below.
+        §2.1 puts Care outside the supervision graph: it supervises nothing and
+        escalates to nobody, and an edge upward would put the one role that can
+        re-identify a student inside a chair's transitive purview.
+      - *An assignment reporting to a Care assignment, and a reporting cycle at
+        any depth* — one `AFTER INSERT OR UPDATE` trigger, created by the
+        migration, because both are facts about a *pair* of rows and a `CHECK`
+        may not look at a second row. ADR 0027 records why that is a trigger and
+        what it costs. `alembic check` cannot see a trigger in either direction;
+        the behavioural tests in
+        `tests/integration/test_role_assignment_graph.py` and the generated
+        properties in `tests/integration/test_supervision_graph_properties.py`
+        are what hold it.
+
+    **What the database deliberately permits.** A person may hold both a `CARE`
+    assignment and a reporting assignment. E0-09 is explicit that this must not
+    be constrained: a Care staffer who also teaches a section is unlikely and
+    legitimate, non-composability is about capabilities rather than about people,
+    and §6.2 handles the overlap detectively by flagging such a reveal in the
+    identity-access audit log rather than by blocking it. Person-level cycles are
+    permitted for the same kind of reason — SPEC §2.1 calls a chair's lead-faculty
+    assignment reporting to their own chair assignment "legal and expected", so
+    the cycle guard walks assignment ids and never `person_id`.
+
+    **There is no uniqueness rule on this table.** Two chairs of one department,
+    or one person holding the same role twice over one node, are shapes no ticket
+    rules out, and a constraint here would be this module guessing at a policy
+    question the People editor (§6.3) owns.
+    """
+
+    __tablename__ = "role_assignment"
+    __table_args__ = (
+        CheckConstraint(SCOPE_GRAIN_RULE, name="scope_node_matches_the_role"),
+        # The half of E0-09 criterion 8 that one row can answer for. The other
+        # half — nothing may report *to* a Care assignment — needs the parent
+        # row's role and is in the trigger.
+        CheckConstraint(
+            "role <> 'CARE' OR reports_to IS NULL",
+            name="care_reports_to_nobody",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    # The Pulse-owned people graph, not `user`: SPEC §2.1 keeps the two sides
+    # apart and computes purview from this one, because "the LMS has no
+    # equivalent". A dean who has never launched the tool still supervises
+    # chairs, which is the case ADR 0024 makes `person.user_id` nullable for.
+    #
+    # Indexed, because this is the first question every authorization decision
+    # asks — "which assignments does this actor hold" — and nothing else covers
+    # it. RESTRICT: removing a person while they hold a grant is a deliberate
+    # edit, not a side effect.
+    person_id: Mapped[UUID] = mapped_column(
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    role: Mapped[AssignmentRole] = mapped_column(
+        Enum(AssignmentRole, name="assignment_role"), nullable=False
+    )
+    # The five scope references, one per containment level a role can be scoped
+    # to (ADR 0025). Exactly one is populated on any row, and which one is fixed
+    # by the role: see `SCOPE_GRAIN_RULE`. All five are RESTRICT, matching
+    # `app/models/org.py` — deleting a department that somebody chairs would
+    # otherwise silently drop the grant rather than refuse the deletion.
+    #
+    # None of the five is indexed. The reads this table serves start from a
+    # person or walk an edge, not from a node: "who chairs this department" is a
+    # display label on a roll-up (§2.1) rather than a hot path, and five indexes
+    # on five mostly-null columns would be paid for on every write. E9 adds one
+    # with a measurement if the People editor turns out to need it.
+    institution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("institution.id", ondelete="RESTRICT"), nullable=True
+    )
+    college_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("college.id", ondelete="RESTRICT"), nullable=True
+    )
+    department_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("department.id", ondelete="RESTRICT"), nullable=True
+    )
+    course_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("course.id", ondelete="RESTRICT"), nullable=True
+    )
+    section_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("section.id", ondelete="RESTRICT"), nullable=True
+    )
+    # The supervision edge. Self-referential, nullable — a root assignment
+    # reports to nobody — and indexed, because the purview union descends it
+    # ("all assignments transitively reporting to it") and the trigger asks the
+    # same question in the other direction before letting a row become Care.
+    #
+    # RESTRICT: an assignment that somebody reports to cannot be deleted out from
+    # under them. Re-pointing the reporting line first is the deliberate edit
+    # §6.3's People editor performs, and a cascade here would delete a subtree of
+    # grants for a reason nobody could see afterwards.
+    reports_to: Mapped[UUID | None] = mapped_column(
+        ForeignKey("role_assignment.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    # SPEC §2.1's two entry doors, derived from the role rather than stored per
+    # row (ADR 0026). See `LAUNCH_DOOR_DERIVATION` above for why they are
+    # generated and why each is enumerated positively.
+    permits_launch: Mapped[bool] = mapped_column(
+        Boolean, Computed(LAUNCH_DOOR_DERIVATION, persisted=True), nullable=False
+    )
+    permits_web_login: Mapped[bool] = mapped_column(
+        Boolean, Computed(WEB_LOGIN_DOOR_DERIVATION, persisted=True), nullable=False
+    )
+
+
+class LeadFacultyMapping(Base):
+    """Which courses a person leads (SPEC §2.1, §8).
+
+    Pulse-owned, maintained in the admin console with CSV import/export, and the
+    thing a Lead Faculty's own grant is computed from: "a Lead Faculty's grant is
+    only the courses they lead (never sibling leads' courses, at any point in the
+    union)".
+
+    **One lead per course, and any number of courses per lead.** The uniqueness
+    rule is on `course_id` alone. Both halves matter and they pull in opposite
+    directions: a second mapping for one course hands a second person the first
+    one's purview, which is SPEC §4.1 invariant 2; and a rule written over the
+    person, or over the pair, would refuse the ordinary case §2.1 states twice —
+    "people and courses are not 1:1", and "a lead's practical span may cross
+    prefixes and departments".
+
+    **A course with no mapping is a row that does not exist.** §2.1: such a course
+    "falls to its department chair". That resolution is a query concern and is
+    deliberately not stored — a row saying "the chair leads this" would be a
+    second, staler answer to who the chair is, and it would have to be rewritten
+    every time a chair changed.
+
+    **This table carries no assignment reference.** A person's `LEAD_FACULTY`
+    assignment and their mappings are separate facts, and joining them into one
+    row would make the commonest case — one lead assignment, four led courses —
+    four assignments in the supervision graph, each with its own edge to
+    maintain.
+    """
+
+    __tablename__ = "lead_faculty_mapping"
+    __table_args__ = (UniqueConstraint("course_id"),)
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    # Indexed: "which courses does this lead lead" is how a lead's own grant is
+    # built, and it is asked on every request they make. Nothing else covers it —
+    # the unique constraint below leads with `course_id`.
+    person_id: Mapped[UUID] = mapped_column(
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    # Not indexed on its own: it is the whole of `uq_lead_faculty_mapping_course_id`,
+    # which serves a lookup by course. Same reasoning as `course.prefix_id` in
+    # `app/models/org.py`.
+    course_id: Mapped[UUID] = mapped_column(
+        ForeignKey("course.id", ondelete="RESTRICT"), nullable=False
+    )

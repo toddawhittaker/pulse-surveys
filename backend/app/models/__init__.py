@@ -4,8 +4,10 @@
 prefix, course, section (E0-05). `term` holds the academic calendar — term,
 week, start_letter_map, survey_window (E0-06). `identity` holds user,
 user_identity, person and enrollment, and `lti` the registration tables they
-hang off — lti_platform and lti_deployment (E0-08). The other aggregates §13
-lists arrive with the tickets that need them.
+hang off — lti_platform and lti_deployment (E0-08). `identity` also holds the
+supervision graph, role_assignment and lead_faculty_mapping (E0-09), which SPEC
+§13 puts in that module. The other aggregates §13 lists arrive with the tickets
+that need them.
 
 **Importing this package must import every model module.** `backend/migrations/
 env.py` autogenerates against `Base.metadata`, and a table whose module nobody
