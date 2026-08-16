@@ -60,11 +60,32 @@ cookie survival), §2.1 (what the launch claims must carry), §13 (`mock-lms/`).
       repository.
 - [ ] An issued `id_token` contains every LTI 1.3 required claim, asserted field
       by field in a test rather than by eyeballing.
-- [ ] The login-initiation endpoint round-trips `state` and `nonce` unchanged.
+- [ ] The **authorization endpoint** returns the `state` it was given, unchanged,
+      and the issued `id_token` carries the `nonce` from that same authorization
+      request. Two launches carry different nonces.
+
+      This read "the login-initiation endpoint round-trips `state` and `nonce`",
+      which is untestable on this side of the protocol. In LTI 1.3 the
+      login-initiation endpoint is the **tool's**: the platform calls it with
+      `iss`, `login_hint` and `target_link_uri`, and neither `state` nor `nonce`
+      exists yet at that point. Both are minted by the tool on its *authorization
+      request to the platform*; the platform echoes `state` on the redirect and
+      embeds `nonce` in the `id_token`. That is the property this ticket owns.
+      *Validating* either is E1's — §14.3 puts "LTI launch validation
+      (state/nonce…)" in E1's exit criteria, not here.
 - [ ] The launch form posts to a configurable target link URI, so it can point
       at the tool once E1 exists.
+
+      Two distinct URLs hide in that sentence, and the criterion is not asking
+      about one of them twice: the form's **action** is the tool's OIDC
+      login-initiation URL, while `target_link_uri` is a **claim inside the
+      token** naming where the tool should land the user. Both are asserted
+      separately — the action follows configuration rather than a constant that
+      happens to equal it, and the claim matches what the launch page announced.
 - [ ] A test can obtain a signed launch for an arbitrary seeded user and role
-      without a browser, for use as an integration fixture.
+      without a browser, for use as an integration fixture. "Arbitrary" needs at
+      least two seeded users and at least two seeded roles to have any content;
+      the larger seed set is E0-15's.
 
 ## Definition of done
 
