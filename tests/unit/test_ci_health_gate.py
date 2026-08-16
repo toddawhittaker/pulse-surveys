@@ -1,15 +1,21 @@
-"""The CI health gate: which services it names, and where it names them — E0-03.
+"""The CI health gate: which services it names, and where it names them — E0-03, E0-14.
 
-Acceptance criterion 5: "The CI `docker` job waits on all three services and
-passes." The passing half is the job's own business and cannot be asserted from
-pytest. The *waiting on all three* half can, and it is worth a test of its own
-because of what `scripts/ci/wait_for_health.sh` does with its arguments: it
-fails a service that declares no HEALTHCHECK, fails one that reports unhealthy,
-and says nothing whatever about a service nobody named. So the argument list is
-not a detail of the job — it is the whole of what criterion 1 ("`docker compose
-up -d` reaches healthy on `api`, `worker`, and `beat`") is checked by. Leave
-`worker` off it and the job goes green with a worker that crash-looped, and
-E0-03's first criterion is then asserted nowhere at all.
+E0-03's acceptance criterion 5: "The CI `docker` job waits on all three services
+and passes." The passing half is the job's own business and cannot be asserted
+from pytest. The *waiting on each of them* half can, and it is worth a test of
+its own because of what `scripts/ci/wait_for_health.sh` does with its arguments:
+it fails a service that declares no HEALTHCHECK, fails one that reports
+unhealthy, and says nothing whatever about a service nobody named. So the
+argument list is not a detail of the job — it is the whole of what criterion 1
+("`docker compose up -d` reaches healthy on ...") is checked by. Leave `worker`
+off it and the job goes green with a worker that crash-looped, and E0-03's first
+criterion is then asserted nowhere at all.
+
+**The list grows with the stack, and this module is where it grows.** E0-14 adds
+`mock-lms`, whose own first criterion — "`docker compose up -d` brings `mock-lms`
+to healthy alongside the existing services" — is checked by exactly the same
+mechanism and by nothing else. A ticket that adds a service with a health check
+and does not add it here has shipped a service the gate never looks at.
 
 E0-02 reached `db` and `redis` through `api`'s `depends_on` conditions rather
 than by naming them, and `test_compose_stack.py` holds those conditions for that
@@ -62,8 +68,13 @@ from typing import Any
 # so rather than quietly find nothing to check.
 DOCKER_JOB = "docker"
 
-# The three services criterion 1 requires to reach healthy.
-REQUIRED_SERVICES = ("api", "worker", "beat")
+# Every service a first acceptance criterion requires to reach healthy: `api`,
+# `worker` and `beat` from E0-03, and `mock-lms` from E0-14. Listed rather than
+# derived from the Compose file, and the difference matters — a rule of "wait on
+# whatever the file declares" would silently accept a service that lost its
+# health check, because `wait_for_health.sh` would stop being given it at the
+# same moment it stopped being able to answer.
+REQUIRED_SERVICES = ("api", "worker", "beat", "mock-lms")
 
 WAIT_SCRIPT = "scripts/ci/wait_for_health.sh"
 
@@ -249,7 +260,7 @@ def script_events(script: str) -> list[tuple[str, set[str]]]:
     return events
 
 
-def test_the_docker_job_waits_on_api_worker_and_beat(
+def test_the_docker_job_waits_on_every_service_a_criterion_names(
     ci_workflow_path: Path,
     ci_workflow: dict[str, Any],
 ) -> None:
@@ -261,7 +272,7 @@ def test_the_docker_job_waits_on_api_worker_and_beat(
     never run it before — which is exactly the case a worker whose image lacks a
     dependency, or a beat whose schedule file cannot be created, fails. A second
     wait that names only `api` would report that a clean start works while
-    having watched one third of it.
+    having watched a fraction of it.
 
     The "found any at all" assertion is not ceremony. This test compares the
     required names against what it collected, and an empty collection satisfies
@@ -303,11 +314,11 @@ def test_the_docker_job_waits_on_api_worker_and_beat(
     assert not incomplete, "\n".join(
         [
             f"A `{WAIT_SCRIPT}` call in the `{DOCKER_JOB}` job does not wait on every "
-            "service E0-03 brings up:",
+            "service the stack brings up:",
             *reported,
             "",
-            "E0-03 criterion 1 is that `docker compose up -d` reaches healthy on api, "
-            "worker and beat, and this argument list is the only thing that checks it: a "
+            "E0-03 criterion 1 and E0-14 criterion 1 are both that `docker compose up -d` "
+            "reaches healthy, and this argument list is the only thing that checks either: a "
             "service nobody names is a service the gate never looks at, and the job goes "
             "green with it crash-looping. Restore the full list — "
             f"`{WAIT_SCRIPT} {' '.join(REQUIRED_SERVICES)}` — at every wait in the job, the "
@@ -316,7 +327,7 @@ def test_the_docker_job_waits_on_api_worker_and_beat(
     )
 
 
-def test_the_docker_job_waits_on_all_three_after_starting_the_base_file_alone(
+def test_the_docker_job_waits_on_every_service_after_starting_the_base_file_alone(
     ci_workflow_path: Path,
     ci_workflow: dict[str, Any],
 ) -> None:
@@ -333,7 +344,7 @@ def test_the_docker_job_waits_on_all_three_after_starting_the_base_file_alone(
     returned the stale value.
 
     **Why both halves are one assertion.** The test above collects every wait in
-    the job and requires each to name all three, and that is exactly the guard
+    the job and requires each to name every service, and that is exactly the guard
     that missed this: a step with no wait at all contributes nothing to a
     collection, and the job's other waits keep it non-empty, so the pass could be
     cut back to `up -d` with nothing looking at it and the suite stayed green. It
@@ -432,7 +443,7 @@ def test_the_docker_job_waits_on_all_three_after_starting_the_base_file_alone(
             "runs the working tree and not the wheel in the image: a packaging regression "
             "in `app/jobs` passes every merged gate and fails in every real deployment. The "
             "base-file-only pass is the only thing that runs what actually ships — and only "
-            "if something waits on all three afterwards. A pass that starts a stack and "
+            "if something waits on every service afterwards. A pass that starts a stack and "
             "never looks at it verifies nothing while looking exactly like verification.",
         ]
     )
