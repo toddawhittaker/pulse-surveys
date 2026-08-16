@@ -110,9 +110,41 @@ the cleanest resolution, and worth stating in the pull request either way.
 - A structural test that enumerates identity columns via E0-08's marker
   convention and asserts none appears in any view in `views_sql/` — so a view
   added later that leaks identity fails CI without anyone remembering to check.
+- **Close the two holes in that marker convention first — this ticket is where
+  they stop being theoretical.** E0-08's independent security review found both,
+  and neither was blocking there precisely because no grants existed yet. This
+  ticket lands the grants. Details in the "Fix the marker before you build on
+  it" section below.
 - Remove `--allow-empty` from the invariant checker in `.github/workflows/ci.yml`
   and in `make invariants`. From this ticket on, a skipped invariant is a build
   failure.
+
+## Fix the marker before you build on it
+
+The whole of this ticket rests on being able to enumerate identity-bearing
+columns programmatically. E0-08 built that convention (ADR 0022, `identity_` name
+prefix) and its security review found two ways it fails quietly. Both are
+recorded here rather than in E0-08 because E0-08 has no read paths and no grants
+— nothing there is exposed by either. **This ticket adds the grants, so this is
+the ticket where an unmarked identity column becomes an instructor-visible one.**
+
+**1. Discovery is by the name fragments `("name", "email")`.** A roster sync
+storing an NRPS or LTI claim as `picture`, `login_id`, `lis_person_sourcedid`,
+`phone`, `sortable`, or `given`/`family` spelled without "name" lands an
+identity column that the sweep passes unmarked and unnoticed. The convention
+requires a human to name a column in a way the sweep happens to recognise, which
+is the property a tripwire is supposed to remove.
+
+**2. The table sweep is one foreign-key hop, not a fixed point.**
+`people_tables` in `tests/integration/test_identity_column_marker.py` tests each
+table's foreign keys against the three-table constant rather than against the set
+it is building, so a table linking to a table that links to `user` is never
+swept. `response` is covered today; `answer` and `threat_case` are not — and
+`threat_case` is §6.2's Care queue, the most identity-adjacent table in the
+system. This one is a four-line fix and should not wait.
+
+Neither is exploitable as of E0-08: no such column exists and no grants exist.
+Both are load-bearing from this ticket onward.
 
 ## Out of scope
 
@@ -131,6 +163,17 @@ the cleanest resolution, and worth stating in the pull request either way.
 
 ## Acceptance criteria
 
+- [ ] **The marker sweep reaches every table that can hold identity**, by
+      iterating the foreign-key walk to a fixed point rather than one hop. A test
+      asserts `threat_case` and `answer` are in the swept set, since both are
+      reachable only at two hops and `threat_case` is the Care queue.
+- [ ] **An identity column whose name contains neither "name" nor "email" is
+      still caught.** Decide how — a declared list on the model, a type, a
+      `Column.info` flag carried into the database, or a widened fragment set —
+      and say in the pull request what the new convention cannot see, because
+      every version of this has a blind spot and the one that goes unstated is
+      the one that bites. Add a test that fails when a plausibly-named identity
+      column (`login_id`, `picture`, `lis_person_sourcedid`) is added unmarked.
 - [ ] Views ship as Alembic migrations under `views_sql/`, not as ORM
       constructs; `alembic upgrade head` creates them and `alembic check` is
       clean.
