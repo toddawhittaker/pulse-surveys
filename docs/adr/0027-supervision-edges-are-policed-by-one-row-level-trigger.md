@@ -36,10 +36,41 @@ parent, with the SQL `CYCLE` clause so the walk terminates even against a row se
 that already contains a loop. It compares assignment ids and never `person_id`.
 
 Before either cross-row check, and only where there is cross-row work to do, the
-trigger takes a transaction-scoped advisory lock keyed on the table's own oid.
+trigger takes a transaction-scoped advisory lock keyed on the table's own oid,
+**and refuses the write outright if the transaction is `REPEATABLE READ`**.
 
 Errors are raised with `ERRCODE = 'check_violation'` and messages naming what the
 writer did.
+
+### The isolation level is part of the guarantee, so it is enforced rather than assumed
+
+Both cross-row rules are read-then-write, so the guard is only as good as what
+its read can see. The advisory lock serialises the writers; it does not give the
+second one a fresh snapshot. Measured against the shipped migration on the pinned
+Postgres, three attempts per cell, two shapes — `A → B` plus `B → A`, and a
+three-row shape where `B → C` is already committed while one transaction writes
+`C → A` and the other writes `A → B`:
+
+| Trigger | READ COMMITTED | REPEATABLE READ | SERIALIZABLE |
+|---|---|---|---|
+| advisory lock alone | 0/3 stored | **3/3 stored, both shapes** | 0/3 stored |
+| lock + parent `FOR KEY SHARE` | 0/3 | **3/3, both shapes** | 0/3 |
+| lock + parent `FOR SHARE` or `FOR UPDATE` | 0/3 | 0/3 two-row, **3/3 three-row** | 0/3 |
+| lock + refusing REPEATABLE READ (shipped) | 0/3 | 0/3 | 0/3 |
+
+`READ COMMITTED` holds because each statement inside the trigger re-snapshots, so
+after the lock is granted the walk sees the other writer's committed edge.
+`SERIALIZABLE` holds by SSI, which aborts one side with a `40001`. `REPEATABLE
+READ` fails because the snapshot was fixed at the transaction's first statement
+and no amount of waiting changes it.
+
+Refusing that level is the whole of the fix, and it is refused only for writes
+that need the cross-row read — an assignment with no edge and a role other than
+`CARE` is accepted at any isolation level, which is measured too. Nothing in this
+codebase runs `REPEATABLE READ` today ([ADR
+0013](0013-the-database-session-is-synchronous.md) leaves the level at the server
+default), so the restriction costs nothing now and converts a silent wrong answer
+into an error naming the level and the two that work.
 
 ## Alternatives rejected
 
@@ -81,6 +112,24 @@ overlapping transactions, both committed, and both edges were stored. With the
 advisory lock the second transaction blocks, then sees the first one's committed
 edge and is refused — measured the same way, against the migration as it ships.
 
+**Locking the parent row instead of refusing `REPEATABLE READ`.** The repair
+suggested by the privacy review, and the one to reach for first: after taking the
+advisory lock, `SELECT … FOR KEY SHARE` the parent, so a writer whose snapshot is
+stale gets a `40001` instead of a silent success. Rejected on measurement, in two
+steps. `FOR KEY SHARE` does not close even the two-row case — it conflicts only
+with `FOR UPDATE`, and writing an edge takes `FOR NO KEY UPDATE` because
+`reports_to` is not a key column, so the lock is granted against the stale row
+version and the cycle is stored 3/3. `FOR SHARE` and `FOR UPDATE` are strong
+enough to raise, and they close the two-row case, but they still store the
+three-row case 3/3: the edge the stale walk cannot see sits further up the path
+than the parent being locked, so locking the parent asks the wrong row. Closing
+it properly means locking **every row the walk visits**, which the recursive CTE
+cannot do — Postgres forbids a locking clause in a recursive term — so it would
+mean replacing the walk with a hand-rolled `LOOP` and taking a share lock on each
+ancestor of every re-parenting write. That is a real option and it is the one to
+weigh if `REPEATABLE READ` is ever wanted; it is not worth its complexity and its
+lock footprint for a level nothing uses.
+
 ## Consequences
 
 **`alembic check` cannot see this trigger, in either direction.** It reads
@@ -96,13 +145,24 @@ trigger for `course.level` and this accepts one**, which is worth stating rather
 than leaving as an apparent contradiction. That decision had a generated column
 available, and this rule spans rows, so no declarative instrument exists. The
 objection 0015 raised — "a trigger's guarantee is only as good as the next
-`ALTER TABLE ... DISABLE TRIGGER`" — is narrower here than it looks: disabling a
-trigger requires ownership of the table, migrations run as the superuser
-identity ([ADR 0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md))
-and so own it, and the application role is `NOSUPERUSER` and not the owner.
-Measured: as `pulse_app`, with `SELECT`/`INSERT`/`UPDATE` granted, `ALTER TABLE
-role_assignment DISABLE TRIGGER` is refused with "must be owner of table
-role_assignment".
+`ALTER TABLE ... DISABLE TRIGGER`" — stands, and **`ALTER TABLE` is not the
+cheapest way to do it**. `SET session_replication_role = replica` turns off every
+non-replica trigger in the session, with no `ALTER TABLE`, no ownership check and
+nothing in the schema to notice: measured, two inserts and two updates in such a
+session store a two-row cycle. The parameter is superuser-only, so this does not
+widen what the application can do — measured from both ends, `pulse_app` is
+refused `ALTER TABLE role_assignment DISABLE TRIGGER` with "must be owner of
+table role_assignment", and refused the parameter itself with "permission denied
+to set parameter `session_replication_role`".
+
+**Where that matters is [E0-17](../tickets/e0/E0-17-seed-script.md), which runs
+as the superuser identity**, and a bulk loader is exactly the place somebody
+reaches for `session_replication_role` to make an import fast. A seed run that
+does so is not writing test data past a slow constraint; it is writing a
+supervision graph that no rule in this schema has looked at. The same applies to
+any future data migration. If a loader ever needs it, the loader owes a check
+afterwards that no cycle exists — the same recursive walk, run once over the
+table.
 
 **Re-parenting writes serialise.** Only writes that carry an edge or make a row
 Care take the lock, so an ordinary assignment with no supervisor does not queue —
@@ -111,12 +171,21 @@ The writes that do serialise are administrator edits and CSV import rows, where
 the contention is one person at a time. If a bulk import ever makes this hurt,
 the fix is a coarser transaction rather than a weaker guard.
 
-**Two rules the trigger enforces are asserted by no test**: an existing
-assignment being flipped to `CARE` while others report to it, and the concurrency
-case above. Both were mutated and both survived, which is how they are known to
-be untested rather than assumed to be covered. They stay because each closes a
+**The rules the trigger enforces that no test in this ticket asserts** are the
+concurrency case and the `REPEATABLE READ` refusal. Both need two connections and
+an isolation level, which no fixture here sets up. They stay because each closes a
 path to the same stored state the tested rules refuse, and both are named in the
-pull request so the test author can decide whether to cover them.
+pull request. The measurements behind them are reproducible from the tables above.
+
+A third was in that list and is now covered: an existing assignment flipped to
+`CARE` while others report to it, mutated and survived, now
+`test_an_assignment_others_report_to_cannot_be_turned_into_a_care_assignment` in
+`tests/integration/test_role_assignment_graph.py`. It is the `UPDATE` path to the
+state the two insert-side Care tests refuse — the row itself becomes Care while
+the edges pointing at it do not move, so a guard that inspects the edge being
+written never runs — and its control is the same update applied to an assignment
+nothing reports to, which is what makes the refusal attributable to the inbound
+edge rather than to the role, the scope or the doors all changing at once.
 
 **The walk is over assignment ids, and a future edit must keep it that way.** A
 guard written over `person_id` passes every cycle test in the suite and makes the

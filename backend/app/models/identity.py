@@ -473,6 +473,20 @@ class RoleAssignment(Base):
     or one person holding the same role twice over one node, are shapes no ticket
     rules out, and a constraint here would be this module guessing at a policy
     question the People editor (§6.3) owns.
+
+    **`lead_faculty_mapping` is the authority on who leads a course, not this
+    table.** A `LEAD_FACULTY` row here says where an assignment sits in the
+    supervision graph — who it reports to, and what its own grant is restricted
+    to — while §2.1 puts "one lead per course" on the mapping and computes a
+    lead's grant from it. The two can disagree today and nothing refuses it:
+    measured, two `LEAD_FACULTY` assignments on one course are accepted, and so is
+    a `LEAD_FACULTY` assignment on a course whose mapping names somebody else. The
+    scope grain rule above is *necessary* for §4.1 invariant 2 and it is not
+    sufficient — it stops a lead being scoped above a course, and it does not make
+    the course theirs. So a purview resolver reads the mapping to decide which
+    courses a lead holds, and reads this table only for the edges; E0-11 is where
+    that is written down, and E9 is where an editor keeping the two in step gets
+    built.
     """
 
     __tablename__ = "role_assignment"

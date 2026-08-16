@@ -27,6 +27,15 @@ college in the university, and a lead faculty scoped to a prefix holds every
 sibling lead's course, which is [§4.1](../SPEC.md) invariant 2 broken in the
 schema before any query is written. Nobody reports seeing too much.
 
+**On invariant 2 the grain rule is necessary and not sufficient**, and this
+record should not be read as claiming otherwise. It stops a `LEAD_FACULTY`
+assignment being scoped above a course; it does not decide *whose* course that
+is. §2.1 puts "one lead per course" on `lead_faculty_mapping`, which is where a
+lead's own grant is computed from, and the two are unconstrained against each
+other — measured, two `LEAD_FACULTY` assignments on one course are accepted, and
+so is one on a course whose mapping names somebody else. E0-11 owns which of the
+two a resolver reads.
+
 ## Decision
 
 `role_assignment` carries **five nullable foreign keys**, one per containment
@@ -42,6 +51,17 @@ a role added to the enum without a grain cannot be written down at all.
 `prefix_id` is absent because no role in §2.1's table is scoped to a prefix. A
 scope that cannot be spelled is a stronger rule than one that is spelled and
 rejected.
+
+**Two spec lines put a Lead Faculty and a prefix in one sentence, and neither is
+an assignment scope.** §5.2 makes the exclusion log "visible at the Lead Faculty
+prefix scope and above", and §5.3 lets a Lead Faculty set response publishing to
+"required" per prefix. Both are grain for a *view* and for a *policy*, and both
+are computed from §2.1's rule that a lead's tree roots are "the prefixes of their
+led courses" — the distinct prefixes of the courses in `lead_faculty_mapping`,
+which is a query over rows that already exist. A `prefix_id` here would be a much
+larger claim than either line makes: it would grant the lead every course under
+that prefix, sibling leads' courses included, which is §4.1 invariant 2. When
+§5.3's per-prefix policy is built, the prefix belongs on the policy row.
 
 ## Alternatives rejected
 
@@ -88,13 +108,22 @@ E0-11 and E9 will write that expression, probably once, in the purview resolver.
 This is the shape a unified node table would improve, and the reason the door is
 left open above.
 
-**`num_nonnulls(...) = 1` and `ELSE false` are hardening that no test asserts.**
-Both were mutated and both survived, deliberately: no test writes two scope
-columns, and the `ELSE` is unreachable while the enum holds exactly the eight
-labels the `CASE` names. They stay because the failure they prevent — a role
-scopeable to anything, or a grant naming two nodes — is silent, and because
-removing them would make the constraint's meaning depend on the enum never
-growing.
+**`num_nonnulls(...) = 1` and `ELSE false` shipped as hardening that no test
+asserted.** Both were mutated, both survived, and both were declared rather than
+quietly kept: no test wrote two scope columns, and the `ELSE` is unreachable while
+the enum holds exactly the labels the `CASE` names. They stayed because the
+failure they prevent — a role scopeable to anything, or a grant naming two nodes —
+is silent.
+
+Both are asserted now, in `tests/integration/test_role_assignment_graph.py`. A row
+carrying two scope columns and a row carrying none are each written and refused.
+The first is what needed a test rather than a note: a chair carrying a second
+scope column satisfies every other rule on the table, and the coalesce above then
+resolves it to whichever level that expression reaches first, so the failure is a
+widened purview and not an error. The `ELSE` is held closed from the other end —
+every label `pg_enum` holds for the role type must appear in the constraint's
+definition — because the failure that reaches it is a role added later without an
+arm, and no row this suite can write provokes that.
 
 **Adding a role means editing this constraint**, and forgetting to makes the role
 unwritable rather than unrestricted. That is the intended direction of failure.
