@@ -93,6 +93,17 @@ dev = [
 where = ["backend"]
 include = ["app*"]
 
+# The only non-Python files inside the package, and they are not optional: the
+# prompt a classification names is the text that produced it (SPEC §7.4). The
+# Dockerfile installs a wheel built from this project and nothing else, so
+# without this line the runtime image holds `app/ai/contracts.py` and no prompt
+# beside it — measured, not assumed: `pip wheel . --no-deps` before this entry
+# produced a wheel containing the two `.py` files alone. E0-13 is the first
+# caller, and it would fail in the container while passing on a developer's
+# machine, where the source tree is still there to read from.
+[tool.setuptools.package-data]
+"app.ai" = ["prompts/*.md"]
+
 [tool.setuptools.dynamic]
 version = { attr = "app.__version__" }
 
