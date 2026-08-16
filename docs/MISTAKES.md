@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 11**
+**Caught: 12**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -105,7 +105,7 @@ cannot see whether it exists.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 10**
+**Caught: 11**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -130,7 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 8**
+**Caught: 9**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -189,7 +189,7 @@ sentence.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -544,4 +544,47 @@ its log level up (`WORKER_LOGLEVEL`, `docker compose logs <service>`,
 `docker inspect` for a health check's output) and reproduce outside the harness
 if the harness is what is hiding it. A timeout is the absence of evidence, not
 evidence.
+
+---
+
+## 16. A mutation the fixture undid, read as a test that could not fail
+
+**Caught: 0**
+
+**What happened.** In E0-14, checking by mutation that "issuer keys are generated
+per run" is really asserted. The obvious mutation is to make the key survive a
+restart, so it was moved to a module-level constant: `_CACHED_KEY =
+IssuerKey.generate()` at import, with `create_app()` handing it out. All 27 tests
+stayed green, which reads as the criterion being asserted by nothing.
+
+It is not. `import_mock_lms_application` in `tests/conftest.py` drops every
+`app.*` module from `sys.modules` and re-imports before each platform starts —
+deliberately, and its docstring says why. So a module-level constant is
+*regenerated per platform*, and the mutation had not made the key survive
+anything. A second mutation that actually did — drawing the primes from a
+module-level seeded PRNG, which restarts identically on every re-import — turned
+two tests red immediately, and they were the right two.
+
+**Root cause.** Mutating at the wrong layer. The property under test is "two
+platform starts produce two keys", and the fixture's definition of a platform
+start is a fresh import — so any mutation *above* the import boundary is undone
+by the harness before the assertion runs. The mutation looked like it changed the
+lifetime of the key and changed nothing at all.
+
+**Consequence.** None this time, because the first result was disbelieved and a
+second mutation was tried. Had it been believed, the conclusion available was
+"this criterion is asserted by nothing" — followed by either a dispute against a
+test that is in fact correct and sharp, or a quiet decision that the key lifetime
+does not matter. It is a bad failure mode precisely because the evidence looks
+clean: a green suite after a deliberate break is the strongest signal there is,
+which is why a false one is expensive.
+
+**Rule.** Before believing a mutation that did not fail, say which mechanism was
+supposed to carry it to the assertion, and check the harness does not neutralise
+it. `tests/conftest.py` has two fixtures that drop and restore `sys.modules` —
+`import_app_module` and `import_mock_lms_application` — so **anything at module
+scope is per-test state, not process state**, and a mutation that relies on
+process lifetime has to go below the import: into a file, into the environment, or
+into a deterministic source of randomness. A mutation that fails to fail is a
+result about the mutation until you have shown otherwise.
 

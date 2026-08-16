@@ -72,3 +72,8 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0022](0022-identity-bearing-columns-are-marked-by-a-name-prefix.md) | Identity-bearing columns are marked by an `identity_` name prefix | Accepted — follows [0014](0014-lms-owned-columns-are-marked-by-a-name-prefix.md), and takes the name where the two markers meet |
 | [0023](0023-overlapping-enrollments-are-refused-by-an-exclusion-constraint.md) | Overlapping enrollment windows are refused, by a GiST exclusion constraint | Accepted — settles the choice E0-08's criterion 5 leaves open |
 | [0024](0024-the-person-to-user-link-is-carried-by-person.md) | The person-to-user link is carried by `person`, and is one to one | Accepted — rests on one registered platform per person, stated in the record |
+| [0035](0035-the-mock-platform-signs-with-standard-library-rsa.md) | The mock platform signs with standard-library RSA | Accepted — bounded to `mock-lms/`, and the bound is part of the decision |
+| [0036](0036-the-mock-platform-publishes-its-registration-as-a-document.md) | The mock platform publishes its registration as a document keyed by column | Accepted |
+| [0037](0037-the-mock-platform-is-configured-by-compose-literals.md) | The mock platform is configured by Compose literals, and earns no `.env.example` entry | Accepted — applies the rule in [0008](0008-env-has-two-readers-and-the-database-credential-is-split.md) |
+| [0038](0038-the-mock-platform-ships-in-the-base-compose-file.md) | The mock platform ships in the base Compose file, and is kept out of a deployment by what it holds | Accepted |
+| [0039](0039-the-two-app-packages-are-typechecked-in-two-runs.md) | The two `app` packages are typechecked in two mypy runs | Accepted |
