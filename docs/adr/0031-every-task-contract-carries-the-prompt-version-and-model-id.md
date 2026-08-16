@@ -96,9 +96,40 @@ straight to `model_validate`.** It parses what the provider returned, adds the
 two values it knows, and validates the result. That is a specific instruction to
 the next ticket and the reason this record exists rather than a comment.
 
-**`extra="forbid"` on the contracts and this decision interact.** A provider that
-volunteers a `model_id` of its own is refused rather than trusted, which is the
-intended behaviour and is worth knowing before reading a retry loop.
+**The contract cannot enforce this decision, and `extra="forbid"` does not close
+it.** An earlier version of this record claimed it did — that a provider
+volunteering a `model_id` of its own would be refused. That was never true, and
+was corrected after being run rather than reasoned about:
+
+```
+ModerationOutput.model_validate(
+    {"verdict": "clear", "model_id": "i-am-a-liar-3000", "prompt_version": "moderation.v1"}
+)
+→ model_id='i-am-a-liar-3000'
+```
+
+`extra="forbid"` refuses keys the model does not *declare*. `prompt_version` and
+`model_id` are declared fields, so a provider-supplied value is not extra — it is
+the field, filled in by the wrong party, and it validates and round-trips
+cleanly. Which value survives then depends entirely on the order in which E0-13
+merges its own values over the parsed payload, and nothing in the contract or in
+this ticket's tests constrains that order.
+
+**So this is an instruction to E0-13, not a property of the contract.** The
+gateway must reject a provider payload that contains either key, *before* merging
+anything into it, and treat that as the shape violation §7.4 has it retry on. Not
+overwrite quietly: a model returning an audit field is a model doing something it
+was told not to do, and on the moderation path the value it invented would
+otherwise land in a §6.2 audit record. The prompt instruction that the model must
+not return these values (`prompts/validity.v1.md` carries it) is a request, and a
+request is not a control.
+
+**The check belongs in the gateway, not in a second contract.** The obvious
+alternative — a provider-side model holding only the task's output, merged into
+the task contract afterwards — is the fork §7.4 forbids: two shapes for one task,
+free to drift, which is exactly what makes an eval case stop being a typed object
+about the thing that runs. One shape, and one gateway that refuses to be told
+what produced it.
 
 **The pair is not enough to reproduce a run on its own**, and this record does
 not claim it is. Temperature, provider-side model updates behind a stable

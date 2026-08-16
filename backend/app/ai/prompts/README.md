@@ -76,6 +76,23 @@ the JSON shape to return. The shape is the matching model in
 against it and retries on a shape violation, so a prompt that describes a
 different shape produces retries rather than results.
 
+Two rules follow from that, and both are easy to break by writing the prompt from
+the spec instead of from the contract:
+
+- **Spell every verdict exactly as the enum's value, not as SPEC §7.4's prose.**
+  The two differ in one place and it is the worst available place: §7.4 writes
+  `self-harm`, the enum's value is `self_harm`, and `"self-harm"` is *refused*.
+  Copy the table's hyphen into a moderation prompt's example object and every
+  self-harm classification becomes a shape violation — on the one path (§6.2)
+  carrying the strictest recall floor in the suite (§9.3), and with no sanctioned
+  fail-open. The prompt's prose may spell it however reads best; the example
+  object may not. [ADR 0030](../../../../docs/adr/0030-a-verdict-is-an-enum-whose-value-is-the-stored-token.md).
+- **Never ask for the prompt version or the model ID.** Every contract carries
+  both, and the gateway fills them in from what it knows it sent — a model's
+  account of what produced its own answer is not an audit record. A prompt that
+  requests them produces a payload the gateway rejects.
+  [ADR 0031](../../../../docs/adr/0031-every-task-contract-carries-the-prompt-version-and-model-id.md).
+
 Whether a prompt is any *good* is not settled by reading it. §9.3 answers that
 with versioned eval sets and per-task precision and recall floors, and a new
 version has to clear its task's floor before it ships.

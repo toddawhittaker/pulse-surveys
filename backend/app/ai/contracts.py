@@ -117,9 +117,13 @@ class ContractModel(BaseModel):
 
     - `extra="forbid"` — a provider is an untrusted dependency (`CLAUDE.md`), and
       §7.4 has the gateway "retry on shape violations" rather than store
-      whatever came back. A field nobody declared is a shape violation, including
-      one the provider volunteered that happens to share a name with something
-      real.
+      whatever came back. A key nobody declared is a shape violation.
+      **What this does not do**, because it reads as though it might: it does not
+      refuse a *declared* field the provider filled in itself. A payload carrying
+      its own `model_id` validates cleanly, and which value survives is decided
+      by E0-13's merge order. Refusing that is the gateway's job, not this
+      model's — ADR 0031's consequences say so and say why it may not be closed
+      by adding a second contract.
     - `frozen=True` — a validated output is a record of what a model returned. It
       is written once, stored, and read by the drift panel (§6.1) and by eval
       cases (§9.3); mutating one after validation would make those two disagree

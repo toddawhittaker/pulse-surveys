@@ -96,7 +96,10 @@ nothing in the diff says so.
 the spec's own spelling has real value in an audit conversation. Rejected because
 the value ends up in more machine contexts than human ones, and the hyphen is the
 form most likely to be retyped inconsistently. The hyphenated spelling stays in
-the spec and in the prompt text; the value is the token.
+the spec, and in a prompt's *prose*; the value is the token, and a prompt's
+returned-JSON example spells the token. See the consequence below — an earlier
+version of this sentence said "in the prompt text" without that distinction,
+which is a sentence a prompt author could act on and be wrong.
 
 ## Consequences
 
@@ -113,6 +116,26 @@ checked less strictly, and this record does not claim otherwise.
 verdict**, and anyone reading a database row against §7.4's table has to know
 that. It is written down here and in the enum's own docstring, which is the whole
 of the mitigation.
+
+**A prompt that shows the hyphen in its returned JSON produces a shape violation
+on every self-harm classification**, and this is the sharpest edge in this
+record. Verified rather than reasoned about: `"self_harm"` validates and
+`"self-harm"` is refused. §7.4's table spells it with a hyphen, so an author
+writing E6's moderation prompt from the spec, copying the table's wording into
+the example object, produces a prompt that works for five verdicts and fails for
+the sixth. The failure lands where it is least affordable — §5.2 routes self-harm
+to Care immediately, §9.3 makes that recall floor the strictest gate in the
+suite, and unlike §3.3's validity check, moderation has no sanctioned fail-open,
+so the classification retries and then surfaces as an error rather than
+defaulting to anything.
+
+The requirement, stated for whoever writes that prompt: **a prompt's example
+object spells verdicts exactly as the enum's values do, underscore and all**, and
+the enum in `app/ai/contracts.py` is the authority rather than §7.4's prose.
+`prompts/validity.v1.md` already does this, and the prompt directory's README
+says so under "Writing one". A test asserting a prompt's examples parse against
+its contract is the enforcing version of this and is not built here; it wants the
+prompt-to-contract mapping that arrives with E0-13's gateway.
 
 **Adding a verdict is a contract change with visible blast radius.** The enum is
 imported by the routing in §5.2, the eval cases in §9.3 and, from E0-13, the
