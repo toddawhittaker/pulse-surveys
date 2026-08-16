@@ -148,6 +148,51 @@ UNMAPPED_START = "A"
 BELOW_THE_NUMBERED_RANGE = "1"
 ABOVE_THE_NUMBERED_RANGE = "8"
 
+# ---------------------------------------------------------------------------
+# A second term, of a different length, whose map holds a different set of
+# numbered positions. **Every number here is this suite's choice and is marked
+# as one**: §2.2 gives summer 12 weeks and seeds no summer map, so unlike the
+# Fall 2026 values above there is nothing in the spec to check these against.
+#
+# 5/11/2026 is a Monday, matching the convention every term in this module
+# follows, and 12 weeks from it ends 8/2 — clear of the fall term, which starts
+# 8/17, so the two can sit in one institution without any question of overlap.
+#
+# **The positions are deliberately neither contiguous nor the whole set.** A
+# 12-week term has room for four 3-week blocks, and this map labels them 2, 3, 5
+# and 7. §2.2 numbers the fall's six blocks 2 through 7; nothing in the spec or
+# in E0-06 says a term's numbered positions must run consecutively, and E0-06's
+# check on the letter column admits any single character, so this is a map an
+# admin can configure. It is chosen this way because of what it rules out —
+# see `test_a_numbered_position_is_legal_because_its_row_exists_rather_than_by
+# _range`, where 7 being legal and 6 not is what no range rule of any shape can
+# reproduce.
+#
+# `U` is here so the summer map is not digits-only, and because a 12-week letter
+# in a 12-week term is E0-06 criterion 5's own boundary: it ends on the term's
+# last day.
+SUMMER_2026_START = date(2026, 5, 11)
+SUMMER_2026_WEEKS = 12
+SUMMER_2026_END = date(2026, 8, 2)
+THREE_WEEK_LENGTH = 3
+
+SUMMER_2026_SEED_MAP: tuple[tuple[str, int, int], ...] = (
+    ("U", 12, 0),
+    ("2", THREE_WEEK_LENGTH, 0),
+    ("3", THREE_WEEK_LENGTH, 3),
+    ("5", THREE_WEEK_LENGTH, 6),
+    ("7", THREE_WEEK_LENGTH, 9),
+)
+SUMMER_STARTS = tuple(entry[0] for entry in SUMMER_2026_SEED_MAP)
+
+# The numbered position the fall map holds and the summer map does not, and the
+# higher one the summer map does hold. The pair is the whole subject of the two
+# tests that use them: 6 is legal in one term and not in the other, and 7 is
+# legal in the term where 6 is not.
+LEGAL_IN_FALL_ONLY = "6"
+LEGAL_IN_SUMMER_ABOVE_IT = "7"
+LEGAL_IN_BOTH = "2"
+
 ONLINE_SUFFIX = "WW"
 FACE_TO_FACE_SUFFIX = "FF"
 
@@ -544,6 +589,27 @@ def seed_fall_2026(session: Any, tables: dict[str, Table], chain: dict[str, Any]
     return term
 
 
+def seed_summer_2026(session: Any, tables: dict[str, Table], chain: dict[str, Any]) -> Any:
+    """A 12-week summer term whose map holds a different set of numbered positions.
+
+    The counterpart to `seed_fall_2026`, and the only other term shape §2.2
+    describes: "fall and spring terms are 18 calendar weeks including break;
+    summer is 12". What it holds is this suite's choice — see
+    `SUMMER_2026_SEED_MAP`.
+    """
+    term = seed_term(session, tables, chain, weeks=SUMMER_2026_WEEKS, start=SUMMER_2026_START)
+    for letter, length_weeks, offset in SUMMER_2026_SEED_MAP:
+        seed_letter(
+            session,
+            tables,
+            chain,
+            letter=letter,
+            length_weeks=length_weeks,
+            start=SUMMER_2026_START + timedelta(weeks=offset),
+        )
+    return term
+
+
 # ---------------------------------------------------------------------------
 # Calling the service.
 # ---------------------------------------------------------------------------
@@ -704,7 +770,13 @@ def stored_section(session: Any, tables: dict[str, Table], section: Any) -> Any:
 
 
 def refusal(
-    section_codes: Any, session: Any, tables: dict[str, Table], term_row: Any, code: str
+    section_codes: Any,
+    session: Any,
+    tables: dict[str, Table],
+    term_row: Any,
+    code: str,
+    *,
+    because: str = "",
 ) -> BaseException:
     """The exception deriving `code` raised, or a failure saying it raised none.
 
@@ -712,16 +784,24 @@ def refusal(
     discovery helpers — "there is no such module", "there are two candidate
     derivations" — stays a failure instead of being read as the refusal the test
     was looking for (`docs/MISTAKES.md` entry 3).
+
+    `because` is appended to the message on the path where the code derives
+    instead of being refused. That path is the interesting one for some callers
+    and not for others: a caller asking about an unknown letter is describing an
+    ordinary missing row, while a caller asking about a position that is legal in
+    a *different* term is describing a specific wrong implementation, and the
+    failure should name it rather than leave the reader to open the file.
     """
     try:
         derived = derive(section_codes, session, tables, term_row, code)
     except Exception as raised:
         return raised
-    pytest.fail(
+    message = (
         f"Deriving {code!r} returned {derived!r} instead of raising. E0-07 rejects a code the "
         "term's map cannot resolve, and a section that derives anyway carries a calendar nobody "
         "configured."
     )
+    pytest.fail(f"{message} {because}" if because else message)
 
 
 # ---------------------------------------------------------------------------
@@ -761,6 +841,50 @@ def test_the_seed_map_offsets_reproduce_the_three_start_dates_the_spec_documents
     assert FALL_2026_START + timedelta(days=FALL_2026_WEEKS * 7 - 1) == FALL_2026_END, (
         "The term's end date and its length disagree, so a section that ends on the term's last "
         "day is not the boundary case this module treats it as."
+    )
+
+
+def test_the_summer_seed_map_is_a_calendar_that_term_could_hold() -> None:
+    """The summer fixture is checked for consistency before anything rests on it.
+
+    Unlike the fall map above there is nothing in §2.2 to check these numbers
+    against — the spec gives summer 12 weeks and seeds no map — so what can be
+    checked is that they are a calendar rather than a set of numbers: a Monday
+    start like every other term in this module, an end date that agrees with the
+    length, and every row fitting inside the term.
+
+    That last one matters more than it looks. A row that ran past the term's end
+    would have to be *rejected* under criterion 5, so a summer map with an
+    overrunning row would fail the tests below for a reason none of them is
+    about, and the failure would read as a defect in the derivation.
+    """
+    assert SUMMER_2026_START.weekday() == MONDAY, (
+        f"{SUMMER_2026_START} is not a Monday, so the summer term does not follow the convention "
+        "every other term in this module and §2.2's own seed dates use."
+    )
+    assert SUMMER_2026_START + timedelta(days=SUMMER_2026_WEEKS * 7 - 1) == SUMMER_2026_END, (
+        "The summer term's end date and its length disagree, so a row that fits the length may "
+        "still run past the end date."
+    )
+    assert SUMMER_2026_END < FALL_2026_START, (
+        f"The summer term ends {SUMMER_2026_END}, on or after the fall term's start "
+        f"{FALL_2026_START}. The two share an institution in the test below, and overlapping "
+        "terms would put a question into that contrast which it is not there to answer."
+    )
+
+    overrunning = {
+        letter: expected_end(SUMMER_2026_START + timedelta(weeks=offset), length_weeks)
+        for letter, length_weeks, offset in SUMMER_2026_SEED_MAP
+        if expected_end(SUMMER_2026_START + timedelta(weeks=offset), length_weeks) > SUMMER_2026_END
+    }
+    assert not overrunning, (
+        f"These rows of the summer map end after the term does ({SUMMER_2026_END}): "
+        f"{overrunning}. Criterion 5 requires the service to reject them, so the tests below "
+        "would fail on a fixture rather than on a derivation."
+    )
+    assert len(set(SUMMER_STARTS)) == len(SUMMER_STARTS), (
+        f"The summer map repeats a start position: {list(SUMMER_STARTS)}. E0-06 makes a letter "
+        "unique within a term, so the seeding would be refused by the database."
     )
 
 
@@ -1276,6 +1400,240 @@ def test_a_numbered_start_just_outside_the_range_the_map_holds_is_refused(
         f"{failure!r}, defined by `{type(failure).__module__}` rather than by this project. §2.2 "
         "numbers the 3-week sections 2 through 7, and what makes a position legal is a row in "
         "the term's map, not the digit being in a range."
+    )
+
+
+def test_the_same_numbered_code_derives_in_one_term_and_is_refused_in_another(
+    db_session: Any, declared_tables: dict[str, Table], section_codes: Any
+) -> None:
+    """Which numbered positions exist is the term's, and §2.2's 2-7 is one term's answer.
+
+    An 18-week fall term has room for six 3-week blocks and §2.2 numbers them 2
+    through 7. A 12-week summer term has room for four. So `61WW` is an ordinary
+    code in the fall and names nothing in the summer, and the difference is data:
+    the fall map has a row for 6 and the summer map does not.
+
+    **The same code, two terms, opposite outcomes, in one transaction.** Every
+    other numbered test in this module uses the Fall 2026 map alone, and a single
+    term cannot show that the range moves — a parser carrying `2 <= n <= 7`
+    passes all of them. It fails here, on the summer half, because it accepts a
+    position the summer term has no row for and hands back a section with a start
+    date read from nowhere.
+
+    **The control is `21WW` in the same summer term.** Position 2 is in both
+    maps, so its deriving in the summer proves the term and its map are readable
+    and that the refusal below is about position 6 rather than about anything
+    else in the row. Without it, a summer term that failed to seed would produce
+    the same refusal and read as a pass (`docs/MISTAKES.md` entry 3).
+
+    The two terms share an institution and do not overlap in time — summer ends
+    8/2 and fall opens 8/17 — so nothing about the contrast rests on the calendar
+    being unusual.
+    """
+    assert LEGAL_IN_FALL_ONLY in ALL_STARTS, (
+        f"{LEGAL_IN_FALL_ONLY!r} is not in the Fall 2026 seed map, so the fall half of this test "
+        "is about a position that does not exist there either, and the contrast is not one."
+    )
+    assert LEGAL_IN_FALL_ONLY not in SUMMER_STARTS, (
+        f"{LEGAL_IN_FALL_ONLY!r} is in the summer map, so it is legal in both terms and there is "
+        "no contrast to assert."
+    )
+
+    chain: dict[str, Any] = {}
+    fall = seed_fall_2026(db_session, declared_tables, chain)
+    summer_chain = {name: row for name, row in chain.items() if name == "institution"}
+    summer = seed_summer_2026(db_session, declared_tables, summer_chain)
+    assert summer_chain["term"] != chain["term"], (
+        "Seeding the summer term reused the fall one, so both maps are one map and the refusal "
+        "below would be about nothing."
+    )
+
+    code = code_for(LEGAL_IN_FALL_ONLY)
+    _, _, offset = next(entry for entry in FALL_2026_SEED_MAP if entry[0] == LEGAL_IN_FALL_ONLY)
+    in_the_fall = derive(section_codes, db_session, declared_tables, fall, code)
+    found_length, found_start, _ = derived_parts(section_codes, in_the_fall)
+
+    assert (found_length, found_start) == (
+        THREE_WEEK_LENGTH,
+        FALL_2026_START + timedelta(weeks=offset),
+    ), (
+        f"{code!r} derived {(found_length, found_start)} in the 18-week fall term, whose map row "
+        f"for {LEGAL_IN_FALL_ONLY!r} says {THREE_WEEK_LENGTH} weeks from "
+        f"{FALL_2026_START + timedelta(weeks=offset)}. It has to be an ordinary code somewhere "
+        "before its refusal in the summer term means anything."
+    )
+
+    control = code_for(LEGAL_IN_BOTH)
+    assert LEGAL_IN_BOTH in SUMMER_STARTS and LEGAL_IN_BOTH in ALL_STARTS, (
+        f"{LEGAL_IN_BOTH!r} is not in both maps, so it is not a control for a refusal that is "
+        "supposed to be about one position rather than about the summer term being unreadable."
+    )
+    try:
+        derive(section_codes, db_session, declared_tables, summer, control)
+    except Exception as raised:
+        pytest.fail(
+            f"The control code {control!r} was refused in the summer term: {raised!r}. Its "
+            "position is in the summer map, so until it derives, the refusal below says nothing "
+            "about which positions that map holds."
+        )
+
+    failure = refusal(
+        section_codes,
+        db_session,
+        declared_tables,
+        summer,
+        code,
+        because=(
+            f"This code names position {LEGAL_IN_FALL_ONLY!r}, which the 18-week fall term's map "
+            f"holds and this 12-week summer term's map does not — it holds "
+            f"{list(SUMMER_STARTS)}. Deriving it here rather than refusing it is what a rule "
+            "carrying §2.2's '2-7' as a range in the code does: that range describes the fall "
+            "term's map, and a 12-week term has room for four 3-week blocks rather than six. The "
+            "section it just produced has a start date that came from no configured row."
+        ),
+    )
+
+    assert section_codes.raised_by_the_service(failure), (
+        f"{code!r} derives in the 18-week fall term and was not refused by the service in the "
+        f"12-week summer term, whose map holds {list(SUMMER_STARTS)} and no row for "
+        f"{LEGAL_IN_FALL_ONLY!r}: it raised {failure!r}. §2.2's '3-week sections numbered 2-7' "
+        "describes one term's map, not the parser — a 12-week term has room for four 3-week "
+        "blocks, not six. A rule that hardcodes the fall's range accepts this code and derives a "
+        "section whose start date came from no configured row."
+    )
+
+
+def test_every_numbered_position_in_a_twelve_week_terms_map_derives_three_weeks(
+    db_session: Any, declared_tables: dict[str, Table], section_codes: Any
+) -> None:
+    """The other half: the shorter term's own positions derive against its own calendar.
+
+    The sibling of `test_every_numbered_three_week_start_derives_three_weeks`,
+    which asserts the same thing for the fall. Two terms are needed for the same
+    reason two are needed above: a derivation that read the length from the map
+    and the start date from somewhere fixed would pass the fall test, because in
+    the fall the fixed answer happens to be right.
+
+    Asserted on the length and the start date together, since a numbered position
+    resolving to the right row of the right term is the whole question.
+    """
+    chain: dict[str, Any] = {}
+    summer = seed_summer_2026(db_session, declared_tables, chain)
+    numbered = [entry for entry in SUMMER_2026_SEED_MAP if entry[0].isdigit()]
+    assert numbered, (
+        "The summer map in this file holds no numbered positions, so this test would pass "
+        "against a service that cannot derive one at all."
+    )
+
+    wrong: dict[str, Any] = {}
+    for start_position, length_weeks, offset in numbered:
+        derived = derive(
+            section_codes, db_session, declared_tables, summer, code_for(start_position)
+        )
+        found_length, found_start, _ = derived_parts(section_codes, derived)
+        expected = (length_weeks, SUMMER_2026_START + timedelta(weeks=offset))
+        if (found_length, found_start) != expected:
+            wrong[start_position] = ((found_length, found_start), expected)
+
+    assert not wrong, (
+        f"These numbered positions in the 12-week summer term derived the wrong (length, start): "
+        f"{wrong}. Their rows are in that term's map and nowhere else — the term starts "
+        f"{SUMMER_2026_START} and the fall term starts {FALL_2026_START}, so a start date read "
+        "off the wrong term is off by three months rather than by a week, and every week axis, "
+        "survey window and participation denominator (§3.4) counts from it."
+    )
+
+
+def test_a_numbered_position_is_legal_because_its_row_exists_rather_than_by_range(
+    db_session: Any, declared_tables: dict[str, Table], section_codes: Any
+) -> None:
+    """No rule of the form "between these two numbers" can produce this answer.
+
+    In the summer map, 7 is legal and 6 is not, while 2, 3 and 5 are legal. Any
+    rule that admits a position because its number falls between a low and a high
+    bound — `2 <= n <= 7`, or a bound computed from the term's length, or
+    anything else of that shape — must admit 6 as soon as it admits both 5 and 7.
+    So the pair below cannot be satisfied by a range at all, whatever its
+    endpoints and however they are derived. Only a lookup that asks whether the
+    row exists gives this answer.
+
+    That is a strictly stronger claim than the two-term contrast above, which
+    shows the range *moving* and is still satisfiable by a range computed per
+    term: `2 <= n <= term_weeks // 3 + 1` gives 2-7 for eighteen weeks and 2-5
+    for twelve, and passes that test and every other one in this module that uses
+    the fall map alone. What it cannot do is admit 7 in a twelve-week term, which
+    is the first half below — and it is worth knowing that it therefore also
+    fails the sibling test that derives every summer position, since that map
+    holds 7. This test is where the *reason* is legible: the two positions differ
+    only in whether a row exists.
+
+    **Both halves are needed and neither is redundant.** 7 deriving rules out a
+    range with a low ceiling; 6 being refused rules out one with a high ceiling.
+    Either alone is satisfied by some range.
+
+    A non-contiguous map is a legitimate configuration rather than a contrivance:
+    §2.2 makes the map admin-configured data, E0-06 stores it per term, and
+    nothing anywhere requires a term to offer every block it has room for. A
+    summer that runs four 3-week sessions and labels them by the fall's numbering
+    is exactly the sort of thing E11's calendar editor will be used for.
+    """
+    assert LEGAL_IN_SUMMER_ABOVE_IT in SUMMER_STARTS, (
+        f"{LEGAL_IN_SUMMER_ABOVE_IT!r} is not in the summer map, so the half of this test that "
+        "rules out a low ceiling is about nothing."
+    )
+    assert LEGAL_IN_FALL_ONLY not in SUMMER_STARTS, (
+        f"{LEGAL_IN_FALL_ONLY!r} is in the summer map, so there is no gap in the numbering and a "
+        "range rule survives this test."
+    )
+    assert LEGAL_IN_FALL_ONLY < LEGAL_IN_SUMMER_ABOVE_IT, (
+        f"{LEGAL_IN_FALL_ONLY!r} is not below {LEGAL_IN_SUMMER_ABOVE_IT!r}, so a range admitting "
+        "the second need not admit the first and the argument this test rests on does not hold."
+    )
+
+    chain: dict[str, Any] = {}
+    summer = seed_summer_2026(db_session, declared_tables, chain)
+
+    legal = code_for(LEGAL_IN_SUMMER_ABOVE_IT)
+    _, length_weeks, offset = next(
+        entry for entry in SUMMER_2026_SEED_MAP if entry[0] == LEGAL_IN_SUMMER_ABOVE_IT
+    )
+    derived = derive(section_codes, db_session, declared_tables, summer, legal)
+    found_length, found_start, _ = derived_parts(section_codes, derived)
+
+    assert (found_length, found_start) == (
+        length_weeks,
+        SUMMER_2026_START + timedelta(weeks=offset),
+    ), (
+        f"{legal!r} derived {(found_length, found_start)} in a term whose map row for "
+        f"{LEGAL_IN_SUMMER_ABOVE_IT!r} says {length_weeks} weeks from "
+        f"{SUMMER_2026_START + timedelta(weeks=offset)}. The row is there, so the position is "
+        "legal — a service that refuses it is applying a rule about the number itself, most "
+        f"likely a ceiling drawn from the term's {SUMMER_2026_WEEKS} weeks."
+    )
+
+    failure = refusal(
+        section_codes,
+        db_session,
+        declared_tables,
+        summer,
+        code_for(LEGAL_IN_FALL_ONLY),
+        because=(
+            f"This term's map holds {list(SUMMER_STARTS)}, so position {LEGAL_IN_FALL_ONLY!r} "
+            f"has no row while {LEGAL_IN_SUMMER_ABOVE_IT!r} above it does. Deriving it means the "
+            "service decided by the number rather than by the map — and no rule of the form "
+            "'between a low and a high bound' can admit 5 and 7 while refusing 6, so this is a "
+            "range check whatever its endpoints are and however they were computed."
+        ),
+    )
+
+    assert section_codes.raised_by_the_service(failure), (
+        f"In a term whose map holds {list(SUMMER_STARTS)}, position "
+        f"{LEGAL_IN_SUMMER_ABOVE_IT!r} derives and position {LEGAL_IN_FALL_ONLY!r} was not "
+        f"refused by the service: it raised {failure!r}. There is no row for it. Any rule that "
+        f"admits {LEGAL_IN_FALL_ONLY!r} while admitting "
+        f"{LEGAL_IN_SUMMER_ABOVE_IT!r} is deciding by the number rather than by the map, and "
+        "§2.2 makes the map the configuration that decides — a section derived from a row that "
+        "does not exist has a calendar nobody set."
     )
 
 
