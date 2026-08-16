@@ -76,8 +76,9 @@ the JSON shape to return. The shape is the matching model in
 against it and retries on a shape violation, so a prompt that describes a
 different shape produces retries rather than results.
 
-Two rules follow from that, and both are easy to break by writing the prompt from
-the spec instead of from the contract:
+Three rules follow from that. The first two are easy to break by writing the
+prompt from the spec instead of from the contract; the third is about the text a
+student supplies, and is the one with teeth:
 
 - **Spell every verdict exactly as the enum's value, not as SPEC §7.4's prose.**
   The two differ in one place and it is the worst available place: §7.4 writes
@@ -92,6 +93,37 @@ the spec instead of from the contract:
   account of what produced its own answer is not an audit record. A prompt that
   requests them produces a payload the gateway rejects.
   [ADR 0031](../../../../docs/adr/0031-every-task-contract-carries-the-prompt-version-and-model-id.md).
+- **Put the student's text last, behind a marker, and say it is data.** Every
+  prompt here is completed with something a student typed into a feedback box,
+  and text arriving straight after the instructions reads as more instructions.
+  So a prompt ends with a section that names the marker, states that everything
+  after it is the input and runs to the end of the message, and says plainly
+  that the input is classified rather than obeyed — including anything in it
+  shaped like a command, a JSON object, or another copy of the marker.
+  `validity.v1.md` is the worked example; copy its last section.
+
+  Three details that are easy to get wrong:
+
+  - **The marker opens the input and has no closing half.** A closing marker is
+    a string the input can contain, and then the boundary sits wherever the
+    student put it. "To the end of the message" cannot be forged, and it means
+    the gateway must append nothing after the comment.
+  - **The placeholder is `[[STUDENT_COMMENT]]`, replaced literally** — with
+    `str.replace`, never `str.format` or an f-string. These files carry JSON
+    braces in their output examples, so `.format` raises on the example object
+    before it ever reaches the placeholder.
+  - **Say what an injection attempt should be classified *as*,** rather than only
+    forbidding it. A rule the model can apply beats a prohibition it can only
+    obey: in `validity.v1.md`, a comment demanding its own verdict is judged on
+    whatever is left once the demand is set aside.
+
+  This matters least for validity and most for moderation. A validity prompt
+  talked into `substantive` inflates a section's validity rate and hands out
+  participation credit under §3.3, which is money and a grade. A **moderation**
+  prompt talked into `clear` suppresses the verdict that routes a threat or
+  self-harm disclosure to the Care queue (§6.2) — the one path §7.4 grants no
+  fail-open and §9.3 gates with the strictest recall floor in the suite. E2
+  writes that prompt from this section.
 
 Whether a prompt is any *good* is not settled by reading it. §9.3 answers that
 with versioned eval sets and per-task precision and recall floors, and a new
