@@ -124,7 +124,30 @@ role = ANY (ARRAY[
 """
 
 # The two cross-row rules of SPEC §2.1's supervision graph, as one trigger
-# function. Five details of it are load-bearing and none is obvious.
+# function. Six details of it are load-bearing and none is obvious.
+#
+# **Every relation is schema-qualified, and that is a security control rather
+# than a style.** Postgres searches the temporary schema *first* for relation
+# names, and it does so whether or not `pg_temp` appears in `search_path` — so an
+# unqualified `role_assignment` in a guard query is a table the caller chooses.
+# Measured on the pinned Postgres, as a `NOSUPERUSER NOCREATEDB NOCREATEROLE`
+# role with no `CREATE` on `public` (creating a temp table needs only the
+# `TEMPORARY` privilege, which Postgres grants to PUBLIC): with an empty
+# `pg_temp.role_assignment` present, all three guards read the temp table, and
+# the two-assignment cycle and the edge into a `CARE` assignment that had both
+# been refused seconds earlier committed instead. `'role_assignment'::regclass`
+# resolved to the temp table's oid as well, so the advisory lock key moved with
+# it and the serialisation went too.
+#
+# `SET search_path` alone does **not** close this — an unnamed `pg_temp` is
+# searched first precisely because it is unnamed, and the cycle still commits
+# under `SET search_path = pg_catalog, public`. Measured both ways. The
+# qualification is what carries the guard; the `SET search_path` on the function
+# is kept because naming `pg_temp` explicitly, and last, is the difference
+# between a search order that was chosen and one that was inherited.
+#
+# Nothing reaches this today — `pulse_app` holds only `CONNECT` — but E0-10 is
+# the ticket that grants the DML, and the bypass would arrive with it, silently.
 #
 # **It is an `AFTER` trigger, and that is what catches the shortest cycle.**
 # Postgres checks a row's foreign keys after the row exists, so
@@ -181,8 +204,10 @@ role = ANY (ARRAY[
 # (§6.3): "you have created a reporting loop" is actionable and "duplicate key
 # value violates unique constraint" is a bug report.
 SUPERVISION_EDGE_TRIGGER_FUNCTION = """
-CREATE FUNCTION role_assignment_refuse_illegal_supervision_edge() RETURNS trigger
-LANGUAGE plpgsql AS $$
+CREATE FUNCTION public.role_assignment_refuse_illegal_supervision_edge() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
+AS $$
 DECLARE
     closes_a_cycle boolean;
 BEGIN
@@ -197,12 +222,12 @@ BEGIN
                 NEW.id
                 USING ERRCODE = 'check_violation';
         END IF;
-        PERFORM pg_advisory_xact_lock('role_assignment'::regclass::oid::bigint);
+        PERFORM pg_advisory_xact_lock('public.role_assignment'::regclass::oid::bigint);
     END IF;
 
     IF NEW.reports_to IS NOT NULL THEN
         IF (
-            SELECT above.role FROM role_assignment AS above WHERE above.id = NEW.reports_to
+            SELECT above.role FROM public.role_assignment AS above WHERE above.id = NEW.reports_to
         ) = 'CARE' THEN
             RAISE EXCEPTION
                 'role assignment % may not report to %: a CARE assignment is never the '
@@ -215,7 +240,7 @@ BEGIN
                 SELECT NEW.reports_to
             UNION ALL
                 SELECT above.reports_to
-                  FROM role_assignment AS above
+                  FROM public.role_assignment AS above
                   JOIN ancestor ON above.id = ancestor.assignment_id
                  WHERE above.reports_to IS NOT NULL
         ) CYCLE assignment_id SET already_walked USING walked
@@ -232,7 +257,7 @@ BEGIN
     END IF;
 
     IF NEW.role = 'CARE' AND EXISTS (
-        SELECT 1 FROM role_assignment AS below WHERE below.reports_to = NEW.id
+        SELECT 1 FROM public.role_assignment AS below WHERE below.reports_to = NEW.id
     ) THEN
         RAISE EXCEPTION
             'role assignment % may not become a CARE assignment while other assignments '
@@ -246,11 +271,15 @@ END;
 $$
 """
 
+# Qualified for the same reason the function body is, though this one is resolved
+# once at migration time rather than on every write: it says which table the
+# trigger is attached to and which function it calls, rather than letting the
+# migration session's `search_path` answer.
 SUPERVISION_EDGE_TRIGGER = """
 CREATE TRIGGER role_assignment_supervision_edge_is_legal
-    AFTER INSERT OR UPDATE ON role_assignment
+    AFTER INSERT OR UPDATE ON public.role_assignment
     FOR EACH ROW
-    EXECUTE FUNCTION role_assignment_refuse_illegal_supervision_edge()
+    EXECUTE FUNCTION public.role_assignment_refuse_illegal_supervision_edge()
 """
 
 
@@ -375,7 +404,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_role_assignment_reports_to"), table_name="role_assignment")
     op.drop_index(op.f("ix_role_assignment_person_id"), table_name="role_assignment")
     op.drop_table("role_assignment")
-    op.execute("DROP FUNCTION role_assignment_refuse_illegal_supervision_edge()")
+    op.execute("DROP FUNCTION public.role_assignment_refuse_illegal_supervision_edge()")
     op.drop_index(op.f("ix_lead_faculty_mapping_person_id"), table_name="lead_faculty_mapping")
     op.drop_table("lead_faculty_mapping")
     # Autogenerate does not emit this either. `CREATE TYPE` rode in with
