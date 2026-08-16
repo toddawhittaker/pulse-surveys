@@ -87,10 +87,17 @@ lint: ## ruff check + ruff format --check, eslint
 		$(call skip,no frontend/package.json yet); \
 	fi
 
+# mypy runs twice, and it has to: `mock-lms/app` and `backend/app` are both
+# packages called `app` (SPEC §13 names both), and one run over the two stops
+# with "Duplicate module named app" having checked neither. Measured, not
+# assumed. `.github/workflows/ci.yml` runs the same pair in the same order. See
+# docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
 .PHONY: typecheck
-typecheck: ## mypy (strict on services/ and ai/contracts.py) + tsc --noEmit
+typecheck: ## mypy over backend/ and mock-lms/ + tsc --noEmit
 	$(call banner,mypy)
 	@mypy
+	$(call banner,mypy mock-lms/app)
+	@mypy mock-lms/app
 	$(call banner,tsc --noEmit)
 	@if [ -f frontend/package.json ]; then \
 		cd frontend && npx tsc --noEmit; \

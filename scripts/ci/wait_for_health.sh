@@ -32,7 +32,7 @@ for service in "$@"; do
     else
       # A service with no HEALTHCHECK reports an empty .Health. Treat "running
       # with no health check defined" as a configuration gap, not as healthy —
-      # api, worker, and beat are all required to declare one.
+      # every service named on this command line is required to declare one.
       status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "${container}" 2>/dev/null || echo unknown)"
       state="$(docker inspect -f '{{.State.Status}}' "${container}" 2>/dev/null || echo unknown)"
 
@@ -50,7 +50,7 @@ for service in "$@"; do
         ;;
       no-healthcheck)
         echo "FAIL: '${service}' declares no HEALTHCHECK." >&2
-        echo "      api, worker, and beat must each declare one so this gate means something." >&2
+        echo "      Every service named here must declare one so this gate means something." >&2
         exit 1
         ;;
       unhealthy)

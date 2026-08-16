@@ -41,8 +41,9 @@ make down           # docker compose down -v — discards the database too
 
 `GET http://localhost:8000/healthz` answers with the service name, the version,
 and the environment it was configured with. The interactive API documentation is
-at `/docs`, the captured mail is at <http://localhost:8025>, and Postgres and
-Redis are on their usual ports. All of them bind to `127.0.0.1` only.
+at `/docs`, the captured mail is at <http://localhost:8025>, the mock LMS is at
+<http://localhost:8080>, and Postgres and Redis are on their usual ports. All of
+them bind to `127.0.0.1` only.
 
 `docker compose up` merges [`docker-compose.override.yml`](docker-compose.override.yml)
 over the base file automatically, and that override is what publishes those
@@ -102,6 +103,44 @@ is deliberately empty: every scheduled job — window open and close, the Monday
 report, roster sync, retention — belongs to a later epic. Beat keeps its
 schedule file on a named volume, so the last-run times survive a restart and a
 job that has already fired is not fired again when one of those entries lands.
+
+## The mock LMS
+
+Pulse is launched from a learning management system over LTI 1.3, and nobody has
+a spare Canvas. So the stack brings its own platform to launch from: `mock-lms`,
+a small FastAPI application in [`mock-lms/`](mock-lms/) that does the platform
+half of a launch — it signs the `id_token` that Pulse will one day validate
+(SPEC §9.2). It is development and test only. Nothing in Pulse trusts it unless a
+row in `lti_platform` says so.
+
+`make up` starts it with everything else. Open <http://localhost:8080>, choose a
+seeded user and a placement, and press **Launch**: the page posts a
+third-party-initiated login request at the tool, exactly as a real platform
+would. Until E1 builds the tool's side of the launch, that post lands on a 404 —
+which is the honest state of a platform whose tool does not exist yet.
+
+To register it with Pulse, take the values from
+<http://localhost:8080/registration>. The keys are the column names they go into,
+so `issuer`, `client_id`, `jwks_url` and `deployment_id` fill in `lti_platform`
+and `lti_deployment` without translation. The same block is on the launch page.
+
+Two things about it are worth knowing before debugging anything:
+
+- **Its issuer key is generated per process, and never written down.** Restart
+  the container and it is a different platform with a different key set, so
+  anything that cached the old key set stops verifying. That is deliberate: SPEC
+  §9.1 asks for issuer keys generated per test run rather than fixtures checked
+  into the repository, and no private key is committed anywhere in this
+  repository — a test sweeps the tree to make sure.
+- **It has no reload.** The development override mounts your checkout into the
+  three application containers and not into this one, so editing `mock-lms/`
+  means `docker compose up -d --build mock-lms`.
+
+Two seeded users, one a learner and one an instructor, are enrolled in two
+sections. One of those sections deliberately has no title, because LTI 1.3 makes
+the context claim's title optional and Pulse's own `course.lms_title` is not —
+so the ingestion path in E1 meets the awkward case in a test rather than in a
+deployment. The roster and grade services, and a larger seed, are E0-15's.
 
 ## Working on the backend without containers
 

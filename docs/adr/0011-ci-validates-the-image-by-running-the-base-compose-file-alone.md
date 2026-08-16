@@ -40,8 +40,10 @@ and all three health waits, and would have surfaced first in a deployment.
 
 **CI validates the image by running it, in one pass on the base Compose file
 alone.** The `docker` job ends with `docker compose -f docker-compose.yml down -v
-&& up -d`, followed by `wait_for_health.sh api worker beat`. No override: no
-source mount, no published host port, no reload.
+&& up -d`, followed by `wait_for_health.sh` naming every service the stack brings
+up. (`api worker beat` when this was written; E0-14 added `mock-lms`, and the
+list grows with the stack — `tests/unit/test_ci_health_gate.py` holds it.) No
+override: no source mount, no published host port, no reload.
 
 Every other dynamic check in the job keeps running the merged topology, and that
 is half the decision rather than an accident. The merged stack is what a
@@ -83,11 +85,11 @@ matters, which is a release.
   a CI runner will be slower. It publishes no host port, which is what keeps it
   cheap — and is why every check that talks to `localhost` must stay *above* it
   in the job.
-- **Its health-wait argument list is the whole of what it asserts.** All three
-  services are named because nothing depends on `worker` or `beat`, so a name
-  dropped from that list would leave the pass green against a container that
-  never started. `tests/unit/test_ci_health_gate.py` holds both halves: that
-  every wait in the job names all three, and that the base-file-only start is
+- **Its health-wait argument list is the whole of what it asserts.** Every
+  service is named because nothing depends on `worker`, `beat` or `mock-lms`, so
+  a name dropped from that list would leave the pass green against a container
+  that never started. `tests/unit/test_ci_health_gate.py` holds both halves: that
+  every wait in the job names every service, and that the base-file-only start is
   itself followed by such a wait. The second was written because the first could
   not see a step that simply stopped waiting — an empty contribution to a
   collection that other steps keep non-empty — which would have reduced this

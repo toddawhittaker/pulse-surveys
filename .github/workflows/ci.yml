@@ -98,8 +98,16 @@ jobs:
       # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
       # the authorization chokepoint and the AI output contract; they carry the
       # confidentiality and eval guarantees, so they get no untyped escape.
+      #
+      # Then a second invocation for the mock platform, which is a second package
+      # also called `app` (SPEC §13 names both). One run over the two stops with
+      # "Duplicate module named app" having checked neither, so this is two runs
+      # rather than a longer `files` list. `make typecheck` runs the same pair.
+      # See docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
       - name: mypy
-        run: mypy
+        run: |
+          mypy
+          mypy mock-lms/app
 
   lint-frontend:
     name: Fast · tsc + eslint
@@ -406,15 +414,16 @@ jobs:
           cp .env.example .env
           docker compose build
 
-      # Three services named, five covered. `api` declares `depends_on` on a
+      # Four services named, six covered. `api` declares `depends_on` on a
       # healthy `db` and a healthy `redis`, so reaching healthy here means those
-      # two did too. `worker` and `beat` have to be named: nothing depends on
-      # them — the API must come up whether or not the job runtime does — and a
-      # service nobody names is one this gate never looks at.
-      - name: Stack comes up healthy (api, worker, beat, and through them db and redis)
+      # two did too. `worker`, `beat` and `mock-lms` have to be named: nothing
+      # depends on any of them — the API must come up whether or not the job
+      # runtime does, and nothing in the tool depends on the fake platform — and
+      # a service nobody names is one this gate never looks at.
+      - name: Stack comes up healthy (api, worker, beat, mock-lms, and through api db and redis)
         run: |
           docker compose up -d
-          ./scripts/ci/wait_for_health.sh api worker beat
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms
 
       # The container's own HEALTHCHECK proves the app answers itself. It says
       # nothing about whether the development override publishes the port, which
@@ -459,7 +468,7 @@ jobs:
       # three application containers. Every step above therefore imports from the
       # bind mount, and none of them executes the copy `pip install` put in the
       # image. A stale or missing wheel in `app/jobs` leaves the build, the round
-      # trip and all three health waits green, and then fails at worker startup
+      # trip and every health wait above green, and then fails at worker startup
       # in every deployment. That was reproduced, not assumed; the measurement,
       # the alternatives, and what has to stay true are in
       # docs/adr/0011-ci-validates-the-image-by-running-the-base-compose-file-alone.md.
@@ -469,16 +478,16 @@ jobs:
       # step rather than inside it. `down -v` first, so the base file is proved
       # from nothing — beat builds its schedule store on an empty volume here.
       #
-      # All three services are named on purpose. `api` reaches `db` and `redis`
-      # through its depends_on conditions; nothing depends on `worker` or `beat`,
-      # so dropping either from this list would leave the pass green against a
-      # container that never started.
+      # Every service is named on purpose. `api` reaches `db` and `redis`
+      # through its depends_on conditions; nothing depends on `worker`, `beat` or
+      # `mock-lms`, so dropping any of them from this list would leave the pass
+      # green against a container that never started.
       - name: Base file alone runs the installed application, not the mounted checkout
         run: |
           set -euo pipefail
           docker compose -f docker-compose.yml down -v
           docker compose -f docker-compose.yml up -d
-          ./scripts/ci/wait_for_health.sh api worker beat
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms
 
       # `down -v` discards the Postgres volume and beat's schedule volume, so
       # the second and third starts each initialise from nothing. This catches
@@ -491,7 +500,7 @@ jobs:
             echo "::group::down -v && up -d (attempt ${attempt})"
             docker compose down -v
             docker compose up -d
-            ./scripts/ci/wait_for_health.sh api worker beat
+            ./scripts/ci/wait_for_health.sh api worker beat mock-lms
             echo "::endgroup::"
           done
 

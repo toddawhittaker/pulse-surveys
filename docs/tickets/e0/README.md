@@ -161,6 +161,7 @@ that ticket includes removing its tolerance:
 | ruff, mypy, pip-audit, license check, pytest | 01 (and see below — its last tolerance went in 04) |
 | Docker build and Compose health (`api`) | 02 |
 | Compose health (`api`, `worker`, `beat`) | 03 |
+| Compose health (`mock-lms`) | 14 |
 | migration drift | 04 |
 | §4.1 invariant suite — no skips permitted | 10 |
 | Playwright e2e | 18 |

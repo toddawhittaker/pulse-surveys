@@ -44,6 +44,14 @@ unit tests and the derivation integration tests — and E0-07 spells the service
 that would drift if it were written twice (`docs/MISTAKES.md` entry 13). What it
 does and what it deliberately refuses to decide is written on the class.
 
+E0-14 adds `mock_platform` and `mock_platforms`, below `section_codes`, plus the
+JSON Web Signature helpers they hand back results in. Its definition of done asks
+for "a reusable fixture that mints a signed launch — E1's launch-validation tests
+depend on it, so its interface matters", so the fixture is the ticket's own
+deliverable rather than a convenience, and it lives here for the reason every
+other shared thing does: E1 will import it, and a second copy would drift. Like
+`SectionCodeService`, it discovers the mock platform rather than naming its
+parts — what it discovers and what it refuses to decide is written on the class.
 E0-09 adds `supervision_graph`, at the very bottom, for the same reason and with
 one more of its own. Two modules ask it the same question — the schema tests and
 the Hypothesis properties over generated graphs — and E0-09's definition of done
@@ -57,21 +65,29 @@ to decide — what a scope node is made of, and how a role is spelled — is wri
 on the class.
 """
 
+import base64
+import hashlib
+import hmac
 import importlib
 import inspect
+import itertools
+import json
 import os
 import re
+import secrets
 import string
 import sys
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from html.parser import HTMLParser
+from importlib.machinery import PathFinder
 from itertools import count
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 from uuid import uuid4
 
 import pytest
@@ -1041,6 +1057,714 @@ def section_codes() -> SectionCodeService:
 
 
 # ---------------------------------------------------------------------------
+# E0-14 — the mock LTI 1.3 platform, driven the way a tool drives one.
+# ---------------------------------------------------------------------------
+
+# SPEC §13 spells the directory and the package inside it: `mock-lms/` holding a
+# `Dockerfile` and an `app/`. Nothing else about the module layout is written
+# down, so the application object is discovered rather than imported by name.
+MOCK_LMS_DIR = REPO_ROOT / "mock-lms"
+MOCK_LMS_SERVICE = "mock-lms"
+MOCK_LMS_PACKAGE = "app"
+
+# Where the ASGI application might sit inside that package, most likely first.
+# `backend/` puts its own in `app.main`, so a mock written beside it probably
+# does too; the rest are here so that a different arrangement is found rather
+# than reported as a missing deliverable.
+MOCK_LMS_MODULES = ("app.main", "app", "app.platform", "app.server", "app.api")
+
+# Names a zero-argument application factory might carry, if the mock exposes one
+# instead of a module-level instance. `backend/app/main.py` uses `create_app`,
+# and `uvicorn --factory` is what makes that legal, so the mock may well too.
+APPLICATION_FACTORY_NAMES = ("create_app", "get_app", "make_app", "build_app")
+
+# How many launches a page offering several users, contexts or roles is walked
+# for. **This suite's choice**, and a bound rather than a rule: the seeded data
+# is meant to be small (E0-15: "this seed data belongs to the mock platform and
+# stays small"), and a page offering more combinations than this is still walked,
+# just not exhaustively. Raise it if a seed grows and a test starts missing a
+# shape it names.
+MAX_LAUNCH_VARIANTS = 32
+
+# The parameters a tool sends to a platform's authorization endpoint for a plain
+# resource-link launch. These are the OIDC and LTI 1.3 required values, not this
+# suite's preferences: `id_token` with `form_post` and `prompt=none` is what the
+# LTI 1.3 security framework specifies, and a platform that answered anything
+# else would not be strict LTI 1.3 core (SPEC §7.3).
+AUTHORIZATION_REQUEST_CONSTANTS = {
+    "scope": "openid",
+    "response_type": "id_token",
+    "response_mode": "form_post",
+    "prompt": "none",
+}
+
+# The DigestInfo prefix PKCS#1 v1.5 puts in front of a SHA-256 digest, from
+# RFC 8017 appendix B.1. Nineteen bytes, and the whole of what makes an RS256
+# verification a verification rather than a decode.
+SHA256_DIGEST_INFO_PREFIX = bytes.fromhex("3031300d060960864801650304020105000420")
+
+
+def base64url_decode(value: str) -> bytes:
+    """Decode one base64url segment, supplying the padding JWS omits."""
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+class JsonWebSignature(NamedTuple):
+    """A compact JWS, split into the parts a verification needs.
+
+    `signing_input` is the exact bytes that were signed — the encoded header and
+    payload with the dot between them — and it is kept rather than recomputed so
+    that a caller checking a *tampered* token compares against what the tamper
+    produced.
+    """
+
+    header: dict[str, Any]
+    claims: dict[str, Any]
+    signing_input: bytes
+    signature: bytes
+
+
+def split_jws(token: str) -> JsonWebSignature:
+    """Split a compact JWS, failing with the token in hand if it is not one."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        pytest.fail(
+            f"The mock platform issued a value with {len(parts)} dot-separated segments rather "
+            "than the three a compact JSON Web Signature has, so it is not a signed `id_token`. "
+            f"It begins {token[:64]!r}."
+        )
+    encoded_header, encoded_claims, encoded_signature = parts
+    try:
+        header = json.loads(base64url_decode(encoded_header))
+        claims = json.loads(base64url_decode(encoded_claims))
+    except ValueError as failure:
+        # `json.JSONDecodeError` and `binascii.Error` are both `ValueError`
+        # subclasses, so this one clause covers a segment that is not base64url
+        # and a segment that decodes to something that is not JSON.
+        pytest.fail(f"The `id_token`'s header or payload is not base64url-encoded JSON: {failure}")
+    return JsonWebSignature(
+        header=header,
+        claims=claims,
+        signing_input=f"{encoded_header}.{encoded_claims}".encode("ascii"),
+        signature=base64url_decode(encoded_signature),
+    )
+
+
+def verify_rs256(signing_input: bytes, signature: bytes, key: Mapping[str, Any]) -> bool:
+    """Whether `signature` is an RS256 signature over `signing_input` under `key`.
+
+    Written out of `pow` and `hashlib` rather than taken from a library, because
+    nothing in this project's locked dependency set verifies a JWS and adding one
+    to satisfy a test would decide, from the test side, which JOSE library the
+    mock signs with. RSA *verification* is public-exponent modular
+    exponentiation and a padding comparison, so the whole of it is below.
+
+    The comparison is against the full PKCS#1 v1.5 encoded message, padding
+    included, which is what makes this a real check: a verifier that compared
+    only the trailing digest would accept a signature with forged padding, and a
+    verifier that only decoded the token would accept anything at all. The tests
+    that hand this a wrong key and a tampered payload are what prove it says no.
+    """
+    if key.get("kty") != "RSA":
+        return False
+    try:
+        modulus = int.from_bytes(base64url_decode(str(key["n"])), "big")
+        exponent = int.from_bytes(base64url_decode(str(key["e"])), "big")
+    except (KeyError, ValueError, TypeError):
+        return False
+    if modulus <= 0 or exponent <= 0:
+        return False
+
+    width = (modulus.bit_length() + 7) // 8
+    if len(signature) != width:
+        return False
+    numeric = int.from_bytes(signature, "big")
+    if numeric >= modulus:
+        return False
+
+    encoded = pow(numeric, exponent, modulus).to_bytes(width, "big")
+    digest_info = SHA256_DIGEST_INFO_PREFIX + hashlib.sha256(signing_input).digest()
+    if width < len(digest_info) + 11:
+        return False
+    expected = b"\x00\x01" + b"\xff" * (width - len(digest_info) - 3) + b"\x00" + digest_info
+    return hmac.compare_digest(encoded, expected)
+
+
+def verifying_key(signature: JsonWebSignature, key_set: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The key in `key_set` that verifies `signature`, or `None` if none does.
+
+    Every key is tried, not just the one the header's `kid` names. That is
+    deliberate: whether the header selects the right key and whether the key set
+    contains a key that works are two different claims, and one test asserts each.
+    Trying only the named key would fold them together, so a mock that published
+    the right key under the wrong `kid` would fail both tests with one cause.
+    """
+    keys = key_set.get("keys")
+    if not isinstance(keys, list):
+        return None
+    for key in keys:
+        if isinstance(key, dict) and verify_rs256(
+            signature.signing_input, signature.signature, key
+        ):
+            return key
+    return None
+
+
+class FormReader(HTMLParser):
+    """Every form on an HTML page, with the fields it would submit.
+
+    A parser rather than a regular expression, because what is being read is the
+    launch page's contract with a browser — a form's action, its method, and the
+    named values it carries — and a pattern over markup answers a different
+    question that happens to look the same (`docs/MISTAKES.md` entry 3).
+
+    `<select>` options are collected separately from fixed fields, because a
+    launch page offering a choice of seeded users is one form with several
+    outcomes, and the tests about "an arbitrary seeded user" need each outcome.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.forms: list[dict[str, Any]] = []
+        self.open_select: str | None = None
+        self.open_option: str | None = None
+        self.option_text: str = ""
+
+    def current(self) -> dict[str, Any] | None:
+        return self.forms[-1] if self.forms else None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = {name.lower(): (value or "") for name, value in attrs}
+        if tag == "form":
+            self.forms.append(
+                {
+                    "action": attributes.get("action", ""),
+                    "method": (attributes.get("method") or "get").lower(),
+                    "fields": {},
+                    "choices": {},
+                }
+            )
+            return
+        form = self.current()
+        if form is None:
+            return
+        if tag in {"input", "textarea"}:
+            name = attributes.get("name")
+            if name:
+                form["fields"][name] = attributes.get("value", "")
+        elif tag == "select":
+            self.open_select = attributes.get("name") or None
+            if self.open_select:
+                form["choices"].setdefault(self.open_select, [])
+        elif tag == "option" and self.open_select:
+            # Closed here as well as on `</option>`, because HTML permits the
+            # end tag to be omitted and a page that omits it would otherwise
+            # lose every option but the last — which would silently shrink the
+            # set of seeded launches the tests walk.
+            self.close_option()
+            self.open_option = attributes.get("value")
+            self.option_text = ""
+
+    def handle_data(self, data: str) -> None:
+        if self.open_option is None and self.open_select:
+            self.option_text += data
+
+    def close_option(self) -> None:
+        form = self.current()
+        if form is None or not self.open_select:
+            return
+        value = self.open_option if self.open_option is not None else self.option_text.strip()
+        if value:
+            form["choices"][self.open_select].append(value)
+        self.open_option = None
+        self.option_text = ""
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "option":
+            self.close_option()
+        elif tag == "select":
+            self.close_option()
+            self.open_select = None
+
+
+def forms_in(markup: str) -> list[dict[str, Any]]:
+    """Parse `markup` and hand back every form it declares."""
+    reader = FormReader()
+    reader.feed(markup)
+    reader.close()
+    return reader.forms
+
+
+def form_submissions(form: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Every set of values `form` could submit, one per combination of choices."""
+    choices = form.get("choices") or {}
+    names = sorted(name for name, options in choices.items() if options)
+    if not names:
+        return [dict(form.get("fields") or {})]
+    submissions: list[dict[str, str]] = []
+    for combination in itertools.islice(
+        itertools.product(*(choices[name] for name in names)), MAX_LAUNCH_VARIANTS
+    ):
+        values = dict(form.get("fields") or {})
+        values.update(dict(zip(names, combination, strict=True)))
+        submissions.append(values)
+    return submissions
+
+
+class LaunchOffer(NamedTuple):
+    """One launch the platform's launch page offers a browser.
+
+    `posts_to` is the form's action — the tool's third-party login-initiation
+    URL — and `parameters` is what the form would send it. Those parameters are
+    the OIDC third-party-initiated login request, so they are also where a test
+    learns the seeded registration's issuer, client ID and deployment ID without
+    any endpoint being invented to publish them.
+    """
+
+    page: str
+    posts_to: str
+    method: str
+    parameters: dict[str, str]
+
+
+class SignedLaunch(NamedTuple):
+    """The result of driving one launch to the point the tool would receive it."""
+
+    offer: LaunchOffer
+    authorization_request: dict[str, str]
+    id_token: str
+    state: str | None
+    posted_to: str | None
+    signature: JsonWebSignature
+
+    @property
+    def claims(self) -> dict[str, Any]:
+        return self.signature.claims
+
+    @property
+    def header(self) -> dict[str, Any]:
+        return self.signature.header
+
+
+class MockLmsFinder:
+    """Resolve the `app` package out of `mock-lms/` for the duration of an import.
+
+    The mock is a second application whose package is *also* called `app`
+    (SPEC §13), and this repository's own `app` is importable in the test
+    process. Putting `mock-lms/` on `sys.path` is not enough to win that
+    collision: an editable install of the backend registers a meta-path finder,
+    and `sys.meta_path` is consulted before `sys.path` is, so a plain
+    `import app` would return the backend's package on a developer's machine and
+    possibly the mock's in CI — the same test measuring two different programs
+    depending on how the project was installed.
+
+    So the resolution is made explicit and temporary: this finder goes on the
+    front of `sys.meta_path`, answers for `app` and everything under it out of
+    `mock-lms/`, and comes off again. Nothing outside the import sees it.
+    """
+
+    def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
+        if fullname != MOCK_LMS_PACKAGE and not fullname.startswith(f"{MOCK_LMS_PACKAGE}."):
+            return None
+        parts = fullname.split(".")
+        if len(parts) == 1:
+            search = [str(MOCK_LMS_DIR)]
+        else:
+            parent = sys.modules.get(".".join(parts[:-1]))
+            search = list(getattr(parent, "__path__", []))
+        return PathFinder.find_spec(fullname, search)
+
+
+def import_mock_lms_application(values: Mapping[str, str]) -> Any:
+    """Import the mock platform fresh, under `values`, and return its ASGI app.
+
+    Fresh every time, and that is the property two of E0-14's tests rest on:
+    "issuer keys are generated per run" is only observable if a second start of
+    the platform is really a second start. Every `app*` module is dropped before
+    the import and the previous set is put back after, exactly as
+    `import_app_module` does above and for the same reason — a module cached in
+    `sys.modules` answers with the environment some earlier test set.
+
+    What is found is a `FastAPI` instance at module level, or a factory that
+    returns one. Both are legal — `uvicorn --factory` is how this repository
+    starts its own — and E0-14 names neither, so naming one here would make the
+    implementer build to this fixture instead of to the ticket.
+    """
+    from fastapi import FastAPI
+
+    if not MOCK_LMS_DIR.is_dir():
+        pytest.fail(
+            f"{MOCK_LMS_DIR} does not exist. E0-14's scope is a `mock-lms/` FastAPI application "
+            "with a Dockerfile, added to Compose as `mock-lms` (SPEC §13 puts it at "
+            "`mock-lms/app/`, and §9.2 says what it is for)."
+        )
+
+    saved = {
+        name: module
+        for name, module in list(sys.modules.items())
+        if name == MOCK_LMS_PACKAGE or name.startswith(f"{MOCK_LMS_PACKAGE}.")
+    }
+    for name in saved:
+        sys.modules.pop(name, None)
+
+    finder = MockLmsFinder()
+    sys.meta_path.insert(0, finder)
+    imported: list[ModuleType] = []
+    try:
+        with environment(dict(values)):
+            for name in MOCK_LMS_MODULES:
+                try:
+                    module = importlib.import_module(name)
+                except ModuleNotFoundError as failure:
+                    absent = failure.name
+                    if absent is not None and (name == absent or name.startswith(f"{absent}.")):
+                        continue
+                    raise
+                imported.append(module)
+                for attribute in sorted(vars(module)):
+                    candidate = getattr(module, attribute, None)
+                    if isinstance(candidate, FastAPI):
+                        return candidate
+                for attribute in APPLICATION_FACTORY_NAMES:
+                    factory = getattr(module, attribute, None)
+                    if callable(factory) and not inspect.isclass(factory):
+                        built = factory()
+                        if isinstance(built, FastAPI):
+                            return built
+    finally:
+        if finder in sys.meta_path:
+            sys.meta_path.remove(finder)
+        for name in [
+            n
+            for n in list(sys.modules)
+            if n == MOCK_LMS_PACKAGE or n.startswith(f"{MOCK_LMS_PACKAGE}.")
+        ]:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+    pytest.fail(
+        "Nothing under `mock-lms/app/` exposes a FastAPI application. Looked for a module-level "
+        f"instance, then a factory named one of {list(APPLICATION_FACTORY_NAMES)}, in "
+        f"{list(MOCK_LMS_MODULES)}; imported {[m.__name__ for m in imported] or 'nothing'}. "
+        "E0-14's scope is a `mock-lms/` FastAPI application; if it is reachable under a spelling "
+        "none of those covers, that is a defect in `MockPlatform` in tests/conftest.py rather "
+        "than in the mock, and MOCK_LMS_MODULES there is the one line that changes."
+    )
+
+
+class MockPlatform:
+    """E0-14's platform, driven the way a tool drives one rather than by name.
+
+    **Nothing about the mock's URLs is written down**, so nothing here is
+    hardcoded that the protocol can supply instead:
+
+      - The launch page is found by *what it serves*: the page carrying a form
+        with the OIDC third-party-initiated login parameters. That is the
+        definition of a launch page rather than a guess at a path.
+      - The registration values a test compares claims against — issuer, client
+        ID, deployment ID, target link URI — are read out of that form, because
+        those are exactly the parameters the initiation request carries.
+      - The authorization endpoint and the key set are taken from the platform's
+        OIDC discovery document when it serves one, and otherwise from the one
+        route whose path names them.
+
+    Two paths are all this leaves to a fragment match, and each fails with a
+    message saying so. **What this does not do is decide anything**: where E0-14
+    leaves a name open, a test fails naming the gap rather than passing against
+    an interface the ticket never asked for.
+    """
+
+    def __init__(self, values: Mapping[str, str] | None = None) -> None:
+        from fastapi.testclient import TestClient
+
+        self.values = dict(values or {})
+        self.application = import_mock_lms_application(self.values)
+        self.client = TestClient(self.application, follow_redirects=False)
+        # Entered so the application's lifespan runs: a platform that generates
+        # its issuer key on startup has not generated one until it does.
+        self.client.__enter__()
+
+    def close(self) -> None:
+        self.client.__exit__(None, None, None)
+
+    # -- what the application serves ----------------------------------------
+
+    def paths(self, method: str = "GET") -> list[str]:
+        """Every declared path that answers `method` and takes no path parameter."""
+        found: list[str] = []
+        for route in self.application.routes:
+            path = getattr(route, "path", None)
+            methods = getattr(route, "methods", None) or set()
+            if isinstance(path, str) and "{" not in path and method in methods:
+                found.append(path)
+        return sorted(set(found))
+
+    def path_named_after(self, fragments: tuple[str, ...], purpose: str) -> str:
+        """The one route whose path carries one of `fragments`.
+
+        Ambiguity stops rather than picks, the way `callable_named_after` does
+        above: two candidates mean this cannot tell which one the ticket is
+        about, and choosing would be the test deciding.
+        """
+        declared = sorted(set(self.paths("GET")) | set(self.paths("POST")))
+        for fragment in fragments:
+            matches = [path for path in declared if fragment in path.lower()]
+            if len(matches) > 1:
+                pytest.fail(
+                    f"The mock platform declares more than one route whose path carries "
+                    f"{fragment!r} ({matches}), so this cannot tell which one {purpose}. E0-14 "
+                    "spells no URL, so naming one here would pin an interface the ticket leaves "
+                    "open — say in the pull request which it is, and `MockPlatform` in "
+                    "tests/conftest.py is the one place that changes."
+                )
+            if matches:
+                return matches[0]
+        pytest.fail(
+            f"The mock platform declares no route whose path carries any of {list(fragments)} — "
+            f"it declares {declared}. This is the endpoint that {purpose}, which E0-14's scope "
+            "requires; if it is there under a path none of these fragments reaches, that is a "
+            "defect in `MockPlatform` in tests/conftest.py rather than in the mock."
+        )
+
+    def discovery(self) -> dict[str, Any] | None:
+        """The platform's OIDC discovery document, if it serves one."""
+        for path in self.paths("GET"):
+            if "openid-configuration" not in path:
+                continue
+            response = self.client.get(path)
+            if response.status_code == 200:
+                document = response.json()
+                if isinstance(document, dict):
+                    return document
+        return None
+
+    def endpoint(self, discovered: str, fragments: tuple[str, ...], purpose: str) -> str:
+        """An endpoint path, from the discovery document if there is one."""
+        document = self.discovery()
+        if document:
+            advertised = document.get(discovered)
+            if isinstance(advertised, str) and advertised:
+                return urlsplit(advertised).path or advertised
+        return self.path_named_after(fragments, purpose)
+
+    def jwks(self) -> dict[str, Any]:
+        """The published key set, as JSON."""
+        path = self.endpoint("jwks_uri", ("jwks", "keys"), "serves the platform's public keys")
+        response = self.client.get(path)
+        assert response.status_code == 200, (
+            f"The JWKS endpoint `{path}` answered {response.status_code} rather than 200. E0-14's "
+            "second acceptance criterion is that it serves a key that verifies an issued "
+            "`id_token`, and a key set nobody can fetch verifies nothing."
+        )
+        document = response.json()
+        assert isinstance(document, dict), (
+            f"The JWKS endpoint `{path}` served {document!r}, which is not a JWK Set. RFC 7517 "
+            "makes a key set a JSON object with a `keys` member."
+        )
+        return document
+
+    def published_keys(self) -> list[dict[str, Any]]:
+        keys = self.jwks().get("keys")
+        return [key for key in keys if isinstance(key, dict)] if isinstance(keys, list) else []
+
+    def verifies(self, token: Any) -> dict[str, Any] | None:
+        """The published key that verifies `token`, or `None` if none does.
+
+        Takes a compact JWS string or an already-split one, so a test that has
+        tampered with a token can hand over the string it produced rather than
+        rebuilding the split. Verification is the arithmetic in `verify_rs256`
+        above; this only supplies the key set.
+        """
+        signature = token if isinstance(token, JsonWebSignature) else split_jws(str(token))
+        return verifying_key(signature, self.jwks())
+
+    # -- launches ------------------------------------------------------------
+
+    def offers(self) -> list[LaunchOffer]:
+        """Every launch the platform's launch page offers.
+
+        Found by serving rather than by path: a launch page is the page carrying
+        a form whose fields are an OIDC third-party-initiated login request, and
+        `target_link_uri` plus `login_hint` are the two that request must carry.
+        Only `GET` routes with no path parameter are fetched, so nothing here can
+        have a side effect.
+        """
+        offers: list[LaunchOffer] = []
+        for path in self.paths("GET"):
+            response = self.client.get(path)
+            if response.status_code != 200:
+                continue
+            if "html" not in response.headers.get("content-type", "").lower():
+                continue
+            for form in forms_in(response.text):
+                names = set(form["fields"]) | set(form["choices"])
+                if not {"target_link_uri", "login_hint"} <= names:
+                    continue
+                for parameters in form_submissions(form):
+                    offers.append(
+                        LaunchOffer(
+                            page=path,
+                            posts_to=urljoin(f"http://testserver{path}", form["action"]),
+                            method=form["method"],
+                            parameters=parameters,
+                        )
+                    )
+        return offers
+
+    def require_offers(self) -> list[LaunchOffer]:
+        offers = self.offers()
+        assert offers, (
+            "The mock platform serves no page carrying a form with `target_link_uri` and "
+            f"`login_hint` fields. Pages fetched: {self.paths('GET')}. E0-14's scope asks for "
+            "'a launch page that posts the form to the tool, so a browser-driven test can click "
+            "through a realistic launch', and those two fields are what make that form an OIDC "
+            "third-party-initiated login request rather than an arbitrary form."
+        )
+        return offers
+
+    def mint(
+        self,
+        offer: LaunchOffer | None = None,
+        *,
+        state: str | None = None,
+        nonce: str | None = None,
+    ) -> SignedLaunch:
+        """Drive one launch to the point a tool would receive the `id_token`.
+
+        This is E0-14's seventh criterion — "a test can obtain a signed launch
+        for an arbitrary seeded user and role without a browser" — and it is done
+        by *being* the tool: taking the platform's initiation request, answering
+        it with an authorization request the way a tool would, and reading the
+        `id_token` out of what comes back. Nothing is called that a real tool
+        would not call, so a launch minted here and a launch a browser produces
+        are the same launch.
+        """
+        chosen = offer or self.require_offers()[0]
+        request = dict(AUTHORIZATION_REQUEST_CONSTANTS)
+        request["state"] = state if state is not None else secrets.token_urlsafe(24)
+        request["nonce"] = nonce if nonce is not None else secrets.token_urlsafe(24)
+        request["redirect_uri"] = chosen.parameters.get("target_link_uri", "")
+        for name in ("login_hint", "lti_message_hint", "client_id", "lti_deployment_id"):
+            value = chosen.parameters.get(name)
+            if value:
+                request[name] = value
+
+        path = self.endpoint(
+            "authorization_endpoint",
+            ("auth",),
+            "receives the tool's authorization request and answers with a signed `id_token`",
+        )
+        # POST where the route accepts it, GET otherwise. Which of the two a
+        # tool uses is the tool's choice under OIDC, so the endpoint's own
+        # declaration decides rather than this file.
+        if path in self.paths("POST"):
+            response = self.client.post(path, data=request)
+        else:
+            response = self.client.get(path, params=request)
+
+        id_token, returned_state, posted_to = self.read_authorization_response(response, path)
+        return SignedLaunch(
+            offer=chosen,
+            authorization_request=request,
+            id_token=id_token,
+            state=returned_state,
+            posted_to=posted_to,
+            signature=split_jws(id_token),
+        )
+
+    def read_authorization_response(
+        self, response: Any, path: str
+    ) -> tuple[str, str | None, str | None]:
+        """Pull the `id_token` and the returned `state` out of what the platform sent.
+
+        Both shapes are accepted — the `form_post` auto-submitting form the LTI
+        security framework specifies, and a redirect carrying the values in its
+        query or fragment — because which one the mock uses is not something
+        E0-14 decides, and refusing the second would fail a platform that is
+        merely making a different legal choice.
+        """
+        if response.status_code == 200:
+            for form in forms_in(response.text):
+                fields = form["fields"]
+                if "id_token" in fields:
+                    return fields["id_token"], fields.get("state"), form["action"]
+        location = response.headers.get("location")
+        if location:
+            split = urlsplit(location)
+            for blob in (split.query, split.fragment):
+                pairs = parse_qs(blob)
+                if "id_token" in pairs:
+                    returned = pairs.get("state") or [None]
+                    return pairs["id_token"][0], returned[0], location
+        pytest.fail(
+            f"The authorization endpoint `{path}` answered {response.status_code} with no "
+            "`id_token` in a form and none in a redirect, so no launch was produced. Body begins "
+            f"{response.text[:300]!r}. E0-14 issues 'a signed `id_token` carrying the LTI 1.3 "
+            "core claims'; the LTI 1.3 security framework returns it by `form_post` to the "
+            "tool's redirect URI."
+        )
+
+
+@pytest.fixture
+def repo_root() -> Path:
+    """The repository root, for the tests that sweep the whole tree."""
+    return REPO_ROOT
+
+
+@pytest.fixture
+def mock_lms_dir() -> Path:
+    """Where the mock platform must live (SPEC §13). Asserted by the test, not here."""
+    return MOCK_LMS_DIR
+
+
+@pytest.fixture
+def mock_lms_service() -> str:
+    """The Compose service name SPEC §7.2 gives the mock platform."""
+    return MOCK_LMS_SERVICE
+
+
+@pytest.fixture
+def mock_platforms() -> Iterator[Callable[..., MockPlatform]]:
+    """Start one or more independent mock platforms, and shut them all down after.
+
+    A factory rather than a single instance because two of E0-14's criteria are
+    about *two* platforms: issuer keys generated per run means a second start
+    generates a second key, and a key set that verifies its own launches has to
+    refuse someone else's. Neither is observable from one instance.
+    """
+    started: list[MockPlatform] = []
+
+    def start(values: Mapping[str, str] | None = None) -> MockPlatform:
+        platform = MockPlatform(values)
+        started.append(platform)
+        return platform
+
+    try:
+        yield start
+    finally:
+        for platform in reversed(started):
+            platform.close()
+
+
+@pytest.fixture
+def mock_platform(mock_platforms: Callable[..., MockPlatform]) -> MockPlatform:
+    """One mock platform, started fresh for this test. See `MockPlatform` above."""
+    return mock_platforms()
+
+
+@pytest.fixture
+def signed_launch(mock_platform: MockPlatform) -> SignedLaunch:
+    """One signed launch off the first seeded offer.
+
+    E0-14's definition of done names this: "a reusable fixture that mints a
+    signed launch — E1's launch-validation tests depend on it, so its interface
+    matters". `mock_platform.mint(...)` is the interface; this fixture is the
+    common case of it.
+    """
+    return mock_platform.mint()
+
+
 # E0-09 — role assignments and the supervision graph.
 # ---------------------------------------------------------------------------
 

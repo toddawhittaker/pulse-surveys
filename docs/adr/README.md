@@ -79,3 +79,8 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0030](0030-a-verdict-is-an-enum-whose-value-is-the-stored-token.md) | A verdict is an `enum.Enum` whose value is the stored token | Accepted |
 | [0031](0031-every-task-contract-carries-the-prompt-version-and-model-id.md) | Every task contract carries the prompt version and model ID, and the gateway supplies them | Accepted — reads E0-12's "every model" over §7.4's narrower "every classification" |
 | [0032](0032-a-prompt-file-is-immutable-once-a-classification-cites-it.md) | Prompts are named `<task>.v<N>.md` and a committed prompt file is never edited | Accepted — half enforced by test, half convention, said so in the record |
+| [0035](0035-the-mock-platform-signs-with-standard-library-rsa.md) | The mock platform signs with standard-library RSA | Accepted — bounded to `mock-lms/`, and the bound is part of the decision |
+| [0036](0036-the-mock-platform-publishes-its-registration-as-a-document.md) | The mock platform publishes its registration as a document keyed by column | Accepted |
+| [0037](0037-the-mock-platform-is-configured-by-compose-literals.md) | The mock platform is configured by Compose literals, and earns no `.env.example` entry | Accepted — applies the rule in [0008](0008-env-has-two-readers-and-the-database-credential-is-split.md) |
+| [0038](0038-the-mock-platform-ships-in-the-base-compose-file.md) | The mock platform ships in the base Compose file, and is kept out of a deployment by what it holds | Accepted |
+| [0039](0039-the-two-app-packages-are-typechecked-in-two-runs.md) | The two `app` packages are typechecked in two mypy runs | Accepted |
