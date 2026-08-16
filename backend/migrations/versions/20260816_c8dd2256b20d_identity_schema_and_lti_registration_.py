@@ -1,7 +1,7 @@
 """identity schema and lti registration tables
 
 Revision ID: c8dd2256b20d
-Revises: 216896354431
+Revises: e046c1b23e54
 Create Date: 2026-08-16 06:54:46.657499
 
 The six tables of SPEC §8 that say who someone is — user, user_identity, person,
@@ -53,7 +53,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "c8dd2256b20d"
-down_revision: str | Sequence[str] | None = "216896354431"
+down_revision: str | Sequence[str] | None = "e046c1b23e54"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
