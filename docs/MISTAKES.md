@@ -35,7 +35,23 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 26**
+**Caught: 27**
+
+*(The twenty-seventh, in E0-11's arbitration round, and it caught the same shape
+twice in one afternoon. First, three tests in `test_identity_grants.py` reached
+their subject with `alembic downgrade -1` — a step chosen relative to head, so on
+a branch carrying a new revision they undid E0-11's work while asserting facts
+about E0-10's. They were red, which is the lucky version. Second, and worse
+because it was green: `test_an_assignment_that_reports_to_itself_is_refused`,
+`test_a_two_assignment_cycle_is_refused` and `test_a_three_assignment_cycle_is_refused`
+all passed against the new rank rule rather than against the cycle guard they are
+named for, and the two-assignment test's message assertion passed only because
+`CYCLE_ERROR_FRAGMENTS` held `"supervis"` while the rank rule's message reads "a
+supervision edge runs from a role to one that outranks it". Three tests named for
+a guard, none of them reaching it, and a fragment list meant to identify one guard
+satisfied by another's wording. The repair plants a non-climbing edge under the
+superuser bypass so the cycle walk has a subject that exists, and splits the
+fragments into a cycle set and a rank set so a test can say which answered.)*
 
 *(The twenty-sixth, in E0-11, and it decided the shape of a measurement rather
 than of a test. The claim was that the new revision's `downgrade()` restores
@@ -185,7 +201,17 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 23**
+**Caught: 24**
+
+*(The twenty-fourth, and it set the radius of a one-line repair. Pinning three
+tests to E0-10's revision changed one call and falsified everything around it:
+six assertion messages that said "After `alembic downgrade -1` …", a section
+comment claiming `downgrade -1` is the inverse of `upgrade head`, a fixture named
+`views_at_head` that no longer looked at head, and two module docstrings. It also
+caught a count — ADR 0044 recorded E0-11's edge module as "43 assertions" and
+recorded the three E0-09 tests as "red on this branch", both true when written and
+both false an hour later. The count was deleted rather than corrected: a number
+that has to be re-measured on every edit is a record that will be wrong again.)*
 
 *(The twenty-third: E0-11 added two rules to E0-09's supervision trigger, and this
 entry is why the sweep went outward from the function rather than stopping at it.
@@ -333,7 +359,19 @@ sentence.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 23**
+**Caught: 24**
+
+*(The twenty-fourth: E0-11's mirror rule. The rank rule refuses an edge that does
+not climb, but a supervisor's *role* can be edited after its reporters are in
+place — a `CHAIR` with a lead reporting to it, changed to `LEAD_FACULTY`, turns
+every one of those stored edges into the inversion the rule exists to refuse,
+without an edge being written. The implementer closed it in four lines and could
+not test it, because the test wall put the assertion on the other side; ADR 0044
+declared the gap in writing rather than letting it ship silent, and this entry is
+why the declaration was not treated as sufficient. The test now exists with its
+control — the same edit to a role that still outranks its reporters must succeed,
+and the reporter must still report to it afterwards, which kills a mirror rule
+implemented by clearing the children's edges.)*
 
 *(The twenty-third, in E0-11, and it is the honest half of this entry rather than a
 fix. Closing the mirror of the rank rule — an assignment may not change to a role
@@ -399,7 +437,15 @@ second case arrives.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 15**
+**Caught: 16**
+
+*(The sixteenth, inside the helper that plants a non-climbing edge for the cycle
+tests. The plant needs the superuser bypass to store a row the rank rule refuses —
+and a helper that goes straight to the bypass would keep working on a schema where
+the rank rule had been deleted, planting nothing, with the cycle tests still green
+and no longer testing what they claim. So it attempts the edge unbypassed first
+and requires the refusal before bypassing anything: the guard it depends on is
+executed, not assumed.)*
 
 *(The fifteenth, in E0-11, twice, and one of the two changed the order the whole
 ticket was built in. Before designing anything, the question "does a revision
@@ -495,7 +541,16 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 11**
+**Caught: 12**
+
+*(The twelfth, twice over the same hazard. E0-09's scope grain rule ties the
+populated scope column to the role, so a test that edits a supervisor's role and
+leaves its scope node alone is refused by the grain rule — a refusal that says
+nothing about rank, and would have made the mirror-rule test pass for the wrong
+reason. `change_role` therefore moves the scope with the role in one `UPDATE`.
+The same rule is why the forest generator excludes the institution-scoped top
+rank: two `VP_ACADEMICS` assignments in one transaction sit on the single
+institution node, and a refusal there would read as a graph rule firing.)*
 
 *(The eleventh, in E0-11, and the two places are four lines apart in one plpgsql
 function. The new rule refuses a supervision edge that does not climb SPEC §2.1's
@@ -696,7 +751,16 @@ property, say the property and let the implementer find the mechanism.
 
 ## 16. A mutation harness reported kills it had not made
 
-**Caught: 4**
+**Caught: 5**
+
+*(The fifth, and its subject is a mutation that lives in the database rather than
+in a file. The cycle tests plant an inverted edge by reinstalling E0-09's trigger
+function, writing the row, and restoring E0-11's — three statements, any of which
+can silently not take effect, after which the test measures a database in a state
+nobody intended. So the plant reads the edge back out before anything is believed,
+asserts the session is off `replica` again, and restores the function in a
+`finally` so a failing assertion does not leave E0-09's trigger installed for
+whatever runs next.)*
 
 *(The fourth, in E0-11, and it is this entry's last paragraph applied before
 anything went wrong. The object under measurement is a trigger function body, which
@@ -786,7 +850,17 @@ you are about to add.
 
 ## 15. A property test's generator excluded the case its own docstring named
 
-**Caught: 2**
+**Caught: 3**
+
+*(The third: the rank rule changed what both supervision generators can produce,
+and the docstrings describing them were written against the old space. Cycles no
+longer run to length eight but to six, because six ranks is the longest chain that
+can exist; the forest no longer draws every role at every position but a strictly
+lower role than its parent; and the top rank is excluded from the forest for the
+grain reason in entry 13. Each of those is a narrowing that a reader would have
+gone on believing was not there, so the "what these generators do not reach" lists
+were rewritten against what the generators now actually draw rather than amended
+at the edges.)*
 
 **What happened.** E0-07's parsing suite carries a property for the definition of
 done's "parsing is total: no exception type that escapes as a 500". Its docstring

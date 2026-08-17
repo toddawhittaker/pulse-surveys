@@ -233,16 +233,23 @@ E0-09's cycle guard has become defence in depth rather than the only guard. The
 cost is recorded above; the benefit is that the invariant §8 asks for at write time
 now holds for two independent reasons.
 
-**Three of E0-09's tests cannot pass against this rule**, and they are red on this
-branch: `test_a_six_assignment_cycle_is_refused` and both properties in
-`test_supervision_graph_properties.py`. Each builds its graph out of
-`graph.node("CHAIR", reports_to=<another CHAIR>)` and requires those writes to
+**Three of E0-09's tests had to be rewritten for this rule**, and were:
+`test_a_six_assignment_cycle_is_refused` and both properties in
+`test_supervision_graph_properties.py`. Each built its graph out of
+`graph.node("CHAIR", reports_to=<another CHAIR>)` and required those writes to
 succeed, while E0-11's `[chair-chair]` case writes the identical row and requires
-it to be refused. That is not a defect in either module and it is not something an
-implementation can resolve, so it is raised as
+it to be refused. That was not a defect in either module and not something an
+implementation could resolve, so it was raised as
 [`docs/disputes/E0-11-01.md`](../disputes/E0-11-01.md) rather than worked around.
-The dispute is the place the underlying spec question is written down: *may an
-assignment report to another assignment in the same role?*
+
+The ruling was that the E0-09 controls move, because no spec line requires a
+same-role edge to be storable and those modules' own docstrings say the
+single-role generator was fixture convenience. On the one same-role pair the spec
+does answer — `LEAD_FACULTY → LEAD_FACULTY` — §4.1 invariant 2, §2.1's grain
+sentence and §2.1's hierarchy-view-only rule agree that it is forbidden. Every
+other same-role pair is spec-silent, and silence is not permission. The generators
+now draw a strictly increasing role sequence; the dispute file carries the whole
+argument, which is worth reading before anyone proposes relaxing this rule.
 
 **A future role that does not fit one order is the cost this record is most
 exposed on.** A total order is the right shape for the chain §2.1 draws, and it
@@ -262,17 +269,25 @@ than inventing one.
 rules it added: the check reads neither `pg_trigger` nor `pg_proc`, so replacing
 the function or dropping the trigger leaves it green.
 `tests/integration/test_supervision_edges_run_up_the_role_ranks.py` is the only
-reader — 43 assertions, 15 legal pairs, 21 refused pairs, three two-hat shapes,
-the `ADMIN` pair and the `UPDATE` path.
+reader: the legal pairs, the refused pairs, the two-hat shapes, the `ADMIN` pair,
+the `UPDATE` path and the mirror rule below. No count is given here on purpose — a
+number that has to be re-measured on every edit to that file is a record that will
+be wrong again (`docs/MISTAKES.md` entry 1).
 
-**One rule this record adds is asserted by nothing**, and it is the mirror rule on
-the parent's role. No test writes an `UPDATE` that changes a role in a way that
+**The mirror rule on the parent's role shipped unasserted and no longer is.** When
+this record was written no test wrote an `UPDATE` that changes a role in a way that
 invalidates a child's edge, and the implementer of this ticket is walled out of
-`tests/`, so it ships as a convention rather than a guarantee —
-`docs/MISTAKES.md` entry 2, declared rather than left to be discovered. The test
-it needs is small and worth naming: a `CHAIR` with a `LEAD_FACULTY` reporting to
-it, updated to `LEAD_FACULTY`, refused; with the control being the same update
-applied to a chair nothing reports to, which must succeed.
+`tests/`, so the gap was declared here rather than left to be discovered
+(`docs/MISTAKES.md` entry 2). The test named in that declaration now exists: a
+`CHAIR` with a `LEAD_FACULTY` reporting to it, updated to `LEAD_FACULTY`, refused,
+controlled by the same update applied to a chair nothing reports to, which must
+succeed. A second test edits that chair to `DEAN` — a role that still outranks its
+reporters — and asserts the reporter still reports to it afterwards, which is what
+distinguishes this rule from one implemented by clearing the children's edges.
+
+The scope node moves with the role in those updates, and has to: E0-09's grain rule
+ties the populated scope column to the role, so a role-only update is refused by
+the grain rule and that refusal says nothing about rank.
 
 **The `REPEATABLE READ` refusal widened**, and the message with it. E0-09 refused
 that isolation level for writes carrying an edge or the `CARE` role; a write that
