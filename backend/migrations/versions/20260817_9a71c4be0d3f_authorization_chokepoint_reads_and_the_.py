@@ -47,6 +47,7 @@ never touched — which E0-10 shipped the wrong way round once and had to fix.
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 from app.views_sql import read_sql
@@ -328,8 +329,97 @@ $$
 """
 
 
+# The rows the new rule would have refused, had it existed when they were written.
+#
+# **A trigger does not look backwards.** This one is `AFTER INSERT OR UPDATE FOR
+# EACH ROW`, so replacing the function polices every future write and examines no
+# row already stored. Every edge written while E0-09's version was live therefore
+# survives this migration unexamined, and E0-11's own ticket records that E0-09
+# accepted both shapes the rank rule exists to refuse — measured, not supposed.
+#
+# **That would make a sentence in the spec false on exactly the databases that
+# matter.** SPEC 2.1 now states the bound as a property of the system: "The
+# supervision graph is therefore at most six assignments deep." On a database
+# migrated rather than built fresh, a stored `LEAD_FACULTY -> LEAD_FACULTY` edge
+# makes it deeper than that and puts one lead's courses inside a sibling's purview,
+# which is SPEC 4.1 invariant 2 — dormant only because E9 has not implemented the
+# union that would read it.
+#
+# So the migration refuses rather than completing. The rank order is spelled here
+# rather than read out of the function's own array so that the check and the rule
+# are two statements of one intent: if they disagree, this refuses a migration that
+# the trigger would have allowed, which is the safe direction to be wrong in.
+UNCLIMBING_EDGES_ALREADY_STORED = """
+SELECT child.id AS child_id, child.role AS child_role,
+       parent.id AS parent_id, parent.role AS parent_role
+  FROM public.role_assignment AS child
+  JOIN public.role_assignment AS parent ON parent.id = child.reports_to
+ WHERE array_position(
+           ARRAY['INSTRUCTOR', 'LEAD_FACULTY', 'CHAIR',
+                 'ASSISTANT_DEAN', 'DEAN', 'VP_ACADEMICS']::text[],
+           child.role::text
+       ) IS NULL
+    OR array_position(
+           ARRAY['INSTRUCTOR', 'LEAD_FACULTY', 'CHAIR',
+                 'ASSISTANT_DEAN', 'DEAN', 'VP_ACADEMICS']::text[],
+           parent.role::text
+       ) IS NULL
+    OR array_position(
+           ARRAY['INSTRUCTOR', 'LEAD_FACULTY', 'CHAIR',
+                 'ASSISTANT_DEAN', 'DEAN', 'VP_ACADEMICS']::text[],
+           child.role::text
+       ) >= array_position(
+           ARRAY['INSTRUCTOR', 'LEAD_FACULTY', 'CHAIR',
+                 'ASSISTANT_DEAN', 'DEAN', 'VP_ACADEMICS']::text[],
+           parent.role::text
+       )
+ ORDER BY child.id
+"""
+
+
+def _refuse_edges_that_do_not_climb() -> None:
+    """Stop the migration if a stored edge would fail the rule it is about to install.
+
+    Raises naming every offending row, because the operator's next question is
+    which ones — and a count alone sends them to write this query themselves.
+
+    **Offline mode cannot do this and says so rather than pretending.** `alembic
+    upgrade --sql` renders statements without a connection, so there are no stored
+    rows to read and `op.get_bind()` answers `None`. The check is skipped and a
+    comment goes into the emitted script, because a script that silently omitted
+    the validation would be a worse artifact than one that tells the operator the
+    rows still need checking against the target database.
+    """
+    if op.get_context().as_sql:
+        op.execute(
+            "-- E0-11: stored supervision edges were NOT validated against the role"
+            " rank rule, because this script was generated offline. Run the query in"
+            " UNCLIMBING_EDGES_ALREADY_STORED against the target database before"
+            " applying it; any row it returns breaks the rule this revision installs."
+        )
+        return
+
+    offending = op.get_bind().execute(sa.text(UNCLIMBING_EDGES_ALREADY_STORED)).mappings().all()
+    if not offending:
+        return
+
+    rows = "; ".join(
+        f"assignment {row['child_id']} ({row['child_role']}) reports to "
+        f"{row['parent_id']} ({row['parent_role']})"
+        for row in offending
+    )
+    raise RuntimeError(
+        f"{len(offending)} stored supervision edge(s) do not climb the role rank, so this "
+        f"revision refuses to install a rule the existing data breaks: {rows}. Each is an edge "
+        "E0-09 accepted and E0-11 refuses. Repoint or delete them and run the migration again — "
+        "a LEAD_FACULTY reporting to a LEAD_FACULTY is SPEC 4.1 invariant 2, and it becomes "
+        "readable the moment E9 implements the transitive union."
+    )
+
+
 def upgrade() -> None:
     """Apply this revision."""
+    _refuse_edges_that_do_not_climb()
     for script in SCRIPTS:
         op.execute(read_sql(script))
     op.execute(SUPERVISION_EDGE_TRIGGER_FUNCTION)

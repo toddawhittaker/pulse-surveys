@@ -52,11 +52,23 @@ says.
 SPEC §8: "instructor/leadership read paths go through views that structurally
 cannot join to `user` identity columns — enforced in the database, not just the
 application." The connection this module is handed is `pulse_app`, which holds
-`SELECT` on five views and on no base table at all, so a query that named
-`public.person` would be refused by the server rather than by review.
+`SELECT` on five views and on no base table at all, so a query *written here* that
+named `public.person` would be refused by the server rather than by review.
 `tests/unit/test_no_service_reads_an_identity_table_directly.py` is the
 application-side half of that, and it reaches the two tables no grant stops:
 `person` holds a name outright (§2.1) and `user` holds the LMS key.
+
+**The grant does not protect the views themselves, and this ticket added three.**
+Measured on the pinned Postgres: all five views are owned by `pulse_admin` with
+`security_invoker` off, so each executes with its owner's privileges. A `_v002` of
+`assignment_scope`, `lead_faculty_course` or `containment_path` that joined
+`public.person` would hand `pulse_app` a name, and no grant would be consulted on
+the way. What stands between that and a deployment is ADR 0041's rule — a view
+ships as a new immutable versioned file that a migration executes, so the join is
+in a diff somebody reads — together with the structural sweep in
+`tests/integration/test_identity_column_marker.py`. Neither of those is the server
+refusing it. Adding a view here widens the surface that rule protects, which is a
+cost E0-11 paid three times over.
 
 **Nothing here obtains its own connection.** ADR 0042 binds the `pulse_care` pool
 to `app.services.safety` and to nothing else, so this module reads whatever
@@ -392,10 +404,41 @@ _OWN_GRANT_ROOT: Final[Mapping[AssignmentRole, str]] = {
     AssignmentRole.INSTRUCTOR: "section",
     AssignmentRole.LEAD_FACULTY: "course",
     AssignmentRole.CHAIR: "department",
-    AssignmentRole.ASSISTANT_DEAN: "college",
     AssignmentRole.DEAN: "college",
     AssignmentRole.VP_ACADEMICS: "institution",
 }
+
+# **`ASSISTANT_DEAN` is scoped to a college and its own grant is empty**, which is
+# the one role grain that cannot be read off the scope column — and the one SPEC
+# §2.1 singles out to say so: "The assistant dean is the worked example for why
+# purview comes from the graph: own led courses union every supervised chair's
+# department — **a set no single containment node holds**." §2's table says it from
+# the other side, in the scope-attachment column itself: "College (same node as the
+# dean — **authority comes from the supervision graph, not the scope**)." §2.1's
+# own-grant sentence names a lead, a chair and a dean, and does not name this role.
+#
+# So both terms of that union arrive from somewhere other than this assignment. The
+# led courses come from the person's own `LEAD_FACULTY` assignment, resolved as its
+# own row, because §2 keeps people and roles apart and a purview is computed per
+# assignment. The supervised chairs' departments come from the transitive walk,
+# which is E9's and which `transitive_purview` refuses to fake.
+#
+# **An empty answer here means "the graph supplies it", and for `CARE` an empty
+# answer would have meant "there is nothing to supply"** — which is why Care raises
+# instead of returning this. The two are opposite claims and must not share a
+# spelling; ADR 0046 records the distinction.
+#
+# Until E9 lands, an assistant dean therefore sees nothing, exactly as ADR 0003
+# says of every consumer of the deferred union: "Leadership landing views are empty
+# by design in E0." An earlier version of this module rooted the grant at the
+# college, which made `ASSISTANT_DEAN` and `DEAN` identical, handed an assistant
+# dean every department in the college including those whose chairs report straight
+# to the dean, and contradicted the spec sentence quoted above. It was found by
+# E0-11's security review and is asserted against by three tests in
+# `tests/integration/test_own_grant_follows_the_role_grain.py`.
+_GRANT_ARRIVES_THROUGH_THE_GRAPH: Final[frozenset[AssignmentRole]] = frozenset(
+    {AssignmentRole.ASSISTANT_DEAN}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +567,9 @@ def _own_grant_of(session: Session, assignment: _Assignment) -> Purview:
             "power is the threat queue, kept isolated so safety re-identification never rides "
             "alongside routine oversight access. Ask holds_care() instead."
         )
+
+    if assignment.role in _GRANT_ARRIVES_THROUGH_THE_GRAPH:
+        return Purview.empty()
 
     level = _OWN_GRANT_ROOT.get(assignment.role)
     if level is None:
@@ -659,8 +705,15 @@ def resolve_scope(
     purview = Purview.empty()
     for row in rows:
         assignment = _Assignment.of(row)
-        if assignment.role not in _OWN_GRANT_ROOT:
+        if (
+            assignment.role not in _OWN_GRANT_ROOT
+            and assignment.role not in _GRANT_ARRIVES_THROUGH_THE_GRAPH
+        ):
             continue
+        # An assistant dean's row is unioned rather than skipped, though it
+        # contributes nothing today. Skipping would give the same answer and would
+        # go on giving it if `_own_grant_of` ever learned to answer for the role,
+        # which is a second place for the grain to live.
         purview = purview.union(_own_grant_of(session, assignment))
 
     threshold = Settings().n_threshold_default if n_threshold is None else n_threshold
