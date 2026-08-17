@@ -82,7 +82,18 @@ calls it needs committed rows and an environment pointing at this container. The
 Care role itself is provisioned beside the application role now, mirroring
 `scripts/db-init/02-care-role.sh`: a login and no grant.
 
-E0-11 adds fixtures at the very bottom, and one of them is unlike everything
+E0-17 adds two at the very bottom, and they are the first fixtures here that run
+a *process* rather than a function. Its subject is `scripts/seed.py`, which
+`make seed` invokes as a program and which reaches the database on its own, so
+the fixture gives it a database of its own — created in the session container,
+migrated to head, and dropped afterwards — and runs it the way the Makefile does.
+It is here rather than in the test module because E0-17's definition of done says
+the seeded institution "is also the fixture E9 will reuse", and because
+`seed_environment` below is the third place in this file that answers "which
+variables could a program need to reach this container", which is a question
+`docs/MISTAKES.md` entry 13 says to answer once.
+
+E0-11 adds fixtures further up, and one of them is unlike everything
 above it. `authz` reaches the authorization chokepoint **by name**: E0-11's
 surface was settled before any code was written, so there is nothing to discover,
 and the class exists only to turn an absent module or an absent symbol into a
@@ -107,6 +118,7 @@ import os
 import re
 import secrets
 import string
+import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -3870,3 +3882,251 @@ def application_session(
         session.rollback()
         session.close()
         connection.close()
+
+
+# ---------------------------------------------------------------------------
+# E0-17 — the demo seed script, run the way `make seed` runs it.
+# ---------------------------------------------------------------------------
+
+# SPEC §13 spells the path and E0-17's scope repeats it: `scripts/seed.py`.
+SEED_SCRIPT_PATH = REPO_ROOT / "scripts" / "seed.py"
+
+# How long one run may take before this stops waiting. **This file's choice**,
+# and a bound rather than a requirement: E0-17 seeds an institution, a term, a
+# people graph and some sections, which is thousands of rows at the outside. A
+# run that passes this is a hang — most likely a script waiting on a connection
+# it cannot open — and a test that reported it as a failed criterion would send
+# the reader to the wrong place.
+SEED_TIMEOUT_SECONDS = 180
+
+
+class SeedRun(NamedTuple):
+    """One execution of `scripts/seed.py`, as the shell sees it.
+
+    `make seed` runs the script and takes its exit status as the answer, so that
+    is what a test asserts against. Both streams are kept because a non-zero exit
+    is only useful with the traceback that produced it.
+    """
+
+    argv: tuple[str, ...]
+    returncode: int
+    stdout: str
+    stderr: str
+
+    @property
+    def succeeded(self) -> bool:
+        return self.returncode == 0
+
+    def report(self) -> str:
+        """The run, rendered for a failure message, with both streams tailed."""
+        return (
+            f"`{' '.join(self.argv)}` exited {self.returncode}.\n"
+            f"stdout:\n{self.stdout[-2000:]}\nstderr:\n{self.stderr[-2000:]}"
+        )
+
+
+def seed_environment(database: DatabaseUnderTest) -> dict[str, str]:
+    """Every variable `scripts/seed.py` could need to reach `database`.
+
+    Three layers, and the over-supply is the same choice `migration_environment`
+    above makes for the same reason. E0-17 says the script "runs as the superuser
+    identity (ADR 0009)" and spells no variable for it, so the layers are:
+
+      - every documented `.env.example` entry, at its placeholder value, so that
+        a script which builds an `app.config.Settings` constructs at all — that
+        object requires `AI_PROVIDER_BASE_URL` and others which have nothing to
+        do with seeding. Entries whose value is an unexpanded `${...}` reference
+        are dropped, because a literal `${DB_APP_USER}` is not a value; the
+        entries that carry one are the database URLs, and the layers below supply
+        those properly.
+      - `migration_environment`, which is how everything else in this repository
+        addresses a database as the bootstrap identity: `DATABASE_URL` for the
+        address plus `DB_SUPERUSER`/`DB_SUPERUSER_PASSWORD` for the identity
+        (ADR 0012, and `backend/migrations/env.py` reads exactly those three),
+        with a whole superuser URL beside them in case the script prefers one.
+      - `application_environment`, so a script that connects as the application
+        role, or that opens the Care connection, finds those too. It sets
+        `DATABASE_URL` to the same value the layer above does, so the two agree.
+
+    Nothing here decides which of those a seed script should use. Supplying only
+    one would decide it, by failing the others.
+    """
+    documented = (
+        parse_dotenv(ENV_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        if ENV_EXAMPLE_PATH.is_file()
+        else {}
+    )
+    values = {name: value for name, value in documented.items() if "${" not in value}
+    values.update(migration_environment(database))
+    values.update(application_environment(database))
+    return values
+
+
+class DemoSeed:
+    """A database of its own, and the seed script pointed at it.
+
+    **Nothing here asserts anything.** `run` hands back what the process did and
+    lets the test decide what that means, so that a script which exits non-zero
+    produces a failed assertion naming the exit status rather than an error inside
+    a fixture. A script that is *absent* is reported the same way, as a run that
+    failed with the reason in its stderr, for the same reason: while E0-17 is
+    unbuilt every test in the module should be red on its own criterion rather
+    than erroring in setup on somebody else's.
+
+    **Why a subprocess rather than an import.** E0-17's criterion is about
+    `make seed`, which runs the file as a program; a script that seeds from inside
+    a `if __name__ == "__main__":` block would do nothing at all on import, and a
+    test that imported it would report a green run of nothing. A subprocess also
+    keeps the script's own `app.*` imports out of this interpreter, where
+    `sys.modules` already holds modules built against a different `DATABASE_URL`
+    (see `import_app_module` above for what that costs).
+    """
+
+    def __init__(self, database: DatabaseUnderTest) -> None:
+        self.database = database
+        self.environment = seed_environment(database)
+
+    def run(self, **overrides: str) -> SeedRun:
+        """Run `scripts/seed.py` against this database and report what happened.
+
+        `overrides` go into the child's environment last, which is how a test asks
+        what the script does under an environment that looks like a deployment.
+        The parent's environment is inherited underneath everything, as it is for
+        `make seed`, and then overwritten: `.env` in the repository root is read by
+        the process with `override=False` everywhere else in this project, so the
+        values here win over a developer's local file.
+        """
+        argv = (sys.executable, str(SEED_SCRIPT_PATH))
+        if not SEED_SCRIPT_PATH.is_file():
+            # Reported as a run that failed rather than raised from here, and the
+            # difference matters to whoever reads the output: a `pytest.fail`
+            # inside a fixture is an *error* in setup, while this makes every
+            # test in the module fail on its own assertion, naming its own
+            # criterion, with this sentence attached. 127 is what a shell answers
+            # when the command is not there.
+            return SeedRun(
+                argv=argv,
+                returncode=127,
+                stdout="",
+                stderr=(
+                    f"{SEED_SCRIPT_PATH} does not exist, so there was nothing to run. SPEC §13 "
+                    "puts the demo seed there — 'seed.py — demo institution, hierarchy, term, "
+                    "sample sections' — and E0-17 is the ticket that writes it. `make seed` "
+                    "skips when the file is absent, so nothing else in this repository notices."
+                ),
+            )
+        # Named for the child rather than `environment`, which is the context
+        # manager further up this file — one of them setting `os.environ` and the
+        # other building a child's is exactly the pair worth not confusing.
+        child_environment = {**os.environ, **self.environment, **overrides}
+        try:
+            # S603: the command is this interpreter and a path built from the
+            # repository root. Nothing in it comes from input.
+            completed = subprocess.run(  # noqa: S603
+                list(argv),
+                cwd=REPO_ROOT,
+                env=child_environment,
+                capture_output=True,
+                text=True,
+                timeout=SEED_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(
+                f"`{' '.join(argv)}` did not finish in {SEED_TIMEOUT_SECONDS} seconds against a "
+                "database with nothing in it. That is a hang rather than a failed criterion — a "
+                "script waiting on a connection it cannot open looks exactly like this."
+            )
+        return SeedRun(
+            argv=argv,
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+
+    @contextmanager
+    def connect(self) -> Iterator[Any]:
+        """A connection to the seeded database, as the identity that migrated it.
+
+        The bootstrap identity, for the reason `migrated_engine` gives: these
+        tests read every table including `user_identity`, which `pulse_app` is
+        refused by E0-10's grants. What a read path may reach is asserted by the
+        modules that own that question, over `application_engine`.
+        """
+        from sqlalchemy import create_engine
+
+        engine = create_engine(self.database.superuser_url)
+        try:
+            with engine.connect() as connection:
+                yield connection
+        finally:
+            engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def demo_database(
+    postgres_container: Any, provisioned_database: DatabaseUnderTest
+) -> Iterator[DemoSeed]:
+    """A database of its own, at head, with all three roles, for one test module.
+
+    A database of its own because a seed script commits: it opens its own
+    connection, so `db_session`'s rollback cannot reach it, and rows left in the
+    session database would fail somebody else's non-vacuity guard three tickets
+    from now. Dropped `WITH (FORCE)` at the end, so a connection the script left
+    open does not keep it alive.
+
+    Module-scoped because migrating costs seconds and the seed run itself is the
+    subject: a test that wants a *second* run asks for one, which is E0-17's
+    idempotency criterion and is the whole reason this hands back a runner rather
+    than a database that has already been seeded.
+
+    Roles are cluster-wide, so all three URLs name the three roles ADR 0009 and
+    ADR 0001 separate, exactly as `empty_database` above does.
+    """
+    from alembic import command
+    from sqlalchemy import create_engine, text
+
+    name = f"e0_17_{uuid4().hex[:12]}"
+    admin = create_engine(provisioned_database.superuser_url, isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as connection:
+            connection.execute(text(f'CREATE DATABASE "{name}"'))
+        database = DatabaseUnderTest(
+            superuser_url=container_url(
+                postgres_container,
+                username=TEST_SUPERUSER,
+                credential=TEST_SUPERUSER_CREDENTIAL,
+                database=name,
+            ),
+            application_url=container_url(
+                postgres_container,
+                username=TEST_APP_USER,
+                credential=TEST_APP_CREDENTIAL,
+                database=name,
+            ),
+            care_url=container_url(
+                postgres_container,
+                username=TEST_CARE_USER,
+                credential=TEST_CARE_CREDENTIAL,
+                database=name,
+            ),
+        )
+        with environment(migration_environment(database)):
+            command.upgrade(alembic_config(), "head")
+        yield DemoSeed(database)
+    finally:
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()
+
+
+@pytest.fixture(scope="module")
+def seeded_demo(demo_database: DemoSeed) -> SeedRun:
+    """One run of `scripts/seed.py` against that database, whatever it did.
+
+    Deliberately does not assert that the run succeeded. E0-17's third criterion
+    is that it does, and that criterion is a test rather than a precondition of
+    one; a fixture that asserted it would report every other failure in the module
+    as the same failure.
+    """
+    return demo_database.run()
