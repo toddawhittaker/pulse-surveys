@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 20**
+**Caught: 21**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -74,18 +74,33 @@ correct: controls stop a refusal being unrelated to the *row*, and this refusal
 was unrelated to the *constraint*. The implementer found it in its own work and
 declared it.
 
+A sixth, in E0-10, and it is the first one found by running a mutation the test
+itself named. `test_every_read_view_is_created_from_a_sql_file_under_views_sql`
+says what it is built against: "move the `CREATE VIEW` into `op.execute("...")`
+in a revision file and the sweep below has nothing to read while staying green."
+That mutation was performed — `section_roster_v001.sql` deleted, its SQL inlined
+into the revision — and all seven tests in the module stayed green. The test
+searches the combined text of `views_sql/` for the view's *name*, and
+`identity_grants_v001.sql` names both views because it grants on them. So the
+sweep is satisfied by a mention and the assertion it advertises is about a
+definition.
+
 **Root cause.** Asserting an absence. Absence is satisfied by the thing being
 broken in an unrelated way, by a fixture returning nothing, by a parser matching
 nothing. In the third case, by the difference between what a sentence looks like
 in a file and what it is as a string. In the fifth, by a second mechanism in the
 same schema that refuses the same row for its own reasons — "the database said
-no" does not say which part of it said so.
+no" does not say which part of it said so. In the sixth, by a search that matches
+the *name* of the thing rather than the thing, in a directory where the name
+appears for three unrelated reasons.
 
 **Consequence. ** A green suite is read as coverage. The first case would have
 been counted as proof the leak was fixed when it proved nothing about it. The
 fifth would have let a later ticket delete a constraint as redundant, with the
 rule it states surviving only as a side effect of how overlap happens to be
-enforced today.
+enforced today. The sixth leaves a layout decision — where a view's SQL lives —
+recorded in an ADR and enforced by nothing, which is the state the ADR now says
+it is in rather than the state it claimed.
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -93,6 +108,11 @@ say in the message why that guard is not ceremony. A pattern searched against a
 file is a case of this and looks like none: run it against the text you claim it
 catches *and* against the text you claim it allows, and give it a canary — a
 string certainly present — so a search that has gone blind says so.
+
+**A mutation a test names in its own docstring is a claim, not a record.** Run
+it. The sixth case is a test that named the exact edit it exists to catch,
+carefully, in the file — and the edit did not catch it. A named mutation is the
+cheapest one to try and the one least likely to have been tried.
 
 **Where two rules can refuse the same row, a behavioural test cannot tell you
 which one did.** Mutation is what exposes it — delete the constraint and see
@@ -105,7 +125,7 @@ cannot see whether it exists.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 18**
+**Caught: 19**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -130,7 +150,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 16**
+**Caught: 17**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -255,7 +275,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 5**
+**Caught: 6**
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
@@ -312,7 +332,7 @@ prefix yet.
 
 ## 12. A stale build of the thing under test was reused, and the run looked clean
 
-**Caught: 3**
+**Caught: 4**
 
 **What happened.** In E0-05, checking that `alembic check` warns when a generated
 column's expression drifts: edit `app/models/org.py` to change one band edge from
@@ -362,17 +382,31 @@ does this.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 2**
+**Caught: 3**
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and
 leaves the credential in `errors()`.
 
+A second, in E0-10's objection file, caught by this entry before it was filed.
+The objection proposed a widened identity-column fragment set for the marker
+sweep and wrote out the tuple: `"name", "email", "login", "picture", …`. Run
+against the schema as it stands, `login` matches
+`role_assignment.permits_web_login` — a boolean about which doors a role opens,
+carrying no identity — so the proposed fix would have arrived as a new red test
+in a module nobody had touched. `login_id` adds nothing on today's schema, which
+was measured the same way. The prescription was one word wrong and read
+perfectly.
+
 **Root cause.** The fix was plausible and cheap, so it went into the brief
-without being run.
+without being run. In the second case the tuple was written by thinking of
+claims a roster sync carries, which is the right list to start from and is not
+the same question as "what does this substring match in the schema I have".
 
 **Consequence.** Would have shipped green against the one test that existed,
-leaving the credential one `json.dumps` from any structured logger.
+leaving the credential one `json.dumps` from any structured logger. The second
+would have handed an arbitrator a fix that breaks a passing test, in the file
+whose whole subject is a sweep that fires on the wrong things.
 
 **Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
 property, say the property and let the implementer find the mechanism.
@@ -427,6 +461,43 @@ a limit in the standard library, a column width, a protocol maximum — generate
 than trusting a wide range to wander into it. Where a bound stays, say in the
 docstring what it does not reach; a stated bound is a scope, and an unstated one
 is a false claim of totality.
+
+---
+
+## 14. An enumeration was reported as an impossibility
+
+**Caught: 2**
+
+**What happened.** In E0-06, the guard that refuses a naive datetime has to sit
+on the column type, and the test module's fixture could not seed a decorated
+type. Four implementations were tried and measured — a `TypeDecorator`, a
+`DateTime` subclass, a hybrid of the two, and putting the guard in a service —
+and the objection filed in `docs/disputes/E0-06-01.md` generalised from them:
+"no implementation that satisfies criterion 4 can get past `invented_value`."
+
+That is false. A type subclassing psycopg's `_PGTimeStamp` survives
+`adapt_type`, so the `isinstance` check passes *and* the guard runs, and the
+module passes 18 for 18 with no fixture change. The arbitrator found it by
+reading `adapt_type` and running it — the same method the objection had used for
+its own four options and abandoned at the moment it generalised.
+
+**Root cause.** Treating a search that stopped as a search that finished. Each
+of the four options was measured honestly; the sentence joining them was not
+measured at all, because there was nothing to run — which is exactly why it went
+in unchecked while the four claims around it were verified.
+
+**Consequence.** A false universal in a durable record. The dispute file is read
+by a fresh arbitrator with no context, and had it been believed, the ruling would
+have rested on it. The correct position was available and narrower — the only
+implementation the fixture admitted was built on a private, driver-specific class
+— and it won the dispute on its own. The overclaim added nothing and cost the
+record a correction.
+
+**Rule.** Do not write "no X can" from a list of the X you tried. Say what you
+tried and what it did, and let the boundary of the search be visible: "four
+shapes, all measured, all fail" is honest and is usually enough to decide. If a
+universal is genuinely load-bearing, it needs an argument from the mechanism —
+here, from what `adapt_type` does — not a longer list.
 
 ---
 
@@ -539,43 +610,6 @@ the debounce window is not a result.
 
 ---
 
-## 14. An enumeration was reported as an impossibility
-
-**Caught: 1**
-
-**What happened.** In E0-06, the guard that refuses a naive datetime has to sit
-on the column type, and the test module's fixture could not seed a decorated
-type. Four implementations were tried and measured — a `TypeDecorator`, a
-`DateTime` subclass, a hybrid of the two, and putting the guard in a service —
-and the objection filed in `docs/disputes/E0-06-01.md` generalised from them:
-"no implementation that satisfies criterion 4 can get past `invented_value`."
-
-That is false. A type subclassing psycopg's `_PGTimeStamp` survives
-`adapt_type`, so the `isinstance` check passes *and* the guard runs, and the
-module passes 18 for 18 with no fixture change. The arbitrator found it by
-reading `adapt_type` and running it — the same method the objection had used for
-its own four options and abandoned at the moment it generalised.
-
-**Root cause.** Treating a search that stopped as a search that finished. Each
-of the four options was measured honestly; the sentence joining them was not
-measured at all, because there was nothing to run — which is exactly why it went
-in unchecked while the four claims around it were verified.
-
-**Consequence.** A false universal in a durable record. The dispute file is read
-by a fresh arbitrator with no context, and had it been believed, the ruling would
-have rested on it. The correct position was available and narrower — the only
-implementation the fixture admitted was built on a private, driver-specific class
-— and it won the dispute on its own. The overclaim added nothing and cost the
-record a correction.
-
-**Rule.** Do not write "no X can" from a list of the X you tried. Say what you
-tried and what it did, and let the boundary of the search be visible: "four
-shapes, all measured, all fail" is honest and is usually enough to decide. If a
-universal is genuinely load-bearing, it needs an argument from the mechanism —
-here, from what `adapt_type` does — not a longer list.
-
----
-
 ## 16. A mutation harness reported kills it had not made
 
 **Caught: 1**
@@ -633,6 +667,67 @@ baseline it read was already mutated and all three variants came back identical 
 the same defect as above with no file involved. Read the baseline from the source
 that installs the object, and assert it does **not** already contain the thing
 you are about to add.
+
+---
+
+## 18. A deliverable existed in the source tree and not in the built artifact
+
+**Caught: 1**
+
+**What happened.** E0-12 shipped `backend/app/ai/prompts/validity.v1.md`, the
+prompt SPEC §7.4 requires a classification to name. Every gate was green: the
+unit tests read the file off disk, ruff and mypy had nothing to say about a
+`.md`, and it was committed and visible in the diff. Building the wheel the
+Dockerfile installs — `pip wheel . --no-deps --no-build-isolation` — produced
+`app/ai/__init__.py` and `app/ai/contracts.py` and no `prompts/` at all.
+setuptools includes Python modules in a wheel; a data file inside a package
+needs `[tool.setuptools.package-data]` and had none.
+
+**Root cause.** Two different ideas of where the code lives. Every test in this
+repository runs against the source tree, where the file is simply there. The
+container installs a wheel into `/opt/venv` and has no source tree, so
+"the file is in the repository" and "the file is in the running system" are
+separate facts, and nothing connected them.
+
+**Consequence.** As caught, none — the packaging entry went in with the ticket.
+Unrecognised, E0-13's gateway would have loaded the prompt on a developer's
+machine and raised on the first real launch in a container, with a green CI run
+and a passing Compose health check behind it, because the health check answers
+before any AI task is called. The same trap is waiting for four later epics: E2,
+E4, E6 and E7 each add a prompt file here, and each will pass every gate.
+
+**Rule.** When a ticket ships a non-Python file that code will read at runtime,
+build the artifact and look inside it — `pip wheel . --no-deps
+--no-build-isolation` then `unzip -l`. A green test suite proves the file is in
+the repository and says nothing about whether it is in the image. This is entry
+9 in a new place: the guard is the packaging configuration, and reading it is
+not executing it.
+
+For this directory the check is no longer manual:
+`tests/unit/test_prompt_directory_layout.py` builds the wheel and asserts every
+prompt in the source tree is inside it, so the four later epics get the failure
+without knowing this entry exists. Asserting the `package-data` line instead
+would not have worked — the glob first shipped here was `prompts/*.md`, which is
+present, correct-looking, and matches neither a prompt in a subdirectory nor one
+with another extension.
+
+**And that fix was itself wrong, which is the part worth keeping.**
+`prompts/*.md` was written to match ADR 0032's naming scheme exactly, and
+matching the scheme was the error: a packaging glob that encodes a naming rule
+enforces that rule by making the offending file absent from every container,
+which is the worst available way to report a broken convention. It was widened to
+`prompts/**/*` — the whole directory, any depth, any extension — so that
+packaging decides only what reaches production, while the scheme stays enforced
+by review and by the version test. Both narrow cases were measured by planting a
+file and building rather than argued: `prompts/v2/moderation.md` and
+`draft.v1.jinja` were each dropped in silence.
+
+**Second rule, from that.** A fix to packaging, to an ignore rule, or to any
+other glob-shaped configuration is not finished when the case in front of you
+passes. Ask what the surrounding tests already *permit* — here, a sibling test
+deliberately accepts a version held in a directory — and make the configuration
+admit all of it. A glob narrower than the layouts the suite allows is a trap
+primed for whoever first uses one of them, and it will look correct in review.
 
 ---
 
@@ -789,67 +884,6 @@ scope is per-test state, not process state**, and a mutation that relies on
 process lifetime has to go below the import: into a file, into the environment, or
 into a deterministic source of randomness. A mutation that fails to fail is a
 result about the mutation until you have shown otherwise.
-
----
-
-## 18. A deliverable existed in the source tree and not in the built artifact
-
-**Caught: 0**
-
-**What happened.** E0-12 shipped `backend/app/ai/prompts/validity.v1.md`, the
-prompt SPEC §7.4 requires a classification to name. Every gate was green: the
-unit tests read the file off disk, ruff and mypy had nothing to say about a
-`.md`, and it was committed and visible in the diff. Building the wheel the
-Dockerfile installs — `pip wheel . --no-deps --no-build-isolation` — produced
-`app/ai/__init__.py` and `app/ai/contracts.py` and no `prompts/` at all.
-setuptools includes Python modules in a wheel; a data file inside a package
-needs `[tool.setuptools.package-data]` and had none.
-
-**Root cause.** Two different ideas of where the code lives. Every test in this
-repository runs against the source tree, where the file is simply there. The
-container installs a wheel into `/opt/venv` and has no source tree, so
-"the file is in the repository" and "the file is in the running system" are
-separate facts, and nothing connected them.
-
-**Consequence.** As caught, none — the packaging entry went in with the ticket.
-Unrecognised, E0-13's gateway would have loaded the prompt on a developer's
-machine and raised on the first real launch in a container, with a green CI run
-and a passing Compose health check behind it, because the health check answers
-before any AI task is called. The same trap is waiting for four later epics: E2,
-E4, E6 and E7 each add a prompt file here, and each will pass every gate.
-
-**Rule.** When a ticket ships a non-Python file that code will read at runtime,
-build the artifact and look inside it — `pip wheel . --no-deps
---no-build-isolation` then `unzip -l`. A green test suite proves the file is in
-the repository and says nothing about whether it is in the image. This is entry
-9 in a new place: the guard is the packaging configuration, and reading it is
-not executing it.
-
-For this directory the check is no longer manual:
-`tests/unit/test_prompt_directory_layout.py` builds the wheel and asserts every
-prompt in the source tree is inside it, so the four later epics get the failure
-without knowing this entry exists. Asserting the `package-data` line instead
-would not have worked — the glob first shipped here was `prompts/*.md`, which is
-present, correct-looking, and matches neither a prompt in a subdirectory nor one
-with another extension.
-
-**And that fix was itself wrong, which is the part worth keeping.**
-`prompts/*.md` was written to match ADR 0032's naming scheme exactly, and
-matching the scheme was the error: a packaging glob that encodes a naming rule
-enforces that rule by making the offending file absent from every container,
-which is the worst available way to report a broken convention. It was widened to
-`prompts/**/*` — the whole directory, any depth, any extension — so that
-packaging decides only what reaches production, while the scheme stays enforced
-by review and by the version test. Both narrow cases were measured by planting a
-file and building rather than argued: `prompts/v2/moderation.md` and
-`draft.v1.jinja` were each dropped in silence.
-
-**Second rule, from that.** A fix to packaging, to an ignore rule, or to any
-other glob-shaped configuration is not finished when the case in front of you
-passes. Ask what the surrounding tests already *permit* — here, a sibling test
-deliberately accepts a version held in a directory — and make the configuration
-admit all of it. A glob narrower than the layouts the suite allows is a trap
-primed for whoever first uses one of them, and it will look correct in review.
 
 ---
 
