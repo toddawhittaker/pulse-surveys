@@ -24,13 +24,19 @@ person-shaped tests near the end are what hold that line, and they are the reaso
 this module is not only the matrix.
 
 **What the two refused shapes cost, in §2.1's own terms.** Purview is "own grant
-∪ purviews of all assignments transitively reporting to it". A
+union the purviews of all assignments transitively reporting to it". A
 `LEAD_FACULTY → LEAD_FACULTY` edge therefore puts one lead's courses inside a
 sibling lead's purview, which is §4.1 invariant 2 — the invariant §2.1 restates
 as "never sibling leads' courses, **at any point in the union**". A
 `VP_ACADEMICS → CHAIR` edge puts the whole institution inside that chair's
 purview. Neither row is wrong on its face and neither errors; both were accepted
 against the shipped migration when E0-09 measured them.
+
+**The mirror of the rule is at the end of this file**, and it is the half no test
+reached when the rule shipped: an edge is made illegal by editing the *parent's*
+role, without anybody writing an edge. ADR 0044 states it, its consequences
+declare it asserted by nothing, and the two tests under the last heading are that
+gap closed.
 
 **Care is not tested here.** E0-09 already refuses a `CARE` assignment an edge in
 both directions, by a check constraint and by the trigger, and
@@ -87,6 +93,22 @@ REFUSED_EDGES = [
 ]
 
 ADMIN_ROLE = "ADMIN"
+
+# The kind of containment node each role in the chain is scoped to: SPEC §2.1's
+# table, and a copy of `ROLE_SCOPE_GRAIN` in `tests/conftest.py`, marked as one for
+# the reason `written` below is marked. It is needed because **a role cannot change
+# on its own**. E0-09's role grain rule pairs the role with the kind of node the
+# assignment is scoped to, so an `UPDATE` that moved only the role would be refused
+# by that rule, and the refusal would say nothing about rank
+# (`docs/MISTAKES.md` entry 3). `change_role` moves both in one statement.
+SCOPE_GRAIN = {
+    "INSTRUCTOR": "section",
+    "LEAD_FACULTY": "course",
+    "CHAIR": "department",
+    "ASSISTANT_DEAN": "college",
+    "DEAN": "college",
+    "VP_ACADEMICS": "institution",
+}
 
 
 def written(graph: Any, action: Any, what: str) -> Any:
@@ -185,11 +207,11 @@ def test_an_edge_to_a_role_that_does_not_outrank_the_child_is_refused(
     assert refused is not None, (
         f"A {child} assignment was stored reporting to a {parent} assignment, and "
         f"{ROLE_RANK[child]} is not below {ROLE_RANK[parent]} in SPEC §2.1's chain. Purview is "
-        "'own grant ∪ purviews of all assignments transitively reporting to it', so this edge "
-        f"puts everything the {child} holds inside the {parent}'s purview. Neither row is wrong "
-        "on its face and nothing errors: an equal-rank edge hands one lead a sibling lead's "
-        "courses (§4.1 invariant 2, 'at any point in the purview union computation'), and an "
-        "inverted one hands the lower role everything above it."
+        "'own grant union the purviews of all assignments transitively reporting to it', so this "
+        f"edge puts everything the {child} holds inside the {parent}'s purview. Neither row is "
+        "wrong on its face and nothing errors: an equal-rank edge hands one lead a sibling "
+        "lead's courses (§4.1 invariant 2, 'at any point in the purview union computation'), "
+        "and an inverted one hands the lower role everything above it."
     )
 
 
@@ -306,8 +328,8 @@ def test_a_chair_may_report_through_an_assistant_dean_or_straight_to_the_dean(
     The matrix above accepts each of those edges on its own; this is the shape
     they make together, and it is the worked example §2.1 gives for why purview
     comes from the graph rather than from containment — the assistant dean's
-    purview is "own led courses ∪ every supervised chair's department, a set no
-    single containment node holds".
+    purview is "own led courses union every supervised chair's department, a set
+    no single containment node holds".
 
     The edges are read back rather than trusted, because an edge silently dropped
     looks identical to an edge accepted, and a rank rule implemented as a `BEFORE`
@@ -372,12 +394,12 @@ def test_an_edge_touching_an_admin_assignment_is_refused(supervision_graph: Any,
     them: §2's table gives it a console rather than a scope over other people's
     data, and nothing in the spec says who an administrator answers to or who
     answers to them. The direction of the failure is what this asserts. An edge
-    *into* an Admin assignment gives it a transitive purview — "own grant ∪
-    purviews of all assignments transitively reporting to it" — which turns the
-    role that manages the org chart into a role that reads everybody's reports,
-    and it is one row in the People editor away. An edge *out of* one puts the
-    administrator's own grant, whatever a later ticket decides that is, inside
-    somebody else's.
+    *into* an Admin assignment gives it a transitive purview — "own grant union
+    the purviews of all assignments transitively reporting to it" — which turns
+    the role that manages the org chart into a role that reads everybody's
+    reports, and it is one row in the People editor away. An edge *out of* one
+    puts the administrator's own grant, whatever a later ticket decides that is,
+    inside somebody else's.
 
     Fail closed is the same choice ADR 0025 records for the scope grain rule,
     whose `CASE` ends in `ELSE false` so that "a role added to the enum without a
@@ -463,4 +485,184 @@ def test_re_pointing_a_lead_at_a_sibling_lead_is_refused_on_update(
         "the one SPEC §4.1 invariant 2 forbids — 'a Lead Faculty assignment never grants sibling "
         "leads' courses, at any point in the purview union computation'. The same row was "
         "accepted re-pointed at its own chair one statement earlier."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The mirror of the rule: an edge is made illegal by editing the *parent's* role,
+# and no edge is written at all.
+#
+# ADR 0044: "an assignment may not change to a role that something already
+# reporting to it fails to be outranked by", and its consequences say what these
+# two tests are: "One rule this record adds is asserted by nothing… The test it
+# needs is small and worth naming: a `CHAIR` with a `LEAD_FACULTY` reporting to it,
+# updated to `LEAD_FACULTY`, refused; with the control being the same update
+# applied to a chair nothing reports to, which must succeed."
+#
+# The reason it needs its own pair of tests rather than being counted as covered by
+# the matrix above: the guard that reads the edge being written never runs here. An
+# administrator editing a chair into a lead faculty member in §6.3's People editor
+# writes one row and leaves every reporting line under it inverted — the same shape
+# E0-09 already closes for its Care rule, four lines away in the same function
+# (`docs/MISTAKES.md` entry 13), and the same end state §4.1 invariant 2 forbids.
+# ---------------------------------------------------------------------------
+
+
+def role_of(graph: Any, row: Any) -> Any:
+    """The role one assignment carries, read back out of the database."""
+    from sqlalchemy import select
+
+    table = graph.assignments
+    key = graph.assignment_key
+    return graph.session.execute(
+        select(table.c[graph.role_column]).where(table.c[key] == row[key])
+    ).scalar_one()
+
+
+def change_role(graph: Any, row: Any, role: str) -> None:
+    """Edit one existing assignment's role, moving its scope node to the new role's grain.
+
+    One `UPDATE`, because that is what §6.3's People editor issues and because two
+    statements would be refused between them by the grain rule whichever order they
+    went in. Every other scope column is cleared in the same statement for the
+    reason `scoped_to_the_institution` in
+    `tests/integration/test_role_assignment_graph.py` gives: leaving the old level
+    populated would make the row carry two scope nodes, and the update would then be
+    refused by the rule that forbids *that* rather than by the one under test
+    (`docs/MISTAKES.md` entry 3).
+
+    The new scope node is a fresh one of the right kind, so no uniqueness rule
+    nobody's ticket mentions — one chair per department, one lead per course — can
+    refuse the update and be read as the rank rule answering.
+    """
+    table = graph.assignments
+    key = graph.assignment_key
+    kind = SCOPE_GRAIN[role]
+    shape, detail = graph.scope_shape()
+    cleared = dict.fromkeys(detail.values(), None) if shape == "per_kind" else {}
+    values = {
+        graph.role_column: graph.role_value(role),
+        **cleared,
+        **graph.scope_overrides(kind, graph.fresh_scope(kind)),
+    }
+    graph.session.execute(table.update().where(table.c[key] == row[key]).values(**values))
+
+
+def test_changing_a_supervisors_role_to_one_its_reporters_no_longer_climb_to_is_refused(
+    supervision_graph: Any,
+) -> None:
+    """The mirror rule: a chair with a lead reporting to it may not become a lead.
+
+    No edge is written by this test's last statement. The two rows are already
+    stored and already legal — a lead reporting to a chair is the third link of
+    SPEC §2.1's canonical chain — and the `UPDATE` changes the *parent's* role, so
+    a guard that inspects the edge being written never runs. What is left behind if
+    it is accepted is `LEAD_FACULTY → LEAD_FACULTY`, the row E0-11's first
+    criterion names first and the one §4.1 invariant 2 forbids in as many words: "a
+    Lead Faculty assignment never grants sibling leads' courses, at any point in the
+    purview union computation", with §2.1 adding that Lead Faculty "must not see
+    peers' courses". Nobody wrote an edge, nothing errors, and one lead's courses
+    are inside another's purview.
+
+    **The control is the identical update on a chair nothing reports to**, written
+    first, in the same transaction. It is what makes the refusal attributable:
+    flipping a chair to a lead moves the role and the scope node together, so a
+    bare `pytest.raises` here would pass against a schema that refuses *any* such
+    update — for the grain rule, for a scope column left behind, for an entry door.
+    The two updates below differ in exactly one thing: whether anything reports to
+    the row.
+
+    **The mutation it exists to survive** is deleting the mirror rule from the
+    trigger and keeping the rank check on the edge. Every other assertion in this
+    module stays green when that happens, which is why ADR 0044 declares
+    the rule shipped as a convention: "a fix with nothing asserting it is a
+    convention, and saying so is not the same as fixing it" (`docs/MISTAKES.md`
+    entry 2).
+    """
+    graph = supervision_graph
+    key = graph.assignment_key
+
+    childless = written(graph, lambda: graph.node("CHAIR"), "A chair assignment nothing reports to")
+    supervisor = written(graph, lambda: graph.node("CHAIR"), "A second chair assignment")
+    written(
+        graph,
+        lambda: graph.node("LEAD_FACULTY", reports_to=supervisor[key]),
+        "A lead-faculty assignment reporting to that second chair",
+    )
+
+    written(
+        graph,
+        lambda: change_role(graph, childless, "LEAD_FACULTY"),
+        "Turning the chair nobody reports to into a lead-faculty assignment",
+    )
+
+    refused = graph.refusal(lambda: change_role(graph, supervisor, "LEAD_FACULTY"))
+    assert refused is not None, (
+        "A chair with a lead-faculty assignment reporting to it was edited into a lead-faculty "
+        "assignment itself, and the stored graph now holds `LEAD_FACULTY → LEAD_FACULTY`. ADR "
+        "0044: 'The mirror of the rule is enforced too, on the `UPDATE` that changes a parent's "
+        "role: an assignment may not change to a role that something already reporting to it fails "
+        "to be outranked by.' No edge was written, which is the whole point — a rank check that "
+        "reads only the edge in front of it never runs on this statement, and the row an "
+        "administrator edits in §6.3's People editor is the parent. The identical update was "
+        "accepted one statement earlier on a chair nothing reports to, so this is about the "
+        "reporting line rather than about the update. The end state is §4.1 invariant 2: one "
+        "lead's courses inside a sibling lead's purview, silently."
+    )
+
+
+def test_a_supervisors_role_may_change_to_another_role_that_still_outranks_its_reporters(
+    supervision_graph: Any,
+) -> None:
+    """The other side of the mirror rule: a chair with a lead under it may become a dean.
+
+    The rule is about the *relationship* the update leaves behind, not about
+    editing a row that has reporters. `rank(LEAD_FACULTY)=2 < rank(DEAN)=5`, so the
+    stored edge still climbs after the change and there is nothing to refuse — and
+    a mirror rule written as "refuse a role change on any assignment that has
+    reporters" satisfies the test above while making an ordinary promotion
+    unwritable. §2.1's insertions are the same argument one level down: reporting
+    lines are re-arranged, and the schema has to take the ones that stay legal.
+
+    **Three assertions, because "accepted" has two degenerate readings.** The
+    update is not refused; the row comes back holding the new role, so an update
+    that was silently swallowed is not read as success; and the lead still reports
+    to it, because a mirror rule implemented by clearing the children's edges would
+    satisfy both of the others and quietly shrink somebody's purview — the failure
+    mode `test_a_chair_may_report_through_an_assistant_dean_or_straight_to_the_dean`
+    reads edges back for.
+    """
+    graph = supervision_graph
+    key = graph.assignment_key
+
+    supervisor = written(graph, lambda: graph.node("CHAIR"), "A chair assignment")
+    lead = written(
+        graph,
+        lambda: graph.node("LEAD_FACULTY", reports_to=supervisor[key]),
+        "A lead-faculty assignment reporting to that chair",
+    )
+
+    refused = graph.refusal(lambda: change_role(graph, supervisor, "DEAN"))
+    assert refused is None, (
+        f"A chair with a lead reporting to it was refused a change of role to `DEAN`: {refused}. "
+        "ADR 0044's mirror rule refuses a role change that leaves an existing reporter no longer "
+        "outranked, and `rank(LEAD_FACULTY)=2 < rank(DEAN)=5` — the edge still climbs, so this is "
+        "an ordinary promotion and §6.3's People editor has to be able to make it. A rule written "
+        "as 'refuse a role change on an assignment anything reports to' passes "
+        "`test_changing_a_supervisors_role_to_one_its_reporters_no_longer_climb_to_is_refused` and "
+        "fails here."
+    )
+    assert role_of(graph, supervisor) == graph.role_value("DEAN"), (
+        f"That assignment came back in role {role_of(graph, supervisor)!r} rather than "
+        f"{graph.role_value('DEAN')!r}, although the update was accepted. The role was changed "
+        "back, or the update was swallowed — either way the assertion above is true of a statement "
+        "that did nothing."
+    )
+    assert graph.parent_of(lead[key]) == supervisor[key], (
+        f"The lead now reports to {graph.parent_of(lead[key])} rather than to the assignment it "
+        "reported to before its role changed. The update was accepted, so the edge was rewritten "
+        "rather than refused — which is how a mirror rule implemented as 'clear whatever no longer "
+        "climbs' would pass every other assertion here, and it makes somebody's purview quietly "
+        "smaller (SPEC §2.1 unions the purviews of everything transitively reporting to an "
+        "assignment)."
     )

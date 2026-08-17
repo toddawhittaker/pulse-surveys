@@ -1598,7 +1598,7 @@ def test_the_role_migration_corrects_an_attribute_it_did_not_write(
 # The downgrade, and the one privilege it deliberately leaves behind.
 # ---------------------------------------------------------------------------
 #
-# `alembic downgrade -1` has to be the inverse of `alembic upgrade head`, and for
+# This revision's `downgrade()` has to be the inverse of its `upgrade()`, and for
 # this revision that is not only a question of which objects exist. A privilege on
 # an object the downgrade drops goes with the object; a privilege on an object
 # that **survives** does not, and has to be revoked by hand. The first spelling of
@@ -1640,6 +1640,33 @@ def test_the_role_migration_corrects_an_attribute_it_did_not_write(
 # `public.role_assignment` had gone missing would raise a differently-coded error
 # with an equally plausible-looking message.
 UNDEFINED_OBJECT = "42704"
+
+# E0-10's own revision, named rather than reached relatively. Both ends of the
+# three tests below are pinned to it: they upgrade *to* it and downgrade to the
+# revision below it, so that neither end moves when a later ticket lands a
+# revision on top.
+#
+# **Why the upgrade is pinned as well as the downgrade.** `-1` is relative to
+# head, so from the moment any revision lands on top of this one, `alembic
+# downgrade -1` undoes *that* revision, E0-10's views and grants are all still
+# standing, and every assertion below — each of which is that some set is empty —
+# is satisfied by a database nobody has changed (`docs/MISTAKES.md` entry 3, note
+# 24). E0-11 is the ticket where that arrived, and it was measured with a
+# throwaway revision whose whole content was one view:
+# [`docs/disputes/E0-11-02.md`](../../docs/disputes/E0-11-02.md). Left at head,
+# the *upgrade* is the other half of the same problem in the other direction —
+# `privileges_held` would report a later revision's unrevoked grant as a defect in
+# E0-10's `downgrade()`, which cannot revoke a grant it never made, and
+# `the_reveal_function` requires there to be exactly one `SECURITY DEFINER`
+# function, which is a fact about E0-10 rather than about head.
+#
+# **Only one identifier is written down**, and that is deliberate. Alembic
+# resolves `<revision>-1` against the chain, so the parent is derived rather than
+# spelled: a revision inserted between E0-09's and this one changes what gets
+# undone on its own, where a second constant here would quietly keep naming the
+# wrong parent.
+IDENTITY_REVISION = "446183e8cc5f"
+BELOW_THE_IDENTITY_REVISION = f"{IDENTITY_REVISION}-1"
 
 # Which roles hold what on the `public` schema, and on the database, as the
 # catalog records it. `aclexplode` is what makes this readable without pinning an
@@ -1734,46 +1761,75 @@ def database_grantees(connection: Any) -> set[tuple[str, str]]:
     return {(row[0], row[1]) for row in connection.execute(text(DATABASE_GRANTEES))}
 
 
-def downgrade_one_revision(config: Any, meaning: str) -> None:
-    """`alembic downgrade -1`, where not completing is a failed test rather than an error."""
+def the_identity_revision(config: Any) -> str:
+    """`IDENTITY_REVISION`, after asking the script directory whether it still exists.
+
+    Resolved rather than passed straight to `command.upgrade`, so that a constant
+    left behind by a squash, a rebase or a renamed revision file fails with a
+    message naming E0-10 — instead of Alembic's own `Can't locate revision
+    identified by '446183e8cc5f'`, which reads like a broken environment.
+    """
+    from alembic.script import ScriptDirectory
+
+    try:
+        ScriptDirectory.from_config(config).get_revision(IDENTITY_REVISION)
+    except Exception as failure:
+        pytest.fail(
+            f"`{IDENTITY_REVISION}` is not a revision in this tree: {failure!r}. That is E0-10's "
+            "own revision — the one that creates the two read views, the reveal function and every "
+            "grant the three tests below are about — and all three pin both ends of their work to "
+            "it rather than to `head` and `-1`. If the revision has been renumbered or squashed, "
+            "this constant is the one place to change; if E0-10's grants have moved to a different "
+            "revision, point it there and say so in the pull request. Do not restore `head` and "
+            "`-1`: that is `docs/disputes/E0-11-02.md`, and it makes every assertion below true of "
+            "a database nobody has changed."
+        )
+    return IDENTITY_REVISION
+
+
+def downgrade_below_the_identity_revision(config: Any, meaning: str) -> None:
+    """Undo E0-10's revision and nothing else, failing the test if it does not complete."""
     from alembic import command
 
     try:
-        command.downgrade(config, "-1")
+        command.downgrade(config, BELOW_THE_IDENTITY_REVISION)
     except Exception as failure:
         pytest.fail(
-            f"`alembic downgrade -1` did not complete: {failure!r}. {meaning} A downgrade that "
-            "stops part-way is worse than one that refuses to start: the objects before the "
-            "failing statement are gone, the ones after it are still there, and the revision is "
-            "still stamped as applied."
+            f"`alembic downgrade {BELOW_THE_IDENTITY_REVISION}` did not complete: {failure!r}. "
+            f"{meaning} A downgrade that stops part-way is worse than one that refuses to start: "
+            "the objects before the failing statement are gone, the ones after it are still there, "
+            "and the revision is still stamped as applied."
         )
 
 
 def only_the_identity_revision_was_undone(
-    views_at_head: Sequence[str], views_now: Sequence[str]
+    views_at_the_revision: Sequence[str], views_now: Sequence[str]
 ) -> None:
-    """Fail unless the step `-1` undid is the one that created the read views.
+    """Fail unless the step that was undone is the one that created the read views.
 
-    `-1` is relative to head, so on the day a revision lands on top of this one it
-    is that revision `-1` names, and every assertion after this point becomes a
-    statement about a downgrade this file is not about — satisfied trivially, and
-    green (`docs/MISTAKES.md` entry 3). The views are what make the difference
-    visible from the outside: this revision creates them, so a downgrade that
-    leaves one standing did not undo it.
+    Both ends of these tests are pinned to `IDENTITY_REVISION`, so this is no
+    longer the guard against `-1` drifting that it was written as — it is the guard
+    that the constant still names the revision the assertions describe. The views
+    are what make that visible from the outside: E0-10's revision creates them, so
+    a downgrade that leaves one standing did not undo E0-10, and every assertion
+    after this point is about privileges some other revision writes — all of them
+    satisfied by a database nobody has changed (`docs/MISTAKES.md` entry 3).
     """
-    assert views_at_head, (
-        "There is no view in `public` at head, so nothing here can tell which revision the "
-        "downgrade undid — and E0-10's 'a section-roster view and an enrollment-count view' are "
-        "missing besides. `test_identity_separated_views.py` diagnoses that."
+    assert views_at_the_revision, (
+        f"There is no view in `public` at revision {IDENTITY_REVISION}, so nothing here can tell "
+        "which revision the downgrade undid — and E0-10's 'a section-roster view and an "
+        "enrollment-count view' are missing besides. `test_identity_separated_views.py` diagnoses "
+        "that."
     )
-    surviving = sorted(set(views_at_head) & set(views_now))
+    surviving = sorted(set(views_at_the_revision) & set(views_now))
     assert not surviving, (
-        f"After `alembic downgrade -1` the views {surviving} still exist, so the step that was "
-        f"undone is not the one that created them — at head `public` held {sorted(views_at_head)}. "
-        "The likeliest cause is a revision landing on top of this one, which `-1` now names. Point "
-        "this test at the identity revision explicitly rather than relatively: every assertion "
-        "below is about privileges *that* revision writes, and against any other revision they are "
-        "all satisfied by a database nobody has changed."
+        f"After `alembic downgrade {BELOW_THE_IDENTITY_REVISION}` the views {surviving} still "
+        "exist, so the step that was undone is not the one that created them — at "
+        f"{IDENTITY_REVISION} `public` held {sorted(views_at_the_revision)}. `IDENTITY_REVISION` "
+        "no longer names the revision that creates the read views: it has been renumbered, or "
+        "E0-10's objects have moved to another revision. Every assertion below is about privileges "
+        "*that* revision writes, and against any other revision they are all satisfied by a "
+        "database nobody has changed."
     )
 
 
@@ -1787,18 +1843,23 @@ def test_downgrading_the_identity_revision_leaves_no_grant_on_a_surviving_table(
     grants, and the survivors are read out of `pg_class` after the fact, so a table
     a later ticket adds is inside this assertion the day it exists. The three roles
     are the two runtime ones and the reveal function's owner, and the owner is
-    discovered from the catalog at head rather than spelled — E10 replaces the
+    discovered from the catalog rather than spelled — E10 replaces the
     function, and a rule written with the role's name would retire with it.
+
+    **Both ends are pinned to E0-10's own revision** rather than to `head` and
+    `-1`, and the constant at the top of this section says why at length. In one
+    line: this test is about what *E0-10's* `downgrade()` takes back, and neither
+    end of a relative step stays pointed at E0-10 once a later revision exists.
 
     **The baseline is asserted first, and it is not ceremony.** Every assertion
     after the downgrade is that a set is empty, and an empty set is what a database
     with no grants in it produces — a migration that never ran, a role that was
     never created, a `has_table_privilege` call answering about the wrong database.
-    So two grants this revision certainly makes are read back at head before
-    anything is undone: `pulse_care`'s `SELECT` on `role_assignment`, which is the
-    one that was left behind, and the definer's `SELECT` on `user_identity`, which
-    is the one with a name behind it. The schema grants are read the same way for
-    the same reason.
+    So two grants this revision certainly makes are read back at that revision
+    before anything is undone: `pulse_care`'s `SELECT` on `role_assignment`, which
+    is the one that was left behind, and the definer's `SELECT` on `user_identity`,
+    which is the one with a name behind it. The schema grants are read the same way
+    for the same reason.
 
     **The set difference is reported, not a boolean.** A failure here has to say
     which role holds which privilege on which table, because the fix is a `REVOKE`
@@ -1814,42 +1875,44 @@ def test_downgrading_the_identity_revision_leaves_no_grant_on_a_surviving_table(
     from alembic import command
 
     config = alembic_config_pointed_at(empty_database)
-    command.upgrade(config, "head")
+    command.upgrade(config, the_identity_revision(config))
 
     with catalog_connection(empty_database) as connection:
         definer = the_reveal_function(connection)["owner"]
         roles = (APPLICATION_ROLE, CARE_ROLE, definer)
-        views_at_head = read_views(connection)
-        at_head = privileges_held(connection, roles, public_relations(connection))
-        schema_at_head = schema_grantees(connection)
+        views_at_the_revision = read_views(connection)
+        at_the_revision = privileges_held(connection, roles, public_relations(connection))
+        schema_at_the_revision = schema_grantees(connection)
 
-    assert (CARE_ROLE, "role_assignment", "SELECT") in at_head, (
-        f"At head, `{CARE_ROLE}` does not hold `SELECT` on `public.role_assignment`. That grant is "
-        "the one this test was written about — it outlived `downgrade -1` while the definer's two "
-        "beside it were revoked — so without it at head, every assertion below is true of a "
-        "database that never had the grant in the first place. What the roles do hold here is "
-        f"{sorted(at_head)}. The reveal function reads `role_assignment` on its own account "
-        "(ADR 0043), so if this grant has moved, say where in the pull request."
+    assert (CARE_ROLE, "role_assignment", "SELECT") in at_the_revision, (
+        f"At revision {IDENTITY_REVISION}, `{CARE_ROLE}` does not hold `SELECT` on "
+        "`public.role_assignment`. That grant is the one this test was written about — it outlived "
+        "the downgrade while the definer's two beside it were revoked — so without it here, every "
+        "assertion below is true of a database that never had the grant in the first place. What "
+        f"the roles do hold is {sorted(at_the_revision)}. The reveal function reads "
+        "`role_assignment` on its own account (ADR 0043), so if this grant has moved, say where in "
+        "the pull request."
     )
-    assert (definer, IDENTITY_TABLE, "SELECT") in at_head, (
-        f"At head, the reveal function's owner `{definer}` does not hold `SELECT` on "
-        f"`public.{IDENTITY_TABLE}`. That is the privilege the one door in the wall spends "
-        "(ADR 0043), and it is the second half of this test's baseline: with it absent, the "
+    assert (definer, IDENTITY_TABLE, "SELECT") in at_the_revision, (
+        f"At revision {IDENTITY_REVISION}, the reveal function's owner `{definer}` does not hold "
+        f"`SELECT` on `public.{IDENTITY_TABLE}`. That is the privilege the one door in the wall "
+        "spends (ADR 0043), and it is the second half of this test's baseline: with it absent, the "
         "assertion that nothing survives the downgrade is satisfied by a database where nothing "
-        f"was ever granted. The roles hold {sorted(at_head)}. "
+        f"was ever granted. The roles hold {sorted(at_the_revision)}. "
         "`test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs` diagnoses a "
         "definer whose grants have moved."
     )
-    assert set(roles) <= {role for role, _ in schema_at_head}, (
-        f"At head, `public`'s ACL names {sorted(schema_at_head)}, which does not cover all of "
-        f"{sorted(roles)}. ADR 0043 lists `USAGE ON SCHEMA public` for all three roles among the "
+    assert set(roles) <= {role for role, _ in schema_at_the_revision}, (
+        f"At revision {IDENTITY_REVISION}, `public`'s ACL names {sorted(schema_at_the_revision)}, "
+        f"which does not cover all of {sorted(roles)}. ADR 0043 lists `USAGE ON SCHEMA public` for "
+        "all three roles among the "
         "privileges this revision writes and the downgrade must revoke, so if the revision no "
         "longer grants it, the schema assertion below is asserting nothing. Fix this test rather "
         "than deleting the assertion: the question it exists to ask — did the downgrade take back "
         "what the upgrade gave on the schema — has an answer either way."
     )
 
-    downgrade_one_revision(
+    downgrade_below_the_identity_revision(
         config,
         "This revision's `downgrade()` has to run to the end, because the revokes are the last "
         "thing in it: a statement that raises before them leaves every privilege below in place "
@@ -1862,10 +1925,11 @@ def test_downgrading_the_identity_revision_leaves_no_grant_on_a_surviving_table(
         left_over = privileges_held(connection, roles, surviving_relations)
         schema_now = schema_grantees(connection)
 
-    only_the_identity_revision_was_undone(views_at_head, views_now)
+    only_the_identity_revision_was_undone(views_at_the_revision, views_now)
 
     assert surviving_relations, (
-        "There is no table or view left in `public` after `alembic downgrade -1`, so the cross "
+        f"There is no table or view left in `public` after `alembic downgrade "
+        f"{BELOW_THE_IDENTITY_REVISION}`, so the cross "
         "product below is empty and 'no role holds anything' is true of nothing. This revision "
         "drops the objects it created and leaves the schema the tickets under it built standing; "
         "a database with none of that left has had more undone than one step."
@@ -1875,7 +1939,8 @@ def test_downgrading_the_identity_revision_leaves_no_grant_on_a_surviving_table(
         f"{role} holds {privilege} on public.{relation}" for role, relation, privilege in left_over
     )
     assert not left_behind, (
-        f"After `alembic downgrade -1`, {left_behind} — privileges on objects that survived the "
+        f"After `alembic downgrade {BELOW_THE_IDENTITY_REVISION}`, {left_behind} — privileges on "
+        "objects that survived the "
         "revision that granted them. ADR 0043: 'a privilege on anything that outlives the "
         "downgrade is revoked, one guarded `IF EXISTS` per role'. A privilege cannot outlive the "
         "object it is on, so the grants on the two views and on the reveal function need nothing; "
@@ -1892,7 +1957,8 @@ def test_downgrading_the_identity_revision_leaves_no_grant_on_a_surviving_table(
         if role in roles
     )
     assert not on_the_schema, (
-        f"After `alembic downgrade -1`, `public`'s ACL still names {on_the_schema}. This revision "
+        f"After `alembic downgrade {BELOW_THE_IDENTITY_REVISION}`, `public`'s ACL still names "
+        f"{on_the_schema}. This revision "
         "is the only thing in the tree that grants `USAGE ON SCHEMA public` to these roles, so it "
         "is the only thing that can take it back. On a stock cluster nothing observable changes — "
         "`PUBLIC` holds `USAGE` on `public` by default and the roles keep reaching the schema "
@@ -1934,22 +2000,23 @@ def test_the_downgrade_leaves_the_application_roles_connect_privilege_in_place(
     from alembic import command
 
     config = alembic_config_pointed_at(empty_database)
-    command.upgrade(config, "head")
+    command.upgrade(config, the_identity_revision(config))
 
     with catalog_connection(empty_database) as connection:
-        views_at_head = read_views(connection)
-        at_head = database_grantees(connection)
+        views_at_the_revision = read_views(connection)
+        at_the_revision = database_grantees(connection)
 
-    assert (APPLICATION_ROLE, "CONNECT") in at_head, (
-        f"At head, this database's ACL does not name `{APPLICATION_ROLE}` as holding `CONNECT`: it "
-        f"names {sorted(at_head)}. Then the assertion below is about an entry that was never "
+    assert (APPLICATION_ROLE, "CONNECT") in at_the_revision, (
+        f"At revision {IDENTITY_REVISION}, this database's ACL does not name `{APPLICATION_ROLE}` "
+        f"as holding `CONNECT`: it names {sorted(at_the_revision)}. Then the assertion below is "
+        "about an entry that was never "
         "there, and it would stay green with `REVOKE CONNECT ON DATABASE … FROM pulse_app` added "
         "to `downgrade()` — the exact edit it exists to catch. E0-10's migration grants `CONNECT` "
         "to both connection roles; if that has moved, this test needs pointing at wherever it "
         "moved to rather than relaxing."
     )
 
-    downgrade_one_revision(
+    downgrade_below_the_identity_revision(
         config,
         "The exception below is only meaningful against a downgrade that ran to the end.",
     )
@@ -1958,10 +2025,11 @@ def test_the_downgrade_leaves_the_application_roles_connect_privilege_in_place(
         views_now = read_views(connection)
         now = database_grantees(connection)
 
-    only_the_identity_revision_was_undone(views_at_head, views_now)
+    only_the_identity_revision_was_undone(views_at_the_revision, views_now)
 
     assert (APPLICATION_ROLE, "CONNECT") in now, (
-        f"`alembic downgrade -1` removed `{APPLICATION_ROLE}`'s `CONNECT` entry from this "
+        f"`alembic downgrade {BELOW_THE_IDENTITY_REVISION}` removed `{APPLICATION_ROLE}`'s "
+        "`CONNECT` entry from this "
         f"database's ACL. It now names {sorted(now)}. This is the one grant the downgrade "
         "deliberately leaves (ADR 0043, and the migration says so at the point of the omission): "
         "`scripts/db-init/01-application-role.sh` grants the same privilege at `initdb`, before "
@@ -2019,19 +2087,20 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
     from alembic import command
 
     config = alembic_config_pointed_at(empty_database)
-    command.upgrade(config, "head")
+    command.upgrade(config, the_identity_revision(config))
 
     with catalog_connection(empty_database) as connection:
         definer = the_reveal_function(connection)["owner"]
         still_present = (APPLICATION_ROLE, definer)
-        views_at_head = read_views(connection)
-        at_head = privileges_held(connection, still_present, public_relations(connection))
+        views_at_the_revision = read_views(connection)
+        at_the_revision = privileges_held(connection, still_present, public_relations(connection))
 
-    assert (definer, IDENTITY_TABLE, "SELECT") in at_head, (
-        f"At head, the reveal function's owner `{definer}` does not hold `SELECT` on "
-        f"`public.{IDENTITY_TABLE}` — the roles that will still be present hold {sorted(at_head)}. "
+    assert (definer, IDENTITY_TABLE, "SELECT") in at_the_revision, (
+        f"At revision {IDENTITY_REVISION}, the reveal function's owner `{definer}` does not hold "
+        f"`SELECT` on `public.{IDENTITY_TABLE}` — the roles that will still be present hold "
+        f"{sorted(at_the_revision)}. "
         "That grant is on a table the downgrade leaves standing, so it is the one the last "
-        "assertion in this test watches for. Without it at head, that assertion is true before the "
+        "assertion in this test watches for. Without it there, that assertion is true before the "
         "downgrade runs and would stay true if `downgrade()` did nothing at all."
     )
 
@@ -2069,7 +2138,7 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
             "what a guard is for."
         )
 
-        downgrade_one_revision(
+        downgrade_below_the_identity_revision(
             config,
             f"`{CARE_ROLE}` does not exist in this cluster, which is the case the `IF EXISTS` "
             "guards around the revokes are for: the control above shows the unguarded statement "
@@ -2087,7 +2156,7 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
             connection.execute(text(f'ALTER ROLE "{absent_under}" RENAME TO "{CARE_ROLE}"'))
             connection.commit()
 
-    only_the_identity_revision_was_undone(views_at_head, views_now)
+    only_the_identity_revision_was_undone(views_at_the_revision, views_now)
 
     assert surviving_relations, (
         "There is no table or view left in `public` after the downgrade, so the assertion below "
