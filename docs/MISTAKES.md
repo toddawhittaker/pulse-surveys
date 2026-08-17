@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 19**
+**Caught: 20**
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -105,7 +105,7 @@ cannot see whether it exists.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 17**
+**Caught: 18**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -130,7 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 15**
+**Caught: 16**
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -255,7 +255,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 4**
+**Caught: 5**
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
@@ -427,6 +427,77 @@ a limit in the standard library, a column width, a protocol maximum — generate
 than trusting a wide range to wander into it. Where a bound stays, say in the
 docstring what it does not reach; a stated bound is a scope, and an unstated one
 is a false claim of totality.
+
+---
+
+## 17. An unqualified table name let the caller choose which table a guard read
+
+**Caught: 1**
+
+**What happened.** E0-09's supervision-edge trigger names `role_assignment`
+unqualified in all three of its guard queries and in `'role_assignment'::regclass`,
+which keys its advisory lock. Postgres searches the temporary schema **first** for
+relation names, and does so whether or not `pg_temp` is in `search_path` — being
+unlisted is what puts it first, not what skips it. So a caller who creates
+`pg_temp.role_assignment` and then writes `public.role_assignment` gets all three
+guards reading an empty temp table.
+
+Reproduced on the pinned Postgres as a `NOSUPERUSER NOCREATEDB NOCREATEROLE` role
+with no `CREATE` on `public`, because creating a temporary table needs only the
+`TEMPORARY` privilege, which Postgres grants to `PUBLIC` by default. The
+two-assignment cycle and the edge into a `CARE` assignment that the same role had
+been refused seconds earlier both committed. The lock key moved too, so the
+serialisation ADR 0027 rests on went with it.
+
+The generic security review found it. Nothing could reach it — `pulse_app` holds
+only `CONNECT` — but E0-10 is the ticket that grants the DML, and the bypass
+would have arrived with those grants, silently and in a file nobody was editing.
+
+**Root cause.** Writing SQL that runs *later* as though it ran *now*. Everything
+else in the schema — check constraints, generated columns, foreign keys,
+exclusion constraints — is resolved to OIDs when the DDL runs, and is immune;
+measured, five for five, with shadows in place. A `plpgsql` body is the one place
+in this repository where a name is resolved on every call, and it was written in
+the same style as the rest.
+
+**Consequence.** Caught before it could be reached, so the cost was one round.
+Had it landed with E0-10's grants, all three of the rules the ticket exists to
+enforce would have been bypassable by any authenticated application session, with
+276 tests still green — no fixture creates a temporary table, so removing the
+qualification is invisible to the suite today.
+
+**Rule.** In any SQL that is parsed at call time — a `plpgsql` body, anything
+built for `EXECUTE` — **schema-qualify every relation**, and
+put `SET search_path = pg_catalog, public, pg_temp` on the function. Both, not
+either: the qualification survives someone dropping the `SET`, and the `SET`
+survives someone adding an unqualified reference. Name `pg_temp` **explicitly and
+last** — a `search_path` that merely omits it, which is the usual advice, leaves
+the hijack open, and that difference was measured rather than assumed. And verify
+it the way it is exploited: stand up the shadow table as a non-superuser role and
+watch the write be refused, rather than reading the SQL and agreeing with it.
+
+**A view is not in that list, and the first version of this entry said it was.**
+E0-10's test author queried the clause rather than editing it, having no shell to
+settle it with; it was then measured on the deployed image, and the query is
+worth keeping because the result is the opposite of what both this entry and
+E0-10 assumed:
+
+| | baseline | after `CREATE TEMP TABLE` shadowing the base table |
+|---|---|---|
+| `plpgsql` body | `from public` | **`from pg_temp`** |
+| view | `from public` | `from public` |
+
+`pg_depend` records the view against `public.<table>`: the oid is resolved at
+`CREATE VIEW` and stored, so a view is early-bound like a constraint. The
+practical consequence is not that qualification stops mattering — it is that
+**a test which shadows a relation and asserts a view is unchanged cannot fail**,
+which is entry 3's shape wearing this entry's clothes. Point that test at the
+function.
+
+*The general lesson, and the reason this is here rather than only in the ticket:
+a rule that names a list of cases invites the list being extended by analogy. Two
+of the three items here were measured; the third was added because it sounded
+like the other two.*
 
 ---
 
@@ -718,55 +789,6 @@ scope is per-test state, not process state**, and a mutation that relies on
 process lifetime has to go below the import: into a file, into the environment, or
 into a deterministic source of randomness. A mutation that fails to fail is a
 result about the mutation until you have shown otherwise.
-
----
-
-## 17. An unqualified table name let the caller choose which table a guard read
-
-**Caught: 0**
-
-**What happened.** E0-09's supervision-edge trigger names `role_assignment`
-unqualified in all three of its guard queries and in `'role_assignment'::regclass`,
-which keys its advisory lock. Postgres searches the temporary schema **first** for
-relation names, and does so whether or not `pg_temp` is in `search_path` — being
-unlisted is what puts it first, not what skips it. So a caller who creates
-`pg_temp.role_assignment` and then writes `public.role_assignment` gets all three
-guards reading an empty temp table.
-
-Reproduced on the pinned Postgres as a `NOSUPERUSER NOCREATEDB NOCREATEROLE` role
-with no `CREATE` on `public`, because creating a temporary table needs only the
-`TEMPORARY` privilege, which Postgres grants to `PUBLIC` by default. The
-two-assignment cycle and the edge into a `CARE` assignment that the same role had
-been refused seconds earlier both committed. The lock key moved too, so the
-serialisation ADR 0027 rests on went with it.
-
-The generic security review found it. Nothing could reach it — `pulse_app` holds
-only `CONNECT` — but E0-10 is the ticket that grants the DML, and the bypass
-would have arrived with those grants, silently and in a file nobody was editing.
-
-**Root cause.** Writing SQL that runs *later* as though it ran *now*. Everything
-else in the schema — check constraints, generated columns, foreign keys,
-exclusion constraints — is resolved to OIDs when the DDL runs, and is immune;
-measured, five for five, with shadows in place. A `plpgsql` body is the one place
-in this repository where a name is resolved on every call, and it was written in
-the same style as the rest.
-
-**Consequence.** Caught before it could be reached, so the cost was one round.
-Had it landed with E0-10's grants, all three of the rules the ticket exists to
-enforce would have been bypassable by any authenticated application session, with
-276 tests still green — no fixture creates a temporary table, so removing the
-qualification is invisible to the suite today.
-
-**Rule.** In any SQL that is parsed at call time — a `plpgsql` body, a view
-definition, anything built for `EXECUTE` — **schema-qualify every relation**, and
-put `SET search_path = pg_catalog, public, pg_temp` on the function. Both, not
-either: the qualification survives someone dropping the `SET`, and the `SET`
-survives someone adding an unqualified reference. Name `pg_temp` **explicitly and
-last** — a `search_path` that merely omits it, which is the usual advice, leaves
-the hijack open, and that difference was measured rather than assumed. And verify
-it the way it is exploited: stand up the shadow table as a non-superuser role and
-watch the write be refused, rather than reading the SQL and agreeing with it.
-
 
 ---
 
