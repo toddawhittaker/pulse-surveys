@@ -86,13 +86,9 @@ from app.launch import (
     id_token_claims,
     resolve_launch,
 )
-from app.nrps import (
-    MEMBERSHIP_CONTAINER_MEDIA_TYPE,
-    PAGE_PARAMETER,
-    MembershipPageOutOfRangeError,
-    membership_page,
-)
+from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, membership_page
 from app.pages import authorization_response_page, launch_page, registration_values
+from app.paging import PAGE_PARAMETER, PageOutOfRangeError
 from app.seed import MockContext, seeded_platform
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
 
@@ -335,7 +331,7 @@ def create_app() -> FastAPI:
         context = require_context(context_id)
         try:
             served = membership_page(platform, settings, context, page)
-        except MembershipPageOutOfRangeError as refusal:
+        except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         return JSONResponse(
             served.document,

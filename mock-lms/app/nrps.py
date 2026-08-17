@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.config import PlatformSettings
+from app.paging import link_header, page_count, page_url, window
 from app.seed import MockContext, MockEnrollment, SeededPlatform
 
 # The media type NRPS 2.0 gives a membership container. Served rather than
@@ -44,12 +45,6 @@ ENROLLMENT_EXTENSION = "https://mock-lms.invalid/spec/nrps/enrollment"
 # no next relation at all.
 PAGE_SIZE = 5
 
-# The query parameter a page is addressed by, 1-based. A client is not expected
-# to build it — the `Link` header is what a tool follows — but a URL a developer
-# can type is worth more than an opaque cursor on a service whose whole audience
-# is people debugging a sync.
-PAGE_PARAMETER = "page"
-
 
 def nrps_claim(settings: PlatformSettings, context_id: str) -> dict[str, Any]:
     """The NRPS claim: where this launch's roster is served.
@@ -62,10 +57,6 @@ def nrps_claim(settings: PlatformSettings, context_id: str) -> dict[str, Any]:
         "context_memberships_url": settings.memberships_url(context_id),
         "service_versions": ["2.0"],
     }
-
-
-class MembershipPageOutOfRangeError(LookupError):
-    """A page was asked for that this roster does not have."""
 
 
 @dataclass(frozen=True)
@@ -105,54 +96,6 @@ def member_document(platform: SeededPlatform, enrollment: MockEnrollment) -> dic
     return document
 
 
-def page_count(members: int) -> int:
-    """How many pages a roster of `members` divides into. One, for an empty one.
-
-    An empty roster is one empty page rather than zero pages, because a container
-    with no members is a legitimate answer — an unenrolled section — and a
-    service that answered `404` for it would make "the section is empty" and "the
-    section does not exist" the same response.
-    """
-    return max(1, -(-members // PAGE_SIZE))
-
-
-def page_url(settings: PlatformSettings, context: MockContext, page: int) -> str:
-    """The absolute URL of one page of one roster.
-
-    Page one is advertised without the parameter, which is the URL the launch's
-    NRPS claim carries: a tool that follows the claim and a tool that follows a
-    `first` relation then arrive at the same string rather than at two spellings
-    of one page.
-    """
-    url = settings.memberships_url(context.context_id)
-    return url if page == 1 else f"{url}?{PAGE_PARAMETER}={page}"
-
-
-def link_header(
-    settings: PlatformSettings, context: MockContext, page: int, pages: int
-) -> str | None:
-    """The RFC 8288 header for one page, or `None` for a roster that fits on one.
-
-    `next` is advertised **only where a next page exists**, which is the whole of
-    the most common paging defect: a platform that advertises one whenever the
-    page it just served was full sends a client for a page with nothing on it.
-    The seed holds a section of exactly one page for that reason.
-
-    `first`, `prev` and `last` ride along because a real header carries several
-    relations, and a client written against a header that only ever holds one
-    passes here and breaks on the first platform that sends two.
-    """
-    if pages <= 1:
-        return None
-    entries = [f'<{page_url(settings, context, 1)}>; rel="first"']
-    if page > 1:
-        entries.append(f'<{page_url(settings, context, page - 1)}>; rel="prev"')
-    if page < pages:
-        entries.append(f'<{page_url(settings, context, page + 1)}>; rel="next"')
-    entries.append(f'<{page_url(settings, context, pages)}>; rel="last"')
-    return ", ".join(entries)
-
-
 def membership_page(
     platform: SeededPlatform,
     settings: PlatformSettings,
@@ -161,27 +104,29 @@ def membership_page(
 ) -> MembershipPage:
     """One page of one section's roster, with the header that says where the next is.
 
-    Raises `MembershipPageOutOfRangeError` for a page this roster does not have, so
-    that a client following a header into nowhere gets a `404` naming the
-    problem rather than an empty container that reads as a section nobody is in.
+    Raises `PageOutOfRangeError` for a page this roster does not have, so that a
+    client following a header into nowhere gets a `404` naming the problem
+    rather than an empty container that reads as a section nobody is in.
+
+    The slicing and the header come from `app.paging`, which the AGS line-item
+    container uses too — the ticket rules that it pages "exactly as `nrps.py`
+    does", and two copies of that rule would be two things to keep in step.
     """
+    base = settings.memberships_url(context.context_id)
     members = platform.enrollments_in(context.context_id)
-    pages = page_count(len(members))
-    if page < 1 or page > pages:
-        raise MembershipPageOutOfRangeError(
-            f"The roster for {context.context_id!r} has {pages} page(s) of at most {PAGE_SIZE} "
-            f"members, and page {page} is not one of them."
-        )
-    window = members[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
+    pages = page_count(len(members), PAGE_SIZE)
     return MembershipPage(
         document={
-            "id": page_url(settings, context, page),
+            "id": page_url(base, page),
             "context": {
                 "id": context.context_id,
                 "label": context.label,
                 "title": context.title,
             },
-            "members": [member_document(platform, enrollment) for enrollment in window],
+            "members": [
+                member_document(platform, enrollment)
+                for enrollment in window(members, page, PAGE_SIZE)
+            ],
         },
-        link_header=link_header(settings, context, page, pages),
+        link_header=link_header(base, page, pages),
     )
