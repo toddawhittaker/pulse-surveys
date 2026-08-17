@@ -3,7 +3,8 @@
 **Small on purpose.** E0-15: "this seed data belongs to the mock platform and
 stays small". It is three sections in one term, each with a roster of its own —
 enough that a roster pages, that one student joins late and one drops, and that
-both modalities and two start letters reach a tool. The full demo institution is
+both modalities and more than one start letter reach a tool. The full demo
+institution is
 E0-17's, and it is seeded into Pulse's own database rather than into this
 platform.
 
@@ -21,8 +22,8 @@ met the empty-title case in a test; Todd withdrew that on 2026-08-17 and E0-15's
 "every seeded course needs a title" replaced it.
 
 **Section codes are §2.2's `{startLetter}{ordinal}{modality}`, and they vary.**
-Two start letters and both modalities, because the start letter carries the
-section's length *and* its start date within the term — one letter is one
+More than one start letter and both modalities, because the start letter carries
+the section's length *and* its start date within the term — one letter is one
 calendar, and E0-07's parser would have one answer to be right about. Nothing
 here parses them; that is the tool's side.
 
@@ -187,7 +188,7 @@ INSTRUCTOR = MockUser(
 # The three sections. Course numbers are read off SPEC §8's table: `215` and
 # `140` are undergraduate three-digit numbers inside `000`-`799`, and `8100` is a
 # doctoral four-digit number inside `8000`-`9999`. Section codes are §2.2's:
-# two start letters, both modalities, `WW` online and `FF` face-to-face.
+# more than one start letter, both modalities, `WW` online and `FF` face-to-face.
 CELL_BIOLOGY = MockContext(
     context_id="mock-lms-context-biol-215-r3ww",
     label="BIOL-215-R3WW",

@@ -170,6 +170,14 @@ class LineItemFilters:
     is not silently attributed to the launch's placement, because a platform that
     did that would answer a filter for placement A with a line item that belongs
     to nobody.
+
+    **A line item that carries no such member at all does not match either**, and
+    nothing asserts it. Every line item the suite creates carries a `tag` and a
+    `resourceId`, so widening this comparison to `in (value, None)` — the fail-open
+    shape, where a filter hands back everything that lacks the member — leaves all
+    28 tests in the AGS module green. Reported rather than worked around; the test
+    it needs creates a line item with the member absent and requires a filter for
+    that member not to return it.
     """
 
     resource_link_id: str | None = None
@@ -234,6 +242,14 @@ def moment(value: Any) -> datetime:
             f"The score carries a `timestamp` of {value!r}, which is not an RFC 3339 timestamp: "
             f"{failure}. A platform that stored it would have a log it cannot sort."
         ) from failure
+    # **This branch decides the message, not the answer.** The offset check below
+    # is strictly stronger — anything with no zone also fails to end in `Z` or
+    # `+HH:MM` — so deleting this leaves every refusal here still a refusal, which
+    # is what a mutation of it showed (`docs/MISTAKES.md` entry 3: two rules that
+    # refuse one row are indistinguishable to a behavioural test). It stays
+    # because "carries no UTC offset" is the true sentence for a bare
+    # `2026-03-02`, and the offset check's sentence — about how an offset is
+    # spelled — would be a puzzling thing to read about a value that has none.
     if parsed.tzinfo is None:
         raise GradeServiceError(
             f"The score's `timestamp` {value!r} carries no UTC offset. A stamp without a zone "
@@ -262,9 +278,18 @@ def score_value(payload: dict[str, Any], line_item: "LineItem") -> None:
     into a grade nobody can trace. AGS permits a score with *neither*, which is
     why this is conditional rather than a required member.
 
-    **A maximum is positive.** Zero makes every participation percentage in E3 a
-    division by zero and a negative one inverts the grade — the same rule
-    `create_line_item` already applies one layer up.
+    **A maximum is positive**, and this rule is unreachable through the HTTP
+    surface as it stands: the agreement rule below refuses any maximum that is
+    not the line item's, and `create_line_item` already refuses a non-positive
+    line-item maximum, so a score maximum that gets past both is positive by
+    construction. Removing it changes no answer, which a mutation of it showed.
+    It stays as the guard that becomes load-bearing the moment the agreement rule
+    is relaxed — which ADR 0051 explicitly contemplates a later ticket doing, and
+    the first thing a rescaling platform needs is a denominator that is not zero.
+
+    Zero makes every participation percentage in E3 a division by zero and a
+    negative one inverts the grade — the same rule `create_line_item` applies
+    one layer up.
 
     **A maximum must equal the line item's**, which AGS does not require: the
     specification lets a platform take a differing maximum and scale, and Canvas

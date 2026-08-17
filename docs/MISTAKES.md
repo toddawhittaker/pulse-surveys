@@ -469,7 +469,29 @@ say in the commit that you did.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 25**
+**Caught: 26**
+
+*(The twenty-sixth, in E0-15's review round, and it is four survivors of one
+mutation run rather than one defect. Nineteen mutations against the new AGS rules:
+fourteen killed by the test named for what each broke, and **four survived, of which
+exactly one is a gap**. That ratio is the reason to write this down — a survivor is a
+result about the mutation until it has been read, and three of these four are a
+second guard already refusing the same input. The score's positive-maximum check is
+unreachable through the HTTP surface, because the disagreeing-maximum rule refuses
+any maximum that is not the line item's and `create_line_item` already refuses a
+non-positive line-item maximum. The naive-timestamp check is subsumed by the offset
+check added beside it, and survives as the branch that produces the *true sentence*
+for a bare date rather than as one that changes an answer. The results fold by
+timestamp is subsumed by the 409, exactly as its own docstring predicted. All three
+stay — each becomes load-bearing the moment its neighbour is relaxed, which
+[ADR 0051](adr/0051-a-disagreeing-score-maximum-is-refused-rather-than-rescaled.md)
+contemplates for one of them — and each now says in the code that a test cannot tell
+it apart from the guard beside it. **The fourth is real:** widening the line-item
+filter to `in (value, None)`, so that a filter hands back every line item *lacking*
+the member, leaves all 28 tests green, because every line item the suite creates
+carries a `tag` and a `resourceId`. It fails open, which is the direction that hands
+a tool another placement's grades. The implementer cannot close it on this side of
+the test wall; the test it needs creates a line item with the member absent.)*
 
 *(The twenty-fifth, in E0-15, and it is a gap found by trying to reintroduce a
 defect rather than by any review. The mock platform's roster is served per
@@ -685,7 +707,21 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 13**
+**Caught: 14**
+
+*(The fourteenth, in E0-15's review round, and it is one repository disagreeing with
+itself about what RFC 3339 means. ADR 0048 holds an enrollment window's `start` to an
+offset spelled `+HH:MM` with the colon, and the seed suite refuses a compact `+0000`
+by name. The review's HIGH then asked for a score `timestamp` to be parsed as RFC
+3339, which `datetime.fromisoformat` does — except that it also accepts `+0000`, so
+the score service would have taken exactly the spelling the roster service refuses.
+No test covers it in either direction; the four the suite names are `"yesterday"`, a
+bare date, a naive stamp and `03/02/2026`. It was found by running every new refusal
+branch before writing the commit message rather than by reading the parser and
+agreeing with it, which is entry 9's method arriving at this entry's defect. The
+narrower lesson is about the tool rather than the rule: **a standard-library parser
+named after a standard is not a check against that standard**, and the gap is exactly
+where a second place facing the same hazard ends up disagreeing with the first.)*
 
 *(The thirteenth, in E0-15's tests, and it decided where the helpers live. More than
 one module asks what a `Link` header says, so the paging walk and the header parser
