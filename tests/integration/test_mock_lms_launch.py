@@ -682,7 +682,7 @@ def test_two_launches_carry_different_nonces(mock_platform: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The seeded launches. Criteria 6 and 7, and the context-title requirement.
+# The seeded launches. Criteria 6 and 7, and the context title.
 # ---------------------------------------------------------------------------
 
 
@@ -725,10 +725,20 @@ def test_the_seeded_launches_offer_more_than_one_role(mock_platform: Any) -> Non
 
 
 def test_a_seeded_context_carries_a_title(mock_platform: Any) -> None:
-    """The first of the two context shapes E0-14's scope requires.
+    """A seeded context is nameable, which is what E0-05's `NOT NULL` needs.
 
-    Paired with the test below. This one on its own is what a mock does by
-    default; the pair is the requirement.
+    **This test had a pair, and the pair was the requirement.**
+    `test_a_seeded_context_carries_no_title` asserted that at least one seeded
+    context carried `id` alone, so that E1's ingestion met a titleless course in
+    a test rather than in a deployment. Todd withdrew that on 2026-08-17 in
+    favour of E0-15's "every seeded course needs a title" — the two cannot both
+    hold in one seed — so the other half is deleted and this one stands alone.
+    E0-14's scope carries the withdrawal and what it costs.
+
+    What remains here is the weak form. The strong one — *every* seeded context
+    rather than at least one — is E0-15's criterion, and it is asserted in
+    `tests/integration/test_mock_lms_seed_data.py`, because the seed is that
+    ticket's subject.
     """
     contexts = [
         claim(launch, CONTEXT_CLAIM) for launch in launches_across_seeded_offers(mock_platform)
@@ -738,33 +748,6 @@ def test_a_seeded_context_carries_a_title(mock_platform: Any) -> None:
         f"No seeded context carries a `title` (contexts: {contexts!r}). E0-14's scope: 'Have "
         "this mock exercise both shapes: at least one seeded context with a title and one with "
         "`id` alone.'"
-    )
-
-
-def test_a_seeded_context_carries_no_title(mock_platform: Any) -> None:
-    """The second shape, and the one the ticket wrote a paragraph about.
-
-    In LTI 1.3 the context claim requires only `id`; `title` is optional, so a
-    conformant platform may send a course with no human-readable name at all.
-    E0-05 shipped `course.lms_title` as `NOT NULL`, deliberately, so E1's
-    ingestion needs a fallback rather than an assumption — and E0-14's scope asks
-    this mock to produce the empty case so that whoever writes that path "meets
-    the empty case in a test rather than in a deployment".
-
-    Catches the mock every implementer writes first: a seed loop that gives every
-    context a title because a context without one looks unfinished. Nothing else
-    in E0 fails against it, and the failure surfaces in production as a
-    `NOT NULL` violation on the first launch from a course with no name.
-    """
-    contexts = [
-        claim(launch, CONTEXT_CLAIM) for launch in launches_across_seeded_offers(mock_platform)
-    ]
-    assert contexts, "The platform offers no launches, so there are no contexts to inspect."
-    assert any(isinstance(context, dict) and not context.get("title") for context in contexts), (
-        f"Every seeded context carries a `title` (contexts: {contexts!r}). E0-14's scope asks "
-        "for at least one context with `id` alone, because `course.lms_title` is `NOT NULL` "
-        "and E1's ingestion needs to meet the titleless case in a test rather than in a "
-        "deployment."
     )
 
 

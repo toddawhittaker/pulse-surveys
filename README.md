@@ -144,11 +144,88 @@ Two things about it are worth knowing before debugging anything:
   three application containers and not into this one, so editing `mock-lms/`
   means `docker compose up -d --build mock-lms`.
 
-Two seeded users, one a learner and one an instructor, are enrolled in two
-sections. One of those sections deliberately has no title, because LTI 1.3 makes
-the context claim's title optional and Pulse's own `course.lms_title` is not —
-so the ingestion path in E1 meets the awkward case in a test rather than in a
-deployment. The roster and grade services, and a larger seed, are E0-15's.
+### What it is seeded with
+
+Three sections in one term, each with a roster of its own. Small on purpose: the
+full demo institution is E0-17's and lives in Pulse's own database.
+
+| Section | Course | Modality | Roster |
+|---|---|---|---|
+| `BIOL-215-R3WW` | Cell Biology | online, 12 weeks | 12 members — three pages |
+| `MATH-140-E1FF` | College Algebra | face-to-face, 6 weeks | 7 members — two pages |
+| `NURS-8100-Q2FF` | Doctoral Practice Inquiry | face-to-face, 12 weeks | 5 members — one page |
+
+Course numbers are picked against SPEC §8's bands rather than from the prototype
+screens in `design/`, every one of which is invalid under them. The section codes
+are §2.2's `{startLetter}{ordinal}{modality}`, and they use more than one start
+letter and both modalities so that E0-07's parser has real input.
+
+**Who to launch as.** The launch page offers the two people enrolled in every
+section, so any combination of its two selectors is a launch that works:
+
+| Launch as | Role | What they are for |
+|---|---|---|
+| `mock-lms-user-instructor` | Instructor | every instructor surface |
+| `mock-lms-user-learner` | Learner | every student surface |
+
+Everybody else is a student who takes one section, and they exist so that a
+roster pages and so that E3 has its edge cases. Two of them are not ordinary:
+in `BIOL-215-R3WW`, student 04 enrolls three weeks after their classmates and
+student 07 drops six weeks in — reported `Inactive`, with an enrollment `end`,
+and still on the roster, because SPEC §3.4 has the tool learn about a drop from
+the roster rather than from an absence.
+
+Nobody has a name. Every person carries an email address and nothing else
+personal, and every address is at a domain RFC 2606 reserves so that it can never
+be delivered to. See [ADR 0050](docs/adr/0050-the-mock-roster-exposes-an-address-and-no-name.md).
+
+### The roster and grade services
+
+The platform serves LTI Advantage as well as the launch, and a tool finds both
+services the way a real tool does — out of the two service claims inside the
+`id_token`, never from a path it assembled. Nothing here is authenticated: a real
+platform puts these behind an OAuth 2.0 client-credentials grant, and whichever
+of E1 and E3 needs a token first is where that belongs.
+
+- **NRPS 2.0** serves one section's roster five members at a time, and says where
+  the next page is in an RFC 8288 `Link` header — never in the body. Enrollment
+  windows ride on a namespaced member extension, because NRPS defines no date on
+  a member at all ([ADR 0048](docs/adr/0048-enrollment-windows-ride-on-a-namespaced-nrps-extension.md)).
+- **AGS 2.0** creates line items, lists them filtered by `resource_link_id`,
+  `resource_id` or `tag` and paged the same way the roster is, and takes scores.
+  Nothing is seeded: §3.4 has the tool create "Pulse Participation" on first
+  launch, so what the container answers is only what a tool put there.
+- **What the Score service refuses** is as much of the contract as what it takes,
+  because a score this mock accepts is a score a tool learns to send. A
+  `scoreGiven` with no `scoreMaximum`, a negative one, a non-positive maximum, a
+  `userId` that is not a string, `true` where a number belongs, an
+  `activityProgress` or `gradingProgress` outside AGS's two fixed vocabularies,
+  and a `timestamp` that is not RFC 3339 are all refused. A score *above* the
+  maximum is taken, because AGS permits it and Canvas records it as extra credit.
+  A score older than the one already held for that student on that line item is
+  `409`; one at the *same* instant is taken, because a passback that times out
+  re-sends an identical body and a `409` there would say the retry failed
+  ([ADR 0052](docs/adr/0052-an-equal-score-timestamp-is-accepted-as-a-retry.md)).
+  And a `scoreMaximum` that disagrees with the line item's own is refused rather
+  than rescaled — stricter than AGS, deliberately, so that posting against the
+  line item's maximum is the habit E3 forms
+  ([ADR 0051](docs/adr/0051-a-disagreeing-score-maximum-is-refused-rather-than-rescaled.md)).
+- **The conformant `Result`** is served per line item, filtered by `user_id`, and
+  at its own URL — which is also the `resultUrl` a score post answers with, so a
+  tool can follow what the platform just handed it. A score only becomes a
+  `Result` if it is a grade: `gradingProgress` of `FullyGraded` or
+  `PendingManual` produces one, and `NotReady`, `Failed` or `Pending` does not,
+  because those say the grading process has not produced a grade yet.
+- **`GET /mock/posted-scores`** answers with every score the platform has been
+  sent, verbatim and in arrival order. It is outside the AGS namespace on
+  purpose — a conformant `Result` has no timestamp and no progress fields, so
+  this is the only place what the tool sent can be read back, and a tool that
+  learned this route would have learned something no real platform serves
+  ([ADR 0047](docs/adr/0047-the-posted-score-readback-is-a-mock-only-route.md)).
+
+All of that is per-process and in memory: restart the container and the line
+items and the posted scores are gone
+([ADR 0049](docs/adr/0049-the-mock-gradebook-is-per-application-state-in-memory.md)).
 
 ## Working on the backend without containers
 

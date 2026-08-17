@@ -52,6 +52,13 @@ deliverable rather than a convenience, and it lives here for the reason every
 other shared thing does: E1 will import it, and a second copy would drift. Like
 `SectionCodeService`, it discovers the mock platform rather than naming its
 parts — what it discovers and what it refuses to decide is written on the class.
+
+E0-15 extends that class rather than adding another, because its subject is the
+same platform: the LTI Advantage services it now serves are reached through the
+claims a launch carries, which is how a tool reaches them and which means no URL
+is hardcoded here either. `link_relations_in` and `instant_of` sit beside
+`signed_launch` and exist so that a test module can exercise the paging-header
+parser and the timestamp comparison without importing this file by name.
 E0-09 adds `supervision_graph`, at the very bottom, for the same reason and with
 one more of its own. Two modules ask it the same question — the schema tests and
 the Hypothesis properties over generated graphs — and E0-09's definition of done
@@ -101,7 +108,7 @@ import re
 import secrets
 import string
 import sys
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -111,7 +118,7 @@ from itertools import count
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from uuid import uuid4
 
 import pytest
@@ -1598,6 +1605,168 @@ def import_mock_lms_application(values: Mapping[str, str]) -> Any:
     )
 
 
+# ---------------------------------------------------------------------------
+# E0-15 — the LTI Advantage services, reached the way a tool reaches them.
+# ---------------------------------------------------------------------------
+
+# The two service claims, **spelled as the IMS specifications spell them and not
+# this suite's choice in any part**. In LTI Advantage a platform advertises its
+# services inside the launch it has just signed: the NRPS claim carries the
+# context memberships URL, and the AGS endpoint claim carries the line-items URL
+# together with the scopes a token may be requested for. Reading them out of the
+# token is how a real tool finds these services, which is why nothing below
+# hardcodes a path — and a mock that serves them at fixed paths while putting no
+# claim in the token has built something `pylti1p3` (SPEC §7.1) cannot find.
+NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
+
+# The context claim, from the same specification. `tests/integration/
+# test_mock_lms_launch.py` spells it too, and both are transcriptions of one
+# published constant rather than two copies of a decision: a launch spelling it
+# differently fails there first, by name.
+CONTEXT_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/context"
+
+# The media types the Advantage services exchange, from NRPS 2.0 and AGS 2.0.
+# Sent rather than assumed, because sending them is what a tool does. All four
+# end in `+json`, which is also what lets a FastAPI endpoint declaring a JSON
+# body parse them — FastAPI reads any `application/…+json` subtype as JSON — so
+# using the specification's media type cannot fail a mock that expected plain
+# `application/json`, while the reverse could.
+NRPS_MEDIA_TYPE = "application/vnd.ims.lti-nrps.v2.membershipcontainer+json"
+LINE_ITEM_MEDIA_TYPE = "application/vnd.ims.lis.v2.lineitem+json"
+LINE_ITEM_CONTAINER_MEDIA_TYPE = "application/vnd.ims.lis.v2.lineitemcontainer+json"
+RESULT_CONTAINER_MEDIA_TYPE = "application/vnd.ims.lis.v2.resultcontainer+json"
+SCORE_MEDIA_TYPE = "application/vnd.ims.lis.v1.score+json"
+
+# Where a test reads back what the tool posted. **E0-15's spelling, not this
+# suite's** (ADR 0047): a mock-only route outside the AGS namespace, answering
+# `{"scores": [{"lineItem": …, "score": {…}}]}` in arrival order. It is named
+# here rather than discovered, and the `/mock/` prefix is the reason — a fixture
+# that went looking for a route whose path carries "score" would accept an AGS
+# route serving the same thing, which is the one arrangement the prefix exists to
+# rule out. A tool that learned this route would have learned something no real
+# platform serves.
+MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
+
+# The two AGS scopes SPEC §3.4 needs: one line item per section, and a score
+# posted to it. Specification constants, not preferences.
+AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
+AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+
+# How many pages of one paged container are walked before the walk is called
+# broken. **This suite's choice**, and a bound rather than a rule: E0-15 keeps
+# its seed small ("this seed data belongs to the mock platform and stays
+# small"), so a container running past this is a `Link` header that never says
+# stop rather than a large collection. Raise it if a seed grows.
+MAX_PAGES_WALKED = 25
+
+# One `<url>; rel="next"` entry of an RFC 8288 `Link` header. The parameter tail
+# stops at a comma so that two entries in one header are read as two, which is
+# the shape a platform sends when it offers `next` and `last` together.
+LINK_HEADER_ENTRY = re.compile(r"<(?P<url>[^>]*)>(?P<parameters>(?:\s*;[^,;]*)*)")
+
+
+def link_relations(header: str | None) -> dict[str, str]:
+    """Every `rel` an RFC 8288 `Link` header declares, mapped to its URL.
+
+    A parser rather than a substring search, for the reason `FormReader` above
+    is a parser: what is being read is the platform's contract with a paging
+    client, and `"next" in header` answers a different question that happens to
+    look the same (`docs/MISTAKES.md` entry 3). A header carrying
+    `rel="first next"` declares both relations on one URL, which is legal and
+    which a substring search gets right for the wrong reason.
+
+    The first URL declared for a relation wins, so a repeated `rel="next"` is
+    read the way a client reads it rather than silently taking the last.
+    """
+    relations: dict[str, str] = {}
+    if not header:
+        return relations
+    for entry in LINK_HEADER_ENTRY.finditer(header):
+        url = entry.group("url").strip()
+        for parameter in entry.group("parameters").split(";"):
+            name, _, value = parameter.partition("=")
+            if name.strip().lower() != "rel":
+                continue
+            for relation in value.strip().strip('"').split():
+                relations.setdefault(relation.lower(), url)
+    return relations
+
+
+def instant(value: Any) -> datetime | None:
+    """`value` as a moment in time, or `None` if it is not one.
+
+    Timestamps are compared as instants rather than as strings, because
+    `2026-09-14T18:30:00+00:00` and `2026-09-14T18:30:00Z` are one moment
+    written two ways and a service that normalises between them has lost
+    nothing. What the comparison is for is the near miss — a score recorder that
+    stored the value it was sent and stamped its own clock over the timestamp —
+    and that survives normalisation.
+
+    A date with no time is accepted, at midnight: NRPS carries enrollment
+    windows (SPEC §3.4, §7.3) and a window's edges are days.
+    """
+    if not isinstance(value, str) or len(value) < 10:
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        # RFC 3339 §5.6 notes that `Z` may be written in lower case, and
+        # `datetime.fromisoformat` does not accept the lower-case form — so a
+        # conformant timestamp would read as "not a moment" and a test about
+        # enrollment windows would report that the roster carries no dates.
+        # Rewritten by position rather than by `replace`, which would also
+        # rewrite a `Z` that was not the designator.
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+class MembershipPage(NamedTuple):
+    """One page of an NRPS membership container, with the header that pages it.
+
+    `link_header` is kept raw as well as parsed, because the criterion is about
+    the header — "a roster larger than one page returns `Link` headers" — and a
+    failure that can print what was actually sent is worth more than one that
+    can only say a relation was missing.
+    """
+
+    url: str
+    status_code: int
+    document: dict[str, Any]
+    link_header: str | None
+    relations: dict[str, str]
+    members: list[dict[str, Any]]
+    next_url: str | None
+
+
+class SeededContext(NamedTuple):
+    """One seeded section, and every launch the platform offers into it.
+
+    `subjects` is the independent ground truth the paging tests need. Each is a
+    user this platform will sign a launch for in this context, learned by
+    driving the launch rather than by reading the roster, so a roster that has
+    lost one has lost a member that demonstrably exists. It is a **lower bound**
+    on the membership rather than the whole of it — the launch page offers a
+    handful of users and a roster is bigger than that — and the test that leans
+    on it says so.
+    """
+
+    context_id: str
+    memberships_url: str
+    launches: list[SignedLaunch]
+
+    @property
+    def subjects(self) -> set[str]:
+        return {
+            str(launch.claims["sub"])
+            for launch in self.launches
+            if isinstance(launch.claims.get("sub"), str)
+        }
+
+
 class MockPlatform:
     """E0-14's platform, driven the way a tool drives one rather than by name.
 
@@ -1850,6 +2019,463 @@ class MockPlatform:
             "tool's redirect URI."
         )
 
+    # -- the LTI Advantage services (E0-15) ----------------------------------
+
+    def local(self, url: str) -> str:
+        """`url` as this in-process client can request it: its path and query.
+
+        The services advertise themselves with absolute URLs built from whatever
+        public base the mock is configured with, and that host is one this
+        client neither can nor should resolve — what is under test is the
+        platform's own routing. That the advertised URL *is* absolute is
+        asserted by a test rather than assumed here, because a relative one is a
+        URL no real tool could follow.
+        """
+        split = urlsplit(url)
+        target = split.path or "/"
+        return f"{target}?{split.query}" if split.query else target
+
+    @staticmethod
+    def refuse_an_unspecified_token_flow(response: Any, url: str) -> None:
+        """Turn a 401 or a 403 into a named gap rather than a puzzling red.
+
+        Real LTI Advantage services sit behind an OAuth 2.0 client-credentials
+        grant against the platform's token endpoint. E0-15 does not mention one,
+        E0-14 built none, and no ticket says what a tool would sign its
+        assertion with — so this suite drives the services unauthenticated,
+        which is the only reading of the ticket that does not invent an
+        interface. If the mock requires a token, the answer is a sentence in the
+        ticket, not a guess here.
+        """
+        if response.status_code in (401, 403):
+            pytest.fail(
+                f"The platform answered {response.status_code} for `{url}`, so it requires an "
+                "access token for its Advantage services. E0-15 specifies no token endpoint and "
+                "no grant, and E0-14 built neither, so this suite calls NRPS and AGS "
+                "unauthenticated. What a tool should present is an interface question for the "
+                "ticket rather than something to guess at in tests/conftest.py."
+            )
+
+    def service_get(self, url: str, accept: str | None = None) -> Any:
+        """GET one Advantage URL the platform advertised."""
+        response = self.client.get(self.local(url), headers={"accept": accept} if accept else None)
+        self.refuse_an_unspecified_token_flow(response, url)
+        return response
+
+    def service_post(
+        self,
+        url: str,
+        payload: Mapping[str, Any],
+        content_type: str,
+        accept: str | None = None,
+    ) -> Any:
+        """POST one JSON document to an Advantage URL, under the media type AGS fixes.
+
+        The body is serialised here rather than handed to httpx's `json=`
+        keyword, because that keyword would set `application/json` and overwrite
+        the media type the specification requires the request to carry.
+        """
+        headers = {"content-type": content_type}
+        if accept:
+            headers["accept"] = accept
+        response = self.client.post(self.local(url), content=json.dumps(payload), headers=headers)
+        self.refuse_an_unspecified_token_flow(response, url)
+        return response
+
+    def service_claim(self, launch: SignedLaunch, claim: str, member: str, purpose: str) -> str:
+        """One member of one service claim, or a failure naming what is missing.
+
+        The failure is worth more than the value: a launch that carries no
+        service claim is a platform whose services a conformant tool cannot
+        discover at all, whatever it serves and wherever.
+        """
+        advertised = launch.claims.get(claim)
+        if not isinstance(advertised, dict):
+            pytest.fail(
+                f"The `id_token` carries no `{claim}` claim (it carries "
+                f"{sorted(launch.claims)}). That claim is how a platform tells a tool where "
+                f"{purpose}; without it a tool has nothing to call, whatever the mock serves and "
+                "at whatever path."
+            )
+        value = advertised.get(member)
+        if not isinstance(value, str) or not value:
+            pytest.fail(
+                f"The `{claim}` claim carries no `{member}` (it carries {sorted(advertised)}). "
+                f"That member is the URL {purpose}."
+            )
+        return value
+
+    def memberships_url(self, launch: SignedLaunch) -> str:
+        """Where this launch's context roster lives, per the NRPS claim."""
+        return self.service_claim(
+            launch,
+            NRPS_CLAIM,
+            "context_memberships_url",
+            "the roster for the launched context is served",
+        )
+
+    def line_items_url(self, launch: SignedLaunch) -> str:
+        """Where this launch's line items live, per the AGS endpoint claim."""
+        return self.service_claim(
+            launch,
+            AGS_CLAIM,
+            "lineitems",
+            "the context's line items are listed and created",
+        )
+
+    def ags_scopes(self, launch: SignedLaunch) -> list[str]:
+        """The scopes the AGS endpoint claim says a token may be requested for."""
+        advertised = launch.claims.get(AGS_CLAIM)
+        if not isinstance(advertised, dict):
+            return []
+        scopes = advertised.get("scope")
+        if not isinstance(scopes, list):
+            return []
+        return [scope for scope in scopes if isinstance(scope, str)]
+
+    def membership_page(self, url: str) -> MembershipPage:
+        """Fetch one page of a membership container and read its paging header."""
+        response = self.service_get(url, accept=NRPS_MEDIA_TYPE)
+        assert response.status_code == 200, (
+            f"The membership service answered {response.status_code} for `{url}` rather than 200. "
+            "E0-15's first criterion is a roster whose members carry role and enrollment status, "
+            f"and a roster nobody can fetch carries nothing. Body begins {response.text[:200]!r}."
+        )
+        return self.membership_page_of(url, response)
+
+    def membership_page_of(self, url: str, response: Any) -> MembershipPage:
+        """Read one already-fetched membership page, header and all.
+
+        Split from the fetch so that the walk in `link_walk` above and a caller
+        asking for a single page build a page the same way, from one place.
+        """
+        document = response.json()
+        assert isinstance(document, dict), (
+            f"The membership service served {document!r} for `{url}`, which is not an NRPS "
+            "membership container. NRPS 2.0 makes the container a JSON object with `id`, "
+            "`context` and `members` members; a bare array is the shape `pylti1p3` cannot read."
+        )
+        members = document.get("members")
+        header = response.headers.get("link")
+        relations = link_relations(header)
+        following = relations.get("next")
+        return MembershipPage(
+            url=url,
+            status_code=response.status_code,
+            document=document,
+            link_header=header,
+            relations=relations,
+            members=[member for member in members if isinstance(member, dict)]
+            if isinstance(members, list)
+            else [],
+            next_url=urljoin(url, following) if following else None,
+        )
+
+    def link_walk(self, url: str, accept: str, subject: str) -> list[tuple[str, Any]]:
+        """Fetch `url` and every page its `Link` header advertises, in order.
+
+        One walk for both paged containers E0-15 serves — the roster and the
+        line-item container, which the ticket pages "the same way NRPS does" —
+        so that the guards below exist once rather than twice
+        (`docs/MISTAKES.md` entry 13). What differs between the two callers is
+        what a page *carries*, and that stays with the caller.
+
+        Two ways of not terminating are failures rather than hangs, and neither
+        is hypothetical: a `next` URL that points at the page that served it, and
+        a header that advertises a next page forever. Both leave a real tool
+        looping, so both are named where they happen rather than left to a
+        pytest timeout that says only that something hung.
+        """
+        walked: list[tuple[str, Any]] = []
+        visited: set[str] = set()
+        following: str | None = url
+        while following is not None:
+            if following in visited:
+                pytest.fail(
+                    f"The {subject} walk arrived back at `{following}` after {len(walked)} pages, "
+                    "so the `Link` header advertises a next page that is the page that served "
+                    "it. A client following this header never finishes."
+                )
+            visited.add(following)
+            response = self.service_get(following, accept=accept)
+            assert response.status_code == 200, (
+                f"Page {len(walked) + 1} of the {subject} at `{following}` answered "
+                f"{response.status_code} rather than 200, so the `Link` header that pointed here "
+                f"points at nothing. Body begins {response.text[:200]!r}."
+            )
+            walked.append((following, response))
+            if len(walked) > MAX_PAGES_WALKED:
+                pytest.fail(
+                    f"The {subject} at `{url}` ran past {MAX_PAGES_WALKED} pages without reaching "
+                    "one that advertises no next relation. E0-15 keeps the seed small, so this is "
+                    "a header that never says stop rather than a large collection — and a tool "
+                    "paging on it does not stop either."
+                )
+            relations = link_relations(response.headers.get("link"))
+            advertised = relations.get("next")
+            following = urljoin(following, advertised) if advertised else None
+        return walked
+
+    def membership_pages(self, url: str) -> list[MembershipPage]:
+        """Walk a roster from its first page to its last. Exactly what a sync does."""
+        return [
+            self.membership_page_of(page_url, response)
+            for page_url, response in self.link_walk(url, NRPS_MEDIA_TYPE, "roster")
+        ]
+
+    def seeded_contexts(self) -> list[SeededContext]:
+        """Every context the launch page offers a launch into, with those launches.
+
+        Grouped by the context claim's `id`, so that a page offering four users
+        in two sections answers two contexts rather than four. The memberships
+        URL is taken from the first launch into each context, which is the URL
+        that context's own roster lives at.
+        """
+        grouped: dict[str, list[SignedLaunch]] = {}
+        for offer in self.require_offers():
+            launch = self.mint(offer)
+            context = launch.claims.get(CONTEXT_CLAIM)
+            identifier = context.get("id") if isinstance(context, dict) else None
+            if not isinstance(identifier, str) or not identifier:
+                pytest.fail(
+                    f"A launch from `{offer.page}` carries no context `id` (its context claim is "
+                    f"{context!r}). E0-14's own suite asserts that claim, so this is that failure "
+                    "arriving here first; without it a roster cannot be attributed to a section."
+                )
+            grouped.setdefault(identifier, []).append(launch)
+        return [
+            SeededContext(
+                context_id=identifier,
+                memberships_url=self.memberships_url(launches[0]),
+                launches=launches,
+            )
+            for identifier, launches in sorted(grouped.items())
+        ]
+
+    def create_line_item(
+        self,
+        launch: SignedLaunch,
+        *,
+        omitting: Sequence[str] = (),
+        **overrides: Any,
+    ) -> dict[str, Any]:
+        """Create one line item and hand back what the platform stored.
+
+        The default body is SPEC §3.4's: one line item per section labelled
+        "Pulse Participation", scored out of 100. `resourceId` is drawn fresh per
+        call so that a test asking whether *its* line item appears in a listing
+        is not answered by a seeded one.
+
+        `omitting` sends a body with those keys **absent**, which `overrides`
+        cannot express: `tag=None` posts `{"tag": null}`, and a null member and a
+        missing member are two different bodies that a filter is entitled to
+        treat differently — the missing one is the case a fail-open filter
+        matches. It is a keyword rather than a sentinel value so that the call
+        site reads as what it does, and a name that was not there to omit is a
+        failure rather than a silent no-op, because a misspelling would
+        otherwise leave a test quietly asserting nothing about the body it meant
+        to send.
+        """
+        payload: dict[str, Any] = {
+            "scoreMaximum": 100,
+            "label": "Pulse Participation",
+            "resourceId": f"e0-15-{uuid4().hex[:12]}",
+            "tag": "participation",
+        }
+        payload.update(overrides)
+        return self.created_line_item(launch, payload, omitting)
+
+    def post_line_item(
+        self,
+        launch: SignedLaunch,
+        payload: Mapping[str, Any],
+    ) -> Any:
+        """POST one line-item body and hand back the response, asserting nothing.
+
+        `create_line_item` requires success, which is right for the callers that
+        need a line item to work with and wrong for the ones asking what the
+        container *refuses*. Those need the raw answer, and they need it without
+        knowing the media type AGS fixes for the request.
+        """
+        return self.service_post(
+            self.line_items_url(launch),
+            payload,
+            LINE_ITEM_MEDIA_TYPE,
+            accept=LINE_ITEM_MEDIA_TYPE,
+        )
+
+    def created_line_item(
+        self,
+        launch: SignedLaunch,
+        payload: dict[str, Any],
+        omitting: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Post `payload`, require it created, and hand back what was stored."""
+        for name in omitting:
+            if name not in payload:
+                pytest.fail(
+                    f"`create_line_item(omitting={list(omitting)})` was asked to leave out "
+                    f"`{name}`, which this body does not carry — it carries {sorted(payload)}. "
+                    "A key that is already absent cannot be omitted, and a misspelling here "
+                    "would post the very member the caller meant to leave out."
+                )
+            payload.pop(name)
+        response = self.post_line_item(launch, payload)
+        assert response.status_code in (200, 201), (
+            f"Creating a line item answered {response.status_code} rather than 200 or 201. E0-15 "
+            "criterion 3: line-item creation returns an identifier that score posting accepts. "
+            f"Body begins {response.text[:200]!r}."
+        )
+        created = response.json()
+        assert isinstance(created, dict), (
+            f"Creating a line item answered {created!r}, which is not an AGS line item. AGS 2.0 "
+            "makes it a JSON object whose `id` is the line item's own URL."
+        )
+        return created
+
+    def with_query(self, url: str, query: Mapping[str, Any]) -> str:
+        """`url` with `query` appended to whatever it already carries."""
+        if not query:
+            return url
+        split = urlsplit(url)
+        merged = parse_qsl(split.query) + [(name, str(value)) for name, value in query.items()]
+        return urlunsplit(
+            (split.scheme, split.netloc, split.path, urlencode(merged), split.fragment)
+        )
+
+    def line_item_container(self, url: str) -> list[dict[str, Any]]:
+        """One page of an AGS line-item container, as a list.
+
+        AGS 2.0 serves an array; a mock that wraps it in an object is read here
+        rather than failed, because which of the two E0-15 meant is not
+        something this file decides — what every caller needs is the line items.
+        """
+        response = self.service_get(url, accept=LINE_ITEM_CONTAINER_MEDIA_TYPE)
+        assert response.status_code == 200, (
+            f"Listing line items at `{url}` answered {response.status_code} rather than 200. "
+            "E0-15's scope: 'Assignment and Grade Services 2.0 stubs: line-item creation and "
+            f"listing'. Body begins {response.text[:200]!r}."
+        )
+        return self.line_items_of(response)
+
+    def line_items_of(self, response: Any) -> list[dict[str, Any]]:
+        """Read the line items out of an already-fetched container page."""
+        listed = response.json()
+        if isinstance(listed, dict):
+            listed = listed.get("lineItems") or listed.get("line_items") or listed.get("items")
+        assert isinstance(listed, list), (
+            f"Listing line items answered {response.json()!r}, which is not a line item "
+            "container. AGS 2.0 serves an array of line items."
+        )
+        return [item for item in listed if isinstance(item, dict)]
+
+    def line_items(self, launch: SignedLaunch, **query: Any) -> list[dict[str, Any]]:
+        """The line items the platform lists for this launch's context, one page.
+
+        `query` is passed to the container as it stands, so a test asking for
+        `resource_id=…` is asking the platform the question AGS 2.0 defines
+        rather than filtering the answer itself — which is the only way to tell a
+        platform that honours the filter from one that accepts it and ignores it.
+        """
+        return self.line_item_container(self.with_query(self.line_items_url(launch), query))
+
+    def line_item_pages(self, launch: SignedLaunch, **query: Any) -> list[list[dict[str, Any]]]:
+        """Every page of the line-item container, walked by `Link` as the roster is."""
+        return [
+            self.line_items_of(response)
+            for _, response in self.link_walk(
+                self.with_query(self.line_items_url(launch), query),
+                LINE_ITEM_CONTAINER_MEDIA_TYPE,
+                "line item container",
+            )
+        ]
+
+    def post_score(self, line_item: Mapping[str, Any], payload: Mapping[str, Any]) -> Any:
+        """POST one score against a line item, to the URL AGS derives from its `id`.
+
+        `{lineitem}/scores` is the specification's own construction rather than
+        this file's guess: AGS 2.0 defines the Score service as the line item URL
+        with `/scores` appended, which is why criterion 3 can speak of an
+        identifier "that score posting accepts" without naming a second URL.
+        """
+        identifier = self.line_item_id(line_item)
+        return self.service_post(f"{identifier.rstrip('/')}/scores", payload, SCORE_MEDIA_TYPE)
+
+    def line_item_id(self, line_item: Mapping[str, Any]) -> str:
+        """A line item's own URL, or a failure saying it has none."""
+        identifier = line_item.get("id")
+        if not isinstance(identifier, str) or not identifier:
+            pytest.fail(
+                f"The line item {line_item!r} carries no `id`, so there is no URL to address it "
+                "by. E0-15 criterion 3: 'AGS line-item creation returns an identifier that score "
+                "posting accepts.'"
+            )
+        return identifier
+
+    def posted_scores(self) -> list[dict[str, Any]]:
+        """Every score the platform has been sent, in the order it received them.
+
+        E0-15 settles this surface rather than leaving it to be discovered:
+        `GET /mock/posted-scores`, outside the AGS namespace, answering
+        `{"scores": [{"lineItem": …, "score": {…}}]}` in arrival order (ADR
+        0047). So the shape is asserted here rather than normalised — an earlier
+        version of this helper accepted four shapes because the ticket named
+        none, and every one of the three it no longer accepts is now a mock that
+        does not do what the ticket says.
+        """
+        response = self.service_get(MOCK_POSTED_SCORES_PATH)
+        assert response.status_code == 200, (
+            f"`GET {MOCK_POSTED_SCORES_PATH}` answered {response.status_code} rather than 200. "
+            "E0-15 criterion 4 reads a posted score back from exactly this route, outside the AGS "
+            f"namespace. Body begins {response.text[:200]!r}."
+        )
+        document = response.json()
+        assert isinstance(document, dict), (
+            f"`{MOCK_POSTED_SCORES_PATH}` served {document!r}. E0-15 spells the body "
+            '`{"scores": [{"lineItem": …, "score": {…}}]}`.'
+        )
+        entries = document.get("scores")
+        assert isinstance(entries, list), (
+            f"`{MOCK_POSTED_SCORES_PATH}` served an object carrying {sorted(document)} rather "
+            "than a `scores` array. A bare array, or the scores under another key, is a shape "
+            "E0-15 does not describe and a test cannot read as arrival order."
+        )
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    def posted_scores_for(self, line_item: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """The scores posted to one line item, in the order they arrived."""
+        identifier = self.line_item_id(line_item)
+        return [entry for entry in self.posted_scores() if entry.get("lineItem") == identifier]
+
+    def results(self, line_item: Mapping[str, Any], **query: Any) -> list[dict[str, Any]]:
+        """The conformant AGS Result container for one line item.
+
+        The other half of E0-15's readback, and the one E3 is built against. AGS
+        2.0 puts the Result service at the line item URL with `/results`
+        appended, and a `Result` carries `userId`, `resultScore`,
+        `resultMaximum` and `scoreOf` — no timestamp, no progress. That absence
+        is a criterion of its own, which is why this is reached separately from
+        `posted_scores` rather than folded into it.
+        """
+        identifier = self.line_item_id(line_item)
+        response = self.service_get(
+            self.with_query(f"{identifier.rstrip('/')}/results", query),
+            accept=RESULT_CONTAINER_MEDIA_TYPE,
+        )
+        assert response.status_code == 200, (
+            f"The AGS Result service answered {response.status_code} for line item "
+            f"`{identifier}`. E0-15: 'The conformant AGS Results endpoint answers for the same "
+            f"line item.' Body begins {response.text[:200]!r}."
+        )
+        listed = response.json()
+        if isinstance(listed, dict):
+            listed = listed.get("results")
+        assert isinstance(listed, list), (
+            f"The AGS Result service served {response.json()!r}, which is not a result container. "
+            "AGS 2.0 serves an array of results."
+        )
+        return [result for result in listed if isinstance(result, dict)]
+
 
 @pytest.fixture
 def repo_root() -> Path:
@@ -1908,6 +2534,36 @@ def signed_launch(mock_platform: MockPlatform) -> SignedLaunch:
     common case of it.
     """
     return mock_platform.mint()
+
+
+@pytest.fixture
+def link_relations_in() -> Callable[[str | None], dict[str, str]]:
+    """Hand `link_relations` to a test that checks the parser itself.
+
+    The walk in `MockPlatform.membership_pages` reads paging headers with this
+    same function, so the control test and the thing it controls cannot end up
+    disagreeing about what a `Link` header says — which is the whole value of
+    the control (`docs/MISTAKES.md` entry 3: run the pattern against the text
+    you claim it catches *and* the text you claim it allows).
+    """
+    return link_relations
+
+
+@pytest.fixture
+def instant_of() -> Callable[[Any], datetime | None]:
+    """Hand `instant` to a test that has to compare two spellings of one moment.
+
+    The seeded rosters ask it: an enrollment window's `start` and `end` are
+    moments, and whether one member enrolled after another is a question about
+    instants rather than about strings.
+
+    **The AGS round trip deliberately does not**, and the asymmetry is worth
+    knowing before someone tidies it away. E0-15 records a posted score "the
+    posted body, verbatim" (ADR 0047), so there the spelling *is* the fact: a
+    recorder that re-renders `+00:00` as `Z` has stopped carrying what the tool
+    sent, and comparing instants would call that agreement.
+    """
+    return instant
 
 
 # E0-09 — role assignments and the supervision graph.

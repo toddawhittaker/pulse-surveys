@@ -6,6 +6,11 @@ against a remembered `state` and a remembered `nonce`, against a clock-skew
 window — is E1's, and the ticket says so: "The mock produces launches; validating
 them is E1's work."
 
+E0-15 adds the two LTI Advantage service claims to the token that comes out of
+here. Nothing else in this module changed, and that is the point of where they
+went: a service is discovered through the launch, so the claims belong on the
+message rather than in a document a tool would have to know to fetch.
+
 **The order of the protocol, since the two endpoints are easy to confuse.** The
 launch page posts an OIDC third-party-initiated login request to the *tool's*
 login-initiation URL, carrying `iss`, `login_hint` and `target_link_uri`. Neither
@@ -28,12 +33,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from app.ags import ags_endpoint_claim
 from app.config import PlatformSettings
+from app.nrps import nrps_claim
 from app.seed import COURSE_SECTION_TYPE, MockPlacement, MockUser, SeededPlatform
 
 # The LTI 1.3 message claims, spelled as the specification spells them. A claim
 # under any other name is a claim `pylti1p3` (SPEC §7.1) will not read.
 LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
+
 MESSAGE_TYPE_CLAIM = f"{LTI_CLAIM_PREFIX}message_type"
 VERSION_CLAIM = f"{LTI_CLAIM_PREFIX}version"
 DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"
@@ -41,6 +49,15 @@ TARGET_LINK_URI_CLAIM = f"{LTI_CLAIM_PREFIX}target_link_uri"
 RESOURCE_LINK_CLAIM = f"{LTI_CLAIM_PREFIX}resource_link"
 CONTEXT_CLAIM = f"{LTI_CLAIM_PREFIX}context"
 ROLES_CLAIM = f"{LTI_CLAIM_PREFIX}roles"
+
+# The two LTI Advantage service claims. They live under their own specification
+# prefixes rather than under the core LTI one, which is not a detail worth
+# hiding: a platform announces its services *inside the launch it has just
+# signed*, and that is the only route by which a conformant tool ever learns a
+# service URL. A mock serving a perfect roster at a fixed path with no claim in
+# the token has built something `pylti1p3` (SPEC §7.1) cannot find.
+NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 
 # A plain resource-link launch, which SPEC §7.3 makes the default. Deep Linking
 # is explicitly out of scope for E0-14.
@@ -211,16 +228,28 @@ def id_token_claims(
     anything, which sounds like a silly thing to say until you have debugged a
     token that was expired the moment it was minted and read it as the tool's
     clock-skew handling being broken.
+
+    **The last two claims are the whole of service discovery** (E0-15). Both are
+    built per context, because a roster is one section's and a gradebook is one
+    section's, and both carry absolute URLs — a tool resolves them knowing
+    nothing about where the token came from.
+
+    `title` is unconditional. E0-14 omitted it for the one context seeded without
+    one, so that E1 met the empty case in a test; Todd withdrew that requirement
+    on 2026-08-17 and every seeded course now carries a title, so there is no
+    longer a context this branch would fire for. What went with it is the only
+    fixture in the repository exercising the titleless path — E1 has to mint one
+    itself before it can test its fallback against `course.lms_title`'s
+    `NOT NULL`.
     """
     issued = int(time.time()) if issued_at is None else issued_at
     context = launch.placement.context
     context_claim: dict[str, Any] = {
         "id": context.context_id,
         "label": context.label,
+        "title": context.title,
         "type": [COURSE_SECTION_TYPE],
     }
-    if context.title is not None:
-        context_claim["title"] = context.title
 
     return {
         "iss": settings.issuer,
@@ -239,4 +268,6 @@ def id_token_claims(
         },
         CONTEXT_CLAIM: context_claim,
         ROLES_CLAIM: list(launch.roles),
+        NRPS_CLAIM: nrps_claim(settings, context.context_id),
+        AGS_CLAIM: ags_endpoint_claim(settings, context.context_id),
     }

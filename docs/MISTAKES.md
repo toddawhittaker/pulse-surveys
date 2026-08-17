@@ -35,7 +35,40 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 28**
+**Caught: 30**
+
+*(The thirtieth, in E0-15's review round, and three tests at once — each asserting a
+strictly weaker property than its own name. Two of the three were found by reviewers
+reading the finished suite rather than by anyone writing it, which is the part worth
+keeping: the tests had already been read, twice, by the people who wrote them. The
+sharpest is the late add: `a_seeded_section_holds_a_member_who_enrolled_after_their_classmates`
+asserted that a section held more than one distinct enrollment `start`, which is
+satisfied by an enrollment a month **early**, and a reviewer proved it by setting the
+seed's late add backwards and watching every test stay green. A test named for a
+direction was passing on the inverse of it. The other two are the same shape in
+quieter clothes: `end is not None` cannot tell an absent key from a null one, so a
+window emitted with no `end` at all passed; and "no member is dropped", checked
+against the two users the launch page offers, passed a page slice that lost one
+member per boundary, because both those users sit at the head of every roster. **The
+general rule, which none of the three had:** when a criterion is about an ordering or
+a shape, assert the ordering or the shape — "the values differ" is a property of the
+case and of its mirror image, and the mirror image is what ships.)*
+
+*(The twenty-ninth, writing E0-15's tests for the mock platform's roster and grade
+services, and it decided six of them. "No member is duplicated" is a count against a
+count, which is `n == n` over a roster that fits on one page — so the test finds the
+rosters that came back on more than one page first and fails if there are none, and
+its sibling asserts the first page is *shorter* than the assembled membership. "A
+posted score is retrievable" is asserted with an `activityProgress` of `Submitted`
+and a `gradingProgress` of `PendingManual`, because a stub that hardcodes the
+obvious pair passes a round trip posted as `Completed`/`FullyGraded`; and with a
+fixed past second for the timestamp, because a recorder stamping its own clock
+cannot coincide with one. The seed's dropped member is asserted beside a member who
+is still `Active`, since a roster reporting everybody `Inactive` satisfies "somebody
+is not Active" with no drop in it. And both matchers this suite invented — §2.2's
+section code and §8's course-number bands — are run against what they are claimed to
+catch and what they are claimed to allow, in their own tests, before any silence
+from them counts.)*
 
 *(The twenty-eighth, writing the tests for E0-11's two review dispositions, and it
 decided the shape of both. An `ASSISTANT_DEAN` assignment's own grant is asserted
@@ -213,7 +246,31 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 26**
+**Caught: 28**
+
+*(The twenty-eighth, in E0-15's implementation, one round after the twenty-seventh
+below found the same file's header. The sweep outward from "the mock now holds an
+email address" reached four records nobody was editing: `mock-lms/app/main.py`'s
+own first line counting "six endpoints" and its §10 paragraph saying "this
+platform holds none" of the personally identifiable information it forbids in
+logs — the second being the expensive kind, since it is the sentence a reader
+would trust when deciding whether a new log line is safe; `app/seed.py`'s "One
+context has a title and one has none", which the ruling of 2026-08-17 had already
+falsified; the `if context.title is not None` branch in `id_token_claims`, a
+record in code for a case the seed can no longer produce; and `README.md`'s
+paragraph telling a developer that one seeded section deliberately has no title.
+This entry's rule about counts is also why the corrected first line names the two
+halves of the surface instead of counting them — "six endpoints" had been wrong
+since the moment a seventh route was declared, and a corrected number would be
+wrong again at the eighth.)*
+
+*(The twenty-seventh, in E0-15's tests. `tests/conftest.py`'s header describes what
+each ticket added to the file and why, and adding the Advantage-service helpers to
+`MockPlatform` made its E0-14 paragraph — "it discovers the mock platform rather than
+naming its parts" — a description of a class that had grown a second subject. The
+sweep is small and the rule is the same one: the header is the record a reader meets
+before the code, and it goes stale by something being added to the file rather than
+by anything in it being edited.)*
 
 *(The twenty-sixth, and it is this entry's rule about counts caught by the change
 that made one stale. `tests/integration/test_own_grant_follows_the_role_grain.py`
@@ -360,6 +417,21 @@ request body, test docstrings. Indexes are the highest risk: written once, never
 re-read. "Re-read nearby prose" is not enough; it misses the record that was
 never written and the one that drifted out from under you.
 
+A thirteenth, in E0-15, and it is the sharpest instance of the count rule below
+because it happened **inside the commit that bumped this entry's counter for
+sweeping outward**. `README.md` and `mock-lms/app/seed.py` both said the seed
+holds "twenty people and thirty-two enrollments". Twenty is right. Thirty-two was
+never right: the three rosters hold twelve, seven and five, which is twenty-four,
+and the number came from adding the same figure up in my head rather than out of
+`seeded_platform()`. The table two lines below it in the README gave 12, 7 and 5
+correctly, so the document contradicted itself on one screen and neither half was
+re-read against the other. It reached three prose sites, a report to the
+coordinator, and a commit message that cannot be corrected because history is not
+rewritten here; the coordinator found it by counting the enrollments out of the
+code. The repair deletes the number in all three places rather than correcting
+it — the roster sizes are in the table, and a total is a number nobody will
+recount the next time a section is added.
+
 **And read the prose in your own diff as if someone else wrote it.** Every claim
 you have just written is a claim nobody has checked, including the ones written
 while correcting somebody else's. Where a sentence describes a behaviour, it has
@@ -377,18 +449,84 @@ expensive records are the ones a later ticket implements against, where the code
 is right and only the sentence is wrong, so nothing goes red.
 
 **A count in prose is a record with a scheduled expiry**, so prefer not writing
-one. Two of these were counts — the ADR index that omitted three ADRs, and "the
+one. Three of these were counts — the ADR index that omitted three ADRs, "the
 two tests below" in `tests/integration/test_term_calendar_schema.py`, left behind
 by the commit that added a third and updated the identical count one docstring
-over. The fix is to delete the number rather than correct it: "the tests below"
-cannot go stale, and a sentence that needs the number usually wants a different
-sentence.
+over, and E0-15's thirty-two enrollments. The fix is to delete the number rather
+than correct it: "the tests below" cannot go stale, and a sentence that needs the
+number usually wants a different sentence.
+
+**And a count is not only a stale-record risk — it is an unverified measurement.**
+The E0-15 case was wrong on the day it was written, so no amount of re-reading it
+later would have helped; what would have helped is the one thing nobody did,
+which is to ask the program. A count of rows, files, tests or enrollments is a
+number the code can produce in a line, and writing one from memory is entry 9
+arriving through arithmetic: citing a total without executing the thing that
+knows it. If a sentence must carry a number, get the number from the system and
+say in the commit that you did.
 
 ---
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 24**
+**Caught: 26**
+
+*(The twenty-sixth, in E0-15's review round, and it is four survivors of one
+mutation run rather than one defect. Nineteen mutations against the new AGS rules:
+fifteen killed by the test named for what each broke, and **four survived, of which
+exactly one is a gap**. That ratio is the reason to write this down — a survivor is a
+result about the mutation until it has been read, and three of these four are a
+second guard already refusing the same input. The score's positive-maximum check is
+unreachable through the HTTP surface, because the disagreeing-maximum rule refuses
+any maximum that is not the line item's and `create_line_item` already refuses a
+non-positive line-item maximum. The naive-timestamp check is subsumed by the offset
+check added beside it, and survives as the branch that produces the *true sentence*
+for a bare date rather than as one that changes an answer. The results fold by
+timestamp is subsumed by the 409, exactly as its own docstring predicted. All three
+stay — each becomes load-bearing the moment its neighbour is relaxed, which
+[ADR 0051](adr/0051-a-disagreeing-score-maximum-is-refused-rather-than-rescaled.md)
+contemplates for one of them — and each now says in the code that a test cannot tell
+it apart from the guard beside it. **The fourth is real:** widening the line-item
+filter to `in (value, None)`, so that a filter hands back every line item *lacking*
+the member, left all 28 tests then in this module green, because every line item the
+suite creates carries a `tag` and a `resourceId`. It fails open, which is the
+direction that hands a tool another placement's grades. **Now closed**, by the only
+agent that could: `test_a_line_item_filter_does_not_return_an_item_that_lacks_the_member`
+creates one line item carrying the value and one with the member absent — a body
+`create_line_item` had to gain an `omitting=` keyword to send, since `tag=None` posts
+a null and a null is not a missing key — and requires the first back and the second
+not. It is the second guard on this branch that passes on first run against correct
+code, and like the first it is evidence only because the mutation was re-applied
+against it. What it still does not cover is the same widening on `resourceLinkId`,
+which no test here can create a line item lacking; that went to the followup ticket
+rather than being guessed at.)*
+
+*(The twenty-fifth, in E0-15, and it is a gap found by trying to reintroduce a
+defect rather than by any review. The mock platform's roster is served per
+context, and the mutation that makes `membership_page` read **the first seeded
+section's** members while the container goes on naming the context it was asked
+for left all 61 tests then in the four mock modules green. Every launch user is
+enrolled in every section, so `every_user_the_platform_will_launch_appears_in_
+the_roster_of_its_context` is satisfied by the wrong roster; the paging
+assertions are satisfied by any roster that divides; and
+`the_membership_container_names_the_context_the_launch_came_from` compares the
+container's declared context, which the mutation does not touch — its docstring
+claimed it caught "a handler that ignores the context it was given", and it
+catches the declaration rather than the membership. **Now closed**, which is the
+half of this entry that usually does not happen on the same branch: the
+implementer declared the gap and named the assertion it needed rather than
+leaving it, the coordinator reproduced the mutation, and
+`test_two_seeded_contexts_do_not_return_the_same_membership` is the test — two
+seeded rosters, both non-empty, whose member sets differ, which kills it because
+BIOL's twelve served for MATH's seven is a set the seed does not contain. The
+misleading docstring was corrected in the same change, since a test that says it
+catches something it does not is why nobody went looking. Two things are worth
+keeping from it. The guard was declared by the only agent that could not write
+it, which is what turned a convention into a test rather than into a line in a
+pull request nobody re-reads. And the new test does not assert that a roster is
+the *right* one — swapped rosters pass — because pinning the seed's own section
+codes as expected values would make the test a second copy of the seed; the
+docstring says so rather than implying more.)*
 
 *(The twenty-fourth: E0-11's mirror rule. The rank rule refuses an edge that does
 not climb, but a supervisor's *role* can be edited after its reporters are in
@@ -577,7 +715,33 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 12**
+**Caught: 14**
+
+*(The fourteenth, in E0-15's review round, and it is one repository disagreeing with
+itself about what RFC 3339 means. ADR 0048 holds an enrollment window's `start` to an
+offset spelled `+HH:MM` with the colon, and the seed suite refuses a compact `+0000`
+by name. The review's HIGH then asked for a score `timestamp` to be parsed as RFC
+3339, which `datetime.fromisoformat` does — except that it also accepts `+0000`, so
+the score service would have taken exactly the spelling the roster service refuses.
+No test covers it in either direction; the four the suite names are `"yesterday"`, a
+bare date, a naive stamp and `03/02/2026`. It was found by running every new refusal
+branch before writing the commit message rather than by reading the parser and
+agreeing with it, which is entry 9's method arriving at this entry's defect. The
+narrower lesson is about the tool rather than the rule: **a standard-library parser
+named after a standard is not a check against that standard**, and the gap is exactly
+where a second place facing the same hazard ends up disagreeing with the first.)*
+
+*(The thirteenth, in E0-15's tests, and it decided where the helpers live. More than
+one module asks what a `Link` header says, so the paging walk and the header parser
+sit once in `tests/conftest.py` and reach the modules as fixtures — a copy in a test
+module would be a copy that drifts from the walk it is meant to control, and a control
+that has drifted from the thing it controls is worth less than none. The same entry
+then had to be argued *against* one round later: reading a timestamp is asked in two
+places and the two want different answers, because a score is recorded verbatim and an
+enrollment window is not, so the roster tests compare instants and the AGS round trip
+compares strings. One helper serves both and the fixture's docstring says why only one
+caller uses it — the hazard this entry is about is two copies of a rule, not two
+callers with different questions.)*
 
 *(The twelfth, twice over the same hazard. E0-09's scope grain rule ties the
 populated scope column to the role, so a test that edits a supervisor's role and
@@ -690,104 +854,25 @@ prefix yet.
 
 ---
 
-## 12. A stale build of the thing under test was reused, and the run looked clean
-
-**Caught: 4**
-
-**What happened.** In E0-05, checking that `alembic check` warns when a generated
-column's expression drifts: edit `app/models/org.py` to change one band edge from
-`499` to `498`, run the check, edit it back, run it again. The warning was there
-both times. Ten minutes went into the model, the migration and the database
-before `grep` showed the file on disk said `499` while the module Python imported
-said `498`.
-
-A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
-missing from the built wheel entirely — that defect is entry 18; this is what
-happened while verifying its fix. The fix was a
-`[tool.setuptools.package-data]` entry. Verifying it
-meant removing the entry and rebuilding, which produced a wheel that still
-contained the prompts: setuptools had reused the `build/` directory and the
-egg-info left by the previous build, so the wheel described the *previous*
-configuration. Deleting both first showed the real answer, an empty package.
-
-**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
-file's size and mtime **truncated to the second**. Reverting a mutation of equal
-length inside the same second leaves the cache valid, so the stale bytecode is
-what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
-revert is invisible to the interpreter. The build tree is the same mechanism with
-a longer memory and no invalidation rule worth the name: `build/` and
-`*.egg-info` persist until something removes them, and no tool warns that it is
-answering from them.
-
-**Consequence.** The reverted run and the mutated run produce identical output,
-which reads as "the mutation made no difference" — the conclusion that kills the
-finding. In E0-05 it would have been "matching the server's own rendering does not
-silence the warning, so do not bother", and the drift signal E0-20 now depends on
-would have been dropped as not working. In E0-12 it would have been "the
-`package-data` entry makes no difference", against a defect that empties the
-prompt directory in every container the project ships.
-
-**Rule.** When mutating and reverting between runs, destroy the caches in the
-same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
-`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
-rebuild — and confirm the revert in the thing that ran rather than in the file:
-print the value the module holds, list the archive. `grep` proves what is on
-disk, which is not what ran. **In a test, prefer making the reuse impossible over
-undoing it**: build in a copy that has never been built in, and there is no stale
-artifact to remember to delete, no working tree to reach into, and nothing to get
-wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
-does this.
-
----
-
-## 8. Prescribing a fix without probing it
-
-**Caught: 4**
-
-*(The fourth, and it is the second time this entry has caught a prescription
-about the same tuple. A review of E0-10 found that the Care-session sweep in
-`tests/unit/test_care_session_is_bound_to_the_care_service.py` cannot see
-`Settings.care_database_url`, and prescribed widening `SESSION_FRAGMENTS`. Run
-before being written down, over the 26 modules under `backend/app` and over the
-reviewer's own future module, the widening does close that shape and does not
-close a second one: `defined_here` subtracts **any** assigned name, so
-`care_database_url = settings.care_database_url` — the exact idiom
-`app/services/safety.py` itself uses — masks the attribute read and the sweep
-reports nothing with the widened tuple in place. The prescription was necessary
-and not sufficient, and reading it would not have shown that.)*
-
-**What happened.** `hide_input_in_errors=True` was the obvious fix for a
-credential appearing in a pydantic validation error. It cleans `str(exc)` and
-leaves the credential in `errors()`.
-
-A second, in E0-10's objection file, caught by this entry before it was filed.
-The objection proposed a widened identity-column fragment set for the marker
-sweep and wrote out the tuple: `"name", "email", "login", "picture", …`. Run
-against the schema as it stands, `login` matches
-`role_assignment.permits_web_login` — a boolean about which doors a role opens,
-carrying no identity — so the proposed fix would have arrived as a new red test
-in a module nobody had touched. `login_id` adds nothing on today's schema, which
-was measured the same way. The prescription was one word wrong and read
-perfectly.
-
-**Root cause.** The fix was plausible and cheap, so it went into the brief
-without being run. In the second case the tuple was written by thinking of
-claims a roster sync carries, which is the right list to start from and is not
-the same question as "what does this substring match in the schema I have".
-
-**Consequence.** Would have shipped green against the one test that existed,
-leaving the credential one `json.dumps` from any structured logger. The second
-would have handed an arbitrator a fix that breaks a passing test, in the file
-whose whole subject is a sweep that fires on the wrong things.
-
-**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
-property, say the property and let the implementer find the mechanism.
-
----
-
 ## 16. A mutation harness reported kills it had not made
 
-**Caught: 5**
+**Caught: 6**
+
+*(The sixth, in E0-15, and this entry's last paragraph is the one that fired: "read
+each mutation for whether it changes *meaning*". Seventeen mutations were run
+against the mock platform with the controls below — baseline recorded first,
+never `-x`, the replaced text asserted to match exactly once, the revert checked
+by digest — and two came back SURVIVED. One was real (entry 2 above). The other
+was not a result about the code at all: the mutation renamed the seeded section
+`MATH-140-E1FF` to `MATH-140-R4WW` to remove the second start letter and the
+`FF` modality, and a **third** section, `NURS-8100-Q2FF`, still supplied both. So
+the diff was real, the file changed, the suite stayed green, and the mutation had
+removed nothing. Renaming both of the other two sections killed it immediately,
+by the two tests named for it. A harness that checks the text was replaced still
+cannot check that the replacement removed the property — only reading the
+mutation against the seed can, and the tell here was the same one this entry
+already names: a result that disagrees with a test written specifically for that
+property should be disbelieved before it is reported.)*
 
 *(The fifth, and its subject is a mutation that lives in the database rather than
 in a file. The cycle tests plant an inverted edge by reinstalling E0-09's trigger
@@ -884,9 +969,136 @@ you are about to add.
 
 ---
 
+## 12. A stale build of the thing under test was reused, and the run looked clean
+
+**Caught: 5**
+
+*(The fifth, applied before anything went wrong rather than after. E0-15's
+mutation harness edits `mock-lms/app/*.py` and reverts each edit inside seconds,
+which is exactly the size-and-second window this entry's root cause describes —
+and `tests/conftest.py` re-imports every `app.*` module per platform, so a stale
+`.pyc` would be read seventeen times over. The harness therefore runs each variant
+with `PYTHONDONTWRITEBYTECODE=1` and deletes every `__pycache__` under
+`mock-lms/` first, which is this entry's rule and costs one line. Nothing was
+observed going wrong, which is the point: with the caches left in place there
+would have been nothing to observe.)*
+
+**What happened.** In E0-05, checking that `alembic check` warns when a generated
+column's expression drifts: edit `app/models/org.py` to change one band edge from
+`499` to `498`, run the check, edit it back, run it again. The warning was there
+both times. Ten minutes went into the model, the migration and the database
+before `grep` showed the file on disk said `499` while the module Python imported
+said `498`.
+
+A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
+missing from the built wheel entirely — that defect is entry 18; this is what
+happened while verifying its fix. The fix was a
+`[tool.setuptools.package-data]` entry. Verifying it
+meant removing the entry and rebuilding, which produced a wheel that still
+contained the prompts: setuptools had reused the `build/` directory and the
+egg-info left by the previous build, so the wheel described the *previous*
+configuration. Deleting both first showed the real answer, an empty package.
+
+**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
+file's size and mtime **truncated to the second**. Reverting a mutation of equal
+length inside the same second leaves the cache valid, so the stale bytecode is
+what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
+revert is invisible to the interpreter. The build tree is the same mechanism with
+a longer memory and no invalidation rule worth the name: `build/` and
+`*.egg-info` persist until something removes them, and no tool warns that it is
+answering from them.
+
+**Consequence.** The reverted run and the mutated run produce identical output,
+which reads as "the mutation made no difference" — the conclusion that kills the
+finding. In E0-05 it would have been "matching the server's own rendering does not
+silence the warning, so do not bother", and the drift signal E0-20 now depends on
+would have been dropped as not working. In E0-12 it would have been "the
+`package-data` entry makes no difference", against a defect that empties the
+prompt directory in every container the project ships.
+
+**Rule.** When mutating and reverting between runs, destroy the caches in the
+same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
+`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
+rebuild — and confirm the revert in the thing that ran rather than in the file:
+print the value the module holds, list the archive. `grep` proves what is on
+disk, which is not what ran. **In a test, prefer making the reuse impossible over
+undoing it**: build in a copy that has never been built in, and there is no stale
+artifact to remember to delete, no working tree to reach into, and nothing to get
+wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
+does this.
+
+---
+
+## 8. Prescribing a fix without probing it
+
+**Caught: 4**
+
+*(The fourth, and it is the second time this entry has caught a prescription
+about the same tuple. A review of E0-10 found that the Care-session sweep in
+`tests/unit/test_care_session_is_bound_to_the_care_service.py` cannot see
+`Settings.care_database_url`, and prescribed widening `SESSION_FRAGMENTS`. Run
+before being written down, over the 26 modules under `backend/app` and over the
+reviewer's own future module, the widening does close that shape and does not
+close a second one: `defined_here` subtracts **any** assigned name, so
+`care_database_url = settings.care_database_url` — the exact idiom
+`app/services/safety.py` itself uses — masks the attribute read and the sweep
+reports nothing with the widened tuple in place. The prescription was necessary
+and not sufficient, and reading it would not have shown that.)*
+
+**What happened.** `hide_input_in_errors=True` was the obvious fix for a
+credential appearing in a pydantic validation error. It cleans `str(exc)` and
+leaves the credential in `errors()`.
+
+A second, in E0-10's objection file, caught by this entry before it was filed.
+The objection proposed a widened identity-column fragment set for the marker
+sweep and wrote out the tuple: `"name", "email", "login", "picture", …`. Run
+against the schema as it stands, `login` matches
+`role_assignment.permits_web_login` — a boolean about which doors a role opens,
+carrying no identity — so the proposed fix would have arrived as a new red test
+in a module nobody had touched. `login_id` adds nothing on today's schema, which
+was measured the same way. The prescription was one word wrong and read
+perfectly.
+
+**Root cause.** The fix was plausible and cheap, so it went into the brief
+without being run. In the second case the tuple was written by thinking of
+claims a roster sync carries, which is the right list to start from and is not
+the same question as "what does this substring match in the schema I have".
+
+**Consequence.** Would have shipped green against the one test that existed,
+leaving the credential one `json.dumps` from any structured logger. The second
+would have handed an arbitrator a fix that breaks a passing test, in the file
+whose whole subject is a sweep that fires on the wrong things.
+
+**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
+property, say the property and let the implementer find the mechanism.
+
+---
+
 ## 15. A property test's generator excluded the case its own docstring named
 
-**Caught: 3**
+**Caught: 4**
+
+*(The fourth, in E0-15's tests, and about a stated scope rather than a strategy —
+this entry's last sentence is the one that applied: "a stated bound is a scope, and
+an unstated one is a false claim of totality". Two tests carry a bound they cannot
+remove, and stating both is what got one of them lifted. "No member is dropped" has
+no total on the NRPS surface to check against, so it is checked against the users the
+launch page will sign a launch for, which is a lower bound and says so. The mid-term
+add was the second: with no enrollment-window field named anywhere, the test could
+only look for a member value that parsed as a date and assert that the dates were not
+all equal. Writing that bound down is what sent it to Todd as a question rather than
+leaving it as a weak green test, and the ruling added the field — so the assertion is
+now over a named `start`, within one section. **Both bounds have since moved, and
+stating them is what moved them.** The enrollment field arrived from the first
+ruling, and a reviewer then measured that "not all together" was satisfied by an
+early add — so the assertion is now the shape of a late arrival: one member later
+than every other, over a cohort of at least two. And the lower bound on "no member is
+dropped" was measured too weak to keep alone; the claim now rests on the seed's own
+numbering, with the lower bound kept beside it because the two fail for different
+reasons. What is left is stated for the same reason as before: E0-15 asks that the
+added member's `start` fall after its *section's* start date, and no section start
+date is published on this surface at all — the section's calendar is derived
+tool-side from its code and the term's start-letter map.)*
 
 *(The third: the rank rule changed what both supervision generators can produce,
 and the docstrings describing them were written against the old space. Cycles no
@@ -1322,7 +1534,17 @@ result about the mutation until you have shown otherwise.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 1**
+**Caught: 2**
+
+*(The second, in E0-15's tests, over SPEC §8's course-number bands. The mock's seeded
+numbers are checked against a transcription of the table, because §8 states the rule
+as a markdown table *plus* a sentence of prose about width — three digits only in
+`000`–`799`, four only in `8000`–`9999` — and nothing in the repository holds that in
+a form a test can read. So this entry's escape clause applies and its condition is
+met: the comment says the constants are deliberately not derived and why, and a
+control test walks every edge the table names, including `2150` from the `design/`
+corpus the ticket warns about. Without the control the transcription is a second copy
+of the rule with nobody comparing it to the first.)*
 
 *(The first, in E0-11's tests, and it changed where three constants were read
 from. The role ranks that decide which supervision edges are legal are written
@@ -1416,7 +1638,26 @@ its content and will take the markers for formatting they do not recognise.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 0**
+**Caught: 1**
+
+*(The first, in E0-15's tests, and it stopped a test being written rather than
+repaired one. E0-15's scope says "every seeded course needs a title"; E0-14's scope
+requires at least one seeded context carrying `id` alone, no title, so that E1's
+ingestion meets the empty case in a test rather than in a deployment — and
+`test_mock_lms_launch.py::test_a_seeded_context_carries_no_title` asserts exactly
+that today. A test of E0-15's sentence would have turned that one red, on a seed
+satisfying both tickets read separately. This entry's rule is about rows a new
+write-time rule forbids; the same question asked of an existing *assertion* found
+this one in a minute. It is reported as a disagreement between two tickets rather
+than resolved in a test file, and the course-number half of the same sentence — which
+collides with nothing — is asserted. **The ruling then went the way this entry's title
+does not lead you to expect**: rather than the new ticket bending, Todd withdrew the
+earlier requirement, `test_a_seeded_context_carries_no_title` was deleted in its own
+commit, and E0-14's scope now records what the project gave up — the only fixture in
+the repository that exercised a titleless course. Worth keeping, because the entry's
+own thesis is that these collisions are repaired on the other side of the test wall,
+and this one was repaired on the other side of the *product*: neither test was wrong,
+and no amount of care inside `tests/` could have settled which requirement to keep.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix
@@ -1492,3 +1733,58 @@ guard that produces an escalation rather than a fix, which is sometimes right �
 is right here — but it should be a chosen outcome and written down, not a surprise.
 Where a test's subject is a particular revision, **name the revision**; `-1` and
 `head` are convenient and neither is a subject.
+
+---
+
+## 23. A validation created the appearance of a behaviour
+
+**Caught: 0**
+
+**What happened.** In E0-15's mock platform, the AGS Result fold ignored
+`gradingProgress` entirely. A score posted `NotReady` — the value that says the
+grading process has not started — read back as a finished grade, and so did
+`Failed` and `Pending`; measured across all five values by a reviewer.
+
+That is an ordinary omission. What makes it worth an entry is the round in
+between. The previous review pass found the field checked only for presence, and
+the fix added a vocabulary check: `gradingProgress` had to be one of AGS 2.0's
+five exact strings, refused loudly otherwise, with a control asserting all five
+were accepted. Every one of those things is correct and none of them made the
+grade right. After that fix the field was **validated on the way in, recorded
+verbatim in the log, echoed in the readback, and consulted by nothing** — and it
+now looked handled from every angle a reader has. The code had a named constant
+for its vocabulary. The suite had a case per value. Anyone scanning either would
+conclude the field was understood.
+
+**Root cause.** Checking that a value is *well-formed* and never asking what it
+is *for*. A vocabulary check is an assertion about the shape of an input; it says
+nothing about whether anything downstream reads it. The two are easy to confuse
+because a validated field looks like a used field: it appears in a constant, in
+an error message, and in the name of something green.
+
+It is entry 2's family — behaviour with nothing asserting it — and it is the
+inverse of it, which is why it needs its own heading. There, a guard exists and
+nothing covers it. Here, the coverage exists, it passes, and the field it
+describes was never wired to anything. Entry 2's rule — try to reintroduce the
+defect, and a green suite means you wrote a convention — cannot find this,
+because there is nothing to reintroduce: removing the fold's use of the field is
+a no-op, since it had none.
+
+**Consequence.** Two rounds, and the second made the defect harder to see than
+the first. Had it shipped, E3 would post a score at submit time — before SPEC
+§3.3's classification has decided whether the response counts — and the gradebook
+would show a participation grade computed from a week that has not been graded.
+The student sees a number that will change, and nothing on the tool's side could
+find it, because the tool is built against this mock.
+
+**Rule.** **For every field a service validates, name the code that reads it.**
+If the answer is "nothing", the field is decorative, and one of two things has to
+happen: it gets acted on, or the validation says in writing that it is a shape
+check and nothing more. The question to ask of an input is not only "is this
+checked?" but "what changes when it changes?".
+
+The cheap version is a search: grep the field name and count the sites that are
+not the validator. One hit means the value goes in and stops there. And **a round
+that adds validation to a field is the round to ask this**, because adding a
+check to a field nothing consumes makes the gap less visible rather than more —
+the next reader inherits a field that looks settled.
