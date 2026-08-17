@@ -24,12 +24,15 @@ Fall 2026 start-letter map), §13 (`scripts/seed.py`), §6.3.
   §2.1), and courses across all five levels.
 
   **The design prototype's course numbers cannot be seeded, and this is where
-  that lands.** E0-05 settled the number-to-level bands (SPEC §8), and 24 of the
-  25 course numbers written across `design/` fail them — every four-digit
-  number below `8000`, which is all of `BIOL 2150`, `CHEM 1210`, `MATH 1610`,
-  `PSYC 1010` and the rest. Only `MATH 040` survives. SPEC §2.1's own two
-  examples were renumbered when the bands landed; the `design/` corpus was
-  deliberately not, because it is a design deliverable rather than schema.
+  that lands.** E0-05 settled the number-to-level bands (SPEC §8), and **all 27
+  distinct course numbers written across `design/` fail them** — every one is
+  four digits and below `8000`, which is the gap between the two bands, and that
+  is all of `BIOL 2150`, `CHEM 1210`, `MATH 1610`, `PSYC 1010` and the rest.
+  There is no survivor; an earlier version of this paragraph named `MATH 040` as
+  one, which is SPEC §8's own example of a developmental number and appears
+  nowhere in `design/`. SPEC §2.1's own two examples were renumbered when the
+  bands landed; the `design/` corpus was deliberately not, because it is a
+  design deliverable rather than schema.
   Whoever builds this ticket picks the seed numbers against §8 and should
   expect them to disagree with every screenshot in `design/`. Renumbering that
   corpus, or deciding it stays as illustration, is a separate call — raise it

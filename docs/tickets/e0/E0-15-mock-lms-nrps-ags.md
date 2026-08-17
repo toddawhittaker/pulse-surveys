@@ -33,8 +33,9 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
   [E0-21](E0-21-review-debt.md)), so a course inserted without one fails, and
   course numbers outside the bands are refused at write time. Note that the
   numbers written across `design/` — `BIOL 2150` and the rest — are all invalid
-  under those bands; 24 of the 25 in the repository are. Pick numbers against §8
-  rather than from a prototype screen.
+  under those bands; all 27 distinct ones are, with no exception. Pick numbers
+  against §8 rather than from a prototype screen. [E0-17](E0-17-seed-script.md)
+  carries the decision about what to do with that corpus.
 - An endpoint or fixture hook that lets a test inspect posted scores.
 
 ## Out of scope

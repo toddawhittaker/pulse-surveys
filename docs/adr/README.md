@@ -37,6 +37,14 @@ table below in the same commit** — an unindexed record is one nobody finds, an
 three of them accumulated on one branch before anyone noticed, because the index
 is the artifact nobody re-reads once it exists.
 
+**0029, 0033 and 0034 do not exist, and no record is missing.** Three tickets
+were built in parallel worktrees and each was given a range to number within —
+0025–0029, 0030–0034, 0035–0039 — so that two branches could not both claim one
+number. Each ticket used fewer than its range allowed and the remainder was left
+unused rather than back-filled, because renumbering is the one thing this file
+forbids. A gap in the sequence means a range ran out early, never that a record
+was lost.
+
 A superseded record stays where it is with a line at the top pointing at its
 replacement. Where a later decision changes only *part* of an earlier one, say
 amended rather than superseded, on the earlier record's status line and beside

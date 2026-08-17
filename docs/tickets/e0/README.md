@@ -27,8 +27,8 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 07 | [Section-code parser and date derivation](E0-07-section-code-parser.md) | 05, 06 | Parse `R3WW`, derive length, dates, and modality; Hypothesis property tests over the full letter map. |
 | 08 | [Identity schema and LTI registration tables](E0-08-identity-schema.md) | 04, 05 | `user` split from `user_identity` so identity is table-level, plus `person`, `enrollment`, and the LTI registration tables. |
 | 09 | [Role assignments and the supervision graph](E0-09-role-assignment-graph.md) | 05, 06, 08 | `role_assignment` with `reports_to` pointing at assignments, cycle rejection, lead-faculty mapping. |
-| 10 | [Identity-separated read views](E0-10-identity-separated-views.md) | 08, 09 | Three database roles so instructor screens physically cannot read identity, while Care keeps an audited door; first §4.1 invariants; invariant suite becomes unskippable. |
-| 11 | [Authorization skeleton](E0-11-authz-skeleton.md) | 09, 10 | The `services/authz.py` chokepoint, role grain, sibling-lead isolation; transitive union deliberately deferred to E9. |
+| 10 | [Identity-separated read views](E0-10-identity-separated-views.md) | 08, 09 | Three database roles so instructor screens physically cannot read identity, while Care keeps an audited door; first §4.1 invariants; invariant suite becomes unskippable. Also closes the two holes in E0-08's identity marker and carries E0-09's `search_path` rule into every view. |
+| 11 | [Authorization skeleton](E0-11-authz-skeleton.md) | 09, 10 | The `services/authz.py` chokepoint, role grain, sibling-lead isolation; transitive union deliberately deferred to E9. Decides where two rules E0-09's schema does not enforce live: edge direction by role, and one lead per course. |
 | 12 | [AI output contracts and prompt layout](E0-12-ai-contracts.md) | 01 | One Pydantic contract per §7.4 task, versioned prompt directory, contracts usable as eval fixtures. |
 | 13 | [AIGateway shell and one working round-trip](E0-13-ai-gateway-roundtrip.md) | 04, 12 | Single-shot gateway, comment validity end to end, fail-open on timeout, append-only classification rows. |
 | 14 | [Mock LMS: JWKS and LTI 1.3 launch](E0-14-mock-lms-launch.md) | 02, 08 | Platform-side launch with per-run issuer keys and a signed `id_token`. |
@@ -37,7 +37,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
-| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
+| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, `alembic check` comparing neither check-constraint expressions nor exclusion constraints, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
 | 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | Two findings from PR #19 that editing E0-05 cannot close: detecting an LMS-owned column that was never marked, and asserting that a prefix belongs to a department. |
 | 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | Does the benchmark minimum cover comparison-set numbers or only lines, and is one institution per deployment enforced or merely assumed. Both are product decisions a schema ticket declined to make. |
 | 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | Which launches may trigger a roster sync, whether the service URL is stored, and what an operator sees when a section has never had a roster. A spec edit E1 needs answered before it builds the sync. |
@@ -68,13 +68,15 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 23 hang
-off 03, 04 and 05 or off nothing at all, and block nothing — they harden tests or
-settle records rather than adding behaviour, so they can land any time afterwards
-and none is on the path to the E0 exit. Ticket 21 in particular is cheapest done
-while passing through for another reason: its first item is most naturally closed
-by E1's roster sync, which is the only code that knows which fields came from the
-platform.
+chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 25 hang
+off 03, 04, 05, 07, 08, 09, 12 and 14 or off nothing at all, and block nothing —
+they harden tests or settle records rather than adding behaviour, so they can
+land any time afterwards and none is on the path to the E0 exit. Ticket 21 in
+particular is cheapest done while passing through for another reason: E0-11 picks
+the grain of its first item, and if that choice is the write seam rather than a
+table-grained refusal, the code that closes it is E1's roster sync — the only
+code that sees both which field came from the platform and which column it went
+into.
 
 Two of them are exceptions to "no hurry". Ticket 22's first question is a
 confidentiality rule that is currently unenforced, and E4 builds the reports it
@@ -86,9 +88,12 @@ One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
 item was `alembic check` being blind to server-default drift, and E0-05 is where
 the first server defaults landed. **E0-05 closed that item** — `env.py` now sets
 `compare_server_default=True` on both paths — so three of its original four
-remain, and it gained a narrower fourth in the same place: a *generated*
-column's expression can still drift with `alembic check` green, because Alembic
-warns rather than failing. Four open in total. Details in E0-20 item 3.
+remain, and it has gained two more since. A *generated* column's expression can
+still drift with `alembic check` green, because Alembic cannot `ALTER` one and so
+warns rather than failing; and E0-07 and E0-08 found that the same gate compares
+neither check-constraint expressions nor exclusion constraints, which is no
+longer hypothetical now that E0-08's overlap rule is an exclusion constraint.
+**Five open in total.** Details in E0-20 items 3 and 3a.
 
 ## What the built tickets settled
 
@@ -213,5 +218,6 @@ Where this differs from the ticket list in §14.3, and why:
   for the three constraints it imposed on anyone editing a Compose file. It adds
   no behaviour and blocks nothing.
 
-The illustrative ticket names in `CONTRIBUTING.md` predate this file. Where the
-two differ, these ticket branch names win.
+Where a branch name here differs from the *Ticket breakdown* line under E0 in
+SPEC §14.3, or from the three illustrative names in `CONTRIBUTING.md`'s diagram,
+these names win. §14.3 lists eight groupings, not twenty-five branches.

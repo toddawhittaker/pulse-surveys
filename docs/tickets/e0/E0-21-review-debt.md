@@ -83,10 +83,10 @@ already holds the containment tests.
 ## Out of scope
 
 - **The generated-column drift gap.** `alembic check` exits zero on a changed
-  generation expression because Alembic cannot `ALTER` one. That is
-  [E0-20](E0-20-gate-fidelity.md)'s fourth item, not this ticket's.
-- **The `design/` course numbers.** 22 numbers across the prototype fail the
-  SPEC §8 bands. [E0-17](E0-17-seed-script.md) carries it.
+  generation expression because Alembic cannot `ALTER` one. That belongs to
+  [E0-20](E0-20-gate-fidelity.md), under its item 3, not to this ticket.
+- **The `design/` course numbers.** All 27 distinct numbers across the prototype
+  fail the SPEC §8 bands. [E0-17](E0-17-seed-script.md) carries it.
 
 ## Considered and deliberately not carried
 

@@ -65,13 +65,16 @@ question stops being hypothetical for every epic that follows.
 - Playwright configuration and `tests/e2e/`, running against the Compose stack.
 - Install Playwright as a **pinned devDependency** and invoke the local binary.
   The `e2e` job currently runs `npx --yes playwright install` and
-  `npx playwright test` (`.github/workflows/ci.yml:301-302`, mirrored at
-  `Makefile:131`), which resolves whatever version is latest at run time and so
-  breaks the `CLAUDE.md` rule against unpinned tool versions in CI. Fix it in
-  this ticket, since this is where those lines stop being dead code. The license
-  scanner at `ci.yml:470` and `Makefile:199` pins its version but still fetches
-  from the registry rather than a lockfile; fold it in if the frontend has
-  landed by then. Raised by the E0-01 security review.
+  `npx playwright test` (the "Run Playwright" step in
+  `.github/workflows/ci.yml`, mirrored in the `e2e` target of the `Makefile`),
+  which resolves whatever version is latest at run time and so breaks the
+  `CLAUDE.md` rule against unpinned tool versions in CI. Fix it in this ticket,
+  since this is where those lines stop being dead code. The license scanner —
+  `license-checker-rseidelsohn` in the `supply-chain` job and in the Makefile's
+  `licenses` target — pins its version but still fetches from the registry
+  rather than a lockfile; fold it in if the frontend has landed by then. Raised
+  by the E0-01 security review. (Line numbers were cited here originally and had
+  drifted by four tickets; the steps are named instead.)
 - A launch path: click through the mock LMS launch form, arrive at the tool, and
   land on a role-appropriate empty view.
 - A web-login path: authenticate against the mock IdP as a leadership user and

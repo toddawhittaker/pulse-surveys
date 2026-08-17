@@ -18,15 +18,23 @@ non-obvious requirements in the spec exist to protect one of those two beliefs.
 
 ## Status
 
-Early. The backend package exists — a FastAPI application factory, the
-environment-driven settings object, a health endpoint, and now a database engine
-with a session per request — and it runs in a container alongside a Celery
-worker, a Celery beat scheduler, Postgres, Redis, and Mailpit. CI enforces lint,
-typing, the test suite, migration drift, dependency audit, license
-compatibility, and that the stack comes up healthy. The job runtime is wired but
-does no work yet: the beat schedule is empty, and the only task is a `ping` that
-proves the round trip. The migration chain exists and creates nothing — there
-are no tables yet, and no frontend.
+Early, but no longer empty. The backend package exists — a FastAPI application
+factory, the environment-driven settings object, a health endpoint, and a
+database engine with a session per request — and it runs in a container
+alongside a Celery worker, a Celery beat scheduler, Postgres, Redis, Mailpit,
+and the mock LMS described below. CI enforces lint, typing, the test suite,
+migration drift, dependency audit, license compatibility, and that the stack
+comes up healthy.
+
+The schema is real now. Migrations create the containment hierarchy
+(institution through section), the term calendar and start-letter map, the
+identity tables with `user` split from `user_identity`, the LTI registration
+tables, and role assignments with the supervision graph. What sits on top of it
+does not exist yet: no read views, no authorization, no HTTP routes beyond
+`/healthz`, and no frontend. The job runtime is wired but does no work — the
+beat schedule is empty, and the only task is a `ping` that proves the round
+trip. The AI side has its typed contracts and versioned prompt directory but no
+gateway to call a provider with.
 
 ## Run it locally
 
