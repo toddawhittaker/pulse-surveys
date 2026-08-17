@@ -35,7 +35,23 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 28**
+**Caught: 29**
+
+*(The twenty-ninth, writing E0-15's tests for the mock platform's roster and grade
+services, and it decided six of them. "No member is duplicated" is a count against a
+count, which is `n == n` over a roster that fits on one page — so the test finds the
+rosters that came back on more than one page first and fails if there are none, and
+its sibling asserts the first page is *shorter* than the assembled membership. "A
+posted score is retrievable" is asserted with an `activityProgress` of `Submitted`
+and a `gradingProgress` of `PendingManual`, because a stub that hardcodes the
+obvious pair passes a round trip posted as `Completed`/`FullyGraded`; and with a
+fixed past second for the timestamp, because a recorder stamping its own clock
+cannot coincide with one. The seed's dropped member is asserted beside a member who
+is still `Active`, since a roster reporting everybody `Inactive` satisfies "somebody
+is not Active" with no drop in it. And both matchers this suite invented — §2.2's
+section code and §8's course-number bands — are run against what they are claimed to
+catch and what they are claimed to allow, in their own tests, before any silence
+from them counts.)*
 
 *(The twenty-eighth, writing the tests for E0-11's two review dispositions, and it
 decided the shape of both. An `ASSISTANT_DEAN` assignment's own grant is asserted
@@ -213,7 +229,15 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 26**
+**Caught: 27**
+
+*(The twenty-seventh, in E0-15's tests. `tests/conftest.py`'s header describes what
+each ticket added to the file and why, and adding the Advantage-service helpers to
+`MockPlatform` made its E0-14 paragraph — "it discovers the mock platform rather than
+naming its parts" — a description of a class that had grown a second subject. The
+sweep is small and the rule is the same one: the header is the record a reader meets
+before the code, and it goes stale by something being added to the file rather than
+by anything in it being edited.)*
 
 *(The twenty-sixth, and it is this entry's rule about counts caught by the change
 that made one stale. `tests/integration/test_own_grant_follows_the_role_grain.py`
@@ -577,7 +601,15 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 12**
+**Caught: 13**
+
+*(The thirteenth, in E0-15's tests, and it decided where three helpers live. Three
+modules ask the same two questions — what does this `Link` header say, and are these
+two spellings of a timestamp the same moment — so the paging walk, the header parser
+and the instant comparison sit once in `tests/conftest.py` and reach the modules as
+fixtures. A copy in a test module would be a copy that drifts from the walk it is
+meant to control, and a control that has drifted from the thing it controls is worth
+less than none.)*
 
 *(The twelfth, twice over the same hazard. E0-09's scope grain rule ties the
 populated scope column to the role, so a test that edits a supervisor's role and
@@ -886,7 +918,19 @@ you are about to add.
 
 ## 15. A property test's generator excluded the case its own docstring named
 
-**Caught: 3**
+**Caught: 4**
+
+*(The fourth, in E0-15's tests, and about a stated scope rather than a strategy —
+this entry's last sentence is the one that applied: "a stated bound is a scope, and
+an unstated one is a false claim of totality". Two tests carry a bound they cannot
+remove. "No member is dropped" has no total on the NRPS surface to check against, so
+it is checked against the users the launch page will sign a launch for, which is a
+lower bound and says so. And the mid-term add is found by looking for a member field
+that carries a date, because neither NRPS 2.0 nor the ticket spells an
+enrollment-window field, so what the test can assert is that the seeded enrollments
+do not all begin together and not that any of them begins mid-term. Both are written
+into the docstrings as what the test does not reach, rather than left for a reader to
+infer from a name that claims more.)*
 
 *(The third: the rank rule changed what both supervision generators can produce,
 and the docstrings describing them were written against the old space. Cycles no
@@ -1322,7 +1366,17 @@ result about the mutation until you have shown otherwise.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 1**
+**Caught: 2**
+
+*(The second, in E0-15's tests, over SPEC §8's course-number bands. The mock's seeded
+numbers are checked against a transcription of the table, because §8 states the rule
+as a markdown table *plus* a sentence of prose about width — three digits only in
+`000`–`799`, four only in `8000`–`9999` — and nothing in the repository holds that in
+a form a test can read. So this entry's escape clause applies and its condition is
+met: the comment says the constants are deliberately not derived and why, and a
+control test walks every edge the table names, including `2150` from the `design/`
+corpus the ticket warns about. Without the control the transcription is a second copy
+of the rule with nobody comparing it to the first.)*
 
 *(The first, in E0-11's tests, and it changed where three constants were read
 from. The role ranks that decide which supervision edges are legal are written
@@ -1416,7 +1470,19 @@ its content and will take the markers for formatting they do not recognise.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 0**
+**Caught: 1**
+
+*(The first, in E0-15's tests, and it stopped a test being written rather than
+repaired one. E0-15's scope says "every seeded course needs a title"; E0-14's scope
+requires at least one seeded context carrying `id` alone, no title, so that E1's
+ingestion meets the empty case in a test rather than in a deployment — and
+`test_mock_lms_launch.py::test_a_seeded_context_carries_no_title` asserts exactly
+that today. A test of E0-15's sentence would have turned that one red, on a seed
+satisfying both tickets read separately. This entry's rule is about rows a new
+write-time rule forbids; the same question asked of an existing *assertion* found
+this one in a minute. It is reported as a disagreement between two tickets rather
+than resolved in a test file, and the course-number half of the same sentence — which
+collides with nothing — is asserted.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix

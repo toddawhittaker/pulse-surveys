@@ -1,0 +1,427 @@
+"""The mock platform's roster service, walked the way a roster sync walks it — E0-15.
+
+E0-15 builds the *platform* side of Names and Role Provisioning Service 2.0: a
+paged course roster whose members carry roles and enrollment status. Everything
+below asserts what the platform produces, driven through the URL the launch
+advertised rather than through a path this file invented.
+
+**How a test finds the service.** In LTI Advantage the platform announces its
+services inside the launch it has just signed — the NRPS claim carries the
+context memberships URL — so a test that discovers the endpoint that way is
+doing what E1's sync will do, and is not inventing an interface E0-15 left open.
+Nothing here knows a path. A mock serving a perfectly good roster at a fixed URL
+with no claim in the token fails the first test in this module, which is the
+right failure: `pylti1p3` (SPEC §7.1) would never find it.
+
+**What is deliberately not here.** Tool-side roster sync — enrollment
+provisioning, the hourly schedule, debouncing on launch — is E1's, and E0-15's
+out-of-scope list says so. There is no test below of what Pulse does with a
+roster. Nor is there a test of the access-token flow: real Advantage services
+sit behind an OAuth 2.0 client-credentials grant, E0-15 mentions none and E0-14
+built none, so this suite calls the services unauthenticated and a 401 is
+reported as a gap in the ticket rather than as a defect in the mock.
+
+**No §4.1 invariant lives here.** The mock is a platform, not a Pulse read path;
+the confidentiality invariants attach to what Pulse shows a human. What the
+suite does assert about the seeded people — that their identities are obviously
+fake — is in `test_mock_lms_seed_data.py`, where the seed is the subject.
+
+**On "no member is duplicated or dropped".** Those are two different claims and
+only one of them has a total to check against. Duplication is checkable from the
+pages alone: the pages of a container partition its membership, so the members
+counted across pages and the members counted once have to be the same number.
+A *drop* has no total on this surface — NRPS containers carry no count — so it
+is checked against the one independent source E0-14 left behind: every user the
+launch page will sign a launch for in a context is demonstrably a member of that
+context, and has to appear in its roster. That is a lower bound rather than the
+whole membership, and the test that uses it says so in its own words.
+"""
+
+from typing import Any
+from urllib.parse import urlsplit
+
+import pytest
+
+pytestmark = pytest.mark.lti
+
+# `mock_platform`, `link_relations_in` and the platform's service helpers come
+# from `tests/conftest.py` and are reached through fixtures rather than
+# imported. A test module that imports its sibling `conftest` by name depends on
+# where pytest happened to put `tests/` on `sys.path`, and an import error is
+# not a red — it is a broken suite that reports nothing about the ticket.
+
+# The three values NRPS 2.0 gives a membership `status`. Not this suite's
+# choice: `pylti1p3` and every platform adapter compare against these exact
+# strings, and SPEC §3.4 needs the difference between them — "Drops: scores stop
+# updating" is a decision a tool can only make if the roster says a member is no
+# longer active.
+NRPS_MEMBERSHIP_STATUSES = ("Active", "Inactive", "Deleted")
+
+# The member's identifier, spelled as NRPS 2.0 spells it. A container that
+# spells it `userId` is one `pylti1p3` reads as a member with no user, so the
+# strictness is the specification's rather than this suite's.
+MEMBER_ID = "user_id"
+
+# A `Link` header this suite builds itself, to check the parser the walk uses.
+# Two entries, one of them carrying two relations on one URL, because that is
+# the shape a substring search for "next" gets right for the wrong reason.
+SAMPLE_LINK_HEADER = '<https://platform.invalid/memberships?page=2>; rel="next", '
+SAMPLE_LINK_HEADER += '<https://platform.invalid/memberships?page=9>; rel="last first"'
+
+
+def roster_of(platform: Any, context: Any) -> list[Any]:
+    """Every page of one context's roster, first to last."""
+    return platform.membership_pages(context.memberships_url)
+
+
+def walked_rosters(platform: Any) -> list[tuple[Any, list[Any]]]:
+    """Every seeded context paired with its fully walked roster.
+
+    Fails rather than answering an empty list, because every assertion below is
+    over the members it returns and an empty walk satisfies most of them
+    (`docs/MISTAKES.md` entry 3).
+    """
+    contexts = platform.seeded_contexts()
+    assert contexts, (
+        "The launch page offers no launches, so this suite found no context to fetch a roster "
+        "for. E0-14 seeds the launches and E0-15 seeds the roster behind them."
+    )
+    return [(context, roster_of(platform, context)) for context in contexts]
+
+
+def members_across(pages: list[Any]) -> list[dict[str, Any]]:
+    """Every member on every page of one walked roster, in page order."""
+    return [member for page in pages for member in page.members]
+
+
+def every_member(walked: list[tuple[Any, list[Any]]]) -> list[dict[str, Any]]:
+    """Every member of every seeded context, with a guard against emptiness."""
+    members = [member for _, pages in walked for member in members_across(pages)]
+    assert members, (
+        "Every seeded roster came back with no members at all, so every assertion about what a "
+        "member carries would hold vacuously. E0-15 seeds 'students, instructors, and "
+        "enrollments'."
+    )
+    return members
+
+
+# ---------------------------------------------------------------------------
+# Finding the service at all, and what it answers with.
+# ---------------------------------------------------------------------------
+
+
+def test_a_launch_advertises_the_names_and_role_provisioning_service(
+    signed_launch: Any,
+    mock_platform: Any,
+) -> None:
+    """The claim a tool discovers the roster through, carrying an absolute URL.
+
+    Catches the mock that serves a good roster at `/nrps/...` and puts nothing in
+    the token. Every other test in this module would then be written against a
+    path someone chose, E1's sync would be written the same way, and the first
+    real platform — which publishes a different path per context — would have no
+    route in at all.
+
+    The URL is required to be absolute for the same reason and it is a separate
+    failure: a claim carrying `/nrps/context/1/memberships` looks correct in a
+    body and cannot be resolved by a tool that received the token over a queue,
+    out of a session, or from anywhere but the response it arrived in.
+    """
+    url = mock_platform.memberships_url(signed_launch)
+    split = urlsplit(url)
+    assert split.scheme and split.netloc, (
+        f"The NRPS claim advertises `{url}`, which is not an absolute URL. A tool resolves this "
+        "value with no knowledge of where the token came from, so a relative path is a service "
+        "it cannot call."
+    )
+
+
+def test_the_membership_service_answers_a_container_naming_its_context(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """The container shape, before anything reads members out of it.
+
+    Catches the two shapes a mock produces when nobody checks: a bare JSON array
+    of members, and an object whose `members` key is missing because the
+    serialiser named it `memberships`. Both are readable by hand and neither is
+    readable by `pylti1p3`, which asks the container for its `members`.
+
+    `context` is asserted because it is what ties a roster to a section. A
+    container that answers the same membership for every URL passes every other
+    test in this module — the members are all there, the paging is right — and
+    gives E1 one roster for the whole institution.
+    """
+    page = mock_platform.membership_page(mock_platform.memberships_url(signed_launch))
+    context = page.document.get("context")
+    assert isinstance(context, dict) and context.get("id"), (
+        f"The membership container carries no `context` object with an `id` (it carries "
+        f"{sorted(page.document)}). NRPS 2.0 puts the context there, and it is what says which "
+        "section this roster belongs to."
+    )
+    assert isinstance(page.document.get("members"), list), (
+        f"The membership container carries no `members` array (it carries "
+        f"{sorted(page.document)}). That member is the roster; a container without it is a "
+        "document `pylti1p3` reads as an empty class."
+    )
+
+
+def test_the_membership_container_names_the_context_the_launch_came_from(
+    mock_platform: Any,
+) -> None:
+    """The roster a launch points at is the roster for *that* section.
+
+    The control on the test above, and the mutation is one line: a memberships
+    URL built without the context in it, or a handler that ignores the context
+    it was given and answers the first seeded section. Every member is present,
+    every page is right, and E1 syncs one section's roster into every section.
+    """
+    for context in mock_platform.seeded_contexts():
+        page = mock_platform.membership_page(context.memberships_url)
+        served = page.document.get("context")
+        served_id = served.get("id") if isinstance(served, dict) else None
+        assert served_id == context.context_id, (
+            f"The roster at `{context.memberships_url}` names context {served_id!r}, and the "
+            f"launch that advertised that URL carries context {context.context_id!r}. A roster "
+            "service that answers the same context whatever it is asked for gives E1 one class "
+            "list for the whole institution."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Criterion 1 — members carry role and enrollment status.
+# ---------------------------------------------------------------------------
+
+
+def test_every_roster_member_carries_at_least_one_role(mock_platform: Any) -> None:
+    """Criterion 1, the role half.
+
+    Catches a roster of names and identifiers with no roles at all — the shape a
+    mock takes when the seed is written as a list of people rather than as a list
+    of enrollments — and catches `roles` serialised as a bare string, which is
+    what a single-role member becomes when nobody wraps it. A tool reading
+    `"Learner"` as a list finds eight roles of one character each.
+
+    Whether a role is spelled as an LIS vocabulary URI or by its short name is
+    deliberately not asserted: NRPS 2.0's own example uses short names while the
+    launch's roles claim requires URIs, so a rule here would be this suite
+    inventing conformance the ticket does not state.
+    """
+    roleless = [
+        member
+        for member in every_member(walked_rosters(mock_platform))
+        if not (
+            isinstance(member.get("roles"), list)
+            and member["roles"]
+            and all(isinstance(role, str) and role for role in member["roles"])
+        )
+    ]
+    assert not roleless, (
+        f"{len(roleless)} roster members carry no usable `roles` array — the first is "
+        f"{roleless[0]!r}. E0-15 criterion 1: 'NRPS returns a roster whose members carry role and "
+        "enrollment status.' A member with no role cannot be turned into an enrollment, and a "
+        "`roles` that is a bare string is read character by character."
+    )
+
+
+def test_every_roster_member_carries_an_enrollment_status(mock_platform: Any) -> None:
+    """Criterion 1, the status half, against NRPS 2.0's three values.
+
+    Catches a status omitted (every member reads as active, and SPEC §3.4's
+    "Drops: scores stop updating" has nothing to fire on), and a status invented
+    — `"enrolled"`, `"dropped"`, `"active"` in lower case. Each of those is
+    perfectly readable and none is a value any platform sends, so E1's ingestion
+    would be written against a vocabulary that exists nowhere but this mock.
+    """
+    members = every_member(walked_rosters(mock_platform))
+    wrong = [member for member in members if member.get("status") not in NRPS_MEMBERSHIP_STATUSES]
+    assert not wrong, (
+        f"{len(wrong)} of {len(members)} roster members carry a `status` outside "
+        f"{list(NRPS_MEMBERSHIP_STATUSES)} — the first is {wrong[0].get('status')!r} on "
+        f"{wrong[0]!r}. E0-15 criterion 1 asks for enrollment status on every member, and NRPS "
+        "2.0 fixes those three spellings; anything else is a vocabulary only this mock has."
+    )
+
+
+def test_every_roster_member_is_identified_the_way_a_launch_identifies_a_user(
+    mock_platform: Any,
+) -> None:
+    """`user_id` on the member, spelled as NRPS spells it.
+
+    The precondition for every test below that matches a member against a
+    launch, asserted on its own so that a container spelling it `userId` or `id`
+    reports as one failure naming the field rather than as three failures that
+    look like members going missing.
+    """
+    members = every_member(walked_rosters(mock_platform))
+    unnamed = [member for member in members if not isinstance(member.get(MEMBER_ID), str)]
+    assert not unnamed, (
+        f"{len(unnamed)} of {len(members)} roster members carry no `{MEMBER_ID}` string — the "
+        f"first carries {sorted(unnamed[0])}. NRPS 2.0 spells it `{MEMBER_ID}`, and it is the "
+        "value SPEC §4 keys every response to: the LMS user ID a launch carries as `sub`."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Criterion 2 and the definition of done — paging.
+# ---------------------------------------------------------------------------
+
+
+def test_the_link_header_parser_reads_a_next_relation_and_ignores_the_others(
+    link_relations_in: Any,
+) -> None:
+    """The control on the walk, run before the walk's answers are believed.
+
+    `docs/MISTAKES.md` entry 3: a pattern searched against text is "a test that
+    passed for a reason unrelated to what it asserted" wearing a disguise, so it
+    is run against the text it is claimed to catch *and* the text it is claimed
+    to allow. Both halves are here, and neither is ceremony — a parser that
+    returned `{}` for everything would make the walk stop after one page, which
+    silently turns every paging assertion below into a statement about page one.
+    """
+    relations = link_relations_in(SAMPLE_LINK_HEADER)
+    assert relations.get("next") == "https://platform.invalid/memberships?page=2"
+    assert relations.get("last") == "https://platform.invalid/memberships?page=9"
+    assert relations.get("first") == "https://platform.invalid/memberships?page=9"
+    assert link_relations_in('<https://platform.invalid/m?page=9>; rel="prev"').get("next") is None
+    assert link_relations_in(None) == {}
+    assert link_relations_in("") == {}
+
+
+def test_a_roster_larger_than_one_page_advertises_the_next_page_in_a_link_header(
+    mock_platform: Any,
+) -> None:
+    """Criterion 2, and the reason E0-15 seeds more members than fit on a page.
+
+    Two mutations, and the second is the near miss. The first is a mock that
+    answers the whole roster in one response: every other test here passes,
+    paging is never exercised, and §7.3's named per-platform deviation — "NRPS
+    paging" — is a bug class E1 meets for the first time against a real LMS.
+
+    The second is a mock that pages the *body* and carries the next URL inside
+    the JSON rather than in a `Link` header. A test walking the body would call
+    that correct. A conformant tool reads the header, sees no next relation, and
+    silently syncs one page of the class — which looks exactly like a small
+    section rather than like a defect.
+    """
+    walked = walked_rosters(mock_platform)
+    paged = [
+        (context, pages) for context, pages in walked if pages and pages[0].relations.get("next")
+    ]
+    assert paged, (
+        "No seeded roster's first page carries a `Link` header with a `rel=next` relation. "
+        + "; ".join(
+            f"{context.context_id}: {len(members_across(pages))} members over {len(pages)} "
+            f"page(s), first page Link header {pages[0].link_header!r}"
+            for context, pages in walked
+            if pages
+        )
+        + ". E0-15 criterion 2: 'A roster larger than one page returns `Link` headers and a test "
+        "walks all pages to assemble the full membership.' A next URL carried in the body instead "
+        "leaves a conformant tool syncing page one and calling it the class."
+    )
+    context, pages = paged[0]
+    assert len(pages[0].members) < len(members_across(pages)), (
+        f"The roster for {context.context_id} advertises a next page and its first page already "
+        "holds every member, so the header points at nothing new. Paging that does not divide "
+        "the roster is a header a tool follows for no reason."
+    )
+
+
+def test_walking_every_page_of_a_roster_returns_each_member_exactly_once(
+    mock_platform: Any,
+) -> None:
+    """The definition of done's "no member is duplicated", from the pages themselves.
+
+    The pages of a container partition its membership, so counting members across
+    the pages and counting them once has to give the same number. Catches the
+    off-by-one that overlaps pages — an offset advanced by one less than the page
+    size, or a next URL that repeats the offset it was served at — which duplicates
+    a member per page boundary. E3 divides valid weeks by weeks elapsed per
+    student; a student who appears twice in a synced roster is either two students
+    or one whose enrollment window is written twice.
+
+    The guard above the assertion is not ceremony: over a roster that fits on one
+    page the comparison is `n == n` for any implementation at all, so a mock that
+    stopped paging would satisfy this test rather than fail it.
+    """
+    walked = walked_rosters(mock_platform)
+    paged = [(context, pages) for context, pages in walked if len(pages) > 1]
+    assert paged, (
+        "No seeded roster came back on more than one page, so this test would compare a page "
+        "against itself. Criterion 2 requires a roster larger than one page; "
+        f"{[(context.context_id, len(pages)) for context, pages in walked]}."
+    )
+    for context, pages in paged:
+        members = members_across(pages)
+        identifiers = [member.get(MEMBER_ID) for member in members]
+        repeated = sorted({str(name) for name in identifiers if identifiers.count(name) > 1})
+        assert not repeated, (
+            f"Walking the {len(pages)} pages of the roster for {context.context_id} returned "
+            f"{len(members)} members of whom {len(set(map(str, identifiers)))} are distinct; "
+            f"{repeated} appear more than once. The pages of a membership container partition "
+            "the membership, so a member on two pages is a paging offset that moves by less than "
+            "the page it just served."
+        )
+
+
+def test_no_page_of_a_walked_roster_comes_back_empty(mock_platform: Any) -> None:
+    """The other half of a wrong `Link` header: one that says next once too often.
+
+    Catches the most common paging mistake there is — advertising a next page
+    whenever the page just served was full — which produces a final page with no
+    members on it. The membership is complete, no member is duplicated or
+    dropped, and every test above passes. What it breaks is agreement about when
+    to stop: a tool paging until the header goes quiet makes one more request
+    than exists, and a tool paging until a short page disagrees with the header
+    the platform sent.
+    """
+    for context, pages in walked_rosters(mock_platform):
+        empty = [page for page in pages if not page.members]
+        assert not empty, (
+            f"The roster for {context.context_id} came back over {len(pages)} pages and "
+            f"{len(empty)} of them carry no members — the first is `{empty[0].url}`, served with "
+            f"Link header {empty[0].link_header!r}. A `Link` header that advertises a next page "
+            "whenever the page it is on is full advertises one page too many."
+        )
+
+
+def test_every_user_the_platform_will_launch_appears_in_the_roster_of_its_context(
+    mock_platform: Any,
+) -> None:
+    """The definition of done's "no member is dropped", against an independent source.
+
+    A membership container carries no total, so nothing in the roster can say
+    whether the roster is short. What can say it is the launch page: every user
+    it will sign a launch for in a context is demonstrably enrolled in that
+    context, learned by driving the launch rather than by reading the roster. A
+    paging slice that drops a member per boundary, or a first page served from
+    offset one, loses one of these as soon as the seeded launch users are not all
+    on page one.
+
+    **What this does not reach**, said rather than implied: it is a lower bound.
+    The launch page offers a handful of users and the roster is bigger than that,
+    so a drop that lands on a member nobody launches as is invisible here. There
+    is no total on this surface to close that gap with.
+
+    A dropped student is expected to be *present* with a non-Active status rather
+    than absent: SPEC §3.4 has the tool learn about drops from NRPS enrollment
+    data, which it cannot do from a member that is simply gone.
+    """
+    walked = walked_rosters(mock_platform)
+    expected = {context.context_id: context.subjects for context, _ in walked}
+    assert any(expected.values()), (
+        "No launch carried a `sub`, so there is nothing to look for in the roster and this test "
+        "would pass against any roster at all, including an empty one."
+    )
+    for context, pages in walked:
+        present = {str(member.get(MEMBER_ID)) for member in members_across(pages)}
+        missing = sorted(context.subjects - present)
+        assert not missing, (
+            f"The platform signs launches into context {context.context_id} for {missing}, and "
+            f"the assembled roster for it — {len(present)} members over {len(pages)} pages — "
+            "does not carry them. Either paging dropped a member, or the roster omits an "
+            "enrollment the platform will still launch. SPEC §3.4 has the tool learn about drops "
+            "from NRPS, so a dropped student belongs on the roster carrying a non-Active status "
+            "rather than absent from it."
+        )
