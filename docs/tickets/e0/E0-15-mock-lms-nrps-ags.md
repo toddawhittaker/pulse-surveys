@@ -24,6 +24,23 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
   bug class entirely.
 - Assignment and Grade Services 2.0 stubs: line-item creation and listing, and
   score posting that records what it received so a test can assert on it.
+
+  **The readback is a mock-only route, not a widened AGS Result.** A conformant
+  AGS `Result` carries `userId`, `resultScore` and `resultMaximum` and nothing
+  else — no timestamp, no `activityProgress` — so the fields criterion 4 names
+  cannot be read back through the protocol. Serve the conformant Results
+  endpoint for E3 to build against, and serve the inspection surface separately
+  at `GET /mock/posted-scores`, outside the AGS namespace, answering
+
+  ```json
+  {"scores": [{"lineItem": "<absolute line item URL>", "score": { ...the posted body, verbatim... }}]}
+  ```
+
+  in the order the scores arrived. Verbatim means verbatim: a recorder that
+  normalises `timestamp` or fills in a default `gradingProgress` is a recorder a
+  test cannot use to prove what the tool sent. Todd's decision, 2026-08-17;
+  ADR 0047. The `/mock/` prefix is the point — a tool that learned this route
+  would have learned something no real platform serves.
 - Seed data: a small institution with a handful of courses and sections whose
   codes exercise more than one start letter and both modalities, plus students,
   instructors, and enrollments including at least one mid-term add and one drop.
@@ -36,7 +53,39 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
   under those bands; all 27 distinct ones are, with no exception. Pick numbers
   against §8 rather than from a prototype screen. [E0-17](E0-17-seed-script.md)
   carries the decision about what to do with that corpus.
-- An endpoint or fixture hook that lets a test inspect posted scores.
+
+  **Every** means every, and that withdraws a requirement E0-14 shipped. E0-14
+  asked this mock to seed one context carrying `id` alone, so that E1's
+  ingestion would meet a titleless course in a test rather than in a deployment,
+  and `test_mock_lms_launch.py::test_a_seeded_context_carries_no_title` asserted
+  it. Todd ruled on 2026-08-17 that every seeded course carries a title; that
+  test goes, in its own commit, and E0-14's scope is amended to point here.
+  **What goes with it is the only fixture in the repository that exercises the
+  empty-title path**, so E1 has to mint a titleless context itself before it can
+  test its fallback, and until it does, the `NOT NULL` on `course.lms_title`
+  will first be met by a real launch from a real course with no name.
+- An endpoint or fixture hook that lets a test inspect posted scores — settled
+  above as `GET /mock/posted-scores`.
+
+- **Enrollment windows ride on a namespaced member extension.** SPEC §3.4 says a
+  late add's denominator starts at the student's first enrolled week "from NRPS
+  enrollment data", and §9.2 repeats that the sync reads enrollment windows from
+  NRPS — but NRPS 2.0 defines no date field on a member at all, so a platform
+  that supplies one supplies it as a vendor extension. This mock does the same,
+  under a namespace that cannot be mistaken for the standard's:
+
+  ```json
+  "https://mock-lms.invalid/spec/nrps/enrollment": {"start": "2026-09-08T00:00:00-04:00", "end": null}
+  ```
+
+  `start` is required on every member and is an RFC 3339 timestamp with an
+  offset, never a bare date — E0-06 made the calendar timezone-aware throughout
+  and a naive stamp here would hand E1 a value it has to guess a zone for. `end`
+  is `null` for a member still enrolled and a timestamp for one who dropped.
+  Todd's decision, 2026-08-17; ADR 0048. E1 learns from this that enrollment
+  dates arrive per-platform rather than as core NRPS, which is true of every
+  real platform, and what a platform that supplies none should do is E1's
+  question, not this ticket's.
 
 ## Out of scope
 
@@ -54,12 +103,20 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
 - [ ] A roster larger than one page returns `Link` headers and a test walks all
       pages to assemble the full membership.
 - [ ] AGS line-item creation returns an identifier that score posting accepts.
-- [ ] A posted score is retrievable by a test, including its timestamp and
-      activity progress fields.
+- [ ] A posted score is retrievable by a test at `GET /mock/posted-scores`,
+      carrying the body the tool posted verbatim — its timestamp and its
+      `activityProgress` and `gradingProgress` among the rest.
+- [ ] The conformant AGS Results endpoint answers for the same line item, and
+      carries none of those three fields, because a `Result` does not have them.
+- [ ] Every NRPS member carries the enrollment extension named in the scope,
+      with an offset-bearing `start`, and `end` set on the dropped member alone.
+- [ ] Every seeded context carries a `title`.
 - [ ] Seed sections use at least two different start letters and both `WW` and
       `FF` modalities, so E0-07's parser has real input.
 - [ ] Seed enrollments include a mid-term add and a mid-term drop, giving E3 the
-      edge cases its property tests need.
+      edge cases its property tests need. Mid-term is now assertable rather than
+      inferred: the added member's `start` falls after its section's start date
+      and the dropped member's `end` falls before its section's end date.
 - [ ] `docker compose up -d` still reaches healthy on every service.
 
 ## Definition of done

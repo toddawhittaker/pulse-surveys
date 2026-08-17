@@ -37,6 +37,15 @@ cookie survival), §2.1 (what the launch claims must carry), §13 (`mock-lms/`).
   ingestion path in E1 meets the empty case in a test rather than in a
   deployment. The fallback itself is E1's to choose; `label`, or the prefix and
   number, are the obvious candidates.
+
+  **Withdrawn on 2026-08-17, and the paragraph above is left standing because it
+  still says why the shape matters.** [E0-15](E0-15-mock-lms-nrps-ags.md)
+  requires every seeded course to carry a title, Todd ruled for that reading
+  over this one, and the two cannot both hold in one seed. So this mock now
+  seeds titled contexts only, `test_a_seeded_context_carries_no_title` is gone,
+  and the empty case E1's ingestion has to survive no longer has a fixture
+  anywhere in the repository. E1 mints one itself or meets the `NOT NULL` on
+  `course.lms_title` in a deployment.
 - A launch page that posts the form to the tool, so a browser-driven test can
   click through a realistic launch.
 - Seeded platform registration values matching what `lti_platform` from E0-08
