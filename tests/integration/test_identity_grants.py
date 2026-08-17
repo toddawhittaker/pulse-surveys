@@ -74,10 +74,13 @@ half waits on the interface.
 """
 
 import re
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from typing import Any
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DatabaseError
 
 pytestmark = pytest.mark.integration
@@ -730,11 +733,19 @@ def test_a_runtime_role_cannot_become_a_role_that_owns_a_table(db_session: Any, 
 
 # ---------------------------------------------------------------------------
 # §4.1 — no instructor read path can reach an identity column, at each of the
-# three doors the application role has. This is the **one** §4.1 item E0-10
-# lands: item 1, "no student-visible path exposes another section", is deferred
-# to E2 on the record, because there is no student-visible path here and the
-# scoping that would make "another section" mean anything is E0-11's. Nothing in
-# this file may be read as covering it.
+# three doors the application role has *on this connection*: a direct `SELECT`, a
+# join from a read view back to `user_identity`, and `EXECUTE` on the reveal
+# function. There is a fourth door and it is not here, because it does not go
+# through a grant at all — a view is read with its **owner's** privileges, so a
+# later view that selects an identity column hands it over with all three of
+# these still shut. `test_identity_column_marker.py`'s
+# `test_no_view_reads_a_column_the_identity_marker_names` is that one, marked
+# `invariant` for the same reason these are.
+#
+# This is the **one** §4.1 item E0-10 lands: item 1, "no student-visible path
+# exposes another section", is deferred to E2 on the record, because there is no
+# student-visible path here and the scoping that would make "another section"
+# mean anything is E0-11's. Nothing in this file may be read as covering it.
 # ---------------------------------------------------------------------------
 
 
@@ -1008,25 +1019,59 @@ def test_the_care_role_obtains_identity_through_the_one_function_it_may_execute(
     )
 
 
-def test_a_rollback_discards_the_revealed_identity_and_its_audit_row_together(
+def test_the_reveal_writes_its_audit_row_in_the_callers_own_transaction(
     db_session: Any, seed_rows: Any, supervision_graph: Any
 ) -> None:
-    """Criterion: the reveal and its audit row cannot come apart.
+    """The function writes the record itself, on the caller's transaction — no more than that.
 
-    ADR 0001 rejected "logging the reveal as a separate step after reading
-    identity … because it makes the audit trail a convention that a future code
-    path can skip. Putting the read and the audit write in one transaction means
-    they cannot come apart." This asserts both directions of that in one
-    transaction:
+    Two things are asserted, and both are about *where* the write happens:
 
       - calling the function **adds a row somewhere** while the caller has the
         identity in hand. An implementation that returns identity and leaves the
         logging to its caller adds nothing here, and that is the one this kills;
-      - rolling the transaction back **removes it again**. An implementation that
-        logs through a second connection — `dblink`, a separate engine, a
-        "fire-and-forget" audit writer — leaves the row behind, and that is the
-        other. It looks like a safer design and it means the record can exist
-        without the read, and the read without the record.
+      - rolling the transaction back **removes it again**, which is what says the
+        write was made on the caller's transaction rather than on a second
+        connection of the function's own. `plpgsql` has no autonomous transaction,
+        so today there is nowhere else for it to have gone.
+
+    **What this test does not prove, stated because its previous name claimed it.**
+    It was called `test_a_rollback_discards_the_revealed_identity_and_its_audit_
+    row_together`, after E0-10's criterion "rolling back the transaction discards
+    both the read and the audit row, so the two cannot come apart". The assertions
+    below are correct and the conclusion drawn from them was not. A rollback
+    discards both *inside the database*; Postgres has already streamed the result
+    rows to the client by the time the caller decides what to do with the
+    transaction, so
+
+        BEGIN;
+        SELECT * FROM public.reveal_student_identity(<a real CARE person>, <a user>, NULL);
+        ROLLBACK;
+
+    returns the real name and email address and leaves `audit_log` at zero rows.
+    That was reproduced twice on the pinned image during E0-10's review, each time
+    with the controls that make it a finding rather than a coincidence: a non-CARE
+    actor is still refused, and the identical call without the `ROLLBACK` does
+    write the row, so the rollback alone is the difference. **The read and the
+    record can come apart, and the party who can separate them is the one holding
+    the Care credential.** Nothing in this file closes that, and no reader should
+    leave this test believing otherwise.
+
+    Closing it is **`docs/tickets/e0/E0-26-review-debt-from-e0-10.md` item 1**,
+    which is done when a caller that rolls back keeps no name it is not recorded
+    as having taken, and which needs the audit row written over a **second
+    connection** that commits independently — `dblink` or a loopback
+    `postgres_fdw`, each of which puts a credential inside a `SECURITY DEFINER`
+    function and wants its own ADR. E0-26 must land before E10 builds the queue
+    that calls this door.
+
+    **So the second assertion below is asserting today's mechanism, and E0-26 will
+    invert it.** When the write moves to a second connection the row will survive
+    the rollback deliberately, and that is the fix rather than a regression: this
+    test is then the one to rewrite, against E0-26's own requirement that the
+    surviving row is read back from a connection other than the one that rolled
+    back. Until then it holds the property the current design does have — the
+    record is not something a caller adds afterwards, and it is not written by a
+    path that could be skipped.
 
     **The audit table is not named**, because E0-10 does not name it and SPEC §8's
     `audit_log` is a list of tables rather than a decision about this one. What is
@@ -1059,21 +1104,29 @@ def test_a_rollback_discards_the_revealed_identity_and_its_audit_row_together(
     written = {name: during[name] - before[name] for name in before if during[name] > before[name]}
     assert written, (
         f"Calling `{function['signature']}` returned identity and wrote no row to any table: the "
-        f"counts across {len(before)} tables are unchanged. §4: 'every identity access is "
-        "automatically audit-logged with actor, timestamp, and case', and E0-10 puts the write "
-        "inside the function so that 'a name cannot be obtained without leaving a record'. An "
-        "audit written by the caller afterwards is the design ADR 0001 rejected, and it passes "
-        "every other test in this file."
+        f"counts across {len(before)} tables are unchanged. §4 requires that 'every identity "
+        "access is automatically audit-logged with actor, timestamp, and case', and E0-10 puts "
+        "the write inside the function rather than beside it. An audit the caller is trusted to "
+        "write afterwards is the design ADR 0001 rejected — it is a step a later code path can "
+        "skip — and it passes every other test in this file. (What the write being inside the "
+        "function does *not* buy is a record the caller cannot discard: see this test's "
+        "docstring, and E0-26 item 1.)"
     )
 
     surviving = {name: after[name] - before[name] for name in before if after[name] != before[name]}
     assert not surviving, (
         f"After rolling the transaction back, {surviving} still differs from the counts before "
-        f"the reveal, while the identity read was discarded with the transaction. The audit row "
-        "and the read are then in different transactions — an autonomous or second-connection "
-        "writer — so a failed reveal can leave a record of an access that did not happen, and a "
-        "future refactor can leave an access with no record. E0-10 asks for both to be discarded "
-        "together, and this is the shape that proves they are one write."
+        "the reveal. So the audit row was not written on the transaction the caller controls, and "
+        "this assertion — which is a description of today's mechanism rather than a guarantee — "
+        "no longer holds.\n\n"
+        "**Read E0-26 item 1 before treating this as a regression.** That ticket moves the audit "
+        "write onto a second connection that commits independently, precisely so that the row "
+        "survives a caller's `ROLLBACK`, because Postgres has already streamed the identity to "
+        "that caller by then and the record must not be theirs to discard. If that is what has "
+        "just landed, this test is the one to rewrite, against E0-26's own requirement that the "
+        "surviving row is read back from a connection other than the one that rolled back — and "
+        "the assertion above, that the row is written by the function rather than by its caller, "
+        "is the half to keep."
     )
 
 
@@ -1538,4 +1591,519 @@ def test_the_role_migration_corrects_an_attribute_it_did_not_write(
         "tests from `tests/conftest.py`; on a managed Postgres from the operator. The migration "
         "is the one mechanism that runs everywhere, so it is the one that has to end with the "
         "attributes stated."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The downgrade, and the one privilege it deliberately leaves behind.
+# ---------------------------------------------------------------------------
+#
+# `alembic downgrade -1` has to be the inverse of `alembic upgrade head`, and for
+# this revision that is not only a question of which objects exist. A privilege on
+# an object the downgrade drops goes with the object; a privilege on an object
+# that **survives** does not, and has to be revoked by hand. The first spelling of
+# this revision revoked the definer's two table grants and left
+# `GRANT SELECT ON public.role_assignment TO pulse_care` one statement away, still
+# in place afterwards — a role holding a grant with no function left to spend it
+# through, which is the shape of privilege nobody ever notices again. Enumerating
+# the rest then found `USAGE ON SCHEMA public`, held by all three roles and
+# written by this revision alone.
+#
+# ADR 0043 states the repaired rule as a property of the object rather than of the
+# role: **a privilege on anything that outlives the downgrade is revoked, one
+# guarded `IF EXISTS` per role**, with `CONNECT ON DATABASE` the single deliberate
+# exception. The tests below are that rule and that exception. They are written
+# against the rule rather than against the list, so a grant a later ticket adds to
+# a surviving table is covered without anybody adding a line here: the roles come
+# from the catalog, the relations come from `pg_class`, and the privileges are the
+# whole of `TABLE_PRIVILEGES`.
+#
+# **They run against a database of their own.** `empty_database` is a second
+# database in the same container, migrated from zero and dropped when the test
+# ends, and it is what keeps a downgrade out of the session database — where it
+# would drop `audit_log`, both views and the reveal function for every test after
+# it. A test that poisons the fixture it shares is worse than no test, because the
+# failures land in modules that did nothing wrong. Roles are cluster-wide and
+# privileges on tables are not, so a fresh database is the same arrangement of
+# privileges with none of the blast radius: `tests/conftest.py` has already
+# created `pulse_app` and `pulse_care`, and the migration creates the definer.
+#
+# **Not `invariant`-marked**, on the line `test_application_role_privileges.py`
+# draws for the same reason: §4.1 is about what a reader of a running system can
+# see, and this is about what a migration leaves behind in a database that is
+# being taken apart.
+
+# Postgres reports a statement naming a role that does not exist as SQLSTATE
+# 42704, `undefined_object`. Asserted on the code rather than on the message for
+# the reason `INSUFFICIENT_PRIVILEGE` gives above, and here there is a second: the
+# statement that provokes it also names a table, and a run where
+# `public.role_assignment` had gone missing would raise a differently-coded error
+# with an equally plausible-looking message.
+UNDEFINED_OBJECT = "42704"
+
+# Which roles hold what on the `public` schema, and on the database, as the
+# catalog records it. `aclexplode` is what makes this readable without pinning an
+# ACL string: an `aclitem` renders as `grantee=privileges/grantor`, and the
+# grantor half is whichever identity ran the `GRANT` — the deployment's own
+# superuser, which is `pulse_admin` in one place and `pulse_test_admin` in this
+# fixture. Matching that text would tie the assertion to a name `.env` chooses.
+#
+# The join to `pg_roles` drops the `PUBLIC` entry, which `aclexplode` reports with
+# grantee oid 0. That is not a hole: Postgres grants `USAGE` on `public` to
+# `PUBLIC` by default on a stock cluster, so that entry is not this revision's and
+# revoking it is not this revision's job. What is asked here is only whether one
+# of the three roles is named in its own right.
+SCHEMA_GRANTEES = """
+    SELECT r.rolname, a.privilege_type
+    FROM pg_catalog.pg_namespace n
+    CROSS JOIN LATERAL aclexplode(n.nspacl) AS a
+    JOIN pg_catalog.pg_roles r ON r.oid = a.grantee
+    WHERE n.nspname = 'public'
+    ORDER BY 1, 2
+"""
+
+DATABASE_GRANTEES = """
+    SELECT r.rolname, a.privilege_type
+    FROM pg_catalog.pg_database d
+    CROSS JOIN LATERAL aclexplode(d.datacl) AS a
+    JOIN pg_catalog.pg_roles r ON r.oid = a.grantee
+    WHERE d.datname = current_database()
+    ORDER BY 1, 2
+"""
+
+HAS_TABLE_PRIVILEGE = "SELECT has_table_privilege(:role, :relation, :privilege)"
+
+
+@contextmanager
+def catalog_connection(database: Any) -> Iterator[Any]:
+    """A bootstrap-identity connection to `database`, with its engine disposed after.
+
+    An engine of its own rather than `migrated_engine`, because everything in this
+    section runs against the database `empty_database` made for one test, and
+    `migrated_engine` is bound to the session's.
+
+    Opened and closed around each phase rather than held across a downgrade: an
+    idle connection that has read a catalog holds no lock on a user table today,
+    and a later reader who adds a query that does would find a `DROP TABLE` inside
+    Alembic waiting on this test's own session, which is a hang rather than a
+    failure.
+    """
+    engine = create_engine(database.superuser_url)
+    try:
+        with engine.connect() as connection:
+            yield connection
+    finally:
+        engine.dispose()
+
+
+def public_relations(connection: Any) -> list[str]:
+    """Every table, partitioned table, view and materialised view in `public`, by name."""
+    return [row[0] for row in connection.execute(text(PUBLIC_RELATIONS))]
+
+
+def privileges_held(
+    connection: Any, roles: Sequence[str], relations: Sequence[str]
+) -> set[tuple[str, str, str]]:
+    """Every `(role, relation, privilege)` the catalog says one of `roles` holds.
+
+    Asked of `has_table_privilege` rather than read out of `relacl`, so that a
+    privilege reaching a role by inheritance from another role is counted too — a
+    grant of a table-owning role to a runtime role voids every revoke this
+    revision writes without touching a single ACL entry, and an entry-by-entry
+    reading would not see it.
+    """
+    return {
+        (role, relation, privilege)
+        for role in roles
+        for relation in relations
+        for privilege in TABLE_PRIVILEGES
+        if connection.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {"role": role, "relation": f"public.{relation}", "privilege": privilege},
+        ).scalar_one()
+    }
+
+
+def schema_grantees(connection: Any) -> set[tuple[str, str]]:
+    """Every `(role, privilege)` named in `public`'s own ACL, `PUBLIC` excluded."""
+    return {(row[0], row[1]) for row in connection.execute(text(SCHEMA_GRANTEES))}
+
+
+def database_grantees(connection: Any) -> set[tuple[str, str]]:
+    """Every `(role, privilege)` named in this database's ACL, `PUBLIC` excluded."""
+    return {(row[0], row[1]) for row in connection.execute(text(DATABASE_GRANTEES))}
+
+
+def downgrade_one_revision(config: Any, meaning: str) -> None:
+    """`alembic downgrade -1`, where not completing is a failed test rather than an error."""
+    from alembic import command
+
+    try:
+        command.downgrade(config, "-1")
+    except Exception as failure:
+        pytest.fail(
+            f"`alembic downgrade -1` did not complete: {failure!r}. {meaning} A downgrade that "
+            "stops part-way is worse than one that refuses to start: the objects before the "
+            "failing statement are gone, the ones after it are still there, and the revision is "
+            "still stamped as applied."
+        )
+
+
+def only_the_identity_revision_was_undone(
+    views_at_head: Sequence[str], views_now: Sequence[str]
+) -> None:
+    """Fail unless the step `-1` undid is the one that created the read views.
+
+    `-1` is relative to head, so on the day a revision lands on top of this one it
+    is that revision `-1` names, and every assertion after this point becomes a
+    statement about a downgrade this file is not about — satisfied trivially, and
+    green (`docs/MISTAKES.md` entry 3). The views are what make the difference
+    visible from the outside: this revision creates them, so a downgrade that
+    leaves one standing did not undo it.
+    """
+    assert views_at_head, (
+        "There is no view in `public` at head, so nothing here can tell which revision the "
+        "downgrade undid — and E0-10's 'a section-roster view and an enrollment-count view' are "
+        "missing besides. `test_identity_separated_views.py` diagnoses that."
+    )
+    surviving = sorted(set(views_at_head) & set(views_now))
+    assert not surviving, (
+        f"After `alembic downgrade -1` the views {surviving} still exist, so the step that was "
+        f"undone is not the one that created them — at head `public` held {sorted(views_at_head)}. "
+        "The likeliest cause is a revision landing on top of this one, which `-1` now names. Point "
+        "this test at the identity revision explicitly rather than relatively: every assertion "
+        "below is about privileges *that* revision writes, and against any other revision they are "
+        "all satisfied by a database nobody has changed."
+    )
+
+
+def test_downgrading_the_identity_revision_leaves_no_grant_on_a_surviving_table(
+    empty_database: Any,
+    alembic_config_pointed_at: Any,
+) -> None:
+    """After the downgrade, no role of this revision's holds anything still in the database.
+
+    The rule is stated over the *objects that survive* rather than over a list of
+    grants, and the survivors are read out of `pg_class` after the fact, so a table
+    a later ticket adds is inside this assertion the day it exists. The three roles
+    are the two runtime ones and the reveal function's owner, and the owner is
+    discovered from the catalog at head rather than spelled — E10 replaces the
+    function, and a rule written with the role's name would retire with it.
+
+    **The baseline is asserted first, and it is not ceremony.** Every assertion
+    after the downgrade is that a set is empty, and an empty set is what a database
+    with no grants in it produces — a migration that never ran, a role that was
+    never created, a `has_table_privilege` call answering about the wrong database.
+    So two grants this revision certainly makes are read back at head before
+    anything is undone: `pulse_care`'s `SELECT` on `role_assignment`, which is the
+    one that was left behind, and the definer's `SELECT` on `user_identity`, which
+    is the one with a name behind it. The schema grants are read the same way for
+    the same reason.
+
+    **The set difference is reported, not a boolean.** A failure here has to say
+    which role holds which privilege on which table, because the fix is a `REVOKE`
+    naming exactly those three things and a message saying "something survived"
+    sends the reader back to the catalog to find out what.
+
+    **The exact ACL string is deliberately not pinned.** `relacl` and `nspacl`
+    render the grantor's name into every entry, and that name is the deployment's
+    superuser — `pulse_admin` in production, `pulse_test_admin` in this fixture —
+    so a text comparison would pass in one place and fail in the other while
+    measuring nothing about the revoke.
+    """
+    from alembic import command
+
+    config = alembic_config_pointed_at(empty_database)
+    command.upgrade(config, "head")
+
+    with catalog_connection(empty_database) as connection:
+        definer = the_reveal_function(connection)["owner"]
+        roles = (APPLICATION_ROLE, CARE_ROLE, definer)
+        views_at_head = read_views(connection)
+        at_head = privileges_held(connection, roles, public_relations(connection))
+        schema_at_head = schema_grantees(connection)
+
+    assert (CARE_ROLE, "role_assignment", "SELECT") in at_head, (
+        f"At head, `{CARE_ROLE}` does not hold `SELECT` on `public.role_assignment`. That grant is "
+        "the one this test was written about — it outlived `downgrade -1` while the definer's two "
+        "beside it were revoked — so without it at head, every assertion below is true of a "
+        "database that never had the grant in the first place. What the roles do hold here is "
+        f"{sorted(at_head)}. The reveal function reads `role_assignment` on its own account "
+        "(ADR 0043), so if this grant has moved, say where in the pull request."
+    )
+    assert (definer, IDENTITY_TABLE, "SELECT") in at_head, (
+        f"At head, the reveal function's owner `{definer}` does not hold `SELECT` on "
+        f"`public.{IDENTITY_TABLE}`. That is the privilege the one door in the wall spends "
+        "(ADR 0043), and it is the second half of this test's baseline: with it absent, the "
+        "assertion that nothing survives the downgrade is satisfied by a database where nothing "
+        f"was ever granted. The roles hold {sorted(at_head)}. "
+        "`test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs` diagnoses a "
+        "definer whose grants have moved."
+    )
+    assert set(roles) <= {role for role, _ in schema_at_head}, (
+        f"At head, `public`'s ACL names {sorted(schema_at_head)}, which does not cover all of "
+        f"{sorted(roles)}. ADR 0043 lists `USAGE ON SCHEMA public` for all three roles among the "
+        "privileges this revision writes and the downgrade must revoke, so if the revision no "
+        "longer grants it, the schema assertion below is asserting nothing. Fix this test rather "
+        "than deleting the assertion: the question it exists to ask — did the downgrade take back "
+        "what the upgrade gave on the schema — has an answer either way."
+    )
+
+    downgrade_one_revision(
+        config,
+        "This revision's `downgrade()` has to run to the end, because the revokes are the last "
+        "thing in it: a statement that raises before them leaves every privilege below in place "
+        "with the objects already dropped.",
+    )
+
+    with catalog_connection(empty_database) as connection:
+        views_now = read_views(connection)
+        surviving_relations = public_relations(connection)
+        left_over = privileges_held(connection, roles, surviving_relations)
+        schema_now = schema_grantees(connection)
+
+    only_the_identity_revision_was_undone(views_at_head, views_now)
+
+    assert surviving_relations, (
+        "There is no table or view left in `public` after `alembic downgrade -1`, so the cross "
+        "product below is empty and 'no role holds anything' is true of nothing. This revision "
+        "drops the objects it created and leaves the schema the tickets under it built standing; "
+        "a database with none of that left has had more undone than one step."
+    )
+
+    left_behind = sorted(
+        f"{role} holds {privilege} on public.{relation}" for role, relation, privilege in left_over
+    )
+    assert not left_behind, (
+        f"After `alembic downgrade -1`, {left_behind} — privileges on objects that survived the "
+        "revision that granted them. ADR 0043: 'a privilege on anything that outlives the "
+        "downgrade is revoked, one guarded `IF EXISTS` per role'. A privilege cannot outlive the "
+        "object it is on, so the grants on the two views and on the reveal function need nothing; "
+        "these are the ones on tables the downgrade leaves standing, and nothing else in this "
+        "repository will ever revoke them. What that costs is not theoretical: a database "
+        "downgraded past this revision holds a role that can still read the table the revision "
+        "was the only reason to grant it on, with no function left to spend it through and no "
+        "record anywhere that it holds it."
+    )
+
+    on_the_schema = sorted(
+        f"{role} holds {privilege} on schema public"
+        for role, privilege in schema_now
+        if role in roles
+    )
+    assert not on_the_schema, (
+        f"After `alembic downgrade -1`, `public`'s ACL still names {on_the_schema}. This revision "
+        "is the only thing in the tree that grants `USAGE ON SCHEMA public` to these roles, so it "
+        "is the only thing that can take it back. On a stock cluster nothing observable changes — "
+        "`PUBLIC` holds `USAGE` on `public` by default and the roles keep reaching the schema "
+        "through that — and it is revoked anyway, because 'the default happens to cover it' is not "
+        "the same claim as 'this revision left nothing behind', and on a cluster where that "
+        "default has been revoked the difference is a role that can still see the schema."
+    )
+
+
+def test_the_downgrade_leaves_the_application_roles_connect_privilege_in_place(
+    empty_database: Any,
+    alembic_config_pointed_at: Any,
+) -> None:
+    """The one exception to the rule above, asserted so nobody closes it as an oversight.
+
+    `CONNECT ON DATABASE` is granted by this revision **and** by
+    `scripts/db-init/01-application-role.sh` at `initdb`, and an ACL entry records
+    no history: there is one entry, not two, so a single `REVOKE` removes both
+    mechanisms' grants and takes the running application's login with it on any
+    cluster where `PUBLIC` no longer holds `CONNECT`. That is why the rule the test
+    above asserts stops here, and this test is what makes the stop deliberate — an
+    exception recorded only in a comment is one the next reader closes as an
+    oversight, tidily, in a pull request about something else.
+
+    **Asserted over the ACL entry rather than over `has_database_privilege`**, and
+    the difference is the whole test. `has_database_privilege('pulse_app',
+    current_database(), 'CONNECT')` answers true for every role on a stock cluster,
+    because Postgres grants `CONNECT` to `PUBLIC` on every new database — so that
+    assertion passes with the grant revoked, passes with the role holding nothing
+    at all, and cannot fail. The entry in `datacl` is the thing a `REVOKE` in
+    `downgrade()` would remove, so it is the thing to look at.
+
+    **This database is the strict case rather than the lenient one.**
+    `empty_database` runs no `initdb` hook, so the `CONNECT` entry asserted here is
+    one the revision granted itself — the case where revoking it is most
+    defensible, and it is left alone anyway, because the ACL cannot tell the two
+    sources apart and a downgrade must not depend on which script ran first.
+    """
+    from alembic import command
+
+    config = alembic_config_pointed_at(empty_database)
+    command.upgrade(config, "head")
+
+    with catalog_connection(empty_database) as connection:
+        views_at_head = read_views(connection)
+        at_head = database_grantees(connection)
+
+    assert (APPLICATION_ROLE, "CONNECT") in at_head, (
+        f"At head, this database's ACL does not name `{APPLICATION_ROLE}` as holding `CONNECT`: it "
+        f"names {sorted(at_head)}. Then the assertion below is about an entry that was never "
+        "there, and it would stay green with `REVOKE CONNECT ON DATABASE … FROM pulse_app` added "
+        "to `downgrade()` — the exact edit it exists to catch. E0-10's migration grants `CONNECT` "
+        "to both connection roles; if that has moved, this test needs pointing at wherever it "
+        "moved to rather than relaxing."
+    )
+
+    downgrade_one_revision(
+        config,
+        "The exception below is only meaningful against a downgrade that ran to the end.",
+    )
+
+    with catalog_connection(empty_database) as connection:
+        views_now = read_views(connection)
+        now = database_grantees(connection)
+
+    only_the_identity_revision_was_undone(views_at_head, views_now)
+
+    assert (APPLICATION_ROLE, "CONNECT") in now, (
+        f"`alembic downgrade -1` removed `{APPLICATION_ROLE}`'s `CONNECT` entry from this "
+        f"database's ACL. It now names {sorted(now)}. This is the one grant the downgrade "
+        "deliberately leaves (ADR 0043, and the migration says so at the point of the omission): "
+        "`scripts/db-init/01-application-role.sh` grants the same privilege at `initdb`, before "
+        "this revision runs, and an ACL entry records no history — so revoking it here takes the "
+        "other mechanism's grant with it, and with it the running application's login on any "
+        "cluster where `PUBLIC` no longer holds `CONNECT`. `CONNECT` opens a session and reads no "
+        "row; a role that can connect and holds no table privilege is precisely the pre-revision "
+        "state that script sets out to establish. If this is being changed on purpose, the "
+        "downgrade also has to stop the two connection roles ending up in different states "
+        "according to which provisioning script happened to run."
+    )
+
+
+def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
+    empty_database: Any,
+    alembic_config_pointed_at: Any,
+) -> None:
+    """A missing role skips its own revokes and nobody else's.
+
+    `REVOKE … FROM <role>` is an error rather than a no-op when the role is
+    absent, and a downgrade is exactly the moment somebody is already dealing with
+    a database in a state nobody planned — a cluster that applied an earlier
+    spelling of this revision, a managed Postgres where the roles are the
+    operator's to create, a restore that brought the schema and not the globals.
+    So the revokes are guarded, and ADR 0043 requires **one guard per role**
+    rather than one around all three, "because a cluster missing
+    `pulse_reveal_definer` is no reason to leave what `pulse_care` holds".
+
+    Both halves are asserted, because a downgrade that completes proves the guard
+    only if the unguarded form would have failed (`docs/MISTAKES.md` entry 9, and
+    entry 3 for the shape it prevents):
+
+      - the **control** runs the bare `REVOKE ALL ON public.role_assignment FROM
+        pulse_care` first and requires it to fail with `undefined_object`. Without
+        that, a downgrade completing says nothing — it also completes on a cluster
+        where the role was never absent, which is what a rename that silently did
+        not happen would leave behind;
+      - the **assertion** is that the guarded downgrade completes, that the
+        revision's objects are gone, and that the two roles which *are* present
+        were still revoked from. That last clause is what kills the tidier design
+        ADR 0043 rejects: one `IF EXISTS` around the whole block skips every
+        role's revokes when any one role is missing, and it completes just as
+        cleanly.
+
+    **The role is made absent by renaming it, not by dropping it.** `DROP ROLE`
+    refuses while any database in the cluster records a privilege for the role, so
+    dropping `pulse_care` here would mean `DROP OWNED BY` in the session database
+    too — which revokes the grants half this file's other tests assert, in a
+    database this test does not own. A rename leaves every ACL entry exactly where
+    it is, keyed by oid, and makes `SELECT 1 FROM pg_roles WHERE rolname =
+    'pulse_care'` empty, which is precisely the condition each guard tests and
+    precisely what the bare `REVOKE` chokes on. It is undone in a `finally`, since
+    a role outlives the transaction and outlives this database.
+    """
+    from alembic import command
+
+    config = alembic_config_pointed_at(empty_database)
+    command.upgrade(config, "head")
+
+    with catalog_connection(empty_database) as connection:
+        definer = the_reveal_function(connection)["owner"]
+        still_present = (APPLICATION_ROLE, definer)
+        views_at_head = read_views(connection)
+        at_head = privileges_held(connection, still_present, public_relations(connection))
+
+    assert (definer, IDENTITY_TABLE, "SELECT") in at_head, (
+        f"At head, the reveal function's owner `{definer}` does not hold `SELECT` on "
+        f"`public.{IDENTITY_TABLE}` — the roles that will still be present hold {sorted(at_head)}. "
+        "That grant is on a table the downgrade leaves standing, so it is the one the last "
+        "assertion in this test watches for. Without it at head, that assertion is true before the "
+        "downgrade runs and would stay true if `downgrade()` did nothing at all."
+    )
+
+    absent_under = f"{CARE_ROLE}_renamed_by_the_tests_{uuid4().hex[:8]}"
+    with catalog_connection(empty_database) as connection:
+        connection.execute(text(f'ALTER ROLE "{CARE_ROLE}" RENAME TO "{absent_under}"'))
+        connection.commit()
+
+    try:
+        with catalog_connection(empty_database) as connection:
+            lingering = connection.execute(
+                text(ROLE_EXISTS), {"role": CARE_ROLE}
+            ).scalar_one_or_none()
+            assert lingering is None, (
+                f"`{CARE_ROLE}` still has a row in `pg_roles` after being renamed to "
+                f"`{absent_under}`, so the downgrade below meets a role that is present and this "
+                "test would report the guard working having never exercised it."
+            )
+            unguarded = refused(
+                connection, f'REVOKE ALL ON public.role_assignment FROM "{CARE_ROLE}"'
+            )
+            connection.rollback()
+
+        assert unguarded is not None, (
+            f"`REVOKE ALL ON public.role_assignment FROM {CARE_ROLE}` succeeded against a cluster "
+            "with no such role. Then an unguarded revoke is a no-op here, the guard in "
+            "`downgrade()` is not what makes the downgrade below complete, and this test is "
+            "measuring nothing. The migration's own comment claims this statement is an error "
+            "rather than a no-op, and this is the assertion that claim rests on."
+        )
+        assert sqlstate(unguarded) == UNDEFINED_OBJECT, (
+            f"The unguarded revoke failed with SQLSTATE {sqlstate(unguarded)} rather than "
+            f"{UNDEFINED_OBJECT}: {unguarded}. It has to fail *because the role is absent* — a "
+            "missing `public.role_assignment` would satisfy 'it failed' while saying nothing about "
+            "what a guard is for."
+        )
+
+        downgrade_one_revision(
+            config,
+            f"`{CARE_ROLE}` does not exist in this cluster, which is the case the `IF EXISTS` "
+            "guards around the revokes are for: the control above shows the unguarded statement "
+            "raising `undefined_object` on this very database. Without the guard the downgrade "
+            "stops mid-block, having dropped the function and both views and having revoked "
+            "whatever came before the failing statement.",
+        )
+
+        with catalog_connection(empty_database) as connection:
+            views_now = read_views(connection)
+            surviving_relations = public_relations(connection)
+            left_over = privileges_held(connection, still_present, surviving_relations)
+    finally:
+        with catalog_connection(empty_database) as connection:
+            connection.execute(text(f'ALTER ROLE "{absent_under}" RENAME TO "{CARE_ROLE}"'))
+            connection.commit()
+
+    only_the_identity_revision_was_undone(views_at_head, views_now)
+
+    assert surviving_relations, (
+        "There is no table or view left in `public` after the downgrade, so the assertion below "
+        "has nothing to ask about. `test_downgrading_the_identity_revision_leaves_no_grant_on_a_"
+        "surviving_table` diagnoses that."
+    )
+
+    left_behind = sorted(
+        f"{role} holds {privilege} on public.{relation}" for role, relation, privilege in left_over
+    )
+    assert not left_behind, (
+        f"With `{CARE_ROLE}` absent, the downgrade completed and left {left_behind} behind for the "
+        "roles that were present. So the guard is around more than the arm that needed it: ADR "
+        "0043 asks for 'one guarded `IF EXISTS` per role rather than one around all three, because "
+        "a cluster missing `pulse_reveal_definer` is no reason to leave what `pulse_care` holds'. "
+        "A single guard is tidier to read and this is what it costs — the roles that exist keep "
+        "everything this revision granted them, on a database that no longer has the objects that "
+        "justified any of it, and the downgrade reports success."
     )
