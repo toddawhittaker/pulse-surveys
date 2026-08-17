@@ -321,7 +321,7 @@ jobs:
 
       - name: No e2e specs yet
         if: needs.detect.outputs.e2e != 'true'
-        run: echo "::notice::No tests/e2e specs yet. Enforcing once e0/mock-lms and e0/mock-idp land — §9.2 requires both doors exercised in every run."
+        run: echo "::notice::No tests/e2e specs yet. Enforcing in E0-18, which writes the first specs over the mock LMS (E0-14, landed) and the mock IdP (E0-16) — §9.2 requires both doors exercised in every run."
 
       - uses: actions/setup-node@v4
         if: needs.detect.outputs.e2e == 'true'
@@ -362,7 +362,7 @@ jobs:
       - name: No eval sets yet
         if: needs.detect.outputs.evals != 'true'
         run: |
-          echo "::notice::No tests/evals runner yet. Enforcing once e0/ai-gateway-shell lands."
+          echo "::notice::No tests/evals runner yet. E0-13 builds the gateway; the first eval set and the floors that gate on it are E2's, and this job stays tolerant until then."
           echo "::notice::Running the eval suite needs a provider API key as a repository secret and a secrets.* reference in this workflow. Under the secrets policy in CLAUDE.md that is Todd's call, so it is proposed, not wired."
 
       - uses: actions/setup-python@v5
