@@ -35,7 +35,19 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 25**
+**Caught: 26**
+
+*(The twenty-sixth, in E0-11, and it decided the shape of a measurement rather
+than of a test. The claim was that the new revision's `downgrade()` restores
+E0-09's trigger function body, and "the body matches after the downgrade" is
+satisfied by a database nobody changed and by two bodies that were always
+identical — so the script asserts the two differ **at head** before it downgrades
+anything, and reads the expected body out of revision `014ccb3d0fe5`'s own text on
+disk rather than out of `pg_proc`. It is also why the rank check was placed
+*after* E0-09's Care-children rule in the same function: with it first, the test
+that turns a chair with children into a `CARE` assignment would still pass, and
+would pass because of a rank comparison rather than because of the rule it is
+named for.)*
 
 *(The twenty-fifth, and it caught a line inside this entry's own reader. Writing
 E0-11's tests for the deferred purview union, the first draft put
@@ -173,7 +185,18 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 22**
+**Caught: 23**
+
+*(The twenty-third: E0-11 added two rules to E0-09's supervision trigger, and this
+entry is why the sweep went outward from the function rather than stopping at it.
+ADR 0027's decision says the trigger enforces "the three cross-row rules", which
+had become an undercount; its consequences said the Hypothesis properties "generate
+cycles of every length up to eight", which the rank rule makes a space the schema no
+longer admits; and the ADR index's row for ADR 0014 said the enforcing check was
+"deferred to E0-11", which E0-11 declined to close. All three were records nobody
+was editing. This entry's rule about counts is also why the corrected sentence in
+ADR 0027 names the two new rules instead of counting the set — the count had already
+gone stale once and would go stale again the next time a rule lands there.)*
 
 *(The twenty-second: two records left over from the round that measured E0-10's
 "the read and the audit write cannot come apart" false. A test's **name** is a
@@ -310,7 +333,18 @@ sentence.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 22**
+**Caught: 23**
+
+*(The twenty-third, in E0-11, and it is the honest half of this entry rather than a
+fix. Closing the mirror of the rank rule — an assignment may not change to a role
+that something already reporting to it fails to be outranked by — was the right
+call for entry 13's reasons, and **no test writes that `UPDATE`**. The implementer
+is walled out of `tests/`, so it ships as a convention, and the response was to say
+so in ADR 0044's consequences and in the pull request, and to name the test it
+needs down to its control: a `CHAIR` with a `LEAD_FACULTY` reporting to it, updated
+to `LEAD_FACULTY`, refused — with the same update on a chair nothing reports to,
+which must succeed. A fix with nothing asserting it is a convention, and saying so
+is not the same as fixing it.)*
 
 *(The twenty-second: E0-11's chokepoint. Two guards in it would otherwise have
 been conventions. `LMS_OWNED_TABLES` is a set of table *names*, so a misspelling
@@ -365,7 +399,19 @@ second case arrives.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 14**
+**Caught: 15**
+
+*(The fifteenth, in E0-11, twice, and one of the two changed the order the whole
+ticket was built in. Before designing anything, the question "does a revision
+landing on top of E0-10's break its downgrade tests?" was answered by writing a
+throwaway revision whose entire content was `CREATE VIEW public.probe_view AS
+SELECT 1` and running them: three go red on a guard that says so in its own
+message. Reasoning about it would have reached the same answer and would have
+reached it after the work rather than before, and the answer decided that the
+ticket could not be finished green. The second: `authz_grants_v001.sql` claims
+`pulse_app` is refused every base table these views read, so the claim was run —
+`SET ROLE pulse_app` and a direct `SELECT` on all eleven, eleven "permission
+denied" and three views permitted — before the sentence was written.)*
 
 *(The fourteenth, one round after the thirteenth below and about the same guard.
 The thirteenth ran both halves by hand; this is the test that keeps them run.
@@ -449,7 +495,20 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 10**
+**Caught: 11**
+
+*(The eleventh, in E0-11, and the two places are four lines apart in one plpgsql
+function. The new rule refuses a supervision edge that does not climb SPEC §2.1's
+role rank, enforced on the row carrying the edge — and an edge is also made illegal
+by changing the **parent's** role, which that check never runs for: an administrator
+editing a chair into a lead faculty member in §6.3's People editor leaves whatever
+reported to that chair reporting to a lead. E0-09's Care rule already closes exactly
+that shape, in the same function, for the same reason — a row "may not become a CARE
+assignment while other assignments report to it" — so closing it for one rule and
+not the rule beside it would have been this entry with both halves visible on one
+screen. It is narrow: it runs only on an `UPDATE` where the role changed, because no
+row can have children at the instant it is inserted, which keeps ADR 0027's rule
+that an ordinary insert takes no advisory lock.)*
 
 *(The tenth, one layer up from the eighth below: the *rules* face the hazard in
 more places than the Compose file does. Asked for a test that `worker` and
@@ -637,7 +696,18 @@ property, say the property and let the implementer find the mechanism.
 
 ## 16. A mutation harness reported kills it had not made
 
-**Caught: 3**
+**Caught: 4**
+
+*(The fourth, in E0-11, and it is this entry's last paragraph applied before
+anything went wrong. The object under measurement is a trigger function body, which
+lives in the database rather than in a file, and the thing being claimed is that
+`downgrade()` puts E0-09's version back. So the baseline is read **from the revision
+that installs it** — `014ccb3d0fe5`'s own dollar-quoted constant, parsed off disk —
+and never from `pg_proc`, because a downgrade that reinstates whatever the database
+happens to hold reinstates nothing and reports success. Control 0 is that E0-11's
+`PREVIOUS_…` constant equals E0-09's shipped body byte for byte; control 1 is that
+the two bodies differ at head. Without the second, "the bodies match after the
+downgrade" is true of a revision that changed the function not at all.)*
 
 *(The third: measuring what E0-10's `downgrade()` leaves behind. The thing being
 changed lives in the database rather than in a file, so the baseline is the whole
@@ -767,7 +837,19 @@ is a false claim of totality.
 
 ## 14. An enumeration was reported as an impossibility
 
-**Caught: 2**
+**Caught: 3**
+
+*(The third, in E0-11, and it decided how an objection was argued rather than
+whether to file one. `docs/disputes/E0-11-01.md` claims that no rule can accept the
+`CHAIR → CHAIR` edge E0-09's properties require and refuse the one E0-11's matrix
+requires refused. The tempting way to support that is a list of implementations
+tried, and this entry forbids it — so the objection says plainly "one
+implementation, and then I stopped", and the argument is from the **construction of
+the two rows**: both are built by the same `graph.node` helper, each with its own
+new person and its own new department, so they are identical in every column any
+rule could read. That is an argument from the mechanism, which is what this entry
+asks for in place of a longer list, and it is checkable by a fresh arbitrator
+without running anything.)*
 
 **What happened.** In E0-06, the guard that refuses a naive datetime has to sit
 on the column type, and the test module's fixture could not seed a decorated
@@ -1219,3 +1301,84 @@ the whole file rather than the region you edited. A conflict in a documentation
 file is *more* likely to survive than one in code, not less, because nothing but
 a reader will ever object — and the reader who arrives next is reading it for
 its content and will take the markers for formatting they do not recognise.
+
+---
+
+## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
+
+**Caught: 0**
+
+**What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
+consequence: the ticket cannot be finished green and the implementer cannot fix
+either, because both repairs are edits to `tests/`.
+
+**The first is a rule that changed what is writable.** E0-11's first acceptance
+criterion adds a role-rank rule to E0-09's supervision trigger: an edge is legal
+only where `rank(child) < rank(parent)` over SPEC §2.1's chain. Its own module goes
+from 19 passed and 24 failed to 43 passed. Three of E0-09's tests go red, and not
+on their assertions — inside their setup. `test_a_six_assignment_cycle_is_refused`
+and both properties in `test_supervision_graph_properties.py` build their graphs out
+of `graph.node("CHAIR", reports_to=<another CHAIR>)` and require those writes to
+**succeed**, while E0-11's `[chair-chair]` case writes the identical row — same
+helper, own person, own department — and requires it **refused**. Two identical rows,
+two opposite requirements. E0-09's module docstring even states the choice that
+causes it: "one role and one scope grain per graph. Every generated node is a chair
+on its own department, so that no uniqueness rule this ticket does not mention can
+refuse a row and be read as the cycle guard firing." That was the right call for
+E0-09 and it is what a later write-time rule collides with.
+
+**The second is a test pinned to a relative revision.** Three tests in
+`tests/integration/test_identity_grants.py` assert what E0-10's `downgrade()`
+leaves behind, reaching it with `alembic downgrade -1`. `-1` is relative to head, so
+the first revision to land on top of E0-10's — E0-11's — is the one `-1` names, and
+all three fail. That is by design and the design is good: the shared guard
+`only_the_identity_revision_was_undone` exists precisely so the change is loud
+rather than a green test about a downgrade the file is not about, and its message
+names the repair. The repair is "point this test at the identity revision
+explicitly", inside `tests/`.
+
+Measured, not predicted, and in the cheapest possible order: a throwaway revision
+whose entire content was `CREATE VIEW public.probe_view AS SELECT 1` was written
+*before* any of E0-11 was designed, and it turned the same three red. The content of
+the revision is irrelevant — E0-10's two views are in both the at-head and
+after-downgrade sets whenever `-1` names anything else — so no implementation of the
+ticket avoids it.
+
+**Root cause.** Two, and they are worth separating.
+
+For the first: a new *write-time* rule was specified without asking which rows in
+the existing suite it makes unwritable. A rule that changes what can be stored
+changes every fixture that stores it, and a fixture is not a record that quietly
+goes stale — it goes red, loudly, in a module nobody is editing. Both tickets'
+authors looked at `test_role_assignment_graph.py`: E0-11's new module cites it twice
+and correctly predicts which of its tests survive. Neither looked at the *generators*
+in the property module, where the role is a constant chosen for an unrelated reason.
+
+For the second: a test whose subject is one specific revision identified it by
+position. Nothing declared the dependency, and it holds until the day it does not.
+
+**Consequence.** Two dispute rounds on a ticket whose own 71 tests are green, and a
+branch that cannot be merged under `CLAUDE.md`'s "never merge with red CI" until
+somebody who may edit `tests/` acts. The expensive part is not the rounds — it is
+that both failures look, in a runner, exactly like an implementer having broken
+something. The three E0-09 failures print a `CheckViolation` from the new rule, and
+the natural reading is that the rule is too strict rather than that two correct
+specifications disagree. Six red tests, no defect in any of them, no defect in the
+implementation.
+
+**Rule.** **Before specifying a rule that changes what the database will store,
+grep the existing suite for the rows it forbids.** `grep -rn 'reports_to='
+tests/integration/` would have found all three in a minute, and the collision is a
+sentence in the ticket rather than a dispute round. The sweep is not the outward
+sweep over *records* that entry 1 asks for — this is over executable setup, and the
+question is narrower and mechanical: which fixture writes a row this rule now
+refuses?
+
+**And when a guard's failure message prescribes a repair, ask who will meet it.**
+`only_the_identity_revision_was_undone` is a well-written guard: it fires exactly
+when intended and says what to do. It says it to an agent that is forbidden from
+doing it. A guard whose remedy lies outside the reach of whoever it fires on is a
+guard that produces an escalation rather than a fix, which is sometimes right — it
+is right here — but it should be a chosen outcome and written down, not a surprise.
+Where a test's subject is a particular revision, **name the revision**; `-1` and
+`head` are convenient and neither is a subject.
