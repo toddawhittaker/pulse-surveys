@@ -269,6 +269,117 @@ you have removed the only signal that would have told you it did not work.
 
 ---
 
+## 13. A hazard was written down and worked around in only one of the two places facing it
+
+<<<<<<< HEAD
+**Caught: 4**
+=======
+**Caught: 3**
+>>>>>>> origin/epic/e0-foundations
+
+**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
+columns by reflecting from Postgres, and its docstring said why: "a column whose
+type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
+is not an instance of `DateTime` and would be missed." The row-seeding helper in
+the same file dispatched `isinstance` against the **declared** column type and
+got no such accommodation. When the implementation did what the docstring
+predicted, both criterion-4 tests died inside the fixture on
+`survey_window.closes_at`, before either reached an assertion. It took a dispute
+round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
+
+A second, in E0-09, three tickets later, and it cost another dispute round
+([`docs/disputes/E0-09-01.md`](disputes/E0-09-01.md)). The E0-09 seeding helper
+pins two column values so that a freely invented one cannot trip a rule from an
+earlier ticket. The section code is drawn fresh per call, because E0-06 made
+`(course, term, code)` unique; the course number one line above it was the
+constant `"150"`, because SPEC §8 bands the number — and E0-05 also made
+`(prefix, number)` unique. So the second course any test seeded under one prefix
+was refused, and the three tests that need a sibling lead died inside the fixture
+before any assertion ran. The two entries sit in the same dictionary, four lines
+apart, and one of them already had the answer.
+
+**Root cause.** Meeting a hazard at the call site where it first bit, instead of
+asking which other call sites ask the same question. The write-up made it look
+handled: the file named the hazard, in prose, one screen above the code that fell
+to it. In the E0-09 case it was narrower still — the two values face *two* rules
+each, a format rule and a uniqueness rule, and satisfying the format rule with a
+constant is what violates the uniqueness one. Checking the entry against one rule
+and stopping is the same shape as checking one call site and stopping.
+
+**Consequence.** Two tests that could not pass against any implementation the
+criterion admits, reported as a defect in the implementation. A round of the
+loop, and — the expensive shape — an implementer under pressure to satisfy a
+fixture rather than a criterion. Two of the four implementations tried in
+response would have satisfied the helper *by removing the guard*, and one of them
+is what the schema would have shipped.
+
+**Rule.** When you work around a quirk of a type, a parser or an API, grep for
+every place that asks the same question and route them through one helper, in the
+same change. A docstring explaining the quirk is not a fix for the code that does
+not call the fix. And when a test fails inside its own fixture, suspect the
+fixture first — the message this one printed said exactly that, and was right.
+
+**A fixture value has to satisfy every rule the column carries, not the one you
+pinned it for.** Ask what makes the row *unique* as well as what makes it
+well-formed, and prefer a generator over a literal wherever a second row of the
+same kind is a shape any test might want. The `"150"` course number still sits in
+the private copies of that dictionary in `test_identity_schema.py`,
+`test_section_date_derivation.py` and `test_term_calendar_schema.py`; it is
+latent there rather than active, because none of them seeds two courses under one
+prefix yet.
+
+---
+
+## 12. A stale build of the thing under test was reused, and the run looked clean
+
+**Caught: 3**
+
+**What happened.** In E0-05, checking that `alembic check` warns when a generated
+column's expression drifts: edit `app/models/org.py` to change one band edge from
+`499` to `498`, run the check, edit it back, run it again. The warning was there
+both times. Ten minutes went into the model, the migration and the database
+before `grep` showed the file on disk said `499` while the module Python imported
+said `498`.
+
+A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
+missing from the built wheel entirely — that defect is entry 18; this is what
+happened while verifying its fix. The fix was a
+`[tool.setuptools.package-data]` entry. Verifying it
+meant removing the entry and rebuilding, which produced a wheel that still
+contained the prompts: setuptools had reused the `build/` directory and the
+egg-info left by the previous build, so the wheel described the *previous*
+configuration. Deleting both first showed the real answer, an empty package.
+
+**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
+file's size and mtime **truncated to the second**. Reverting a mutation of equal
+length inside the same second leaves the cache valid, so the stale bytecode is
+what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
+revert is invisible to the interpreter. The build tree is the same mechanism with
+a longer memory and no invalidation rule worth the name: `build/` and
+`*.egg-info` persist until something removes them, and no tool warns that it is
+answering from them.
+
+**Consequence.** The reverted run and the mutated run produce identical output,
+which reads as "the mutation made no difference" — the conclusion that kills the
+finding. In E0-05 it would have been "matching the server's own rendering does not
+silence the warning, so do not bother", and the drift signal E0-20 now depends on
+would have been dropped as not working. In E0-12 it would have been "the
+`package-data` entry makes no difference", against a defect that empties the
+prompt directory in every container the project ships.
+
+**Rule.** When mutating and reverting between runs, destroy the caches in the
+same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
+`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
+rebuild — and confirm the revert in the thing that ran rather than in the file:
+print the value the module holds, list the archive. `grep` proves what is on
+disk, which is not what ran. **In a test, prefer making the reuse impossible over
+undoing it**: build in a copy that has never been built in, and there is no stale
+artifact to remember to delete, no working tree to reach into, and nothing to get
+wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
+does this.
+
+---
+
 ## 8. Prescribing a fix without probing it
 
 **Caught: 2**
@@ -336,67 +447,6 @@ a limit in the standard library, a column width, a protocol maximum — generate
 than trusting a wide range to wander into it. Where a bound stays, say in the
 docstring what it does not reach; a stated bound is a scope, and an unstated one
 is a false claim of totality.
-
----
-
-## 13. A hazard was written down and worked around in only one of the two places facing it
-
-<<<<<<< HEAD
-**Caught: 4**
-=======
-**Caught: 3**
->>>>>>> origin/epic/e0-foundations
-
-**What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
-columns by reflecting from Postgres, and its docstring said why: "a column whose
-type is a `TypeDecorator` — the natural place for the criterion 4 guard to live —
-is not an instance of `DateTime` and would be missed." The row-seeding helper in
-the same file dispatched `isinstance` against the **declared** column type and
-got no such accommodation. When the implementation did what the docstring
-predicted, both criterion-4 tests died inside the fixture on
-`survey_window.closes_at`, before either reached an assertion. It took a dispute
-round to settle ([`docs/disputes/E0-06-01.md`](disputes/E0-06-01.md)).
-
-A second, in E0-09, three tickets later, and it cost another dispute round
-([`docs/disputes/E0-09-01.md`](disputes/E0-09-01.md)). The E0-09 seeding helper
-pins two column values so that a freely invented one cannot trip a rule from an
-earlier ticket. The section code is drawn fresh per call, because E0-06 made
-`(course, term, code)` unique; the course number one line above it was the
-constant `"150"`, because SPEC §8 bands the number — and E0-05 also made
-`(prefix, number)` unique. So the second course any test seeded under one prefix
-was refused, and the three tests that need a sibling lead died inside the fixture
-before any assertion ran. The two entries sit in the same dictionary, four lines
-apart, and one of them already had the answer.
-
-**Root cause.** Meeting a hazard at the call site where it first bit, instead of
-asking which other call sites ask the same question. The write-up made it look
-handled: the file named the hazard, in prose, one screen above the code that fell
-to it. In the E0-09 case it was narrower still — the two values face *two* rules
-each, a format rule and a uniqueness rule, and satisfying the format rule with a
-constant is what violates the uniqueness one. Checking the entry against one rule
-and stopping is the same shape as checking one call site and stopping.
-
-**Consequence.** Two tests that could not pass against any implementation the
-criterion admits, reported as a defect in the implementation. A round of the
-loop, and — the expensive shape — an implementer under pressure to satisfy a
-fixture rather than a criterion. Two of the four implementations tried in
-response would have satisfied the helper *by removing the guard*, and one of them
-is what the schema would have shipped.
-
-**Rule.** When you work around a quirk of a type, a parser or an API, grep for
-every place that asks the same question and route them through one helper, in the
-same change. A docstring explaining the quirk is not a fix for the code that does
-not call the fix. And when a test fails inside its own fixture, suspect the
-fixture first — the message this one printed said exactly that, and was right.
-
-**A fixture value has to satisfy every rule the column carries, not the one you
-pinned it for.** Ask what makes the row *unique* as well as what makes it
-well-formed, and prefer a generator over a literal wherever a second row of the
-same kind is a shape any test might want. The `"150"` course number still sits in
-the private copies of that dictionary in `test_identity_schema.py`,
-`test_section_date_derivation.py` and `test_term_calendar_schema.py`; it is
-latent there rather than active, because none of them seeds two courses under one
-prefix yet.
 
 ---
 
@@ -475,53 +525,63 @@ here, from what `adapt_type` does — not a longer list.
 
 ---
 
-## 12. A stale build of the thing under test was reused, and the run looked clean
+## 16. A mutation harness reported kills it had not made
 
-**Caught: 3**
+**Caught: 1**
 
-**What happened.** In E0-05, checking that `alembic check` warns when a generated
-column's expression drifts: edit `app/models/org.py` to change one band edge from
-`499` to `498`, run the check, edit it back, run it again. The warning was there
-both times. Ten minutes went into the model, the migration and the database
-before `grep` showed the file on disk said `499` while the module Python imported
-said `498`.
+**What happened.** In E0-09, eight guards were mutated one at a time to check
+that each was load-bearing — the cycle walk, the two Care rules, the role grain
+rule, both entry doors. The harness ran the suite after each mutation and called
+the mutation killed if the run came back non-zero. All eight reported killed.
 
-A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
-missing from the built wheel entirely — that defect is entry 16; this is what
-happened while verifying its fix. The fix was a
-`[tool.setuptools.package-data]` entry. Verifying it
-meant removing the entry and rebuilding, which produced a wheel that still
-contained the prompts: setuptools had reused the `build/` directory and the
-egg-info left by the previous build, so the wheel described the *previous*
-configuration. Deleting both first showed the real answer, an empty package.
+Six of the eight reports were worthless and two were wrong.
 
-**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
-file's size and mtime **truncated to the second**. Reverting a mutation of equal
-length inside the same second leaves the cache valid, so the stale bytecode is
-what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
-revert is invisible to the interpreter. The build tree is the same mechanism with
-a longer memory and no invalidation rule worth the name: `build/` and
-`*.egg-info` persist until something removes them, and no tool warns that it is
-answering from them.
+Three tests in that module were **already failing**, for a reason unrelated to
+the schema — a defect in the shared fixture, now `docs/disputes/E0-09-01.md`. The
+harness ran with `-x`, so every run stopped at the first of those, and the
+mutation under test was frequently never reached. Eight mutations, one identical
+summary line: "1 failed, 10 passed".
 
-**Consequence.** The reverted run and the mutated run produce identical output,
-which reads as "the mutation made no difference" — the conclusion that kills the
-finding. In E0-05 it would have been "matching the server's own rendering does not
-silence the warning, so do not bother", and the drift signal E0-20 now depends on
-would have been dropped as not working. In E0-12 it would have been "the
-`package-data` entry makes no difference", against a defect that empties the
-prompt directory in every container the project ships.
+Worse, two of the mutations mutated nothing. `AND CASE role ...` was "removed" by
+replacing it with `AND true AND CASE role ...`, which leaves the `CASE` exactly
+where it was. Those two would have reported SURVIVED against a correct harness
+and been read as "this guard is untested", which is the opposite of the truth: on
+a second run that deleted the whole `CASE`, fifteen tests went red, and loosening
+any single arm turned its own test red.
 
-**Rule.** When mutating and reverting between runs, destroy the caches in the
-same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
-`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
-rebuild — and confirm the revert in the thing that ran rather than in the file:
-print the value the module holds, list the archive. `grep` proves what is on
-disk, which is not what ran. **In a test, prefer making the reuse impossible over
-undoing it**: build in a copy that has never been built in, and there is no stale
-artifact to remember to delete, no working tree to reach into, and nothing to get
-wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
-does this.
+A third mutation compared an enum column against a string that is not one of its
+labels. Postgres raises on the comparison itself, so every row in the module
+failed — a kill for a reason that had nothing to do with the guard.
+
+**Root cause.** Measuring "did the run fail" instead of "did *this* fail", from a
+baseline that was not green. A mutation harness is a test of the tests, and it
+was written with none of the care the tests themselves get: no baseline, no
+check that the mutation applied, no check that it applied *semantically*, and a
+flag (`-x`) whose whole purpose is to stop before the interesting part.
+
+**Consequence.** Caught before anything rested on it, because eight identical
+summary lines is a suspicious shape. Had it not been, the pull request would have
+claimed every guard verified by mutation, with three of the eight claims false
+and two guards recorded as tested that no test touches. That is worse than not
+mutating at all — the claim would have discouraged the next person from checking.
+
+**Rule.** A mutation harness needs its own controls, and they are cheap. Record
+the baseline failures first and report the failures a mutation **adds** to that
+set, never the exit code. Never use `-x`. Assert the mutated text was found
+before replacing it, and assert the revert restored the file byte for byte. And
+read each mutation for whether it changes *meaning*: adding `AND true` in front
+of a condition, or widening a value the code never reads, produces a diff and no
+mutation. If several mutations report the same result, suspect the harness before
+believing them.
+
+**A mutation that lives in the database rather than in a file needs the same
+care, and the file-shaped rule above does not cover it.** Later in E0-09 a second
+harness replaced a trigger *function* per variant and read its baseline back out
+of `pg_proc`. An earlier run had died before reinstalling the original, so the
+baseline it read was already mutated and all three variants came back identical —
+the same defect as above with no file involved. Read the baseline from the source
+that installs the object, and assert it does **not** already contain the thing
+you are about to add.
 
 ---
 
@@ -681,66 +741,6 @@ into a deterministic source of randomness. A mutation that fails to fail is a
 result about the mutation until you have shown otherwise.
 
 =======
-## 16. A mutation harness reported kills it had not made
-
-**Caught: 1**
-
-**What happened.** In E0-09, eight guards were mutated one at a time to check
-that each was load-bearing — the cycle walk, the two Care rules, the role grain
-rule, both entry doors. The harness ran the suite after each mutation and called
-the mutation killed if the run came back non-zero. All eight reported killed.
-
-Six of the eight reports were worthless and two were wrong.
-
-Three tests in that module were **already failing**, for a reason unrelated to
-the schema — a defect in the shared fixture, now `docs/disputes/E0-09-01.md`. The
-harness ran with `-x`, so every run stopped at the first of those, and the
-mutation under test was frequently never reached. Eight mutations, one identical
-summary line: "1 failed, 10 passed".
-
-Worse, two of the mutations mutated nothing. `AND CASE role ...` was "removed" by
-replacing it with `AND true AND CASE role ...`, which leaves the `CASE` exactly
-where it was. Those two would have reported SURVIVED against a correct harness
-and been read as "this guard is untested", which is the opposite of the truth: on
-a second run that deleted the whole `CASE`, fifteen tests went red, and loosening
-any single arm turned its own test red.
-
-A third mutation compared an enum column against a string that is not one of its
-labels. Postgres raises on the comparison itself, so every row in the module
-failed — a kill for a reason that had nothing to do with the guard.
-
-**Root cause.** Measuring "did the run fail" instead of "did *this* fail", from a
-baseline that was not green. A mutation harness is a test of the tests, and it
-was written with none of the care the tests themselves get: no baseline, no
-check that the mutation applied, no check that it applied *semantically*, and a
-flag (`-x`) whose whole purpose is to stop before the interesting part.
-
-**Consequence.** Caught before anything rested on it, because eight identical
-summary lines is a suspicious shape. Had it not been, the pull request would have
-claimed every guard verified by mutation, with three of the eight claims false
-and two guards recorded as tested that no test touches. That is worse than not
-mutating at all — the claim would have discouraged the next person from checking.
-
-**Rule.** A mutation harness needs its own controls, and they are cheap. Record
-the baseline failures first and report the failures a mutation **adds** to that
-set, never the exit code. Never use `-x`. Assert the mutated text was found
-before replacing it, and assert the revert restored the file byte for byte. And
-read each mutation for whether it changes *meaning*: adding `AND true` in front
-of a condition, or widening a value the code never reads, produces a diff and no
-mutation. If several mutations report the same result, suspect the harness before
-believing them.
-
-**A mutation that lives in the database rather than in a file needs the same
-care, and the file-shaped rule above does not cover it.** Later in E0-09 a second
-harness replaced a trigger *function* per variant and read its baseline back out
-of `pg_proc`. An earlier run had died before reinstalling the original, so the
-baseline it read was already mutated and all three variants came back identical —
-the same defect as above with no file involved. Read the baseline from the source
-that installs the object, and assert it does **not** already contain the thing
-you are about to add.
-
----
-
 ## 17. An unqualified table name let the caller choose which table a guard read
 
 **Caught: 0**

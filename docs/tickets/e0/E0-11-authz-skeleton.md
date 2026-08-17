@@ -48,8 +48,44 @@ thin), §4.1, and the roles section of `CLAUDE.md`.
 - The multi-role switcher and multi-root navigation (E9).
 - Any HTTP router or dependency wiring to a real request (E1).
 
+## Two rules E0-09 left for you, both measured
+
+E0-09 built the supervision graph and its privacy review found two rules that
+are **not** enforced by the schema. Neither widens anything today, because no
+purview computation exists yet — this ticket is the one that writes it, so this
+is where they stop being theoretical.
+
+**1. Edge direction is unconstrained by role.** Nothing stops
+`LEAD_FACULTY → LEAD_FACULTY`, which puts one lead's course inside a sibling
+lead's purview, or `CHAIR ← VP_ACADEMICS`, which under §2.1's "own grant ∪ the
+purviews of all assignments transitively reporting to it" puts the whole
+institution inside that chair's purview. Both writes were accepted against the
+shipped migration. E0-09's sibling-isolation test asserts the ancestors of the
+rows *it* wrote, not that the joining edge is unwritable, so it stays green
+against this.
+
+Decide where the rule lives: a role-rank check inside E0-09's trigger, or
+enforcement in the resolver. **Either is legitimate; leaving it in neither is
+not.** If you choose the resolver, say so in an ADR and amend ADR 0027, because
+it currently reads as though the trigger is the whole story.
+
+**2. One lead per course is enforced on `lead_faculty_mapping` only** — a table
+`role_assignment` does not reference. Two `LEAD_FACULTY` assignment rows on one
+course are accepted, and so is an assignment on a course whose mapping names a
+different person. `RoleAssignment`'s docstring names the mapping as
+authoritative and ADR 0025 says the grain rule is necessary and **not
+sufficient** for §4.1 invariant 2, so the reading is settled — the constraint
+keeping the two tables in step is not.
+
 ## Acceptance criteria
 
+- [ ] **A `LEAD_FACULTY → LEAD_FACULTY` edge and a role-inverted edge such as
+      `CHAIR ← VP_ACADEMICS` are refused**, or the resolver ignores them and an
+      ADR says why that is the right place. A test covers whichever you choose.
+- [ ] **A lead's own grant has one answer.** Either `role_assignment` cannot
+      hold two `LEAD_FACULTY` rows for one course, or the resolver reads
+      `lead_faculty_mapping` alone and a test asserts a conflicting assignment
+      row changes nothing.
 - [ ] Every read helper in the module goes through the E0-10 views; a test
       asserts no code path in `services/` opens a raw session against an
       identity table.

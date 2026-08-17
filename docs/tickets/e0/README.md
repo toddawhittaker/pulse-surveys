@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Twenty-four tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Twenty-five tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -42,6 +42,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | Does the benchmark minimum cover comparison-set numbers or only lines, and is one institution per deployment enforced or merely assumed. Both are product decisions a schema ticket declined to make. |
 | 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | Which launches may trigger a roster sync, whether the service URL is stored, and what an operator sees when a section has never had a roster. A spec edit E1 needs answered before it builds the sync. |
 | 24 | [Review debt from E0-07 and E0-08](E0-24-review-debt-from-e0-07-and-e0-08.md) | 07, 08 | Four findings those pull requests could not close: an unconstrained `jwks_url` that is credential-equivalent, the single-writer rule for the derived section columns being convention rather than enforcement, re-derivation when a term's map is edited, and a summer start-letter map the test suite invented. |
+| 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Six findings those pull requests could not close, and an index of the twelve that went to the ticket that owns them: an unguarded `.dockerignore`, a latent course-number literal in three modules, two overclaiming records, and two spec lines describing things that no longer exist. |
 
 ## Dependency graph
 
@@ -61,6 +62,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 05 ── 21, 22        (independent; block nothing)
       23            (independent; blocks nothing in E0, gates E1's roster sync)
 07, 08 ── 24        (independent; blocks nothing)
+09, 12, 14 ── 25    (independent; blocks nothing)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and

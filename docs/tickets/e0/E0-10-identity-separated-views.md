@@ -161,8 +161,43 @@ Both are load-bearing from this ticket onward.
   flag, so E10 adds a value rather than redesigning the table. Leave the column
   or leave room for it, and say which in the pull request.
 
+## Views resolve names at run time, so qualify them
+
+E0-09's supervision trigger shipped naming `role_assignment` unqualified, and
+that was a HIGH: **Postgres searches the temp schema first for relations even
+when `pg_temp` is absent from `search_path`**, so a caller who creates
+`pg_temp.role_assignment` and then writes fully-qualified
+`public.role_assignment` makes every guard in the function read an empty shadow.
+Reproduced as a `NOSUPERUSER` role with no `CREATE` on `public`. It moved
+`'role_assignment'::regclass` too, so the advisory lock stopped serialising
+anything.
+
+**Your views are the next late-bound SQL in the tree, and this ticket is what
+grants the DML that makes the class reachable at all.** Two rules, and the
+second is the one that surprises people:
+
+- **Schema-qualify every relation** a view or function names — `public.user`,
+  not `user`. This is what actually carries the guard.
+- **`SET search_path = pg_catalog, public, pg_temp` — with `pg_temp` named, and
+  named last.** The conventional advice, `search_path = pg_catalog, public`, is
+  precisely the version that does **not** work: omitting `pg_temp` is what
+  leaves it first. Measured both ways in ADR 0027, which carries the table.
+
+Ship both. The qualification survives someone dropping the `SET`; the `SET`
+survives someone adding an unqualified reference. E0-09's
+`tests/integration/test_trigger_resists_a_shadowed_table.py` is the shape to
+copy, including the part that proves the hijack is live rather than assuming it.
+
+Constraints are safe — they resolve at DDL time, verified by shadowing
+`role_assignment`, `course` and `person` and watching five rules across three
+tickets still refuse their rows. It is functions and views that bind late.
+
 ## Acceptance criteria
 
+- [ ] **Every relation named in a view or function is schema-qualified, and
+      every such function sets a `search_path` naming `pg_temp` last.** Asserted
+      out of the catalog, not by reading the migration, and with a test that a
+      shadowed relation does not change what a view returns.
 - [ ] **The marker sweep reaches every table that can hold identity**, by
       iterating the foreign-key walk to a fixed point rather than one hop. A test
       asserts `threat_case` and `answer` are in the swept set, since both are

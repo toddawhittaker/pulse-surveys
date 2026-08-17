@@ -123,7 +123,7 @@ period. Nothing checks this today.
 **Prompt files ship as package data, and the glob is wider than the scheme on
 purpose.** `pyproject.toml` names `"app.ai" = ["prompts/**/*"]`, because the
 Dockerfile installs a wheel and nothing else; without an entry at all, the
-runtime image holds the contracts and no prompt (`docs/MISTAKES.md` entry 16).
+runtime image holds the contracts and no prompt (`docs/MISTAKES.md` entry 18).
 
 The first version of that entry was `prompts/*.md`, matching this scheme exactly,
 and matching the scheme was the mistake. Two layouts it silently dropped were

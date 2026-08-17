@@ -465,7 +465,7 @@ def test_every_prompt_in_the_source_tree_reaches_the_built_package(tmp_path: Pat
     could be green — a versioned validity prompt, a README documenting the
     scheme — with the container holding `app/ai/contracts.py` and no prompt
     beside it. That is not hypothetical: it is what this ticket shipped until the
-    wheel was opened, and it is `docs/MISTAKES.md` entry 16. This test is that
+    wheel was opened, and it is `docs/MISTAKES.md` entry 18. This test is that
     entry's rule made automatic, because the rule as written is a thing a person
     has to remember to do, and entry 2 is what happens to a fix in
     `pyproject.toml` that nothing asserts — any later edit undoes it with every
