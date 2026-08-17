@@ -60,10 +60,14 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.ags import (
     LINE_ITEM_CONTAINER_MEDIA_TYPE,
     LINE_ITEM_MEDIA_TYPE,
+    LINE_ITEM_PAGE_SIZE,
+    MAX_LINE_ITEM_LIMIT,
     RESULT_CONTAINER_MEDIA_TYPE,
+    RESULT_MEDIA_TYPE,
     GradeBook,
     GradeServiceError,
     LineItem,
+    LineItemFilters,
     result_url,
 )
 from app.config import (
@@ -77,6 +81,7 @@ from app.config import (
     MEMBERSHIPS_PATH,
     MOCK_POSTED_SCORES_PATH,
     REGISTRATION_PATH,
+    RESULT_PATH,
     RESULTS_PATH,
     SCORES_PATH,
     PlatformSettings,
@@ -88,7 +93,7 @@ from app.launch import (
 )
 from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, membership_page
 from app.pages import authorization_response_page, launch_page, registration_values
-from app.paging import PAGE_PARAMETER, PageOutOfRangeError
+from app.paging import PAGE_PARAMETER, PageOutOfRangeError, link_header, page_count, window
 from app.seed import MockContext, seeded_platform
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
 
@@ -98,6 +103,23 @@ SUMMARY = "A development-only LTI 1.3 platform to launch Pulse from (SPEC §9.2)
 
 # How an OIDC authorization request arrives when a tool posts it.
 FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+
+
+def advertised(base: str, query: str) -> str:
+    """`base` carrying the query this request arrived with, so a `Link` can keep it.
+
+    The paging helpers build every other page's URL from this one, and they
+    replace the page parameter rather than appending to it — so handing them the
+    request's whole query is what makes a filtered or limited container advertise
+    the second page *of that filter* rather than of everything. A `next` relation
+    that quietly drops a filter is the paging defect that looks most like
+    working.
+
+    The base is the platform's own absolute URL rather than `request.url`,
+    because a tool resolves what a service advertised knowing nothing about the
+    host it reached, and `request.url` carries whatever `Host` header arrived.
+    """
+    return f"{base}?{query}" if query else base
 
 
 async def json_object(request: Request, subject: str) -> dict[str, Any]:
@@ -350,19 +372,45 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=422, detail=str(refusal)) from refusal
         return JSONResponse(created.document, status_code=201, media_type=LINE_ITEM_MEDIA_TYPE)
 
-    @app.get(LINE_ITEMS_PATH, summary="AGS 2.0: list a section's line items")
-    def list_line_items(context_id: str) -> JSONResponse:
-        """Every line item this section's gradebook holds, in creation order.
+    @app.get(LINE_ITEMS_PATH, summary="AGS 2.0: list a section's line items, filtered and paged")
+    def list_line_items(
+        request: Request,
+        context_id: str,
+        resource_link_id: str | None = None,
+        resource_id: str | None = None,
+        tag: str | None = None,
+        limit: Annotated[int | None, Query(ge=1, le=MAX_LINE_ITEM_LIMIT)] = None,
+        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+    ) -> JSONResponse:
+        """One page of this section's line items, in creation order.
 
         An array, which is what AGS 2.0 serves for a line item container. Nothing
         is seeded here: §3.4 has the tool create "Pulse Participation" on first
         launch, so a seeded one would let a test mistake a fixture for a stored
         line item.
+
+        The three filters and the paging are AGS's own, and they page exactly as
+        the roster does — same module, same `Link` header, same rule that `next`
+        appears only where a next page exists. The next URL is built from the
+        query this request carried, so a filtered container's second page is the
+        second page *of that filter* rather than of everything.
         """
         require_context(context_id)
+        found = grades.line_items(
+            context_id,
+            LineItemFilters(resource_link_id=resource_link_id, resource_id=resource_id, tag=tag),
+        )
+        size = limit or LINE_ITEM_PAGE_SIZE
+        try:
+            shown = window(found, page, size)
+        except PageOutOfRangeError as refusal:
+            raise HTTPException(status_code=404, detail=str(refusal)) from refusal
+        base = advertised(settings.line_items_url(context_id), request.url.query)
+        header = link_header(base, page, page_count(len(found), size))
         return JSONResponse(
-            [line_item.document for line_item in grades.line_items(context_id)],
+            [line_item.document for line_item in shown],
             media_type=LINE_ITEM_CONTAINER_MEDIA_TYPE,
+            headers={"link": header} if header else None,
         )
 
     @app.get(LINE_ITEM_PATH, summary="AGS 2.0: one line item")
@@ -385,21 +433,63 @@ def create_app() -> FastAPI:
         try:
             grades.record_score(line_item, payload)
         except GradeServiceError as refusal:
-            raise HTTPException(status_code=422, detail=str(refusal)) from refusal
+            # The status comes off the refusal rather than being chosen here.
+            # AGS 2.0 fixes 409 for a stale score and leaves the rest to the
+            # platform, so which code answers is a fact about the rule that was
+            # broken and belongs beside it.
+            raise HTTPException(status_code=refusal.status_code, detail=str(refusal)) from refusal
         return JSONResponse({"resultUrl": result_url(line_item, str(payload["userId"]))})
 
     @app.get(RESULTS_PATH, summary="AGS 2.0: the results for one line item")
-    def read_results(context_id: str, line_item_id: str) -> JSONResponse:
+    def read_results(
+        context_id: str,
+        line_item_id: str,
+        user_id: str | None = None,
+    ) -> JSONResponse:
         """The conformant `Result` container: the current grade, and nothing else.
 
         A `Result` has no timestamp and no progress members, so what the tool
         posted cannot be read back here. `GET /mock/posted-scores` is where that
         lives, deliberately outside this namespace (ADR 0047).
+
+        `user_id` is AGS's own filter and is honoured, because a tool asking a
+        platform for one student's result and receiving the class is holding
+        grades it did not ask for. The container does **not** page and does not
+        take a `limit`; that is
+        [E0-28](../../docs/tickets/e0/E0-28-review-debt-from-e0-15.md) item 4,
+        deliberately left rather than forgotten.
         """
         return JSONResponse(
-            grades.results(require_line_item(context_id, line_item_id)),
+            grades.results(require_line_item(context_id, line_item_id), user_id=user_id),
             media_type=RESULT_CONTAINER_MEDIA_TYPE,
         )
+
+    @app.get(RESULT_PATH, summary="AGS 2.0: one user's result on one line item")
+    def read_result(context_id: str, line_item_id: str, user_id: str) -> JSONResponse:
+        """The result at the URL the platform hands out for it.
+
+        This is the URL a score post answers with as `resultUrl` and the URL
+        every `Result` gives as its own `id`. Both were composed and neither was
+        served, which is the shape a container test cannot see: the identifier
+        looks exactly right and nothing follows it. A tool that follows what a
+        platform hands it is doing the right thing.
+
+        A user with no current result is a 404 rather than an empty document —
+        "no grade" and "a grade of nothing" are different answers, and a score
+        posted with no `scoreGiven` means the first.
+        """
+        line_item = require_line_item(context_id, line_item_id)
+        found = grades.result(line_item, user_id)
+        if found is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No result for {user_id!r} on line item {line_item_id!r}. Either no score "
+                    "has been accepted for that user, or the last one carried no `scoreGiven`, "
+                    "which AGS 2.0 makes a request to clear the result."
+                ),
+            )
+        return JSONResponse(found, media_type=RESULT_MEDIA_TYPE)
 
     @app.get(MOCK_POSTED_SCORES_PATH, summary="Mock only: every score this platform was sent")
     def posted_scores() -> JSONResponse:

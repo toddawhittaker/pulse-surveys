@@ -84,6 +84,12 @@ LINE_ITEM_PATH = f"{LINE_ITEMS_PATH}/{{line_item_id}}"
 SCORES_PATH = f"{LINE_ITEM_PATH}/scores"
 RESULTS_PATH = f"{LINE_ITEM_PATH}/results"
 
+# One user's result, which AGS makes a `Result`'s own `id` and the `resultUrl` a
+# score post answers with. It is served because it is handed out: a URL a
+# platform composes and does not serve is a link a tool follows once, in the job
+# that needed it.
+RESULT_PATH = f"{RESULTS_PATH}/{{user_id}}"
+
 # The inspection surface, and the `/mock/` prefix is the point (ADR 0047): a
 # conformant AGS `Result` has no timestamp and no progress fields, so what the
 # tool posted cannot be read back through the protocol. This route serves it
