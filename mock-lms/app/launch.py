@@ -42,14 +42,6 @@ from app.seed import COURSE_SECTION_TYPE, MockPlacement, MockUser, SeededPlatfor
 # under any other name is a claim `pylti1p3` (SPEC §7.1) will not read.
 LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
 
-# The two LTI Advantage service claims. They live under their own specification
-# prefixes rather than under the core LTI one, which is not a detail: a platform
-# announces its services *inside the launch it has just signed*, and that is the
-# only route by which a conformant tool ever learns a service URL. A mock serving
-# a perfect roster at a fixed path with no claim in the token has built something
-# `pylti1p3` cannot find.
-NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
-AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 MESSAGE_TYPE_CLAIM = f"{LTI_CLAIM_PREFIX}message_type"
 VERSION_CLAIM = f"{LTI_CLAIM_PREFIX}version"
 DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"
@@ -57,6 +49,15 @@ TARGET_LINK_URI_CLAIM = f"{LTI_CLAIM_PREFIX}target_link_uri"
 RESOURCE_LINK_CLAIM = f"{LTI_CLAIM_PREFIX}resource_link"
 CONTEXT_CLAIM = f"{LTI_CLAIM_PREFIX}context"
 ROLES_CLAIM = f"{LTI_CLAIM_PREFIX}roles"
+
+# The two LTI Advantage service claims. They live under their own specification
+# prefixes rather than under the core LTI one, which is not a detail worth
+# hiding: a platform announces its services *inside the launch it has just
+# signed*, and that is the only route by which a conformant tool ever learns a
+# service URL. A mock serving a perfect roster at a fixed path with no claim in
+# the token has built something `pylti1p3` (SPEC §7.1) cannot find.
+NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 
 # A plain resource-link launch, which SPEC §7.3 makes the default. Deep Linking
 # is explicitly out of scope for E0-14.
