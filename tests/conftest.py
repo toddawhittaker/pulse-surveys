@@ -75,14 +75,18 @@ calls it needs committed rows and an environment pointing at this container. The
 Care role itself is provisioned beside the application role now, mirroring
 `scripts/db-init/02-care-role.sh`: a login and no grant.
 
-E0-11 adds two, at the very bottom, and one of them is unlike everything above
-it. `authz` reaches the authorization chokepoint **by name**: E0-11's surface was
-settled before any code was written, so there is nothing to discover, and the
-class exists only to turn an absent module or an absent symbol into a failed
-assertion instead of a collection error. `application_session` is a session on
-the connection production serves requests over — `pulse_app`, holding only what
-the migrations grant it — because from E0-11 on, "the resolver could read that"
-is a claim about a grant and not only about a query.
+E0-11 adds fixtures at the very bottom, and one of them is unlike everything
+above it. `authz` reaches the authorization chokepoint **by name**: E0-11's
+surface was settled before any code was written, so there is nothing to discover,
+and the class exists only to turn an absent module or an absent symbol into a
+failed assertion instead of a collection error. `application_session` is a
+session on the connection production serves requests over — `pulse_app`, holding
+only what the migrations grant it — because from E0-11 on, "the resolver could
+read that" is a claim about a grant and not only about a query. It also adds
+`supervision_graph_on`, beside `supervision_graph` rather than at the bottom,
+which is the same builder pointed at a database standing at an earlier revision:
+the ticket's migration has to answer for rows that were already stored when it
+runs, and no fixture here could reach that state before.
 """
 
 import base64
@@ -2920,6 +2924,33 @@ def supervision_graph(db_session: Any, metadata_tables: dict[str, Any]) -> Super
     """
     _GRAPH_INTEGER_COUNTERS.clear()
     return SupervisionGraph(db_session, metadata_tables)
+
+
+@pytest.fixture
+def supervision_graph_on(
+    metadata_tables: dict[str, Any],
+) -> Callable[[Any], SupervisionGraph]:
+    """The same builder, on a session the caller opened, for a database that is not at head.
+
+    `supervision_graph` above and `committed_rows` below both bind the builder to
+    the session database, which `migrated_database` has already taken to head.
+    E0-11 needs the same rows in a database standing at an **earlier** revision —
+    the state a deployment is in at the moment a new rule arrives — and that is
+    `empty_database`'s, on a connection the test opens and closes around each
+    migration step. The choice was a fifth private copy of the builder or this
+    (`docs/MISTAKES.md` entry 13), and the copy is the one nobody updates.
+
+    The counters are cleared once per test rather than once per call, because a
+    test that opens three sessions against one database is still one test's budget
+    of course numbers — clearing per call would hand out `100` twice under the
+    same prefix and fail E0-05's uniqueness rule inside the fixture.
+    """
+    _GRAPH_INTEGER_COUNTERS.clear()
+
+    def build(session: Any) -> SupervisionGraph:
+        return SupervisionGraph(session, metadata_tables)
+
+    return build
 
 
 # ---------------------------------------------------------------------------

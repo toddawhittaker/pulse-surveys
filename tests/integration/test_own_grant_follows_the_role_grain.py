@@ -8,8 +8,30 @@ a dean's the college."
 
 The union is E9's and raises here (ADR 0003,
 `tests/unit/test_deferred_authz_seams_fail_closed.py`). The own grant is E0-11's,
-and it is the whole of what this module asserts: five role grains, the lead's
+and it is the whole of what this module asserts: the role grains, the lead's
 authority question, and §4.1 invariant 2 at the level it can already be broken.
+
+**The assistant dean was the grain with no test, and it is the one §2.1 argues
+about.** SPEC §2.1's canonical chain ranks six roles; the tests below covered the
+grain of instructor, lead, chair, dean and VP, and the role the spec picks as its
+own worked example had nothing standing behind it. That role is the case §2.1
+makes *against* reading a grant off a containment node: "the assistant dean is
+the worked example for why purview comes from the graph: own led courses union
+every supervised chair's department — a set no single containment node holds",
+and §2's table says the same from the other side, giving the scope as "College
+(same node as the dean — **authority comes from the supervision graph, not the
+scope**)". §2.1's own-grant sentence names a lead, a chair and a dean, and
+pointedly does not name an assistant dean.
+
+So the own grant of an `ASSISTANT_DEAN` assignment is empty. Both halves of the
+set §2.1 describes arrive from somewhere else: the led courses from the person's
+own `LEAD_FACULTY` assignment, and the supervised chairs' departments from E9's
+transitive walk, which is the deferred seam that raises here. An assistant dean
+therefore sees nothing in E0, which is what ADR 0003 already says about
+leadership landing views in this epic. A security review of E0-11 measured the
+opposite — the college, a supervised department, an unsupervised department and
+an unsupervised section, all present in the own grant — and the tests under the
+last heading in this file are that gap closed.
 
 **Every read runs over a `pulse_app` connection.** `db_session` connects as the
 bootstrap superuser, which passes every grant; from E0-10 on, `pulse_app` holds
@@ -539,4 +561,197 @@ def test_two_leads_with_courses_under_one_prefix_resolve_to_disjoint_purviews(
         "union computation.' A shared prefix or department is the same failure one level up — "
         "whatever expands that node holds the other lead's courses — and §2.1 gives leads the "
         "hierarchy view precisely so that a peer's courses have nowhere to appear."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The assistant dean, whose own grant is empty. See the module docstring for why
+# that is the spec's answer rather than a gap in this file.
+# ---------------------------------------------------------------------------
+
+
+def test_an_assistant_deans_own_grant_is_empty_at_every_level(
+    authz: Any, committed_rows: Any, application_session: Any
+) -> None:
+    """§2's table: the assistant dean sits on the dean's node and draws no authority from it.
+
+    "College (same node as the dean — **authority comes from the supervision
+    graph, not the scope**)." The scope column on this row says where the person
+    works, not what they may read, and §2.1's own-grant sentence — which spells
+    out what a lead, a chair and a dean each hold — does not give this role a
+    grain at all. What it says instead is that the assistant dean's purview is
+    "own led courses union every supervised chair's department", and neither half
+    of that is reachable from this assignment: the courses belong to the person's
+    separate `LEAD_FACULTY` assignment, and the departments come from E9's
+    transitive walk.
+
+    **The control is a `DEAN` assignment on the same college**, resolved on the
+    same session against the same rows. The two differ in one column — the role —
+    so an `own_grant` mutated to return an empty purview for everything passes the
+    assertion below and fails the control (`docs/MISTAKES.md` entry 3). Without
+    it, "the assistant dean sees nothing" is equally true of a resolver that sees
+    nothing for anybody, which over a `pulse_app` connection is what a missing
+    grant looks like.
+
+    **The mutation it exists to survive** is the state E0-11's security review
+    measured: the whole college subtree returned for this role because the
+    resolver coalesced over the scope columns and found `college_id` populated.
+    Nothing about that reads as wrong — the row genuinely is scoped to the college
+    — and it hands one assistant dean every department in it, supervised or not.
+    """
+    rows = committed_rows
+    graph = rows.graph
+    college = graph.scope("college")
+    under_the_college = subtree(rows, "institution", "college")
+    assistant = written(
+        graph,
+        lambda: graph.assign("ASSISTANT_DEAN", scope=college),
+        "An assistant dean assignment on the college",
+    )
+    dean = written(
+        graph, lambda: graph.assign("DEAN", scope=college), "A dean assignment on the same college"
+    )
+    rows.commit()
+
+    deans = grant(authz, application_session, dean, graph)
+    theirs = grant(authz, application_session, assistant, graph)
+
+    assert any(deans.values()), (
+        f"The dean on the same college resolved to {deans}, so `own_grant` answers nothing for "
+        "anybody on this session and the assertion below would be satisfied by a resolver with no "
+        "answers at all (`docs/MISTAKES.md` entry 3). "
+        "`test_a_deans_own_grant_is_its_college_and_everything_under_it` is where that is "
+        "diagnosed."
+    )
+    assert theirs == expected(), (
+        f"An `ASSISTANT_DEAN` assignment resolved to {theirs} rather than to an empty purview. The "
+        f"dean on the same college node resolved to {deans}, which is what that node grants — so "
+        "anything here was taken from the containment hierarchy, and SPEC §2's table says in "
+        "parentheses that it must not be: 'same node as the dean — authority comes from the "
+        "supervision graph, not the scope'. The department seeded under that college is "
+        f"{node_id(rows, under_the_college, 'department')}; nobody has said this assistant dean "
+        "supervises its chair, and under §2.1 its sections are in their purview only if a "
+        "reporting line puts them there."
+    )
+
+
+def test_an_assistant_deans_own_grant_stays_empty_when_a_chair_reports_to_it(
+    authz: Any, committed_rows: Any, application_session: Any
+) -> None:
+    """The supervised department is E9's to supply, and it is still not the own grant.
+
+    **Read this before "fixing" it.** The natural objection to the test above is
+    that it proves nothing, because no chair reported to that assistant dean —
+    surely the supervised department is exactly what the own grant is for. It is
+    not. SPEC §2.1 defines `Purview(assignment) = own grant union the purviews of
+    all assignments transitively reporting to it`, so a supervised chair's
+    department enters through the **second** term, by the walk over reporting
+    lines that E9 implements and that raises here (ADR 0003,
+    `tests/unit/test_deferred_authz_seams_fail_closed.py`). Adding it to the own
+    grant would compute the right answer for this shape by the wrong route, and
+    the route is the whole of what §2.1 argues: "a set no single containment node
+    holds".
+
+    The rows are E0-09's `assistant_dean_shape`, which that ticket built as "a
+    fixture builder for the assistant-dean shape that E9 will reuse" — a dean, an
+    assistant dean on the same college, two chairs reporting to the assistant
+    dean, and a third chair reporting straight to the dean whose department holds
+    the course the assistant dean leads.
+
+    **The control is one of the supervised chairs**, whose own grant has to be
+    non-empty: it is the department this assistant dean will eventually see
+    *through that chair*, and if it resolves to nothing then the emptiness below
+    is a resolver that answers nothing rather than a grain rule.
+    """
+    rows = committed_rows
+    graph = rows.graph
+    shape = written(
+        graph, lambda: graph.assistant_dean_shape(), "SPEC §2.1's assistant-dean worked example"
+    )
+    rows.commit()
+
+    chairs = grant(authz, application_session, shape["supervised_chairs"][0], graph)
+    theirs = grant(authz, application_session, shape["assistant_dean"], graph)
+
+    assert any(chairs.values()), (
+        f"A chair reporting to the assistant dean resolved to {chairs}, so `own_grant` answers "
+        "nothing on this session and the emptiness asserted below means nothing "
+        "(`docs/MISTAKES.md` entry 3). "
+        "`test_a_chairs_own_grant_is_its_department_and_everything_under_it` diagnoses that."
+    )
+    assert theirs == expected(), (
+        f"An `ASSISTANT_DEAN` assignment with two chairs reporting to it resolved to {theirs}. "
+        f"Their supervised departments are {shape['supervised_departments']} and the department "
+        f"nobody put under them is {shape['unsupervised_department']} — both sit in the college "
+        "this assignment is scoped to, which is why reading the scope column hands over the "
+        "second one along with the first. SPEC §2.1 computes the supervised half from the "
+        "reporting lines: 'own grant union the purviews of all assignments transitively reporting "
+        "to it'. That union is E9's and raises here, so an assistant dean sees nothing in E0 — "
+        "which is what ADR 0003 says about leadership landing views in this epic, and is a "
+        "deliberate outcome rather than a missing feature."
+    )
+
+
+def test_a_person_with_an_assistant_dean_and_a_lead_assignment_resolves_to_their_led_course(
+    authz: Any, committed_rows: Any, application_session: Any
+) -> None:
+    """§2.1's "own led courses", which come from the lead assignment and not from the other one.
+
+    SPEC §2: "People are not roles… every view is resolved from an assignment (or
+    a union of them), never from a person 'type'", and the sentence naming this
+    exact combination is in the same paragraph: "an assistant dean can hold a
+    lead-faculty assignment while supervising a chair". So the person resolves to
+    the courses their `LEAD_FACULTY` assignment gives them, and the
+    `ASSISTANT_DEAN` assignment beside it adds nothing at all.
+
+    **Nothing reports to either assignment here, deliberately.** The person in
+    `test_an_assistant_deans_own_grant_stays_empty_when_a_chair_reports_to_it`
+    has supervised chairs, and a resolver that reached for §2.1's second term
+    would raise on them; this test is about which of the person's two assignments
+    the grant comes from, so the shape is built with no reporting lines and the
+    deferred union has nothing to be asked about.
+
+    **The control is inside the expectation.** The led course is not asserted
+    absent from something — it is asserted present, exactly, with every other
+    level empty, so a resolver that returned nothing fails this as loudly as one
+    that returned the college. The course sits in its own department under the
+    same college as the assistant dean assignment, which is the arrangement §2.1
+    describes and the one where a scope-column read looks right: it would return
+    this course too, along with every other course in the college.
+    """
+    rows = committed_rows
+    graph = rows.graph
+    person = graph.person()
+    college = graph.scope("college")
+    led = subtree(rows, "institution", "college")
+    led_course = node_id(rows, led, "course")
+
+    written(
+        graph,
+        lambda: graph.lead_mapping(person=person, course=led_course),
+        "The mapping naming the course this person leads",
+    )
+    written(
+        graph,
+        lambda: graph.assign("ASSISTANT_DEAN", scope=college, person=person),
+        "Their assistant dean assignment, on the college",
+    )
+    written(
+        graph,
+        lambda: graph.assign("LEAD_FACULTY", scope=led_course, person=person),
+        "Their lead-faculty assignment, on the course they lead",
+    )
+    rows.commit()
+
+    scope = authz.resolve_scope(application_session, person_id=person)
+    held = levels(scope.purview)
+
+    assert held == expected(course_ids={led_course}, section_ids={node_id(rows, led, "section")}), (
+        f"A person holding an `ASSISTANT_DEAN` assignment and a `LEAD_FACULTY` assignment "
+        f"resolved to {held}, and the course the mapping gives them is {led_course}. SPEC §2.1 "
+        "gives this person 'own led courses union every supervised chair's department' — they "
+        "supervise nobody here, so the first term is the whole answer. A `college_ids` or a "
+        "`department_ids` came from the assistant dean assignment's scope node, which §2's table "
+        "says is not where its authority comes from; an empty purview means the lead assignment "
+        "stopped granting its courses when a second assignment appeared beside it."
     )

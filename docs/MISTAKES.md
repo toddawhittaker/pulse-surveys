@@ -35,7 +35,19 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 27**
+**Caught: 28**
+
+*(The twenty-eighth, writing the tests for E0-11's two review dispositions, and it
+decided the shape of both. An `ASSISTANT_DEAN` assignment's own grant is asserted
+**empty**, which is this entry's own shape, so each of the three tests for it
+carries a control resolved on the same session against the same rows — a `DEAN` on
+the same college, and a supervised chair — because an `own_grant` broken to answer
+an empty purview for every role would otherwise pass all three and read as the
+defect fixed. And the test that the migration refuses a stored non-climbing edge
+asserts the failure names one of the two **row keys** rather than the role pair: a
+`DatabaseError` renders the statement that raised it and the migration's own SQL
+spells `LEAD_FACULTY` in its rank map, so a role-name match would be satisfied by
+an anonymous failure that merely echoed the statement.)*
 
 *(The twenty-seventh, in E0-11's arbitration round, and it caught the same shape
 twice in one afternoon. First, three tests in `test_identity_grants.py` reached
@@ -201,7 +213,16 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 25**
+**Caught: 26**
+
+*(The twenty-sixth, and it is this entry's rule about counts caught by the change
+that made one stale. `tests/integration/test_own_grant_follows_the_role_grain.py`
+said in its docstring that the module asserts "five role grains", which the
+assistant-dean tests make wrong; the number is deleted rather than corrected,
+since one that has to be re-measured on every edit will be wrong again. Sweeping
+outward from it found `tests/conftest.py`'s header saying "E0-11 adds two, at the
+very bottom", wrong twice over once a third fixture lands beside
+`supervision_graph` rather than at the bottom.)*
 
 *(The twenty-fifth, one commit after the twenty-fourth below, in the artifact this
 entry's own rule calls the highest risk. The commit that corrected ADR 0044 and
@@ -445,7 +466,14 @@ second case arrives.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 16**
+**Caught: 17**
+
+*(The seventeenth, in the test that migrates over a stored edge that does not
+climb. The plant rests on E0-09's trigger accepting a row E0-11's refuses, so the
+same `UPDATE` is attempted at the new revision *first* and required to be refused
+before anything is downgraded. A plant that was legal at both revisions would
+store the edge, pass every assertion after it, and look identical in the runner —
+while proving nothing about a migration.)*
 
 *(The sixteenth, inside the helper that plants a non-climbing edge for the cycle
 tests. The plant needs the superuser bypass to store a row the rank rule refuses —
