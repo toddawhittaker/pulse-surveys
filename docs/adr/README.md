@@ -56,7 +56,7 @@ still stands sends a reader looking for a replacement that does not exist.
 
 | # | Decision | Status |
 |---|---|---|
-| [0001](0001-identity-separation-by-database-role.md) | Identity separation enforced by database role and grant | Accepted — one consequence amended by [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md) |
+| [0001](0001-identity-separation-by-database-role.md) | Identity separation enforced by database role and grant | Accepted — one consequence amended by [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md) and again by [0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md), which also resolves `pulse_migrate`; [0043](0043-the-reveal-function-has-an-owner-of-its-own.md) adds the definer role it does not name |
 | [0002](0002-ci-gates-ship-tolerant.md) | CI gates ship tolerant and name the ticket that enforces them | Accepted, recorded retroactively |
 | [0003](0003-deferred-authz-seams-fail-closed.md) | Deferred authorization seams fail closed by raising | Accepted |
 | [0004](0004-agent-roster-mechanism.md) | Agent roster mechanism: hooks, computed gating, session-scoped warmth | Accepted |
@@ -64,7 +64,7 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0006](0006-settings-lifetime.md) | Settings are built inside `create_app()` and hung on `app.state` | Accepted |
 | [0007](0007-container-images-pinned-by-tag-and-digest.md) | Container images are pinned by tag and by digest | Accepted |
 | [0008](0008-env-has-two-readers-and-the-database-credential-is-split.md) | `.env` has two readers, and the database credential is split into parts | Accepted — the count amended to three by [0012](0012-the-migration-environment-builds-its-own-superuser-connection.md) |
-| [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md) | A superuser identity is sanctioned for migrations and bootstrap | Accepted |
+| [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md) | A superuser identity is sanctioned for migrations and bootstrap | Accepted — one row of its provisioning table amended by [0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md) |
 | [0010](0010-the-celery-application-is-built-at-import-time.md) | The Celery application is built at import time, at module level | Accepted — answers for Celery the entry-point question [0006](0006-settings-lifetime.md) left open |
 | [0011](0011-ci-validates-the-image-by-running-the-base-compose-file-alone.md) | CI validates the image by running the base Compose file alone | Accepted |
 | [0012](0012-the-migration-environment-builds-its-own-superuser-connection.md) | The migration environment builds its own superuser connection | Accepted — settles the two open rows in [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)'s provisioning table |
@@ -77,7 +77,7 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0019](0019-a-naive-datetime-is-refused-by-the-column-type.md) | A naive datetime is refused by the column type, not by Postgres or a service | Accepted |
 | [0020](0020-a-sections-end-date-is-its-last-day.md) | A section's end date is its last day, inclusive | Accepted |
 | [0021](0021-a-sections-derived-calendar-has-one-writer.md) | A section's derived calendar is NOT NULL and has exactly one writer | Accepted |
-| [0022](0022-identity-bearing-columns-are-marked-by-a-name-prefix.md) | Identity-bearing columns are marked by an `identity_` name prefix | Accepted — follows [0014](0014-lms-owned-columns-are-marked-by-a-name-prefix.md), and takes the name where the two markers meet |
+| [0022](0022-identity-bearing-columns-are-marked-by-a-name-prefix.md) | Identity-bearing columns are marked by an `identity_` name prefix | Accepted — follows [0014](0014-lms-owned-columns-are-marked-by-a-name-prefix.md), and takes the name where the two markers meet; the discovery rule beside it widened in E0-10, the marker itself unchanged |
 | [0023](0023-overlapping-enrollments-are-refused-by-an-exclusion-constraint.md) | Overlapping enrollment windows are refused, by a GiST exclusion constraint | Accepted — settles the choice E0-08's criterion 5 leaves open |
 | [0024](0024-the-person-to-user-link-is-carried-by-person.md) | The person-to-user link is carried by `person`, and is one to one | Accepted — rests on one registered platform per person, stated in the record |
 | [0025](0025-an-assignments-scope-is-one-nullable-foreign-key-per-level.md) | An assignment's scope is one nullable foreign key per containment level | Accepted — settles what SPEC §8's singular `scope_node_id` references |
@@ -92,3 +92,7 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0037](0037-the-mock-platform-is-configured-by-compose-literals.md) | The mock platform is configured by Compose literals, and earns no `.env.example` entry | Accepted — applies the rule in [0008](0008-env-has-two-readers-and-the-database-credential-is-split.md) |
 | [0038](0038-the-mock-platform-ships-in-the-base-compose-file.md) | The mock platform ships in the base Compose file, and is kept out of a deployment by what it holds | Accepted |
 | [0039](0039-the-two-app-packages-are-typechecked-in-two-runs.md) | The two `app` packages are typechecked in two mypy runs | Accepted |
+| [0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md) | `pulse_migrate` is the bootstrap identity under another name, and is not created | Accepted — amends one row of [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)'s provisioning table and resolves the third role named in [0001](0001-identity-separation-by-database-role.md), its own role count amended by [0043](0043-the-reveal-function-has-an-owner-of-its-own.md) |
+| [0041](0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md) | A read view ships as an immutable, versioned `.sql` file that a migration executes | Accepted — follows [0032](0032-a-prompt-file-is-immutable-once-a-classification-cites-it.md); the layout is a decision this record holds and the suite does not enforce, measured and said so |
+| [0042](0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md) | The Care pool has a credential of its own, and opens on first use | Accepted — answers for the Care queue the entry-point question [0006](0006-settings-lifetime.md) left open; one rejected alternative reversed by E0-10, so `api` alone holds the credential and `CARE_DATABASE_URL` is optional |
+| [0043](0043-the-reveal-function-has-an-owner-of-its-own.md) | The reveal function has an owner of its own, holding three grants | Accepted — amends the role count in [0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md); the views deliberately keep the migration identity, and the record says what that leaves open |

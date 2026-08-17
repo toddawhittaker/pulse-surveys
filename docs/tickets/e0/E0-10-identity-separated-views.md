@@ -87,6 +87,20 @@ the cleanest resolution, and worth stating in the pull request either way.
   nor a stale assignment is enough on its own. Selecting a pool from "the
   actor's role" is not sufficient: a person may hold more than one assignment,
   and that phrasing leaves the answer ambiguous exactly where it matters most.
+
+  **The Care service module is `backend/app/services/safety.py`**, which SPEC
+  §13 already names for the Care queue. Do not add a module for this.
+
+  **The assignment check lives in both places, and that is the decision.** An
+  earlier version of this ticket put it only in the service while one criterion
+  below required it to hold "even if the Care service is somehow reached" —
+  which is only true if the function itself checks. So: the `SECURITY DEFINER`
+  function **takes the acting person as an argument and verifies a live `CARE`
+  assignment itself**, and `services/safety.py` verifies independently before
+  calling it. Neither alone; a caller reaching the function by any other route
+  still gets nothing, and a routing mistake inside the service still gets
+  nothing. Say in the pull request what each half catches that the other does
+  not.
 - A caller can never choose its own pool, and no general-purpose helper hands
   out a `pulse_care` session.
 - **The Care path must remain open, and this ticket proves it.** Care
@@ -104,9 +118,19 @@ the cleanest resolution, and worth stating in the pull request either way.
   guarantee plainly rather than implying the stronger one.
 - Query helpers alongside the views so callers get a typed way in that does not
   tempt them to hand-write a join.
-- The first `@pytest.mark.invariant` tests, asserting §4.1 items reachable this
-  early: no student-visible path exposes another section, and no instructor read
-  path can reach an identity column.
+- `@pytest.mark.invariant` tests for the §4.1 item this ticket can actually
+  reach: **no instructor read path can reach an identity column**, asserted at
+  every door the application role has — a direct `SELECT`, a join from a read
+  view back to `user_identity`, and `EXECUTE` on the reveal function.
+
+  **§4.1 item 1, "no student-visible path exposes another section", is not
+  deliverable here and is deferred on the record.** There is no student-visible
+  path in this ticket: no router, no service, and the scoping that would make
+  "another section" mean anything is E0-11's. Asserting that a view carries a
+  section key would test a mechanism while nothing scopes anything, which is the
+  green-for-an-unrelated-reason shape in `docs/MISTAKES.md` entry 3. **E2 owns
+  it**, with the survey read path it builds; E0-11 owns the scoping it rests on.
+  Do not let this ticket's pull request claim both §4.1 items.
 - A structural test that enumerates identity columns via E0-08's marker
   convention and asserts none appears in any view in `views_sql/` — so a view
   added later that leaks identity fails CI without anyone remembering to check.
@@ -161,7 +185,7 @@ Both are load-bearing from this ticket onward.
   flag, so E10 adds a value rather than redesigning the table. Leave the column
   or leave room for it, and say which in the pull request.
 
-## Views resolve names at run time, so qualify them
+## Your function resolves names at run time, so qualify it
 
 E0-09's supervision trigger shipped naming `role_assignment` unqualified, and
 that was a HIGH: **Postgres searches the temp schema first for relations even
@@ -172,9 +196,29 @@ Reproduced as a `NOSUPERUSER` role with no `CREATE` on `public`. It moved
 `'role_assignment'::regclass` too, so the advisory lock stopped serialising
 anything.
 
-**Your views are the next late-bound SQL in the tree, and this ticket is what
-grants the DML that makes the class reachable at all.** Two rules, and the
-second is the one that surprises people:
+**An earlier version of this section said your views are the next late-bound SQL
+in the tree. That is wrong, and it was measured wrong rather than argued wrong.**
+A view is stored as a parse tree of oids resolved at `CREATE VIEW`, so it is
+early-bound, like the constraints ADR 0027 measured and unlike a `plpgsql` body:
+
+```
+                       baseline       after CREATE TEMP TABLE shadowing it
+plpgsql function body  from public    from pg_temp    <- the hijack
+view                   from public    from public     <- unaffected
+pg_depend for the view: public.<table>                <- oid fixed at creation
+```
+
+So the SQL this ticket adds that *is* late-bound is the `SECURITY DEFINER`
+function, and it is the one the rules below actually protect. **This ticket is
+what grants the DML that makes the class reachable at all**, which is why the
+rules land here rather than later.
+
+The rules still apply to your views, as hygiene and because a later function
+that reads a view inherits that view's text into its own plan — but understand
+which half is a guard and which is a habit, because a test that shadows a
+relation and asserts a *view* is unchanged is a test that cannot fail, and this
+is the ticket that exists to stop that shape shipping. Two rules, and the second
+is the one that surprises people:
 
 - **Schema-qualify every relation** a view or function names — `public.user`,
   not `user`. This is what actually carries the guard.
@@ -186,22 +230,35 @@ second is the one that surprises people:
 Ship both. The qualification survives someone dropping the `SET`; the `SET`
 survives someone adding an unqualified reference. E0-09's
 `tests/integration/test_trigger_resists_a_shadowed_table.py` is the shape to
-copy, including the part that proves the hijack is live rather than assuming it.
+copy, including the part that proves the hijack is live rather than assuming it
+— and point it at **your `SECURITY DEFINER` function**, which is where a shadow
+can still change an answer.
 
 Constraints are safe — they resolve at DDL time, verified by shadowing
 `role_assignment`, `course` and `person` and watching five rules across three
-tickets still refuse their rows. It is functions and views that bind late.
+tickets still refuse their rows. Views are safe for the same reason, measured
+above. **It is functions that bind late.**
 
 ## Acceptance criteria
 
 - [ ] **Every relation named in a view or function is schema-qualified, and
-      every such function sets a `search_path` naming `pg_temp` last.** Asserted
-      out of the catalog, not by reading the migration, and with a test that a
-      shadowed relation does not change what a view returns.
+      every such function sets a `search_path` naming `pg_temp` last.**
+      Qualification is asserted over the `views_sql/` source files and over
+      `pg_proc.prosrc`, **not** over `pg_get_viewdef`, which regenerates names
+      against the asking session's `search_path` and so measures the deparser
+      rather than the stored definition.
+- [ ] **A shadowed relation does not change what the `SECURITY DEFINER` function
+      returns**, proved the way E0-09 proved it: stand the shadow up as a
+      non-superuser role and show the hijack is live before asserting it fails.
+      Point this at the function, not at a view — a view is early-bound, so the
+      view form of this test passes against unqualified SQL and asserts nothing.
 - [ ] **The marker sweep reaches every table that can hold identity**, by
-      iterating the foreign-key walk to a fixed point rather than one hop. A test
-      asserts `threat_case` and `answer` are in the swept set, since both are
-      reachable only at two hops and `threat_case` is the Care queue.
+      iterating the foreign-key walk to a fixed point rather than one hop.
+      `threat_case` and `answer` are the tables this was written about, and
+      **neither exists yet** — they arrive in E10 and E2 — so assert the
+      property instead of those two names: plant a chain at least **three** links
+      from a person table and show it is swept. Three, not two, because a walk
+      repaired by hard-coding a second hop passes a two-link test.
 - [ ] **An identity column whose name contains neither "name" nor "email" is
       still caught.** Decide how — a declared list on the model, a type, a
       `Column.info` flag carried into the database, or a widened fragment set —
@@ -226,21 +283,27 @@ tickets still refuse their rows. It is functions and views that bind late.
       audit row, so the two cannot come apart.
 - [ ] `pulse_care` cannot `SELECT` from `user_identity` directly — only through
       the function.
-- [ ] Requesting a `pulse_care` session from outside the Care service module
-      fails. A test asserts that a reporting-path caller cannot obtain one even
-      when the acting person also holds a `CARE` assignment. **This is the
-      two-hat case and it is expected in production** — a Care staffer who also
-      teaches — so it is a required test, not a hypothetical one. Their
-      instructor requests must run on `pulse_app` with no path to identity.
-- [ ] A person with no live `CARE` assignment cannot reach identity through the
-      function even if the Care service is somehow reached — the assignment
-      check and the pool binding are independent.
+- [ ] Requesting a `pulse_care` session from outside `services/safety.py` fails.
+      A test asserts that a reporting-path caller cannot obtain one even when the
+      acting person also holds a `CARE` assignment. **This is the two-hat case
+      and it is expected in production** — a Care staffer who also teaches — so
+      it is a required test, not a hypothetical one. Their instructor requests
+      must run on `pulse_app` with no path to identity.
+- [ ] **The function refuses an actor with no live `CARE` assignment, on its
+      own.** Asserted against the database directly, with no service involved,
+      because that is the half that has to hold when the service is bypassed.
+      The service's own check is asserted separately, so a test passing does not
+      depend on which of the two refused — where both can refuse, a behavioural
+      test cannot say which one did (`docs/MISTAKES.md` entry 3).
 - [ ] Neither runtime role owns any table, and neither is a superuser. A test
       asserts both, since either would silently void every grant above.
 - [ ] The structural test enumerates identity columns and finds none in any
       view. Adding an identity column to a view makes it fail; verify by hand,
       then revert.
-- [ ] At least two `invariant`-marked tests exist and run.
+- [ ] The §4.1 "no instructor read path reaches identity" item is
+      `invariant`-marked at each of its three doors. (E0-09 already landed five
+      `invariant`-marked tests, so "at least two exist" — this ticket's original
+      wording — was true before it started and asserted nothing.)
 - [ ] CI fails if an invariant test is skipped or xfailed — verify by
       temporarily marking one `skip` and watching the pipeline go red, then
       revert.

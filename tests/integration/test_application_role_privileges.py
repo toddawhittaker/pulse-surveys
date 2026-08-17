@@ -21,11 +21,29 @@ roles, and the one the application uses cannot create a table.
 "Runtime roles must not own tables and must not be superuser" — and ADR 0009
 leaves that half standing while sanctioning the superuser for migrations.
 
-**Not marked `invariant`, deliberately.** E0-04 says the invariant checker keeps
-`--allow-empty` "until E0-10 adds the first §4.1 invariant", so marking anything
-here would make that sentence false and would change what the CI gate reports.
-These are preconditions for the §4.1 invariants rather than instances of them:
-§4.1 is about what a reader can see, and this is about what a role can do.
+**Not marked `invariant`, deliberately**, and the reason has changed with E0-10.
+It used to be that marking anything here would have made E0-04's sentence about
+the checker keeping `--allow-empty` false; that tolerance is gone — E0-10 removed
+the flag from CI and the Makefile, and `tests/unit/test_invariant_gate_is_strict.py`
+now holds it removed. What stands is the substantive half: these are
+preconditions for the §4.1 invariants rather than instances of them. §4.1 is
+about what a reader can see, and this is about what a role can do. The §4.1
+assertions themselves are `invariant`-marked in two modules.
+`tests/integration/test_identity_grants.py` holds one at each door the
+application role has — a direct `SELECT` on `user_identity`, a join from a read
+view back to it, and `EXECUTE` on the reveal function. And
+`tests/integration/test_identity_column_marker.py` holds
+`test_no_view_reads_a_column_the_identity_marker_names`, marked in the same round
+as this paragraph was written, because a view is read with its *owner's*
+privileges rather than its reader's: a later view that selects an identity column
+puts a name on an instructor screen with every grant in this scheme still intact,
+and all three of the doors above stay shut while it happens.
+
+**The role this connects as is `pulse_app` from E0-10 onward**, not the
+`pulse_test_app` E0-04 invented: every grant in the schema belongs to that name,
+so a fixture connecting as another one holds nothing and could not tell a missing
+grant from a present one. `tests/conftest.py` carries the reasoning beside the
+constant.
 """
 
 from typing import Any

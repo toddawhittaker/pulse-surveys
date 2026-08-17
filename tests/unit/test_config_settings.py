@@ -24,6 +24,17 @@ nothing checked, so deleting it left the suite green.
     startup. Survey windows are timezone-bound (SPEC §3.1 — "opens Friday 18:00
     … in the institution timezone"), so a typo that is accepted opens the window
     at the wrong hour rather than failing where it was made.
+
+E0-10 brings the Care connection here, and it asks a question neither of those
+does: whether a variable may be *absent from some processes and not others*.
+`Settings` is constructed identically in `api`, `worker` and `beat`, so a
+required `CARE_DATABASE_URL` puts the one credential that can re-identify a
+student into all three — which is the finding on pull request #29, `worker`
+being the process that ships student comment text to a third-party model
+provider. The field is therefore optional, a blank value reads as absent because
+blanking is how `docker-compose.yml` withholds it, and both halves are asserted
+below along with the half that stops "optional" being reached by way of a field
+that is always `None`. ADR 0042 carries the decision and the reversal behind it.
 """
 
 import contextlib
@@ -102,10 +113,31 @@ N_THRESHOLD_FIELD = "n_threshold_default"
 # a `noqa` would have been a suppression to review on every future read.
 FAKE_DATABASE_CREDENTIAL = "fake-db-pw-Kq7ZrXb9Ld4MnPtVw"
 FAKE_REDIS_CREDENTIAL = "fake-redis-pw-Jh3TgYc5Rf8QsZm"
+FAKE_CARE_CREDENTIAL = "fake-care-pw-Wd2NbXs7Vk5RtGmZ"
 
+# The password each of those URLs carries, keyed by the variable it arrives in.
+# **The two mappings below have to stay in step**, and nothing about writing them
+# makes that happen: `CARE_DATABASE_URL` sat in `CREDENTIAL_BEARING_URLS` alone
+# for as long as it took someone to notice that every rule driven by it — seven
+# serialisation surfaces and two startup-error surfaces — was searching for two
+# passwords out of three. The interlock at the end of this section is what holds
+# them together now, so an entry added to one mapping and not the other is a red
+# test rather than a rule that quietly covers less than it says.
+CREDENTIALS_IN_URLS = {
+    "DATABASE_URL": FAKE_DATABASE_CREDENTIAL,
+    "REDIS_URL": FAKE_REDIS_CREDENTIAL,
+    "CARE_DATABASE_URL": FAKE_CARE_CREDENTIAL,
+}
+
+# The Care connection joined these on E0-10. It carries a password in exactly the
+# position the other two do, and it is the one credential in the cluster that can
+# execute the audited reveal (SPEC §6.2, ADR 0042), so a settings object that
+# hands it to a structured logger puts a route to any student's name in the log
+# aggregator.
 CREDENTIAL_BEARING_URLS = {
     "DATABASE_URL": f"postgresql+psycopg://pulse:{FAKE_DATABASE_CREDENTIAL}@db:5432/pulse",
     "REDIS_URL": f"redis://:{FAKE_REDIS_CREDENTIAL}@redis:6379/0",
+    "CARE_DATABASE_URL": f"postgresql+psycopg://pulse_care:{FAKE_CARE_CREDENTIAL}@db:5432/pulse",
 }
 
 # Length of the contiguous run of a password that counts as leaked. Checking for
@@ -119,6 +151,19 @@ LEAK_FRAGMENT_LENGTH = 8
 # and kept here so it is cheap to change.
 DATABASE_URL_FIELD = "database_url"
 REDIS_URL_FIELD = "redis_url"
+CARE_DATABASE_URL_FIELD = "care_database_url"
+
+# The Care connection, and the one variable on this surface that is optional for
+# a reason none of `DEFAULTED_VARIABLES` shares. It is not that the value is
+# unimportant or that the spec supplies one: it is that only one of the three
+# processes constructing `Settings` may hold it at all.
+CARE_DATABASE_URL_VARIABLE = "CARE_DATABASE_URL"
+
+# The three ways a process ends up without it: never set, blanked, and blanked by
+# something that left a space behind. The second is the one that ships —
+# `docker-compose.yml` withholds this credential by setting it to the empty
+# string, because `env_file: - .env` has already delivered the real one.
+WITHHELD_CARE_DATABASE_URLS = (None, "", "   ")
 
 # The institution timezone, and two values no IANA database resolves. The first
 # is the realistic typo: a space where the IANA name has an underscore, which is
@@ -151,11 +196,17 @@ def leaked_fragments(text: str, secret: str, size: int = LEAK_FRAGMENT_LENGTH) -
 
 
 def assert_no_credential_in(text: str, where: str) -> None:
-    """Neither fake password may appear, in fragments, anywhere in `text`."""
-    for label, secret in (
-        ("DATABASE_URL password", FAKE_DATABASE_CREDENTIAL),
-        ("REDIS_URL password", FAKE_REDIS_CREDENTIAL),
-    ):
+    """No fake password may appear, in fragments, anywhere in `text`.
+
+    Driven off `CREDENTIALS_IN_URLS` rather than a list written out here, so
+    that a URL added to the configuration surface cannot be set by the tests
+    without also being searched for. That was not always true: `CARE_DATABASE_URL`
+    was absent from this search for the whole of E0-10, which left every rule
+    below covering two of the three passwords while reading as though it covered
+    the surface.
+    """
+    for variable, secret in sorted(CREDENTIALS_IN_URLS.items()):
+        label = f"{variable} password"
         fragments = leaked_fragments(text, secret)
         assert not fragments, (
             f"The {label} leaked into {where}: {fragments}. A configuration error is "
@@ -350,6 +401,59 @@ def test_defaulted_variable_is_not_required(
     assert settings is not None
 
 
+@pytest.mark.parametrize("withheld", WITHHELD_CARE_DATABASE_URLS)
+def test_care_database_url_is_optional_and_a_blank_value_reads_as_absent(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    withheld: str | None,
+) -> None:
+    """`Settings` builds in a process that was deliberately not given the Care URL.
+
+    A named test rather than a row in `DEFAULTED_VARIABLES`, because that tuple
+    groups variables whose optionality has a spec-given reason — a default the
+    spec supplies, or a value §11 has not settled — and this one is optional for
+    a reason of a different kind, which is worth the runner printing rather than
+    a set comparison failing (`docs/MISTAKES.md` entry 19).
+
+    The reason: `Settings` is constructed identically in `api`, `worker` and
+    `beat`, so a required field forces the one credential that can re-identify a
+    student into all three. That was the state until pull request #29, and it is
+    the finding — `worker` is the process that ships student comment text to a
+    third-party model provider, and the credential it held opens the only
+    connection in the cluster that can execute `public.reveal_student_identity`.
+    ADR 0042 rejected making this optional and then reversed itself, so the
+    optionality here is a decision on the record and not a default that drifted.
+
+    **Asserted as `None`, not as "no exception".** The empty string is the
+    spelling `docker-compose.yml` withholds with — `env_file: - .env` has already
+    delivered the real value by the time a service's own `environment:` block
+    applies, so blanking is what removes it — and a `SecretStr('')` also builds
+    successfully. That would leave `worker` and `beat` looking configured, with
+    the refusal in `app.services.safety` written against absence and reached one
+    layer further down, in the message it exists to replace.
+    """
+    if withheld is None:
+        monkeypatch.delenv(CARE_DATABASE_URL_VARIABLE, raising=False)
+    else:
+        monkeypatch.setenv(CARE_DATABASE_URL_VARIABLE, withheld)
+
+    settings = load_settings_class()()
+
+    assert hasattr(settings, CARE_DATABASE_URL_FIELD), (
+        f"Settings has no `{CARE_DATABASE_URL_FIELD}` attribute for "
+        f"{CARE_DATABASE_URL_VARIABLE}. ADR 0042 gives the Care queue a connection of its own, "
+        "and `app.services.safety` is the one module that reads it."
+    )
+    configured = getattr(settings, CARE_DATABASE_URL_FIELD)
+    assert configured is None, (
+        f"`settings.{CARE_DATABASE_URL_FIELD}` is {configured!r} for a withheld value of "
+        f"{withheld!r}. Compose withholds this credential by blanking it, so a blank has to "
+        "arrive as absent — otherwise `worker` and `beat` carry a value that passes every "
+        "check until something tries to connect with it, and the refusal that names "
+        f"{CARE_DATABASE_URL_VARIABLE} never fires."
+    )
+
+
 def test_n_threshold_default_is_coerced_from_the_environment_string(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -471,6 +575,7 @@ def revealed(value: object) -> str:
     [
         (DATABASE_URL_FIELD, FAKE_DATABASE_CREDENTIAL),
         (REDIS_URL_FIELD, FAKE_REDIS_CREDENTIAL),
+        (CARE_DATABASE_URL_FIELD, FAKE_CARE_CREDENTIAL),
     ],
 )
 def test_credential_bearing_url_is_still_readable_by_the_application(
@@ -486,6 +591,13 @@ def test_credential_bearing_url_is_still_readable_by_the_application(
     permanently redacted string, would satisfy that on its own. E0-04 opens a
     database connection with this value and E0-03 a broker connection, so it has
     to survive intact.
+
+    The Care row carries a second reason of its own, which is why it is here as
+    well as beside the optionality test below. That field became optional on
+    E0-10 so that `worker` and `beat` could be given nothing, and "optional"
+    reached by way of a field that is always `None` would close the §6.2 Care
+    path in every process including the one that serves it — the outcome E0-10
+    calls "a requirement, not an oversight".
     """
     settings = build_settings_holding_credentials(monkeypatch)
 
@@ -494,6 +606,48 @@ def test_credential_bearing_url_is_still_readable_by_the_application(
         f"`settings.{field_name}` no longer carries the password it was configured "
         "with. Hiding a credential from serialisation must not hide it from the "
         "code that connects with it."
+    )
+
+
+def test_every_credential_bearing_url_is_searched_for_its_password() -> None:
+    """The two mappings above cannot drift, and this is what stops them.
+
+    Every rule in this section is driven by a pair: `CREDENTIAL_BEARING_URLS`
+    decides which variables the tests set, and `CREDENTIALS_IN_URLS` decides
+    which passwords `assert_no_credential_in` then looks for. Adding a URL to the
+    first and not the second widens what is configured without widening what is
+    checked, and the result is a green suite reporting on a surface it has
+    stopped covering — which is what happened: the Care connection was set by
+    every test in this section for the whole of E0-10, in the same position as
+    the other two, and searched for by none of them.
+
+    That is not `docs/MISTAKES.md` entry 3 — the assertions ran and compared what
+    they said they compared — but it has the same consequence, and it is entry
+    19's shape: two copies of one fact, both inside the blast radius of a single
+    edit. The fix is an interlock rather than a comment asking people to
+    remember.
+
+    The second assertion is what makes the first worth anything. Equal key sets
+    with a password that does not appear in its own URL would leave the search
+    looking for a string the configuration never contained, which is a search
+    that can never fail.
+    """
+    assert set(CREDENTIAL_BEARING_URLS) == set(CREDENTIALS_IN_URLS), (
+        "CREDENTIAL_BEARING_URLS and CREDENTIALS_IN_URLS name different variables: "
+        f"{sorted(set(CREDENTIAL_BEARING_URLS) ^ set(CREDENTIALS_IN_URLS))}. Every leak rule "
+        "in this module sets the first and searches for the second, so a variable in one and "
+        "not the other is configured and unchecked, or checked and never configured."
+    )
+
+    unsearchable = {
+        variable: url
+        for variable, url in CREDENTIAL_BEARING_URLS.items()
+        if CREDENTIALS_IN_URLS[variable] not in url
+    }
+    assert not unsearchable, (
+        f"These URLs do not contain the password this module searches them for: "
+        f"{sorted(unsearchable)}. The leak assertions would then be looking for a string that "
+        "was never configured, and no serialisation could ever fail them."
     )
 
 

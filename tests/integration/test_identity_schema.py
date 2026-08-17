@@ -104,15 +104,39 @@ LMS_USER_ID_COLUMNS = ("lms_user_id", "lms_sub", "lms_id", "lms_subject", "sub",
 LMS_USER_ID = "sub-10000001"
 OTHER_LMS_USER_ID = "sub-10000002"
 
-# Name and email spellings, as fragments of a column name. Criterion 3 is about
-# "name or email", and these are the two words it uses; a spelling that contains
-# neither — `sortable`, `sis_login`, `given` on its own — is not caught, and this
-# file does not claim otherwise. `test_identity_column_marker.py` sweeps with the
-# same two fragments and carries its own copy: a test module importing a sibling
-# test module works only because of where pytest puts `tests/` on `sys.path`, and
-# a collection error is not a failing test (`tests/conftest.py` says the same of
-# itself). Change one, look at the other.
-IDENTITY_NAME_FRAGMENTS = ("name", "email")
+# How a column name is recognised as holding a person. E0-08's criterion 3 is
+# about "name or email" and the tests below keep that wording, but the tuple is
+# **widened by E0-10**, whose fourth criterion is that an identity column
+# containing neither word is still caught — so `sortable` and `given`, which the
+# older version of this comment named as things it could not see, are now in it.
+# The widened set is a superset, so it only makes the assertions below stricter;
+# on today's schema it finds nothing the two original fragments did not, which
+# dispute E0-10-01 measured rather than assumed.
+#
+# **There are three copies of this tuple in `tests/`**: here,
+# `test_identity_column_marker.py` — which is where the convention is defined and
+# where its blind spots are written down — and `test_role_assignment_graph.py`.
+# They are copies deliberately: a test module importing a sibling test module
+# works only because of where pytest puts `tests/` on `sys.path`, and a collection
+# error is not a failing test (`tests/conftest.py` says the same of itself).
+# Change one, change all three. `login_id` and never a bare `login`, which would
+# match `role_assignment.permits_web_login` and turn two other modules red.
+IDENTITY_NAME_FRAGMENTS = (
+    "name",
+    "email",
+    "login_id",
+    "picture",
+    "sourcedid",
+    "phone",
+    "sortable",
+    "given",
+    "family",
+    "surname",
+    "address",
+    "photo",
+    "avatar",
+    "username",
+)
 
 # The enrollment window. **This file's choice**, and a fragment list rather than
 # a candidate list because the ticket says only "an enrollment window (start and
@@ -603,7 +627,8 @@ def seed_enrollment(
 
 
 def identity_spelled(names: Any) -> list[str]:
-    """Those of `names` that read as a person's name or email address."""
+    """Those of `names` that read as a person's identity — a name, an email, or one of
+    the other spellings E0-10 widened `IDENTITY_NAME_FRAGMENTS` to cover."""
     return sorted(name for name in names if any(f in name.lower() for f in IDENTITY_NAME_FRAGMENTS))
 
 

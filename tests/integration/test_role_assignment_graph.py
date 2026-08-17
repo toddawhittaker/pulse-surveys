@@ -43,7 +43,14 @@ quietly pick between the two designs.
 conftest.py`.** A test module importing the conftest module by name works only
 because of where pytest puts `tests/` on `sys.path`, and a collection error is
 not a failing test — `test_identity_schema.py` copies its constants for the same
-reason. The copies are three lines each and are marked where they sit.
+reason. The copies are marked where they sit.
+
+**One of those copies is `IDENTITY_NAME_FRAGMENTS`, and it is one of three in
+`tests/`** — here, `test_identity_column_marker.py` (where the convention is
+defined and its blind spots are written down) and `test_identity_schema.py`. E0-10
+widened all three together; dispute E0-10-01 found the comment in the first of
+them claiming there were two, which is how a fourth copy gets missed. Change one,
+change all three.
 """
 
 from typing import Any
@@ -106,11 +113,34 @@ DOORS_BY_ROLE = {
     "ADMIN": {WEB_DOOR},
 }
 
-# Name and email spellings, as fragments of a column name, and the marker that
-# has to be on one. Both are copies of the constants in
+# How a column name is recognised as holding a person, and the marker that has to
+# be on one. All three are copies of the constants in
 # `tests/integration/test_identity_column_marker.py`, deliberately — see the
-# module docstring. Change one, look at the other.
-IDENTITY_NAME_FRAGMENTS = ("name", "email")
+# module docstring. **There are three copies of the fragment tuple in `tests/`**:
+# there, here, and in `test_identity_schema.py`. Change one, change all three.
+#
+# **Widened by E0-10**, whose fourth criterion is that an identity column named
+# neither "name" nor "email" is still caught. `login_id` and never a bare
+# `login`, which is measured rather than chosen: `login` matches
+# `role_assignment.permits_web_login` on the very table this file sweeps — a
+# boolean about which doors a role opens (ADR 0026), carrying no identity — and
+# would turn the sweep below red over it. Dispute E0-10-01 ran both.
+IDENTITY_NAME_FRAGMENTS = (
+    "name",
+    "email",
+    "login_id",
+    "picture",
+    "sourcedid",
+    "phone",
+    "sortable",
+    "given",
+    "family",
+    "surname",
+    "address",
+    "photo",
+    "avatar",
+    "username",
+)
 MARKER_TOKEN = "identity"  # noqa: S105 — the marker convention's token, not a credential
 MARKER_PREFIXES = ("identity_", "pii_")
 
@@ -1522,7 +1552,8 @@ def test_the_assignment_tables_carry_no_unmarked_identity_column(migrated_engine
         and (table, column["name"]) not in marked
     )
     assert not unmarked, (
-        f"{unmarked} read as a person's name or email address and carry no identity marker. ADR "
+        f"{unmarked} are named as a person's identity — one of "
+        f"{list(IDENTITY_NAME_FRAGMENTS)} — and carry no identity marker. ADR "
         "0022: E0-10 builds its views and its grants from the marked enumeration and the §4.1 "
         "invariant suite asserts against it, so a column missing from it is one those two believe "
         "is safe to expose — and `role_assignment` is joined by every leadership read path there "

@@ -117,8 +117,18 @@ include = ["app*"]
 # prompt breaks the scheme, the right outcome is a red test and an argument
 # about ADR 0032 — not a file that is absent from every container while
 # `pyproject.toml` looks entirely correct.
+#
+# The second entry is E0-10's, and it is the same rule for the same reason. The
+# `views_sql/` scripts are what `alembic upgrade head` executes to create the
+# identity-separated read views, the Care reveal function and the grants that
+# make them a guarantee (SPEC §8, ADR 0041). A wheel without them installs an
+# application whose migrations fail on a missing file — in a container, at
+# deploy time, having passed every gate on a machine where the source tree was
+# still there to read from. Same glob, chosen the same way: it descends, and it
+# fixes no name beyond the extension.
 [tool.setuptools.package-data]
 "app.ai" = ["prompts/**/*"]
+"app.views_sql" = ["**/*.sql"]
 
 [tool.setuptools.dynamic]
 version = { attr = "app.__version__" }

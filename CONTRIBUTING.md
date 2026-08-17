@@ -158,6 +158,33 @@ xfailing, or deleting it; if the test is wrong, fix it in its own commit and say
 why in the pull request. And an eval floor is never lowered to get a gate to
 pass — floors move only in a pull request whose purpose is moving them.
 
+## Read paths go through `views_sql/`
+
+Instructor and leadership screens read from the views in
+`backend/app/views_sql/`, never from the base tables. That is not a style rule:
+the connection those screens run on holds no privilege of any kind on
+`user_identity`, so a hand-written join that needs a name is refused by Postgres
+rather than by a reviewer (SPEC §8,
+[ADR 0001](docs/adr/0001-identity-separation-by-database-role.md)). The views are
+what make that survivable — they are read with their *owner's* privileges, so
+they can expose section membership and counts from tables the reader cannot
+touch. `backend/app/views_sql/queries.py` holds a typed helper per view; reach
+for one of those before writing SQL.
+
+**Adding a view means adding an invariant test.** A view runs with its owner's
+privileges, so the grant model does not protect it: a view that reads an identity
+column hands that column to everyone who may read the view. Ship the SQL as a new
+versioned file in `views_sql/`
+([ADR 0041](docs/adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)
+— never edit one a migration already executes), schema-qualify every relation it
+names, and add a `@pytest.mark.invariant` test asserting the §4.1 rule the new
+view is subject to. The structural sweep in
+`tests/integration/test_identity_column_marker.py` already fails on a view that
+reads a marked identity column, including through an alias, so that much you get
+for free; what it cannot see is a §4.1 rule nobody has stated yet. From E0-10 the
+invariant suite runs with no `--allow-empty`, so a skipped or uncollected
+invariant is a build failure rather than a green checkmark.
+
 ## Architecture decision records
 
 When a construction decision is not answered by [`docs/SPEC.md`](docs/SPEC.md)

@@ -35,7 +35,41 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 19**
+**Caught: 24**
+
+*(The twenty-fourth, and it caught an assertion in a brief rather than in a file.
+The tests for E0-10's downgrade were specified down to the statement, and one of
+them — `has_database_privilege('pulse_app', current_database(), 'CONNECT')` is
+still true after the downgrade — cannot fail: Postgres grants `CONNECT` to
+`PUBLIC` on every new database, so that call answers true for every role in the
+cluster, with the grant revoked, with the role holding nothing at all, and on a
+database nobody has migrated. The test asserts the entry in `datacl` instead,
+which is the thing a `REVOKE` in `downgrade()` would actually remove. This entry
+is also why each of the three downgrade tests reads its baseline at head before
+undoing anything — every assertion after the downgrade is that a set is empty,
+and an empty set is what a database with no grants in it produces — and why
+`only_the_identity_revision_was_undone` exists: `-1` is relative to head, so the
+day a revision lands on top of this one, every one of those emptiness assertions
+is satisfied by a downgrade of something else.)*
+
+*(The twenty-third: the tests for E0-10's Care-credential fix. "`worker` and
+`beat` must not hold `CARE_DATABASE_URL`" is satisfied by a stack that blanks it
+everywhere, which also has no Care queue at all — so this entry is why the
+Compose rule asserts `api` holds a value before it asserts anybody else does
+not, why the absolute rule checks each variable's one permitted owner still
+carries it, why the interpolation rule keeps the walker canary its superuser
+sibling has, and why the engine that refuses an absent credential is also
+asserted to build one when the credential is there. Five guards, all of the same
+shape, none of them ceremony: each names a way the rule beside it passes against
+a system with the feature deleted.)*
+
+*(The twenty-second: repairing the sixth incident below. The replacement sweep
+requires a `CREATE` of the view rather than a mention of it, and this entry is
+why it ships with six must-allow samples — `GRANT`, `REVOKE`, `DROP`,
+`COMMENT ON`, a name in a comment, and a different view whose name begins the
+same way — each of which the old version accepted as evidence that a view was
+defined. It is also why the E0-10 service test ends at `pytest.raises` rather
+than at `assert refused.value is not None`, which cannot fail.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -74,18 +108,33 @@ correct: controls stop a refusal being unrelated to the *row*, and this refusal
 was unrelated to the *constraint*. The implementer found it in its own work and
 declared it.
 
+A sixth, in E0-10, and it is the first one found by running a mutation the test
+itself named. `test_every_read_view_is_created_from_a_sql_file_under_views_sql`
+says what it is built against: "move the `CREATE VIEW` into `op.execute("...")`
+in a revision file and the sweep below has nothing to read while staying green."
+That mutation was performed — `section_roster_v001.sql` deleted, its SQL inlined
+into the revision — and all seven tests in the module stayed green. The test
+searches the combined text of `views_sql/` for the view's *name*, and
+`identity_grants_v001.sql` names both views because it grants on them. So the
+sweep is satisfied by a mention and the assertion it advertises is about a
+definition.
+
 **Root cause.** Asserting an absence. Absence is satisfied by the thing being
 broken in an unrelated way, by a fixture returning nothing, by a parser matching
 nothing. In the third case, by the difference between what a sentence looks like
 in a file and what it is as a string. In the fifth, by a second mechanism in the
 same schema that refuses the same row for its own reasons — "the database said
-no" does not say which part of it said so.
+no" does not say which part of it said so. In the sixth, by a search that matches
+the *name* of the thing rather than the thing, in a directory where the name
+appears for three unrelated reasons.
 
 **Consequence. ** A green suite is read as coverage. The first case would have
 been counted as proof the leak was fixed when it proved nothing about it. The
 fifth would have let a later ticket delete a constraint as redundant, with the
 rule it states surviving only as a side effect of how overlap happens to be
-enforced today.
+enforced today. The sixth leaves a layout decision — where a view's SQL lives —
+recorded in an ADR and enforced by nothing, which is the state the ADR now says
+it is in rather than the state it claimed.
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -93,6 +142,11 @@ say in the message why that guard is not ceremony. A pattern searched against a
 file is a case of this and looks like none: run it against the text you claim it
 catches *and* against the text you claim it allows, and give it a canary — a
 string certainly present — so a search that has gone blind says so.
+
+**A mutation a test names in its own docstring is a claim, not a record.** Run
+it. The sixth case is a test that named the exact edit it exists to catch,
+carefully, in the file — and the edit did not catch it. A named mutation is the
+cheapest one to try and the one least likely to have been tried.
 
 **Where two rules can refuse the same row, a behavioural test cannot tell you
 which one did.** Mutation is what exposes it — delete the constraint and see
@@ -103,34 +157,58 @@ cannot see whether it exists.
 
 ---
 
-## 2. Behaviour shipped with nothing asserting it
-
-**Caught: 17**
-
-**What happened.** Four times. `__repr_args__` was added to keep credentials out
-of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
-validator could be deleted whole with the suite green. "`DATABASE_URL` must never
-point at the superuser" was prose, and repointing it passed all 50 tests and the
-`docker` gate. The two Postgres image digests could be set to different values
-with every gate green.
-
-**Root cause.** Fixing the defect and stopping there. The fix is visible in the
-diff, so it feels done; nothing makes the absence of a guard visible.
-
-**Consequence.** The next person deletes it during an unrelated refactor and
-every gate stays green. For the superuser case, the exact defect the pull request
-existed to fix was reintroducible without any signal.
-
-**Rule.** After fixing something, try to reintroduce it. If the suite stays
-green, you have written a convention, not a guarantee. Prefer asserting the
-*forbidden* state over the permitted one — it keeps working when a legitimate
-second case arrives.
-
----
-
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 15**
+**Caught: 22**
+
+*(The twenty-second: two records left over from the round that measured E0-10's
+"the read and the audit write cannot come apart" false. A test's **name** is a
+record — `test_a_rollback_discards_the_revealed_identity_and_its_audit_row_
+together` was the removed claim, in the one place a reader meets it as a passing
+green line — and this entry is why the rename did not stop at the name. The two
+assertion messages inside it still quoted "a name cannot be obtained without
+leaving a record", and the brief said only to leave the assertions alone; a
+`grep` for the old name then found it recorded once more in
+`docs/tickets/e0/.attempts/E0-10.md`'s mutation table, which is a record of what
+was run and is reported rather than edited. The second: this entry's rule about
+counts is why the corrected sentence in `test_application_role_privileges.py`
+names the three doors instead of counting them, having just gone stale by being
+a count of a set that grew to four.)*
+
+*(The twenty-first: widening E0-10's downgrade revokes. ADR 0043's "the downgrade
+revokes what the drop cannot" describes the definer's two grants and nothing
+else, which is the record that made the gap look covered; it is proposed rather
+than amended here, because the ADRs belong to another session this round. And
+this entry's rule about counts in prose deleted one from the new comment before
+it shipped — "grant eleven privileges" was wrong on the first count and would
+have gone wrong again the day a grant moved, so the sentence names the two files
+instead.)*
+
+*(The twentieth, in the same correction one file over: withholding the Care
+credential from `worker` and `beat` made ADR 0042's own consequence — "nothing
+about the caller's own session can separate them" — false, and this entry is why
+the sweep did not stop at the paragraph the brief named. It reached the ADR
+index, `.env.example`, `README.md`'s "Seven variables have no default" and its
+"a name cannot be obtained without leaving a record", and `config.py`'s "Both
+URLs below", which had been a count of two over three fields since the Care URL
+landed. Four of the six were records nobody had touched.)*
+
+*(The nineteenth: correcting E0-10's "the read and the audit write cannot come
+apart", which a reviewer measured false. This entry is why the sweep went outward
+from the sentence rather than stopping at the three places the review named —
+`grep` for the phrase found a fourth in `docs/tickets/e0/`, cleared the migration
+docstring, and cleared the ADR index. It is also why the prose in the same diff
+was re-read as if somebody else had written it, which found a second false claim
+in `views_sql/queries.py` that no review had reported: `SectionRosterRow` said an
+identity column in the view would be unreachable on this connection, when a view
+is read with its owner's privileges and `pulse_app` would get it.)*
+
+*(The eighteenth: E0-10's fixture change, `TEST_APP_USER` from `pulse_test_app`
+to `pulse_app`. This entry is why the sweep went outward from the constant rather
+than stopping at it — the epic README's "the fix is one line… until it lands, do
+not read a green `application_engine` test as evidence about a grant" was written
+about a state that had just stopped being true, and three test-module docstrings
+described the marker convention this ticket had just widened.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -216,9 +294,102 @@ sentence.
 
 ---
 
+## 2. Behaviour shipped with nothing asserting it
+
+**Caught: 21**
+
+*(The twenty-first, found while closing the twentieth below and not by any
+review of it. `tests/unit/test_config_settings.py` holds a settings object to
+keeping its credentials out of seven serialisation surfaces and two
+startup-error surfaces, and it drives all nine off `CREDENTIAL_BEARING_URLS` —
+which named `DATABASE_URL` and `REDIS_URL`. `CARE_DATABASE_URL` carries a
+password in exactly the same position and had been absent from that mapping
+since it landed, so the masking on the one field that opens a route to a
+student's name was asserted by nothing and could have been dropped with the
+suite green. The widening comes with an interlock, because the mapping that
+says what to configure and the mapping that says what to search for are two
+copies of one fact and drifted apart once already.)*
+
+*(The twentieth: E0-10's fix for the Care credential on `worker` and `beat`. The
+blanking went in, and this entry is why the next step was to put it back rather
+than to call it done — `CARE_DATABASE_URL` restored to the shared anchor renders
+the real password into all three containers under `docker compose config`, and
+all 195 unit tests stay green. The implementer is walled out of `tests/`, so the
+gap is reported rather than closed, which is the honest half of this entry: a fix
+with nothing asserting it is a convention, and saying so is not the same as
+fixing it.)*
+
+**What happened.** Four times. `__repr_args__` was added to keep credentials out
+of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
+validator could be deleted whole with the suite green. "`DATABASE_URL` must never
+point at the superuser" was prose, and repointing it passed all 50 tests and the
+`docker` gate. The two Postgres image digests could be set to different values
+with every gate green.
+
+**Root cause.** Fixing the defect and stopping there. The fix is visible in the
+diff, so it feels done; nothing makes the absence of a guard visible.
+
+**Consequence.** The next person deletes it during an unrelated refactor and
+every gate stays green. For the superuser case, the exact defect the pull request
+existed to fix was reintroducible without any signal.
+
+**Rule.** After fixing something, try to reintroduce it. If the suite stays
+green, you have written a convention, not a guarantee. Prefer asserting the
+*forbidden* state over the permitted one — it keeps working when a legitimate
+second case arrives.
+
+---
+
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 9**
+**Caught: 14**
+
+*(The fourteenth, one round after the thirteenth below and about the same guard.
+The thirteenth ran both halves by hand; this is the test that keeps them run.
+`test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent` would have
+been a single call to `alembic downgrade -1` with a role missing, and a downgrade
+that completes proves nothing on its own — it completes on a cluster where the
+role was never absent, which is what a rename that silently did not happen leaves
+behind. So the bare `REVOKE ALL ON public.role_assignment FROM pulse_care` runs
+first and has to fail with `undefined_object`, on the same database, seconds
+earlier: the control is what turns "the downgrade worked" into "the guard is what
+made it work".)*
+
+*(The thirteenth, and the guard is the `IF EXISTS` around E0-10's downgrade
+revokes. Its comment claims `REVOKE … FROM <role>` is an error rather than a
+no-op when the role is absent, so both halves were run instead of cited: on a
+throwaway cluster at head with all three roles dropped, the bare `REVOKE ALL ON
+public.role_assignment FROM pulse_care` fails with `role "pulse_care" does not
+exist`, and the guarded `alembic downgrade -1` completes and leaves the two
+views, the function, `audit_log` and the enum type all gone rather than stopping
+part-way.)*
+
+*(The twelfth, and the guard is a YAML feature rather than a hook. The fix for
+the Care credential turns on `<<:` merging a mapping *inside* an `environment:`
+block, and on a service's own `environment:` replacing the anchor's wholesale
+rather than adding to it. Both are claims about what Compose does, so both were
+put through `docker compose config` before the comment explaining them was
+written — which is also what showed that `DB_CARE_USER` and `DB_CARE_PASSWORD`
+were still arriving in `worker` and `beat` through `env_file:` after the URL had
+been blanked.)*
+
+*(The eleventh, and the guard is one of this repository's own hooks. Asked to
+make two changes inside `tests/`, the implementer had read
+`.claude/hooks/deny-test-edits.sh` and could have reported "that is denied me"
+from the source. It attempted the smallest of the two edits instead and was
+blocked, which is what turned a claim about a hook into an observation — and it
+also established that the `Edit` branch fires and not only the `Bash` one, which
+reading the two `case` statements does not settle.)*
+
+*(The tenth: E0-10's reveal function. A review found that nothing set its owner,
+so a `SECURITY DEFINER` body was running as the migration superuser, and the
+implementer's own file header cited four controls — static SQL, typed
+parameters, a fixed `search_path`, qualified relations — as bounding it. This
+entry is why the reach was measured instead of argued: a probe function created
+the same way returned all 18 rows of `pg_authid` to a `pulse_care` caller that is
+refused that table one statement later. The same probe, re-owned by the scoped
+role the fix adds, is refused — and so is a body that reads one extra ordinary
+table, which is the fail-closed property the change was made for.)*
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -255,7 +426,43 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 4**
+**Caught: 10**
+
+*(The tenth, one layer up from the eighth below: the *rules* face the hazard in
+more places than the Compose file does. Asked for a test that `worker` and
+`beat` no longer hold `CARE_DATABASE_URL`, this entry is why the answer was not
+one assertion over the base file. The two parts `.env` builds the URL from go in
+the same rule, because a fix that blanked the URL alone reads as complete;
+`docker-compose.override.yml` gets its own rule, because its shared anchor
+reaches all three application services and re-supplying a variable there leaves
+a base-file rule green; and the credential inside another key's value, one hop
+through `.env`, gets a third — that spelling was two separate reviewer findings
+against the superuser pair, and nothing about it is specific to which credential
+is being carried.)*
+
+*(The ninth: E0-10's `downgrade()` revoked the definer's grants on the two tables
+that survive the revision and left `pulse_care`'s `SELECT` on `role_assignment`
+one statement away, inside the block whose own comment states the hazard. This
+entry is why the fix was not that one line: every grant the revision makes was
+listed against the rule the block states, which turned up two more. `USAGE ON
+SCHEMA public` for all three roles is this revision's alone and is now revoked;
+`CONNECT ON DATABASE` is deliberately left, because `scripts/db-init` grants
+`pulse_app` the same privilege before the migration runs and an ACL entry records
+no history, so one `REVOKE` would take the other mechanism's grant with it.)*
+
+*(The eighth: the brief for withholding the Care credential from `worker` and
+`beat` named `CARE_DATABASE_URL`, and this entry is why the next question was
+which other value opens the same door. `env_file: - .env` also hands those two
+`DB_CARE_USER` and `DB_CARE_PASSWORD`, and `DATABASE_URL` supplies the host, the
+port and the database name — so blanking the URL alone would have left the
+credential in the container in three parts, and the fix would have read as
+complete in review. All three are blanked now, on every application service.)*
+
+*(The seventh: E0-10 widened `IDENTITY_NAME_FRAGMENTS`, and this entry is why the
+author went looking for every copy rather than editing the one the dispute named.
+There were three — `test_identity_column_marker.py`, `test_identity_schema.py`,
+`test_role_assignment_graph.py` — and the comment on the first said there were
+two, which is exactly how the third stays behind.)*
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
@@ -312,7 +519,7 @@ prefix yet.
 
 ## 12. A stale build of the thing under test was reused, and the run looked clean
 
-**Caught: 3**
+**Caught: 4**
 
 **What happened.** In E0-05, checking that `alembic check` warns when a generated
 column's expression drifts: edit `app/models/org.py` to change one band edge from
@@ -362,152 +569,71 @@ does this.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 2**
+**Caught: 4**
+
+*(The fourth, and it is the second time this entry has caught a prescription
+about the same tuple. A review of E0-10 found that the Care-session sweep in
+`tests/unit/test_care_session_is_bound_to_the_care_service.py` cannot see
+`Settings.care_database_url`, and prescribed widening `SESSION_FRAGMENTS`. Run
+before being written down, over the 26 modules under `backend/app` and over the
+reviewer's own future module, the widening does close that shape and does not
+close a second one: `defined_here` subtracts **any** assigned name, so
+`care_database_url = settings.care_database_url` — the exact idiom
+`app/services/safety.py` itself uses — masks the attribute read and the sweep
+reports nothing with the widened tuple in place. The prescription was necessary
+and not sufficient, and reading it would not have shown that.)*
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and
 leaves the credential in `errors()`.
 
+A second, in E0-10's objection file, caught by this entry before it was filed.
+The objection proposed a widened identity-column fragment set for the marker
+sweep and wrote out the tuple: `"name", "email", "login", "picture", …`. Run
+against the schema as it stands, `login` matches
+`role_assignment.permits_web_login` — a boolean about which doors a role opens,
+carrying no identity — so the proposed fix would have arrived as a new red test
+in a module nobody had touched. `login_id` adds nothing on today's schema, which
+was measured the same way. The prescription was one word wrong and read
+perfectly.
+
 **Root cause.** The fix was plausible and cheap, so it went into the brief
-without being run.
+without being run. In the second case the tuple was written by thinking of
+claims a roster sync carries, which is the right list to start from and is not
+the same question as "what does this substring match in the schema I have".
 
 **Consequence.** Would have shipped green against the one test that existed,
-leaving the credential one `json.dumps` from any structured logger.
+leaving the credential one `json.dumps` from any structured logger. The second
+would have handed an arbitrator a fix that breaks a passing test, in the file
+whose whole subject is a sweep that fires on the wrong things.
 
 **Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
 property, say the property and let the implementer find the mechanism.
 
 ---
 
-## 15. A property test's generator excluded the case its own docstring named
-
-**Caught: 2**
-
-**What happened.** E0-07's parsing suite carries a property for the definition of
-done's "parsing is total: no exception type that escapes as a 500". Its docstring
-listed the leaks it refuses and put `ValueError` out of `int()` first. It
-generated `st.text(max_size=12)`.
-
-The string that produces that `ValueError` is a start letter, more than four
-thousand digits and a modality suffix: CPython caps integer-from-string
-conversion at `sys.get_int_max_str_digits()`, 4300 by default, and
-`parse_section_code("R" + "9" * 4301 + "WW")` raises `builtins.ValueError`
-rather than the service's own error. Section codes come from the LMS roster feed,
-so it is reachable input, and nothing shortens the value on the way in — a
-`String(16)` column is not enforced in Python, and the derived columns are
-`NOT NULL`, so the parse always runs before any row exists. The suite was green.
-`/security-review` found it.
-
-**Root cause.** The bound on the generator and the claim in the docstring were
-written at different moments and never read against each other. Twelve characters
-is a reasonable size for a section code, which is exactly why it looked like a
-detail rather than a decision: it silently redefined "arbitrary text" as "text
-short enough to be a section code", and the counterexample lives on the other
-side of that line. A property test states its claim in the docstring and its
-scope in the strategy, and only the second one runs.
-
-It is entry 3's family — a test that passed for a reason unrelated to what it
-asserted — but the mechanism is its own and worth naming separately: not an
-absence that something else satisfied, and not a pattern that matched nothing. An
-input space narrowed to where the assertion happens to hold.
-
-**Consequence.** A guarantee about untrusted input, asserted by a test named for
-it, over a space that could not contain the failure. Had it shipped, the first
-malformed roster value of that shape would have been a 500 on the sync, with the
-suite still reporting the case as covered. The repair was not simply a larger
-`max_size` either: `st.text()` will not assemble that string by chance in three
-hundred examples, so widening the bound would have put the counterexample inside
-the declared space and left it just as unreachable — the same defect behind a
-bigger number.
-
-**Rule.** For every property, read the strategy against the docstring and ask
-which named case the generator cannot produce. If the claim is about a boundary —
-a limit in the standard library, a column width, a protocol maximum — generate
-*around that boundary explicitly*, drawing from a band that straddles it, rather
-than trusting a wide range to wander into it. Where a bound stays, say in the
-docstring what it does not reach; a stated bound is a scope, and an unstated one
-is a false claim of totality.
-
----
-
-## 6. Shell expansion inside a commit message
-
-**Caught: 1**
-
-**What happened.** `git commit -m "…$$POSTGRES_USER…"` in double quotes. The
-shell expanded `$$` to its process id.
-
-**Root cause.** Double quotes in the shell expand `$`. The message explained an
-escaped-dollar parser, so it was exactly the text that could not survive it.
-
-**Consequence.** Commit `77620c0` permanently reads `pg_isready -U
-1793726POSTGRES_USER`, in the paragraph explaining the subtlest line in the
-change. History is not force-pushed here, so it cannot be corrected.
-
-**Rule.** Write commit messages through a quoted heredoc (`<<'EOF'`) or
-`git commit -F`. Never `-m` with double quotes when the text contains `$`.
-
----
-
-## 7. A verification window equal to the thing's own debounce
-
-**Caught: 1**
-
-**What happened.** Checking that a drifted database password made the container
-report unhealthy, the poll ran for exactly 60 seconds. Docker needs `retries: 12`
-× `interval: 5s` — 60 seconds of consecutive failures — before it flips.
-
-**Root cause.** Choosing the window from the interval without adding the debounce.
-
-**Consequence.** Nearly reported a working fix as broken. The health log already
-said `password authentication failed`; only the status had not caught up.
-
-**Rule.** When verifying a debounced state change, wait past the debounce and
-read the underlying log as well as the summary status. A negative result inside
-the debounce window is not a result.
-
----
-
-## 14. An enumeration was reported as an impossibility
-
-**Caught: 1**
-
-**What happened.** In E0-06, the guard that refuses a naive datetime has to sit
-on the column type, and the test module's fixture could not seed a decorated
-type. Four implementations were tried and measured — a `TypeDecorator`, a
-`DateTime` subclass, a hybrid of the two, and putting the guard in a service —
-and the objection filed in `docs/disputes/E0-06-01.md` generalised from them:
-"no implementation that satisfies criterion 4 can get past `invented_value`."
-
-That is false. A type subclassing psycopg's `_PGTimeStamp` survives
-`adapt_type`, so the `isinstance` check passes *and* the guard runs, and the
-module passes 18 for 18 with no fixture change. The arbitrator found it by
-reading `adapt_type` and running it — the same method the objection had used for
-its own four options and abandoned at the moment it generalised.
-
-**Root cause.** Treating a search that stopped as a search that finished. Each
-of the four options was measured honestly; the sentence joining them was not
-measured at all, because there was nothing to run — which is exactly why it went
-in unchecked while the four claims around it were verified.
-
-**Consequence.** A false universal in a durable record. The dispute file is read
-by a fresh arbitrator with no context, and had it been believed, the ruling would
-have rested on it. The correct position was available and narrower — the only
-implementation the fixture admitted was built on a private, driver-specific class
-— and it won the dispute on its own. The overclaim added nothing and cost the
-record a correction.
-
-**Rule.** Do not write "no X can" from a list of the X you tried. Say what you
-tried and what it did, and let the boundary of the search be visible: "four
-shapes, all measured, all fail" is honest and is usually enough to decide. If a
-universal is genuinely load-bearing, it needs an argument from the mechanism —
-here, from what `adapt_type` does — not a longer list.
-
----
-
 ## 16. A mutation harness reported kills it had not made
 
-**Caught: 1**
+**Caught: 3**
+
+*(The third: measuring what E0-10's `downgrade()` leaves behind. The thing being
+changed lives in the database rather than in a file, so the baseline is the whole
+ACL dump — `pg_class`, `pg_namespace`, `pg_database`, `pg_proc` — taken at head
+before the migration was touched, and the fixed downgrade-and-upgrade round trip
+is asserted against it by `diff` rather than by reading a `\dp` twice and
+agreeing with it. The control that the old text really did leave the grant behind
+is the pre-fix `DO` block taken out of `git show HEAD:`, checked to contain no
+`pulse_care` before it was run, and then run: `pulse_care=r/pulse_admin` survives
+it and the definer's two entries do not.)*
+
+*(The second: the one mutation run against E0-10's Care-credential fix. This
+entry is why it carried its own controls rather than a diff and a summary line —
+the replacement asserted it matched exactly once before writing, the mutated
+compose file was rendered through `docker compose config` to show the real
+password reaching `worker` and `beat` before the suite was believed, and the
+revert was checked by `sha256sum` against the value taken beforehand. Without the
+render, "195 passed" under the mutation would have been indistinguishable from a
+mutation that never took, and the conclusion drawn from it is the opposite one.)*
 
 **What happened.** In E0-09, eight guards were mutated one at a time to check
 that each was load-bearing — the cycle walk, the two Care rules, the role grain
@@ -562,6 +688,264 @@ baseline it read was already mutated and all three variants came back identical 
 the same defect as above with no file involved. Read the baseline from the source
 that installs the object, and assert it does **not** already contain the thing
 you are about to add.
+
+---
+
+## 15. A property test's generator excluded the case its own docstring named
+
+**Caught: 2**
+
+**What happened.** E0-07's parsing suite carries a property for the definition of
+done's "parsing is total: no exception type that escapes as a 500". Its docstring
+listed the leaks it refuses and put `ValueError` out of `int()` first. It
+generated `st.text(max_size=12)`.
+
+The string that produces that `ValueError` is a start letter, more than four
+thousand digits and a modality suffix: CPython caps integer-from-string
+conversion at `sys.get_int_max_str_digits()`, 4300 by default, and
+`parse_section_code("R" + "9" * 4301 + "WW")` raises `builtins.ValueError`
+rather than the service's own error. Section codes come from the LMS roster feed,
+so it is reachable input, and nothing shortens the value on the way in — a
+`String(16)` column is not enforced in Python, and the derived columns are
+`NOT NULL`, so the parse always runs before any row exists. The suite was green.
+`/security-review` found it.
+
+**Root cause.** The bound on the generator and the claim in the docstring were
+written at different moments and never read against each other. Twelve characters
+is a reasonable size for a section code, which is exactly why it looked like a
+detail rather than a decision: it silently redefined "arbitrary text" as "text
+short enough to be a section code", and the counterexample lives on the other
+side of that line. A property test states its claim in the docstring and its
+scope in the strategy, and only the second one runs.
+
+It is entry 3's family — a test that passed for a reason unrelated to what it
+asserted — but the mechanism is its own and worth naming separately: not an
+absence that something else satisfied, and not a pattern that matched nothing. An
+input space narrowed to where the assertion happens to hold.
+
+**Consequence.** A guarantee about untrusted input, asserted by a test named for
+it, over a space that could not contain the failure. Had it shipped, the first
+malformed roster value of that shape would have been a 500 on the sync, with the
+suite still reporting the case as covered. The repair was not simply a larger
+`max_size` either: `st.text()` will not assemble that string by chance in three
+hundred examples, so widening the bound would have put the counterexample inside
+the declared space and left it just as unreachable — the same defect behind a
+bigger number.
+
+**Rule.** For every property, read the strategy against the docstring and ask
+which named case the generator cannot produce. If the claim is about a boundary —
+a limit in the standard library, a column width, a protocol maximum — generate
+*around that boundary explicitly*, drawing from a band that straddles it, rather
+than trusting a wide range to wander into it. Where a bound stays, say in the
+docstring what it does not reach; a stated bound is a scope, and an unstated one
+is a false claim of totality.
+
+---
+
+## 14. An enumeration was reported as an impossibility
+
+**Caught: 2**
+
+**What happened.** In E0-06, the guard that refuses a naive datetime has to sit
+on the column type, and the test module's fixture could not seed a decorated
+type. Four implementations were tried and measured — a `TypeDecorator`, a
+`DateTime` subclass, a hybrid of the two, and putting the guard in a service —
+and the objection filed in `docs/disputes/E0-06-01.md` generalised from them:
+"no implementation that satisfies criterion 4 can get past `invented_value`."
+
+That is false. A type subclassing psycopg's `_PGTimeStamp` survives
+`adapt_type`, so the `isinstance` check passes *and* the guard runs, and the
+module passes 18 for 18 with no fixture change. The arbitrator found it by
+reading `adapt_type` and running it — the same method the objection had used for
+its own four options and abandoned at the moment it generalised.
+
+**Root cause.** Treating a search that stopped as a search that finished. Each
+of the four options was measured honestly; the sentence joining them was not
+measured at all, because there was nothing to run — which is exactly why it went
+in unchecked while the four claims around it were verified.
+
+**Consequence.** A false universal in a durable record. The dispute file is read
+by a fresh arbitrator with no context, and had it been believed, the ruling would
+have rested on it. The correct position was available and narrower — the only
+implementation the fixture admitted was built on a private, driver-specific class
+— and it won the dispute on its own. The overclaim added nothing and cost the
+record a correction.
+
+**Rule.** Do not write "no X can" from a list of the X you tried. Say what you
+tried and what it did, and let the boundary of the search be visible: "four
+shapes, all measured, all fail" is honest and is usually enough to decide. If a
+universal is genuinely load-bearing, it needs an argument from the mechanism —
+here, from what `adapt_type` does — not a longer list.
+
+---
+
+## 17. An unqualified table name let the caller choose which table a guard read
+
+**Caught: 1**
+
+**What happened.** E0-09's supervision-edge trigger names `role_assignment`
+unqualified in all three of its guard queries and in `'role_assignment'::regclass`,
+which keys its advisory lock. Postgres searches the temporary schema **first** for
+relation names, and does so whether or not `pg_temp` is in `search_path` — being
+unlisted is what puts it first, not what skips it. So a caller who creates
+`pg_temp.role_assignment` and then writes `public.role_assignment` gets all three
+guards reading an empty temp table.
+
+Reproduced on the pinned Postgres as a `NOSUPERUSER NOCREATEDB NOCREATEROLE` role
+with no `CREATE` on `public`, because creating a temporary table needs only the
+`TEMPORARY` privilege, which Postgres grants to `PUBLIC` by default. The
+two-assignment cycle and the edge into a `CARE` assignment that the same role had
+been refused seconds earlier both committed. The lock key moved too, so the
+serialisation ADR 0027 rests on went with it.
+
+The generic security review found it. Nothing could reach it — `pulse_app` holds
+only `CONNECT` — but E0-10 is the ticket that grants the DML, and the bypass
+would have arrived with those grants, silently and in a file nobody was editing.
+
+**Root cause.** Writing SQL that runs *later* as though it ran *now*. Everything
+else in the schema — check constraints, generated columns, foreign keys,
+exclusion constraints — is resolved to OIDs when the DDL runs, and is immune;
+measured, five for five, with shadows in place. A `plpgsql` body is the one place
+in this repository where a name is resolved on every call, and it was written in
+the same style as the rest.
+
+**Consequence.** Caught before it could be reached, so the cost was one round.
+Had it landed with E0-10's grants, all three of the rules the ticket exists to
+enforce would have been bypassable by any authenticated application session, with
+276 tests still green — no fixture creates a temporary table, so removing the
+qualification is invisible to the suite today.
+
+**Rule.** In any SQL that is parsed at call time — a `plpgsql` body, anything
+built for `EXECUTE` — **schema-qualify every relation**, and
+put `SET search_path = pg_catalog, public, pg_temp` on the function. Both, not
+either: the qualification survives someone dropping the `SET`, and the `SET`
+survives someone adding an unqualified reference. Name `pg_temp` **explicitly and
+last** — a `search_path` that merely omits it, which is the usual advice, leaves
+the hijack open, and that difference was measured rather than assumed. And verify
+it the way it is exploited: stand up the shadow table as a non-superuser role and
+watch the write be refused, rather than reading the SQL and agreeing with it.
+
+**A view is not in that list, and the first version of this entry said it was.**
+E0-10's test author queried the clause rather than editing it, having no shell to
+settle it with; it was then measured on the deployed image, and the query is
+worth keeping because the result is the opposite of what both this entry and
+E0-10 assumed:
+
+| | baseline | after `CREATE TEMP TABLE` shadowing the base table |
+|---|---|---|
+| `plpgsql` body | `from public` | **`from pg_temp`** |
+| view | `from public` | `from public` |
+
+`pg_depend` records the view against `public.<table>`: the oid is resolved at
+`CREATE VIEW` and stored, so a view is early-bound like a constraint. The
+practical consequence is not that qualification stops mattering — it is that
+**a test which shadows a relation and asserts a view is unchanged cannot fail**,
+which is entry 3's shape wearing this entry's clothes. Point that test at the
+function.
+
+*The general lesson, and the reason this is here rather than only in the ticket:
+a rule that names a list of cases invites the list being extended by analogy. Two
+of the three items here were measured; the third was added because it sounded
+like the other two.*
+
+---
+
+## 6. Shell expansion inside a commit message
+
+**Caught: 1**
+
+**What happened.** `git commit -m "…$$POSTGRES_USER…"` in double quotes. The
+shell expanded `$$` to its process id.
+
+**Root cause.** Double quotes in the shell expand `$`. The message explained an
+escaped-dollar parser, so it was exactly the text that could not survive it.
+
+**Consequence.** Commit `77620c0` permanently reads `pg_isready -U
+1793726POSTGRES_USER`, in the paragraph explaining the subtlest line in the
+change. History is not force-pushed here, so it cannot be corrected.
+
+**Rule.** Write commit messages through a quoted heredoc (`<<'EOF'`) or
+`git commit -F`. Never `-m` with double quotes when the text contains `$`.
+
+---
+
+## 7. A verification window equal to the thing's own debounce
+
+**Caught: 1**
+
+**What happened.** Checking that a drifted database password made the container
+report unhealthy, the poll ran for exactly 60 seconds. Docker needs `retries: 12`
+× `interval: 5s` — 60 seconds of consecutive failures — before it flips.
+
+**Root cause.** Choosing the window from the interval without adding the debounce.
+
+**Consequence.** Nearly reported a working fix as broken. The health log already
+said `password authentication failed`; only the status had not caught up.
+
+**Rule.** When verifying a debounced state change, wait past the debounce and
+read the underlying log as well as the summary status. A negative result inside
+the debounce window is not a result.
+
+---
+
+## 18. A deliverable existed in the source tree and not in the built artifact
+
+**Caught: 1**
+
+**What happened.** E0-12 shipped `backend/app/ai/prompts/validity.v1.md`, the
+prompt SPEC §7.4 requires a classification to name. Every gate was green: the
+unit tests read the file off disk, ruff and mypy had nothing to say about a
+`.md`, and it was committed and visible in the diff. Building the wheel the
+Dockerfile installs — `pip wheel . --no-deps --no-build-isolation` — produced
+`app/ai/__init__.py` and `app/ai/contracts.py` and no `prompts/` at all.
+setuptools includes Python modules in a wheel; a data file inside a package
+needs `[tool.setuptools.package-data]` and had none.
+
+**Root cause.** Two different ideas of where the code lives. Every test in this
+repository runs against the source tree, where the file is simply there. The
+container installs a wheel into `/opt/venv` and has no source tree, so
+"the file is in the repository" and "the file is in the running system" are
+separate facts, and nothing connected them.
+
+**Consequence.** As caught, none — the packaging entry went in with the ticket.
+Unrecognised, E0-13's gateway would have loaded the prompt on a developer's
+machine and raised on the first real launch in a container, with a green CI run
+and a passing Compose health check behind it, because the health check answers
+before any AI task is called. The same trap is waiting for four later epics: E2,
+E4, E6 and E7 each add a prompt file here, and each will pass every gate.
+
+**Rule.** When a ticket ships a non-Python file that code will read at runtime,
+build the artifact and look inside it — `pip wheel . --no-deps
+--no-build-isolation` then `unzip -l`. A green test suite proves the file is in
+the repository and says nothing about whether it is in the image. This is entry
+9 in a new place: the guard is the packaging configuration, and reading it is
+not executing it.
+
+For this directory the check is no longer manual:
+`tests/unit/test_prompt_directory_layout.py` builds the wheel and asserts every
+prompt in the source tree is inside it, so the four later epics get the failure
+without knowing this entry exists. Asserting the `package-data` line instead
+would not have worked — the glob first shipped here was `prompts/*.md`, which is
+present, correct-looking, and matches neither a prompt in a subdirectory nor one
+with another extension.
+
+**And that fix was itself wrong, which is the part worth keeping.**
+`prompts/*.md` was written to match ADR 0032's naming scheme exactly, and
+matching the scheme was the error: a packaging glob that encodes a naming rule
+enforces that rule by making the offending file absent from every container,
+which is the worst available way to report a broken convention. It was widened to
+`prompts/**/*` — the whole directory, any depth, any extension — so that
+packaging decides only what reaches production, while the scheme stays enforced
+by review and by the version test. Both narrow cases were measured by planting a
+file and building rather than argued: `prompts/v2/moderation.md` and
+`draft.v1.jinja` were each dropped in silence.
+
+**Second rule, from that.** A fix to packaging, to an ignore rule, or to any
+other glob-shaped configuration is not finished when the case in front of you
+passes. Ask what the surrounding tests already *permit* — here, a sibling test
+deliberately accepts a version held in a directory — and make the configuration
+admit all of it. A glob narrower than the layouts the suite allows is a trap
+primed for whoever first uses one of them, and it will look correct in review.
 
 ---
 
@@ -718,116 +1102,6 @@ scope is per-test state, not process state**, and a mutation that relies on
 process lifetime has to go below the import: into a file, into the environment, or
 into a deterministic source of randomness. A mutation that fails to fail is a
 result about the mutation until you have shown otherwise.
-
----
-
-## 17. An unqualified table name let the caller choose which table a guard read
-
-**Caught: 0**
-
-**What happened.** E0-09's supervision-edge trigger names `role_assignment`
-unqualified in all three of its guard queries and in `'role_assignment'::regclass`,
-which keys its advisory lock. Postgres searches the temporary schema **first** for
-relation names, and does so whether or not `pg_temp` is in `search_path` — being
-unlisted is what puts it first, not what skips it. So a caller who creates
-`pg_temp.role_assignment` and then writes `public.role_assignment` gets all three
-guards reading an empty temp table.
-
-Reproduced on the pinned Postgres as a `NOSUPERUSER NOCREATEDB NOCREATEROLE` role
-with no `CREATE` on `public`, because creating a temporary table needs only the
-`TEMPORARY` privilege, which Postgres grants to `PUBLIC` by default. The
-two-assignment cycle and the edge into a `CARE` assignment that the same role had
-been refused seconds earlier both committed. The lock key moved too, so the
-serialisation ADR 0027 rests on went with it.
-
-The generic security review found it. Nothing could reach it — `pulse_app` holds
-only `CONNECT` — but E0-10 is the ticket that grants the DML, and the bypass
-would have arrived with those grants, silently and in a file nobody was editing.
-
-**Root cause.** Writing SQL that runs *later* as though it ran *now*. Everything
-else in the schema — check constraints, generated columns, foreign keys,
-exclusion constraints — is resolved to OIDs when the DDL runs, and is immune;
-measured, five for five, with shadows in place. A `plpgsql` body is the one place
-in this repository where a name is resolved on every call, and it was written in
-the same style as the rest.
-
-**Consequence.** Caught before it could be reached, so the cost was one round.
-Had it landed with E0-10's grants, all three of the rules the ticket exists to
-enforce would have been bypassable by any authenticated application session, with
-276 tests still green — no fixture creates a temporary table, so removing the
-qualification is invisible to the suite today.
-
-**Rule.** In any SQL that is parsed at call time — a `plpgsql` body, a view
-definition, anything built for `EXECUTE` — **schema-qualify every relation**, and
-put `SET search_path = pg_catalog, public, pg_temp` on the function. Both, not
-either: the qualification survives someone dropping the `SET`, and the `SET`
-survives someone adding an unqualified reference. Name `pg_temp` **explicitly and
-last** — a `search_path` that merely omits it, which is the usual advice, leaves
-the hijack open, and that difference was measured rather than assumed. And verify
-it the way it is exploited: stand up the shadow table as a non-superuser role and
-watch the write be refused, rather than reading the SQL and agreeing with it.
-
-
----
-
-## 18. A deliverable existed in the source tree and not in the built artifact
-
-**Caught: 0**
-
-**What happened.** E0-12 shipped `backend/app/ai/prompts/validity.v1.md`, the
-prompt SPEC §7.4 requires a classification to name. Every gate was green: the
-unit tests read the file off disk, ruff and mypy had nothing to say about a
-`.md`, and it was committed and visible in the diff. Building the wheel the
-Dockerfile installs — `pip wheel . --no-deps --no-build-isolation` — produced
-`app/ai/__init__.py` and `app/ai/contracts.py` and no `prompts/` at all.
-setuptools includes Python modules in a wheel; a data file inside a package
-needs `[tool.setuptools.package-data]` and had none.
-
-**Root cause.** Two different ideas of where the code lives. Every test in this
-repository runs against the source tree, where the file is simply there. The
-container installs a wheel into `/opt/venv` and has no source tree, so
-"the file is in the repository" and "the file is in the running system" are
-separate facts, and nothing connected them.
-
-**Consequence.** As caught, none — the packaging entry went in with the ticket.
-Unrecognised, E0-13's gateway would have loaded the prompt on a developer's
-machine and raised on the first real launch in a container, with a green CI run
-and a passing Compose health check behind it, because the health check answers
-before any AI task is called. The same trap is waiting for four later epics: E2,
-E4, E6 and E7 each add a prompt file here, and each will pass every gate.
-
-**Rule.** When a ticket ships a non-Python file that code will read at runtime,
-build the artifact and look inside it — `pip wheel . --no-deps
---no-build-isolation` then `unzip -l`. A green test suite proves the file is in
-the repository and says nothing about whether it is in the image. This is entry
-9 in a new place: the guard is the packaging configuration, and reading it is
-not executing it.
-
-For this directory the check is no longer manual:
-`tests/unit/test_prompt_directory_layout.py` builds the wheel and asserts every
-prompt in the source tree is inside it, so the four later epics get the failure
-without knowing this entry exists. Asserting the `package-data` line instead
-would not have worked — the glob first shipped here was `prompts/*.md`, which is
-present, correct-looking, and matches neither a prompt in a subdirectory nor one
-with another extension.
-
-**And that fix was itself wrong, which is the part worth keeping.**
-`prompts/*.md` was written to match ADR 0032's naming scheme exactly, and
-matching the scheme was the error: a packaging glob that encodes a naming rule
-enforces that rule by making the offending file absent from every container,
-which is the worst available way to report a broken convention. It was widened to
-`prompts/**/*` — the whole directory, any depth, any extension — so that
-packaging decides only what reaches production, while the scheme stays enforced
-by review and by the version test. Both narrow cases were measured by planting a
-file and building rather than argued: `prompts/v2/moderation.md` and
-`draft.v1.jinja` were each dropped in silence.
-
-**Second rule, from that.** A fix to packaging, to an ignore rule, or to any
-other glob-shaped configuration is not finished when the case in front of you
-passes. Ask what the surrounding tests already *permit* — here, a sibling test
-deliberately accepts a version held in a directory — and make the configuration
-admit all of it. A glob narrower than the layouts the suite allows is a trap
-primed for whoever first uses one of them, and it will look correct in review.
 
 ---
 

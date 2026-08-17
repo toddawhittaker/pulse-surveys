@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Twenty-five tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Twenty-six tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -37,12 +37,13 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
-| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, `alembic check` comparing neither check-constraint expressions nor exclusion constraints, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
+| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, `alembic check` comparing neither check-constraint expressions nor exclusion constraints, the same gate reading no roles, grants, views or functions at all, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
 | 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | Two findings from PR #19 that editing E0-05 cannot close: detecting an LMS-owned column that was never marked, and asserting that a prefix belongs to a department. |
 | 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | Does the benchmark minimum cover comparison-set numbers or only lines, and is one institution per deployment enforced or merely assumed. Both are product decisions a schema ticket declined to make. |
 | 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | Which launches may trigger a roster sync, whether the service URL is stored, and what an operator sees when a section has never had a roster. A spec edit E1 needs answered before it builds the sync. |
 | 24 | [Review debt from E0-07 and E0-08](E0-24-review-debt-from-e0-07-and-e0-08.md) | 07, 08 | Four findings those pull requests could not close: an unconstrained `jwks_url` that is credential-equivalent, the single-writer rule for the derived section columns being convention rather than enforcement, re-derivation when a term's map is edited, and a summer start-letter map the test suite invented. |
 | 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Six findings those pull requests could not close, and an index of the twelve that went to the ticket that owns them: an unguarded `.dockerignore`, a latent course-number literal in three modules, two overclaiming records, and two spec lines describing things that no longer exist. |
+| 26 | [Review debt from E0-10](E0-26-review-debt-from-e0-10.md) | 10 | Five findings PR #29 could not close, and an index of what it did close. Four harden a guard or settle a record; the first is a live gap in SPEC §4's logging guarantee — a caller that rolls back keeps the name and discards the audit row — which blocks nothing in E0 but must land before E10 opens the Care queue. |
 
 ## Dependency graph
 
@@ -63,13 +64,14 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
       23            (independent; blocks nothing in E0, gates E1's roster sync)
 07, 08 ── 24        (independent; blocks nothing)
 09, 12, 14 ── 25    (independent; blocks nothing)
+10 ── 26            (independent; blocks nothing in E0, gates E10's Care queue)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 25 hang
-off 03, 04, 05, 07, 08, 09, 12 and 14 or off nothing at all, and block nothing —
+chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 26 hang
+off 03, 04, 05, 07, 08, 09, 10, 12 and 14 or off nothing at all, and block nothing —
 they harden tests or settle records rather than adding behaviour, so they can
 land any time afterwards and none is on the path to the E0 exit. Ticket 21 in
 particular is cheapest done while passing through for another reason: E0-11 picks
@@ -78,22 +80,36 @@ table-grained refusal, the code that closes it is E1's roster sync — the only
 code that sees both which field came from the platform and which column it went
 into.
 
-Two of them are exceptions to "no hurry". Ticket 22's first question is a
+Three of them are exceptions to "no hurry". Ticket 22's first question is a
 confidentiality rule that is currently unenforced, and E4 builds the reports it
 governs. Ticket 23 blocks nothing inside E0 but is a question E1's roster sync
 has to have answered before it can be built, so it wants settling by the end of
-this epic rather than at the start of the next one.
+this epic rather than at the start of the next one. Ticket 26's first item is a
+measured gap in SPEC §4's logging guarantee rather than hardening: a caller
+holding the Care credential who rolls back keeps the student's name and leaves
+no audit row. Nothing in E0 opens that door, so it blocks no ticket here, but it
+has to be closed before E10 builds the queue that calls it.
+
+Two deferrals from E0-10 are recorded elsewhere and repeated here so they are not
+lost: `alembic check` reading no roles, grants, views or functions is **E0-20
+item 3b**, and §4.1 item 1 — "no student-visible path exposes another section" —
+**belongs to E2**, which is the first epic with a student-visible path and the
+scoping that gives "another section" its meaning. E0-26 item 5 carries the second
+of those into a document E2 will actually read.
 
 One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
 item was `alembic check` being blind to server-default drift, and E0-05 is where
 the first server defaults landed. **E0-05 closed that item** — `env.py` now sets
 `compare_server_default=True` on both paths — so three of its original four
-remain, and it has gained two more since. A *generated* column's expression can
+remain, and it has gained three more since. A *generated* column's expression can
 still drift with `alembic check` green, because Alembic cannot `ALTER` one and so
-warns rather than failing; and E0-07 and E0-08 found that the same gate compares
+warns rather than failing; E0-07 and E0-08 found that the same gate compares
 neither check-constraint expressions nor exclusion constraints, which is no
-longer hypothetical now that E0-08's overlap rule is an exclusion constraint.
-**Five open in total.** Details in E0-20 items 3 and 3a.
+longer hypothetical now that E0-08's overlap rule is an exclusion constraint; and
+E0-10 measured that it reads no roles, grants, views or functions at all, so
+`GRANT SELECT ON user_identity TO pulse_app` and `ALTER ROLE pulse_care
+SUPERUSER` are each one statement that voids the confidentiality model with the
+drift gate clean. **Six open in total.** Details in E0-20 items 3, 3a and 3b.
 
 ## What the built tickets settled
 
@@ -149,6 +165,48 @@ A variable read only by something else — a script, a mock service that is not 
 Compose service — cannot be documented there as things stand, and
 `tests/unit/test_env_example_sync.py` will say so. Tickets 08, 13 and 16 all add
 configuration and should expect this.
+
+**The application role is `pulse_app`, and a read-path test must connect as it**
+([ADR 0001](../../adr/0001-identity-separation-by-database-role.md), E0-10).
+From E0-10 the migration grants `SELECT` on the read views to `pulse_app` and
+nothing at all on `user_identity`, so *which role a fixture authenticates as* is
+now the difference between a test that can detect a missing grant and one that
+cannot. `tests/conftest.py`'s `application_engine` provisioned and connected as
+`pulse_test_app` — a name chosen in E0-04, when no grant existed for it to be
+wrong about — which held none of those grants, so an assertion made over it was
+an assertion about a role holding nothing and passed for the wrong reason
+(`docs/MISTAKES.md` entry 3). **E0-10 changed it to `pulse_app`**, one line, and it
+works because the fixture creates the role before the migration runs and the
+migration's `CREATE ROLE` is guarded, exactly as on a Compose volume. Two things
+follow for anyone writing a read-path test: `application_engine` is now evidence
+about a grant, and
+`test_the_suites_application_connection_authenticates_as_the_granted_role` in
+`tests/integration/test_identity_grants.py` is what keeps the fixture's name and
+the migration's name from drifting apart again — they are two constants in two
+files and nothing else would notice. E0-10's own grant tests reach both runtime
+roles with `SET ROLE` from the bootstrap session, because `pulse_care` has no
+login credential in the fixture and because a control and the refusal it
+qualifies then sit in one transaction.
+
+**Adding a read view means adding SQL to `backend/app/views_sql/` and an
+invariant test** (SPEC §13, [ADR
+0041](../../adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)).
+A view is read with its *owner's* privileges, so no grant protects it: a view
+that reads an identity column hands that column to every role that may read the
+view. `CONTRIBUTING.md` has the rule; the short version is a new versioned
+`.sql` file, never an edit to one a migration already executed, every relation
+schema-qualified, and a `@pytest.mark.invariant` test for the §4.1 rule the view
+is subject to.
+
+**Only `app/services/safety.py` may obtain a `pulse_care` session** ([ADR
+0042](../../adr/0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md)).
+The pool is bound to the code path, not to the actor, because §2.1 permits one
+person to hold a Care assignment and a teaching assignment at once. A module that
+imports, calls or attributes a Care session fails
+`tests/unit/test_care_session_is_bound_to_the_care_service.py` by name. Care's
+route to identity is `reveal_identity`, which checks the actor and calls a
+`SECURITY DEFINER` function that checks the actor again and writes the audit row
+in the same transaction.
 
 **The session is synchronous** ([ADR
 0013](../../adr/0013-the-database-session-is-synchronous.md)). Handlers that
