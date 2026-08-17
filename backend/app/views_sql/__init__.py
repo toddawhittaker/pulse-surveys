@@ -5,8 +5,9 @@ as migrations + query helpers" — and says why in the paragraph under the tree:
 "shipped as migrations, not just ORM conventions, so the confidentiality
 guarantee holds at the database level even against a future careless query".
 
-**Every `.sql` file here is executed by a revision, and is never edited once that
-revision has merged.** The file name carries a version —
+**Every `.sql` file here is executed by a revision, and is never edited once
+anybody else's database can be at that revision — in practice, once the branch is
+pushed for review.** The file name carries a version —
 `section_roster_v001.sql` — and a change to a view then ships as `_v002.sql` plus
 a revision that replaces the object. That rule is
 [ADR 0041](../../../docs/adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md),
@@ -15,11 +16,12 @@ which made a prompt immutable once a classification cites it, for the same
 reason: a migration that reads a file at upgrade time means the file is what ran,
 so editing it in place silently changes what an already-applied revision did.
 
-The boundary is the merge, because that is when a database other than the
-author's own can be at that revision. An unmerged revision is edited as freely as
-the `op.create_table` calls beside it — and the author owes their own database an
-`alembic downgrade -1 && alembic upgrade head` after changing a file it has
-already run, because nothing re-executes a revision that is already applied.
+The boundary is the push rather than the merge, because a reviewer who pulls the
+branch and runs `alembic upgrade head` has a database at that revision holding
+the old file. An unpushed revision is edited as freely as the `op.create_table`
+calls beside it — and whoever has applied it owes their database an
+`alembic downgrade -1 && alembic upgrade head` after the file changes, because
+nothing re-executes a revision that is already applied.
 
 **Why the SQL is a file rather than a string in the revision.** Postgres does not
 keep the text a `CREATE VIEW` was written with. It stores a parse tree of oids,

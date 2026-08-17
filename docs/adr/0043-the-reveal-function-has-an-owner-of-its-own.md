@@ -115,9 +115,9 @@ unstated gets read as a wider one:
 
 - **A migration that grants the role more.** The three grants are a budget, and
   the fail-closed property lasts exactly as long as nobody adds a grant beside
-  the line that needed it. `alembic check` reads no grants, so nothing detects
-  it; line-by-line review of `views_sql/` is what stands there, and it is the
-  reason the ticket asks for that review by name.
+  the line that needed it. Nothing in CI detects that — see the measurement
+  below — so line-by-line review of `views_sql/` is the only control, and it is
+  the reason the ticket asks for that review by name.
 - **A body change within the three grants.** The function could be edited to
   return every row of `user_identity` and would still write exactly one audit
   row: the record says an access happened, not what was read. E10 owns making the
@@ -131,6 +131,30 @@ unstated gets read as a wider one:
   scoped owner is the same idea one step further and is worth doing when there
   are more of them; it costs a grant per base table per view, which is why it is
   not done for two.
+
+**`alembic check` sees none of this, and that is a property of the gate rather
+than of this decision.** It compares `Base.metadata` against the database, so it
+reads tables and columns and nothing else — no `pg_roles`, no ACLs, no
+`pg_class` entry for a view, no `pg_proc`. Measured against a freshly upgraded
+container on the pinned Alembic 1.19, mutating the *database* only, with a
+dropped column at the end as the canary so that "clean" is distinguishable from a
+comparison that has gone blind:
+
+| Mutation | `alembic check` |
+|---|---|
+| `GRANT SELECT ON public.user_identity TO pulse_app` | **clean** |
+| `ALTER ROLE pulse_care SUPERUSER` | **clean** |
+| the reveal function's owner set back to the migration superuser | **clean** |
+| the reveal function dropped | **clean** |
+| `public.section_roster` dropped | **clean** |
+| a column dropped from `audit_log` | detected — the canary |
+
+The first row is the one that matters most here, and the second is worse than it
+looks: it voids every grant in this ticket, in one statement, with the drift gate
+green. E0-20 collects this class of finding and now carries it as item 3b. For
+this record the consequence is narrower and worth stating plainly: the budget
+this role holds is enforced by nobody reading it wrong, so it belongs to review
+and to the integration tests, not to a gate.
 
 **A fourth role exists in `\du` and in none of the configuration.** That is the
 point, and it is also the thing an operator will ask about: it has no password

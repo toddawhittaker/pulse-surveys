@@ -21,7 +21,7 @@ here rather than fixed there, because the reviewer pass reports and the merge
 decision chooses. Sizes differ a lot: the first is a few lines, the last is a
 judgement call about logging that nothing yet depends on.
 
-**Five open: three of the original four, plus two this ticket gained.** Item 3
+**Six open: three of the original four, plus three this ticket gained.** Item 3
 landed in E0-05, which is where the first server defaults arrived; it is kept
 below with what it settled, because the reasoning is worth finding. Closing it
 exposed a narrower gap in the same place, which this ticket now carries as a
@@ -36,6 +36,12 @@ twenty start positions §2.2 seeds, and nobody found out until E0-07 wrote code
 that needed one. It is the clearest evidence this ticket's subject is worth more
 than its "blocks nothing" label suggests: **every serious defect found while
 building E0-07 and E0-08 was sitting behind a test or a gate that was green.**
+
+The sixth arrived from E0-10 (item 3b), and it is the widest of the three: the
+drift gate reads tables and columns and nothing else, so every role, grant, view
+and function that ticket added is invisible to it. `GRANT SELECT ON user_identity
+TO pulse_app` and `ALTER ROLE pulse_care SUPERUSER` are each one statement, each
+voids the confidentiality model, and `alembic check` calls both clean.
 
 Read first: `.github/workflows/ci.yml`, `docs/adr/0002-ci-gates-ship-tolerant.md`,
 and `docs/MISTAKES.md` entries 2 and 3.
@@ -146,6 +152,51 @@ migration that creates its table reads like coverage and is not.** E0-08 asserts
 both of its rules against a real server instead, which is the pattern to
 generalise.
 
+### 3b. `alembic check` reads no roles, no grants, no views and no functions
+
+Found in E0-10, measured on a freshly upgraded container on the pinned Alembic
+1.19. Same class as 3 and 3a and the widest of the three: those two are about a
+*rule on a table* the comparison does not reach, and this is about four whole
+kinds of object it never looks at. `alembic check` compares `Base.metadata`
+against the database, and `Base.metadata` holds tables and columns — so
+`pg_roles`, ACLs, `pg_class` entries for views and `pg_proc` are all outside it
+in both directions.
+
+E0-10 is what makes that expensive rather than merely true. Its confidentiality
+guarantee is not a table at all: it is two roles, one function's owner, a handful
+of grants, and the absence of any grant on `user_identity` for the two connection
+roles. Mutating the database only, with a dropped column last as the canary so
+that "clean" is distinguishable from a comparison that has gone blind:
+
+| Mutation | `alembic check` |
+|---|---|
+| `GRANT SELECT ON public.user_identity TO pulse_app` | **clean** |
+| `ALTER ROLE pulse_care SUPERUSER` | **clean** |
+| the reveal function's owner set back to the migration superuser | **clean** |
+| the reveal function dropped | **clean** |
+| `public.section_roster` dropped | **clean** |
+| a column dropped from `audit_log` | detected — the canary |
+
+Rows one and two are each a single statement that voids the whole scheme: the
+first hands every instructor screen a student's name, the second gives the Care
+role every privilege in the cluster. Row three re-opens the escalation
+[ADR 0043](../../adr/0043-the-reveal-function-has-an-owner-of-its-own.md) closes,
+where a `SECURITY DEFINER` body reads `pg_authid`.
+
+**What stands there today is the integration suite**, and it is genuinely
+load-bearing rather than a consolation: `tests/integration/test_identity_grants.py`
+provokes each refusal *and* asserts the grant model as stated out of
+`has_table_privilege`, and three of its tests are `invariant`-marked so a skip is
+a build failure. Two things that suite does not have are worth this ticket's
+attention — nothing asserts the *owner* of a `SECURITY DEFINER` function is not a
+superuser at the moment this is written (E0-10 routed one), and nothing asserts
+the set of grants is *exactly* what the migration wrote rather than a superset,
+which is the shape a later ticket's convenience grant would take.
+
+The trap to name here is the one item 3a names in a different place: **a grant
+written into the migration that creates the object reads like coverage and is
+not.** Nothing re-reads it, in either direction.
+
 ### 4. `echo=False` is not what keeps SQL out of the log
 
 `backend/app/db.py`. Narrowed from a MED during review, and the narrowing matters
@@ -237,6 +288,16 @@ passing while every statement is being logged.
       now. The cheap form is the one E0-08 already uses for its own two: read
       the constraint out of the catalog — `get_check_constraints`, and `pg_constraint`
       for `contype = 'x'` — and assert against it, rather than trusting the gate.
+      Do not accept "it is in the creating migration" as coverage.
+- [ ] A database whose **roles, grants, view set or function set** drift from
+      what the migrations wrote fails something. None of it does today (see item
+      3b): `GRANT SELECT ON user_identity TO pulse_app` and `ALTER ROLE
+      pulse_care SUPERUSER` are each one statement that voids E0-10's whole
+      scheme with `alembic check` clean. The cheap form is the one E0-10 already
+      uses for the rules it does assert — read the catalog and compare — extended
+      to the two properties it has no assertion for: that the owner of every
+      `SECURITY DEFINER` function in `public` is not a superuser, and that the
+      grant set is *exactly* what the migrations wrote rather than a superset.
       Do not accept "it is in the creating migration" as coverage.
 - [ ] With `sqlalchemy.engine` set to INFO by name, no bound parameter reaches
       the log outside development.

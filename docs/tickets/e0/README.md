@@ -37,7 +37,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
-| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, `alembic check` comparing neither check-constraint expressions nor exclusion constraints, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
+| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, `alembic check` comparing neither check-constraint expressions nor exclusion constraints, the same gate reading no roles, grants, views or functions at all, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
 | 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | Two findings from PR #19 that editing E0-05 cannot close: detecting an LMS-owned column that was never marked, and asserting that a prefix belongs to a department. |
 | 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | Does the benchmark minimum cover comparison-set numbers or only lines, and is one institution per deployment enforced or merely assumed. Both are product decisions a schema ticket declined to make. |
 | 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | Which launches may trigger a roster sync, whether the service URL is stored, and what an operator sees when a section has never had a roster. A spec edit E1 needs answered before it builds the sync. |
@@ -88,12 +88,15 @@ One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
 item was `alembic check` being blind to server-default drift, and E0-05 is where
 the first server defaults landed. **E0-05 closed that item** — `env.py` now sets
 `compare_server_default=True` on both paths — so three of its original four
-remain, and it has gained two more since. A *generated* column's expression can
+remain, and it has gained three more since. A *generated* column's expression can
 still drift with `alembic check` green, because Alembic cannot `ALTER` one and so
-warns rather than failing; and E0-07 and E0-08 found that the same gate compares
+warns rather than failing; E0-07 and E0-08 found that the same gate compares
 neither check-constraint expressions nor exclusion constraints, which is no
-longer hypothetical now that E0-08's overlap rule is an exclusion constraint.
-**Five open in total.** Details in E0-20 items 3 and 3a.
+longer hypothetical now that E0-08's overlap rule is an exclusion constraint; and
+E0-10 measured that it reads no roles, grants, views or functions at all, so
+`GRANT SELECT ON user_identity TO pulse_app` and `ALTER ROLE pulse_care
+SUPERUSER` are each one statement that voids the confidentiality model with the
+drift gate clean. **Six open in total.** Details in E0-20 items 3, 3a and 3b.
 
 ## What the built tickets settled
 

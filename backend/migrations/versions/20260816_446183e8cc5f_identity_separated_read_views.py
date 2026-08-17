@@ -39,10 +39,13 @@ a directory listing is not a dependency order. A new file added here does nothin
 until a revision names it, which is the safe direction.
 
 **What `alembic check` can and cannot see in this revision.** It compares
-`audit_log` and its two indexes. It reads neither `pg_roles`, `pg_class` for
-views, nor `pg_proc`, so dropping the reveal function, dropping a view, or
-granting `SELECT ON user_identity TO pulse_app` all leave the check green. The
-tests in `tests/integration/test_identity_grants.py` and
+`audit_log` and its two indexes, and nothing else here. It reads neither
+`pg_roles`, ACLs, `pg_class` for views, nor `pg_proc` — measured, six mutations
+with a dropped column as the canary, and the table is in E0-20 item 3b. So
+granting `SELECT ON user_identity TO pulse_app`, making `pulse_care` a superuser,
+putting the reveal function's owner back to the migration identity, dropping the
+function and dropping a view all leave the drift gate clean. The tests in
+`tests/integration/test_identity_grants.py` and
 `tests/integration/test_identity_separated_views.py` are the only thing that
 notices, and three of them are `invariant`-marked so a skip is a build failure.
 """
