@@ -25,9 +25,64 @@ name: pulse-surveys
 # What `api`, `worker`, and `beat` have in common, written once. All three run
 # the same image over the same configuration and differ only in the command they
 # run and in how they report health, so the shared part is an anchor rather than
-# three copies: the superuser blanking below is two hand-written lines whose
+# three copies: the blanking below is a handful of hand-written lines whose
 # absence is invisible in every dynamic check, and copying a service block is
 # exactly how they go missing.
+#
+# **The environment is an anchor of its own, and that is not tidiness.** A YAML
+# merge key supplies only the keys a node does not declare for itself, so a
+# service that writes its own `environment:` block replaces the anchor's mapping
+# wholesale rather than adding to it — which is how a service gains one variable
+# and silently loses every blanked one. `api` needs exactly that: one variable
+# the other two must not hold. It merges this mapping inside its own block, so
+# the blanking travels with it. Verified with `docker compose config`, which
+# renders the merged environment per service.
+x-application-environment: &application-environment
+  # Overrides, all relying on `environment:` beating `env_file:` on every
+  # Compose version.
+  #
+  # First: `.env` builds DATABASE_URL out of DB_APP_USER, DB_APP_PASSWORD,
+  # and DB_NAME so the password is written once, and Compose expands that
+  # here, when it reads `.env` as its own interpolation source. Whether
+  # `env_file:` expands it is a Compose version's business and has not
+  # always been the same answer, so the container gets an expanded URL
+  # either way.
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
+  # Second: the Care queue's own connection, blanked here and supplied by the
+  # `api` service alone. `pulse_care` is the only credential in the cluster
+  # that can execute `public.reveal_student_identity`, and a caller holding it
+  # can read the `CARE` assignments it needs to borrow an actor and then run
+  # the reveal inside a transaction it rolls back — which keeps the name and
+  # discards the audit row. Reproduced on the pinned image, and it is the
+  # premise ADR 0042 rejected this blanking on, so that record is amended
+  # rather than left standing. `worker` and `beat` never serve this queue, and
+  # `worker` is the process that ships student comment text to a third-party
+  # model provider, so it is the last container in the stack that should hold
+  # a route to a student's name. Blanked rather than omitted, for the same
+  # reason as the superuser pair below.
+  CARE_DATABASE_URL: ''
+  # And the parts that URL is built from, blanked on every application service
+  # including `api`, because blanking the URL alone would be nominal:
+  # `env_file:` hands over `DB_CARE_USER` and `DB_CARE_PASSWORD` as well, and
+  # `DATABASE_URL` supplies the host, the port and the database name, so a
+  # process holding the pair can assemble the connection in one line. `db` is
+  # the only service that needs them and takes them by explicit interpolation
+  # (below), never through `env_file:`. Nothing in the application reads them —
+  # see `.env.example`, where the whole `DB_*` block exists for Compose.
+  DB_CARE_USER: ''
+  DB_CARE_PASSWORD: ''
+  # Fourth: `.env` also carries the superuser credential, because `db` needs
+  # it, and `env_file:` would hand the whole file to this container. No
+  # application container may hold it. `db:5432` is reachable from all three
+  # and accepts that role over scram, so a credential sitting in this
+  # environment is a route back to everything scripts/db-init and ADR 0009
+  # exist to deny — bypass of every grant, bypass of row-level security, and
+  # COPY … FROM PROGRAM. Blanked rather than omitted: `env_file:` has
+  # already set them by the time this is applied, so an empty value is what
+  # removes them.
+  DB_SUPERUSER: ''
+  DB_SUPERUSER_PASSWORD: ''
+
 x-application: &application
   build:
     context: .
@@ -36,41 +91,20 @@ x-application: &application
   # ticket reaches the container without editing this file.
   env_file:
     - .env
-  environment:
-    # Two overrides, both relying on `environment:` beating `env_file:` on
-    # every Compose version.
-    #
-    # First: `.env` builds DATABASE_URL out of DB_APP_USER, DB_APP_PASSWORD,
-    # and DB_NAME so the password is written once, and Compose expands that
-    # here, when it reads `.env` as its own interpolation source. Whether
-    # `env_file:` expands it is a Compose version's business and has not
-    # always been the same answer, so the container gets an expanded URL
-    # either way.
-    DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
-    # The Care queue's own connection, expanded here for the same reason and
-    # under the same rule. It names `pulse_care`, which holds no privilege on
-    # the identity table and one EXECUTE on the audited reveal (SPEC §6.2,
-    # ADR 0001) — so it is not the superuser credential the two blanked lines
-    # below withhold, and it does reach every application service. `worker` and
-    # `beat` never serve this queue; `app.services.safety` opens the pool on
-    # first use, so a process that never reveals anything never connects as it.
-    CARE_DATABASE_URL: ${CARE_DATABASE_URL:?CARE_DATABASE_URL is not set — copy .env.example to .env}
-    # Second: `.env` also carries the superuser credential, because `db` needs
-    # it, and `env_file:` would hand the whole file to this container. No
-    # application container may hold it. `db:5432` is reachable from all three
-    # and accepts that role over scram, so a credential sitting in this
-    # environment is a route back to everything scripts/db-init and ADR 0009
-    # exist to deny — bypass of every grant, bypass of row-level security, and
-    # COPY … FROM PROGRAM. Blanked rather than omitted: `env_file:` has
-    # already set them by the time this is applied, so an empty value is what
-    # removes them.
-    DB_SUPERUSER: ''
-    DB_SUPERUSER_PASSWORD: ''
+  environment: *application-environment
 
 services:
   # The FastAPI application (§7.1).
   api:
     <<: *application
+    # The one process that serves the Care queue (§6.2), and therefore the one
+    # that holds the `pulse_care` credential. `<<:` inside this block and not
+    # beside it: an `environment:` written here replaces the anchor's mapping
+    # outright, so without the merge the superuser pair would arrive unblanked
+    # from `env_file:` and nothing dynamic would say so.
+    environment:
+      <<: *application-environment
+      CARE_DATABASE_URL: ${CARE_DATABASE_URL:?CARE_DATABASE_URL is not set — copy .env.example to .env}
     depends_on:
       # The mapping form, not the list. `depends_on: [db]` waits for the
       # container to start; this waits for Postgres to accept connections,

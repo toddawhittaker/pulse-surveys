@@ -25,10 +25,10 @@ in the group header below, and in `.env.example`. The per-field comments have
 been right every time. They carry it alone now.
 
 **A credential never reaches a log through this class**, and there are two ways
-in, so there are two guarantees. `DATABASE_URL` and `REDIS_URL` carry passwords
-today; the AI provider key, the SMTP password, and the LTI private key are
-coming (§6.3), and SPEC §10 puts secrets in the environment precisely so they
-stay out of logs.
+in, so there are two guarantees. `DATABASE_URL`, `CARE_DATABASE_URL` and
+`REDIS_URL` carry passwords today; the AI provider key, the SMTP password, and
+the LTI private key are coming (§6.3), and SPEC §10 puts secrets in the
+environment precisely so they stay out of logs.
 
 *When the configuration is refused*, no value is quoted back. The failure names
 the variables at fault and says what is wrong with each, and it happens at
@@ -189,7 +189,7 @@ class Settings(BaseSettings):
     # the value rather than on the model, so every container the value is
     # copied into inherits it.
     #
-    # Both URLs below carry a password in the same position. The AI provider
+    # Each URL below carries a password in the same position. The AI provider
     # key (§6.3, E0-13), the SMTP password, and the LTI private key belong in
     # this group when they land.
     #
@@ -206,11 +206,24 @@ class Settings(BaseSettings):
     # read path in the application runs on `database_url` and cannot reach
     # identity at all.
     #
-    # Required, not optional. A deployment missing it fails at start-up in every
-    # process rather than at the first reveal, which is the one moment in this
-    # system where a configuration error costs the most.
-    care_database_url: SecretStr = Field(
-        description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2)."
+    # Optional, and absent is the ordinary state rather than a misconfiguration.
+    # The process that serves the Care queue is the only process that may hold
+    # this credential: it is the one thing in the cluster that can execute
+    # `public.reveal_student_identity`, so a container holding it can obtain a
+    # student's name. `docker-compose.yml` therefore gives it to `api` and blanks
+    # it on `worker` and `beat`, which never serve that queue — and `worker` is
+    # the process that ships comment text to a third-party model provider. A
+    # required field could not express that: `Settings` is built the same way in
+    # all three, so requiring it here would force the credential into all three.
+    #
+    # An empty string is read as absent, because blanking is how `env_file:`
+    # values are removed — a `SecretStr('')` that validated would leave the two
+    # job processes looking configured and fail at `create_engine` instead.
+    # `app.services.safety` is the only reader, and it refuses loudly when this
+    # is `None` (ADR 0042, as amended).
+    care_database_url: SecretStr | None = Field(
+        default=None,
+        description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2).",
     )
     redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
 
@@ -256,6 +269,29 @@ class Settings(BaseSettings):
         ge=1,
         description="Respondents a comparison set needs before it is shown (§5.1).",
     )
+
+    @field_validator("care_database_url", mode="before")
+    @classmethod
+    def blank_care_database_url_is_absent(cls, value: object) -> object:
+        """An empty `CARE_DATABASE_URL` means the process does not serve the Care queue.
+
+        `docker-compose.yml` withholds this credential from `worker` and `beat`
+        by setting it to the empty string, because `env_file:` has already handed
+        them the whole of `.env` by the time the service's own `environment:`
+        block is applied — blanking is what removes a value there, and omitting
+        the entry leaves it in place.
+
+        So the empty string is the spelling of "withheld", and it has to arrive
+        here as `None`. A `SecretStr('')` would validate, leave those two
+        processes looking configured, and turn a deliberate withholding into a
+        connection attempt with no credential in it.
+
+        Whitespace is stripped first: a value that is only spaces is a blanking
+        someone reformatted, not a URL.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("institution_timezone")
     @classmethod

@@ -51,6 +51,19 @@ check and are still wrong. There are three kinds:
     accepting that role over scram. Those are also the containers that will run
     E0-13's gateway over untrusted comment text.
 
+    E0-10 adds a second credential of this kind and one difference worth reading
+    before editing either set of rules. `CARE_DATABASE_URL` opens the only
+    connection in the cluster that can execute the audited reveal, and it sat on
+    the same shared anchor until pull request #29, so `worker` and `beat` each
+    held a route to any student's name. The difference is that this one is not
+    forbidden everywhere: `api` serves the §6.2 queue and must keep it, so the
+    rule has to assert a value on one service as well as its absence on the
+    others — a stack that blanks it everywhere satisfies the forbidding half and
+    has no Care queue at all. The parts `.env` builds it from are in the same
+    rule, because `env_file:` hands those over too and `DATABASE_URL` supplies
+    the address, so blanking the URL alone leaves the credential in the container
+    in three pieces and reads as a complete fix in review.
+
 E0-03 adds `worker` and `beat`, and they fall into the same three kinds rather
 than into a fourth:
 
@@ -175,6 +188,45 @@ SUPERUSER_VARIABLES = ("DB_SUPERUSER", "DB_SUPERUSER_PASSWORD")
 # second service needing the credential is an amendment to ADR 0009, and the
 # right way for that to arrive is this constant changing in a reviewed diff.
 CREDENTIAL_OWNING_SERVICE = "db"
+
+# The Care credential, and the two parts `.env` builds it out of. Named rather
+# than derived, for the same reason `SUPERUSER_VARIABLES` above is: these three
+# are the subject of a rule rather than an incidental group of variables, and a
+# fourth spelling should be a deliberate edit here.
+#
+# **All three together, because the URL alone is not the credential.**
+# `env_file: - .env` hands a container `DB_CARE_USER` and `DB_CARE_PASSWORD` as
+# well, and `DATABASE_URL` supplies the host, the port and the database name, so
+# a process holding the pair can assemble the connection in one line. Blanking
+# the URL and stopping there leaves the credential in `worker` and `beat` in
+# three parts, and reads as a complete fix in review — `docs/MISTAKES.md`
+# entry 13, whose most recent incident is this one.
+CARE_CONNECTION_URL = "CARE_DATABASE_URL"
+CARE_CREDENTIAL_PARTS = ("DB_CARE_USER", "DB_CARE_PASSWORD")
+CARE_VARIABLES = (CARE_CONNECTION_URL, *CARE_CREDENTIAL_PARTS)
+
+# The one application service that may hold the Care connection. `api` serves
+# the §6.2 Care queue and `app.services.safety` opens its pool there; `worker`
+# and `beat` never serve it, and `worker` is the process that ships student
+# comment text to a third-party model provider.
+#
+# Like `CREDENTIAL_OWNING_SERVICE` above, this cannot be derived. Every route to
+# deriving it — "the service that runs uvicorn", "the service with an HTTP
+# health check" — names the same thing one step further away and reads as a rule
+# when it is a list of one. A second service serving the Care queue is an
+# amendment to ADR 0042, and the right way for that to arrive is this constant
+# changing in a reviewed diff.
+CARE_SERVING_SERVICE = "api"
+
+# Which single service may carry each of the three with a value in it. They
+# differ, and the difference is not tidiness: `api` gets the assembled
+# connection because it serves the queue, and `db` gets the two parts because it
+# is the server `scripts/db-init` creates the role in — the same reason it is
+# the one exemption from the superuser rules above. Neither is allowed both.
+CARE_VARIABLE_OWNERS = {
+    CARE_CONNECTION_URL: CARE_SERVING_SERVICE,
+    **{part: CREDENTIAL_OWNING_SERVICE for part in CARE_CREDENTIAL_PARTS},
+}
 
 # The top-level sections these two Compose files may declare. Not a style
 # preference: the credential rules walk both documents whole, which makes them
@@ -384,6 +436,29 @@ def service_environment(service: dict[str, Any]) -> dict[str, str | None]:
             resolved[name.strip()] = value if separator else None
 
     return resolved
+
+
+def supplies_a_value(declared: str | None) -> bool:
+    """Whether an `environment:` entry hands a container something to connect with.
+
+    Three states, and only one of them withholds. An empty value removes what
+    `env_file:` already set. A value — a literal, or `${CARE_DATABASE_URL}` —
+    supplies one. A *bare* name with no value is the one that reads as harmless
+    and is not: `- CARE_DATABASE_URL` in a list, or `CARE_DATABASE_URL:` in a
+    mapping, tells Compose to pass the variable through from the host
+    environment, which is where the real credential lives. `service_environment`
+    above keeps that third case as `None` for exactly this reason.
+
+    Whitespace-only counts as empty, and that is agreement rather than leniency:
+    `app.config.Settings` reads a blank `CARE_DATABASE_URL` as absent and strips
+    before deciding, so a blanking line that has picked up a space on its way
+    through a formatter is still a withheld credential at both layers. The
+    superuser rules above compare against `""` exactly, which is a stricter
+    reading of a line those services also write by hand; the two are not in
+    conflict, and this one is stated where the `Settings` validator can be cited
+    for it.
+    """
+    return declared is None or bool(declared.strip())
 
 
 def host_ports_published_by(service: dict[str, Any]) -> set[str]:
@@ -941,6 +1016,353 @@ def test_nothing_outside_the_database_service_reads_the_superuser_credential(
             "COPY ... FROM PROGRAM. If this is the migration identity E0-04 needs, ADR 0009 "
             "has a table for who provisions what: amend it, then change "
             "`CREDENTIAL_OWNING_SERVICE` deliberately.",
+        ]
+    )
+
+
+def test_only_the_api_service_is_left_holding_the_care_credential(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+) -> None:
+    """`api` keeps the Care connection; every other service that reads `.env` loses it.
+
+    The finding on pull request #29, found independently by two reviewers.
+    `CARE_DATABASE_URL` sat on the shared `x-application` anchor, so all three
+    application services received the one credential in the cluster that can
+    execute `public.reveal_student_identity`. Code execution in `worker` — the
+    process that ships student comment text to a third-party model provider — or
+    a `docker exec` by an operator holding no `CARE` assignment is then enough:
+    read the variable, connect as `pulse_care`, read a live `CARE` assignment out
+    of `public.role_assignment`, which that role may `SELECT`, and call the reveal
+    with the borrowed person as the acting actor. It returns a student's name and
+    email address, and the audit row names the borrowed Care staffer rather than
+    the caller. A caller that rolls its own transaction back keeps the name and
+    leaves no audit row at all, which is the premise ADR 0042 had rejected this
+    blanking on, measured false on the pinned image.
+
+    **Blanked, not omitted, and that distinction is the whole rule.**
+    `env_file: - .env` has already delivered all three variables by the time a
+    service's own `environment:` block is applied, so an empty value is what
+    removes one and an omitted entry leaves it in place. This is the same shape
+    as `DB_SUPERUSER: ''` beside it in the same anchor.
+
+    **All three variables, because the URL alone is not the credential.** The
+    pair `DB_CARE_USER` and `DB_CARE_PASSWORD` arrives through the same
+    `env_file:`, and `DATABASE_URL` supplies the host, the port and the database
+    name, so a process holding the pair assembles the connection in one line. The
+    parts are required to be blanked on `api` too — it holds the assembled URL
+    and has no use for them — which is what `.env.example` says and what makes
+    the rule "no application container holds the parts" rather than "no
+    application container except one".
+
+    **Both directions, because either half alone is satisfiable by an accident.**
+    A stack that blanks the variable everywhere passes any rule that only forbids
+    a value on the other services, and it also breaks the Care queue outright —
+    E0-10 makes the Care path a requirement rather than an oversight, and §6.2's
+    queue going silently unavailable is the failure ADR 0042 spent an alternative
+    on. So `api` is asserted to hold something, and the rest to hold nothing.
+
+    **Over the services that inherit `.env`, not over a list of names**, which is
+    the shape ADR 0009's last consequence asks for and the reason the superuser
+    rule above is written the same way: a fourth application service copied from
+    the anchor arrives blanked, and one written flat with its own `env_file:`
+    arrives here as a failure naming itself.
+
+    The base file only. A blank in `docker-compose.override.yml` is absent from
+    every deployment that runs the base file alone — which is every real
+    deployment, and CI's own base-file-only pass. That asymmetry is stated at
+    length on the superuser rule above, and it is the same asymmetry here. The
+    other direction, an override that *re-supplies* what the base file blanked,
+    belongs to the absolute rule below.
+    """
+    assert base_compose, (
+        f"{base_compose_path} does not exist or declares nothing. E0-02 ships the base "
+        "Compose file at the repository root (SPEC §13)."
+    )
+
+    inheriting = {
+        name: body for name, body in services_of(base_compose).items() if declares_env_file(body)
+    }
+
+    serving = inheriting.get(CARE_SERVING_SERVICE)
+    assert serving is not None, (
+        f"No `{CARE_SERVING_SERVICE}` service in docker-compose.yml inherits the whole of "
+        "`.env`, so nothing here is handed the Care credential to keep and the assertions "
+        "below would be comparing absences. E0-02 ships `api` with `env_file: - .env`."
+    )
+
+    serving_url = service_environment(serving).get(CARE_CONNECTION_URL)
+    assert serving_url is not None and serving_url.strip(), (
+        f"`{CARE_SERVING_SERVICE}` supplies {CARE_CONNECTION_URL} as {serving_url!r}. It is the "
+        "one process that serves the §6.2 Care queue, so it is the one process that must hold "
+        "this credential — a stack where nobody holds it satisfies every 'the other services "
+        "must not hold it' assertion below while the Care queue is dead and nothing says so. "
+        "E0-10 makes the Care path a requirement, not an oversight, and ADR 0042 weighs a "
+        "silently unavailable queue as the expensive outcome. If `api` has stopped being the "
+        "process that serves it, change `CARE_SERVING_SERVICE` deliberately."
+    )
+
+    withheld_from: dict[str, tuple[str, ...]] = {
+        name: CARE_VARIABLES for name in inheriting if name != CARE_SERVING_SERVICE
+    }
+    assert withheld_from, (
+        "`api` is the only service in docker-compose.yml that inherits the whole of `.env`, so "
+        "this rule has nothing left to forbid and passes without checking anything. E0-03 adds "
+        "`worker` and `beat` on the same anchor (SPEC §7.2). If the job services now get their "
+        "configuration some other way, work out what they are handed and rewrite this rule "
+        "around it."
+    )
+    # `api` keeps the assembled URL and is asked for the parts anyway: it has no
+    # use for them, and requiring them here is what stops the rule reading as
+    # "every service but one", which is the reading a fourth service inherits.
+    withheld_from[CARE_SERVING_SERVICE] = CARE_CREDENTIAL_PARTS
+
+    problems: list[str] = []
+    for name, variables in sorted(withheld_from.items()):
+        environment = service_environment(inheriting[name])
+        for variable in variables:
+            if variable not in environment:
+                problems.append(
+                    f"`{name}` does not blank {variable} at all — `env_file: - .env` has "
+                    "already set it, so omitting the entry leaves the value in place"
+                )
+            elif environment[variable] is None:
+                problems.append(
+                    f"`{name}` passes {variable} through from the host environment, which is "
+                    "where the real credential is"
+                )
+            elif supplies_a_value(environment[variable]):
+                problems.append(f"`{name}` sets {variable} to {environment[variable]!r}")
+
+    assert not problems, "\n".join(
+        [
+            "An application container is handed a route to the Care credential "
+            "(SPEC §6.2, ADR 0042 as amended by E0-10):",
+            *problems,
+            "",
+            "`pulse_care` is the only role in the cluster with EXECUTE on "
+            "public.reveal_student_identity. A caller holding it can read a live CARE "
+            "assignment out of role_assignment, borrow that person as the acting actor, and "
+            "roll its own transaction back — which returns the student's name and email and "
+            "leaves no audit row. `worker` and `beat` never serve this queue, and `worker` is "
+            "the container that runs E0-13's gateway over untrusted comment text. Blank each "
+            "of them in the shared `x-application-environment` anchor: an empty value removes "
+            "what `env_file` set, and omitting the entry does not. If a second process "
+            "genuinely needs to reveal an identity, that is an amendment to ADR 0042 and a "
+            "deliberate edit here.",
+        ]
+    )
+
+
+def test_no_compose_file_hands_a_container_the_care_credential(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """Each of the three has exactly one service allowed to carry it, in either file.
+
+    The rule above says a service that inherits the whole of `.env` must take the
+    Care credential back out. This one says something simpler and wider: no
+    Compose file may *write* one of these three into a container that is not the
+    single service entitled to it. The two are complementary — that one is about
+    the credential arriving implicitly through `env_file`, this one about it
+    being handed over on purpose — and neither implies the other.
+
+    **This is the half that reads the override**, and it is where the superuser
+    rules were broken twice. Reviewer pass 2 put `DB_SUPERUSER` on the override's
+    `x-development-source` anchor, which is merged into all three application
+    services, and delivered the real password to three containers with the whole
+    unit suite green. The identical edit is available here: one line on that
+    anchor re-supplies `CARE_DATABASE_URL` to `worker` and `beat` while the base
+    file goes on blanking it and the rule above goes on passing.
+
+    No merge model is needed for it, which is why this is a question worth asking
+    of the override at all. `environment:` beats `env_file:`, and the override's
+    `environment:` beats the base file's, so a value written in either file is a
+    value the container gets. It over-approximates in the safe direction only.
+
+    **Two owners, not one, and they are different services.** `api` may hold the
+    assembled connection because it serves the §6.2 queue. `db` may hold
+    `DB_CARE_USER` and `DB_CARE_PASSWORD` because it is the server the role is
+    created in, which is the same reason it is the one exemption from the
+    superuser rules — and unlike the superuser pair, which it takes under
+    Postgres's own names, it takes these two under the names `.env` gives them.
+    Neither service is allowed the other's, so `CARE_DATABASE_URL` on `db` or the
+    pair on `api` is a failure here even though both are one service away from
+    something permitted.
+
+    The canary is the first loop. "Only these two may carry it" is true of a
+    stack where nobody carries it, and that stack has no Care queue at all.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. Both Compose files ship, and a file "
+            "that did not parse supplies no services — which would narrow this rule silently "
+            "rather than fail it."
+        )
+
+    assert services_of(override_compose), (
+        f"{override_compose_path.name} declares no services, so this test is not reading the "
+        "file the override half of this rule is about — the `x-development-source` anchor is "
+        "merged into all three application services there, which is one line away from "
+        "re-supplying what the base file blanks."
+    )
+
+    base_services = services_of(base_compose)
+    for variable, owner in sorted(CARE_VARIABLE_OWNERS.items()):
+        declared = service_environment(base_services.get(owner) or {}).get(variable)
+        assert declared is not None and declared.strip(), (
+            f"`{owner}` supplies {variable} as {declared!r} in docker-compose.yml, so nothing "
+            "in the stack holds it and the search below would report a clean file for a stack "
+            f"with no Care queue in it. `{CARE_SERVING_SERVICE}` serves the §6.2 queue and "
+            f"`{CREDENTIAL_OWNING_SERVICE}` is the server the role is created in; if either "
+            "has genuinely stopped taking this variable this way, this rule needs rewriting "
+            "around whatever replaced it rather than deleting."
+        )
+
+    problems: list[str] = []
+    for path, document in documents:
+        for name, body in sorted(services_of(document).items()):
+            environment = service_environment(body)
+            for variable, owner in sorted(CARE_VARIABLE_OWNERS.items()):
+                if name == owner or variable not in environment:
+                    continue
+                value = environment[variable]
+                if value is None:
+                    problems.append(
+                        f"{path.name}: `{name}` passes {variable} through from the host "
+                        "environment, which is where the real credential is"
+                    )
+                elif supplies_a_value(value):
+                    problems.append(
+                        f"{path.name}: `{name}` sets {variable} to {value!r}, and only "
+                        f"`{owner}` may carry it"
+                    )
+
+    assert not problems, "\n".join(
+        [
+            "A Compose file hands a container a route to the Care credential "
+            "(SPEC §6.2, ADR 0042 as amended by E0-10):",
+            *problems,
+            "",
+            "`pulse_care` is the only role that can execute public.reveal_student_identity, "
+            "and a caller holding it can borrow a live CARE assignment out of role_assignment "
+            "and roll the transaction back, keeping the name and leaving no audit row. It does "
+            "not matter which file the value is written in: the override's `environment:` "
+            "beats the base file's, and its shared anchor reaches every application service. "
+            "Set it to an empty string, or do not name it. If a second process genuinely needs "
+            "the Care connection, that is an amendment to ADR 0042 and a change to "
+            "`CARE_VARIABLE_OWNERS` made on purpose and reviewed as such.",
+        ]
+    )
+
+
+def test_nothing_outside_the_care_and_database_services_reads_the_care_credential(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+    documented_env: dict[str, str],
+    interpolated_variables_in: Callable[[Any], set[str]],
+) -> None:
+    """The Care credential does not reach a container under some other name, or via `.env`.
+
+    The rule above asks whether one of the three is an environment *key*. That is
+    one of the ways the value travels and not the only one, and both of the
+    others were found by reviewers writing plausible lines against the superuser
+    pair — first the credential inside another key's value,
+
+        ALEMBIC_DATABASE_URL: postgresql://${DB_SUPERUSER}:${DB_SUPERUSER_PASSWORD}@db:5432/...
+
+    and then, once that was caught, the same thing one hop further out, with
+    `.env.example` assembling the entry the Compose file names. Both put the real
+    password into three containers with the suite green. The Care credential is
+    open to both spellings exactly as the superuser one was, and E0-19 exists
+    because this boundary keeps eroding; `docs/MISTAKES.md` entry 13 is the rule
+    that says to close a hazard at every place facing it rather than at the one
+    that bit.
+
+    So this is the superuser rule next door with two exemptions instead of one,
+    and it is shaped the same way: it reads values rather than keys, it walks
+    each document whole with the two exempt service bodies removed — anchors,
+    build arguments, labels and top-level sections covered by not being excluded
+    — and it resolves names through `.env.example` transitively first, because
+    Compose expands `${...}` inside dotenv values and this repository depends on
+    that for both URLs.
+
+    `api` is exempt because it serves the queue and `db` because it creates the
+    role. The exemption is each service's body and nothing else: an anchor at the
+    top level holding the credential is flagged even if only `api` merges it,
+    because the top level is one `<<:` away from every service — which is the
+    exact shape the fix on pull request #29 uses in the safe direction.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. A file that did not parse holds no "
+            "interpolations, and a search that finds none reports every file clean."
+        )
+    assert documented_env, (
+        ".env.example is missing or parsed to nothing, so the transitive step below resolves "
+        "no names at all and this rule degrades to the one that reviewer pass 4 broke — the "
+        "one that sees a URL variable and asks no further."
+    )
+
+    values = {name.upper(): value for name, value in documented_env.items()}
+    bounded = set(CARE_VARIABLES)
+
+    def reads(node: Any) -> set[str]:
+        return transitively_read(node, interpolated_variables_in, values)
+
+    base_services = services_of(base_compose)
+    for owner in sorted({CARE_SERVING_SERVICE, CREDENTIAL_OWNING_SERVICE}):
+        assert bounded & reads(base_services.get(owner) or {}), (
+            f"The `{owner}` service reads none of {sorted(bounded)}, and it is one of the two "
+            "that has to. Either the walker is looking at the wrong thing or it is finding "
+            "nothing at all, and a rule that finds nothing calls every file clean."
+        )
+
+    problems: list[str] = []
+    for path, document in documents:
+        remainder = document_without(
+            document_without(document, CREDENTIAL_OWNING_SERVICE), CARE_SERVING_SERVICE
+        )
+        reached = sorted(bounded & reads(remainder))
+        if not reached:
+            continue
+        # Attribution for the message only. The assertion is about the document,
+        # so a credential sitting in a top-level section or an unmerged anchor
+        # still fails with nothing named here — which is why the fallback says
+        # where else to look rather than "no services".
+        exempt = {CARE_SERVING_SERVICE, CREDENTIAL_OWNING_SERVICE}
+        culprits = sorted(
+            name
+            for name, body in services_of(document).items()
+            if name not in exempt and bounded & reads(body)
+        )
+        where = culprits or ["outside any service — a top-level section, or an anchor"]
+        problems.append(f"{path.name}: {reached} reaches {where}")
+
+    assert not problems, "\n".join(
+        [
+            "Something other than the Care service and the database reads the Care credential "
+            "(SPEC §6.2, ADR 0042 as amended by E0-10):",
+            *problems,
+            "",
+            "It does not matter which key it lands in — a second connection URL, a build "
+            "argument, a label — or how many `.env` entries it came through: the container "
+            "holds a working `pulse_care` connection either way, and that role is the only one "
+            "that can execute the audited reveal. `worker` is the process that ships student "
+            "comment text to a third-party model provider, which makes it the last container "
+            "in the stack that should hold a route to a student's name.",
         ]
     )
 

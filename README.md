@@ -181,10 +181,21 @@ here on your machine, and `db` is a name only the Compose network resolves.
 
 Configuration is entirely environment-driven and documented in
 [`.env.example`](.env.example), which a unit test keeps in sync with
-`app.config.Settings`. Seven variables have no default, because a working
-default for a deployment-specific value is a misconfiguration that starts
+`app.config.Settings`. The deployment-specific variables have no default,
+because a working default for such a value is a misconfiguration that starts
 successfully: the application refuses to start without them and names the one it
 is missing.
+
+`CARE_DATABASE_URL` is the exception, and deliberately. It is the one credential
+in the cluster that can re-identify a student, so `docker-compose.yml` hands it
+to `api` alone and blanks it — with the `DB_CARE_USER` and `DB_CARE_PASSWORD`
+parts it is built from — on `worker` and `beat`. Those two never serve the Care
+queue, and `worker` is the process that ships comment text to a third-party
+model provider. `Settings` is built the same way in all three processes, so the
+field has to be optional for that to be expressible at all; a reveal attempted
+in a process without it fails naming the variable. See
+[ADR 0042](docs/adr/0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md),
+whose reversal section is why.
 The `DB_*` entries are in that file for Compose rather than for the application
 — Compose cannot parse a URL, so the `db` service is handed the parts
 `DATABASE_URL` is built from, and each password stays written once.
@@ -199,9 +210,14 @@ points at, so an injection in application code cannot reach a shell in the
 database container, read past a row-level security policy, or read a student's
 name — it holds no privilege of any kind on `user_identity`. `DB_CARE_USER`
 serves the Care queue (SPEC §6.2) and is the only role that can re-identify a
-student, through one `SECURITY DEFINER` function that writes an audit row in the
-same transaction as the read. It holds no direct `SELECT` on that table either,
-so a name cannot be obtained without leaving a record.
+student, through one `SECURITY DEFINER` function that writes an audit row before
+it reads the name and in the same transaction. It holds no direct `SELECT` on
+that table either, so every route to a name goes through that function. One gap
+is known and stated rather than papered over: a caller that runs the reveal and
+then rolls back its own transaction keeps the name and discards the audit row,
+because the rows are streamed before the caller decides. Closing that needs a
+second connection for the audit write and is E0-26 item 1. It is also why only
+the `api` process is given this credential.
 
 A fourth role, `pulse_reveal_definer`, appears in `\du` and in none of this
 file. It owns the reveal function and holds three grants, so that the one

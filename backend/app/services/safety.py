@@ -31,12 +31,21 @@ itself. Neither alone:
   when this one is bypassed, and it is asserted against the database with no
   service in the picture.
 
-**The engine is built on first use, and the configuration is validated at
-import.** `Settings` requires `CARE_DATABASE_URL`, so a deployment missing it
-fails when `app.db` is imported — at start-up, in every process, loudly. What is
-deferred is only the socket: `worker` and `beat` never serve this queue, and a
-pool they never check out is a pool they should not open. ADR 0006 left the
-lifetime question open per entry point and ADR 0042 answers it for this one.
+**The configuration decides which process can reveal at all.**
+`CARE_DATABASE_URL` is optional in `Settings`, and its absence is the ordinary
+state rather than a misconfiguration: `docker-compose.yml` gives it to `api` and
+blanks it on `worker` and `beat`, so the one credential that can execute the
+reveal reaches only the process that serves this queue. `worker` is also the
+process that ships comment text to a third-party model provider, which is why it
+is the last container that should hold a route to a name.
+
+So a process without the variable does not fail at import — it fails at the
+call, in `_care_engine`, naming the variable and saying that only the API process
+is configured to serve the Care queue. That is a deliberate move of the failure
+from start-up to first use, and ADR 0042's amendment records why the trade
+changed. The engine itself is still built on first use behind `functools.cache`,
+so importing this module opens no socket; ADR 0006 left the lifetime question
+open per entry point and ADR 0042 answers it for this one.
 """
 
 from collections.abc import Iterator
@@ -51,7 +60,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import Settings
 from app.models.identity import AssignmentRole
 
-__all__ = ["NotCareStaffError", "RevealedIdentity", "reveal_identity"]
+__all__ = [
+    "CareQueueNotConfiguredError",
+    "NotCareStaffError",
+    "RevealedIdentity",
+    "reveal_identity",
+]
 
 # Whether this person holds an assignment in the Care role at all. E0-09's
 # `role_assignment` carries no validity dates, so "live" reads as "exists" today:
@@ -75,6 +89,18 @@ _REVEAL = text(
     " FROM public.reveal_student_identity("
     " :actor_person_id, :subject_user_id, :case_id)"
 )
+
+
+class CareQueueNotConfiguredError(Exception):
+    """This process holds no Care credential, so it cannot reveal anything.
+
+    Not a defect on its own: `worker` and `beat` are configured this way on
+    purpose, and reaching this means a reveal was attempted somewhere that was
+    never meant to serve the Care queue. Raised rather than allowed to become a
+    `None` inside `create_engine`, which answers `ArgumentError: Expected string
+    or URL object, got None` — measured on the pinned SQLAlchemy, and it names
+    neither the variable nor the reason.
+    """
 
 
 class NotCareStaffError(Exception):
@@ -110,13 +136,30 @@ def _care_engine() -> Engine:
     may hold it. `@cache` rather than a module-level assignment so that importing
     this module opens no socket — see the note on lifetime in the module
     docstring.
+
+    Refuses before it builds anything when the setting is absent or blank. That
+    is the state `worker` and `beat` are deliberately in, so the message says
+    which variable is missing and which process is meant to hold it, rather than
+    letting a `None` reach `create_engine` and come back as an argument error
+    about a URL.
     """
     settings = Settings()
+    care_database_url = settings.care_database_url
+    if care_database_url is None:
+        raise CareQueueNotConfiguredError(
+            "CARE_DATABASE_URL is not set in this process, so no Care connection can be "
+            "opened and nothing was revealed. Only the API process is configured to serve "
+            "the Care queue: docker-compose.yml gives it this credential and blanks it on "
+            "`worker` and `beat`, because it is the one credential in the cluster that can "
+            "execute public.reveal_student_identity (SPEC 6.2, ADR 0042). If a reveal is "
+            "genuinely reaching this process, the routing is wrong — do not set the "
+            "variable here to make the error go away."
+        )
     return create_engine(
         # The explicit act ADR 0008's `SecretStr` choice exists to make
         # searchable. It goes no further than this call: the URL lives inside the
         # engine, whose own `repr` masks the password.
-        settings.care_database_url.get_secret_value(),
+        care_database_url.get_secret_value(),
         # Same reasoning as `app.db`: a pooled connection can be dead before it
         # is handed out, and this pool is checked out rarely enough that an idle
         # socket dropped by the network is the ordinary case rather than the rare
@@ -157,9 +200,17 @@ def reveal_identity(
     seen but whose name never arrived over NRPS — which is a different answer from
     a refusal and is why `NotCareStaffError` is raised rather than returned.
 
-    The audit row is written inside the function, in the transaction this commits,
-    so the read and the record cannot come apart (ADR 0001). A failure anywhere
-    after the reveal discards both.
+    The audit row is written before the identity is read and in the same
+    transaction, so an actor whose `INSERT` is refused never reaches the
+    `SELECT`, and a failure inside the function discards both. What that does not
+    give is atomicity against the *caller*: Postgres has already streamed the
+    rows by the time the caller decides, so a session that rolls back keeps the
+    name and discards the record. Reproduced on the pinned image. plpgsql has no
+    autonomous transaction, so closing it means writing the audit row over a
+    second connection — a dblink or a loopback foreign-data wrapper — which is
+    E0-26's. Until then the record holds against everything except a caller that
+    deliberately rolls back, and the credential that permits that reaches only
+    the `api` process.
 
     `case_id` is optional and defaults to nothing because there is no case model
     until E10; §4 asks for "actor, timestamp, and case" and the column is there
