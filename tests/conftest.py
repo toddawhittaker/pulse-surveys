@@ -63,6 +63,11 @@ the other three is a refactor that would edit three tickets' modules, so this on
 is written here rather than imported from any of them. What the builder refuses
 to decide — what a scope node is made of, and how a role is spelled — is written
 on the class.
+
+E0-10 adds `seed_rows`, beside `supervision_graph` and built out of the same
+helper. Its Care reveal can only be asserted against an identity that exists, and
+the seeding it needs is "one row of whatever table, with its ancestors" rather
+than a graph shape.
 """
 
 import base64
@@ -2738,6 +2743,31 @@ def metadata_tables(migrated_database: DatabaseUnderTest) -> dict[str, Any]:
             "through — and nothing for `migrations/env.py` to autogenerate against either."
         )
     return dict(metadata.tables)
+
+
+@pytest.fixture
+def seed_rows(db_session: Any, metadata_tables: dict[str, Any]) -> Callable[..., Any]:
+    """`seed_row` bound to the session whose writes are rolled back after the test.
+
+    E0-10 is what needs it. Every assertion about its Care reveal is about a
+    **particular** identity — that the function returned the name that was seeded,
+    not that it returned something — and over an unseeded database each of them is
+    satisfied by a function that reveals nobody (`docs/MISTAKES.md` entry 3).
+    `SupervisionGraph` seeds the containment chain and assignments and nothing
+    else, so the choice was a fifth private copy of the seeding helper or this;
+    entry 13 says one helper, reached from both places.
+
+    The integer counters are restarted for the same reason `supervision_graph`
+    restarts them: a course number is drawn from a 700-wide band, and a counter
+    that climbed across the session would eventually fail somebody else's test
+    inside its own seeding.
+    """
+    _GRAPH_INTEGER_COUNTERS.clear()
+
+    def seed(name: str, chain: dict[str, Any] | None = None, **overrides: Any) -> Any:
+        return seed_row(db_session, metadata_tables, name, chain, **overrides)
+
+    return seed
 
 
 @pytest.fixture
