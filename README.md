@@ -162,15 +162,16 @@ cp .env.example .env
 uvicorn app.main:create_app --factory --reload
 ```
 
-One catch. `DATABASE_URL` and `REDIS_URL` in `.env.example` name the Compose
-services `db` and `redis`, because CI copies that file and starts the stack from
-it, so it has to be a file the stack can actually start from. Outside a
-container those names do not resolve. Either start the backing services with
-`make up` and point the two URLs at `localhost`:
+One catch. `DATABASE_URL`, `CARE_DATABASE_URL` and `REDIS_URL` in `.env.example`
+name the Compose services `db` and `redis`, because CI copies that file and
+starts the stack from it, so it has to be a file the stack can actually start
+from. Outside a container those names do not resolve. Either start the backing
+services with `make up` and point the three URLs at `localhost`:
 
 ```sh
-# in your own .env, replacing the two lines copied from .env.example
+# in your own .env, replacing the three lines copied from .env.example
 DATABASE_URL=postgresql+psycopg://${DB_APP_USER}:${DB_APP_PASSWORD}@localhost:5432/${DB_NAME}
+CARE_DATABASE_URL=postgresql+psycopg://${DB_CARE_USER}:${DB_CARE_PASSWORD}@localhost:5432/${DB_NAME}
 REDIS_URL=redis://localhost:6379/0
 ```
 
@@ -180,27 +181,42 @@ here on your machine, and `db` is a name only the Compose network resolves.
 
 Configuration is entirely environment-driven and documented in
 [`.env.example`](.env.example), which a unit test keeps in sync with
-`app.config.Settings`. Six variables have no default, because a working default
-for a deployment-specific value is a misconfiguration that starts successfully:
-the application refuses to start without them and names the one it is missing.
+`app.config.Settings`. Seven variables have no default, because a working
+default for a deployment-specific value is a misconfiguration that starts
+successfully: the application refuses to start without them and names the one it
+is missing.
 The `DB_*` entries are in that file for Compose rather than for the application
 — Compose cannot parse a URL, so the `db` service is handed the parts
 `DATABASE_URL` is built from, and each password stays written once.
 
-They describe two database roles, and the difference matters. `DB_SUPERUSER` is
-the role Postgres creates on first start; it is the cluster superuser, and it is
-what migrations and system-level tasks use. `DB_APP_USER` is created alongside
-it by [`scripts/db-init`](scripts/db-init) and is granted only the right to
-connect. It is what `DATABASE_URL` points at, so an injection in application
-code cannot reach a shell in the database container or read past a row-level
-security policy.
+They describe three database roles, and the differences matter. `DB_SUPERUSER`
+is the role Postgres creates on first start; it is the cluster superuser, and it
+is what migrations and system-level tasks use. `DB_APP_USER` is created
+alongside it by [`scripts/db-init`](scripts/db-init) and is granted only the
+right to connect and to read the views in
+[`backend/app/views_sql/`](backend/app/views_sql). It is what `DATABASE_URL`
+points at, so an injection in application code cannot reach a shell in the
+database container, read past a row-level security policy, or read a student's
+name — it holds no privilege of any kind on `user_identity`. `DB_CARE_USER`
+serves the Care queue (SPEC §6.2) and is the only role that can re-identify a
+student, through one `SECURITY DEFINER` function that writes an audit row in the
+same transaction as the read. It holds no direct `SELECT` on that table either,
+so a name cannot be obtained without leaving a record.
 
 `DATABASE_URL` must never point at `DB_SUPERUSER`, and the Compose file keeps
 that credential out of the application container entirely. See
 [ADR 0009](docs/adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
-for which identity does what, and
+for which identity does what,
 [ADR 0001](docs/adr/0001-identity-separation-by-database-role.md) for why the
-runtime role is scoped the way it is.
+runtime roles are scoped the way they are, and
+[ADR 0042](docs/adr/0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md)
+for why the Care queue gets a credential rather than a `SET ROLE`.
+
+**Upgrading an existing stack past E0-10 needs `docker compose down -v`.**
+`scripts/db-init` runs only against an empty data directory, so on a volume
+created before this ticket `pulse_care` exists — the migration creates it — with
+no password and no way to log in, and the Care connection fails to
+authenticate.
 
 ```sh
 make ci             # every gate, in the same order as CI
@@ -259,6 +275,14 @@ Two things worth knowing before writing one:
   `backend/app/models/<aggregate>.py` means adding it to that package's
   `__init__.py` in the same change, or `alembic check` will cheerfully report no
   drift for a table that exists in no database.
+- **`alembic check` sees tables, and nothing else this schema relies on.** It
+  reads neither `pg_roles`, nor `pg_class` for views, nor `pg_proc`, so dropping
+  a read view, a trigger, the Care reveal function, or a grant leaves the check
+  green. A read view's SQL lives in
+  [`backend/app/views_sql/`](backend/app/views_sql) as a versioned file a
+  revision executes and never edits afterwards
+  ([ADR 0041](docs/adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)),
+  and the integration tests are the only thing that notices when one changes.
 
 ## Documents
 
