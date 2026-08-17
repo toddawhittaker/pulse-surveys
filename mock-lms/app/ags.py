@@ -92,14 +92,43 @@ REQUIRED_SCORE_MEMBERS = ("userId", "timestamp", "activityProgress", "gradingPro
 ACTIVITY_PROGRESS_VALUES = ("Initialized", "Started", "InProgress", "Submitted", "Completed")
 GRADING_PROGRESS_VALUES = ("FullyGraded", "Pending", "PendingManual", "Failed", "NotReady")
 
-# How RFC 3339 spells a UTC offset: `Z`, or `+HH:MM` with the colon. Checked
-# beside `datetime.fromisoformat` rather than instead of it, because the two
-# disagree: `fromisoformat` accepts a compact `+0000`, which RFC 3339 does not.
-# ADR 0048 already holds an enrollment window's `start` to the spelling with the
-# colon, and one service in this repository accepting what the other refuses
-# would be a rule that holds in half the places it applies
-# (`docs/MISTAKES.md` entry 13).
-RFC_3339_OFFSET = re.compile(r"([Zz]|[+-]\d{2}:\d{2})$")
+# Which of those five mean a grade exists, and so which produce a `Result`.
+#
+# **AGS's direction, Canvas's line, and the ADR owes that sentence.** That the
+# field decides *something* is the specification's — `gradingProgress` exists to
+# say whether a score is a grade yet, so a fold that ignores it has made the
+# field decorative. Where the line falls between the five is not in AGS's text:
+# it rests on Canvas's documented behaviour, that `NotReady`, `Failed` and
+# `Pending` cause `scoreGiven` to be ignored, and on reading `PendingManual` as a
+# grade awaiting a human rather than one awaiting computation.
+#
+# `PendingManual` producing a result is the load-bearing half. It is the value
+# E3 posts while SPEC §3.3's classification is still deciding whether a response
+# counts, and a fold that dropped it would leave every participation grade
+# invisible until something marked it fully graded — which nothing in E3 does.
+GRADED_PROGRESS_VALUES = ("FullyGraded", "PendingManual")
+UNGRADED_PROGRESS_VALUES = ("NotReady", "Failed", "Pending")
+
+# RFC 3339's `date-time`, whole and anchored, because a partial check of a
+# grammar is a different grammar. An earlier version of this module tested only
+# the offset's *tail* and let `datetime.fromisoformat` decide the rest, and a
+# reviewer measured that arrangement wrong in both directions at once: it
+# refused a conformant lower-case `z`, which §5.6 permits in as many words, and
+# accepted `20260302T100000Z` and `2026-03-02T10:00:00,5Z`, which are ISO 8601's
+# basic and comma-fraction forms and are not RFC 3339 at all. A standard-library
+# parser named after a standard is not a check against that standard.
+#
+# So the pattern is the whole authority and `fromisoformat` runs only after it
+# matches. Three details are the specification's rather than this file's: `T`
+# and `Z` may be lower case (§5.6's note); the fraction separator is a full stop
+# and only a full stop (`time-secfrac = "." 1*DIGIT`); and a space is admitted
+# as a separator because §5.6 explicitly allows applications to substitute one
+# for readability. That last is also the spelling the enrollment-window matcher
+# accepts, so the two surfaces answer alike — asserted on both sides now rather
+# than left to coincidence (`docs/MISTAKES.md` entry 13).
+RFC_3339_DATE_TIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$"
+)
 
 
 class GradeServiceError(ValueError):
@@ -205,6 +234,42 @@ def required_members(payload: dict[str, Any], members: tuple[str, ...], subject:
         )
 
 
+def is_a_grade(score: dict[str, Any]) -> bool:
+    """Whether one posted score is a grade, and so whether it makes a `Result`.
+
+    Two ways it is not, and they are different facts wearing one answer. An
+    absent `scoreGiven` is AGS's request to clear a result — the tool is saying
+    there is no longer a grade. A `gradingProgress` outside
+    `GRADED_PROGRESS_VALUES` is the platform's own field saying a grade has not
+    been produced yet, which is the one this fold ignored for two rounds.
+
+    Written as a named question rather than as a condition inside the fold,
+    because "is this score a grade" is the thing the AGS Result service exists to
+    answer, and a reader looking for that rule should find it under that name.
+    """
+    if score.get("scoreGiven") is None:
+        return False
+    return score.get("gradingProgress") in GRADED_PROGRESS_VALUES
+
+
+def numeric(value: Any) -> bool:
+    """Whether `value` is a number this service will do arithmetic on.
+
+    **`bool` is excluded, and only a Python reader would know to ask.** `bool`
+    subclasses `int`, so `isinstance(True, int | float)` is true and every
+    numeric check written the obvious way accepts `true` — measured on both
+    surfaces of this module, where it produced a `Result` whose `resultScore`
+    was `true` and a line item whose maximum was `true`. It is a hole no reading
+    of AGS would find, because AGS says "number" and JSON agrees; the gap is
+    between JSON's types and Python's.
+
+    One helper for both surfaces rather than the test repeated at each, since
+    two copies of this would be two places to forget it
+    (`docs/MISTAKES.md` entry 13).
+    """
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
 def one_of(payload: dict[str, Any], member: str, vocabulary: tuple[str, ...]) -> None:
     """Refuse a value outside one of AGS's two fixed vocabularies."""
     value = payload.get(member)
@@ -219,52 +284,49 @@ def one_of(payload: dict[str, Any], member: str, vocabulary: tuple[str, ...]) ->
 def moment(value: Any) -> datetime:
     """`value` as an RFC 3339 instant, or a refusal saying why it is not one.
 
-    **An offset is required**, not merely a parseable date. Two reasons, and the
-    second is this module's own: ADR 0048 already refuses a naive stamp on an
-    enrollment window because E0-06 made the calendar timezone-aware throughout,
-    and the score ordering rule below *compares* timestamps — two stamps in
-    unknown zones cannot be ordered at all, so an ordering rule resting on them
-    is arithmetic on a guess.
+    **The pattern is the authority and the parser runs after it.** Written the
+    other way round — parse first, then check the tail — this module refused a
+    conformant lower-case `z` and accepted two ISO 8601 forms RFC 3339 excludes,
+    because `datetime.fromisoformat` implements ISO 8601 and is named after
+    neither. See `RFC_3339_DATE_TIME` above for what the grammar admits and why
+    each part of it is the specification's rather than this file's.
 
-    A bare `2026-03-02` parses perfectly, lands at midnight in no zone, and is
-    exactly what an implementer writes when the day is what matters. That is the
-    value this refusal exists for; `"yesterday"` fails on its own.
+    **An offset is required**, and that is this module's own need as much as the
+    specification's: ADR 0048 refuses a naive stamp on an enrollment window
+    because E0-06 made the calendar timezone-aware throughout, and the score
+    ordering rule below *compares* timestamps — two stamps in unknown zones
+    cannot be ordered at all, so an ordering rule resting on them is arithmetic
+    on a guess. A bare `2026-03-02` parses perfectly, lands at midnight in no
+    zone, and is exactly what an implementer writes when the day is what
+    matters. That is the value this refusal exists for; `"yesterday"` fails on
+    its own.
+
+    Nothing normalised here reaches the store. The instant is used to order
+    scores; what the log keeps is the string the tool sent, because E0-15 records
+    the posted body verbatim and a re-rendered timestamp is the field E3 uses to
+    tell one week's repost from the next.
     """
     if not isinstance(value, str):
         raise GradeServiceError(
             f"The score carries a `timestamp` of {value!r}, which is not a string. AGS 2.0 makes "
             "it an RFC 3339 timestamp."
         )
-    try:
-        parsed = datetime.fromisoformat(value.strip())
-    except ValueError as failure:
+    text = value.strip()
+    if not RFC_3339_DATE_TIME.match(text):
         raise GradeServiceError(
-            f"The score carries a `timestamp` of {value!r}, which is not an RFC 3339 timestamp: "
-            f"{failure}. A platform that stored it would have a log it cannot sort."
-        ) from failure
-    # **This branch decides the message, not the answer.** The offset check below
-    # is strictly stronger — anything with no zone also fails to end in `Z` or
-    # `+HH:MM` — so deleting this leaves every refusal here still a refusal, which
-    # is what a mutation of it showed (`docs/MISTAKES.md` entry 3: two rules that
-    # refuse one row are indistinguishable to a behavioural test). It stays
-    # because "carries no UTC offset" is the true sentence for a bare
-    # `2026-03-02`, and the offset check's sentence — about how an offset is
-    # spelled — would be a puzzling thing to read about a value that has none.
-    if parsed.tzinfo is None:
-        raise GradeServiceError(
-            f"The score's `timestamp` {value!r} carries no UTC offset. A stamp without a zone "
-            "cannot be ordered against another, and this service refuses a score older than the "
-            "one it holds — so an unzoned stamp is a comparison against a guess."
+            f"The score carries a `timestamp` of {value!r}, which is not an RFC 3339 date-time. "
+            "It is `YYYY-MM-DDThh:mm:ss` with an optional `.fraction` and then `Z` or `+hh:mm` — "
+            "`T` and `Z` may be lower case, the fraction separator is a full stop and not a "
+            "comma, and the basic form without hyphens and colons is ISO 8601's rather than this "
+            "profile's. A stamp outside it is one this platform cannot order against another."
         )
-    if not RFC_3339_OFFSET.search(value.strip()):
-        raise GradeServiceError(
-            f"The score's `timestamp` {value!r} spells its offset in a form RFC 3339 does not. "
-            "The offset is `Z` or `+HH:MM` with the colon; `datetime.fromisoformat` also accepts "
-            "a compact `+0000`, and this platform does not — an enrollment window is held to the "
-            "same spelling (ADR 0048), and one service in this repository accepting what the "
-            "other refuses is how a tool learns a rule that holds in half the places it applies."
-        )
-    return parsed
+    if text.endswith(("Z", "z")):
+        # Rewritten by position rather than by `replace`, which would also
+        # rewrite a `Z` somewhere else in the string. `fromisoformat` accepts the
+        # upper-case designator and rejects the lower-case one, and the pattern
+        # above has already admitted both.
+        text = f"{text[:-1]}+00:00"
+    return datetime.fromisoformat(text)
 
 
 def score_value(payload: dict[str, Any], line_item: "LineItem") -> None:
@@ -291,6 +353,13 @@ def score_value(payload: dict[str, Any], line_item: "LineItem") -> None:
     negative one inverts the grade — the same rule `create_line_item` applies
     one layer up.
 
+    **A value is not negative, and deliberately has no upper bound.**
+    `0 <= scoreGiven <= scoreMaximum` is the obvious way to write the first half
+    and its second half is wrong: AGS permits a score above the maximum and
+    Canvas records it as extra credit, so refusing one turns a legitimate
+    passback into a 422 a tool would retry forever. The bound is one-sided on
+    purpose.
+
     **A maximum must equal the line item's**, which AGS does not require: the
     specification lets a platform take a differing maximum and scale, and Canvas
     does. E0-15 rules that Results does not rescale, and those two together would
@@ -306,14 +375,20 @@ def score_value(payload: dict[str, Any], line_item: "LineItem") -> None:
             "a pair, because a score is a fraction and a platform that invents the denominator "
             "produces a grade nobody can trace."
         )
-    if given is not None and not isinstance(given, int | float):
+    if given is not None and not numeric(given):
         raise GradeServiceError(
             f"The score carries `scoreGiven` {given!r}, which is not a number. AGS 2.0 makes it "
             "optional and numeric; a score sent without one clears the result."
         )
+    if given is not None and given < 0:
+        raise GradeServiceError(
+            f"The score carries `scoreGiven` {given!r}. A grade below nothing is not a grade, and "
+            "E3 computes valid weeks over weeks elapsed, which cannot go negative — so a negative "
+            "arriving here is a tool defect to refuse rather than a number to put in a gradebook."
+        )
     if maximum is None:
         return
-    if not isinstance(maximum, int | float) or maximum <= 0:
+    if not numeric(maximum) or maximum <= 0:
         raise GradeServiceError(
             f"The score carries `scoreMaximum` {maximum!r}. A maximum is a positive number: zero "
             "makes every percentage a division by zero and a negative one inverts the grade."
@@ -356,7 +431,7 @@ class GradeBook:
         section's column.
         """
         required_members(payload, REQUIRED_LINE_ITEM_MEMBERS, "line item")
-        if not isinstance(payload["scoreMaximum"], int | float) or payload["scoreMaximum"] <= 0:
+        if not numeric(payload["scoreMaximum"]) or payload["scoreMaximum"] <= 0:
             raise GradeServiceError(
                 f"The line item asks for `scoreMaximum` {payload['scoreMaximum']!r}. A maximum is "
                 "a positive number; §3.4 posts a participation score as a percentage of it."
@@ -418,11 +493,26 @@ class GradeBook:
         property that makes this readback usable as evidence.
         """
         required_members(payload, REQUIRED_SCORE_MEMBERS, "score")
+        if not isinstance(payload["userId"], str):
+            # AGS types `userId` as a string, and until this refusal the two
+            # rules below disagreed about what one *is*: the staleness guard
+            # keyed on `str(userId)` while the fold required an actual `str` and
+            # dropped the rest. So `"777"` and `777` were one user to the guard
+            # and two to the fold — the integer's score invisible in the
+            # gradebook while still blocking the string's re-posts as stale,
+            # which is a grade that silently stops updating and cannot be
+            # debugged from the tool's side.
+            raise GradeServiceError(
+                f"The score carries `userId` {payload['userId']!r}, which is not a string. AGS "
+                "2.0 types it as one, and this platform keys both its ordering rule and its "
+                "results on it — two rules that disagree about identity produce a student whose "
+                "grade stops updating for no visible reason."
+            )
         one_of(payload, "activityProgress", ACTIVITY_PROGRESS_VALUES)
         one_of(payload, "gradingProgress", GRADING_PROGRESS_VALUES)
         stamped = moment(payload["timestamp"])
         score_value(payload, line_item)
-        self.refuse_a_stale_score(line_item, str(payload["userId"]), stamped)
+        self.refuse_a_stale_score(line_item, payload["userId"], stamped)
         self._scores.append(PostedScore(line_item=line_item.identifier, score=payload))
 
     def refuse_a_stale_score(self, line_item: LineItem, user_id: str, stamped: datetime) -> None:
@@ -456,14 +546,15 @@ class GradeBook:
         Read off the log rather than kept in a second mapping beside it, because
         a cache of a fact the log already carries is a fact that can disagree
         with it — and the log is the thing E0-15 makes authoritative. Every entry
-        in it was checked by `moment` on the way in, so none of these parses can
-        fail.
+        in it was checked by `moment` and by the `userId` type rule on the way
+        in, so none of these parses can fail and every stored identifier is
+        already a string. Compared as one rather than through `str()`, so that
+        this rule and the fold answer the same question about who a user is.
         """
         stamps = [
             moment(posted.score["timestamp"])
             for posted in self._scores
-            if posted.line_item == line_item.identifier
-            and str(posted.score.get("userId", "")) == user_id
+            if posted.line_item == line_item.identifier and posted.score.get("userId") == user_id
         ]
         return max(stamps) if stamps else None
 
@@ -475,9 +566,30 @@ class GradeBook:
         """The conformant AGS Result container for one line item, optionally for one user.
 
         A `Result` is the *current* grade, so it is folded out of the score log
-        rather than stored beside it: the newest score for each user wins, and a
-        score sent with no `scoreGiven` clears that user's result, which is what
-        AGS 2.0 says an absent `scoreGiven` means.
+        rather than stored beside it: the newest score for each user wins, and it
+        produces a `Result` only if it is a grade. Two ways it is not — an absent
+        `scoreGiven`, which is what AGS says a request to clear a result looks
+        like, and a `gradingProgress` in `UNGRADED_PROGRESS_VALUES`, which says
+        the grading process has produced no grade yet.
+
+        **The `gradingProgress` half is the defect this fold shipped without.**
+        The field was validated on the way in and read by nothing here, so a
+        score posted `NotReady` came back as a finished grade — and the round
+        that added the vocabulary check made that *harder* to see, because the
+        field then looked handled to anyone reading the code or the tests. E3
+        posts a score at submit time, before SPEC §3.3's classification has
+        decided whether the response counts; folding that into a `Result` puts a
+        number in front of a student that the platform has just said does not
+        exist.
+
+        **What happens when an ungraded score arrives after a graded one is not
+        settled here.** This fold takes the newest, so an ungraded score retracts
+        the grade before it; Canvas instead ignores the score and leaves the
+        earlier grade standing. Those are opposite behaviours, AGS settles
+        neither, and no test pins one — it is
+        [E0-28](../../docs/tickets/e0/E0-28-review-debt-from-e0-15.md)'s to
+        decide. What is written here is the continuation of the existing rule
+        rather than an answer to that question.
 
         **Newest by timestamp, with arrival order breaking a tie**, and not by
         arrival order alone. The 409 above already makes the log monotonic per
@@ -503,6 +615,9 @@ class GradeBook:
         for arrival, posted in enumerate(self._scores):
             if posted.line_item != line_item.identifier:
                 continue
+            # Every stored `userId` is a string, because `record_score` refuses
+            # anything else — so this narrowing is unreachable as it stands and
+            # is kept only to satisfy the type checker about the key below.
             user = posted.score.get("userId")
             if not isinstance(user, str) or (user_id is not None and user != user_id):
                 continue
@@ -513,7 +628,7 @@ class GradeBook:
         return [
             result_document(line_item, user, score)
             for user, (_, _, score) in newest.items()
-            if score.get("scoreGiven") is not None
+            if is_a_grade(score)
         ]
 
     def result(self, line_item: LineItem, user_id: str) -> dict[str, Any] | None:

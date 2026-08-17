@@ -59,7 +59,18 @@ def page_url(base: str, page: int) -> str:
     URL whose meaning then depends on which one the reader takes first.
     """
     split = urlsplit(base)
-    query = [(name, value) for name, value in parse_qsl(split.query) if name != PAGE_PARAMETER]
+    # `keep_blank_values=True`, and it is load-bearing rather than tidy.
+    # `parse_qsl` drops a blank value by default, so a container filtered by
+    # `?tag=` would rebuild its own `Link` URLs without the filter — answering a
+    # correctly filtered first page and an unfiltered second one, and handing a
+    # tool line items it did not ask for. The empty string is a value; a request
+    # round-tripped through a parser that normalises is a class of defect, and
+    # this is the one place in this platform that does it.
+    query = [
+        (name, value)
+        for name, value in parse_qsl(split.query, keep_blank_values=True)
+        if name != PAGE_PARAMETER
+    ]
     if page > 1:
         query.append((PAGE_PARAMETER, str(page)))
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))

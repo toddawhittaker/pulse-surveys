@@ -379,7 +379,7 @@ def create_app() -> FastAPI:
         resource_link_id: str | None = None,
         resource_id: str | None = None,
         tag: str | None = None,
-        limit: Annotated[int | None, Query(ge=1, le=MAX_LINE_ITEM_LIMIT)] = None,
+        limit: Annotated[int | None, Query(ge=1)] = None,
         page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
     ) -> JSONResponse:
         """One page of this section's line items, in creation order.
@@ -400,7 +400,11 @@ def create_app() -> FastAPI:
             context_id,
             LineItemFilters(resource_link_id=resource_link_id, resource_id=resource_id, tag=tag),
         )
-        size = limit or LINE_ITEM_PAGE_SIZE
+        # An over-large `limit` is **clamped, not refused**. A tool has no way to
+        # discover the cap, so the only thing it can do with "your page size is
+        # too large" is guess a smaller one — and a platform that clamps has
+        # already answered the question. Canvas clamps.
+        size = min(limit, MAX_LINE_ITEM_LIMIT) if limit else LINE_ITEM_PAGE_SIZE
         try:
             shown = window(found, page, size)
         except PageOutOfRangeError as refusal:
