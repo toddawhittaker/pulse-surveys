@@ -488,10 +488,18 @@ stay — each becomes load-bearing the moment its neighbour is relaxed, which
 contemplates for one of them — and each now says in the code that a test cannot tell
 it apart from the guard beside it. **The fourth is real:** widening the line-item
 filter to `in (value, None)`, so that a filter hands back every line item *lacking*
-the member, leaves all 28 tests green, because every line item the suite creates
-carries a `tag` and a `resourceId`. It fails open, which is the direction that hands
-a tool another placement's grades. The implementer cannot close it on this side of
-the test wall; the test it needs creates a line item with the member absent.)*
+the member, left all 28 tests then in this module green, because every line item the
+suite creates carries a `tag` and a `resourceId`. It fails open, which is the
+direction that hands a tool another placement's grades. **Now closed**, by the only
+agent that could: `test_a_line_item_filter_does_not_return_an_item_that_lacks_the_member`
+creates one line item carrying the value and one with the member absent — a body
+`create_line_item` had to gain an `omitting=` keyword to send, since `tag=None` posts
+a null and a null is not a missing key — and requires the first back and the second
+not. It is the second guard on this branch that passes on first run against correct
+code, and like the first it is evidence only because the mutation was re-applied
+against it. What it still does not cover is the same widening on `resourceLinkId`,
+which no test here can create a line item lacking; that went to the followup ticket
+rather than being guessed at.)*
 
 *(The twenty-fifth, in E0-15, and it is a gap found by trying to reintroduce a
 defect rather than by any review. The mock platform's roster is served per

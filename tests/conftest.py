@@ -108,7 +108,7 @@ import re
 import secrets
 import string
 import sys
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -2243,13 +2243,29 @@ class MockPlatform:
             for identifier, launches in sorted(grouped.items())
         ]
 
-    def create_line_item(self, launch: SignedLaunch, **overrides: Any) -> dict[str, Any]:
+    def create_line_item(
+        self,
+        launch: SignedLaunch,
+        *,
+        omitting: Sequence[str] = (),
+        **overrides: Any,
+    ) -> dict[str, Any]:
         """Create one line item and hand back what the platform stored.
 
         The default body is SPEC §3.4's: one line item per section labelled
         "Pulse Participation", scored out of 100. `resourceId` is drawn fresh per
         call so that a test asking whether *its* line item appears in a listing
         is not answered by a seeded one.
+
+        `omitting` sends a body with those keys **absent**, which `overrides`
+        cannot express: `tag=None` posts `{"tag": null}`, and a null member and a
+        missing member are two different bodies that a filter is entitled to
+        treat differently — the missing one is the case a fail-open filter
+        matches. It is a keyword rather than a sentinel value so that the call
+        site reads as what it does, and a name that was not there to omit is a
+        failure rather than a silent no-op, because a misspelling would
+        otherwise leave a test quietly asserting nothing about the body it meant
+        to send.
         """
         payload: dict[str, Any] = {
             "scoreMaximum": 100,
@@ -2258,6 +2274,15 @@ class MockPlatform:
             "tag": "participation",
         }
         payload.update(overrides)
+        for name in omitting:
+            if name not in payload:
+                pytest.fail(
+                    f"`create_line_item(omitting={list(omitting)})` was asked to leave out "
+                    f"`{name}`, which this body does not carry — it carries {sorted(payload)}. "
+                    "A key that is already absent cannot be omitted, and a misspelling here "
+                    "would post the very member the caller meant to leave out."
+                )
+            payload.pop(name)
         response = self.service_post(
             self.line_items_url(launch),
             payload,

@@ -1110,6 +1110,78 @@ def test_the_line_item_container_filters_by_tag(
     )
 
 
+def test_a_line_item_filter_does_not_return_an_item_that_lacks_the_member(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """A filter matches what carries the value, not what carries nothing.
+
+    **The mutation, measured rather than imagined.** `LineItemFilters.matches` in
+    `mock-lms/app/ags.py` compares `line_item.document.get(member) == value`;
+    widened to `in (value, None)` — the fail-open shape, where a filter also
+    returns every line item that *lacks* the member — all 28 tests in this module
+    stayed green. Nothing could see it, because every line item the suite creates
+    carries a `tag` and a `resourceId`, so there was no line item without one for
+    the widened branch to match.
+
+    It fails open in the direction that costs: a tool asking for one placement's
+    line items is handed items belonging to nobody, and in E3 that is another
+    section's gradebook column. The two filter tests above cannot reach it —
+    they assert that an item carrying a *different* value is excluded, which the
+    widening does not affect.
+
+    The line item is created with the member **absent** rather than null, which
+    `create_line_item(omitting=…)` in `tests/conftest.py` exists for: `{"tag":
+    null}` and a body with no `tag` are two different bodies, and only the second
+    is what `.get()` returns `None` for.
+
+    Two guards, both load-bearing. The line item that *does* carry the value has
+    to come back first, or "the other one is absent" is satisfied by a filter
+    that returns nothing at all. And the platform has to have stored the member
+    as absent — if it fills a default in, there is no line item lacking the
+    member and this test cannot see the shape it is named for, which is worth
+    saying rather than passing.
+
+    **What this does not reach.** Only `tag` and `resourceId`, the two members
+    every line item here carries. `resourceLinkId` is deliberately left out: a
+    platform may reasonably default it to the launch's own placement, so a line
+    item lacking it may not be a thing this suite can create, and asserting
+    otherwise would fail a mock that is behaving well. Whether that filter fails
+    open is unasserted and belongs with the other `resourceLinkId` question on
+    the followup ticket.
+    """
+    for member, parameter in (("tag", "tag"), ("resourceId", "resource_id")):
+        value = f"e0-15-{member.lower()}-{uuid4().hex[:12]}"
+        carrying = mock_platform.create_line_item(signed_launch, **{member: value})
+        lacking = mock_platform.create_line_item(signed_launch, omitting=(member,))
+
+        assert lacking.get(member) is None, (
+            f"The platform stored `{member}` = {lacking.get(member)!r} for a line item created "
+            f"without it ({lacking!r}). There is then no line item carrying no `{member}` for a "
+            "fail-open filter to match, so this test cannot see the shape it is named for — "
+            "which is a different fact from the filter being correct. Absent and `null` are both "
+            "fine here, since a filter reading `.get(member)` cannot tell them apart; what is not "
+            "fine is a default filled in on the way through."
+        )
+
+        listed = {
+            str(item.get("id"))
+            for item in mock_platform.line_items(signed_launch, **{parameter: value})
+        }
+        assert str(carrying.get("id")) in listed, (
+            f"Filtering by `{parameter}={value}` did not return the line item created with "
+            f"`{member}` set to it. It returned {sorted(listed)}. Without this, the assertion "
+            "below would be satisfied by a filter that returns nothing at all."
+        )
+        assert str(lacking.get("id")) not in listed, (
+            f"Filtering by `{parameter}={value}` also returned a line item that carries no "
+            f"`{member}` at all ({lacking.get('id')}). A filter comparing "
+            "`document.get(member) == value` is right; one comparing `in (value, None)` hands "
+            "back every unlabelled line item to whoever asks for any label, which in E3 is "
+            "another section's gradebook column."
+        )
+
+
 def test_the_line_item_container_filters_by_resource_link_id(
     mock_platform: Any,
     signed_launch: Any,
