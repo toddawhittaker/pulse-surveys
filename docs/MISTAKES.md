@@ -35,11 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-<<<<<<< HEAD
 **Caught: 19**
-=======
-**Caught: 17**
->>>>>>> origin/epic/e0-foundations
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -109,11 +105,7 @@ cannot see whether it exists.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-<<<<<<< HEAD
-**Caught: 16**
-=======
-**Caught: 14**
->>>>>>> origin/epic/e0-foundations
+**Caught: 17**
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
@@ -138,11 +130,7 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-<<<<<<< HEAD
 **Caught: 15**
-=======
-**Caught: 13**
->>>>>>> origin/epic/e0-foundations
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -230,11 +218,7 @@ sentence.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-<<<<<<< HEAD
 **Caught: 9**
-=======
-**Caught: 8**
->>>>>>> origin/epic/e0-foundations
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and
@@ -271,11 +255,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-<<<<<<< HEAD
 **Caught: 4**
-=======
-**Caught: 3**
->>>>>>> origin/epic/e0-foundations
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
@@ -698,7 +678,6 @@ evidence.
 
 ---
 
-<<<<<<< HEAD
 ## 20. A mutation the fixture undid, read as a test that could not fail
 
 **Caught: 0**
@@ -740,7 +719,8 @@ process lifetime has to go below the import: into a file, into the environment, 
 into a deterministic source of randomness. A mutation that fails to fail is a
 result about the mutation until you have shown otherwise.
 
-=======
+---
+
 ## 17. An unqualified table name let the caller choose which table a guard read
 
 **Caught: 0**
@@ -892,4 +872,40 @@ its own named test: a fold that fails a set comparison reads as a fixture needin
 an update, while a fold that fails
 `test_the_moderation_contract_keeps_threat_and_self_harm_as_two_distinct_verdicts`
 says what was lost in the line the runner prints.
->>>>>>> origin/epic/e0-foundations
+
+---
+
+## 21. A merge was committed with its conflict markers still in the file
+
+**Caught: 0**
+
+**What happened.** `docs/MISTAKES.md` and `.dockerignore` were merged in commit
+`7f5b300` (pull request #24) with six and one conflicted regions respectively,
+and the markers were committed rather than resolved. The counter values had in
+fact been reconciled correctly — every `<<<<<<< HEAD` side carried the right
+sum of both branches' increments — so the work of resolving was done and only
+the deleting was not. Pull request #27 then re-sorted the same `MISTAKES.md`
+by catch count and did not see them, and pull request #24, pull request #27 and
+the merge between them all passed every gate.
+
+**Root cause.** Nothing in the build reads a Markdown file or a
+`.dockerignore`. `ruff`, `mypy` and pytest sweep `.py`; the Docker gate reads
+the Dockerfile and treats an unknown `.dockerignore` line as a pattern that
+matches nothing, so a marker there is inert rather than loud. The two files this
+repository most depends on being *read by a person* were the two with no
+mechanical reader at all.
+
+**Consequence.** None functional — the `.dockerignore` markers matched nothing
+and both branches' patterns survived, so no file reached an image that should
+not have. The cost was to the documents themselves: for two pull requests
+`MISTAKES.md` carried each of five counters twice with different values, which
+is the exact confusion the `Caught:` ordering rule exists to prevent, and one of
+its entries appeared to end mid-paragraph.
+
+**Rule.** `tests/unit/test_no_unresolved_merge_conflicts.py` sweeps every
+tracked file for a marker at column zero. Beyond that: when a merge conflicts in
+a file no gate reads, the resolution is not finished until you have looked at
+the whole file rather than the region you edited. A conflict in a documentation
+file is *more* likely to survive than one in code, not less, because nothing but
+a reader will ever object — and the reader who arrives next is reading it for
+its content and will take the markers for formatting they do not recognise.
