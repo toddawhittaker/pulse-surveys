@@ -81,11 +81,11 @@ def test_the_deferred_transitive_union_raises_rather_than_returning_a_purview(
 
     pytest.fail(
         f"`transitive_purview` answered with {answered!r} instead of raising. SPEC §2.1 defines "
-        "purview as 'own grant ∪ purviews of all assignments transitively reporting to it', and "
-        "E0-11 does not build it: 'Leave a clearly named unimplemented seam rather than a partial "
-        "union.' ADR 0003 rejects every value that could stand in for one — an empty set reads as "
-        "'supervises nothing', which is a real state; the own grant alone reads as a missing "
-        "roster sync; the institution is the one direction §4.1 forbids absolutely."
+        "purview as 'own grant union the purviews of all assignments transitively reporting to "
+        "it', and E0-11 does not build it: 'Leave a clearly named unimplemented seam rather than "
+        "a partial union.' ADR 0003 rejects every value that could stand in for one — an empty "
+        "set reads as 'supervises nothing', which is a real state; the own grant alone reads as "
+        "a missing roster sync; the institution is the one direction §4.1 forbids absolutely."
     )
 
 

@@ -331,7 +331,7 @@ def test_an_explicit_n_threshold_overrides_the_configured_default(
     rows.commit()
 
     configured = configured_threshold()
-    assert EXPLICIT_N_THRESHOLD != configured, (
+    assert configured != EXPLICIT_N_THRESHOLD, (
         f"This test overrides the threshold with {EXPLICIT_N_THRESHOLD}, which is what "
         "configuration already supplies, so the assertion below cannot tell an applied override "
         "from an ignored one. Change `EXPLICIT_N_THRESHOLD` at the top of this file."

@@ -1,10 +1,10 @@
 """An assignment's own grant is its scope restricted by role grain — ticket E0-11.
 
-SPEC §2.1: "**Purview(assignment) = own grant ∪ purviews of all assignments
-transitively reporting to it**, with the own grant restricted by role grain: a
-Lead Faculty's grant is only the courses they lead (never sibling leads' courses,
-at any point in the union); a chair's is the department subtree; a dean's the
-college."
+SPEC §2.1: "**Purview(assignment) = own grant union the purviews of all
+assignments transitively reporting to it**, with the own grant restricted by
+role grain: a Lead Faculty's grant is only the courses they lead (never sibling
+leads' courses, at any point in the union); a chair's is the department subtree;
+a dean's the college."
 
 The union is E9's and raises here (ADR 0003,
 `tests/unit/test_deferred_authz_seams_fail_closed.py`). The own grant is E0-11's,

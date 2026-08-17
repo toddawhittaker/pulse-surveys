@@ -16,11 +16,11 @@ alongside routine oversight access."
 
 **Why the union is asserted here at all, given that the transitive union is
 deferred.** `Purview.union` is the operation §2.1's definition is written in —
-"own grant ∪ purviews of all assignments transitively reporting to it" — and E9
-is the ticket that walks the graph, not the ticket that decides what joining two
-purviews means. A union that dropped a level would be invisible in E0: a purview
-with `section_ids` and no `course_ids` still renders, still scopes a query, and
-still looks like an answer.
+"own grant union the purviews of all assignments transitively reporting to it" —
+and E9 is the ticket that walks the graph, not the ticket that decides what
+joining two purviews means. A union that dropped a level would be invisible in
+E0: a purview with `section_ids` and no `course_ids` still renders, still scopes
+a query, and still looks like an answer.
 
 **What is not asserted here, and where it is.** That a Care assignment produces no
 purview to union in the first place — `own_grant` on one raises rather than
@@ -84,15 +84,16 @@ def test_a_purview_carries_exactly_the_six_containment_levels(authz: Any) -> Non
     local reason, since the purview is the value already being passed to every
     read path.
     """
-    Purview = authz.Purview
+    purview_class = authz.Purview
 
-    assert dataclasses.is_dataclass(Purview), (
-        f"`Purview` is {Purview!r} rather than a dataclass, so this test cannot list its fields. "
-        "E0-11 settles it as a frozen dataclass of six frozensets; if it is genuinely something "
-        "else, say so in the pull request — the property below is the same one either way."
+    assert dataclasses.is_dataclass(purview_class), (
+        f"`Purview` is {purview_class!r} rather than a dataclass, so this test cannot list its "
+        "fields. E0-11 settles it as a frozen dataclass of six frozensets; if it is genuinely "
+        "something else, say so in the pull request — the property below is the same one either "
+        "way."
     )
 
-    declared = tuple(field.name for field in dataclasses.fields(Purview))
+    declared = tuple(field.name for field in dataclasses.fields(purview_class))
     assert declared == PURVIEW_LEVELS, (
         f"`Purview` carries {declared}; SPEC §2.1's containment hierarchy is {PURVIEW_LEVELS}. A "
         "missing level is a scope that cannot be expressed — a chair's grant is a department "
@@ -127,7 +128,7 @@ def test_a_purview_holds_nothing_that_reads_as_a_capability(authz: Any) -> None:
 
 
 def test_a_purview_unions_every_level(authz: Any) -> None:
-    """§2.1's `∪`, level by level, with nothing dropped and nothing invented.
+    """§2.1's union, level by level, with nothing dropped and nothing invented.
 
     Six levels are populated on each side with ids the other does not hold, so a
     union that forgot a level, or that returned one operand, fails on exactly the
@@ -139,15 +140,15 @@ def test_a_purview_unions_every_level(authz: Any) -> None:
     nobody granted. §4.1 item 6 forbids only one of those absolutely, which is
     why the assertion is equality rather than containment.
     """
-    Purview = authz.Purview
+    purview_class = authz.Purview
     mine = {name: frozenset({uuid4()}) for name in PURVIEW_LEVELS}
     yours = {name: frozenset({uuid4()}) for name in PURVIEW_LEVELS}
 
-    first = Purview(**mine)
-    second = Purview(**yours)
+    first = purview_class(**mine)
+    second = purview_class(**yours)
     joined = first.union(second)
 
-    assert isinstance(joined, Purview), (
+    assert isinstance(joined, purview_class), (
         f"`Purview.union` answered {joined!r}, which is not a `Purview`. §2.1 defines purview as "
         "a union of purviews, so the result has to be one — anything else cannot be unioned again "
         "with the next assignment in the walk."
@@ -195,14 +196,14 @@ def test_an_actor_scope_carries_care_as_a_capability_beside_the_purview(authz: A
     all — §4 makes suppression a property of the request, and a caller that has to
     fetch the threshold separately is a caller that can forget to.
     """
-    ActorScope = authz.ActorScope
+    actor_scope_class = authz.ActorScope
 
-    assert dataclasses.is_dataclass(ActorScope), (
-        f"`ActorScope` is {ActorScope!r} rather than a dataclass, so this test cannot list its "
-        "fields."
+    assert dataclasses.is_dataclass(actor_scope_class), (
+        f"`ActorScope` is {actor_scope_class!r} rather than a dataclass, so this test cannot list "
+        "its fields."
     )
 
-    declared = tuple(field.name for field in dataclasses.fields(ActorScope))
+    declared = tuple(field.name for field in dataclasses.fields(actor_scope_class))
     assert declared == ACTOR_SCOPE_FIELDS, (
         f"`ActorScope` carries {declared} rather than {ACTOR_SCOPE_FIELDS}. Each of the four is a "
         "separate requirement: the person the scope was resolved for, the purview §2.1 defines, "

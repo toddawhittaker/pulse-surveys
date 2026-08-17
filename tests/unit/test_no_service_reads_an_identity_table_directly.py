@@ -79,20 +79,20 @@ QUERY_CALLS = ("select", "query", "get", "delete", "update", "insert", "exists",
 # each shape that has to be caught, and one of each that has to be allowed.
 # Nothing here is executed — they are subjects for a regex, never queries.
 SQL_MUST_CATCH = (
-    "SELECT * FROM user_identity WHERE id = :id",  # noqa: S608
-    'SELECT name FROM public."user_identity"',  # noqa: S608
-    "SELECT 1 FROM section_roster JOIN person ON true",  # noqa: S608
-    "UPDATE person SET category = 'staff'",  # noqa: S608
-    'INSERT INTO "user" (lms_user_id) VALUES (:sub)',  # noqa: S608
-    "select * from PUBLIC . USER_IDENTITY",  # noqa: S608
+    "SELECT * FROM user_identity WHERE id = :id",
+    'SELECT name FROM public."user_identity"',
+    "SELECT 1 FROM section_roster JOIN person ON true",
+    "UPDATE person SET category = 'staff'",
+    'INSERT INTO "user" (lms_user_id) VALUES (:sub)',
+    "select * from PUBLIC . USER_IDENTITY",
 )
 
 SQL_MUST_ALLOW = (
-    "SELECT * FROM section_roster WHERE section_id = :section_id",  # noqa: S608
-    "SELECT * FROM section_enrollment_count WHERE course_id = :course_id",  # noqa: S608
-    "SELECT role, person_id FROM role_assignment WHERE person_id = :person_id",  # noqa: S608
-    "SELECT * FROM public.reveal_student_identity(:actor, :subject, NULL)",  # noqa: S608
-    "SELECT course_id FROM lead_faculty_mapping WHERE person_id = :person_id",  # noqa: S608
+    "SELECT * FROM section_roster WHERE section_id = :section_id",
+    "SELECT * FROM section_enrollment_count WHERE course_id = :course_id",
+    "SELECT role, person_id FROM role_assignment WHERE person_id = :person_id",
+    "SELECT * FROM public.reveal_student_identity(:actor, :subject, NULL)",
+    "SELECT course_id FROM lead_faculty_mapping WHERE person_id = :person_id",
     # Prose, which is where the identity tables are *supposed* to be named.
     "This never joins to user_identity; the grant refuses it anyway.",
 )

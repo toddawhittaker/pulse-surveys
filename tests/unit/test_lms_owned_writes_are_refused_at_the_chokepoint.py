@@ -92,7 +92,7 @@ def declarative_metadata() -> Any:
     try:
         importlib.import_module("app.models")
         base_module = importlib.import_module("app.models.base")
-    except Exception:  # noqa: BLE001 — reported by the assertions that use this
+    except Exception:  # broad on purpose — reported by the assertions that use this
         return None
     base = getattr(base_module, "Base", None)
     return getattr(base, "metadata", None)
