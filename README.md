@@ -146,8 +146,8 @@ Two things about it are worth knowing before debugging anything:
 
 ### What it is seeded with
 
-Three sections in one term, twenty people, and thirty-two enrollments. Small on
-purpose: the full demo institution is E0-17's and lives in Pulse's own database.
+Three sections in one term, each with a roster of its own. Small on purpose: the
+full demo institution is E0-17's and lives in Pulse's own database.
 
 | Section | Course | Modality | Roster |
 |---|---|---|---|
@@ -168,8 +168,8 @@ section, so any combination of its two selectors is a launch that works:
 | `mock-lms-user-instructor` | Instructor | every instructor surface |
 | `mock-lms-user-learner` | Learner | every student surface |
 
-The other eighteen are students who take one section each, and they exist so that
-a roster pages and so that E3 has its edge cases. Two of them are not ordinary:
+Everybody else is a student who takes one section, and they exist so that a
+roster pages and so that E3 has its edge cases. Two of them are not ordinary:
 in `BIOL-215-R3WW`, student 04 enrolls three weeks after their classmates and
 student 07 drops six weeks in — reported `Inactive`, with an enrollment `end`,
 and still on the roster, because SPEC §3.4 has the tool learn about a drop from

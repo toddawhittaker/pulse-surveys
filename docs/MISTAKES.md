@@ -400,6 +400,21 @@ request body, test docstrings. Indexes are the highest risk: written once, never
 re-read. "Re-read nearby prose" is not enough; it misses the record that was
 never written and the one that drifted out from under you.
 
+A thirteenth, in E0-15, and it is the sharpest instance of the count rule below
+because it happened **inside the commit that bumped this entry's counter for
+sweeping outward**. `README.md` and `mock-lms/app/seed.py` both said the seed
+holds "twenty people and thirty-two enrollments". Twenty is right. Thirty-two was
+never right: the three rosters hold twelve, seven and five, which is twenty-four,
+and the number came from adding the same figure up in my head rather than out of
+`seeded_platform()`. The table two lines below it in the README gave 12, 7 and 5
+correctly, so the document contradicted itself on one screen and neither half was
+re-read against the other. It reached three prose sites, a report to the
+coordinator, and a commit message that cannot be corrected because history is not
+rewritten here; the coordinator found it by counting the enrollments out of the
+code. The repair deletes the number in all three places rather than correcting
+it — the roster sizes are in the table, and a total is a number nobody will
+recount the next time a section is added.
+
 **And read the prose in your own diff as if someone else wrote it.** Every claim
 you have just written is a claim nobody has checked, including the ones written
 while correcting somebody else's. Where a sentence describes a behaviour, it has
@@ -417,12 +432,21 @@ expensive records are the ones a later ticket implements against, where the code
 is right and only the sentence is wrong, so nothing goes red.
 
 **A count in prose is a record with a scheduled expiry**, so prefer not writing
-one. Two of these were counts — the ADR index that omitted three ADRs, and "the
+one. Three of these were counts — the ADR index that omitted three ADRs, "the
 two tests below" in `tests/integration/test_term_calendar_schema.py`, left behind
 by the commit that added a third and updated the identical count one docstring
-over. The fix is to delete the number rather than correct it: "the tests below"
-cannot go stale, and a sentence that needs the number usually wants a different
-sentence.
+over, and E0-15's thirty-two enrollments. The fix is to delete the number rather
+than correct it: "the tests below" cannot go stale, and a sentence that needs the
+number usually wants a different sentence.
+
+**And a count is not only a stale-record risk — it is an unverified measurement.**
+The E0-15 case was wrong on the day it was written, so no amount of re-reading it
+later would have helped; what would have helped is the one thing nobody did,
+which is to ask the program. A count of rows, files, tests or enrollments is a
+number the code can produce in a line, and writing one from memory is entry 9
+arriving through arithmetic: citing a total without executing the thing that
+knows it. If a sentence must carry a number, get the number from the system and
+say in the commit that you did.
 
 ---
 
@@ -434,18 +458,28 @@ sentence.
 defect rather than by any review. The mock platform's roster is served per
 context, and the mutation that makes `membership_page` read **the first seeded
 section's** members while the container goes on naming the context it was asked
-for leaves all 61 tests in the four mock modules green. Every launch user is
+for left all 61 tests then in the four mock modules green. Every launch user is
 enrolled in every section, so `every_user_the_platform_will_launch_appears_in_
 the_roster_of_its_context` is satisfied by the wrong roster; the paging
 assertions are satisfied by any roster that divides; and
 `the_membership_container_names_the_context_the_launch_came_from` compares the
 container's declared context, which the mutation does not touch — its docstring
-claims it catches "a handler that ignores the context it was given", and it
-catches the declaration rather than the membership. The implementer is walled out
-of `tests/`, so this ships as a convention and is reported rather than closed. The
-test it needs: two seeded rosters, both non-empty, whose member sets are not
-equal — which is one assertion and kills it, because BIOL's twelve served for
-MATH's seven is a set the seed does not contain.)*
+claimed it caught "a handler that ignores the context it was given", and it
+catches the declaration rather than the membership. **Now closed**, which is the
+half of this entry that usually does not happen on the same branch: the
+implementer declared the gap and named the assertion it needed rather than
+leaving it, the coordinator reproduced the mutation, and
+`test_two_seeded_contexts_do_not_return_the_same_membership` is the test — two
+seeded rosters, both non-empty, whose member sets differ, which kills it because
+BIOL's twelve served for MATH's seven is a set the seed does not contain. The
+misleading docstring was corrected in the same change, since a test that says it
+catches something it does not is why nobody went looking. Two things are worth
+keeping from it. The guard was declared by the only agent that could not write
+it, which is what turned a convention into a test rather than into a line in a
+pull request nobody re-reads. And the new test does not assert that a roster is
+the *right* one — swapped rosters pass — because pinning the seed's own section
+codes as expected values would make the test a second copy of the seed; the
+docstring says so rather than implying more.)*
 
 *(The twenty-fourth: E0-11's mirror rule. The rank rule refuses an edge that does
 not climb, but a supervisor's *role* can be edited after its reporters are in

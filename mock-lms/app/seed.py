@@ -1,11 +1,11 @@
 """The people, courses and placements this platform pretends to have.
 
 **Small on purpose.** E0-15: "this seed data belongs to the mock platform and
-stays small". It is three sections in one term, twenty people and thirty-two
-enrollments — enough that a roster pages, that one student joins late and one
-drops, and that both modalities and two start letters reach a tool. The full
-demo institution is E0-17's, and it is seeded into Pulse's own database rather
-than into this platform.
+stays small". It is three sections in one term, each with a roster of its own —
+enough that a roster pages, that one student joins late and one drops, and that
+both modalities and two start letters reach a tool. The full demo institution is
+E0-17's, and it is seeded into Pulse's own database rather than into this
+platform.
 
 Six things about the shape are deliberate rather than incidental.
 
@@ -278,8 +278,8 @@ class SeededPlatform:
 def student(context: MockContext, ordinal: int) -> MockUser:
     """One student who takes exactly this section, with an address nobody receives.
 
-    Generated rather than written out, because thirty distinct hand-written
-    identifiers is thirty chances to typo one into two people. The identifier
+    Generated rather than written out, because a hand-written identifier per
+    student is one more chance to typo one person into two. The identifier
     carries the section so that a member seen in a response says which roster it
     came from without a lookup.
     """
@@ -312,7 +312,7 @@ def enrolled(
 
 
 def seeded_platform() -> SeededPlatform:
-    """The seed, built fresh: three sections, twenty people, thirty-two enrollments.
+    """The seed, built fresh: the sections, the people in them, and their enrollments.
 
     The three roster sizes are chosen against the page size in `app.nrps`, and
     each is a case rather than a number picked to look plausible:
