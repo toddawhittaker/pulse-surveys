@@ -118,7 +118,7 @@ from itertools import count
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from uuid import uuid4
 
 import pytest
@@ -1653,12 +1653,12 @@ MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
 AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
 
-# How many pages of one roster are walked before the walk is called broken.
-# **This suite's choice**, and a bound rather than a rule: E0-15 keeps its seed
-# small ("this seed data belongs to the mock platform and stays small"), so a
-# roster running past this is a `Link` header that never says stop rather than a
-# large class. Raise it if a seed grows.
-MAX_MEMBERSHIP_PAGES = 25
+# How many pages of one paged container are walked before the walk is called
+# broken. **This suite's choice**, and a bound rather than a rule: E0-15 keeps
+# its seed small ("this seed data belongs to the mock platform and stays
+# small"), so a container running past this is a `Link` header that never says
+# stop rather than a large collection. Raise it if a seed grows.
+MAX_PAGES_WALKED = 25
 
 # One `<url>; rel="next"` entry of an RFC 8288 `Link` header. The parameter tail
 # stops at a comma so that two entries in one header are read as two, which is
@@ -2132,6 +2132,14 @@ class MockPlatform:
             "E0-15's first criterion is a roster whose members carry role and enrollment status, "
             f"and a roster nobody can fetch carries nothing. Body begins {response.text[:200]!r}."
         )
+        return self.membership_page_of(url, response)
+
+    def membership_page_of(self, url: str, response: Any) -> MembershipPage:
+        """Read one already-fetched membership page, header and all.
+
+        Split from the fetch so that the walk in `link_walk` above and a caller
+        asking for a single page build a page the same way, from one place.
+        """
         document = response.json()
         assert isinstance(document, dict), (
             f"The membership service served {document!r} for `{url}`, which is not an NRPS "
@@ -2154,40 +2162,57 @@ class MockPlatform:
             next_url=urljoin(url, following) if following else None,
         )
 
-    def membership_pages(self, url: str) -> list[MembershipPage]:
-        """Walk a roster from its first page to its last, following `Link`.
+    def link_walk(self, url: str, accept: str, subject: str) -> list[tuple[str, Any]]:
+        """Fetch `url` and every page its `Link` header advertises, in order.
 
-        Exactly what a roster sync does, and the reason the walk lives here
-        rather than in one test module is that more than one module asks the
-        same question of it (`docs/MISTAKES.md` entry 13).
+        One walk for both paged containers E0-15 serves — the roster and the
+        line-item container, which the ticket pages "the same way NRPS does" —
+        so that the guards below exist once rather than twice
+        (`docs/MISTAKES.md` entry 13). What differs between the two callers is
+        what a page *carries*, and that stays with the caller.
 
         Two ways of not terminating are failures rather than hangs, and neither
         is hypothetical: a `next` URL that points at the page that served it, and
         a header that advertises a next page forever. Both leave a real tool
-        looping, so both are named where they happen.
+        looping, so both are named where they happen rather than left to a
+        pytest timeout that says only that something hung.
         """
-        pages: list[MembershipPage] = []
+        walked: list[tuple[str, Any]] = []
         visited: set[str] = set()
         following: str | None = url
         while following is not None:
             if following in visited:
                 pytest.fail(
-                    f"The roster walk arrived back at `{following}` after {len(pages)} pages, so "
-                    "the `Link` header advertises a next page that is the page that served it. A "
-                    "roster sync following this header never finishes."
+                    f"The {subject} walk arrived back at `{following}` after {len(walked)} pages, "
+                    "so the `Link` header advertises a next page that is the page that served "
+                    "it. A client following this header never finishes."
                 )
             visited.add(following)
-            page = self.membership_page(following)
-            pages.append(page)
-            if len(pages) > MAX_MEMBERSHIP_PAGES:
+            response = self.service_get(following, accept=accept)
+            assert response.status_code == 200, (
+                f"Page {len(walked) + 1} of the {subject} at `{following}` answered "
+                f"{response.status_code} rather than 200, so the `Link` header that pointed here "
+                f"points at nothing. Body begins {response.text[:200]!r}."
+            )
+            walked.append((following, response))
+            if len(walked) > MAX_PAGES_WALKED:
                 pytest.fail(
-                    f"The roster at `{url}` ran past {MAX_MEMBERSHIP_PAGES} pages without "
-                    "reaching one that advertises no next relation. E0-15 keeps the seed small, "
-                    "so this is a header that never says stop rather than a large class — and a "
-                    "tool paging on it does not stop either."
+                    f"The {subject} at `{url}` ran past {MAX_PAGES_WALKED} pages without reaching "
+                    "one that advertises no next relation. E0-15 keeps the seed small, so this is "
+                    "a header that never says stop rather than a large collection — and a tool "
+                    "paging on it does not stop either."
                 )
-            following = page.next_url
-        return pages
+            relations = link_relations(response.headers.get("link"))
+            advertised = relations.get("next")
+            following = urljoin(following, advertised) if advertised else None
+        return walked
+
+    def membership_pages(self, url: str) -> list[MembershipPage]:
+        """Walk a roster from its first page to its last. Exactly what a sync does."""
+        return [
+            self.membership_page_of(page_url, response)
+            for page_url, response in self.link_walk(url, NRPS_MEDIA_TYPE, "roster")
+        ]
 
     def seeded_contexts(self) -> list[SeededContext]:
         """Every context the launch page offers a launch into, with those launches.
@@ -2251,16 +2276,33 @@ class MockPlatform:
         )
         return created
 
-    def line_items(self, launch: SignedLaunch) -> list[dict[str, Any]]:
-        """Every line item the platform lists for this launch's context."""
-        response = self.service_get(
-            self.line_items_url(launch), accept=LINE_ITEM_CONTAINER_MEDIA_TYPE
+    def with_query(self, url: str, query: Mapping[str, Any]) -> str:
+        """`url` with `query` appended to whatever it already carries."""
+        if not query:
+            return url
+        split = urlsplit(url)
+        merged = parse_qsl(split.query) + [(name, str(value)) for name, value in query.items()]
+        return urlunsplit(
+            (split.scheme, split.netloc, split.path, urlencode(merged), split.fragment)
         )
+
+    def line_item_container(self, url: str) -> list[dict[str, Any]]:
+        """One page of an AGS line-item container, as a list.
+
+        AGS 2.0 serves an array; a mock that wraps it in an object is read here
+        rather than failed, because which of the two E0-15 meant is not
+        something this file decides — what every caller needs is the line items.
+        """
+        response = self.service_get(url, accept=LINE_ITEM_CONTAINER_MEDIA_TYPE)
         assert response.status_code == 200, (
-            f"Listing line items answered {response.status_code} rather than 200. E0-15's scope: "
-            "'Assignment and Grade Services 2.0 stubs: line-item creation and listing'. Body "
-            f"begins {response.text[:200]!r}."
+            f"Listing line items at `{url}` answered {response.status_code} rather than 200. "
+            "E0-15's scope: 'Assignment and Grade Services 2.0 stubs: line-item creation and "
+            f"listing'. Body begins {response.text[:200]!r}."
         )
+        return self.line_items_of(response)
+
+    def line_items_of(self, response: Any) -> list[dict[str, Any]]:
+        """Read the line items out of an already-fetched container page."""
         listed = response.json()
         if isinstance(listed, dict):
             listed = listed.get("lineItems") or listed.get("line_items") or listed.get("items")
@@ -2269,6 +2311,27 @@ class MockPlatform:
             "container. AGS 2.0 serves an array of line items."
         )
         return [item for item in listed if isinstance(item, dict)]
+
+    def line_items(self, launch: SignedLaunch, **query: Any) -> list[dict[str, Any]]:
+        """The line items the platform lists for this launch's context, one page.
+
+        `query` is passed to the container as it stands, so a test asking for
+        `resource_id=…` is asking the platform the question AGS 2.0 defines
+        rather than filtering the answer itself — which is the only way to tell a
+        platform that honours the filter from one that accepts it and ignores it.
+        """
+        return self.line_item_container(self.with_query(self.line_items_url(launch), query))
+
+    def line_item_pages(self, launch: SignedLaunch, **query: Any) -> list[list[dict[str, Any]]]:
+        """Every page of the line-item container, walked by `Link` as the roster is."""
+        return [
+            self.line_items_of(response)
+            for _, response in self.link_walk(
+                self.with_query(self.line_items_url(launch), query),
+                LINE_ITEM_CONTAINER_MEDIA_TYPE,
+                "line item container",
+            )
+        ]
 
     def post_score(self, line_item: Mapping[str, Any], payload: Mapping[str, Any]) -> Any:
         """POST one score against a line item, to the URL AGS derives from its `id`.
@@ -2327,7 +2390,7 @@ class MockPlatform:
         identifier = self.line_item_id(line_item)
         return [entry for entry in self.posted_scores() if entry.get("lineItem") == identifier]
 
-    def results(self, line_item: Mapping[str, Any]) -> list[dict[str, Any]]:
+    def results(self, line_item: Mapping[str, Any], **query: Any) -> list[dict[str, Any]]:
         """The conformant AGS Result container for one line item.
 
         The other half of E0-15's readback, and the one E3 is built against. AGS
@@ -2339,7 +2402,8 @@ class MockPlatform:
         """
         identifier = self.line_item_id(line_item)
         response = self.service_get(
-            f"{identifier.rstrip('/')}/results", accept=RESULT_CONTAINER_MEDIA_TYPE
+            self.with_query(f"{identifier.rstrip('/')}/results", query),
+            accept=RESULT_CONTAINER_MEDIA_TYPE,
         )
         assert response.status_code == 200, (
             f"The AGS Result service answered {response.status_code} for line item "

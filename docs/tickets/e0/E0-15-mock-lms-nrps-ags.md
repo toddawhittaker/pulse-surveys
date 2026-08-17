@@ -52,6 +52,26 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
   E3 needs that a retry happened. **The Results endpoint does not rescale** —
   `resultScore` is the posted `scoreGiven` and `resultMaximum` is the line
   item's maximum.
+
+  **Two rules the review round added, one of which goes past AGS 2.0 and one of
+  which does not.** A posted `scoreMaximum` that differs from the line item's own
+  maximum is **refused**, rather than accepted and dropped. AGS permits the
+  mismatch and expects the platform to scale — Canvas does — so this is a
+  deliberate narrowing, and it is the only shape that keeps the no-rescale ruling
+  from producing a wrong grade in silence. It needs its own ADR, and E3 has to
+  learn from it that it posts against the line item's own maximum rather than
+  relying on a platform to scale for it. In the other direction, a score whose
+  `timestamp` is **strictly earlier** than the last score held for that user on
+  that line item is refused with `409 Conflict`, and an *equal* timestamp is
+  accepted — AGS says "before", and a retry that re-sends an identical body after
+  a network timeout is the case that makes accepting the equal one right.
+
+  **The seed numbers its people, and a test may rely on it.** Every seeded
+  student's identifier carries its section and a zero-padded ordinal, contiguous
+  from 01 within a section. That is the only ground truth on this surface for
+  "no member was dropped" — the NRPS container carries no total — so it is stated
+  here rather than left as an accident of the seed. Renumbering the seed means
+  changing the test that reads it.
 - Seed data: a small institution with a handful of courses and sections whose
   codes exercise more than one start letter and both modalities, plus students,
   instructors, and enrollments including at least one mid-term add and one drop.

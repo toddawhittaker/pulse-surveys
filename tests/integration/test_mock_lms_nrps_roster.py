@@ -27,16 +27,24 @@ suite does assert about the seeded people — that their identities are obviousl
 fake — is in `test_mock_lms_seed_data.py`, where the seed is the subject.
 
 **On "no member is duplicated or dropped".** Those are two different claims and
-only one of them has a total to check against. Duplication is checkable from the
-pages alone: the pages of a container partition its membership, so the members
-counted across pages and the members counted once have to be the same number.
-A *drop* has no total on this surface — NRPS containers carry no count — so it
-is checked against the one independent source E0-14 left behind: every user the
-launch page will sign a launch for in a context is demonstrably a member of that
-context, and has to appear in its roster. That is a lower bound rather than the
-whole membership, and the test that uses it says so in its own words.
+only one of them is checkable from the pages alone. Duplication is: the pages of
+a container partition its membership, so the members counted across pages and
+the members counted once have to be the same number.
+
+A *drop* has no total to check against — NRPS containers carry no count — and
+this suite reached for a lower bound first: every user the launch page will sign
+a launch for is demonstrably a member of that context and has to appear in its
+roster. A reviewer measured that as too weak to be worth much. Both launch users
+sit at the head of every roster, so slicing one member off each page boundary
+left the whole suite green. The claim now rests on the seed's own numbering
+instead — a student identifier carries a trailing ordinal, and an assembled
+roster whose ordinals have a hole has lost somebody — with the lower bound kept
+beside it, because the two fail for different reasons and a reader is better off
+seeing which. What neither reaches is a member lost from the very end of the
+last page: nothing on this surface says how many there should have been.
 """
 
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -68,6 +76,21 @@ MEMBER_ID = "user_id"
 SAMPLE_LINK_HEADER = '<https://platform.invalid/memberships?page=2>; rel="next", '
 SAMPLE_LINK_HEADER += '<https://platform.invalid/memberships?page=9>; rel="last first"'
 
+# A member identifier ending in a number, split into the stem it shares with its
+# classmates and that number. **This is the one place this suite reads a
+# convention of the seed rather than of a specification**, and it is deliberate:
+# see `test_an_assembled_roster_has_no_hole_where_a_page_boundary_was` for what
+# it buys and what it costs. Nothing here says what the stem must be, how wide
+# the number is, or how many there are — only that identifiers sharing a stem
+# and a width are numbered without gaps.
+NUMBERED_IDENTIFIER = re.compile(r"^(?P<stem>.*?)(?P<ordinal>\d+)$")
+
+# How many members a numbered family needs before its numbering is treated as
+# evidence. **This suite's choice.** Two identifiers ending in 1 and 2 are as
+# likely to be a coincidence as a sequence, and a family of two is contiguous
+# whatever a page boundary did to it.
+SMALLEST_TELLING_FAMILY = 3
+
 
 def roster_of(platform: Any, context: Any) -> list[Any]:
     """Every page of one context's roster, first to last."""
@@ -92,6 +115,24 @@ def walked_rosters(platform: Any) -> list[tuple[Any, list[Any]]]:
 def members_across(pages: list[Any]) -> list[dict[str, Any]]:
     """Every member on every page of one walked roster, in page order."""
     return [member for page in pages for member in page.members]
+
+
+def numbered_families(members: list[dict[str, Any]]) -> dict[tuple[str, int], list[int]]:
+    """Member identifiers grouped by the stem and width they are numbered within.
+
+    A family is every identifier sharing an exact stem *and* an exact digit
+    width, so `…-student-01` and `…-student-02` are one family while an
+    instructor's identifier, or a student of another section, is not in it. That
+    is what keeps the numbering evidence about one sequence rather than about
+    whatever else happens to end in a digit.
+    """
+    families: dict[tuple[str, int], list[int]] = {}
+    for member in members:
+        matched = NUMBERED_IDENTIFIER.match(str(member.get(MEMBER_ID, "")))
+        if matched:
+            digits = matched.group("ordinal")
+            families.setdefault((matched.group("stem"), len(digits)), []).append(int(digits))
+    return families
 
 
 def every_member(walked: list[tuple[Any, list[Any]]]) -> list[dict[str, Any]]:
@@ -454,23 +495,97 @@ def test_no_page_of_a_walked_roster_comes_back_empty(mock_platform: Any) -> None
         )
 
 
+def test_an_assembled_roster_has_no_hole_where_a_page_boundary_was(
+    mock_platform: Any,
+) -> None:
+    """The definition of done's "no member is dropped", from the seed's own numbering.
+
+    **The mutation, which was run rather than imagined.** Slicing the page as
+    `members[(page - 1) * PAGE_SIZE : page * PAGE_SIZE - 1]` loses the last
+    member of every page and left the whole suite green. Nothing else sees it:
+    the pages still carry no duplicate, every page is still non-empty, the
+    container still names its context, and the lower bound below is still met
+    because both launch users sit at the head of the roster. E1 would sync a
+    class with one student missing per page, and E3 would never grade them —
+    silently, since a short roster looks exactly like a small section.
+
+    **What it rests on, said plainly because it is a dependence on the seed
+    rather than on a specification.** A seeded student's identifier ends in a
+    zero-padded ordinal, so an assembled roster is a sequence and a lost member
+    is a hole in it. No specific stem, width, or count is written here — only
+    that identifiers sharing a stem and a width run without gaps — but if the
+    seed ever numbers its people differently this test goes red, and the message
+    says so rather than leaving the next reader to guess whether a defect was
+    found. It is the only ground truth on this surface: NRPS containers carry no
+    total.
+
+    **What it does not reach.** A member lost from the very end of the last page
+    leaves a sequence with no hole in it, and nothing published anywhere says
+    where the sequence should have stopped. The `starts at 1` assertion closes
+    the mirror of that at the front, and is separated from the contiguity
+    assertion because it is the one that would go red on a seed that numbered
+    from zero — a convention this suite has no business fixing.
+    """
+    walked = walked_rosters(mock_platform)
+    paged = {context.context_id for context, pages in walked if len(pages) > 1}
+    assert paged, (
+        "No seeded roster came back on more than one page, so no page boundary exists for a "
+        "member to be lost at and this test cannot see the mutation it exists for. Criterion 2 "
+        f"requires a roster larger than one page; {[(c.context_id, len(p)) for c, p in walked]}."
+    )
+
+    families = {
+        (context.context_id, stem, width): sorted(ordinals)
+        for context, pages in walked
+        for (stem, width), ordinals in numbered_families(members_across(pages)).items()
+        if len(ordinals) >= SMALLEST_TELLING_FAMILY
+    }
+    assert any(name in paged for name, _, _ in families), (
+        "No section whose roster spans more than one page carries a family of at least "
+        f"{SMALLEST_TELLING_FAMILY} member identifiers ending in a number, so there is no "
+        "sequence to find a hole in. The families found were "
+        f"{ {key: len(ordinals) for key, ordinals in families.items()} }. This test reads the "
+        "seed's own numbering because a membership container publishes no total; if the seed "
+        "has stopped numbering its students, the ticket needs another way to say how many "
+        "members a roster should have."
+    )
+
+    for (name, stem, width), ordinals in sorted(families.items()):
+        assert max(ordinals) - min(ordinals) + 1 == len(ordinals), (
+            f"The assembled roster for {name} carries {len(ordinals)} identifiers numbered "
+            f"`{stem}` at {width} digits, running {ordinals} — which has a hole in it. The "
+            "pages of a membership container partition the membership, so a missing ordinal is a "
+            "member the walk was never served: a page sliced one short of its own boundary, or an "
+            "offset advanced past it."
+        )
+        assert min(ordinals) == 1, (
+            f"The assembled roster for {name} numbers `{stem}` from {min(ordinals)} rather than "
+            "1, so either the first member of the sequence was dropped or the seed numbers from "
+            "somewhere else. This assertion is the one in this test that rests on a convention "
+            "rather than on arithmetic — contiguity above holds whatever the sequence starts at."
+        )
+
+
 def test_every_user_the_platform_will_launch_appears_in_the_roster_of_its_context(
     mock_platform: Any,
 ) -> None:
-    """The definition of done's "no member is dropped", against an independent source.
+    """The weaker half of "no member is dropped", kept because it fails differently.
 
     A membership container carries no total, so nothing in the roster can say
     whether the roster is short. What can say it is the launch page: every user
     it will sign a launch for in a context is demonstrably enrolled in that
-    context, learned by driving the launch rather than by reading the roster. A
-    paging slice that drops a member per boundary, or a first page served from
-    offset one, loses one of these as soon as the seeded launch users are not all
-    on page one.
+    context, learned by driving the launch rather than by reading the roster.
+
+    **A reviewer measured how weak this is, and the measurement is why the test
+    above exists.** Both launch users sit at the head of every roster, so a page
+    slice that loses one member per boundary satisfies this test completely. It
+    is kept rather than deleted because it fails for a reason the numbering test
+    cannot: a roster that is complete and *of the wrong people* keeps its
+    sequence intact and loses these users.
 
     **What this does not reach**, said rather than implied: it is a lower bound.
     The launch page offers a handful of users and the roster is bigger than that,
-    so a drop that lands on a member nobody launches as is invisible here. There
-    is no total on this surface to close that gap with.
+    so a drop that lands on a member nobody launches as is invisible here.
 
     A dropped student is expected to be *present* with a non-Active status rather
     than absent: SPEC §3.4 has the tool learn about drops from NRPS enrollment

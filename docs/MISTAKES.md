@@ -35,7 +35,24 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 29**
+**Caught: 30**
+
+*(The thirtieth, in E0-15's review round, and three tests at once — each asserting a
+strictly weaker property than its own name. Two of the three were found by reviewers
+reading the finished suite rather than by anyone writing it, which is the part worth
+keeping: the tests had already been read, twice, by the people who wrote them. The
+sharpest is the late add: `a_seeded_section_holds_a_member_who_enrolled_after_their_classmates`
+asserted that a section held more than one distinct enrollment `start`, which is
+satisfied by an enrollment a month **early**, and a reviewer proved it by setting the
+seed's late add backwards and watching every test stay green. A test named for a
+direction was passing on the inverse of it. The other two are the same shape in
+quieter clothes: `end is not None` cannot tell an absent key from a null one, so a
+window emitted with no `end` at all passed; and "no member is dropped", checked
+against the two users the launch page offers, passed a page slice that lost one
+member per boundary, because both those users sit at the head of every roster. **The
+general rule, which none of the three had:** when a criterion is about an ordering or
+a shape, assert the ordering or the shape — "the values differ" is a property of the
+case and of its mirror image, and the mirror image is what ships.)*
 
 *(The twenty-ninth, writing E0-15's tests for the mock platform's roster and grade
 services, and it decided six of them. "No member is duplicated" is a count against a
@@ -1027,12 +1044,17 @@ add was the second: with no enrollment-window field named anywhere, the test cou
 only look for a member value that parsed as a date and assert that the dates were not
 all equal. Writing that bound down is what sent it to Todd as a question rather than
 leaving it as a weak green test, and the ruling added the field — so the assertion is
-now over a named `start`, within one section. **What is left is stated for the same
-reason**: E0-15 asks that the added member's `start` fall after its *section's* start
-date, and no section start date is published on this surface at all — the section's
-calendar is derived tool-side from its code and the term's start-letter map — so the
-test asserts that one member enrolled after their classmates and says in its own
-docstring that this is not the same claim.)*
+now over a named `start`, within one section. **Both bounds have since moved, and
+stating them is what moved them.** The enrollment field arrived from the first
+ruling, and a reviewer then measured that "not all together" was satisfied by an
+early add — so the assertion is now the shape of a late arrival: one member later
+than every other, over a cohort of at least two. And the lower bound on "no member is
+dropped" was measured too weak to keep alone; the claim now rests on the seed's own
+numbering, with the lower bound kept beside it because the two fail for different
+reasons. What is left is stated for the same reason as before: E0-15 asks that the
+added member's `start` fall after its *section's* start date, and no section start
+date is published on this surface at all — the section's calendar is derived
+tool-side from its code and the term's start-letter map.)*
 
 *(The third: the rank rule changed what both supervision generators can produce,
 and the docstrings describing them were written against the old space. Cycles no

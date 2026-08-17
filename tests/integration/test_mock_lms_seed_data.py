@@ -586,8 +586,26 @@ def test_the_enrollment_window_ends_the_dropped_member_and_nobody_else(
     has an end": the members with an `end` are exactly the members NRPS reports
     as no longer active. Both sets are required non-empty first, because two
     empty sets correspond perfectly (`docs/MISTAKES.md` entry 3).
+
+    **The key has to be present, not merely null**, and that assertion was
+    missing until a reviewer proved it: this test read `.get("end") is not None`,
+    which cannot tell `null` from absent, so emitting `{"start": …}` with no
+    `end` key at all left every test in this suite green. ADR 0048 spends a
+    paragraph on why present-and-null is the requirement — a tool meeting an
+    absent key cannot tell "still enrolled" from "this platform supplies no end
+    date", and those want different behaviour from a sync that has to decide
+    whether a student has gone.
     """
     members = seeded_members(mock_platform)
+    keyless = [
+        member.get(MEMBER_ID) for member in members if "end" not in (enrollment_of(member) or {})
+    ]
+    assert not keyless, (
+        f"{len(keyless)} enrollment windows carry no `end` key at all — {keyless[:5]}. ADR 0048 "
+        "makes `end` present and `null` for a member still enrolled: an absent key reads as "
+        "'this platform does not supply end dates', which is a different fact from 'this student "
+        "is still enrolled' and sends a sync down a different branch."
+    )
     ended = {
         str(member.get(MEMBER_ID))
         for member in members
@@ -622,45 +640,73 @@ def test_the_enrollment_window_ends_the_dropped_member_and_nobody_else(
     )
 
 
-def test_a_seeded_section_holds_a_member_who_enrolled_after_their_classmates(
+def test_a_seeded_section_holds_one_member_who_enrolled_after_a_cohort(
     mock_platform: Any,
     instant_of: Any,
 ) -> None:
-    """Criterion 6's mid-term add, as far as this surface can carry it.
+    """Criterion 6's mid-term add, in the shape a late add actually has.
 
-    Catches the seed every implementer writes first: every enrollment in a
-    section beginning at the same moment. SPEC §3.4 makes the late add a
-    denominator rule — "the denominator starts at the student's first enrolled
-    week (from NRPS enrollment data)" — so a seed where every window in a section
-    opens together leaves that branch with nothing behind it, and E3's property
-    tests generate a case the mock cannot produce.
+    **What this test used to assert, and why that was not enough.** It required
+    some section to hold more than one distinct `start`, which a reviewer proved
+    is satisfied by the opposite of a late add: setting the seed's late enrollment
+    to a month *before* the section's other enrollments open left every test in
+    this suite green, and so does a section with two cohorts that simply began in
+    different weeks. "Not all the same" is a property of two very different
+    seeds, and only one of them is the case §3.4's denominator rule is about.
 
-    Asserted **within one section**, which is the part the extension made
-    possible: across the institution, two sections that simply start in different
-    weeks would answer this by themselves, with no late add anywhere in the seed.
+    So the shape is asserted instead: in some section, exactly one member's
+    `start` is strictly later than every other member's, and at least two other
+    members in that section share one common `start`. That is what "the class
+    began, and then somebody joined" looks like from the roster.
+
+      - an *early* add is caught, because the outlier is then the earliest and
+        the maximum is shared by the cohort;
+      - two cohorts are caught, because the later cohort holds the maximum
+        several times over;
+      - a seed where every window in a section opens together is caught, which is
+        the mutation the first version of this test was written for.
+
+    The cohort is required to be **at least two members** rather than "everybody
+    else", deliberately: a section's teaching instructor may reasonably be
+    enrolled before their students, and a rule that demanded every other member
+    agree would fail on that without a late add being anywhere in question.
 
     **What this still does not reach.** E0-15 says the added member's `start`
     falls after *its section's start date*, and no section start date is
     published anywhere on this surface — a section's dates are derived tool-side
     from its code and the term's start-letter map (§2.2), which live in Pulse's
-    database and not in the platform. So what is assertable is that one member
-    began after their classmates did, not that they began after the section did.
-    The two differ for a section where every enrollment is late, which nothing
-    here can see.
+    database and not in the platform. "After the cohort every other member
+    belongs to" is the closest this surface comes, and it is not the same claim:
+    a section where the cohort itself enrolled late is invisible here. Nor does
+    it assert *which* member is the late one, since naming them would be this
+    test carrying a copy of the seed.
     """
-    opened: dict[str, set[Any]] = {}
+    opened: dict[str, list[Any]] = {}
     for context, members in seeded_rosters(mock_platform):
-        starts = {instant_of((enrollment_of(member) or {}).get("start")) for member in members}
-        opened[context.context_id] = {start for start in starts if start is not None}
-    varied = sorted(name for name, starts in opened.items() if len(starts) > 1)
-    assert varied, (
-        "No seeded section holds two members who enrolled at different moments: "
+        starts = [instant_of((enrollment_of(member) or {}).get("start")) for member in members]
+        opened[context.context_id] = [start for start in starts if start is not None]
+
+    late = []
+    for name, starts in opened.items():
+        if len(starts) < 3:
+            continue
+        latest = max(starts)
+        others = [start for start in starts if start != latest]
+        cohort = max((others.count(start) for start in set(others)), default=0)
+        if starts.count(latest) == 1 and cohort >= 2:
+            late.append(name)
+
+    assert late, (
+        "No seeded section holds one member who enrolled after a cohort of their classmates: "
         + "; ".join(
             f"{name} opened at {sorted(str(start) for start in starts)}"
             for name, starts in sorted(opened.items())
         )
         + ". E0-15 criterion 6 seeds a mid-term add 'giving E3 the edge cases its property tests "
-        "need', and a section whose enrollments all open together is a section nobody joined late."
+        "need'. A section whose enrollments all open together has nobody joining late; one whose "
+        "outlier is *earlier* than the rest is an early add, which is not the case §3.4's "
+        "denominator rule is about; and one holding two cohorts is two start dates rather than "
+        "one late arrival."
     )
 
 
