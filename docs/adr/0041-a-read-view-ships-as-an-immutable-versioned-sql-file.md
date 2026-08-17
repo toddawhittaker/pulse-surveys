@@ -46,14 +46,28 @@ executes it by name.** Five files ship with E0-10 — the roles, two views, the
 `SECURITY DEFINER` reveal function, and the grants — and the revision names them
 in the order it runs them.
 
-**A file is immutable once a revision executes it.** A change to a view is a new
-file, `_v002.sql`, and a new revision that replaces the object. This is
+**A file is immutable once the revision that executes it has merged.** After
+that, a change to a view is a new file, `_v002.sql`, and a new revision that
+replaces the object. This is
 [ADR 0032](0032-a-prompt-file-is-immutable-once-a-classification-cites-it.md)'s
 rule for prompts, adopted for the same reason and stated in the package
 docstring: a revision that reads a file at upgrade time means the file is what
 ran, so editing it in place silently changes what an already-applied revision
 did. The version in the name is what makes the rule visible at the point somebody
 would break it.
+
+**The boundary is the merge and not the first `alembic upgrade head`**, and the
+distinction is not a softening — it is where the property the rule protects
+starts to matter. What must never be true is that two databases at the same
+revision hold different objects. Before the revision merges, the only database
+that has applied it is the author's own, and they can rebuild it; after it
+merges, other people's can. So an unmerged revision is edited freely, exactly
+like the `op.create_table` calls beside it, and the author owes their own
+database an `alembic downgrade -1 && alembic upgrade head` — or a
+`docker compose down -v` — when they change a file it has already run. E0-10
+edited three of these files after applying them locally, for a finding that
+arrived during review (ADR 0043), and stating the rule as "once a revision
+executes it" would have forbidden that while protecting nothing.
 
 **The order is written out, not globbed.** Roles before grants, objects before
 the grants that name them; a directory listing is not a dependency order, and a

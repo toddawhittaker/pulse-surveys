@@ -203,6 +203,14 @@ student, through one `SECURITY DEFINER` function that writes an audit row in the
 same transaction as the read. It holds no direct `SELECT` on that table either,
 so a name cannot be obtained without leaving a record.
 
+A fourth role, `pulse_reveal_definer`, appears in `\du` and in none of this
+file. It owns the reveal function and holds three grants, so that the one
+function able to read a name runs with a readable list of privileges rather than
+the migration identity's. It cannot log in, has no password anywhere, and needs
+nothing from an operator —
+[ADR 0043](docs/adr/0043-the-reveal-function-has-an-owner-of-its-own.md) is why
+it exists and what it does not protect against.
+
 `DATABASE_URL` must never point at `DB_SUPERUSER`, and the Compose file keeps
 that credential out of the application container entirely. See
 [ADR 0009](docs/adr/0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)

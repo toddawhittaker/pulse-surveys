@@ -238,7 +238,17 @@ sentence.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 9**
+**Caught: 10**
+
+*(The tenth: E0-10's reveal function. A review found that nothing set its owner,
+so a `SECURITY DEFINER` body was running as the migration superuser, and the
+implementer's own file header cited four controls — static SQL, typed
+parameters, a fixed `search_path`, qualified relations — as bounding it. This
+entry is why the reach was measured instead of argued: a probe function created
+the same way returned all 18 rows of `pg_authid` to a `pulse_care` caller that is
+refused that table one statement later. The same probe, re-owned by the scoped
+role the fix adds, is refused — and so is a body that reads one extra ordinary
+table, which is the fail-closed property the change was made for.)*
 
 **What happened.** Three times. A brief told the test author "a hook denies you
 writes elsewhere" — no such hook existed; the hook matched `Read|Grep|Glob` and

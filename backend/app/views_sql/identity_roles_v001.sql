@@ -1,10 +1,15 @@
--- The two runtime database roles — ticket E0-10, ADR 0001, ADR 0009, ADR 0040.
+-- The database roles E0-10 establishes — ADR 0001, ADR 0009, ADR 0040, ADR 0043.
 --
--- pulse_app serves student, instructor, leadership and admin requests. pulse_care
--- serves the Care queue and nothing else. The third role ADR 0001 names,
--- pulse_migrate, is not created here: ADR 0040 settles that it is the bootstrap
--- identity of ADR 0009 under another name, because the identity a migration runs
--- as cannot itself be created by a migration.
+-- Three are created here, and they are not three of a kind. **Two are connection
+-- roles**: pulse_app serves student, instructor, leadership and admin requests,
+-- and pulse_care serves the Care queue and nothing else. **One is a definer**:
+-- pulse_reveal_definer never connects to anything and exists only to own the
+-- SECURITY DEFINER reveal function, so that the one deliberate hole in the wall
+-- runs with three grants rather than with the privileges of whoever ran the
+-- migration (ADR 0043). The role ADR 0001 names third, pulse_migrate, is still
+-- not created: ADR 0040 settles that it is the bootstrap identity of ADR 0009
+-- under another name, because the identity a migration runs as cannot itself be
+-- created by a migration.
 --
 -- This file is idempotent in both halves, and the second half is the one that
 -- matters. `.env.example` defaults DB_APP_USER=pulse_app, so on any volume the
@@ -40,6 +45,10 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pulse_care') THEN
         CREATE ROLE pulse_care;
     END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pulse_reveal_definer') THEN
+        CREATE ROLE pulse_reveal_definer;
+    END IF;
 END
 $$;
 
@@ -49,11 +58,27 @@ ALTER ROLE pulse_app
 ALTER ROLE pulse_care
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
 
--- CONNECT on this database, whatever it is called. The name cannot be a bind
--- parameter and cannot be hard-coded — DB_NAME is deployment configuration — so
--- it is quoted as an identifier by `format`. PUBLIC holds CONNECT by default, so
--- on a stock cluster this changes nothing; it is what makes the two roles work on
--- a hardened one where that default has been revoked.
+-- The definer, and NOLOGIN is the whole of what makes it different from the two
+-- above. It is guarded and altered exactly like them so that a cluster where
+-- somebody has given it CREATEROLE, or LOGIN, is corrected by the next migration
+-- rather than trusted — but no mechanism anywhere in this repository gives it a
+-- password, because nothing is ever supposed to connect as it. If a deployment
+-- finds itself needing one, that is a question for ADR 0043 rather than a line
+-- in an init script.
+ALTER ROLE pulse_reveal_definer
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOLOGIN INHERIT;
+
+-- CONNECT on this database, whatever it is called, and **for the two connection
+-- roles only**. pulse_reveal_definer is deliberately absent from this statement:
+-- it is NOLOGIN, so CONNECT would grant it nothing it could use, and leaving it
+-- out is the second place this file says out loud that the role is not something
+-- to connect as.
+--
+-- The database name cannot be a bind parameter and cannot be hard-coded —
+-- DB_NAME is deployment configuration — so it is quoted as an identifier by
+-- `format`. PUBLIC holds CONNECT by default, so on a stock cluster this changes
+-- nothing; it is what makes the two roles work on a hardened one where that
+-- default has been revoked.
 DO $$
 BEGIN
     EXECUTE format(

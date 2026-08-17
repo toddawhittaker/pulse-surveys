@@ -18,6 +18,12 @@ and `pulse_migrate` resolved by
 > record needs from it is that the schema's owner is not a role that serves
 > requests, and that holds — `pulse_app` and `pulse_care` own nothing, are
 > members of nothing, and E0-10 asserts all three.
+>
+> ADR 0043 adds one role this record does not name: `pulse_reveal_definer`, which
+> owns the `SECURITY DEFINER` function in point 4 below and holds the three
+> grants its body needs. It is not a fourth connection — it is `NOLOGIN` and has
+> no credential — and it exists so that "runs with its owner's privileges" names
+> a short list rather than a superuser.
 
 ## Context
 

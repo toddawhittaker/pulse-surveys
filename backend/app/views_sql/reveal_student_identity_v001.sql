@@ -13,7 +13,14 @@
 --
 --   * SECURITY DEFINER, so it reads public.user_identity with its owner's
 --     privileges — pulse_care itself holds no grant on that table, which is what
---     makes this the only route rather than the convenient one.
+--     makes this the only route rather than the convenient one. **Its owner is
+--     pulse_reveal_definer**, a NOLOGIN role that holds three grants and exists
+--     for nothing else, so "the definer's privileges" is a list you can read in
+--     `identity_grants_v001.sql` rather than whatever the migration ran as. ADR
+--     0043 records why, and the difference is not academic: applied as written
+--     but owned by the migration identity, a caller of this function is running
+--     as a superuser, and a probe function built that way read every row of
+--     pg_authid for a pulse_care caller that is refused that table directly.
 --   * `SET search_path = pg_catalog, public, pg_temp`, with pg_temp named and
 --     named last. A plpgsql body is parsed on every call, and Postgres searches
 --     the temporary schema first for relation names whether or not it appears in

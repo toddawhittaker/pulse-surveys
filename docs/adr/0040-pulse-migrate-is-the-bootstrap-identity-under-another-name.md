@@ -1,6 +1,7 @@
 # 0040 — `pulse_migrate` is the bootstrap identity under another name, and is not created
 
-**Status:** Accepted
+**Status:** Accepted — the role count amended within the same ticket by
+[ADR 0043](0043-the-reveal-function-has-an-owner-of-its-own.md)
 **Date:** 2026-08-16
 **Tickets:** E0-10
 **Amends:** [ADR 0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md) —
@@ -37,16 +38,27 @@ own "Reconcile first" section refuses to let it stand:
 
 **`pulse_migrate` is ADR 0001's name for the migration identity, and that
 identity is `DB_SUPERUSER`. No role called `pulse_migrate` is created.** E0-10's
-migration establishes two roles, `pulse_app` and `pulse_care`, and runs as the
-third.
+migration establishes the two runtime roles, `pulse_app` and `pulse_care`, and
+runs as the identity ADR 0001 called the third.
+
+*(Amended within the same ticket by
+[ADR 0043](0043-the-reveal-function-has-an-owner-of-its-own.md): the migration
+also creates `pulse_reveal_definer`, which owns the `SECURITY DEFINER` reveal
+function and holds three grants. It is not a fourth answer to "who runs
+migrations" and not a connection role — it is `NOLOGIN`, has no credential
+anywhere, and exists so that the reveal's body runs with a readable list of
+privileges instead of the superuser's. What this record decides is unchanged.)*
 
 Concretely:
 
 * `backend/app/views_sql/identity_roles_v001.sql` creates and corrects the two
-  runtime roles and mentions no third;
-* the schema, every table, every view and the `SECURITY DEFINER` reveal function
-  are owned by whichever role ran the migration, which ADR 0009 fixes as
-  `DB_SUPERUSER` in every environment;
+  runtime roles, and the definer role ADR 0043 adds, and mentions no migration
+  role;
+* the schema, every table and every view are owned by whichever role ran the
+  migration, which ADR 0009 fixes as `DB_SUPERUSER` in every environment. The
+  reveal function is the one exception and ADR 0043 is why: a `SECURITY DEFINER`
+  body spends its owner's privileges at request time, so that one object gets an
+  owner scoped to what it does;
 * `.env` gains no `DB_MIGRATE_USER`. The migration identity is already named
   there, twice, as `DB_SUPERUSER` and `DB_SUPERUSER_PASSWORD`.
 
@@ -108,11 +120,18 @@ is the right failure, and it is the reason `tests/conftest.py` reaches these
 roles with `SET ROLE` rather than by logging in.
 
 **The bootstrap superuser is now load-bearing for confidentiality, not only for
-DDL.** It owns the reveal function, so `SECURITY DEFINER` means *its* privileges;
-it owns the views, so a view reads its sources with them. ADR 0009 already
-records that keeping the application out of that role is enforced by a test
-rather than by there being no superuser to reach, and this widens what that test
-protects.
+DDL.** It owns the views, so a view reads its sources with its privileges. ADR
+0009 already records that keeping the application out of that role is enforced by
+a test rather than by there being no superuser to reach, and this widens what
+that test protects.
+
+*(It owned the reveal function too, which is the sentence that stood here and is
+the reason ADR 0043 exists. A `SECURITY DEFINER` body spends its owner's
+privileges on every call rather than once at migration time, and a probe built
+the same way read every row of `pg_authid` for a `pulse_care` caller. The
+function now has a `NOLOGIN` owner holding three grants; the views still do
+not, and ADR 0043 says why that asymmetry is deliberate and what it leaves
+open.)*
 
 **If a deployment cannot use a superuser for migrations**, the fallback is the
 E13 option above rather than this record: a non-superuser owner with `CREATE` on

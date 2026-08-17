@@ -1,8 +1,14 @@
 # 0022 — Identity-bearing columns are marked by an `identity_` name prefix
 
-**Status:** Accepted
+**Status:** Accepted — the decision unchanged, one consequence widened by E0-10
 **Date:** 2026-08-16
 **Tickets:** E0-08, E0-10
+
+> The marker itself is untouched: an identity-bearing column carries an
+> `identity_` prefix. What E0-10 changed is the *discovery* rule that decides
+> which columns the tripwire demands a marker for — the fragment set is wider and
+> the walk over people tables now iterates to a fixed point. The last paragraph
+> of the Consequences below is the part that moved, and it is marked.
 
 ## Context
 
@@ -87,13 +93,47 @@ query spells `identity_name` rather than `name`.
 
 **The convention is a convention, not an enforcement, and the boundary is worth
 stating exactly.** `tests/integration/test_identity_column_marker.py` sweeps the
-tables that hold a person — `user`, `user_identity`, `person`, and anything with
-a foreign key to one of them — for columns whose names contain "name" or "email",
-and fails on one that carries no marker. That reaches E0-09's `role_assignment`
-and E1's roster tables without being edited, which is the point. What it cannot
-see is an identity column whose name contains neither word: a `sortable`, a
-`sis_login`, a `phone`. No test that reads a database can distinguish one of
-those from an ordinary string column, and this record does not claim otherwise.
+tables that hold a person — `user`, `user_identity`, `person`, and anything
+reaching one of them through foreign keys — for columns whose names read as a
+person's identity, and fails on one that carries no marker. That reaches E0-09's
+`role_assignment` and E1's roster tables without being edited, which is the
+point.
+
+**E0-10 widened the search, and this paragraph is the part of it that moved.**
+As E0-08 shipped it, discovery was the two fragments "name" and "email", and the
+sentence here read: "What it cannot see is an identity column whose name contains
+neither word: a `sortable`, a `sis_login`, a `phone`." Two of those three are now
+caught — `sortable` and `phone` are fragments, and `login_id` catches the usual
+spelling of the third — and the walk over people tables iterates to a fixed
+point rather than stopping one foreign key out, so a table linking to a table
+that links to `user` is swept. The rule now reads `("name", "email", "login_id",
+"picture", "sourcedid", "phone", "sortable", "given", "family", "surname",
+"address", "photo", "avatar", "username")`, and lives on the tuple in that
+module, which is where dispute E0-10-01 settled that it belongs: the discovery
+rule is a judgement about *names*, so there is nothing in the schema for it to be
+read off, and shipping the list from `app.models` for the test to import would
+leave the test holding its expectation inside the thing it checks.
+
+**`login_id` and never a bare `login`**, which is measured rather than chosen:
+`login` pulls in `role_assignment.permits_web_login`, a boolean about which doors
+a role opens (ADR 0026) on a table carrying no identity, and turns two untouched
+test modules red.
+
+**What the widened set still cannot see**, in the words the tuple itself
+carries — the record and the code say one thing rather than two: "an identity
+column named none of these — `sis`, `banner`, `external_ref`, `initials`, `dob` —
+and any identity column on a table with no foreign-key path to `user`,
+`user_identity` or `person`. Both are *naming* judgements, and no test that reads
+a database can make one: a `text` column called `external_ref` and a `text`
+column holding a student number are the same object to Postgres. What closes that
+gap is not this tuple but the grant model, which withholds `user_identity` from
+`pulse_app` whatever anything is called."
+
+That last clause is what changed most about this record's standing. When it was
+written the marker was the only thing between an unnamed identity column and an
+instructor screen. E0-10 landed the grants, so the marker is now a tripwire on
+*where identity is put*, and the guarantee that an instructor cannot read one
+rests on a table-level grant that does not consult a column name at all.
 
 **A column that stops being identity-bearing needs a migration to rename it**,
 which is the intended cost: a change in what a column holds should be a visible
