@@ -42,9 +42,24 @@ predicate or a query fragment to be composed into a later `WHERE` clause.
 
 **It is downward-closed by construction.** An own grant holds the node an
 assignment is scoped to and every node beneath it in the containment hierarchy, and
-never a node above it. A lead's grant is the exception that proves the rule: it
-holds the courses the Lead Faculty mapping gives them and those courses' sections,
-and **no `prefix_ids`**.
+never a node above it.
+
+**Two roles do not read their grant off their scope column, and both matter.** A
+lead's grant holds the courses the Lead Faculty mapping gives them and those
+courses' sections, and **no `prefix_ids`** — the mapping is the authority on which
+courses are theirs, not the assignment row. An assistant dean's grant is **empty**,
+though the assignment is scoped to a college: SPEC §2.1 makes this role the worked
+example for why purview comes from the graph rather than from containment — "own
+led courses union every supervised chair's department — a set no single containment
+node holds" — and §2's table puts it in the scope-attachment column itself, "same
+node as the dean, authority comes from the supervision graph, not the scope". Both
+terms of that union arrive from elsewhere: the led courses from the person's own
+`LEAD_FACULTY` assignment, the supervised departments from E9's walk.
+
+So "scope node plus everything under it" is the rule for three of the five roles
+that hold a grant at all, and the exceptions are not decoration — the assistant
+dean was shipped as a college-grained grant, which made it identical to the dean's,
+and E0-11's security review is what caught it.
 
 **Three views make it computable on the application connection**, each a versioned
 `.sql` file executed by one revision:
@@ -217,6 +232,17 @@ indistinguishable from a lead with no mapped courses, so a caller would union it
 get its own grant back, and the rule §2 states would be enforced by nothing. This
 is ADR 0003's argument about the deferred union, arriving at a different function
 for the same reason.
+
+**This argument does not reach the assistant dean, and the distinction is the
+whole point.** That role *does* answer with an empty purview, and it must, because
+there the union is the correct supplier rather than the thing to prevent: an
+assistant dean's access arrives through the supervision graph, so a caller that
+unions their own grant with what the graph gives them gets the right answer, and
+gets nothing at all until E9 lands. For Care there is no second term and never will
+be — an empty answer would invite a union that must not happen, which is why Care
+raises. An empty purview therefore means "the graph supplies this" in one place and
+would have meant "there is nothing to supply" in the other; the two claims share a
+value, so they must not share a spelling.
 
 ## Consequences
 
