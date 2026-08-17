@@ -13,10 +13,10 @@ in one place before it lands.
 
 ```
 main                     protected; release history
-  └── epic/e0-foundations        one long-lived branch per epic (SPEC §14.3)
-        ├── e0/compose-stack     one short-lived branch per ticket
-        ├── e0/core-schema
-        └── e0/mock-lms
+  └── epic/e0-foundations           one long-lived branch per epic (SPEC §14.3)
+        ├── e0/compose-stack        one short-lived branch per ticket
+        ├── e0/org-containment-schema
+        └── e0/mock-lms-launch
 ```
 
 **`main` is protected.** Never commit to it, never merge into it locally, never
@@ -57,7 +57,7 @@ Ticket branch names come from the *Ticket breakdown* line under each epic in
 §14.3. Where an epic has been decomposed into numbered tickets under
 `docs/tickets/`, those ticket branch names win over the list in the spec —
 [`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is the build order for
-E0 and names all eighteen of its branches.
+E0 and names all twenty-five of its branches.
 
 ⚠ marks epics that additionally require line-by-line human review of the
 security-relevant diff.
@@ -139,15 +139,19 @@ catch a failure before you push.
 |---|---|
 | Fast | CI checker self-test, ruff check and format, mypy, tsc, eslint, migration drift |
 | Test | pytest unit and integration with coverage, the §4.1 invariant suite, Playwright e2e, AI eval floors |
-| Build | all Docker images, Compose health on api/worker/beat, frontend production build, bundle budget |
+| Build | all Docker images, Compose health on api/worker/beat/mock-lms, frontend production build, bundle budget |
 | Supply chain | pip-audit, npm audit, MIT license compatibility |
 
 Fast gates run first and everything else waits on them.
 
-Most of the tree does not exist yet, so most jobs currently detect absence and
-pass with a note naming the ticket that will make them enforcing. Landing that
-ticket includes removing its tolerance — a ticket that adds tests but leaves the
-test gate tolerant has not finished.
+A job whose subject does not exist yet detects the absence and passes with a
+note naming the ticket that will make it enforcing. Landing that ticket includes
+removing its tolerance — a ticket that adds tests but leaves the test gate
+tolerant has not finished. Most of them have now tightened; what remains
+tolerant is the Playwright e2e job, which waits for E0-18, the AI eval floors,
+which wait for E2's first eval set, and the four frontend gates (`tsc`,
+`eslint`, production build, bundle budget), which wait for the frontend scaffold
+in E1. The E0 build order has the full table.
 
 Two rules worth stating outright. A failing test is never fixed by skipping,
 xfailing, or deleting it; if the test is wrong, fix it in its own commit and say
