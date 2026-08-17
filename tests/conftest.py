@@ -82,7 +82,20 @@ calls it needs committed rows and an environment pointing at this container. The
 Care role itself is provisioned beside the application role now, mirroring
 `scripts/db-init/02-care-role.sh`: a login and no grant.
 
-E0-11 adds fixtures at the very bottom, and one of them is unlike everything
+E0-16 adds `mock_idp` and `mock_idps` at the very bottom, and they are the mock
+LMS's fixtures again for the other entry door (SPEC §2, §9.2). Two things about
+them are worth knowing before use. They **share** what the two mocks genuinely
+have in common rather than copying it — the meta-path finder that resolves a
+second package called `app`, the fresh-import machinery, the RS256 verifier and
+the form reader are one implementation each, with the per-ticket failure messages
+staying with the ticket (`docs/MISTAKES.md` entry 13). And, like `MockPlatform`,
+the provider is **driven the way a client drives one**: the endpoints come out of
+the discovery document, the identities come out of the login form, and the one
+thing E0-16 does not say — how a client learns the seeded `client_id` and
+redirect URI — is looked for in three places and then failed on by name rather
+than guessed at.
+
+E0-11 adds fixtures near the bottom, and one of them is unlike everything
 above it. `authz` reaches the authorization chokepoint **by name**: E0-11's
 surface was settled before any code was written, so there is nothing to discover,
 and the class exists only to turn an absent module or an absent symbol into a
@@ -1217,7 +1230,12 @@ def section_codes() -> SectionCodeService:
 # down, so the application object is discovered rather than imported by name.
 MOCK_LMS_DIR = REPO_ROOT / "mock-lms"
 MOCK_LMS_SERVICE = "mock-lms"
-MOCK_LMS_PACKAGE = "app"
+
+# The package name **both** mocks use, because SPEC §13 gives each of them an
+# `app/` beside a Dockerfile. It is the whole reason `MockPackageFinder` below
+# exists, and it is one constant rather than one per mock so that the collision
+# is described once.
+MOCK_PACKAGE = "app"
 
 # Where the ASGI application might sit inside that package, most likely first.
 # `backend/` puts its own in `app.main`, so a mock written beside it probably
@@ -1374,6 +1392,17 @@ class FormReader(HTMLParser):
     `<select>` options are collected separately from fixed fields, because a
     launch page offering a choice of seeded users is one form with several
     outcomes, and the tests about "an arbitrary seeded user" need each outcome.
+
+    **E0-16 widened what counts as a choice, and added `controls` and `labels`.**
+    A login form offering six seeded identities is the same shape as a launch page
+    offering several users, and it can legitimately be written three ways: a
+    `<select>`, a set of same-named radio buttons, or a set of same-named submit
+    buttons. All three are now read as choices, so the provider can be driven
+    whichever the implementer picked — none of the launch pages has a radio or a
+    named button, so nothing E0-14 or E0-15 asserts changes. `controls` and
+    `labels` answer a different question again: whether a Playwright test could
+    address the form without a brittle selector, which needs each control's
+    attributes rather than the value it would submit.
     """
 
     def __init__(self) -> None:
@@ -1395,16 +1424,36 @@ class FormReader(HTMLParser):
                     "method": (attributes.get("method") or "get").lower(),
                     "fields": {},
                     "choices": {},
+                    "controls": [],
+                    "labels": [],
                 }
             )
             return
         form = self.current()
         if form is None:
             return
+        if tag == "label":
+            form["labels"].append(attributes.get("for", ""))
+            return
+        if tag in {"input", "textarea", "select", "button"}:
+            form["controls"].append({"tag": tag, **attributes})
         if tag in {"input", "textarea"}:
             name = attributes.get("name")
-            if name:
+            kind = attributes.get("type", "text").lower()
+            if not name:
+                return
+            if kind in {"radio", "checkbox"}:
+                # One of several values under one name: a choice, not a fixed
+                # field. Recording it as a field would keep only the last one and
+                # silently shrink the set of identities a login form offers.
+                form["choices"].setdefault(name, []).append(attributes.get("value", "on"))
+            else:
                 form["fields"][name] = attributes.get("value", "")
+        elif tag == "button":
+            name = attributes.get("name")
+            kind = (attributes.get("type") or "submit").lower()
+            if name and kind == "submit":
+                form["choices"].setdefault(name, []).append(attributes.get("value", ""))
         elif tag == "select":
             self.open_select = attributes.get("name") or None
             if self.open_select:
@@ -1499,10 +1548,39 @@ class SignedLaunch(NamedTuple):
         return self.signature.header
 
 
-class MockLmsFinder:
-    """Resolve the `app` package out of `mock-lms/` for the duration of an import.
+def local_target(url: str) -> str:
+    """`url` as an in-process test client can request it: its path and query.
 
-    The mock is a second application whose package is *also* called `app`
+    A mock advertises itself with absolute URLs built from whatever public base
+    it is configured with, and that host is one a `TestClient` neither can nor
+    should resolve — what is under test is the mock's own routing. Both mocks ask
+    this question, so it is answered once (`docs/MISTAKES.md` entry 13).
+    """
+    split = urlsplit(url)
+    target = split.path or "/"
+    return f"{target}?{split.query}" if split.query else target
+
+
+def declared_paths(application: Any, method: str = "GET") -> list[str]:
+    """Every path `application` declares that answers `method` and takes no parameter.
+
+    No path parameter, so a caller can fetch every one of them without inventing
+    a value — which is what makes "walk what this service serves" safe to do at
+    all. Shared by both mocks for the reason `local_target` above is.
+    """
+    found: list[str] = []
+    for route in application.routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None) or set()
+        if isinstance(path, str) and "{" not in path and method in methods:
+            found.append(path)
+    return sorted(set(found))
+
+
+class MockPackageFinder:
+    """Resolve the `app` package out of one mock's directory for the length of an import.
+
+    A mock is a second application whose package is *also* called `app`
     (SPEC §13), and this repository's own `app` is importable in the test
     process. Putting `mock-lms/` on `sys.path` is not enough to win that
     collision: an editable install of the backend registers a meta-path finder,
@@ -1513,59 +1591,77 @@ class MockLmsFinder:
 
     So the resolution is made explicit and temporary: this finder goes on the
     front of `sys.meta_path`, answers for `app` and everything under it out of
-    `mock-lms/`, and comes off again. Nothing outside the import sees it.
+    the directory it was given, and comes off again. Nothing outside the import
+    sees it.
+
+    **It takes the directory as an argument**, which it did not when E0-14 wrote
+    it, because E0-16 adds a second mock with exactly the same collision. Two
+    copies of this class would be two copies of one rule about `sys.meta_path`,
+    which is the shape `docs/MISTAKES.md` entry 13 is about.
     """
 
+    def __init__(self, root: Path, package: str = MOCK_PACKAGE) -> None:
+        self.root = root
+        self.package = package
+
     def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
-        if fullname != MOCK_LMS_PACKAGE and not fullname.startswith(f"{MOCK_LMS_PACKAGE}."):
+        if fullname != self.package and not fullname.startswith(f"{self.package}."):
             return None
         parts = fullname.split(".")
         if len(parts) == 1:
-            search = [str(MOCK_LMS_DIR)]
+            search = [str(self.root)]
         else:
             parent = sys.modules.get(".".join(parts[:-1]))
             search = list(getattr(parent, "__path__", []))
         return PathFinder.find_spec(fullname, search)
 
 
-def import_mock_lms_application(values: Mapping[str, str]) -> Any:
-    """Import the mock platform fresh, under `values`, and return its ASGI app.
+def import_mock_application(
+    root: Path,
+    modules: Sequence[str],
+    values: Mapping[str, str],
+    *,
+    absent_directory: str,
+    nothing_found: str,
+    package: str = MOCK_PACKAGE,
+) -> Any:
+    """Import one mock fresh, under `values`, and return its ASGI application.
 
-    Fresh every time, and that is the property two of E0-14's tests rest on:
-    "issuer keys are generated per run" is only observable if a second start of
-    the platform is really a second start. Every `app*` module is dropped before
-    the import and the previous set is put back after, exactly as
+    Fresh every time, and that is the property the per-run key tests on both
+    mocks rest on: "keys are generated per run" is only observable if a second
+    start really is a second start. Every module of the mock's package is dropped
+    before the import and the previous set is put back after, exactly as
     `import_app_module` does above and for the same reason — a module cached in
     `sys.modules` answers with the environment some earlier test set.
 
     What is found is a `FastAPI` instance at module level, or a factory that
     returns one. Both are legal — `uvicorn --factory` is how this repository
-    starts its own — and E0-14 names neither, so naming one here would make the
-    implementer build to this fixture instead of to the ticket.
+    starts its own — and neither mock's ticket names one, so naming one here
+    would make the implementer build to this fixture instead of to the ticket.
+
+    The two failure messages are arguments rather than text written here, because
+    the mechanism is shared between the mocks and the *ticket* a missing
+    deliverable belongs to is not.
     """
     from fastapi import FastAPI
 
-    if not MOCK_LMS_DIR.is_dir():
-        pytest.fail(
-            f"{MOCK_LMS_DIR} does not exist. E0-14's scope is a `mock-lms/` FastAPI application "
-            "with a Dockerfile, added to Compose as `mock-lms` (SPEC §13 puts it at "
-            "`mock-lms/app/`, and §9.2 says what it is for)."
-        )
+    if not root.is_dir():
+        pytest.fail(absent_directory)
 
     saved = {
         name: module
         for name, module in list(sys.modules.items())
-        if name == MOCK_LMS_PACKAGE or name.startswith(f"{MOCK_LMS_PACKAGE}.")
+        if name == package or name.startswith(f"{package}.")
     }
     for name in saved:
         sys.modules.pop(name, None)
 
-    finder = MockLmsFinder()
+    finder = MockPackageFinder(root, package)
     sys.meta_path.insert(0, finder)
     imported: list[ModuleType] = []
     try:
         with environment(dict(values)):
-            for name in MOCK_LMS_MODULES:
+            for name in modules:
                 try:
                     module = importlib.import_module(name)
                 except ModuleNotFoundError as failure:
@@ -1587,21 +1683,32 @@ def import_mock_lms_application(values: Mapping[str, str]) -> Any:
     finally:
         if finder in sys.meta_path:
             sys.meta_path.remove(finder)
-        for name in [
-            n
-            for n in list(sys.modules)
-            if n == MOCK_LMS_PACKAGE or n.startswith(f"{MOCK_LMS_PACKAGE}.")
-        ]:
+        for name in [n for n in list(sys.modules) if n == package or n.startswith(f"{package}.")]:
             sys.modules.pop(name, None)
         sys.modules.update(saved)
 
-    pytest.fail(
-        "Nothing under `mock-lms/app/` exposes a FastAPI application. Looked for a module-level "
-        f"instance, then a factory named one of {list(APPLICATION_FACTORY_NAMES)}, in "
-        f"{list(MOCK_LMS_MODULES)}; imported {[m.__name__ for m in imported] or 'nothing'}. "
-        "E0-14's scope is a `mock-lms/` FastAPI application; if it is reachable under a spelling "
-        "none of those covers, that is a defect in `MockPlatform` in tests/conftest.py rather "
-        "than in the mock, and MOCK_LMS_MODULES there is the one line that changes."
+    pytest.fail(nothing_found.format(imported=[m.__name__ for m in imported] or "nothing"))
+
+
+def import_mock_lms_application(values: Mapping[str, str]) -> Any:
+    """The mock platform's ASGI application. See `import_mock_application` above."""
+    return import_mock_application(
+        MOCK_LMS_DIR,
+        MOCK_LMS_MODULES,
+        values,
+        absent_directory=(
+            f"{MOCK_LMS_DIR} does not exist. E0-14's scope is a `mock-lms/` FastAPI application "
+            "with a Dockerfile, added to Compose as `mock-lms` (SPEC §13 puts it at "
+            "`mock-lms/app/`, and §9.2 says what it is for)."
+        ),
+        nothing_found=(
+            "Nothing under `mock-lms/app/` exposes a FastAPI application. Looked for a "
+            f"module-level instance, then a factory named one of {list(APPLICATION_FACTORY_NAMES)}"
+            f", in {list(MOCK_LMS_MODULES)}; imported {{imported}}. E0-14's scope is a "
+            "`mock-lms/` FastAPI application; if it is reachable under a spelling none of those "
+            "covers, that is a defect in `MockPlatform` in tests/conftest.py rather than in the "
+            "mock, and MOCK_LMS_MODULES there is the one line that changes."
+        ),
     )
 
 
@@ -1806,13 +1913,7 @@ class MockPlatform:
 
     def paths(self, method: str = "GET") -> list[str]:
         """Every declared path that answers `method` and takes no path parameter."""
-        found: list[str] = []
-        for route in self.application.routes:
-            path = getattr(route, "path", None)
-            methods = getattr(route, "methods", None) or set()
-            if isinstance(path, str) and "{" not in path and method in methods:
-                found.append(path)
-        return sorted(set(found))
+        return declared_paths(self.application, method)
 
     def path_named_after(self, fragments: tuple[str, ...], purpose: str) -> str:
         """The one route whose path carries one of `fragments`.
@@ -2031,9 +2132,7 @@ class MockPlatform:
         asserted by a test rather than assumed here, because a relative one is a
         URL no real tool could follow.
         """
-        split = urlsplit(url)
-        target = split.path or "/"
-        return f"{target}?{split.query}" if split.query else target
+        return local_target(url)
 
     @staticmethod
     def refuse_an_unspecified_token_flow(response: Any, url: str) -> None:
@@ -3870,3 +3969,906 @@ def application_session(
         session.rollback()
         session.close()
         connection.close()
+
+
+# ---------------------------------------------------------------------------
+# E0-16 — the mock OIDC identity provider, driven the way a client drives one.
+# ---------------------------------------------------------------------------
+
+# SPEC §13's layout again, and §7.2's service list: `mock-idp/` holding a
+# `Dockerfile` and an `app/`, run as the Compose service `mock-idp`.
+MOCK_IDP_DIR = REPO_ROOT / "mock-idp"
+MOCK_IDP_SERVICE = "mock-idp"
+
+# Where the ASGI application might sit inside that package, most likely first —
+# the same list as the platform's with the platform-shaped names swapped for
+# provider-shaped ones. Nothing in E0-16 spells a module, so it is discovered.
+MOCK_IDP_MODULES = ("app.main", "app", "app.provider", "app.idp", "app.server", "app.api")
+
+# **Not this suite's choice.** OpenID Connect Discovery 1.0 §4 fixes this path,
+# and E0-16's scope spells it out: "Discovery document at
+# `/.well-known/openid-configuration`". A provider serving its metadata anywhere
+# else is one no conformant client can configure itself from.
+DISCOVERY_PATH = "/.well-known/openid-configuration"
+
+# How many of the identities a login form offers are walked. **This suite's
+# choice**, and a bound rather than a rule: E0-16 seeds six roles plus the
+# two-hat person, so a form offering more than this is a seed that has grown
+# rather than a form this cannot read. Raise it if that happens.
+MAX_LOGIN_VARIANTS = 24
+
+# How many internal redirects are followed between the authorization request and
+# the page that asks who is signing in. **This suite's choice.** A provider may
+# reasonably send `/authorize` to `/login?...` and back; a provider that sends a
+# client round more hops than this is looping.
+MAX_LOGIN_HOPS = 4
+
+# Input types that are a person typing something this test cannot know. A login
+# form built out of these is drivable by a browser and not by a fixture, and the
+# right answer is a named failure rather than a guess at a seeded password.
+TYPED_INPUT_TYPES = frozenset({"text", "password", "email", "tel", "url", "number", "search"})
+
+# The claims that carry a *person* rather than a *role*, from OIDC Core 1.0 §2
+# and §5.1, plus the registered JWT claims. Values under these keys are skipped
+# when scanning a session for roles, because a dean called "Dean" is a name and
+# not a grant — and a scanner that could not tell the two apart would report a
+# reporting role on the Care session that §2 exists to keep clear of one.
+PERSONAL_CLAIM_NAMES = frozenset(
+    {
+        "address",
+        "at_hash",
+        "aud",
+        "azp",
+        "birthdate",
+        "c_hash",
+        "email",
+        "email_verified",
+        "family_name",
+        "gender",
+        "given_name",
+        "iss",
+        "jti",
+        "locale",
+        "middle_name",
+        "name",
+        "nickname",
+        "nonce",
+        "phone_number",
+        "phone_number_verified",
+        "picture",
+        "preferred_username",
+        "profile",
+        "sub",
+        "updated_at",
+        "website",
+        "zoneinfo",
+    }
+)
+
+# How a role may be spelled in a session, built from E0-09's `ROLE_ALIASES`
+# rather than beside it, so that "how this project spells LEAD_FACULTY" stays one
+# fact (`docs/MISTAKES.md` entry 13). Two additions, both for this door only: a
+# provider standing in for an institutional IdP may spell the two launch-only
+# roles in the LIS vocabulary a platform uses, where a student is a `Learner`.
+# They are added rather than pushed back into `ROLE_ALIASES` because that mapping
+# is matched against database enum labels, which have no `Learner`.
+ROLE_CLAIM_ALIASES = {
+    **ROLE_ALIASES,
+    "INSTRUCTOR": ("INSTRUCTOR", "TEACHER"),
+    "STUDENT": ("STUDENT", "LEARNER"),
+}
+
+# Which roles a door may hand out is a ticket's expectation rather than a
+# property of the driver, so the three lists E0-16's criteria are written in —
+# the six web-login roles, the two launch-only ones, and §2.1's reporting chain —
+# live in `tests/integration/test_mock_idp_web_login.py` beside the assertions
+# that read them, and are transcribed there from the ticket.
+
+# Fragments that would make a claim name a *purview* — a set of org nodes, or a
+# supervision edge — rather than an identity. §2.1's containment levels, plus the
+# two words the graph is described in. `scope` on its own is deliberately absent:
+# it is an OAuth 2.0 term with a legitimate meaning in a token response, and
+# matching it would fail a conformant provider for saying `openid`.
+PURVIEW_CLAIM_FRAGMENTS = (
+    "purview",
+    "college",
+    "department",
+    "prefix",
+    "course",
+    "section",
+    "scope_node",
+    "reports_to",
+    "supervis",
+)
+
+
+def pkce_pair() -> tuple[str, str]:
+    """One PKCE verifier and its S256 challenge, per RFC 7636 §4.1 and §4.2.
+
+    `secrets.token_urlsafe(48)` produces 64 characters from the unreserved set,
+    inside the 43-to-128 the specification allows. The challenge is the
+    base64url of the SHA-256 of the *ASCII* verifier with the padding stripped,
+    which is the whole of what a provider recomputes.
+    """
+    verifier = secrets.token_urlsafe(48)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+def role_token(value: str) -> str:
+    """One string from a session, normalised to the shape a role name has.
+
+    A role arrives as a bare word (`chair`), as a phrase (`VP Academics`), or as
+    a vocabulary URI (`http://purl.imsglobal.org/vocab/lis/v2/membership#Learner`
+    is how a platform spells one). All three are the same claim about a person,
+    so the last path, fragment or scheme segment is taken and everything that is
+    not a letter or a digit becomes an underscore.
+    """
+    tail = re.split(r"[/#:]", value.strip())[-1]
+    return re.sub(r"[^A-Za-z0-9]+", "_", tail).strip("_").upper()
+
+
+def role_strings(node: Any) -> Iterator[str]:
+    """Every string in a session that could be stating a role.
+
+    Walks the whole claim tree rather than one agreed claim name, because E0-16
+    spells no claim: a provider may put roles under `roles`, under a namespaced
+    URI, or inside a nested object, and a scan that knew the name would report
+    "no instructor role here" about a claim it never looked at.
+
+    Values under the personal claims above are skipped — a name, an email address
+    and a preferred username describe the person, not what they may do.
+    """
+    if isinstance(node, Mapping):
+        for name, value in node.items():
+            if str(name).lower() in PERSONAL_CLAIM_NAMES:
+                continue
+            yield from role_strings(value)
+    elif isinstance(node, list | tuple):
+        for item in node:
+            yield from role_strings(item)
+    elif isinstance(node, str):
+        yield node
+
+
+def roles_in(claims: Any) -> set[str]:
+    """Every role this project recognises, stated anywhere in `claims`.
+
+    Matching is exact against the normalised token rather than by substring, for
+    the reason `ROLE_ALIASES` gives: `DEAN` is a substring of `ASSISTANT_DEAN`,
+    and a fuzzy match would make every assistant dean a dean. Its own control is
+    `tests/integration/test_mock_idp_web_login.py`, which runs it against the
+    values it is claimed to catch *and* the values it is claimed to let past —
+    `docs/MISTAKES.md` entry 3, since every assertion about a role that is
+    *absent* is satisfied by a scanner that finds nothing at all.
+    """
+    tokens = {role_token(value) for value in role_strings(claims)}
+    return {
+        role
+        for role, aliases in ROLE_CLAIM_ALIASES.items()
+        if tokens & {role_token(alias) for alias in aliases}
+    }
+
+
+def purview_claim_names(node: Any) -> set[str]:
+    """Every claim name in a session that names a purview rather than a person."""
+    found: set[str] = set()
+    if isinstance(node, Mapping):
+        for name, value in node.items():
+            lowered = str(name).lower()
+            if any(fragment in lowered for fragment in PURVIEW_CLAIM_FRAGMENTS):
+                found.add(str(name))
+            found |= purview_claim_names(value)
+    elif isinstance(node, list | tuple):
+        for item in node:
+            found |= purview_claim_names(item)
+    return found
+
+
+class LoginAttempt(NamedTuple):
+    """One trip through the provider's login form, refused or not.
+
+    `code` is `None` when the provider did not issue one, whatever it did
+    instead — that is the shape criterion 7 needs, because "an instructor cannot
+    obtain a session here" is a claim about what did *not* come back and the
+    status alone does not say it.
+    """
+
+    submission: dict[str, str]
+    request: dict[str, str]
+    verifier: str
+    response: Any
+    location: str | None
+    code: str | None
+    state: str | None
+
+    @property
+    def refused(self) -> bool:
+        return self.code is None
+
+
+class WebLogin(NamedTuple):
+    """One completed authorization code flow: the session a web login produces."""
+
+    submission: dict[str, str]
+    request: dict[str, str]
+    verifier: str
+    code: str
+    state: str | None
+    tokens: dict[str, Any]
+    id_token: str
+    signature: JsonWebSignature
+
+    @property
+    def claims(self) -> dict[str, Any]:
+        return self.signature.claims
+
+    @property
+    def header(self) -> dict[str, Any]:
+        return self.signature.header
+
+
+class AuthorizationAttempt(NamedTuple):
+    """An authorization request, taken as far as the page that asks who you are."""
+
+    request: dict[str, str]
+    verifier: str
+    page_url: str | None
+    form: dict[str, Any] | None
+    response: Any
+
+
+def import_mock_idp_application(values: Mapping[str, str]) -> Any:
+    """The mock provider's ASGI application. See `import_mock_application` above."""
+    return import_mock_application(
+        MOCK_IDP_DIR,
+        MOCK_IDP_MODULES,
+        values,
+        absent_directory=(
+            f"{MOCK_IDP_DIR} does not exist. E0-16's scope is a `mock-idp/` FastAPI application "
+            "with a Dockerfile, added to Compose as `mock-idp` (SPEC §7.2 lists the service and "
+            "§9.2 says what it is for: an in-repo OIDC provider so that the second entry door is "
+            "exercised in every run)."
+        ),
+        nothing_found=(
+            "Nothing under `mock-idp/app/` exposes a FastAPI application. Looked for a "
+            f"module-level instance, then a factory named one of {list(APPLICATION_FACTORY_NAMES)}"
+            f", in {list(MOCK_IDP_MODULES)}; imported {{imported}}. If it is reachable under a "
+            "spelling none of those covers, that is a defect in `MockIdentityProvider` in "
+            "tests/conftest.py rather than in the mock, and MOCK_IDP_MODULES there is the one "
+            "line that changes."
+        ),
+    )
+
+
+class MockIdentityProvider:
+    """E0-16's provider, driven the way a client drives one rather than by name.
+
+    **Nothing about the provider's URLs is written down except the one the
+    standard fixes**, so nothing here is hardcoded that the protocol can supply
+    instead:
+
+      - The discovery document is fetched from `/.well-known/openid-configuration`,
+        which OIDC Discovery 1.0 §4 fixes and E0-16's scope repeats.
+      - Every endpoint — authorization, token, JWKS — is read out of that
+        document, because that is how a client finds them. A provider that serves
+        them at sensible paths and advertises none has built something no
+        conformant client can configure itself from, and the right outcome is a
+        red rather than a fixture that goes looking.
+      - The identities come out of the login form, the way a browser meets them.
+
+    **The one thing E0-16 does not say is how a client learns the seeded
+    `client_id` and redirect URI.** A registered client is what an authorization
+    request names, so a test cannot start a flow without one. `registration()`
+    looks in the three places a reasonable implementation would put it and then
+    fails by name; it does not invent one.
+
+    **What this does not do is decide anything.** Where the ticket leaves a name
+    open, a test fails saying so rather than passing against an interface nobody
+    asked for.
+    """
+
+    def __init__(self, values: Mapping[str, str] | None = None) -> None:
+        from fastapi.testclient import TestClient
+
+        self.values = dict(values or {})
+        self.application = import_mock_idp_application(self.values)
+        self.client = TestClient(self.application, follow_redirects=False)
+        # Entered so the application's lifespan runs: a provider that generates
+        # its signing key on startup has not generated one until it does.
+        self.client.__enter__()
+        self._discovery: dict[str, Any] | None = None
+        self._registration: dict[str, str] | None = None
+
+    def close(self) -> None:
+        self.client.__exit__(None, None, None)
+
+    # -- what the application serves ----------------------------------------
+
+    def paths(self, method: str = "GET") -> list[str]:
+        """Every declared path that answers `method` and takes no path parameter."""
+        return declared_paths(self.application, method)
+
+    def discovery(self) -> dict[str, Any]:
+        """The provider's metadata document, fetched from the standard path."""
+        if self._discovery is None:
+            response = self.client.get(DISCOVERY_PATH)
+            assert response.status_code == 200, (
+                f"`GET {DISCOVERY_PATH}` answered {response.status_code} rather than 200. E0-16's "
+                "scope puts the discovery document there and OIDC Discovery 1.0 §4 fixes the "
+                "path; a client that cannot fetch it cannot find any other endpoint. Body begins "
+                f"{response.text[:200]!r}."
+            )
+            try:
+                document = response.json()
+            except ValueError as failure:
+                pytest.fail(
+                    f"`GET {DISCOVERY_PATH}` served something that is not JSON ({failure}). "
+                    "Provider metadata is a JSON object."
+                )
+            assert isinstance(document, dict) and document, (
+                f"`GET {DISCOVERY_PATH}` served {document!r}, which is not a provider metadata "
+                "document. OIDC Discovery 1.0 §3 makes it a non-empty JSON object."
+            )
+            self._discovery = document
+        return self._discovery
+
+    def metadata(self, name: str, purpose: str) -> str:
+        """One string member of the discovery document, or a failure naming it."""
+        document = self.discovery()
+        value = document.get(name)
+        if not isinstance(value, str) or not value:
+            pytest.fail(
+                f"The discovery document advertises no `{name}` (it carries {sorted(document)}). "
+                f"That member is how a client learns {purpose}, so without it there is nothing to "
+                "call — whatever the provider serves and at whatever path."
+            )
+        return value
+
+    def endpoint_path(self, name: str, purpose: str) -> str:
+        """One advertised endpoint, as this in-process client can request it."""
+        return local_target(self.metadata(name, purpose))
+
+    def jwks(self) -> dict[str, Any]:
+        """The published key set, fetched from the advertised `jwks_uri`."""
+        path = self.endpoint_path("jwks_uri", "where the provider publishes its signing keys")
+        response = self.client.get(path)
+        assert response.status_code == 200, (
+            f"The JWKS endpoint `{path}` answered {response.status_code} rather than 200. E0-16's "
+            "third criterion is an `id_token` that verifies against the served JWKS, and a key "
+            "set nobody can fetch verifies nothing."
+        )
+        document = response.json()
+        assert isinstance(document, dict), (
+            f"The JWKS endpoint `{path}` served {document!r}, which is not a JWK Set. RFC 7517 "
+            "makes a key set a JSON object with a `keys` member."
+        )
+        return document
+
+    def published_keys(self) -> list[dict[str, Any]]:
+        keys = self.jwks().get("keys")
+        return [key for key in keys if isinstance(key, dict)] if isinstance(keys, list) else []
+
+    def verifies(self, token: Any) -> dict[str, Any] | None:
+        """The published key that verifies `token`, or `None` if none does.
+
+        The arithmetic is `verify_rs256` above — written out of `pow` and
+        `hashlib` because nothing in the locked dependency set verifies a JWS, and
+        controlled by its own tests rather than trusted.
+        """
+        signature = token if isinstance(token, JsonWebSignature) else split_jws(str(token))
+        return verifying_key(signature, self.jwks())
+
+    # -- the seeded client --------------------------------------------------
+
+    def registration(self) -> dict[str, str]:
+        """The client an authorization request may name, and where it may come back to.
+
+        Looked for in three places, most published first, because E0-16 names
+        none and a fixture that pinned one would decide it:
+
+          1. A JSON document the provider serves carrying a `client_id`. The mock
+             platform publishes its registration exactly this way
+             ([ADR 0036](../docs/adr/0036-the-mock-platform-publishes-its-registration-as-a-document.md)),
+             so a provider written beside it may too.
+          2. A form on one of its own pages carrying `client_id` as a field — a
+             demo page that starts a flow announces the client the same way the
+             launch page announces the platform.
+          3. The `mock-idp` service's Compose environment, which is where the mock
+             platform's five addresses are written as literals
+             ([ADR 0037](../docs/adr/0037-the-mock-platform-is-configured-by-compose-literals.md)).
+
+        A failure here is a real gap rather than a fixture problem: E1's login
+        work and E0-18's Playwright path both have to learn the same two values,
+        and if nothing publishes them then every client learns them by reading the
+        source.
+        """
+        if self._registration is None:
+            found = (
+                self.registration_in_a_document()
+                or self.registration_in_a_form()
+                or self.registration_in_compose()
+            )
+            if found is None:
+                pytest.fail(
+                    "Nothing tells a client which `client_id` this provider will accept or which "
+                    "redirect URI it will return to, so no authorization request can be built. "
+                    f"Looked for a JSON document carrying `client_id` among {self.paths('GET')}, "
+                    "for a form field of that name on those pages, and for a `CLIENT_ID` entry in "
+                    f"the `{MOCK_IDP_SERVICE}` service's Compose environment. E0-16 spells none "
+                    "of the three, and a fixture that guessed would be deciding it — publish the "
+                    "registration the way the mock platform does (ADR 0036), or say in the "
+                    "ticket where a client reads it."
+                )
+            self._registration = found
+        return self._registration
+
+    @staticmethod
+    def client_registration_in(node: Any) -> dict[str, str] | None:
+        """The first mapping anywhere in `node` that names a client and a redirect URI."""
+        if isinstance(node, Mapping):
+            client = node.get("client_id")
+            redirect = node.get("redirect_uri")
+            if not isinstance(redirect, str):
+                listed = node.get("redirect_uris")
+                redirect = listed[0] if isinstance(listed, list) and listed else None
+            if isinstance(client, str) and client and isinstance(redirect, str) and redirect:
+                return {"client_id": client, "redirect_uri": redirect}
+            for value in node.values():
+                found = MockIdentityProvider.client_registration_in(value)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for item in node:
+                found = MockIdentityProvider.client_registration_in(item)
+                if found is not None:
+                    return found
+        return None
+
+    def registration_in_a_document(self) -> dict[str, str] | None:
+        """A JSON document the provider serves that names its seeded client."""
+        for path in self.paths("GET"):
+            if path == DISCOVERY_PATH:
+                continue
+            response = self.client.get(path)
+            if response.status_code != 200:
+                continue
+            if "json" not in response.headers.get("content-type", "").lower():
+                continue
+            try:
+                document = response.json()
+            except ValueError:
+                continue
+            found = self.client_registration_in(document)
+            if found is not None:
+                return found
+        return None
+
+    def registration_in_a_form(self) -> dict[str, str] | None:
+        """A form on one of the provider's own pages that names its seeded client."""
+        for path in self.paths("GET"):
+            response = self.client.get(path)
+            if response.status_code != 200:
+                continue
+            if "html" not in response.headers.get("content-type", "").lower():
+                continue
+            for form in forms_in(response.text):
+                found = self.client_registration_in(form["fields"])
+                if found is not None:
+                    return found
+        return None
+
+    @staticmethod
+    def registration_in_compose() -> dict[str, str] | None:
+        """The client and redirect URI written as Compose literals on the service."""
+        services = load_compose(BASE_COMPOSE_PATH).get("services") or {}
+        service = services.get(MOCK_IDP_SERVICE)
+        block = service.get("environment") if isinstance(service, dict) else None
+        if not isinstance(block, dict):
+            return None
+        values = {str(name).upper(): str(value) for name, value in block.items() if value}
+        literal = {name: value for name, value in values.items() if "$" not in value}
+        client = next((v for k, v in literal.items() if k.endswith("CLIENT_ID")), None)
+        redirect = next((v for k, v in literal.items() if "REDIRECT" in k), None)
+        if client and redirect:
+            return {"client_id": client, "redirect_uri": redirect}
+        return None
+
+    # -- the authorization code flow ----------------------------------------
+
+    def authorization_request(
+        self, *, omitting: Sequence[str] = (), **overrides: str
+    ) -> tuple[dict[str, str], str]:
+        """A conformant authorization request with PKCE, and the verifier behind it.
+
+        Every value is one OIDC Core 1.0 §3.1.2.1 and RFC 7636 require of a code
+        flow with PKCE, so nothing here is a preference. `omitting` sends a
+        request with those parameters absent, which an override cannot express —
+        and "absent" is the case that matters for a downgrade.
+        """
+        registration = self.registration()
+        verifier, challenge = pkce_pair()
+        request = {
+            "response_type": "code",
+            "scope": "openid",
+            "client_id": registration["client_id"],
+            "redirect_uri": registration["redirect_uri"],
+            "state": secrets.token_urlsafe(24),
+            "nonce": secrets.token_urlsafe(24),
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+        request.update(overrides)
+        for name in omitting:
+            request.pop(name, None)
+        return request, verifier
+
+    def begin(self, *, omitting: Sequence[str] = (), **overrides: str) -> AuthorizationAttempt:
+        """Send an authorization request and follow it to the page that asks who you are."""
+        request, verifier = self.authorization_request(omitting=omitting, **overrides)
+        path = self.endpoint_path(
+            "authorization_endpoint", "where an authorization request is sent"
+        )
+        response = self.client.get(path, params=request)
+        page_url, form, final = self.follow_to_a_login_form(path, response, request)
+        return AuthorizationAttempt(
+            request=request, verifier=verifier, page_url=page_url, form=form, response=final
+        )
+
+    def follow_to_a_login_form(
+        self, url: str, response: Any, request: Mapping[str, str]
+    ) -> tuple[str | None, dict[str, Any] | None, Any]:
+        """Follow the provider's own redirects until a page carrying a form arrives.
+
+        A redirect to the *client's* redirect URI is not followed and ends the
+        walk: that is the authorization response, and reaching it without being
+        asked anything is a provider that issued a session to whoever asked.
+        """
+        current, hops = url, 0
+        while hops < MAX_LOGIN_HOPS:
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("location") or ""
+                if not location or location.startswith(str(request.get("redirect_uri", "\0"))):
+                    return None, None, response
+                current = local_target(urljoin(f"http://testserver{current}", location))
+                response = self.client.get(current)
+                hops += 1
+                continue
+            if (
+                response.status_code == 200
+                and "html" in response.headers.get("content-type", "").lower()
+            ):
+                forms = forms_in(response.text)
+                posting = [form for form in forms if form["method"] == "post"]
+                chosen = (posting or forms or [None])[0]
+                return current, chosen, response
+            return current, None, response
+        return current, None, response
+
+    def require_login_form(self, attempt: AuthorizationAttempt) -> dict[str, Any]:
+        """The login form, or a failure saying what arrived instead."""
+        if attempt.form is None:
+            pytest.fail(
+                "The authorization request did not reach a page carrying a form, so there is no "
+                f"login to drive. The last response was {attempt.response.status_code} for "
+                f"`{attempt.page_url}`; the provider serves {self.paths('GET')}. E0-16's scope "
+                "asks for 'a login form simple enough for a Playwright test to drive without "
+                "brittle selectors', and a provider that answers an authorization request without "
+                "asking who is signing in has issued a session to whoever asked."
+            )
+        typed = [
+            control
+            for control in attempt.form["controls"]
+            if control.get("tag") == "input"
+            and control.get("type", "text").lower() in TYPED_INPUT_TYPES
+            and not control.get("value")
+        ]
+        if typed and not attempt.form["choices"]:
+            pytest.fail(
+                "The login form asks for values this test cannot know — it carries "
+                f"{[control.get('name') for control in typed]} and offers no choice of seeded "
+                "identity. E0-16 seeds the identities and spells no credential for any of them, "
+                "so either the form offers them (a `<select>`, radio buttons or named submit "
+                "buttons are all read here) or the ticket has to say what a test signs in with."
+            )
+        return attempt.form
+
+    def identify(
+        self, attempt: AuthorizationAttempt, identity: Mapping[str, str] | None
+    ) -> dict[str, str]:
+        """One submission for `attempt`'s form, signing in as `identity`.
+
+        The chosen values are the ones the form offers a *choice* of — a
+        `<select>`, radio buttons or named submit buttons — and everything else
+        comes from this attempt's own form. That is what keeps a caller able to
+        say "sign in as this one" without carrying another flow's hidden state
+        along with it.
+        """
+        offered = self.offered_identities(attempt)
+        if identity is None:
+            return offered[0]
+        form = self.require_login_form(attempt)
+        wanted = {name: value for name, value in identity.items() if name in form["choices"]}
+        for submission in offered:
+            if all(submission.get(name) == value for name, value in wanted.items()):
+                return submission
+        return {**offered[0], **wanted}
+
+    def offered_identities(self, attempt: AuthorizationAttempt) -> list[dict[str, str]]:
+        """Every submission the login form could send, one per seeded identity."""
+        form = self.require_login_form(attempt)
+        submissions = form_submissions(form)[:MAX_LOGIN_VARIANTS]
+        assert submissions, (
+            "The login form offers nothing to submit, so no identity can sign in. E0-16 seeds six "
+            "web-login roles plus the person holding Care and an instructor assignment."
+        )
+        return submissions
+
+    def submit_login(
+        self, attempt: AuthorizationAttempt, submission: Mapping[str, str]
+    ) -> LoginAttempt:
+        """Post one identity to the login form and read what came back.
+
+        Asserts nothing about the outcome. Criterion 7 needs a refusal to be
+        readable as a refusal rather than as a fixture failure, so the caller
+        decides whether a missing code is the answer it wanted.
+        """
+        form = self.require_login_form(attempt)
+        action = urljoin(f"http://testserver{attempt.page_url}", form["action"] or "")
+        target = local_target(action)
+        values = dict(submission)
+        if form["method"] == "post":
+            response = self.client.post(target, data=values)
+        else:
+            response = self.client.get(target, params=values)
+        location, code, state = self.read_authorization_response(response)
+        return LoginAttempt(
+            submission=values,
+            request=dict(attempt.request),
+            verifier=attempt.verifier,
+            response=response,
+            location=location,
+            code=code,
+            state=state,
+        )
+
+    @staticmethod
+    def read_authorization_response(response: Any) -> tuple[str | None, str | None, str | None]:
+        """The `code` and `state` the provider sent back, wherever it put them.
+
+        A redirect carrying them in the query is the code flow's default response
+        mode; a self-submitting form is `form_post`, which is legal and which the
+        LTI side of this repository already uses. Which one E0-16 chose is not
+        something this file decides, so both are read.
+        """
+        location = response.headers.get("location")
+        if location:
+            split = urlsplit(location)
+            for blob in (split.query, split.fragment):
+                pairs = parse_qs(blob)
+                if "code" in pairs:
+                    return location, pairs["code"][0], (pairs.get("state") or [None])[0]
+            return location, None, None
+        if response.status_code == 200:
+            for form in forms_in(response.text):
+                if "code" in form["fields"]:
+                    return (
+                        form["action"] or None,
+                        form["fields"]["code"],
+                        form["fields"].get("state"),
+                    )
+        return None, None, None
+
+    def redeem(
+        self,
+        code: str,
+        verifier: str | None,
+        *,
+        omitting: Sequence[str] = (),
+        **overrides: str,
+    ) -> Any:
+        """Exchange an authorization code at the token endpoint. Asserts nothing.
+
+        The body is RFC 6749 §4.1.3's plus RFC 7636's `code_verifier`, form-encoded
+        as those specifications require. `verifier` of `None` sends no verifier at
+        all, which is the downgrade case and is not the same request as sending a
+        wrong one.
+        """
+        registration = self.registration()
+        body = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": registration["redirect_uri"],
+            "client_id": registration["client_id"],
+        }
+        if verifier is not None:
+            body["code_verifier"] = verifier
+        body.update(overrides)
+        for name in omitting:
+            body.pop(name, None)
+        path = self.endpoint_path("token_endpoint", "where an authorization code is redeemed")
+        return self.client.post(path, data=body)
+
+    @staticmethod
+    def body_of(response: Any) -> dict[str, Any]:
+        """A token endpoint response as a mapping, or an empty one if it is not JSON."""
+        try:
+            document = response.json()
+        except ValueError:
+            return {}
+        return document if isinstance(document, dict) else {}
+
+    def refuse_an_unspecified_client_credential(self, response: Any) -> None:
+        """Turn `invalid_client` into a named gap rather than a passing refusal.
+
+        E0-16 describes no client secret, and PKCE is what a public client
+        authenticates a code exchange with, so this suite redeems without one. If
+        the provider requires a secret, every exchange here fails — and the two
+        refusal criteria would then pass for a reason unrelated to what they
+        assert, which is `docs/MISTAKES.md` entry 3 exactly. So it is named
+        wherever it appears, on the successes and on the refusals alike.
+        """
+        if self.body_of(response).get("error") == "invalid_client":
+            pytest.fail(
+                f"The token endpoint answered {response.status_code} `invalid_client`, so it "
+                "requires a client credential this suite does not send. E0-16 names no client "
+                "secret and PKCE is what a public client proves possession with — if the seeded "
+                "client is confidential, the ticket has to say so, because a refusal for this "
+                "reason is indistinguishable from the code-replay and verifier-mismatch refusals "
+                "two of its criteria are about."
+            )
+
+    def tokens(self, response: Any) -> dict[str, Any]:
+        """The token endpoint's successful response, or a failure saying what came back."""
+        self.refuse_an_unspecified_client_credential(response)
+        assert response.status_code == 200, (
+            f"The token endpoint answered {response.status_code} rather than 200 for a code "
+            "exchange with a matching PKCE verifier. E0-16 criterion 3 is that this flow "
+            f"completes end to end. Body begins {response.text[:300]!r}."
+        )
+        body = self.body_of(response)
+        assert body, (
+            f"The token endpoint answered 200 with {response.text[:200]!r}, which is not a JSON "
+            "object. RFC 6749 §5.1 makes a successful token response one."
+        )
+        return body
+
+    def login(
+        self,
+        identity: Mapping[str, str] | None = None,
+        *,
+        omitting: Sequence[str] = (),
+        **overrides: str,
+    ) -> WebLogin:
+        """Drive one whole authorization code flow, from the form to the `id_token`.
+
+        This is E0-16's third criterion done by *being* a client: an authorization
+        request, a login, a code, and an exchange carrying the verifier. Nothing
+        is called that a real client would not call, so a session obtained here
+        and a session a browser produces are the same session.
+
+        `identity` selects **which** seeded identity signs in, and only that: the
+        hidden fields come from this call's own fresh authorization request. A
+        submission carried whole from an earlier attempt would post that attempt's
+        state, nonce and challenge into this one, and the session would then be
+        checked against a request it did not answer — which reads as the provider
+        returning the wrong nonce.
+        """
+        attempt = self.begin(omitting=omitting, **overrides)
+        chosen = self.identify(attempt, identity)
+        submitted = self.submit_login(attempt, chosen)
+        assert submitted.code, (
+            f"Signing in as {chosen} produced no authorization code — the provider answered "
+            f"{submitted.response.status_code} and sent {submitted.location!r}. Body begins "
+            f"{submitted.response.text[:200]!r}."
+        )
+        response = self.redeem(submitted.code, submitted.verifier)
+        body = self.tokens(response)
+        id_token = body.get("id_token")
+        assert isinstance(id_token, str) and id_token, (
+            f"The token response carries no `id_token` (it carries {sorted(body)}). OIDC Core "
+            "1.0 §3.1.3.3 makes it the member that distinguishes an OpenID Connect response from "
+            "a plain OAuth 2.0 one, and it is the whole of what E0-16 criterion 3 produces."
+        )
+        return WebLogin(
+            submission=submitted.submission,
+            request=submitted.request,
+            verifier=submitted.verifier,
+            code=submitted.code,
+            state=submitted.state,
+            tokens=body,
+            id_token=id_token,
+            signature=split_jws(id_token),
+        )
+
+    def logins(self) -> list[WebLogin]:
+        """One completed session per identity the login form offers."""
+        attempt = self.begin()
+        return [self.login(identity) for identity in self.offered_identities(attempt)]
+
+    @staticmethod
+    def roles(login: WebLogin) -> set[str]:
+        """The roles one session states, by the scan `roles_in` above performs."""
+        return roles_in(login.claims)
+
+
+@pytest.fixture
+def mock_idp_dir() -> Path:
+    """Where the mock provider must live (SPEC §13). Asserted by the test, not here."""
+    return MOCK_IDP_DIR
+
+
+@pytest.fixture
+def mock_idp_service() -> str:
+    """The Compose service name SPEC §7.2 gives the mock provider."""
+    return MOCK_IDP_SERVICE
+
+
+@pytest.fixture
+def discovery_path() -> str:
+    """The path OIDC Discovery 1.0 §4 fixes, for the test that reasons about it.
+
+    Handed over rather than transcribed a second time, so that the path the
+    driver fetches and the path a test says a client would build cannot end up
+    being two different strings.
+    """
+    return DISCOVERY_PATH
+
+
+@pytest.fixture
+def mock_idps() -> Iterator[Callable[..., MockIdentityProvider]]:
+    """Start one or more independent mock providers, and shut them all down after.
+
+    A factory rather than a single instance, for the reason `mock_platforms` is
+    one: E0-16's last criterion is that keys are generated at startup, and a
+    second start generating a second key is not observable from one instance.
+    """
+    started: list[MockIdentityProvider] = []
+
+    def start(values: Mapping[str, str] | None = None) -> MockIdentityProvider:
+        provider = MockIdentityProvider(values)
+        started.append(provider)
+        return provider
+
+    try:
+        yield start
+    finally:
+        for provider in reversed(started):
+            provider.close()
+
+
+@pytest.fixture
+def mock_idp(mock_idps: Callable[..., MockIdentityProvider]) -> MockIdentityProvider:
+    """One mock provider, started fresh for this test. See `MockIdentityProvider`."""
+    return mock_idps()
+
+
+@pytest.fixture
+def web_login(mock_idp: MockIdentityProvider) -> WebLogin:
+    """One completed web login off the first seeded identity.
+
+    E1's login work and E0-18's Playwright path both build on this door, so the
+    interface matters the way `signed_launch`'s does: `mock_idp.login(...)` is the
+    interface and this fixture is its common case.
+    """
+    return mock_idp.login()
+
+
+@pytest.fixture
+def roles_in_claims() -> Callable[[Any], set[str]]:
+    """Hand `roles_in` to the test that checks the scanner itself.
+
+    The provider reads a session's roles with this same function, so the control
+    and the thing it controls cannot end up disagreeing about what counts as a
+    role — which is the whole value of the control (`docs/MISTAKES.md` entry 3:
+    run the matcher against the text you claim it catches *and* the text you
+    claim it allows).
+    """
+    return roles_in
+
+
+@pytest.fixture
+def purview_claims_in() -> Callable[[Any], set[str]]:
+    """Hand `purview_claim_names` to the test that checks that scanner too."""
+    return purview_claim_names
