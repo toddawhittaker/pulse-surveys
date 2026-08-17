@@ -169,12 +169,20 @@ def test_the_membership_service_answers_a_container_naming_its_context(
 def test_the_membership_container_names_the_context_the_launch_came_from(
     mock_platform: Any,
 ) -> None:
-    """The roster a launch points at is the roster for *that* section.
+    """The roster a launch points at *declares* that section. Only the declaration.
 
-    The control on the test above, and the mutation is one line: a memberships
-    URL built without the context in it, or a handler that ignores the context
-    it was given and answers the first seeded section. Every member is present,
-    every page is right, and E1 syncs one section's roster into every section.
+    Catches a memberships URL built without the context in it, and a container
+    that names whichever context it happened to serve last.
+
+    **What it does not reach, corrected after it was measured.** This docstring
+    used to claim it caught "a handler that ignores the context it was given and
+    answers the first seeded section". It does not: the mutation that serves
+    every section the first section's *members* leaves the declared `context.id`
+    exactly as it was, so this test compares the two values it was given and
+    passes. `test_two_seeded_contexts_do_not_return_the_same_membership` below is
+    the one that reaches the membership, and the pair is what the claim needs —
+    a container may agree with itself about which section it is describing while
+    describing somebody else's class.
     """
     for context in mock_platform.seeded_contexts():
         page = mock_platform.membership_page(context.memberships_url)
@@ -186,6 +194,66 @@ def test_the_membership_container_names_the_context_the_launch_came_from(
             "service that answers the same context whatever it is asked for gives E1 one class "
             "list for the whole institution."
         )
+
+
+def test_two_seeded_contexts_do_not_return_the_same_membership(mock_platform: Any) -> None:
+    """The roster a context serves is that context's, asserted on the members.
+
+    **The mutation this exists to kill, which was run rather than imagined.** In
+    `mock-lms/app/nrps.py`, `membership_page` reads
+    `platform.enrollments_in(context.context_id)`; changed to
+    `platform.enrollments_in(platform.contexts[0].context_id)`, every section
+    served the first section's roster and all 61 tests then in the four
+    mock-platform modules stayed green. Every other assertion in this module is
+    satisfied by the wrong class list: the container still declares the context
+    it was asked for, the pages still divide and still carry no duplicate, the
+    members still carry roles and statuses, and every launchable user still
+    turns up — because the seed enrolls the launch users in every section, so
+    the lower bound in `every_user_the_platform_will_launch_appears_in_the_
+    roster_of_its_context` is met by the wrong roster too. E1's sync would write
+    one section's enrollments into every section, and E3 would grade students
+    for courses they are not in.
+
+    **What this does not reach**, and it is a wide gap said plainly rather than
+    softened. It asserts only that the service *distinguishes* contexts, not
+    that any roster is the right one: two contexts whose rosters were swapped
+    pass this, and so does a service that derives membership from a path segment
+    that is not the context. Naming the seed's own section codes or member
+    counts as expected values would close that and would make this test a second
+    copy of the seed, which goes stale the first time a section is added; the
+    ticket asks for a roster per context, not for a particular roster, so this
+    is the strongest form that stays inside it.
+
+    Both guards are load-bearing rather than ceremony. A seed with one section
+    makes the comparison vacuous — there is no second roster for the first to
+    differ from — and a service answering every context an empty membership
+    makes every roster equal, which is this assertion failing for a reason that
+    has nothing to do with the mutation, so it is reported as itself.
+    """
+    walked = walked_rosters(mock_platform)
+    assert len(walked) > 1, (
+        f"The platform seeds one context ({[context.context_id for context, _ in walked]}), so "
+        "there is no second roster for the first to differ from and this test cannot see a "
+        "service that serves one section's members for every section. E0-15 seeds 'a handful of "
+        "courses and sections'."
+    )
+    memberships = {
+        context.context_id: {str(member.get(MEMBER_ID)) for member in members_across(pages)}
+        for context, pages in walked
+    }
+    empty = sorted(name for name, members in memberships.items() if not members)
+    assert not empty, (
+        f"{len(empty)} seeded contexts returned no members at all ({empty}), and every empty "
+        "roster equals every other one — so the comparison below would fail for a reason that has "
+        "nothing to do with which context was asked for."
+    )
+    assert len({frozenset(members) for members in memberships.values()}) > 1, (
+        "Every seeded context returns the same membership: "
+        + "; ".join(f"{name}: {sorted(members)}" for name, members in sorted(memberships.items()))
+        + ". A roster service that answers one section's enrollments whatever it is asked for "
+        "declares the right context and serves the wrong class, which is what E1's sync would "
+        "write into every section."
+    )
 
 
 # ---------------------------------------------------------------------------
