@@ -1,12 +1,26 @@
-"""Typed ways into the read views, so nobody hand-writes the join (SPEC §13).
+"""Typed ways into the read views, so no screen has to spell the SELECT (SPEC §13).
 
-§13 puts "migrations + query helpers" in this package, and the helpers are the
-half that decides whether the views get used. A screen that needs a roster and
-finds no helper writes `SELECT … FROM enrollment JOIN …` against the base tables
-— which works, because `pulse_app` can read the view's *sources* through the
-view's owner — and the next screen copies it. The refusal only fires when
-somebody reaches for `user_identity`, so a hand-written join is a read path
-outside the mechanism that nothing goes red about.
+§13 puts "migrations + query helpers" in this package. What these helpers are is
+typed convenience over the view SQL: each view's column list written out once, in
+the order the view declares it, so a screen that needs a roster gets frozen rows
+with names on them rather than a `SELECT` copied into every caller.
+
+**What forecloses the hand-written base-table join is the database, not this
+module**, and an earlier version of this docstring had it backwards. It argued
+that a screen finding no helper writes `SELECT … FROM enrollment JOIN …` against
+the base tables "which works, because `pulse_app` can read the view's *sources*
+through the view's owner", and that "the refusal only fires when somebody reaches
+for `user_identity`". Owner privileges chain through the view object and nowhere
+else: a query naming a base table directly is checked against its own privileges.
+Measured on this branch with `SET ROLE pulse_app` — `public.enrollment` 42501,
+`public.section` 42501, `public.user_identity` 42501, `public.section_roster`
+permitted. So a hand-rolled join is refused by Postgres rather than quietly
+working, and identity is not the only thing it is refused. `CONTRIBUTING.md`'s
+"Read paths go through `views_sql/`" states the same rule the right way round.
+
+**Nothing in the application calls these yet**, and that is where E0-10 leaves
+them: this ticket ships the views, the grants and the way in, and the first read
+path that needs a roster is a later ticket's.
 
 **These return plain frozen rows, not ORM entities, and deliberately.** A view is
 not on `Base.metadata` (E0-10: views ship "as Alembic migrations under
@@ -59,8 +73,13 @@ _SECTION_ENROLLMENT_COUNTS = text(
 class SectionRosterRow:
     """One person's membership of one section, by key.
 
-    No name and no email address, because the view carries neither and the
-    connection this is read on could not reach them if it did (§4, §8).
+    No name and no email address, because `public.section_roster` selects
+    neither — and the view's own column list is the whole of why. A view is read
+    with its owner's privileges, so a view that *did* select an identity column
+    would hand it to `pulse_app` without its empty grant on
+    `public.user_identity` ever being consulted (§4, §8). What keeps that from
+    happening is the structural sweep in
+    `tests/integration/test_identity_column_marker.py`, not this connection.
     """
 
     enrollment_id: UUID

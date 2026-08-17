@@ -2,8 +2,11 @@
 
 **Status:** Accepted — one consequence amended by
 [ADR 0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md),
-and `pulse_migrate` resolved by
-[ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md)
+`pulse_migrate` resolved by
+[ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md),
+and **one claim withdrawn as measured false** during E0-10's review — the read
+and the audit write were said to be inseparable, and a caller that rolls back
+separates them.
 **Date:** 2026-08-12
 **Tickets:** E0-08, E0-10, E0-11
 
@@ -84,8 +87,16 @@ being wrong is most expensive.
 
 **Logging the reveal as a separate step** after reading identity. Rejected
 because it makes the audit trail a convention that a future code path can skip.
-Putting the read and the audit write in one transaction means they cannot come
-apart.
+Putting the read and the audit write in one transaction means the function
+cannot return a name without having written the record first, and cannot keep a
+record of a reveal that failed.
+
+> **This paragraph used to end "means they cannot come apart", and that property
+> was measured false.** The consequence below headed "one transaction does not
+> make the reveal atomic against its caller" says what was measured. The
+> alternative is still rejected, for the reason above — a separate step is a
+> convention — but the transaction buys less than this record claimed, and the
+> difference is the whole of E0-26 item 1.
 
 ## Consequences
 
@@ -95,6 +106,25 @@ apart.
 - **Deployment must provision three roles**, and migrations run as a different
   role than the application. This is new operational surface for whoever installs
   Pulse, and belongs in the operator documentation in E13.
+- **One transaction does not make the reveal atomic against its caller, and this
+  record claimed it did.** What one transaction gives is real and is worth
+  keeping: the audit row is written before the identity is read and in the same
+  transaction, so an actor whose `INSERT` is refused never reaches the `SELECT`,
+  and a failure inside the function discards both. What it does not give is
+  atomicity against the caller. The rows have already been streamed to the client
+  by the time the caller decides, so a session that deliberately rolls back keeps
+  the name and discards the record. This was reproduced during E0-10's review on
+  the pinned image, using the function's own SQL: `BEGIN; SELECT * FROM
+  public.reveal_student_identity(<a real CARE person id>, <any user id>, NULL);
+  ROLLBACK;` returns the real name and email address and leaves `audit_log` at
+  zero rows, while the identical call without the `ROLLBACK` does write the row
+  and a non-CARE actor is refused either way — so the rollback alone is the
+  difference. plpgsql has no autonomous transaction, so closing this means
+  writing the audit row over a second connection (dblink or a loopback foreign
+  data wrapper), which is **E0-26 item 1**. Until then the record holds against
+  everything except a caller that rolls back on purpose, and the credential that
+  permits that is narrowed to the `api` process alone by the same pull request
+  that corrects this record.
 - **The audit table is on the write path of a safety-critical read.** If it is
   unwritable, the reveal fails. That is the correct trade — an unauditable reveal
   should not happen — but it makes the audit table's availability a Care-queue

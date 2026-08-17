@@ -4,9 +4,12 @@
 -- possible only through the Care queue (§6.2), only by the Care role, and every
 -- identity access is automatically audit-logged with actor, timestamp, and
 -- case." ADR 0001 settles the mechanism: one SECURITY DEFINER function that
--- returns identity and writes the audit row in the same transaction, so the two
--- cannot come apart. Logging as a separate step afterwards was rejected there,
--- because it makes the audit trail a convention a future code path can skip.
+-- returns identity and writes the audit row in the same transaction. Logging as
+-- a separate step afterwards was rejected there, because it makes the audit
+-- trail a convention a future code path can skip. What one transaction buys and
+-- what it does not is set out below, beside the audit INSERT; it is less than
+-- "the two cannot come apart", which is what this header claimed until E0-10's
+-- review measured it.
 --
 -- **This is deliberately the one hole in the wall**, so every line of it is a
 -- control:
@@ -44,11 +47,31 @@
 -- end-dating — a revoked assignment is a deleted row. When E9 or E10 adds
 -- validity dates this predicate gains them, and the sentence above stays true.
 --
--- **The audit row is written before the identity is read**, so an actor whose
--- INSERT is refused never reaches the SELECT. The foreign keys on audit_log do
--- real work here: an actor who is not in the people graph, or a subject who is
--- not a known LMS user, is refused by the record rather than revealed without
--- one.
+-- **The audit row is written before the identity is read, and in the same
+-- transaction**, so an actor whose INSERT is refused never reaches the SELECT,
+-- and a failure inside this function discards both. The foreign keys on
+-- audit_log do real work here: an actor who is not in the people graph, or a
+-- subject who is not a known LMS user, is refused by the record rather than
+-- revealed without one.
+--
+-- **What that does not give is atomicity against the caller.** The rows have
+-- already been streamed to the client by the time the caller decides, so a
+-- session that deliberately rolls back keeps the name and discards the record.
+-- Reproduced on the pinned image, with this function's own SQL:
+--
+--     BEGIN;
+--     SELECT * FROM public.reveal_student_identity(<a real CARE person id>,
+--                                                  <any user id>, NULL);
+--     ROLLBACK;
+--
+-- returns the real name and email address and leaves audit_log at zero rows,
+-- while the identical call without the ROLLBACK does write the row and a
+-- non-CARE actor is refused either way — so the rollback alone is the
+-- difference. plpgsql has no autonomous transaction, so closing this means
+-- writing the audit row over a second connection (dblink or a loopback FDW),
+-- which is E0-26 item 1. Until then the record holds against everything except
+-- a caller that rolls back on purpose, and the credential that permits that is
+-- being narrowed in this same pull request to the api process alone.
 --
 -- E10 replaces this with the real audited reveal — the case model, the two-action
 -- queue, the disposition note and §6.2's conflict-of-interest flag. What it
