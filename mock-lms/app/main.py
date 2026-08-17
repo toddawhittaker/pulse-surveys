@@ -1,4 +1,10 @@
-"""The mock platform's HTTP surface: six endpoints, and one issuer key per process.
+"""The mock platform's HTTP surface, and one issuer key per process.
+
+The launch endpoints are E0-14's — the launch page, discovery, the key set, the
+registration document and the authorization endpoint — and the LTI Advantage
+services below them are E0-15's. The two halves meet in one place: a launch
+carries the NRPS and AGS claims, and those claims are the only route by which a
+conformant tool learns where the services are.
 
 Run it with `uvicorn app.main:create_app --factory`, the same way the backend is
 run. There is no module-level application object, and here that is load-bearing
@@ -18,11 +24,17 @@ the import and the factory call and restores it before lifespan runs, so a
 platform that read its issuer in `startup` would read whatever the process
 happened to hold — and would pass every test that does not set configuration.
 
-**No launch payload is logged.** SPEC §10 forbids personally identifiable
-information in logs, and while this platform holds none (see `app.seed`), a
-request logger that dumped `id_token` payloads would be a pattern for E1 to copy
-into a service that does hold it. So nothing here logs: the `id_token` is
-returned to the caller and written nowhere.
+**No launch payload and no roster is logged.** SPEC §10 forbids personally
+identifiable information in logs, and a request logger that dumped `id_token`
+payloads or membership containers would be a pattern for E1 to copy into a
+service whose roster is real people. So nothing here logs: the `id_token` is
+returned to the caller and written nowhere, and so is every member.
+
+**What this platform holds changed in E0-15, and the sentence above used to say
+it held nothing.** It now holds an email address per seeded person, because
+E0-15's scope has NRPS return "email where exposed" — every one of them at a
+domain RFC 2606 reserves, so nothing can be delivered to any of them (ADR 0050).
+It still holds no name of any kind.
 
 Stated precisely, because "nothing is logged" would be a claim this file cannot
 make. Uvicorn's own access log is on, and it records the method, the path and the
@@ -32,6 +44,10 @@ carries `state`, `nonce` and `login_hint` in its query string, and the access lo
 records those. All three are values this platform invented or was handed by a
 test; none is a person. Measured against the running container rather than
 assumed.
+
+The Advantage routes add nothing to that surface: every one of them carries the
+context in its path, and a context identifier is this platform's own invention.
+A member's address appears only in a response body.
 """
 
 import json
@@ -156,10 +172,16 @@ def create_app() -> FastAPI:
     def discovery() -> dict[str, Any]:
         """What a tool reads to find the endpoints, rather than guessing paths.
 
-        Only what this platform actually serves is advertised. There is no
-        `token_endpoint` here because there is no token endpoint: LTI Advantage's
-        service calls are E0-15's, and an advertised endpoint that answers
-        nothing is a record asserting something untrue.
+        Only what this platform actually serves is advertised. There is still no
+        `token_endpoint` here, and E0-15 did not add one: its Advantage services
+        answer unauthenticated, because no ticket yet says what a tool would sign
+        a client assertion with. An advertised endpoint that answers nothing is a
+        record asserting something untrue.
+
+        The Advantage services are not advertised here either, and that is the
+        protocol rather than an omission: NRPS and AGS are announced per launch,
+        in the claims of the `id_token`, because both are scoped to the context
+        the launch came from. There is no institution-wide roster URL to publish.
         """
         return {
             "issuer": settings.issuer,

@@ -229,7 +229,23 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 27**
+**Caught: 28**
+
+*(The twenty-eighth, in E0-15's implementation, one round after the twenty-seventh
+below found the same file's header. The sweep outward from "the mock now holds an
+email address" reached four records nobody was editing: `mock-lms/app/main.py`'s
+own first line counting "six endpoints" and its §10 paragraph saying "this
+platform holds none" of the personally identifiable information it forbids in
+logs — the second being the expensive kind, since it is the sentence a reader
+would trust when deciding whether a new log line is safe; `app/seed.py`'s "One
+context has a title and one has none", which the ruling of 2026-08-17 had already
+falsified; the `if context.title is not None` branch in `id_token_claims`, a
+record in code for a case the seed can no longer produce; and `README.md`'s
+paragraph telling a developer that one seeded section deliberately has no title.
+This entry's rule about counts is also why the corrected first line names the two
+halves of the surface instead of counting them — "six endpoints" had been wrong
+since the moment a seventh route was declared, and a corrected number would be
+wrong again at the eighth.)*
 
 *(The twenty-seventh, in E0-15's tests. `tests/conftest.py`'s header describes what
 each ticket added to the file and why, and adding the Advantage-service helpers to
@@ -412,7 +428,24 @@ sentence.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 24**
+**Caught: 25**
+
+*(The twenty-fifth, in E0-15, and it is a gap found by trying to reintroduce a
+defect rather than by any review. The mock platform's roster is served per
+context, and the mutation that makes `membership_page` read **the first seeded
+section's** members while the container goes on naming the context it was asked
+for leaves all 61 tests in the four mock modules green. Every launch user is
+enrolled in every section, so `every_user_the_platform_will_launch_appears_in_
+the_roster_of_its_context` is satisfied by the wrong roster; the paging
+assertions are satisfied by any roster that divides; and
+`the_membership_container_names_the_context_the_launch_came_from` compares the
+container's declared context, which the mutation does not touch — its docstring
+claims it catches "a handler that ignores the context it was given", and it
+catches the declaration rather than the membership. The implementer is walled out
+of `tests/`, so this ships as a convention and is reported rather than closed. The
+test it needs: two seeded rosters, both non-empty, whose member sets are not
+equal — which is one assertion and kills it, because BIOL's twelve served for
+MATH's seven is a set the seed does not contain.)*
 
 *(The twenty-fourth: E0-11's mirror rule. The rank rule refuses an edge that does
 not climb, but a supervisor's *role* can be edited after its reporters are in
@@ -726,104 +759,25 @@ prefix yet.
 
 ---
 
-## 12. A stale build of the thing under test was reused, and the run looked clean
-
-**Caught: 4**
-
-**What happened.** In E0-05, checking that `alembic check` warns when a generated
-column's expression drifts: edit `app/models/org.py` to change one band edge from
-`499` to `498`, run the check, edit it back, run it again. The warning was there
-both times. Ten minutes went into the model, the migration and the database
-before `grep` showed the file on disk said `499` while the module Python imported
-said `498`.
-
-A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
-missing from the built wheel entirely — that defect is entry 18; this is what
-happened while verifying its fix. The fix was a
-`[tool.setuptools.package-data]` entry. Verifying it
-meant removing the entry and rebuilding, which produced a wheel that still
-contained the prompts: setuptools had reused the `build/` directory and the
-egg-info left by the previous build, so the wheel described the *previous*
-configuration. Deleting both first showed the real answer, an empty package.
-
-**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
-file's size and mtime **truncated to the second**. Reverting a mutation of equal
-length inside the same second leaves the cache valid, so the stale bytecode is
-what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
-revert is invisible to the interpreter. The build tree is the same mechanism with
-a longer memory and no invalidation rule worth the name: `build/` and
-`*.egg-info` persist until something removes them, and no tool warns that it is
-answering from them.
-
-**Consequence.** The reverted run and the mutated run produce identical output,
-which reads as "the mutation made no difference" — the conclusion that kills the
-finding. In E0-05 it would have been "matching the server's own rendering does not
-silence the warning, so do not bother", and the drift signal E0-20 now depends on
-would have been dropped as not working. In E0-12 it would have been "the
-`package-data` entry makes no difference", against a defect that empties the
-prompt directory in every container the project ships.
-
-**Rule.** When mutating and reverting between runs, destroy the caches in the
-same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
-`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
-rebuild — and confirm the revert in the thing that ran rather than in the file:
-print the value the module holds, list the archive. `grep` proves what is on
-disk, which is not what ran. **In a test, prefer making the reuse impossible over
-undoing it**: build in a copy that has never been built in, and there is no stale
-artifact to remember to delete, no working tree to reach into, and nothing to get
-wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
-does this.
-
----
-
-## 8. Prescribing a fix without probing it
-
-**Caught: 4**
-
-*(The fourth, and it is the second time this entry has caught a prescription
-about the same tuple. A review of E0-10 found that the Care-session sweep in
-`tests/unit/test_care_session_is_bound_to_the_care_service.py` cannot see
-`Settings.care_database_url`, and prescribed widening `SESSION_FRAGMENTS`. Run
-before being written down, over the 26 modules under `backend/app` and over the
-reviewer's own future module, the widening does close that shape and does not
-close a second one: `defined_here` subtracts **any** assigned name, so
-`care_database_url = settings.care_database_url` — the exact idiom
-`app/services/safety.py` itself uses — masks the attribute read and the sweep
-reports nothing with the widened tuple in place. The prescription was necessary
-and not sufficient, and reading it would not have shown that.)*
-
-**What happened.** `hide_input_in_errors=True` was the obvious fix for a
-credential appearing in a pydantic validation error. It cleans `str(exc)` and
-leaves the credential in `errors()`.
-
-A second, in E0-10's objection file, caught by this entry before it was filed.
-The objection proposed a widened identity-column fragment set for the marker
-sweep and wrote out the tuple: `"name", "email", "login", "picture", …`. Run
-against the schema as it stands, `login` matches
-`role_assignment.permits_web_login` — a boolean about which doors a role opens,
-carrying no identity — so the proposed fix would have arrived as a new red test
-in a module nobody had touched. `login_id` adds nothing on today's schema, which
-was measured the same way. The prescription was one word wrong and read
-perfectly.
-
-**Root cause.** The fix was plausible and cheap, so it went into the brief
-without being run. In the second case the tuple was written by thinking of
-claims a roster sync carries, which is the right list to start from and is not
-the same question as "what does this substring match in the schema I have".
-
-**Consequence.** Would have shipped green against the one test that existed,
-leaving the credential one `json.dumps` from any structured logger. The second
-would have handed an arbitrator a fix that breaks a passing test, in the file
-whose whole subject is a sweep that fires on the wrong things.
-
-**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
-property, say the property and let the implementer find the mechanism.
-
----
-
 ## 16. A mutation harness reported kills it had not made
 
-**Caught: 5**
+**Caught: 6**
+
+*(The sixth, in E0-15, and this entry's last paragraph is the one that fired: "read
+each mutation for whether it changes *meaning*". Seventeen mutations were run
+against the mock platform with the controls below — baseline recorded first,
+never `-x`, the replaced text asserted to match exactly once, the revert checked
+by digest — and two came back SURVIVED. One was real (entry 2 above). The other
+was not a result about the code at all: the mutation renamed the seeded section
+`MATH-140-E1FF` to `MATH-140-R4WW` to remove the second start letter and the
+`FF` modality, and a **third** section, `NURS-8100-Q2FF`, still supplied both. So
+the diff was real, the file changed, the suite stayed green, and the mutation had
+removed nothing. Renaming both of the other two sections killed it immediately,
+by the two tests named for it. A harness that checks the text was replaced still
+cannot check that the replacement removed the property — only reading the
+mutation against the seed can, and the tell here was the same one this entry
+already names: a result that disagrees with a test written specifically for that
+property should be disbelieved before it is reported.)*
 
 *(The fifth, and its subject is a mutation that lives in the database rather than
 in a file. The cycle tests plant an inverted edge by reinstalling E0-09's trigger
@@ -917,6 +871,111 @@ baseline it read was already mutated and all three variants came back identical 
 the same defect as above with no file involved. Read the baseline from the source
 that installs the object, and assert it does **not** already contain the thing
 you are about to add.
+
+---
+
+## 12. A stale build of the thing under test was reused, and the run looked clean
+
+**Caught: 5**
+
+*(The fifth, applied before anything went wrong rather than after. E0-15's
+mutation harness edits `mock-lms/app/*.py` and reverts each edit inside seconds,
+which is exactly the size-and-second window this entry's root cause describes —
+and `tests/conftest.py` re-imports every `app.*` module per platform, so a stale
+`.pyc` would be read seventeen times over. The harness therefore runs each variant
+with `PYTHONDONTWRITEBYTECODE=1` and deletes every `__pycache__` under
+`mock-lms/` first, which is this entry's rule and costs one line. Nothing was
+observed going wrong, which is the point: with the caches left in place there
+would have been nothing to observe.)*
+
+**What happened.** In E0-05, checking that `alembic check` warns when a generated
+column's expression drifts: edit `app/models/org.py` to change one band edge from
+`499` to `498`, run the check, edit it back, run it again. The warning was there
+both times. Ten minutes went into the model, the migration and the database
+before `grep` showed the file on disk said `499` while the module Python imported
+said `498`.
+
+A second, in E0-12, one level up from bytecode. `backend/app/ai/prompts/` was
+missing from the built wheel entirely — that defect is entry 18; this is what
+happened while verifying its fix. The fix was a
+`[tool.setuptools.package-data]` entry. Verifying it
+meant removing the entry and rebuilding, which produced a wheel that still
+contained the prompts: setuptools had reused the `build/` directory and the
+egg-info left by the previous build, so the wheel described the *previous*
+configuration. Deleting both first showed the real answer, an empty package.
+
+**Root cause.** CPython validates a cached `__pycache__/*.pyc` against the source
+file's size and mtime **truncated to the second**. Reverting a mutation of equal
+length inside the same second leaves the cache valid, so the stale bytecode is
+what runs. `499`→`498`→`499` is exactly that: same length, same second, and the
+revert is invisible to the interpreter. The build tree is the same mechanism with
+a longer memory and no invalidation rule worth the name: `build/` and
+`*.egg-info` persist until something removes them, and no tool warns that it is
+answering from them.
+
+**Consequence.** The reverted run and the mutated run produce identical output,
+which reads as "the mutation made no difference" — the conclusion that kills the
+finding. In E0-05 it would have been "matching the server's own rendering does not
+silence the warning, so do not bother", and the drift signal E0-20 now depends on
+would have been dropped as not working. In E0-12 it would have been "the
+`package-data` entry makes no difference", against a defect that empties the
+prompt directory in every container the project ships.
+
+**Rule.** When mutating and reverting between runs, destroy the caches in the
+same command — `find <pkg> -name __pycache__ -type d -exec rm -rf {} +` or
+`PYTHONDONTWRITEBYTECODE=1` for bytecode, `rm -rf build *.egg-info` before any
+rebuild — and confirm the revert in the thing that ran rather than in the file:
+print the value the module holds, list the archive. `grep` proves what is on
+disk, which is not what ran. **In a test, prefer making the reuse impossible over
+undoing it**: build in a copy that has never been built in, and there is no stale
+artifact to remember to delete, no working tree to reach into, and nothing to get
+wrong on the run where it matters. `tests/unit/test_prompt_directory_layout.py`
+does this.
+
+---
+
+## 8. Prescribing a fix without probing it
+
+**Caught: 4**
+
+*(The fourth, and it is the second time this entry has caught a prescription
+about the same tuple. A review of E0-10 found that the Care-session sweep in
+`tests/unit/test_care_session_is_bound_to_the_care_service.py` cannot see
+`Settings.care_database_url`, and prescribed widening `SESSION_FRAGMENTS`. Run
+before being written down, over the 26 modules under `backend/app` and over the
+reviewer's own future module, the widening does close that shape and does not
+close a second one: `defined_here` subtracts **any** assigned name, so
+`care_database_url = settings.care_database_url` — the exact idiom
+`app/services/safety.py` itself uses — masks the attribute read and the sweep
+reports nothing with the widened tuple in place. The prescription was necessary
+and not sufficient, and reading it would not have shown that.)*
+
+**What happened.** `hide_input_in_errors=True` was the obvious fix for a
+credential appearing in a pydantic validation error. It cleans `str(exc)` and
+leaves the credential in `errors()`.
+
+A second, in E0-10's objection file, caught by this entry before it was filed.
+The objection proposed a widened identity-column fragment set for the marker
+sweep and wrote out the tuple: `"name", "email", "login", "picture", …`. Run
+against the schema as it stands, `login` matches
+`role_assignment.permits_web_login` — a boolean about which doors a role opens,
+carrying no identity — so the proposed fix would have arrived as a new red test
+in a module nobody had touched. `login_id` adds nothing on today's schema, which
+was measured the same way. The prescription was one word wrong and read
+perfectly.
+
+**Root cause.** The fix was plausible and cheap, so it went into the brief
+without being run. In the second case the tuple was written by thinking of
+claims a roster sync carries, which is the right list to start from and is not
+the same question as "what does this substring match in the schema I have".
+
+**Consequence.** Would have shipped green against the one test that existed,
+leaving the credential one `json.dumps` from any structured logger. The second
+would have handed an arbitrator a fix that breaks a passing test, in the file
+whose whole subject is a sweep that fires on the wrong things.
+
+**Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
+property, say the property and let the implementer find the mechanism.
 
 ---
 
