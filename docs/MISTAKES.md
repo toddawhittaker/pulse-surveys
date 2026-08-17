@@ -35,7 +35,33 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 22**
+**Caught: 24**
+
+*(The twenty-fourth, and it caught an assertion in a brief rather than in a file.
+The tests for E0-10's downgrade were specified down to the statement, and one of
+them — `has_database_privilege('pulse_app', current_database(), 'CONNECT')` is
+still true after the downgrade — cannot fail: Postgres grants `CONNECT` to
+`PUBLIC` on every new database, so that call answers true for every role in the
+cluster, with the grant revoked, with the role holding nothing at all, and on a
+database nobody has migrated. The test asserts the entry in `datacl` instead,
+which is the thing a `REVOKE` in `downgrade()` would actually remove. This entry
+is also why each of the three downgrade tests reads its baseline at head before
+undoing anything — every assertion after the downgrade is that a set is empty,
+and an empty set is what a database with no grants in it produces — and why
+`only_the_identity_revision_was_undone` exists: `-1` is relative to head, so the
+day a revision lands on top of this one, every one of those emptiness assertions
+is satisfied by a downgrade of something else.)*
+
+*(The twenty-third: the tests for E0-10's Care-credential fix. "`worker` and
+`beat` must not hold `CARE_DATABASE_URL`" is satisfied by a stack that blanks it
+everywhere, which also has no Care queue at all — so this entry is why the
+Compose rule asserts `api` holds a value before it asserts anybody else does
+not, why the absolute rule checks each variable's one permitted owner still
+carries it, why the interpolation rule keeps the walker canary its superuser
+sibling has, and why the engine that refuses an absent credential is also
+asserted to build one when the credential is there. Five guards, all of the same
+shape, none of them ceremony: each names a way the rule beside it passes against
+a system with the feature deleted.)*
 
 *(The twenty-second: repairing the sixth incident below. The replacement sweep
 requires a `CREATE` of the view rather than a mention of it, and this entry is
@@ -131,34 +157,51 @@ cannot see whether it exists.
 
 ---
 
-## 2. Behaviour shipped with nothing asserting it
-
-**Caught: 19**
-
-**What happened.** Four times. `__repr_args__` was added to keep credentials out
-of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
-validator could be deleted whole with the suite green. "`DATABASE_URL` must never
-point at the superuser" was prose, and repointing it passed all 50 tests and the
-`docker` gate. The two Postgres image digests could be set to different values
-with every gate green.
-
-**Root cause.** Fixing the defect and stopping there. The fix is visible in the
-diff, so it feels done; nothing makes the absence of a guard visible.
-
-**Consequence.** The next person deletes it during an unrelated refactor and
-every gate stays green. For the superuser case, the exact defect the pull request
-existed to fix was reintroducible without any signal.
-
-**Rule.** After fixing something, try to reintroduce it. If the suite stays
-green, you have written a convention, not a guarantee. Prefer asserting the
-*forbidden* state over the permitted one — it keeps working when a legitimate
-second case arrives.
-
----
-
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 18**
+**Caught: 22**
+
+*(The twenty-second: two records left over from the round that measured E0-10's
+"the read and the audit write cannot come apart" false. A test's **name** is a
+record — `test_a_rollback_discards_the_revealed_identity_and_its_audit_row_
+together` was the removed claim, in the one place a reader meets it as a passing
+green line — and this entry is why the rename did not stop at the name. The two
+assertion messages inside it still quoted "a name cannot be obtained without
+leaving a record", and the brief said only to leave the assertions alone; a
+`grep` for the old name then found it recorded once more in
+`docs/tickets/e0/.attempts/E0-10.md`'s mutation table, which is a record of what
+was run and is reported rather than edited. The second: this entry's rule about
+counts is why the corrected sentence in `test_application_role_privileges.py`
+names the three doors instead of counting them, having just gone stale by being
+a count of a set that grew to four.)*
+
+*(The twenty-first: widening E0-10's downgrade revokes. ADR 0043's "the downgrade
+revokes what the drop cannot" describes the definer's two grants and nothing
+else, which is the record that made the gap look covered; it is proposed rather
+than amended here, because the ADRs belong to another session this round. And
+this entry's rule about counts in prose deleted one from the new comment before
+it shipped — "grant eleven privileges" was wrong on the first count and would
+have gone wrong again the day a grant moved, so the sentence names the two files
+instead.)*
+
+*(The twentieth, in the same correction one file over: withholding the Care
+credential from `worker` and `beat` made ADR 0042's own consequence — "nothing
+about the caller's own session can separate them" — false, and this entry is why
+the sweep did not stop at the paragraph the brief named. It reached the ADR
+index, `.env.example`, `README.md`'s "Seven variables have no default" and its
+"a name cannot be obtained without leaving a record", and `config.py`'s "Both
+URLs below", which had been a count of two over three fields since the Care URL
+landed. Four of the six were records nobody had touched.)*
+
+*(The nineteenth: correcting E0-10's "the read and the audit write cannot come
+apart", which a reviewer measured false. This entry is why the sweep went outward
+from the sentence rather than stopping at the three places the review named —
+`grep` for the phrase found a fourth in `docs/tickets/e0/`, cleared the migration
+docstring, and cleared the ADR index. It is also why the prose in the same diff
+was re-read as if somebody else had written it, which found a second false claim
+in `views_sql/queries.py` that no review had reported: `SectionRosterRow` said an
+identity column in the view would be unreachable on this connection, when a view
+is read with its owner's privileges and `pulse_app` would get it.)*
 
 *(The eighteenth: E0-10's fixture change, `TEST_APP_USER` from `pulse_test_app`
 to `pulse_app`. This entry is why the sweep went outward from the constant rather
@@ -251,9 +294,92 @@ sentence.
 
 ---
 
+## 2. Behaviour shipped with nothing asserting it
+
+**Caught: 21**
+
+*(The twenty-first, found while closing the twentieth below and not by any
+review of it. `tests/unit/test_config_settings.py` holds a settings object to
+keeping its credentials out of seven serialisation surfaces and two
+startup-error surfaces, and it drives all nine off `CREDENTIAL_BEARING_URLS` —
+which named `DATABASE_URL` and `REDIS_URL`. `CARE_DATABASE_URL` carries a
+password in exactly the same position and had been absent from that mapping
+since it landed, so the masking on the one field that opens a route to a
+student's name was asserted by nothing and could have been dropped with the
+suite green. The widening comes with an interlock, because the mapping that
+says what to configure and the mapping that says what to search for are two
+copies of one fact and drifted apart once already.)*
+
+*(The twentieth: E0-10's fix for the Care credential on `worker` and `beat`. The
+blanking went in, and this entry is why the next step was to put it back rather
+than to call it done — `CARE_DATABASE_URL` restored to the shared anchor renders
+the real password into all three containers under `docker compose config`, and
+all 195 unit tests stay green. The implementer is walled out of `tests/`, so the
+gap is reported rather than closed, which is the honest half of this entry: a fix
+with nothing asserting it is a convention, and saying so is not the same as
+fixing it.)*
+
+**What happened.** Four times. `__repr_args__` was added to keep credentials out
+of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
+validator could be deleted whole with the suite green. "`DATABASE_URL` must never
+point at the superuser" was prose, and repointing it passed all 50 tests and the
+`docker` gate. The two Postgres image digests could be set to different values
+with every gate green.
+
+**Root cause.** Fixing the defect and stopping there. The fix is visible in the
+diff, so it feels done; nothing makes the absence of a guard visible.
+
+**Consequence.** The next person deletes it during an unrelated refactor and
+every gate stays green. For the superuser case, the exact defect the pull request
+existed to fix was reintroducible without any signal.
+
+**Rule.** After fixing something, try to reintroduce it. If the suite stays
+green, you have written a convention, not a guarantee. Prefer asserting the
+*forbidden* state over the permitted one — it keeps working when a legitimate
+second case arrives.
+
+---
+
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 10**
+**Caught: 14**
+
+*(The fourteenth, one round after the thirteenth below and about the same guard.
+The thirteenth ran both halves by hand; this is the test that keeps them run.
+`test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent` would have
+been a single call to `alembic downgrade -1` with a role missing, and a downgrade
+that completes proves nothing on its own — it completes on a cluster where the
+role was never absent, which is what a rename that silently did not happen leaves
+behind. So the bare `REVOKE ALL ON public.role_assignment FROM pulse_care` runs
+first and has to fail with `undefined_object`, on the same database, seconds
+earlier: the control is what turns "the downgrade worked" into "the guard is what
+made it work".)*
+
+*(The thirteenth, and the guard is the `IF EXISTS` around E0-10's downgrade
+revokes. Its comment claims `REVOKE … FROM <role>` is an error rather than a
+no-op when the role is absent, so both halves were run instead of cited: on a
+throwaway cluster at head with all three roles dropped, the bare `REVOKE ALL ON
+public.role_assignment FROM pulse_care` fails with `role "pulse_care" does not
+exist`, and the guarded `alembic downgrade -1` completes and leaves the two
+views, the function, `audit_log` and the enum type all gone rather than stopping
+part-way.)*
+
+*(The twelfth, and the guard is a YAML feature rather than a hook. The fix for
+the Care credential turns on `<<:` merging a mapping *inside* an `environment:`
+block, and on a service's own `environment:` replacing the anchor's wholesale
+rather than adding to it. Both are claims about what Compose does, so both were
+put through `docker compose config` before the comment explaining them was
+written — which is also what showed that `DB_CARE_USER` and `DB_CARE_PASSWORD`
+were still arriving in `worker` and `beat` through `env_file:` after the URL had
+been blanked.)*
+
+*(The eleventh, and the guard is one of this repository's own hooks. Asked to
+make two changes inside `tests/`, the implementer had read
+`.claude/hooks/deny-test-edits.sh` and could have reported "that is denied me"
+from the source. It attempted the smallest of the two edits instead and was
+blocked, which is what turned a claim about a hook into an observation — and it
+also established that the `Edit` branch fires and not only the `Bash` one, which
+reading the two `case` statements does not settle.)*
 
 *(The tenth: E0-10's reveal function. A review found that nothing set its owner,
 so a `SECURITY DEFINER` body was running as the migration superuser, and the
@@ -300,7 +426,37 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 7**
+**Caught: 10**
+
+*(The tenth, one layer up from the eighth below: the *rules* face the hazard in
+more places than the Compose file does. Asked for a test that `worker` and
+`beat` no longer hold `CARE_DATABASE_URL`, this entry is why the answer was not
+one assertion over the base file. The two parts `.env` builds the URL from go in
+the same rule, because a fix that blanked the URL alone reads as complete;
+`docker-compose.override.yml` gets its own rule, because its shared anchor
+reaches all three application services and re-supplying a variable there leaves
+a base-file rule green; and the credential inside another key's value, one hop
+through `.env`, gets a third — that spelling was two separate reviewer findings
+against the superuser pair, and nothing about it is specific to which credential
+is being carried.)*
+
+*(The ninth: E0-10's `downgrade()` revoked the definer's grants on the two tables
+that survive the revision and left `pulse_care`'s `SELECT` on `role_assignment`
+one statement away, inside the block whose own comment states the hazard. This
+entry is why the fix was not that one line: every grant the revision makes was
+listed against the rule the block states, which turned up two more. `USAGE ON
+SCHEMA public` for all three roles is this revision's alone and is now revoked;
+`CONNECT ON DATABASE` is deliberately left, because `scripts/db-init` grants
+`pulse_app` the same privilege before the migration runs and an ACL entry records
+no history, so one `REVOKE` would take the other mechanism's grant with it.)*
+
+*(The eighth: the brief for withholding the Care credential from `worker` and
+`beat` named `CARE_DATABASE_URL`, and this entry is why the next question was
+which other value opens the same door. `env_file: - .env` also hands those two
+`DB_CARE_USER` and `DB_CARE_PASSWORD`, and `DATABASE_URL` supplies the host, the
+port and the database name — so blanking the URL alone would have left the
+credential in the container in three parts, and the fix would have read as
+complete in review. All three are blanked now, on every application service.)*
 
 *(The seventh: E0-10 widened `IDENTITY_NAME_FRAGMENTS`, and this entry is why the
 author went looking for every copy rather than editing the one the dispute named.
@@ -413,7 +569,19 @@ does this.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 3**
+**Caught: 4**
+
+*(The fourth, and it is the second time this entry has caught a prescription
+about the same tuple. A review of E0-10 found that the Care-session sweep in
+`tests/unit/test_care_session_is_bound_to_the_care_service.py` cannot see
+`Settings.care_database_url`, and prescribed widening `SESSION_FRAGMENTS`. Run
+before being written down, over the 26 modules under `backend/app` and over the
+reviewer's own future module, the widening does close that shape and does not
+close a second one: `defined_here` subtracts **any** assigned name, so
+`care_database_url = settings.care_database_url` — the exact idiom
+`app/services/safety.py` itself uses — masks the attribute read and the sweep
+reports nothing with the widened tuple in place. The prescription was necessary
+and not sufficient, and reading it would not have shown that.)*
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and
@@ -441,6 +609,85 @@ whose whole subject is a sweep that fires on the wrong things.
 
 **Rule.** Before naming a mechanism in a brief, run it. If you are asking for a
 property, say the property and let the implementer find the mechanism.
+
+---
+
+## 16. A mutation harness reported kills it had not made
+
+**Caught: 3**
+
+*(The third: measuring what E0-10's `downgrade()` leaves behind. The thing being
+changed lives in the database rather than in a file, so the baseline is the whole
+ACL dump — `pg_class`, `pg_namespace`, `pg_database`, `pg_proc` — taken at head
+before the migration was touched, and the fixed downgrade-and-upgrade round trip
+is asserted against it by `diff` rather than by reading a `\dp` twice and
+agreeing with it. The control that the old text really did leave the grant behind
+is the pre-fix `DO` block taken out of `git show HEAD:`, checked to contain no
+`pulse_care` before it was run, and then run: `pulse_care=r/pulse_admin` survives
+it and the definer's two entries do not.)*
+
+*(The second: the one mutation run against E0-10's Care-credential fix. This
+entry is why it carried its own controls rather than a diff and a summary line —
+the replacement asserted it matched exactly once before writing, the mutated
+compose file was rendered through `docker compose config` to show the real
+password reaching `worker` and `beat` before the suite was believed, and the
+revert was checked by `sha256sum` against the value taken beforehand. Without the
+render, "195 passed" under the mutation would have been indistinguishable from a
+mutation that never took, and the conclusion drawn from it is the opposite one.)*
+
+**What happened.** In E0-09, eight guards were mutated one at a time to check
+that each was load-bearing — the cycle walk, the two Care rules, the role grain
+rule, both entry doors. The harness ran the suite after each mutation and called
+the mutation killed if the run came back non-zero. All eight reported killed.
+
+Six of the eight reports were worthless and two were wrong.
+
+Three tests in that module were **already failing**, for a reason unrelated to
+the schema — a defect in the shared fixture, now `docs/disputes/E0-09-01.md`. The
+harness ran with `-x`, so every run stopped at the first of those, and the
+mutation under test was frequently never reached. Eight mutations, one identical
+summary line: "1 failed, 10 passed".
+
+Worse, two of the mutations mutated nothing. `AND CASE role ...` was "removed" by
+replacing it with `AND true AND CASE role ...`, which leaves the `CASE` exactly
+where it was. Those two would have reported SURVIVED against a correct harness
+and been read as "this guard is untested", which is the opposite of the truth: on
+a second run that deleted the whole `CASE`, fifteen tests went red, and loosening
+any single arm turned its own test red.
+
+A third mutation compared an enum column against a string that is not one of its
+labels. Postgres raises on the comparison itself, so every row in the module
+failed — a kill for a reason that had nothing to do with the guard.
+
+**Root cause.** Measuring "did the run fail" instead of "did *this* fail", from a
+baseline that was not green. A mutation harness is a test of the tests, and it
+was written with none of the care the tests themselves get: no baseline, no
+check that the mutation applied, no check that it applied *semantically*, and a
+flag (`-x`) whose whole purpose is to stop before the interesting part.
+
+**Consequence.** Caught before anything rested on it, because eight identical
+summary lines is a suspicious shape. Had it not been, the pull request would have
+claimed every guard verified by mutation, with three of the eight claims false
+and two guards recorded as tested that no test touches. That is worse than not
+mutating at all — the claim would have discouraged the next person from checking.
+
+**Rule.** A mutation harness needs its own controls, and they are cheap. Record
+the baseline failures first and report the failures a mutation **adds** to that
+set, never the exit code. Never use `-x`. Assert the mutated text was found
+before replacing it, and assert the revert restored the file byte for byte. And
+read each mutation for whether it changes *meaning*: adding `AND true` in front
+of a condition, or widening a value the code never reads, produces a diff and no
+mutation. If several mutations report the same result, suspect the harness before
+believing them.
+
+**A mutation that lives in the database rather than in a file needs the same
+care, and the file-shaped rule above does not cover it.** Later in E0-09 a second
+harness replaced a trigger *function* per variant and read its baseline back out
+of `pg_proc`. An earlier run had died before reinstalling the original, so the
+baseline it read was already mutated and all three variants came back identical —
+the same defect as above with no file involved. Read the baseline from the source
+that installs the object, and assert it does **not** already contain the thing
+you are about to add.
 
 ---
 
@@ -638,66 +885,6 @@ said `password authentication failed`; only the status had not caught up.
 **Rule.** When verifying a debounced state change, wait past the debounce and
 read the underlying log as well as the summary status. A negative result inside
 the debounce window is not a result.
-
----
-
-## 16. A mutation harness reported kills it had not made
-
-**Caught: 1**
-
-**What happened.** In E0-09, eight guards were mutated one at a time to check
-that each was load-bearing — the cycle walk, the two Care rules, the role grain
-rule, both entry doors. The harness ran the suite after each mutation and called
-the mutation killed if the run came back non-zero. All eight reported killed.
-
-Six of the eight reports were worthless and two were wrong.
-
-Three tests in that module were **already failing**, for a reason unrelated to
-the schema — a defect in the shared fixture, now `docs/disputes/E0-09-01.md`. The
-harness ran with `-x`, so every run stopped at the first of those, and the
-mutation under test was frequently never reached. Eight mutations, one identical
-summary line: "1 failed, 10 passed".
-
-Worse, two of the mutations mutated nothing. `AND CASE role ...` was "removed" by
-replacing it with `AND true AND CASE role ...`, which leaves the `CASE` exactly
-where it was. Those two would have reported SURVIVED against a correct harness
-and been read as "this guard is untested", which is the opposite of the truth: on
-a second run that deleted the whole `CASE`, fifteen tests went red, and loosening
-any single arm turned its own test red.
-
-A third mutation compared an enum column against a string that is not one of its
-labels. Postgres raises on the comparison itself, so every row in the module
-failed — a kill for a reason that had nothing to do with the guard.
-
-**Root cause.** Measuring "did the run fail" instead of "did *this* fail", from a
-baseline that was not green. A mutation harness is a test of the tests, and it
-was written with none of the care the tests themselves get: no baseline, no
-check that the mutation applied, no check that it applied *semantically*, and a
-flag (`-x`) whose whole purpose is to stop before the interesting part.
-
-**Consequence.** Caught before anything rested on it, because eight identical
-summary lines is a suspicious shape. Had it not been, the pull request would have
-claimed every guard verified by mutation, with three of the eight claims false
-and two guards recorded as tested that no test touches. That is worse than not
-mutating at all — the claim would have discouraged the next person from checking.
-
-**Rule.** A mutation harness needs its own controls, and they are cheap. Record
-the baseline failures first and report the failures a mutation **adds** to that
-set, never the exit code. Never use `-x`. Assert the mutated text was found
-before replacing it, and assert the revert restored the file byte for byte. And
-read each mutation for whether it changes *meaning*: adding `AND true` in front
-of a condition, or widening a value the code never reads, produces a diff and no
-mutation. If several mutations report the same result, suspect the harness before
-believing them.
-
-**A mutation that lives in the database rather than in a file needs the same
-care, and the file-shaped rule above does not cover it.** Later in E0-09 a second
-harness replaced a trigger *function* per variant and read its baseline back out
-of `pg_proc`. An earlier run had died before reinstalling the original, so the
-baseline it read was already mutated and all three variants came back identical —
-the same defect as above with no file involved. Read the baseline from the source
-that installs the object, and assert it does **not** already contain the thing
-you are about to add.
 
 ---
 
