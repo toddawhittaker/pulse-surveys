@@ -74,6 +74,15 @@ so it sees nothing written inside `db_session`'s transaction, and a test that
 calls it needs committed rows and an environment pointing at this container. The
 Care role itself is provisioned beside the application role now, mirroring
 `scripts/db-init/02-care-role.sh`: a login and no grant.
+
+E0-11 adds two, at the very bottom, and one of them is unlike everything above
+it. `authz` reaches the authorization chokepoint **by name**: E0-11's surface was
+settled before any code was written, so there is nothing to discover, and the
+class exists only to turn an absent module or an absent symbol into a failed
+assertion instead of a collection error. `application_session` is a session on
+the connection production serves requests over — `pulse_app`, holding only what
+the migrations grant it — because from E0-11 on, "the resolver could read that"
+is a claim about a grant and not only about a query.
 """
 
 import base64
@@ -3043,3 +3052,134 @@ def care_service_environment(
     for name, value in values.items():
         monkeypatch.setenv(name, value)
     return values
+
+
+# ---------------------------------------------------------------------------
+# E0-11 — the authorization chokepoint, and the connection it has to work over.
+# ---------------------------------------------------------------------------
+
+# SPEC §13 puts the chokepoint here and E0-11's scope repeats the path:
+# "`backend/app/services/authz.py` with the interface every caller uses".
+AUTHZ_MODULE = "app.services.authz"
+
+
+class AuthzModule:
+    """E0-11's chokepoint, reached by name, with a clear failure when it is absent.
+
+    **Nothing here is discovered, which is what makes it unlike
+    `SectionCodeService` above.** E0-07 named a file and none of its callables, so
+    that fixture hunts for them by name fragment. E0-11's surface was settled in
+    the ticket before any code was written — `AuthzError`,
+    `CareIsNotComposableError`, `OutOfPurviewError`, `LmsOwnedWriteRefused`,
+    `Purview`, `ActorScope`, `LMS_OWNED_TABLES`, `own_grant`, `resolve_scope`,
+    `holds_care`, `transitive_purview`, `guard_write`, `raw_comments_permitted`
+    and `scoped_reader` — so a lookup here transcribes that contract rather than
+    guessing at one, and a name this cannot find is a deliverable that is not
+    there yet.
+
+    **Its whole job is to keep that a failed assertion rather than a collection
+    error.** `from app.services.authz import own_grant` at the top of a test
+    module makes every test in the file uncollectable while the module is absent,
+    and an uncollected test is not a red test: it reports as a broken suite rather
+    than as a criterion nobody has met, and the two are fixed by different people.
+    `import_app_module` above draws the same distinction for the same reason, and
+    like it, a `ModuleNotFoundError` for some *other* module is re-raised
+    untouched — a chokepoint that exists and imports something absent and one that
+    was never written need different fixes.
+    """
+
+    def __init__(self) -> None:
+        self._module: ModuleType | None = None
+
+    @property
+    def module(self) -> ModuleType:
+        """`app.services.authz`, or a failure naming the missing file."""
+        if self._module is None:
+            try:
+                self._module = importlib.import_module(AUTHZ_MODULE)
+            except ModuleNotFoundError as failure:
+                absent = failure.name
+                if absent is None or not (
+                    absent == AUTHZ_MODULE or AUTHZ_MODULE.startswith(f"{absent}.")
+                ):
+                    raise
+                pytest.fail(
+                    f"There is no `{AUTHZ_MODULE}` module. E0-11's scope puts the authorization "
+                    "chokepoint in `backend/app/services/authz.py`: 'the single chokepoint every "
+                    "entry point passes through — HTTP, Celery jobs, and the future MCP server' "
+                    "(SPEC §13, and `CLAUDE.md`)."
+                )
+        return self._module
+
+    def symbol(self, name: str) -> Any:
+        """One name off the module's agreed surface, or a failure saying it is missing."""
+        found = getattr(self.module, name, None)
+        if found is None:
+            defined = sorted(
+                attribute for attribute in vars(self.module) if not attribute.startswith("_")
+            )
+            pytest.fail(
+                f"`{AUTHZ_MODULE}` defines no `{name}` — it defines {defined}. That name is part "
+                "of the interface E0-11 settled before any of it was written, so this is a "
+                "missing deliverable rather than a rename to accommodate here. If it genuinely "
+                "moved, say so in the pull request; `AuthzModule` in tests/conftest.py is the one "
+                "place that changes."
+            )
+        return found
+
+    def __getattr__(self, name: str) -> Any:
+        """`authz.own_grant` and `authz.symbol("own_grant")` are the same lookup.
+
+        Only reached for attributes this class does not define itself, so `module`
+        and `symbol` above keep their meanings and everything else falls through
+        to the contract.
+        """
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self.symbol(name)
+
+
+@pytest.fixture
+def authz(configured_env: dict[str, str]) -> AuthzModule:
+    """E0-11's chokepoint. See `AuthzModule` above for what it will and will not do.
+
+    `configured_env` runs first so that every documented variable has a value
+    before the import: `resolve_scope` reads the n-threshold from `Settings`
+    (§4), and a module that builds one at import time would otherwise fail on
+    whichever variable the machine running the suite happens not to have.
+    """
+    return AuthzModule()
+
+
+@pytest.fixture
+def application_session(
+    migrated_database: DatabaseUnderTest, application_engine: Any
+) -> Iterator[Any]:
+    """A session on the connection the application actually serves requests over.
+
+    `db_session` above connects as the bootstrap superuser, which is right for a
+    fixture that has to seed rows and wrong for anything that asks what a read
+    path can reach: a superuser passes every grant. From E0-10 on, `pulse_app`
+    holds `SELECT` on the read views and on nothing else, so "the resolver read
+    the assignment" is a claim about a grant, and it is only true over this
+    session.
+
+    Nothing seeded inside `db_session` is visible here — this is a second
+    connection, and that transaction has not committed. Pair it with
+    `committed_rows`, which is the fixture for exactly that.
+
+    `migrated_database` is depended on and not used: `application_engine` is built
+    from `provisioned_database`, which is the state *before* any migration, so
+    without this a test could open this session against a database holding no
+    views and no grants and read the absence as a refusal.
+    """
+    from sqlalchemy.orm import Session
+
+    connection = application_engine.connect()
+    session = Session(bind=connection)
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+        connection.close()

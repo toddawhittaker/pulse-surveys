@@ -35,7 +35,21 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 24**
+**Caught: 25**
+
+*(The twenty-fifth, and it caught a line inside this entry's own reader. Writing
+E0-11's tests for the deferred purview union, the first draft put
+`assert refused.value is not None` after a `pytest.raises(NotImplementedError)`
+block — the exact assertion the twenty-second below records deleting from an
+E0-10 service test, reintroduced one ticket later by a session that had just read
+it. `pytest.raises` has already made that true. It is now a `try/except/
+pytest.fail` that reports the value that came back instead, which is the thing
+worth seeing: ADR 0003's whole subject is that an empty `Purview` is what a
+broken seam returns. The same entry is why the two-lead disjointness test asserts
+both purviews non-empty before asserting they do not overlap — two empty sets are
+disjoint — why the n-threshold override is asserted to differ from the configured
+default before it is used, and why every scoped read that must be refused is
+preceded by one that must succeed on the same reader.)*
 
 *(The twenty-fourth, and it caught an assertion in a brief rather than in a file.
 The tests for E0-10's downgrade were specified down to the statement, and one of
@@ -296,7 +310,16 @@ sentence.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 21**
+**Caught: 22**
+
+*(The twenty-second: E0-11's chokepoint. Two guards in it would otherwise have
+been conventions. `LMS_OWNED_TABLES` is a set of table *names*, so a misspelling
+in it refuses a table that does not exist while leaving the real one writable and
+reading as correct in review — hence the test that every name in it is a table on
+`Base.metadata`. And an `ADMIN` assignment holds no rank in SPEC §2.1's chain, so
+a rank rule that treats an unranked role as rank zero accepts every edge out of
+one; nothing else in the suite writes such an edge, so the two parametrised
+cases are what make the fail-closed direction a rule rather than an accident.)*
 
 *(The twenty-first, found while closing the twentieth below and not by any
 review of it. `tests/unit/test_config_settings.py` holds a settings object to
@@ -1107,7 +1130,20 @@ result about the mutation until you have shown otherwise.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 0**
+**Caught: 1**
+
+*(The first, in E0-11's tests, and it changed where three constants were read
+from. The role ranks that decide which supervision edges are legal are written
+out of SPEC §2.1's canonical chain rather than read back out of the trigger under
+test — the only other copy of that order is inside the guard, so a test that
+queried it would let both be renumbered together while staying green. The
+LMS-owned table list is §2.1's ownership sentence rather than a copy of the
+module's own `LMS_OWNED_TABLES`, which is the constant it exists to check. The
+n-threshold default is §4's "default 5" rather than whatever `Settings` answers,
+so a configuration defect and a resolver defect fail as two different
+assertions. The `Purview` field list is transcribed from the ticket and says so,
+because reading it off the dataclass would admit a seventh field silently — this
+entry's rule for a value that genuinely has to be written into the test.)*
 
 **What happened.** E0-12's moderation contract test asserted that the verdict
 enum offers exactly the six values SPEC §7.4's table names. The six lived in a
