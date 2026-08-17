@@ -46,9 +46,17 @@ hop rather than a fixed point, so a table linking to a table that links to `user
 was never swept at all. Neither was exploitable in E0-08, because nothing there
 has a read path or a grant. **E0-10 lands the grants, and closes both — here, in
 this module.** `IDENTITY_NAME_FRAGMENTS` is widened and `people_tables` now
-iterates to a fixed point; the two new tests at the foot of the file plant the
-cases and require the sweep to report them. The enumeration this file computes is
-what E0-10's views and the CI invariant pass are both built on.
+iterates to a fixed point; the two tests that plant those cases are at the foot
+of the file and require the sweep to report them. The enumeration this file
+computes is what E0-10's views and the CI invariant pass are both built on.
+
+**One test here is `invariant`-marked**, and it is the last one:
+`test_no_view_reads_a_column_the_identity_marker_names`. A view is read with its
+owner's privileges, so it is the one route to identity that E0-10's grants do not
+close, and this file holds the only guard on it. Its docstring carries the
+reasoning; `scripts/ci/check_invariants.py` is what makes the mark mean
+something, by treating a skip, an xfail or an empty collection in that pass as a
+failure.
 
 **That the fix lives in a test module is the decision, not an accident**, and
 dispute E0-10-01 is where it was settled: the discovery rule is a judgement about
@@ -631,6 +639,7 @@ def test_an_identity_column_named_neither_name_nor_email_is_still_caught(db_sess
     )
 
 
+@pytest.mark.invariant
 def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) -> None:
     """Criterion: the structural test enumerates identity columns and finds none in any view.
 
@@ -639,6 +648,32 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
     views that "structurally cannot join to `user` identity columns", and a view
     added later that leaks one has to fail CI without anybody remembering to
     check.
+
+    **Marked `invariant`, because it is the only guard on this door.** A view is
+    read with its *owner's* privileges rather than its reader's, so a later
+    `CREATE VIEW … SELECT ui.identity_name … JOIN public.user_identity ui`
+    followed by `GRANT SELECT ON that view TO pulse_app` puts a name on an
+    instructor screen with every grant E0-10 writes still intact — and all three
+    of `test_identity_grants.py`'s `invariant`-marked doors stay green while it
+    happens, because the direct select is still refused, the join is still
+    refused, and the reveal function is still not executable by `pulse_app`.
+    `backend/app/views_sql/identity_grants_v001.sql` states that exposure and
+    names this test as the answer to it. Unmarked, the answer sat outside the
+    isolated pass E0-10 has just made unskippable, where a skipped assertion and
+    a passing one are the same green checkmark. The decorator **composes with**
+    this module's `pytestmark = pytest.mark.integration` rather than replacing
+    it, so the test still runs in the ordinary suite as well.
+
+    Only this test in this module is marked. The others are the marker
+    convention's own tripwires — they say what an identity column *is*, which is
+    a precondition for §4.1 rather than an instance of it, and
+    `test_application_role_privileges.py`'s docstring draws the same line for the
+    same reason.
+
+    **The mutation it exists to survive** is that view: add an identity column to
+    `section_roster_v001.sql`'s select list, or a join to `user_identity` used
+    only in a `WHERE` clause, and this goes red naming the view, the table and
+    the column while nothing else in the tree does.
 
     **It reads the dependency, not the output columns.** Postgres records which
     *columns* of which tables a view's rewrite rule uses, so a view selecting
