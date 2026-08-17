@@ -201,7 +201,15 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 24**
+**Caught: 25**
+
+*(The twenty-fifth, one commit after the twenty-fourth below, in the artifact this
+entry's own rule calls the highest risk. The commit that corrected ADR 0044 and
+this file after the E0-11-01 ruling did not reach **the ADR index**, whose row for
+0044 went on saying "the equal-rank half is in dispute" after the dispute had been
+ruled on. The body of a record and its row in an index are two claims edited by
+different reflexes, and only the body is ever re-read on purpose — so a sweep that
+stops at the file it just corrected is not a sweep.)*
 
 *(The twenty-fourth, and it set the radius of a one-line repair. Pinning three
 tests to E0-10's revision changed one call and falsified everything around it:
