@@ -80,47 +80,6 @@ turns nothing red and a prefix belonging to no department becomes writable.
 One assertion against `Base.metadata` or the reflected table, in the module that
 already holds the containment tests.
 
-### 3. Nothing requires a write path to call `guard_write`
-
-From E0-11's security review. `services/authz.py` refuses an LMS-owned write at
-table grain plus the instructor row ([ADR
-0045](../../adr/0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md)),
-and its docstring says it is "called by every application write path before it
-writes". Nothing calls it, which is correct in E0 because no write path exists —
-and nothing will notice the first one that does not.
-
-The asymmetry with the read side is the finding. Identity separation on reads is
-held by three independent things: the grant, the view boundary, and the sweep in
-`tests/unit/test_no_service_reads_an_identity_table_directly.py` that fails when a
-service module reaches an identity table. The write side has the guard and eight
-tests that all call it *directly*, so the guarantee rests on a convention in a
-docstring. E1's roster sync is the first code that can break it silently, and it
-is also the code that writes `course`, `section`, `enrollment` and the
-`INSTRUCTOR` assignment — every relation the guard names.
-
-Done when a write to one of those relations from a module that did not call
-`guard_write` fails something. A sweep modelled on the read-side one is the
-obvious shape; a session-level hook that refuses an unguarded flush is the other,
-and is worth comparing before either is built.
-
-### 4. A view revision can widen identity access with no grant consulted
-
-Also from E0-11's review, and measured on the pinned Postgres: all five views are
-owned by `pulse_admin` with `security_invoker` off, so each executes with its
-owner's privileges. A `_v002` of `assignment_scope`, `lead_faculty_course` or
-`containment_path` that joined `public.person` would hand `pulse_app` a name
-without any grant being consulted. That is not a defect — it is what lets the
-resolver read tables it holds no grant on — but it means the confidentiality
-guarantee on those three files is carried by [ADR
-0041](../../adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)'s
-review rule and by
-`tests/integration/test_identity_column_marker.py`, not by the server.
-
-E0-11 tripled the number of owner's-rights views sitting over the tables the
-resolver must not reach past. Done when the marker sweep is asserted to cover
-view definitions and not only table columns, or when the record says plainly that
-it does not and why that is acceptable.
-
 ## Out of scope
 
 - **The generated-column drift gap.** `alembic check` exits zero on a changed
@@ -161,11 +120,7 @@ contradiction.
       demonstrates it by adding one and watching it go red, not by asserting
       against a list of columns that already exist.
 - [ ] `prefix.department_id` being made nullable turns a test red.
-- [ ] A module that writes `course`, `section`, `enrollment` or an `INSTRUCTOR`
-      `role_assignment` row without calling `guard_write` fails something.
-- [ ] A view revision that selects an identity-bearing column fails something,
-      or the record says plainly that nothing catches it and why.
-- [ ] All verified by mutation — reintroduce each defect and watch it fail.
+- [ ] Both verified by mutation — reintroduce the defect and watch it fail.
 
 ## Definition of done
 
