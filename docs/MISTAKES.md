@@ -603,13 +603,17 @@ you have removed the only signal that would have told you it did not work.
 
 **Caught: 13**
 
-*(The thirteenth, in E0-15's tests, and it decided where three helpers live. Three
-modules ask the same two questions — what does this `Link` header say, and are these
-two spellings of a timestamp the same moment — so the paging walk, the header parser
-and the instant comparison sit once in `tests/conftest.py` and reach the modules as
-fixtures. A copy in a test module would be a copy that drifts from the walk it is
-meant to control, and a control that has drifted from the thing it controls is worth
-less than none.)*
+*(The thirteenth, in E0-15's tests, and it decided where the helpers live. More than
+one module asks what a `Link` header says, so the paging walk and the header parser
+sit once in `tests/conftest.py` and reach the modules as fixtures — a copy in a test
+module would be a copy that drifts from the walk it is meant to control, and a control
+that has drifted from the thing it controls is worth less than none. The same entry
+then had to be argued *against* one round later: reading a timestamp is asked in two
+places and the two want different answers, because a score is recorded verbatim and an
+enrollment window is not, so the roster tests compare instants and the AGS round trip
+compares strings. One helper serves both and the fixture's docstring says why only one
+caller uses it — the hazard this entry is about is two copies of a rule, not two
+callers with different questions.)*
 
 *(The twelfth, twice over the same hazard. E0-09's scope grain rule ties the
 populated scope column to the role, so a test that edits a supervisor's role and
@@ -923,14 +927,19 @@ you are about to add.
 *(The fourth, in E0-15's tests, and about a stated scope rather than a strategy —
 this entry's last sentence is the one that applied: "a stated bound is a scope, and
 an unstated one is a false claim of totality". Two tests carry a bound they cannot
-remove. "No member is dropped" has no total on the NRPS surface to check against, so
-it is checked against the users the launch page will sign a launch for, which is a
-lower bound and says so. And the mid-term add is found by looking for a member field
-that carries a date, because neither NRPS 2.0 nor the ticket spells an
-enrollment-window field, so what the test can assert is that the seeded enrollments
-do not all begin together and not that any of them begins mid-term. Both are written
-into the docstrings as what the test does not reach, rather than left for a reader to
-infer from a name that claims more.)*
+remove, and stating both is what got one of them lifted. "No member is dropped" has
+no total on the NRPS surface to check against, so it is checked against the users the
+launch page will sign a launch for, which is a lower bound and says so. The mid-term
+add was the second: with no enrollment-window field named anywhere, the test could
+only look for a member value that parsed as a date and assert that the dates were not
+all equal. Writing that bound down is what sent it to Todd as a question rather than
+leaving it as a weak green test, and the ruling added the field — so the assertion is
+now over a named `start`, within one section. **What is left is stated for the same
+reason**: E0-15 asks that the added member's `start` fall after its *section's* start
+date, and no section start date is published on this surface at all — the section's
+calendar is derived tool-side from its code and the term's start-letter map — so the
+test asserts that one member enrolled after their classmates and says in its own
+docstring that this is not the same claim.)*
 
 *(The third: the rank rule changed what both supervision generators can produce,
 and the docstrings describing them were written against the old space. Cycles no
@@ -1482,7 +1491,14 @@ satisfying both tickets read separately. This entry's rule is about rows a new
 write-time rule forbids; the same question asked of an existing *assertion* found
 this one in a minute. It is reported as a disagreement between two tickets rather
 than resolved in a test file, and the course-number half of the same sentence — which
-collides with nothing — is asserted.)*
+collides with nothing — is asserted. **The ruling then went the way this entry's title
+does not lead you to expect**: rather than the new ticket bending, Todd withdrew the
+earlier requirement, `test_a_seeded_context_carries_no_title` was deleted in its own
+commit, and E0-14's scope now records what the project gave up — the only fixture in
+the repository that exercised a titleless course. Worth keeping, because the entry's
+own thesis is that these collisions are repaired on the other side of the test wall,
+and this one was repaired on the other side of the *product*: neither test was wrong,
+and no amount of care inside `tests/` could have settled which requirement to keep.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix

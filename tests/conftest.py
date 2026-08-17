@@ -1635,7 +1635,18 @@ CONTEXT_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/context"
 NRPS_MEDIA_TYPE = "application/vnd.ims.lti-nrps.v2.membershipcontainer+json"
 LINE_ITEM_MEDIA_TYPE = "application/vnd.ims.lis.v2.lineitem+json"
 LINE_ITEM_CONTAINER_MEDIA_TYPE = "application/vnd.ims.lis.v2.lineitemcontainer+json"
+RESULT_CONTAINER_MEDIA_TYPE = "application/vnd.ims.lis.v2.resultcontainer+json"
 SCORE_MEDIA_TYPE = "application/vnd.ims.lis.v1.score+json"
+
+# Where a test reads back what the tool posted. **E0-15's spelling, not this
+# suite's** (ADR 0047): a mock-only route outside the AGS namespace, answering
+# `{"scores": [{"lineItem": …, "score": {…}}]}` in arrival order. It is named
+# here rather than discovered, and the `/mock/` prefix is the reason — a fixture
+# that went looking for a route whose path carries "score" would accept an AGS
+# route serving the same thing, which is the one arrangement the prefix exists to
+# rule out. A tool that learned this route would have learned something no real
+# platform serves.
+MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 
 # The two AGS scopes SPEC §3.4 needs: one line item per section, and a score
 # posted to it. Specification constants, not preferences.
@@ -1702,26 +1713,6 @@ def instant(value: Any) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
-
-def score_records(document: Any) -> list[dict[str, Any]]:
-    """Whatever a score-inspection response carried, as a list of records.
-
-    E0-15 asks for "an endpoint or fixture hook that lets a test inspect posted
-    scores" and describes neither its URL nor its shape, so the four shapes that
-    hook could plausibly take are all read: a bare array, a container under
-    `scores`, `results` or `items`, and a single record. Which one the mock
-    serves is not this file's decision to make; what a test needs is the records.
-    """
-    if isinstance(document, list):
-        return [item for item in document if isinstance(item, dict)]
-    if isinstance(document, dict):
-        for member in ("scores", "results", "records", "items"):
-            carried = document.get(member)
-            if isinstance(carried, list):
-                return [item for item in carried if isinstance(item, dict)]
-        return [document] if document else []
-    return []
 
 
 class MembershipPage(NamedTuple):
@@ -2287,49 +2278,82 @@ class MockPlatform:
         with `/scores` appended, which is why criterion 3 can speak of an
         identifier "that score posting accepts" without naming a second URL.
         """
+        identifier = self.line_item_id(line_item)
+        return self.service_post(f"{identifier.rstrip('/')}/scores", payload, SCORE_MEDIA_TYPE)
+
+    def line_item_id(self, line_item: Mapping[str, Any]) -> str:
+        """A line item's own URL, or a failure saying it has none."""
         identifier = line_item.get("id")
         if not isinstance(identifier, str) or not identifier:
             pytest.fail(
-                f"The line item {line_item!r} carries no `id`, so there is no URL to post a score "
-                "to. E0-15 criterion 3: 'AGS line-item creation returns an identifier that score "
+                f"The line item {line_item!r} carries no `id`, so there is no URL to address it "
+                "by. E0-15 criterion 3: 'AGS line-item creation returns an identifier that score "
                 "posting accepts.'"
             )
-        return self.service_post(f"{identifier.rstrip('/')}/scores", payload, SCORE_MEDIA_TYPE)
+        return identifier
 
-    def recorded_scores(self, line_item: Mapping[str, Any]) -> list[dict[str, Any]]:
-        """Every score the platform has recorded, however it lets a test see them.
+    def posted_scores(self) -> list[dict[str, Any]]:
+        """Every score the platform has been sent, in the order it received them.
 
-        E0-15 asks for "an endpoint or fixture hook that lets a test inspect
-        posted scores" and names neither a URL nor a shape, so the three places
-        such a hook plausibly lives are all tried: the AGS Result service at
-        `{lineitem}/results`, a readable `{lineitem}/scores`, and any
-        parameterless route whose path names scores. The failure lists all three
-        rather than guessing at a fourth.
-
-        Worth knowing when reading criterion 4: a conformant AGS **Result**
-        carries `userId`, `resultScore` and `resultMaximum` and carries neither a
-        timestamp nor an activity progress, so the criterion's "including its
-        timestamp and activity progress fields" cannot be met by the Result
-        service alone. That is what makes the inspection hook a deliverable
-        rather than a convenience.
+        E0-15 settles this surface rather than leaving it to be discovered:
+        `GET /mock/posted-scores`, outside the AGS namespace, answering
+        `{"scores": [{"lineItem": …, "score": {…}}]}` in arrival order (ADR
+        0047). So the shape is asserted here rather than normalised — an earlier
+        version of this helper accepted four shapes because the ticket named
+        none, and every one of the three it no longer accepts is now a mock that
+        does not do what the ticket says.
         """
-        base = str(line_item.get("id", "")).rstrip("/")
-        tried = [f"{base}/results", f"{base}/scores"]
-        tried += [path for path in self.paths("GET") if "score" in path.lower()]
-        for candidate in tried:
-            response = self.service_get(candidate)
-            if response.status_code != 200:
-                continue
-            records = score_records(response.json())
-            if records:
-                return records
-        pytest.fail(
-            f"Nothing served a recorded score for line item `{base}`. Tried {tried}. Either the "
-            "platform recorded no score for a post it accepted, or the inspection surface E0-15's "
-            "scope asks for — 'an endpoint or fixture hook that lets a test inspect posted "
-            "scores' — is somewhere none of these reaches, in which case `recorded_scores` in "
-            "tests/conftest.py is the one place that changes."
+        response = self.service_get(MOCK_POSTED_SCORES_PATH)
+        assert response.status_code == 200, (
+            f"`GET {MOCK_POSTED_SCORES_PATH}` answered {response.status_code} rather than 200. "
+            "E0-15 criterion 4 reads a posted score back from exactly this route, outside the AGS "
+            f"namespace. Body begins {response.text[:200]!r}."
         )
+        document = response.json()
+        assert isinstance(document, dict), (
+            f"`{MOCK_POSTED_SCORES_PATH}` served {document!r}. E0-15 spells the body "
+            '`{"scores": [{"lineItem": …, "score": {…}}]}`.'
+        )
+        entries = document.get("scores")
+        assert isinstance(entries, list), (
+            f"`{MOCK_POSTED_SCORES_PATH}` served an object carrying {sorted(document)} rather "
+            "than a `scores` array. A bare array, or the scores under another key, is a shape "
+            "E0-15 does not describe and a test cannot read as arrival order."
+        )
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    def posted_scores_for(self, line_item: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """The scores posted to one line item, in the order they arrived."""
+        identifier = self.line_item_id(line_item)
+        return [entry for entry in self.posted_scores() if entry.get("lineItem") == identifier]
+
+    def results(self, line_item: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """The conformant AGS Result container for one line item.
+
+        The other half of E0-15's readback, and the one E3 is built against. AGS
+        2.0 puts the Result service at the line item URL with `/results`
+        appended, and a `Result` carries `userId`, `resultScore`,
+        `resultMaximum` and `scoreOf` — no timestamp, no progress. That absence
+        is a criterion of its own, which is why this is reached separately from
+        `posted_scores` rather than folded into it.
+        """
+        identifier = self.line_item_id(line_item)
+        response = self.service_get(
+            f"{identifier.rstrip('/')}/results", accept=RESULT_CONTAINER_MEDIA_TYPE
+        )
+        assert response.status_code == 200, (
+            f"The AGS Result service answered {response.status_code} for line item "
+            f"`{identifier}`. E0-15: 'The conformant AGS Results endpoint answers for the same "
+            f"line item.' Body begins {response.text[:200]!r}."
+        )
+        listed = response.json()
+        if isinstance(listed, dict):
+            listed = listed.get("results")
+        assert isinstance(listed, list), (
+            f"The AGS Result service served {response.json()!r}, which is not a result container. "
+            "AGS 2.0 serves an array of results."
+        )
+        return [result for result in listed if isinstance(result, dict)]
 
 
 @pytest.fixture
@@ -2408,10 +2432,15 @@ def link_relations_in() -> Callable[[str | None], dict[str, str]]:
 def instant_of() -> Callable[[Any], datetime | None]:
     """Hand `instant` to a test that has to compare two spellings of one moment.
 
-    Two modules ask it: the AGS round trip, where the question is whether the
-    timestamp that came back is the one that went in, and the roster tests,
-    where the question is whether every enrollment began at the same moment.
-    One helper rather than two, for `docs/MISTAKES.md` entry 13's reason.
+    The seeded rosters ask it: an enrollment window's `start` and `end` are
+    moments, and whether one member enrolled after another is a question about
+    instants rather than about strings.
+
+    **The AGS round trip deliberately does not**, and the asymmetry is worth
+    knowing before someone tidies it away. E0-15 records a posted score "the
+    posted body, verbatim" (ADR 0047), so there the spelling *is* the fact: a
+    recorder that re-renders `+00:00` as `Z` has stopped carrying what the tool
+    sent, and comparing instants would call that agreement.
     """
     return instant
 

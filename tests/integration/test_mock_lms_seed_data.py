@@ -10,20 +10,24 @@ never reaches a tool is a seed no later ticket can use.
 
 **Nothing here names a field the ticket does not name.** Section codes are found
 by §2.2's own grammar rather than by looking in a key called `section_code`, and
-course numbers by §8's; where the seed carries something the ticket describes
-but no specification spells — an enrollment window — the test asserts the
-property (enrollments do not all begin together) and says in its own docstring
-what that does not reach. The alternative is to invent a field name here, which
-would decide from the test side something E0-15 left open.
+course numbers by §8's. The one member that *is* named is named by the ticket:
+enrollment windows ride on `https://mock-lms.invalid/spec/nrps/enrollment`
+(ADR 0048). An earlier draft of this module had to find that window by looking
+for any member value that parsed as a date, and the difference is worth stating
+rather than quietly enjoying — a test that discovers a field by the shape of its
+value is satisfied by a field carrying a date for an unrelated reason, and this
+one cannot be.
 
-**One thing E0-15 asks for that is deliberately not asserted below.** The
-ticket's scope says "every seeded course needs a title", and E0-14's scope
-requires at least one seeded context carrying `id` alone — no title — so that
-E1's ingestion meets the empty case in a test rather than in a deployment.
-`test_mock_lms_launch.py::test_a_seeded_context_carries_no_title` holds that
-requirement today. A test here that every seeded course carries a title would
-make those two red at once, which is a disagreement between two tickets rather
-than a defect in either, and it is reported rather than resolved in a test file.
+**On titles, and what asserting them cost.** E0-15's scope says "every seeded
+course needs a title"; E0-14's asked this mock to seed one context carrying `id`
+alone, so that E1's ingestion met a titleless course in a test rather than in a
+deployment. Both could not hold in one seed. Todd ruled for E0-15 on 2026-08-17,
+`test_mock_lms_launch.py::test_a_seeded_context_carries_no_title` was deleted in
+its own commit, and the assertion below is the requirement that replaced it —
+so it is worth knowing here that what went with that deletion is the only
+fixture in the repository exercising the empty-title path, and E1 has to mint
+one itself before it can test its fallback against `course.lms_title`'s
+`NOT NULL`.
 
 **No §4.1 invariant lives here** — the mock is a platform, not a Pulse read
 path. What is asserted about the seeded people is E0-15's own security note:
@@ -32,8 +36,6 @@ real student data".
 """
 
 import re
-from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 
 import pytest
@@ -107,6 +109,27 @@ STUDENT_ROLE_NAMES = ("learner", "student")
 
 MEMBER_ID = "user_id"
 
+# Where an enrollment window rides. **E0-15's spelling and namespace, not this
+# suite's** (ADR 0048): NRPS 2.0 defines no date on a member at all, so a
+# platform supplying one supplies it as a vendor extension, and E1 learns from
+# the namespace that enrollment dates are per-platform rather than core.
+ENROLLMENT_EXTENSION = "https://mock-lms.invalid/spec/nrps/enrollment"
+
+# An RFC 3339 timestamp that carries an offset. The ticket's requirement is the
+# offset — "never a bare date" — because E0-06 made the calendar timezone-aware
+# throughout and a naive stamp hands E1 a value it has to guess a zone for.
+#
+# Strict about the offset and deliberately loose about the separator: RFC 3339
+# fixes `+HH:MM` with the colon, so a compact `+0000` is refused, while `T`, `t`
+# and a space are all read as the same choice about how to spell a separator,
+# which is not what the ticket is about. Note what a bare `2026-09-08` would do
+# without this check: `datetime.fromisoformat` parses it happily, at midnight, in
+# no zone — so the value that fails the requirement is exactly the one that looks
+# like it passed.
+OFFSET_BEARING = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$"
+)
+
 
 def is_a_course_number_spec_8_admits(number: str) -> bool:
     """Whether SPEC §8 would store `number`, width included.
@@ -136,35 +159,15 @@ def strings_in(node: Any) -> list[str]:
     return []
 
 
-def moments_in(
-    node: Any,
-    parse: Callable[[Any], datetime | None],
-    path: str = "",
-) -> dict[str, datetime]:
-    """Every date or moment inside a decoded JSON value, keyed by where it sits.
+def enrollment_of(member: dict[str, Any]) -> dict[str, Any] | None:
+    """A member's enrollment window, or `None` where it carries none."""
+    window = member.get(ENROLLMENT_EXTENSION)
+    return window if isinstance(window, dict) else None
 
-    Discovery by *value* rather than by name, because no specification spells
-    the field NRPS carries an enrollment window in and E0-15 does not either.
-    What the caller gets is enough to ask whether two members' windows differ,
-    without this file deciding what the field is called.
 
-    `parse` is the `instant_of` fixture — the same comparison the AGS round trip
-    uses on a score's timestamp — rather than a second reading of ISO 8601
-    written here (`docs/MISTAKES.md` entry 13).
-    """
-    found: dict[str, datetime] = {}
-    if isinstance(node, str):
-        parsed = parse(node)
-        if parsed is not None:
-            found[path] = parsed
-        return found
-    if isinstance(node, dict):
-        for name, value in node.items():
-            found.update(moments_in(value, parse, f"{path}.{name}" if path else str(name)))
-    elif isinstance(node, list):
-        for index, item in enumerate(node):
-            found.update(moments_in(item, parse, f"{path}[{index}]"))
-    return found
+def carries_an_offset(value: Any) -> bool:
+    """Whether `value` is an RFC 3339 timestamp that says which zone it is in."""
+    return isinstance(value, str) and bool(OFFSET_BEARING.match(value.strip()))
 
 
 def role_names(member: dict[str, Any]) -> set[str]:
@@ -227,19 +230,36 @@ def seeded_section_codes(platform: Any) -> dict[str, str]:
     return found
 
 
-def seeded_members(platform: Any) -> list[dict[str, Any]]:
-    """Every member of every seeded roster, with a guard against emptiness."""
-    members = [
-        member
+def seeded_rosters(platform: Any) -> list[tuple[Any, list[dict[str, Any]]]]:
+    """Every seeded context paired with the members of its roster, walked to the last page.
+
+    Kept per-context rather than flattened, because one of the questions below is
+    about a *section*: a member who enrolled after their classmates is only late
+    relative to the section they are in, and across the whole institution two
+    sections that start in different weeks would answer the question by
+    themselves.
+    """
+    rosters = [
+        (
+            context,
+            [
+                member
+                for page in platform.membership_pages(context.memberships_url)
+                for member in page.members
+            ],
+        )
         for context in platform.seeded_contexts()
-        for page in platform.membership_pages(context.memberships_url)
-        for member in page.members
     ]
-    assert members, (
-        "Every seeded roster came back empty, so every assertion about the people in it would "
+    assert any(members for _, members in rosters), (
+        "Every seeded roster came back empty, so every assertion about the people in them would "
         "hold vacuously. E0-15 seeds 'students, instructors, and enrollments'."
     )
-    return members
+    return rosters
+
+
+def seeded_members(platform: Any) -> list[dict[str, Any]]:
+    """Every member of every seeded roster, with a guard against emptiness."""
+    return [member for _, members in seeded_rosters(platform) for member in members]
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +311,7 @@ def test_the_course_number_bands_agree_with_the_table_in_spec_8() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Criterion 5 — section codes with two start letters and both modalities.
+# The seeded courses: their codes, their numbers, and their titles.
 # ---------------------------------------------------------------------------
 
 
@@ -381,6 +401,39 @@ def test_every_seeded_course_number_falls_inside_the_bands_spec_8_sets(
     )
 
 
+def test_every_seeded_context_carries_a_title(mock_platform: Any) -> None:
+    """E0-15's criterion, and the requirement that replaced E0-14's opposite one.
+
+    The mutation is one seeded context left with `id` alone — which is not
+    hypothetical: it is what this mock was required to do until 2026-08-17, so it
+    is a mutation that has already shipped once and would look, in a diff, like a
+    ticket being honoured. `course.lms_title` is `NOT NULL` (E0-05), so E0-17
+    seeding from this platform and E1 ingesting a launch from it both fail on the
+    first titleless course, at a schema rule with nothing to say about a mock.
+
+    Asserted over *every* seeded context, which is the whole difference between
+    this and `test_a_seeded_context_carries_a_title` in E0-14's suite: an `any`
+    test is satisfied by a seed where nine sections in ten are nameless.
+
+    A title of whitespace is refused with one that is absent, because
+    `course.lms_title` being `NOT NULL` is not the same as it being useful, and
+    `" "` is what a serialiser writes when the seed row has an empty string in it.
+    """
+    untitled = []
+    for context in mock_platform.seeded_contexts():
+        claim = context.launches[0].claims.get(CONTEXT_CLAIM)
+        title = claim.get("title") if isinstance(claim, dict) else None
+        if not (isinstance(title, str) and title.strip()):
+            untitled.append((context.context_id, claim))
+    assert not untitled, (
+        f"{len(untitled)} seeded context(s) carry no usable `title` — the first is "
+        f"{untitled[0][1]!r}. E0-15: 'Every seeded context carries a `title`', which replaced "
+        "E0-14's requirement that one context carry `id` alone (withdrawn 2026-08-17). "
+        "`course.lms_title` is `NOT NULL`, so a nameless course fails at write time in E0-17 "
+        "against a schema rule that has nothing to say about this mock."
+    )
+
+
 # ---------------------------------------------------------------------------
 # The seeded people, and criterion 6's adds and drops.
 # ---------------------------------------------------------------------------
@@ -446,51 +499,168 @@ def test_the_seeded_roster_carries_a_member_who_is_no_longer_actively_enrolled(
     )
 
 
-def test_the_seeded_roster_does_not_enrol_every_member_at_the_same_moment(
+def test_the_offset_check_reads_an_rfc_3339_stamp_and_refuses_a_bare_date() -> None:
+    """The control on the check below, and the near miss is the whole reason for it.
+
+    `2026-09-08` is a valid date, parses with `datetime.fromisoformat` without
+    complaint, and is what an implementer writes for an enrollment that begins on
+    a day. It is also the exact value E0-15 forbids — "an RFC 3339 timestamp with
+    an offset, never a bare date" — so a check that merely parsed the value would
+    accept the thing the requirement exists to refuse, and would look like it had
+    asserted something (`docs/MISTAKES.md` entry 3).
+    """
+    for stamped in (
+        "2026-09-08T00:00:00-04:00",
+        "2026-09-08T00:00:00Z",
+        "2026-09-08T09:30:00.500+00:00",
+        "2026-09-08 00:00:00+00:00",
+    ):
+        assert carries_an_offset(stamped), f"{stamped!r} is RFC 3339 and says which zone it is in."
+    for naive in (
+        "2026-09-08",
+        "2026-09-08T00:00:00",
+        "2026-09-08T00:00:00+0000",
+        "September 8, 2026",
+        "",
+        None,
+    ):
+        assert not carries_an_offset(naive), (
+            f"{naive!r} does not carry an offset, and E0-15 requires one: E0-06 made the calendar "
+            "timezone-aware throughout, so a stamp without a zone is a value E1 has to guess at."
+        )
+
+
+def test_every_roster_member_carries_an_enrollment_start_with_an_offset(
+    mock_platform: Any,
+) -> None:
+    """Criterion 6's first half, on the member extension E0-15 names.
+
+    Two mutations, and the second is the near miss. The first is the extension
+    absent altogether, or present on the students and not on the instructor:
+    SPEC §3.4 starts a late add's denominator at the student's first enrolled
+    week "from NRPS enrollment data", so a member with no window is a member E3
+    cannot compute a denominator for.
+
+    The second is `"start": "2026-09-08"`. It is a date, it parses, it reads
+    correctly in a response body, and it is what the requirement was written
+    against — E0-06 made the calendar timezone-aware throughout, so a naive stamp
+    is a value E1 has to pick a zone for, and whichever it picks is right for
+    half the year.
+    """
+    members = seeded_members(mock_platform)
+    windowless = [member for member in members if enrollment_of(member) is None]
+    assert not windowless, (
+        f"{len(windowless)} of {len(members)} roster members carry no `{ENROLLMENT_EXTENSION}` "
+        f"object — the first carries {sorted(windowless[0])}. E0-15: 'Every NRPS member carries "
+        "the enrollment extension named in the scope', and SPEC §3.4 takes a late add's "
+        "denominator from it."
+    )
+    naive = [
+        (member.get(MEMBER_ID), (enrollment_of(member) or {}).get("start"))
+        for member in members
+        if not carries_an_offset((enrollment_of(member) or {}).get("start"))
+    ]
+    assert not naive, (
+        f"{len(naive)} enrollment windows carry a `start` that is missing or has no offset: "
+        f"{naive}. E0-15: '`start` is required on every member and is an RFC 3339 timestamp with "
+        "an offset, never a bare date.' A bare date parses perfectly and lands at midnight in "
+        "whatever zone the reader assumes, which is the failure the requirement is written "
+        "against rather than a stricter spelling of it."
+    )
+
+
+def test_the_enrollment_window_ends_the_dropped_member_and_nobody_else(
     mock_platform: Any,
     instant_of: Any,
 ) -> None:
-    """Criterion 6, the add half, and it is the weaker of the two on purpose.
+    """Criterion 6's second half: `end` is `null` until somebody drops.
 
-    Catches the seed every implementer writes first: every enrollment beginning
-    at the term start. SPEC §3.4 makes the late add a denominator rule — "the
-    denominator starts at the student's first enrolled week (from NRPS enrollment
-    data)" — so a seed where every window is identical leaves that branch with
-    nothing to exercise it, and E3's property tests generate a case the mock
-    cannot produce.
+    Two mutations, in opposite directions, and each looks reasonable on its own.
+    A seed that writes the section's end date into every window makes every
+    student look like a drop, so E3 stops updating scores for a whole section at
+    the moment it syncs. A seed that leaves `end` null on everybody — including
+    the member whose `status` says they have gone — leaves the drop visible in
+    one field and invisible in the other, and E1 has to choose which to believe.
 
-    **What this does not reach**, stated rather than implied. NRPS 2.0 spells no
-    enrollment-window field and E0-15 names none either, so the window is found
-    by *value*: any member field carrying a date. That means the test asserts
-    "the seeded enrollments do not all begin together" and cannot assert "one of
-    them begins mid-term", because nothing on this surface says where the term
-    starts. It would also be satisfied by a per-member field that carries a date
-    for some unrelated reason. Both are gaps in what the ticket specifies rather
-    than in what it asks for, and closing them means the ticket saying what
-    carries an enrollment window.
+    So the correspondence is asserted in both directions rather than "somebody
+    has an end": the members with an `end` are exactly the members NRPS reports
+    as no longer active. Both sets are required non-empty first, because two
+    empty sets correspond perfectly (`docs/MISTAKES.md` entry 3).
     """
     members = seeded_members(mock_platform)
-    dated = {
-        str(member.get(MEMBER_ID, index)): moments_in(member, instant_of)
-        for index, member in enumerate(members)
+    ended = {
+        str(member.get(MEMBER_ID))
+        for member in members
+        if (enrollment_of(member) or {}).get("end") is not None
     }
-    assert any(dated.values()), (
-        f"No member of any seeded roster carries a date anywhere ({members[0]!r} is the first). "
-        "SPEC §3.4 takes the student's first enrolled week from NRPS enrollment data and §7.3 "
-        "says the roster sync is what supplies enrollment windows, so a roster carrying no dates "
-        "at all carries no enrollment window for E3 to read."
+    departed = {
+        str(member.get(MEMBER_ID))
+        for member in members
+        if member.get("status") in ("Inactive", "Deleted")
+    }
+    assert ended and departed, (
+        f"{len(ended)} members carry an enrollment `end` and {len(departed)} are reported "
+        "`Inactive` or `Deleted`. E0-15 seeds one mid-term drop, and with either set empty the "
+        "correspondence below is satisfied by a seed that has no drop in it at all."
     )
-    varying = sorted(
-        path
-        for path in {name for fields in dated.values() for name in fields}
-        if len({fields[path] for fields in dated.values() if path in fields}) > 1
+    assert ended == departed, (
+        f"The members carrying an enrollment `end` are {sorted(ended)} and the members NRPS "
+        f"reports as no longer active are {sorted(departed)}. E0-15: '`end` is `null` for a "
+        "member still enrolled and a timestamp for one who dropped' — the two fields describe one "
+        "fact, and a tool meeting them disagreeing has to pick one to believe."
     )
-    assert varying, (
-        "Every seeded member's dates are identical: "
-        f"{ {name: str(value) for fields in dated.values() for name, value in fields.items()} }. "
-        "E0-15 criterion 6 seeds a mid-term add, and an enrollment window that is the same for "
-        "every member is a roster in which nobody joined late — which is the case SPEC §3.4's "
-        "denominator rule exists for."
+    backwards = []
+    for member in members:
+        window = enrollment_of(member) or {}
+        opened, closed = instant_of(window.get("start")), instant_of(window.get("end"))
+        if opened is not None and closed is not None and closed <= opened:
+            backwards.append((member.get(MEMBER_ID), window))
+    assert not backwards, (
+        f"An enrollment window ends at or before it begins: {backwards}. A drop happens after an "
+        "enrollment, so this is a seed with the two values swapped — which reads correctly in a "
+        "response body and gives E3 a negative number of enrolled weeks."
+    )
+
+
+def test_a_seeded_section_holds_a_member_who_enrolled_after_their_classmates(
+    mock_platform: Any,
+    instant_of: Any,
+) -> None:
+    """Criterion 6's mid-term add, as far as this surface can carry it.
+
+    Catches the seed every implementer writes first: every enrollment in a
+    section beginning at the same moment. SPEC §3.4 makes the late add a
+    denominator rule — "the denominator starts at the student's first enrolled
+    week (from NRPS enrollment data)" — so a seed where every window in a section
+    opens together leaves that branch with nothing behind it, and E3's property
+    tests generate a case the mock cannot produce.
+
+    Asserted **within one section**, which is the part the extension made
+    possible: across the institution, two sections that simply start in different
+    weeks would answer this by themselves, with no late add anywhere in the seed.
+
+    **What this still does not reach.** E0-15 says the added member's `start`
+    falls after *its section's start date*, and no section start date is
+    published anywhere on this surface — a section's dates are derived tool-side
+    from its code and the term's start-letter map (§2.2), which live in Pulse's
+    database and not in the platform. So what is assertable is that one member
+    began after their classmates did, not that they began after the section did.
+    The two differ for a section where every enrollment is late, which nothing
+    here can see.
+    """
+    opened: dict[str, set[Any]] = {}
+    for context, members in seeded_rosters(mock_platform):
+        starts = {instant_of((enrollment_of(member) or {}).get("start")) for member in members}
+        opened[context.context_id] = {start for start in starts if start is not None}
+    varied = sorted(name for name, starts in opened.items() if len(starts) > 1)
+    assert varied, (
+        "No seeded section holds two members who enrolled at different moments: "
+        + "; ".join(
+            f"{name} opened at {sorted(str(start) for start in starts)}"
+            for name, starts in sorted(opened.items())
+        )
+        + ". E0-15 criterion 6 seeds a mid-term add 'giving E3 the edge cases its property tests "
+        "need', and a section whose enrollments all open together is a section nobody joined late."
     )
 
 

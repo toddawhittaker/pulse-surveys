@@ -19,15 +19,25 @@ participation formula and retry handling are E3's, and E0-15's out-of-scope list
 says so. Nothing below asserts what Pulse computes or when it posts. There is no
 token-flow test either, for the reason `test_mock_lms_nrps_roster.py` gives.
 
-**One thing worth knowing before reading criterion 4.** A conformant AGS
-**Result** carries `userId`, `resultScore` and `resultMaximum`, and carries
-neither a timestamp nor an activity progress. So "a posted score is retrievable
-by a test, including its timestamp and activity progress fields" cannot be met
-by the Result service alone — it is what makes the inspection surface in E0-15's
-scope ("an endpoint or fixture hook that lets a test inspect posted scores") a
-deliverable rather than a convenience. `recorded_scores` in `tests/conftest.py`
-tries the three places that hook could plausibly live and names all three when
-none answers, because E0-15 names none of them.
+**The readback is two surfaces, and that is the point of it.** A conformant AGS
+`Result` carries `userId`, `resultScore` and `resultMaximum` and nothing else —
+no timestamp, no progress — so criterion 4's fields cannot be read back through
+the protocol at all. E0-15 therefore serves the Results endpoint for E3 to build
+against *and* a mock-only inspection route at `GET /mock/posted-scores`, outside
+the AGS namespace, carrying the posted body verbatim in arrival order (ADR
+0047). Both halves are asserted below, including that Results does **not** carry
+the three fields: a mock that widened `Result` to make criterion 4 easy would
+teach E3 to read a field no platform sends, and would pass every test that only
+looked at the mock route.
+
+**Verbatim is asserted as equality, not field by field.** The three ways a
+recorder half-does this — normalising the timestamp, filling a default
+`gradingProgress`, dropping a field it has no model for — are one assertion
+apart, and naming them individually would leave the fourth one nobody thought
+of. This is also why the timestamp is compared as a *string* here while
+`tests/integration/test_mock_lms_seed_data.py` compares enrollment dates as
+instants: there, two spellings of one moment are the same fact; here, the
+spelling is the fact.
 """
 
 from typing import Any
@@ -36,7 +46,7 @@ import pytest
 
 pytestmark = pytest.mark.lti
 
-# `mock_platform`, `signed_launch` and `instant_of` come from
+# `mock_platform` and `signed_launch` come from
 # `tests/conftest.py` and are reached through fixtures rather than imported, for
 # the reason `test_mock_lms_launch.py` gives: a module that imports its sibling
 # `conftest` by name depends on where pytest put `tests/` on `sys.path`, and an
@@ -52,8 +62,11 @@ AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
 # The score this suite posts. Every value is chosen to be one no implementation
 # would arrive at by accident, which is the whole point of the round trip:
 #
-#   - the timestamp is a specific past second, so a recorder that stamped its own
-#     clock cannot coincide with it;
+#   - the timestamp is a specific past second *and* is written with a `+00:00`
+#     offset rather than `Z`. Both matter now that the ticket says verbatim: the
+#     second defeats a recorder stamping its own clock, and the spelling defeats
+#     one that round-trips the value through a datetime and re-renders it, which
+#     is the single most likely way a FastAPI implementation loses it;
 #   - `activityProgress` and `gradingProgress` are *not* the pair an
 #     implementation hardcodes. AGS's five activity values are Initialized,
 #     Started, InProgress, Submitted and Completed, and a stub that writes
@@ -62,12 +75,24 @@ AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
 #   - the score is not a round number, so a stub echoing the maximum, the
 #     percentage, or zero is visible.
 #
-# **This suite's choice**, all four, and each is one line to change.
+# **This suite's choice**, all of them, and each is one line to change.
 POSTED_TIMESTAMP = "2026-03-02T14:05:09+00:00"
 POSTED_SCORE = 61.5
 POSTED_MAXIMUM = 100
 POSTED_ACTIVITY_PROGRESS = "Submitted"
 POSTED_GRADING_PROGRESS = "PendingManual"
+
+# An optional AGS member, carried in the verbatim test and deliberately absent
+# from the test beside it. AGS 2.0 makes `comment` optional, so it is the field
+# an implementation modelling a score with a fixed set of attributes either drops
+# on the way in or invents as `null` on the way out.
+POSTED_COMMENT = "e0-15 round trip, not shown to anybody"
+
+# The three fields a conformant AGS `Result` does not have. Criterion 5 is that
+# the Results endpoint carries none of them; they are listed from the AGS 2.0
+# `Result` definition, which has `id`, `userId`, `resultScore`, `resultMaximum`,
+# `scoreOf` and `comment` and nothing else.
+FIELDS_A_RESULT_DOES_NOT_CARRY = ("timestamp", "activityProgress", "gradingProgress")
 
 # The second score, for a second student, in the test that asks whether the
 # platform keeps them apart. A different value as well as a different user, so a
@@ -106,40 +131,61 @@ def seeded_subjects(platform: Any) -> list[str]:
     return sorted(subjects)
 
 
-def recorded_for(records: list[dict[str, Any]], user_id: str) -> dict[str, Any]:
-    """The one recorded score naming `user_id`, or a failure listing what came back."""
-    matching = [
-        record
-        for record in records
-        if str(record.get("userId", record.get("user_id", ""))) == user_id
-    ]
-    assert matching, (
-        f"Nothing the platform recorded names user {user_id!r}. It recorded {records!r}. E0-15 "
-        "criterion 4: a posted score is retrievable by a test — which needs the record to say "
-        "whose it is, since E3 posts one score per student per section."
+def scores_in(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The `score` object out of each `/mock/posted-scores` entry, in arrival order.
+
+    An entry with no `score` fails here rather than being read as `{}` and
+    compared, because "the platform recorded an entry carrying nothing" is worth
+    saying and an empty dict quietly answers "the score did not round-trip" as
+    though it were a field mismatch.
+    """
+    for entry in entries:
+        if not isinstance(entry.get("score"), dict):
+            pytest.fail(
+                f"A `/mock/posted-scores` entry carries no `score` object: {entry!r}. E0-15 "
+                'spells each entry `{"lineItem": …, "score": {…the posted body, verbatim…}}`.'
+            )
+    return [entry["score"] for entry in entries]
+
+
+def scores_for(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, Any]]:
+    """Every recorded score naming `user_id`, in arrival order."""
+    return [score for score in scores_in(entries) if str(score.get("userId", "")) == user_id]
+
+
+def one_score_for(entries: list[dict[str, Any]], user_id: str) -> dict[str, Any]:
+    """The single recorded score naming `user_id`, or a failure saying what came back."""
+    matching = scores_for(entries, user_id)
+    assert len(matching) == 1, (
+        f"The platform recorded {len(matching)} scores for user {user_id!r}, not one. It "
+        f"recorded {list(entries)!r}. E0-15 criterion 4: a posted score is "
+        "retrievable by a test — which needs the record to say whose it is, since E3 posts one "
+        "score per student per section."
     )
     return matching[0]
 
 
-def value_of(record: dict[str, Any]) -> Any:
-    """The score inside a recorded score, under either spelling AGS uses.
+def disagreements(recorded: dict[str, Any], posted: dict[str, Any]) -> list[str]:
+    """How `recorded` differs from `posted`, in the words the failure needs.
 
-    `scoreGiven` on a Score and `resultScore` on a Result are the same number
-    seen from the two sides of AGS, and which one an inspection surface answers
-    with is not something E0-15 decides.
-
-    A record carrying neither fails here rather than being read as `None` and
-    compared: a `TypeError` inside an assertion is a broken test rather than a
-    red, and "the platform recorded no score value" deserves to be said.
+    Verbatim is asserted as equality; this exists only so the message names the
+    three ways it fails — a field changed, a field lost, a field invented —
+    rather than printing two dictionaries and leaving the reader to diff them.
     """
-    for member in ("scoreGiven", "resultScore", "score"):
-        value = record.get(member)
-        if isinstance(value, int | float | str):
-            return value
-    pytest.fail(
-        f"The recorded score {record!r} carries no score value under `scoreGiven`, `resultScore` "
-        "or `score`. E0-15's scope: 'score posting that records what it received so a test can "
-        "assert on it.'"
+    return (
+        [
+            f"`{name}` came back {recorded[name]!r} for a posted {posted[name]!r}"
+            for name in sorted(set(posted) & set(recorded))
+            if recorded[name] != posted[name]
+        ]
+        + [
+            f"`{name}` was posted as {posted[name]!r} and is absent"
+            for name in sorted(set(posted) - set(recorded))
+        ]
+        + [
+            f"`{name}` came back as {recorded[name]!r} and was never posted"
+            for name in sorted(set(recorded) - set(posted))
+        ]
     )
 
 
@@ -287,81 +333,147 @@ def test_a_score_posted_against_the_created_identifier_is_accepted(
 # ---------------------------------------------------------------------------
 
 
-def test_a_posted_score_is_read_back_with_the_timestamp_and_progress_it_carried(
+def test_a_posted_score_is_read_back_verbatim_at_the_mock_route(
     mock_platform: Any,
     signed_launch: Any,
-    instant_of: Any,
 ) -> None:
-    """Criterion 4, field by field, and the definition of done's round trip.
+    """Criterion 4, and the definition of done's round trip.
 
-    Catches a recorder that stores the number and drops everything around it —
-    the near miss E0-15's scope is written against, "score posting that records
-    **what it received**". Three shapes of it, each of which passes a round trip
-    that only compares the score:
+    "Verbatim means verbatim" is the ticket's own phrase, so the assertion is
+    equality against the body that went out rather than a walk of the fields
+    that happened to be thought of. Four recorders fail it and all four pass a
+    field-by-field check written from the same body:
 
-      - a timestamp stamped from the platform's own clock rather than taken from
-        the request. Asserted as an instant rather than as a string, so a
-        platform that normalises `+00:00` to `Z` is not failed for it, and
-        against a specific past second, so a clock cannot coincide with it;
-      - an `activityProgress` hardcoded to "Completed" and a `gradingProgress`
-        hardcoded to "FullyGraded", which is the pair an implementation writes
-        when it treats these as ceremony. The score posted here carries neither;
-      - a score echoed from the maximum or from the request's own body without
-        being stored, which the listing-shaped assertion above cannot see.
+      - one that re-renders the timestamp. `2026-03-02T14:05:09+00:00` through a
+        `datetime` and back is `...+00:00` on some paths and `...Z` on others,
+        and the value posted here is spelled with the offset so the round trip
+        through a model is visible rather than lucky;
+      - one that stamps its own clock over the timestamp. The value is a
+        specific past second, which no clock coincides with;
+      - one that hardcodes `activityProgress` to "Completed" and
+        `gradingProgress` to "FullyGraded" — the pair an implementation writes
+        when it reads these as ceremony. The body posted here carries neither;
+      - one that drops `comment`, which AGS makes optional and which is
+        therefore the member a fixed attribute set loses without noticing.
 
     E3 recomputes and re-posts after each week closes (§3.4), so the timestamp is
-    the field that says *which week's* recomputation a score is, and a platform
-    that overwrites it makes every repost indistinguishable from the last.
+    what says *which* week's recomputation a score is: a platform that rewrites
+    it makes every repost indistinguishable from the last, and the tool has no
+    way to prove what it sent.
     """
     created = mock_platform.create_line_item(signed_launch)
     user_id = seeded_subjects(mock_platform)[0]
-    posted = score_payload(user_id)
+    posted = score_payload(user_id, comment=POSTED_COMMENT)
     response = mock_platform.post_score(created, posted)
     assert 200 <= response.status_code < 300, (
         f"Posting the score answered {response.status_code}, so there is nothing to read back. "
         f"Body begins {response.text[:200]!r}."
     )
 
-    record = recorded_for(mock_platform.recorded_scores(created), user_id)
-
-    assert float(value_of(record)) == pytest.approx(POSTED_SCORE), (
-        f"The platform recorded {value_of(record)!r} for a score posted as {POSTED_SCORE}. "
-        f"The whole record is {record!r}."
+    entries = mock_platform.posted_scores_for(created)
+    assert len(entries) == 1, (
+        f"One score was posted to `{created.get('id')}` and `/mock/posted-scores` reports "
+        f"{len(entries)} entries for it: {entries!r}."
     )
-    assert instant_of(record.get("timestamp")) == instant_of(POSTED_TIMESTAMP), (
-        f"The platform recorded timestamp {record.get('timestamp')!r} for a score posted with "
-        f"{POSTED_TIMESTAMP!r}. The whole record is {record!r}. E0-15 criterion 4 asks for the "
-        "timestamp the score carried; a recorder that stamps its own clock, or an inspection "
-        "surface that answers AGS Results — which carry no timestamp at all — cannot give E3 the "
-        "field that distinguishes one week's repost from the next."
-    )
-    assert record.get("activityProgress") == POSTED_ACTIVITY_PROGRESS, (
-        f"The platform recorded `activityProgress` {record.get('activityProgress')!r} for a score "
-        f"posted with {POSTED_ACTIVITY_PROGRESS!r}. The whole record is {record!r}. A value "
-        "hardcoded to 'Completed' is right for every score E3 will ever post and wrong about "
-        "every one of them."
-    )
-    assert record.get("gradingProgress") == POSTED_GRADING_PROGRESS, (
-        f"The platform recorded `gradingProgress` {record.get('gradingProgress')!r} for a score "
-        f"posted with {POSTED_GRADING_PROGRESS!r}. The whole record is {record!r}."
+    recorded = scores_in(entries)[0]
+    assert recorded == posted, (
+        "The recorded score is not the body that was posted: "
+        + "; ".join(disagreements(recorded, posted))
+        + f". Recorded {recorded!r} against posted {posted!r}. E0-15: the entry carries 'the "
+        "posted body, verbatim' — a recorder that normalises a field or fills in a default is a "
+        "recorder a test cannot use to prove what the tool sent."
     )
 
 
-def test_two_students_scores_are_recorded_separately_on_one_line_item(
+def test_the_recorded_score_carries_no_field_the_tool_did_not_post(
     mock_platform: Any,
     signed_launch: Any,
 ) -> None:
-    """The near miss on the round trip: one score slot per line item.
+    """The other direction of verbatim, and the near miss the test above cannot see.
 
-    A recorder that keeps the last score it was sent passes every assertion
-    above — the fields all round-trip, because there is only ever one score in
-    flight. What it breaks is the thing a line item is for: SPEC §3.4 posts one
-    score per student per section, so a single slot means the last student
-    posted is the only student graded, and the tool sees success for all of them.
+    The mutation is a score modelled with a fixed set of attributes and dumped
+    back out: `comment` arrives as `null`, `scoreMaximum` as a default 100, and
+    every field the tool *did* send round-trips perfectly. The test above posts
+    a `comment` and so cannot tell an invented one from a kept one; this one
+    posts the AGS-required members alone and asserts nothing was added.
+
+    It matters beyond tidiness because E3's retry handling will compare what it
+    sent against what the platform holds. A default the platform invented reads,
+    from the tool's side, as a field the tool got wrong.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    user_id = seeded_subjects(mock_platform)[0]
+    posted = score_payload(user_id)
+    mock_platform.post_score(created, posted)
+
+    recorded = one_score_for(mock_platform.posted_scores_for(created), user_id)
+    invented = sorted(set(recorded) - set(posted))
+    assert not invented, (
+        f"The recorded score carries {invented}, which the tool never posted — the whole record "
+        f"is {recorded!r} against a posted {posted!r}. E0-15 records 'the posted body, verbatim', "
+        "and a default the platform filled in is indistinguishable, from the tool's side, from a "
+        "value the tool sent."
+    )
+
+
+def test_each_recorded_score_names_the_line_item_it_was_posted_to(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """The `lineItem` half of the entry, which one line item cannot exercise.
+
+    Two mutations, and neither is visible while a test posts to a single line
+    item. A recorder that stamps every entry with the most recently created line
+    item, and one that records the entries in the right order with the line item
+    of the *last* post, both answer correctly for one. SPEC §3.4 gives every
+    section its own line item, so a readback that cannot say which section a
+    score belongs to is one E3 cannot use to check its own passback.
+
+    The identifier is compared whole rather than by suffix: E0-15 says the entry
+    carries the absolute line item URL, and a relative path is a value that
+    stops being unique the moment two contexts number their line items from one.
+    """
+    first = mock_platform.create_line_item(signed_launch)
+    second = mock_platform.create_line_item(signed_launch)
+    user_id = seeded_subjects(mock_platform)[0]
+
+    mock_platform.post_score(first, score_payload(user_id))
+    mock_platform.post_score(second, score_payload(user_id, scoreGiven=SECOND_POSTED_SCORE))
+
+    for line_item, expected_score in ((first, POSTED_SCORE), (second, SECOND_POSTED_SCORE)):
+        entries = mock_platform.posted_scores_for(line_item)
+        assert len(entries) == 1, (
+            f"`/mock/posted-scores` reports {len(entries)} entries naming line item "
+            f"`{line_item.get('id')}` after one score was posted to it. Every entry it reports is "
+            f"{mock_platform.posted_scores()!r}."
+        )
+        recorded = scores_in(entries)[0]
+        assert recorded.get("scoreGiven") == expected_score, (
+            f"The entry naming line item `{line_item.get('id')}` carries a score of "
+            f"{recorded.get('scoreGiven')!r} rather than {expected_score!r}, so the entries and "
+            "the line items they name have come apart."
+        )
+
+
+def test_two_students_scores_are_recorded_separately_and_in_arrival_order(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """One score per student, kept in the order they arrived.
+
+    Two mutations in one test because they are two readings of one store. A
+    recorder holding the last score it was sent passes every assertion in the
+    round trip above, since only one score is ever in flight there; what it
+    breaks is what a line item is for, because SPEC §3.4 posts one score per
+    student per section and a single slot grades only whoever posted last while
+    the tool sees success for everybody. And a recorder keyed by user rather
+    than appended to answers both scores in whatever order a dictionary hands
+    them over, which E0-15's "in the order the scores arrived" rules out — a
+    readback that cannot say what arrived first cannot show a repost sequence.
 
     The two scores carry different values as well as different users, so a
-    platform that returns two records built from one stored score is caught by
-    the value rather than by the count.
+    platform answering two entries built from one stored score is caught by the
+    value rather than by the count.
     """
     subjects = seeded_subjects(mock_platform)
     assert len(subjects) > 1, (
@@ -379,15 +491,110 @@ def test_two_students_scores_are_recorded_separately_on_one_line_item(
         ),
     )
 
-    records = mock_platform.recorded_scores(created)
-    assert float(value_of(recorded_for(records, first_user))) == pytest.approx(POSTED_SCORE), (
-        f"After posting {POSTED_SCORE} for {first_user!r} and {SECOND_POSTED_SCORE} for "
-        f"{second_user!r}, the platform reports {records!r}. The first student's score has moved, "
-        "so the line item holds one score rather than one score per student."
+    recorded = scores_in(mock_platform.posted_scores_for(created))
+    assert [score.get("userId") for score in recorded] == [first_user, second_user], (
+        f"After posting for {first_user!r} and then {second_user!r}, `/mock/posted-scores` reports "
+        f"{[score.get('userId') for score in recorded]}. E0-15 records the scores 'in the order "
+        "the scores arrived', and one entry where two were posted is a line item holding one "
+        "score rather than one score per student."
     )
-    assert float(value_of(recorded_for(records, second_user))) == pytest.approx(
-        SECOND_POSTED_SCORE
-    ), (
-        f"After posting {POSTED_SCORE} for {first_user!r} and {SECOND_POSTED_SCORE} for "
-        f"{second_user!r}, the platform reports {records!r} for the second student."
+    assert [score.get("scoreGiven") for score in recorded] == [POSTED_SCORE, SECOND_POSTED_SCORE], (
+        f"The two entries carry {[score.get('scoreGiven') for score in recorded]} for scores "
+        f"posted as {[POSTED_SCORE, SECOND_POSTED_SCORE]}. Two entries built from one stored "
+        "score carry the same value twice."
+    )
+
+
+def test_a_reposted_score_is_kept_beside_the_one_it_replaces(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """A record of what the tool sent, not of what the grade currently is.
+
+    SPEC §3.4 recomputes and re-posts a participation score after every week
+    closes, so the same student's score arrives at the same line item many times
+    over a term. E0-15 records "the order the scores arrived", which a store
+    keyed by `(lineItem, userId)` cannot express: it holds the latest and the
+    earlier posts are gone. That store passes every other test in this module,
+    and it is the one that leaves E3 unable to show that a repost happened at
+    all — which is exactly what its retry handling will need to prove.
+
+    The two posts carry increasing timestamps, because AGS permits a platform to
+    refuse a score older than the one it holds and a test should not depend on
+    the mock's choice about that.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    user_id = seeded_subjects(mock_platform)[0]
+
+    mock_platform.post_score(created, score_payload(user_id))
+    mock_platform.post_score(
+        created,
+        score_payload(user_id, scoreGiven=SECOND_POSTED_SCORE, timestamp=SECOND_POSTED_TIMESTAMP),
+    )
+
+    recorded = scores_for(mock_platform.posted_scores_for(created), user_id)
+    assert [score.get("scoreGiven") for score in recorded] == [POSTED_SCORE, SECOND_POSTED_SCORE], (
+        f"Two scores were posted for {user_id!r} to one line item and `/mock/posted-scores` "
+        f"reports {[score.get('scoreGiven') for score in recorded]}. E0-15 records scores 'in the "
+        "order the scores arrived', which reads as a log of what was received rather than a "
+        "latest-per-student store — if that reading is wrong, it is the ticket that has to say "
+        "so, because a store that keeps only the latest cannot show E3 that a repost happened."
+    )
+
+
+def test_the_results_endpoint_answers_without_the_fields_a_result_has_no_room_for(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """The conformant half of the readback, and why the mock route exists at all.
+
+    The mutation is a `Result` widened with `timestamp`, `activityProgress` and
+    `gradingProgress` so that criterion 4 could be met through the protocol. It
+    is an attractive mistake — one endpoint instead of two, and every readback
+    test passes — and what it does is teach E3 to read fields no real platform
+    sends, which surfaces against the first live LMS as a passback that cannot
+    verify itself.
+
+    The absence is asserted over a result that is *there*: `docs/MISTAKES.md`
+    entry 3, because "the record carries none of these three fields" is true of
+    an endpoint that answers an empty array, of one that lost the score, and of
+    one that never received it. So the result for this user is required first,
+    with the score it was posted, and only then is it asked what it does not
+    carry.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    user_id = seeded_subjects(mock_platform)[0]
+    mock_platform.post_score(created, score_payload(user_id))
+
+    results = [
+        result
+        for result in mock_platform.results(created)
+        if str(result.get("userId", "")) == user_id
+    ]
+    assert len(results) == 1, (
+        f"The AGS Result service reports {len(results)} results for {user_id!r} after one score "
+        f"was posted. It reports {mock_platform.results(created)!r}. E0-15: 'The conformant AGS "
+        "Results endpoint answers for the same line item.'"
+    )
+    result = results[0]
+    assert isinstance(result.get("resultScore"), int | float), (
+        f"The result for {user_id!r} carries no numeric `resultScore` — the whole result is "
+        f"{result!r}. Without this the assertion below would be true of a result that had lost "
+        "the score entirely, which is `docs/MISTAKES.md` entry 3 exactly."
+    )
+    assert result.get("resultScore") == POSTED_SCORE, (
+        f"The result for {user_id!r} carries `resultScore` {result.get('resultScore')!r} for a "
+        f"score posted as {POSTED_SCORE} out of {POSTED_MAXIMUM}, against a line item whose "
+        f"maximum is also {POSTED_MAXIMUM}. AGS lets a platform rescale a score to the line "
+        "item's maximum and there is nothing to rescale here, so the two should agree; if the "
+        "mock is deliberately rescaling, that is a sentence the ticket owes rather than a "
+        "number this test should widen."
+    )
+    widened = sorted(name for name in FIELDS_A_RESULT_DOES_NOT_CARRY if name in result)
+    assert not widened, (
+        f"The AGS Result for {user_id!r} carries {widened} — the whole result is {result!r}. A "
+        "`Result` has `id`, `userId`, `resultScore`, `resultMaximum`, `scoreOf` and `comment` and "
+        "nothing else, and E0-15 makes that absence a criterion: the readback of the posted body "
+        "is `GET /mock/posted-scores`, outside the AGS namespace, precisely so that nothing "
+        "teaches E3 to expect these three from a platform."
     )
