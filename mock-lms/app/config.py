@@ -32,6 +32,7 @@ Compose values are literals, and this class is not that `Settings`. See
 
 import os
 from dataclasses import dataclass
+from urllib.parse import quote
 
 # The variable names, together, so that a reader can see the whole configuration
 # surface of this service in one place — and so that `docker-compose.yml` and
@@ -69,6 +70,26 @@ DISCOVERY_PATH = "/.well-known/openid-configuration"
 JWKS_PATH = "/.well-known/jwks.json"
 AUTHORIZATION_PATH = "/oidc/authorize"
 REGISTRATION_PATH = "/registration"
+
+# The LTI Advantage services (E0-15). Every one of them hangs off a context,
+# because that is what NRPS 2.0 and AGS 2.0 scope them to: a roster is one
+# section's, and a line item belongs to one section's gradebook. A tool never
+# builds these paths — it reads the absolute URLs out of the two service claims
+# in the launch — so they are templates here rather than anything a caller
+# assembles, and the builders below are the only place they become a URL.
+CONTEXT_PATH = "/lti/contexts/{context_id}"
+MEMBERSHIPS_PATH = f"{CONTEXT_PATH}/memberships"
+LINE_ITEMS_PATH = f"{CONTEXT_PATH}/line_items"
+LINE_ITEM_PATH = f"{LINE_ITEMS_PATH}/{{line_item_id}}"
+SCORES_PATH = f"{LINE_ITEM_PATH}/scores"
+RESULTS_PATH = f"{LINE_ITEM_PATH}/results"
+
+# The inspection surface, and the `/mock/` prefix is the point (ADR 0047): a
+# conformant AGS `Result` has no timestamp and no progress fields, so what the
+# tool posted cannot be read back through the protocol. This route serves it
+# outside the AGS namespace, so that a tool which learned it would have learned
+# something no real platform serves.
+MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 
 
 class ConfigurationError(RuntimeError):
@@ -151,3 +172,31 @@ class PlatformSettings:
     def discovery_url(self) -> str:
         """Where this platform's OIDC discovery document is served."""
         return f"{self.issuer}{DISCOVERY_PATH}"
+
+    def absolute(self, path_template: str, **parts: str) -> str:
+        """One Advantage URL, absolute, with every part percent-encoded.
+
+        **Absolute, always.** A tool resolves a service URL with no knowledge of
+        where the token came from — it may have arrived over a queue or out of a
+        session — so a relative path is a service it cannot call. Every service
+        URL this platform advertises is built here, which is what keeps that one
+        rule in one place.
+
+        `safe=""` on the encoding is deliberate: a context identifier is opaque
+        to a tool, so a `/` inside one would silently become a path segment and
+        route somewhere else.
+        """
+        encoded = {name: quote(value, safe="") for name, value in parts.items()}
+        return f"{self.issuer}{path_template.format(**encoded)}"
+
+    def memberships_url(self, context_id: str) -> str:
+        """Where one section's NRPS roster is served."""
+        return self.absolute(MEMBERSHIPS_PATH, context_id=context_id)
+
+    def line_items_url(self, context_id: str) -> str:
+        """Where one section's AGS line items are listed and created."""
+        return self.absolute(LINE_ITEMS_PATH, context_id=context_id)
+
+    def line_item_url(self, context_id: str, line_item_id: str) -> str:
+        """One line item's own URL, which AGS makes its `id`."""
+        return self.absolute(LINE_ITEM_PATH, context_id=context_id, line_item_id=line_item_id)

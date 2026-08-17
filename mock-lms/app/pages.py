@@ -53,8 +53,16 @@ def launch_page(settings: PlatformSettings, platform: SeededPlatform) -> str:
     The registration block sits **outside** the form on purpose. Anything inside
     it is a field that gets submitted, and a value that is documentation should
     not become a parameter because it was convenient to put it there.
+
+    The user selector offers `launch_users()` rather than every seeded person,
+    and E0-15 is what made the two differ: its roster holds students who take one
+    section. The page's two selectors are chosen independently, so an option that
+    is only a launch in some sections is an option that produces a `400` — which
+    reads, from a browser, as a broken platform rather than as a dead choice.
     """
-    users = "\n          ".join(option(user.user_id, user.label) for user in platform.users)
+    users = "\n          ".join(
+        option(user.user_id, user.label) for user in platform.launch_users()
+    )
     placements = "\n          ".join(
         option(
             placement.resource_link_id,
