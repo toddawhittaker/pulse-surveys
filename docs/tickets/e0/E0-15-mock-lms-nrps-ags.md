@@ -41,6 +41,17 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
   test cannot use to prove what the tool sent. Todd's decision, 2026-08-17;
   ADR 0047. The `/mock/` prefix is the point — a tool that learned this route
   would have learned something no real platform serves.
+
+  Three readings of that paragraph, settled here so nobody has to guess:
+  **verbatim is equality, not containment** — the recorded body carries the
+  fields the tool posted and no others, since a stray field is how a default
+  invented by the mock gets mistaken for something the tool sent. **The store is
+  a log, not a table keyed by student** — §3.4 re-posts a section's score after
+  every week closes and E3 adds retries on top, so a re-post is a second entry
+  beside the first rather than a replacement, and the sequence is the evidence
+  E3 needs that a retry happened. **The Results endpoint does not rescale** —
+  `resultScore` is the posted `scoreGiven` and `resultMaximum` is the line
+  item's maximum.
 - Seed data: a small institution with a handful of courses and sections whose
   codes exercise more than one start letter and both modalities, plus students,
   instructors, and enrollments including at least one mid-term add and one drop.
@@ -94,6 +105,12 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
   (E3).
 - `PlatformProfile` adapters for real platforms (E1 and beyond) — the mock is
   the reference behavior, not a quirk profile.
+- The OAuth 2.0 client-credentials grant that guards NRPS and AGS on a real
+  platform. This ticket names no token endpoint and E0-14 built none, so both
+  services answer unauthenticated and the tests call them that way. **E1 and E3
+  cannot build a conformant client against that**, and whichever of them needs a
+  token first is where the grant belongs; note it there rather than discovering
+  it against a real LMS.
 - The full seeded demo institution used for development (E0-17); this seed data
   belongs to the mock platform and stays small.
 
@@ -114,9 +131,15 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
 - [ ] Seed sections use at least two different start letters and both `WW` and
       `FF` modalities, so E0-07's parser has real input.
 - [ ] Seed enrollments include a mid-term add and a mid-term drop, giving E3 the
-      edge cases its property tests need. Mid-term is now assertable rather than
-      inferred: the added member's `start` falls after its section's start date
-      and the dropped member's `end` falls before its section's end date.
+      edge cases its property tests need. Asserted within a section rather than
+      against a calendar: the added member's `start` falls after every
+      classmate's in the same section, and the dropped member's `end` is set
+      while everyone else's is `null`. The mock publishes no section start or
+      end date — a section's calendar is derived tool-side from its code and the
+      term's start-letter map (§2.2), which live in Pulse's database, not on the
+      platform — so "mid-term" is not a claim this surface can support, and a
+      criterion written as though it could would be a criterion no test can
+      honestly meet.
 - [ ] `docker compose up -d` still reaches healthy on every service.
 
 ## Definition of done
