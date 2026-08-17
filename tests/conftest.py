@@ -1708,8 +1708,17 @@ def instant(value: Any) -> datetime | None:
     """
     if not isinstance(value, str) or len(value) < 10:
         return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        # RFC 3339 §5.6 notes that `Z` may be written in lower case, and
+        # `datetime.fromisoformat` does not accept the lower-case form — so a
+        # conformant timestamp would read as "not a moment" and a test about
+        # enrollment windows would report that the roster carries no dates.
+        # Rewritten by position rather than by `replace`, which would also
+        # rewrite a `Z` that was not the designator.
+        text = f"{text[:-1]}+00:00"
     try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
@@ -2274,6 +2283,34 @@ class MockPlatform:
             "tag": "participation",
         }
         payload.update(overrides)
+        return self.created_line_item(launch, payload, omitting)
+
+    def post_line_item(
+        self,
+        launch: SignedLaunch,
+        payload: Mapping[str, Any],
+    ) -> Any:
+        """POST one line-item body and hand back the response, asserting nothing.
+
+        `create_line_item` requires success, which is right for the callers that
+        need a line item to work with and wrong for the ones asking what the
+        container *refuses*. Those need the raw answer, and they need it without
+        knowing the media type AGS fixes for the request.
+        """
+        return self.service_post(
+            self.line_items_url(launch),
+            payload,
+            LINE_ITEM_MEDIA_TYPE,
+            accept=LINE_ITEM_MEDIA_TYPE,
+        )
+
+    def created_line_item(
+        self,
+        launch: SignedLaunch,
+        payload: dict[str, Any],
+        omitting: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Post `payload`, require it created, and hand back what was stored."""
         for name in omitting:
             if name not in payload:
                 pytest.fail(
@@ -2283,12 +2320,7 @@ class MockPlatform:
                     "would post the very member the caller meant to leave out."
                 )
             payload.pop(name)
-        response = self.service_post(
-            self.line_items_url(launch),
-            payload,
-            LINE_ITEM_MEDIA_TYPE,
-            accept=LINE_ITEM_MEDIA_TYPE,
-        )
+        response = self.post_line_item(launch, payload)
         assert response.status_code in (200, 201), (
             f"Creating a line item answered {response.status_code} rather than 200 or 201. E0-15 "
             "criterion 3: line-item creation returns an identifier that score posting accepts. "

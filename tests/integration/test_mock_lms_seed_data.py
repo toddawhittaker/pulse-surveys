@@ -508,18 +508,33 @@ def test_the_offset_check_reads_an_rfc_3339_stamp_and_refuses_a_bare_date() -> N
     an offset, never a bare date" — so a check that merely parsed the value would
     accept the thing the requirement exists to refuse, and would look like it had
     asserted something (`docs/MISTAKES.md` entry 3).
+
+    **Three of these cases exist to make two services agree.** A reviewer found
+    that this repository held two answers to "is this an RFC 3339 timestamp": the
+    AGS Score service refused a lower-case `z` and accepted ISO 8601's basic
+    (`20260908T000000Z`) and comma-fraction (`…00,5Z`) forms, while the matcher
+    here gave the opposite answer on all three — and nothing compared them. This
+    one is right: RFC 3339 §5.6 notes that `T` and `Z` "may alternatively be
+    lower case", and the same section fixes the extended spelling and writes
+    `time-secfrac = "." 1*DIGIT`, so the comma is ISO's and not RFC 3339's. The
+    three cases are pinned here and asserted against the Score service in
+    `test_mock_lms_ags_line_items_and_scores.py`, so the two surfaces now agree
+    by assertion rather than by coincidence.
     """
     for stamped in (
         "2026-09-08T00:00:00-04:00",
         "2026-09-08T00:00:00Z",
         "2026-09-08T09:30:00.500+00:00",
         "2026-09-08 00:00:00+00:00",
+        "2026-09-08t00:00:00z",
     ):
         assert carries_an_offset(stamped), f"{stamped!r} is RFC 3339 and says which zone it is in."
     for naive in (
         "2026-09-08",
         "2026-09-08T00:00:00",
         "2026-09-08T00:00:00+0000",
+        "20260908T000000Z",
+        "2026-09-08T00:00:00,5Z",
         "September 8, 2026",
         "",
         None,

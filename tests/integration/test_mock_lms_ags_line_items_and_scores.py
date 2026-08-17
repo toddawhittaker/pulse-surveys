@@ -45,13 +45,26 @@ the mismatch and expects the platform to scale — and what follows for E3 is th
 it posts against the line item's own maximum and never relies on a platform to
 scale for it.
 
-A second rule fills a gap the specification leaves rather than narrowing it. AGS
-refuses a timestamp *before* the one held and says nothing about an equal one;
-E0-15 rules that equal is **accepted**, because a passback that times out on the
+Two further rules fill gaps the specification leaves rather than narrowing it,
+and both rest on a decision recorded outside AGS. The first: AGS refuses a
+timestamp *before* the one held and says nothing about an equal one, and E0-15
+rules that equal is **accepted**, because a passback that times out on the
 network re-sends an identical body and a platform that answered 409 to that
 would tell E3 its retry failed while the score sat in the log. This suite
 asserted the opposite for a day, and the test that turned around says so in its
 own docstring.
+
+The second is which `gradingProgress` values produce a `Result`. That the field
+must decide *something* is AGS's — it exists to say whether a score is a grade
+yet, so a fold that ignores it has made it decorative, which is the defect these
+tests close. Which values fall on which side is **Canvas's documented
+behaviour**, not AGS's text, and it is marked as such where the two constants
+are declared. What is deliberately unasserted, and belongs on E0-28: an ungraded
+score arriving *after* a graded one for the same student. "The newest score
+produces no Result" reads as retracting the earlier grade while Canvas's rule
+ignores the score and leaves the grade standing, and nothing available settles
+which — so this suite tests only the case where every score for a student is
+ungraded.
 
 **Verbatim is asserted as equality, not field by field.** The three ways a
 recorder half-does this — normalising the timestamp, filling a default
@@ -201,6 +214,18 @@ def refused(platform: Any, line_item: dict[str, Any], payload: dict[str, Any], w
         "score is worse than an acceptance, because the tool retries what it believes failed."
     )
     return response
+
+
+def all_line_item_ids(platform: Any, launch: Any) -> set[str]:
+    """Every line item in the container, walked to the last page.
+
+    Walked rather than read off the first page, because the container pages: a
+    test comparing "the listing before" with "the listing after" over one page
+    is comparing two page-sized windows, and a row added past the window makes
+    the two agree. That is the emptiness failure of `docs/MISTAKES.md` entry 3
+    with a bound instead of a zero.
+    """
+    return {str(item.get("id")) for page in platform.line_item_pages(launch) for item in page}
 
 
 def seeded_subjects(platform: Any) -> list[str]:
@@ -378,8 +403,14 @@ def test_a_created_line_item_appears_in_the_line_item_listing(
     array every time would otherwise satisfy "the id is in the list" whenever
     the id happened to be seeded, and would satisfy nothing at all if it were
     empty.
+
+    Both reads walk every page. Reading the first page alone was correct while
+    the container returned everything at once, and became a trap the moment
+    paging landed: a new line item served past the first page would read as a
+    creation that stored nothing, and the failure would point at creation rather
+    than at the window this test was looking through.
     """
-    before = {str(item.get("id")) for item in mock_platform.line_items(signed_launch)}
+    before = all_line_item_ids(mock_platform, signed_launch)
     created = mock_platform.create_line_item(signed_launch)
     identifier = str(created.get("id"))
     assert identifier not in before, (
@@ -387,7 +418,7 @@ def test_a_created_line_item_appears_in_the_line_item_listing(
         "test cannot tell a stored line item from a seeded one. Either creation reused a seeded "
         "identifier or the listing is a fixture."
     )
-    after = {str(item.get("id")) for item in mock_platform.line_items(signed_launch)}
+    after = all_line_item_ids(mock_platform, signed_launch)
     assert identifier in after, (
         f"The line item created at `{identifier}` is absent from the listing, which carries "
         f"{sorted(after)}. E0-15's scope asks for creation and listing; a creation that returns "
@@ -687,6 +718,19 @@ def test_the_results_endpoint_answers_without_the_fields_a_result_has_no_room_fo
     )
 
 
+# The two `gradingProgress` values that mean a grade exists, and the three that
+# mean one does not. **The split is not in AGS's text** — the specification
+# describes the five and does not say which produce a `Result` — so it rests on
+# Canvas's documented behaviour, that `NotReady`, `Failed` and `Pending` cause
+# `scoreGiven` to be ignored, and on the reading that `PendingManual` is a real
+# grade awaiting human review while the other three assert there is no grade
+# yet. E0-15 puts platform quirk profiles out of scope and calls this mock "the
+# reference behavior, not a quirk profile", so the ADR for this rule owes that
+# sentence: the direction is AGS's, the line is Canvas's.
+GRADED_PROGRESS_VALUES = ("FullyGraded", "PendingManual")
+UNGRADED_PROGRESS_VALUES = ("NotReady", "Failed", "Pending")
+
+
 # ---------------------------------------------------------------------------
 # What the Score service refuses. AGS 2.0's own rules, none of them the mock's
 # to relax: it is the reference platform E1 and E3 are built against, so a score
@@ -770,6 +814,136 @@ def test_a_score_whose_maximum_disagrees_with_the_line_items_is_refused(
         created,
         score_payload(seeded_subjects(mock_platform)[0], scoreMaximum=POSTED_MAXIMUM // 2),
         f"a score out of {POSTED_MAXIMUM // 2} against a line item out of {POSTED_MAXIMUM}",
+    )
+
+
+def test_a_negative_score_is_refused(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """A grade below nothing is not a grade, and it folds into the gradebook.
+
+    Measured: `scoreGiven: -5` is accepted and produces a `Result` of `-5`.
+    Canvas answers 422. E3 computes valid weeks over weeks elapsed, which cannot
+    go negative, so a negative arriving at this service is a tool defect the
+    platform should refuse rather than record — and a `Result` of `-5` is a
+    number a student sees.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    refused(
+        mock_platform,
+        created,
+        score_payload(seeded_subjects(mock_platform)[0], scoreGiven=-5),
+        "a score of -5",
+    )
+
+
+def test_a_score_above_the_maximum_is_accepted_as_extra_credit(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """The near-miss on the test above: the range check that goes one step too far.
+
+    `0 <= scoreGiven <= scoreMaximum` is the obvious way to refuse a negative
+    score, and its upper half is wrong. AGS permits a score above the maximum and
+    Canvas treats it as extra credit, so a platform refusing it turns a
+    legitimate passback into a 422 that E3 would retry forever. This test is here
+    so that the fix for the negative case cannot quietly acquire an upper bound
+    nobody asked for.
+
+    The result is read back rather than the status alone, because a service
+    could accept the post and clamp the value on the way into the fold — which
+    is the same defect wearing a 200.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    user_id = seeded_subjects(mock_platform)[0]
+    above = POSTED_MAXIMUM + 20
+    response = mock_platform.post_score(created, score_payload(user_id, scoreGiven=above))
+    assert 200 <= response.status_code < 300, (
+        f"The platform answered {response.status_code} for a score of {above} out of "
+        f"{POSTED_MAXIMUM}. AGS permits a score above the maximum and Canvas records it as extra "
+        f"credit, so refusing it is a range check with one bound too many. Body begins "
+        f"{response.text[:200]!r}."
+    )
+    matching = [
+        result
+        for result in mock_platform.results(created)
+        if str(result.get("userId", "")) == user_id
+    ]
+    assert matching and matching[0].get("resultScore") == above, (
+        f"A score of {above} out of {POSTED_MAXIMUM} was accepted and reads back as "
+        f"{matching!r}. A platform that clamps to the maximum has changed the grade rather than "
+        "refused it, which is the failure a 200 hides."
+    )
+
+
+def test_a_non_string_user_id_is_refused(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """AGS types `userId` as a string, and two guards here disagree about what it is.
+
+    The measured consequence is worse than the type error. The ordering rule keys
+    on `str(payload["userId"])` while the results fold requires an actual `str`
+    and silently drops the rest — so `"777"` and `777` are **one** user to the
+    409 guard and **two** to the fold, and one of those two is invisible in the
+    gradebook while still blocking the other's re-posts as stale. A student whose
+    grade silently stops updating is the shape E3 cannot debug from its own side.
+
+    A list is refused beside the integer because "not a string" is the rule, and
+    a check written `isinstance(user_id, int)` would refuse one and take the
+    other.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    for wrong in (777, ["u1"]):
+        refused(
+            mock_platform,
+            created,
+            score_payload(seeded_subjects(mock_platform)[0], userId=wrong),
+            f"a `userId` of {wrong!r}, which AGS types as a string",
+        )
+
+
+def test_a_boolean_is_not_a_number_to_this_service(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """`true` passes `isinstance(x, int | float)`, and both surfaces let it through.
+
+    A Python-shaped hole rather than a protocol one, which is why no reading of
+    AGS would have found it: `bool` is a subclass of `int`, so every numeric
+    check written with `isinstance` accepts `True`. Measured on both surfaces —
+    `"scoreGiven": true` reads back as `resultScore: true`, and a line item
+    accepts `"scoreMaximum": true` — so both are asserted here rather than the
+    one, because they are two checks and a fix to either leaves the other.
+
+    A `resultScore` of `true` is not a number a gradebook can render, and a line
+    item whose maximum is `true` makes every percentage E3 computes a division by
+    a boolean.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    refused(
+        mock_platform,
+        created,
+        score_payload(seeded_subjects(mock_platform)[0], scoreGiven=True),
+        "a `scoreGiven` of `true`",
+    )
+
+    before = all_line_item_ids(mock_platform, signed_launch)
+    response = mock_platform.post_line_item(
+        signed_launch,
+        {"scoreMaximum": True, "label": "Pulse Participation", "tag": "participation"},
+    )
+    assert 400 <= response.status_code < 500, (
+        f"Creating a line item with `scoreMaximum: true` answered {response.status_code}. "
+        f"Body begins {response.text[:200]!r}. `true` is not a maximum, and every score E3 posts "
+        "against this line item would be a percentage of a boolean."
+    )
+    assert all_line_item_ids(mock_platform, signed_launch) == before, (
+        f"The line item with `scoreMaximum: true` was refused with {response.status_code} and "
+        "created anyway — the container gained "
+        f"{sorted(all_line_item_ids(mock_platform, signed_launch) - before)}. A refusal that "
+        "stores the row is worse than an acceptance, because nothing afterwards knows it is there."
     )
 
 
@@ -863,6 +1037,112 @@ def test_a_grading_progress_outside_the_ags_vocabulary_is_refused(
         )
 
 
+def test_a_score_whose_grading_has_not_produced_a_grade_makes_no_result(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """`gradingProgress` decides whether there is a grade, and the fold has to read it.
+
+    **The defect this closes, and the way the last round created the appearance
+    of fixing it.** `results()` ignored `gradingProgress` entirely, so a score
+    posted `NotReady` — "the grading process has not started" — read back as a
+    finished grade, measured across all five values. The round before this one
+    added a vocabulary check, which makes the field *look* handled: it is now
+    validated, echoed verbatim in the log, and acted upon by nothing. A field
+    that is checked and then ignored is worse than one that is absent, because a
+    reader of either the code or the tests sees it being taken seriously.
+
+    E3 posts a score at submit time, before §3.3's classification has decided
+    whether the response counts. If that score folds into a `Result`, the
+    gradebook shows a participation grade computed from a week that has not been
+    graded yet, and the student sees a number that will change.
+
+    The control is on the same line item and is what stops this being a test
+    about an empty results container: a second student's `FullyGraded` score has
+    to come back while the first's ungraded one does not. Without it, a results
+    endpoint that had stopped answering at all would pass.
+
+    **What this deliberately does not assert**, and it belongs on E0-28: what
+    happens when an ungraded score arrives *after* a graded one for the same
+    student. "The newest score does not produce a Result" reads as retracting
+    the earlier grade; Canvas's rule is that the score is *ignored*, which leaves
+    the earlier grade standing. Those are opposite behaviours, neither AGS nor
+    the ruling settles which, and pinning one here would decide it by accident.
+    """
+    subjects = seeded_subjects(mock_platform)
+    assert len(subjects) > 1, (
+        f"The platform offers launches for only {subjects}, so there is no second student to "
+        "carry the control and an empty results container would pass this test."
+    )
+    ungraded_user, graded_user = subjects[0], subjects[1]
+
+    for progress in UNGRADED_PROGRESS_VALUES:
+        created = mock_platform.create_line_item(signed_launch)
+        mock_platform.post_score(created, score_payload(ungraded_user, gradingProgress=progress))
+        mock_platform.post_score(
+            created,
+            score_payload(
+                graded_user, gradingProgress="FullyGraded", scoreGiven=SECOND_POSTED_SCORE
+            ),
+        )
+
+        named = {str(result.get("userId", "")) for result in mock_platform.results(created)}
+        assert graded_user in named, (
+            f"The results container carries no result for the student whose score was "
+            f"`FullyGraded` ({graded_user!r}) — it carries {sorted(named)}. Without that, the "
+            f"absence asserted below is a fact about the endpoint rather than about "
+            f"`gradingProgress` {progress!r}."
+        )
+        assert ungraded_user not in named, (
+            f"A score posted `gradingProgress` {progress!r} folded into a `Result` for "
+            f"{ungraded_user!r}: {mock_platform.results(created)!r}. That value says the grading "
+            "process has produced no grade, so publishing one from it puts a number in the "
+            "gradebook that the platform has just said does not exist."
+        )
+
+
+def test_a_score_pending_manual_review_still_makes_a_result(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """The boundary of the rule above, and the over-correction it exists to catch.
+
+    An implementation that admits only `FullyGraded` is the obvious way to
+    over-fix the defect, and it is wrong in the direction that costs most:
+    `PendingManual` is a real grade awaiting human review, and it is the value
+    E3 will carry while §3.3's classification is pending. A fold that dropped it
+    would leave every participation grade invisible until something later marked
+    it fully graded — which nothing in E3 does.
+
+    Both graded values are asserted, and the score is read back rather than
+    merely counted: a fold that produced a result carrying nothing, or carrying
+    the maximum, would satisfy a test that only asked whether the student
+    appeared.
+    """
+    user_id = seeded_subjects(mock_platform)[0]
+    for progress in GRADED_PROGRESS_VALUES:
+        created = mock_platform.create_line_item(signed_launch)
+        mock_platform.post_score(created, score_payload(user_id, gradingProgress=progress))
+
+        matching = [
+            result
+            for result in mock_platform.results(created)
+            if str(result.get("userId", "")) == user_id
+        ]
+        assert matching, (
+            f"A score posted `gradingProgress` {progress!r} produced no `Result` for "
+            f"{user_id!r}: {mock_platform.results(created)!r}. Both values in "
+            f"{list(GRADED_PROGRESS_VALUES)} mean a grade exists — `PendingManual` is one "
+            "awaiting review, not one awaiting computation — and E3 posts the second of them "
+            "while §3.3's classification is still pending."
+        )
+        assert matching[0].get("resultScore") == POSTED_SCORE, (
+            f"The result folded from a {progress!r} score reads "
+            f"{matching[0].get('resultScore')!r} rather than the {POSTED_SCORE} that was posted: "
+            f"{matching[0]!r}."
+        )
+
+
 def test_a_timestamp_that_is_not_rfc_3339_is_refused(
     mock_platform: Any,
     signed_launch: Any,
@@ -881,9 +1161,26 @@ def test_a_timestamp_that_is_not_rfc_3339_is_refused(
     timestamp has a log it cannot sort, and one that silently substitutes its own
     clock has thrown away the field E3 uses to tell one week's repost from the
     next.
+
+    The last two are spellings a reviewer measured this service accepting, and
+    neither is RFC 3339. `20260302T100000Z` is ISO 8601 basic format, which RFC
+    3339 does not admit — it fixes the extended spelling with hyphens and colons
+    — and `2026-03-02T10:00:00,5Z` uses ISO's comma for the fraction, where RFC
+    3339 §5.6 writes `time-secfrac = "." 1*DIGIT`. Accepting either is a service
+    validating "roughly ISO" rather than the profile the specification names, and
+    `test_a_timestamp_spelled_with_a_lowercase_zone_designator_is_accepted`
+    below is the other half of the same claim: this is a *narrower* grammar than
+    ISO, not a stricter reading of everything.
     """
     user_id = seeded_subjects(mock_platform)[0]
-    for wrong in ("yesterday", "2026-03-02", "2026-03-02T14:05:09", "03/02/2026"):
+    for wrong in (
+        "yesterday",
+        "2026-03-02",
+        "2026-03-02T14:05:09",
+        "03/02/2026",
+        "20260302T100000Z",
+        "2026-03-02T10:00:00,5Z",
+    ):
         created = mock_platform.create_line_item(signed_launch)
         refused(
             mock_platform,
@@ -891,6 +1188,51 @@ def test_a_timestamp_that_is_not_rfc_3339_is_refused(
             score_payload(user_id, timestamp=wrong),
             f"a `timestamp` of {wrong!r}, which is not an RFC 3339 timestamp with an offset",
         )
+
+
+def test_a_timestamp_spelled_with_a_lowercase_zone_designator_is_accepted(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """`2026-03-02T10:00:00z` is RFC 3339, and it is currently refused.
+
+    RFC 3339 §5.6 carries a note in as many words: the `T` and `Z` characters
+    "may alternatively be lower case". So a tool sending a lower-case designator
+    is conformant, and a platform refusing it has narrowed the specification
+    rather than enforced it — which is the failure mode a validator written from
+    examples always has, since every example in every specification uses the
+    upper-case form.
+
+    This is the control on the refusal test above, and it is the half that keeps
+    it honest (`docs/MISTAKES.md` entry 3): a validator that refused every
+    spelling but one would pass all six refusals there and be wrong about the
+    protocol. It also fixes an inconsistency a reviewer found between this
+    service and the roster's enrollment windows, which accept the lower-case
+    form — one repository holding two answers to "is this an RFC 3339
+    timestamp", with nothing comparing them. The seed side's control test now
+    carries the same three cases, so the two agree by assertion rather than by
+    coincidence.
+
+    Both characters are exercised, since a validator is as likely to case-fold
+    one and not the other as to case-fold neither.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    user_id = seeded_subjects(mock_platform)[0]
+    response = mock_platform.post_score(
+        created, score_payload(user_id, timestamp="2026-03-02t14:05:09z")
+    )
+    assert 200 <= response.status_code < 300, (
+        f"The platform answered {response.status_code} for a timestamp spelled "
+        "`2026-03-02t14:05:09z`. RFC 3339 §5.6 notes that `T` and `Z` may be lower case, so this "
+        "is a conformant tool's timestamp being refused — and the roster's enrollment windows "
+        f"accept the same spelling. Body begins {response.text[:200]!r}."
+    )
+    logged = scores_for(mock_platform.posted_scores_for(created), user_id)
+    assert len(logged) == 1 and logged[0].get("timestamp") == "2026-03-02t14:05:09z", (
+        f"The accepted score reads {logged!r}. E0-15 records the posted body verbatim, so a "
+        "service that normalises the spelling on the way in has changed what the tool sent — "
+        "which the verbatim rule forbids for the same reason it forbids restamping the clock."
+    )
 
 
 def test_a_score_older_than_the_last_one_for_that_user_is_refused_with_409(
@@ -1296,6 +1638,146 @@ def test_the_line_item_container_pages_by_link_header_when_a_limit_is_given(
             f"The line item created at `{created.get('id')}` is missing from the assembled "
             f"container {assembled}. Paging that loses a line item loses a section's grades."
         )
+
+
+def test_a_filtered_walk_of_the_line_item_container_stays_filtered(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """Filtering and paging, which this suite tested separately and never together.
+
+    Each behaviour has a test above and their combination had none — which is
+    where they interact, because the filter has to survive into the `Link` URL
+    the platform advertises for the next page. A container that filters page one
+    correctly and advertises an unfiltered `next` hands a tool another tag's line
+    items from page two onward, and in E3 that is another section's gradebook
+    column. Both existing tests pass against it: the paging test uses no filter,
+    and the filter tests fit on one page.
+
+    Every assembled item is required to carry the tag, rather than only the two
+    that were created with it, because "the ones I made are present" is satisfied
+    by a walk that also collected everything else.
+    """
+    tag = f"e0-15-walk-{uuid4().hex[:12]}"
+    created = [
+        mock_platform.create_line_item(signed_launch, tag=tag),
+        mock_platform.create_line_item(signed_launch, tag=tag),
+    ]
+    mock_platform.create_line_item(signed_launch)
+
+    pages = mock_platform.line_item_pages(signed_launch, tag=tag, limit=1)
+    assert len(pages) > 1, (
+        f"Walking the container filtered by `tag={tag}` with `limit=1` returned "
+        f"{[len(page) for page in pages]}, so the two matching line items did not span more than "
+        "one page and this test cannot see a filter lost at a page boundary."
+    )
+    assembled = [item for page in pages for item in page]
+    wrong = [item.get("id") for item in assembled if item.get("tag") != tag]
+    assert not wrong, (
+        f"Walking the container filtered by `tag={tag}` collected line items carrying another "
+        f"tag: {wrong}. The filter reached the first page and not the `Link` URL that page "
+        "advertised, so a tool paging through its own line items is handed somebody else's."
+    )
+    for line_item in created:
+        assert str(line_item.get("id")) in {str(item.get("id")) for item in assembled}, (
+            f"The line item at `{line_item.get('id')}` carries `{tag}` and is missing from the "
+            f"filtered walk, which assembled {[item.get('id') for item in assembled]}."
+        )
+
+
+def test_a_filtered_walk_stays_filtered_when_the_filter_value_is_blank(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """The empty string is a value, and the standard library disagrees by default.
+
+    `parse_qsl` drops blank values unless it is given `keep_blank_values=True`,
+    so a container that rebuilds its own `Link` URL by parsing the request it
+    received loses `?tag=` on the way — and answers the right first page followed
+    by an unfiltered second one. The mechanism was confirmed directly rather than
+    inferred, and it is invisible to the test above, which filters on a value
+    that is not blank.
+
+    It is worth its own test rather than a second case inside that one because
+    the defect is not in the filtering at all: the filter works, and the *URL
+    the platform advertises about itself* is what has lost the value. That is a
+    class of bug — a request round-tripped through a parser that normalises —
+    which will recur wherever this mock builds a URL from one it was handed.
+
+    A line item carrying an empty tag has to be created for any of this to be
+    reachable, and `create_line_item(tag="")` is not the same call as
+    `omitting=("tag",)`: one posts an empty value and the other posts no member.
+    The test that a filter does not match a *missing* member is above; this one
+    is about a filter whose value is empty and matches deliberately.
+    """
+    created = [
+        mock_platform.create_line_item(signed_launch, tag=""),
+        mock_platform.create_line_item(signed_launch, tag=""),
+    ]
+    mock_platform.create_line_item(signed_launch, tag=f"e0-15-other-{uuid4().hex[:12]}")
+
+    for line_item in created:
+        assert line_item.get("tag") == "", (
+            f"The platform stored `tag` = {line_item.get('tag')!r} for a line item created with "
+            "an empty tag. A blank value that is dropped or defaulted on the way in leaves "
+            "nothing for a blank filter to match, so this test would pass without reaching the "
+            "behaviour it is named for."
+        )
+
+    pages = mock_platform.line_item_pages(signed_launch, tag="", limit=1)
+    assembled = [item for page in pages for item in page]
+    assert len(pages) > 1, (
+        f"Walking the container filtered by `tag=` with `limit=1` returned "
+        f"{[len(page) for page in pages]}, so the two line items carrying an empty tag did not "
+        "span more than one page and a filter lost from the `Link` URL would not show."
+    )
+    wrong = [item.get("id") for item in assembled if item.get("tag") != ""]
+    assert not wrong, (
+        f"Walking the container filtered by `tag=` collected line items carrying a non-empty "
+        f"tag: {wrong}. The blank value survived into the first page and not into the `next` URL "
+        "the platform advertised — which is what `parse_qsl` does with a blank unless it is asked "
+        "not to, and it hands the tool line items it did not ask for."
+    )
+
+
+def test_a_limit_above_the_cap_is_clamped_rather_than_refused(
+    mock_platform: Any,
+    signed_launch: Any,
+) -> None:
+    """An over-large page size is a request to be served, not an error to raise.
+
+    Measured: a `limit` above the container's cap answers 422, where Canvas
+    clamps to its maximum and serves a page. The difference matters to a client
+    that has no way to learn the cap — the only sane thing a tool can do with
+    "your page size is too large" is guess a smaller one, and a platform that
+    clamps has already answered the question.
+
+    Asserted as a page rather than only as a status: a service could answer 200
+    with nothing, which is a clamp to zero and leaves a `Link` walk either empty
+    or endless. The walk is run to the end for that reason, and `link_walk`'s own
+    cap is what turns "endless" into a failure that says so.
+    """
+    created = mock_platform.create_line_item(signed_launch)
+    over_large = 10**6
+    response = mock_platform.service_get(
+        mock_platform.with_query(mock_platform.line_items_url(signed_launch), {"limit": over_large})
+    )
+    assert response.status_code == 200, (
+        f"Asking the line-item container for `limit={over_large}` answered "
+        f"{response.status_code}. The rule is to clamp to the container's own cap and serve a "
+        "page: a tool cannot discover the cap, so refusing leaves it guessing, and Canvas clamps. "
+        f"Body begins {response.text[:200]!r}."
+    )
+    assembled = [
+        item
+        for page in mock_platform.line_item_pages(signed_launch, limit=over_large)
+        for item in page
+    ]
+    assert str(created.get("id")) in {str(item.get("id")) for item in assembled}, (
+        f"Walking the container with `limit={over_large}` assembled "
+        f"{[item.get('id') for item in assembled]}, which does not carry the line item created at "
+        f"`{created.get('id')}`. A clamp that serves an empty page is a clamp to zero."
+    )
 
 
 # ---------------------------------------------------------------------------
