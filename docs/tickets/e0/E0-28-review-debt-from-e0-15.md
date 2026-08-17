@@ -148,6 +148,20 @@ when** either the route matches an identifier containing a slash, or such a
 `userId` is refused at the score post with a message saying why — the second is a
 narrowing of AGS and would need recording as one.
 
+### 10. The line-item cap is a number no test names
+
+Found by mutation while verifying the third fix round. `limit` above
+`MAX_LINE_ITEM_LIMIT` is now clamped rather than refused, which is right, and the
+test asserts that a page comes back rather than a 422 — but nothing asserts the
+clamp's *value*. Removing `min(limit, MAX_LINE_ITEM_LIMIT)` entirely leaves every
+test green, so a tool asking for a million line items is served all of them in one
+page here, where Canvas would cap it and page the rest.
+
+The reason this is debt rather than a defect is that no seeded context holds more
+than a handful of line items, so the difference is invisible today and becomes
+visible exactly when E3 syncs an institution. **Done when** a container holding
+more line items than the cap serves the cap and advertises the rest.
+
 ## Out of scope
 
 - Reopening the "every member carries a window" ruling itself, or the "every
