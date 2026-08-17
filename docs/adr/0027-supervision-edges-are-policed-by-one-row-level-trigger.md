@@ -4,6 +4,14 @@
 **Date:** 2026-08-16
 **Tickets:** E0-09
 
+**Extended by [ADR 0044](0044-a-supervision-edge-must-climb-the-role-rank.md)
+(E0-11)**, which adds the role-rank rule and its mirror to this same trigger
+function. The decision this record makes — one row-level trigger over one table,
+holding an advisory lock, refusing `REPEATABLE READ`, every relation
+schema-qualified — is unchanged and now carries more rules than the ones described
+below. Everything about the instrument still reads correctly; the enumeration of
+*what* it enforces does not, and the two places that say so are marked.
+
 ## Context
 
 [SPEC §2.1](../SPEC.md) makes the supervision graph "a forest/DAG over
@@ -27,9 +35,14 @@ one row, and that one is a `CHECK`.
 ## Decision
 
 One `AFTER INSERT OR UPDATE ... FOR EACH ROW` trigger on `role_assignment`,
-enforcing the three cross-row rules: the parent is not a Care assignment, the row
-does not become a Care assignment while others report to it, and the edge does
-not close a cycle at any depth.
+enforcing every cross-row rule the supervision graph has. E0-09's are: the parent
+is not a Care assignment, the row does not become a Care assignment while others
+report to it, and the edge does not close a cycle at any depth. **E0-11 added two
+more to the same function** — an edge must climb SPEC §2.1's role rank, and a role
+change must not leave something reporting to a row it no longer outranks (ADR
+0044). No count is written here on purpose: this is the one place every such rule
+lands, so a number in this sentence is a record with a scheduled expiry
+(`docs/MISTAKES.md` entry 1).
 
 The cycle test is a recursive CTE walking `reports_to` upward from the new
 parent, with the SQL `CYCLE` clause so the walk terminates even against a row set
@@ -192,6 +205,19 @@ behavioural tests and the Hypothesis properties are the only thing that notices,
 which is why those generate cycles of every length up to eight and close each
 from every rotation. Any later change to this rule needs a test run, not a drift
 check.
+
+**The cycle guard is no longer the only thing that refuses a cycle, and the
+sentence above is where that shows.** ADR 0044's rank rule requires every edge to
+climb SPEC §2.1's chain, and every cycle contains at least one edge that does not
+climb — so no cycle this schema can express reaches the walk below, and the walk
+has become defence in depth. It stays for the reason this record gives elsewhere:
+it is what still holds if the rank order changes or is replaced. The consequence
+for the Hypothesis properties is not benign, because a rank-increasing path cannot
+be longer than the six-role chain: "cycles of every length up to eight" is a space
+the schema no longer admits, and both properties are red on E0-11's branch. That is
+[`docs/disputes/E0-11-01.md`](../disputes/E0-11-01.md), and it is a question about
+whether two assignments in one role may report to each other rather than a defect
+in either module.
 
 **[ADR 0015](0015-course-level-is-a-stored-generated-column.md) rejected a
 trigger for `course.level` and this accepts one**, which is worth stating rather

@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Twenty-six tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Twenty-seven tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -44,6 +44,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 24 | [Review debt from E0-07 and E0-08](E0-24-review-debt-from-e0-07-and-e0-08.md) | 07, 08 | Four findings those pull requests could not close: an unconstrained `jwks_url` that is credential-equivalent, the single-writer rule for the derived section columns being convention rather than enforcement, re-derivation when a term's map is edited, and a summer start-letter map the test suite invented. |
 | 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Six findings those pull requests could not close, and an index of the twelve that went to the ticket that owns them: an unguarded `.dockerignore`, a latent course-number literal in three modules, two overclaiming records, and two spec lines describing things that no longer exist. |
 | 26 | [Review debt from E0-10](E0-26-review-debt-from-e0-10.md) | 10 | Five findings PR #29 could not close, and an index of what it did close. Four harden a guard or settle a record; the first is a live gap in SPEC §4's logging guarantee — a caller that rolls back keeps the name and discards the audit row — which blocks nothing in E0 but must land before E10 opens the Care queue. |
+| 27 | [Review debt from E0-11](E0-27-review-debt-from-e0-11.md) | 11 | Two findings E0-11's security review could not close, plus a sort debt, and an index of what it did close. Both are the same weakness: the read path is guarded three ways and the write path and the view files are guarded once each, by a person reading a diff. E1 is the first ticket that can trip either. |
 
 ## Dependency graph
 
@@ -65,22 +66,23 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 07, 08 ── 24        (independent; blocks nothing)
 09, 12, 14 ── 25    (independent; blocks nothing)
 10 ── 26            (independent; blocks nothing in E0, gates E10's Care queue)
+11 ── 27            (independent; blocks nothing in E0, wants landing before E1's sync)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 26 hang
-off 03, 04, 05, 07, 08, 09, 10, 12 and 14 or off nothing at all, and block nothing —
+chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 27 hang
+off 03, 04, 05, 07, 08, 09, 10, 11, 12 and 14 or off nothing at all, and block nothing —
 they harden tests or settle records rather than adding behaviour, so they can
 land any time afterwards and none is on the path to the E0 exit. Ticket 21 in
-particular is cheapest done while passing through for another reason: E0-11 picks
-the grain of its first item, and if that choice is the write seam rather than a
-table-grained refusal, the code that closes it is E1's roster sync — the only
-code that sees both which field came from the platform and which column it went
-into.
+particular is cheapest done while passing through for another reason: **E0-11
+chose table grain plus the instructor row** for its write refusal, so the column
+the marker misses is still uncaught, and the code that would catch it is E1's
+roster sync — the only code that sees both which field came from the platform and
+which column it went into. Ticket 27 carries the other half of that same seam.
 
-Three of them are exceptions to "no hurry". Ticket 22's first question is a
+Four of them are exceptions to "no hurry". Ticket 22's first question is a
 confidentiality rule that is currently unenforced, and E4 builds the reports it
 governs. Ticket 23 blocks nothing inside E0 but is a question E1's roster sync
 has to have answered before it can be built, so it wants settling by the end of
@@ -88,7 +90,11 @@ this epic rather than at the start of the next one. Ticket 26's first item is a
 measured gap in SPEC §4's logging guarantee rather than hardening: a caller
 holding the Care credential who rolls back keeps the student's name and leaves
 no audit row. Nothing in E0 opens that door, so it blocks no ticket here, but it
-has to be closed before E10 builds the queue that calls it.
+has to be closed before E10 builds the queue that calls it. Ticket 27's first item
+wants landing before **E1's roster sync**, for a reason of the same shape: that
+sync is the first code to write all four relations E0-11's chokepoint refuses, and
+if it does not call the guard, nothing fails and the rule quietly becomes a
+description of a former intention.
 
 Two deferrals from E0-10 are recorded elsewhere and repeated here so they are not
 lost: `alembic check` reading no roles, grants, views or functions is **E0-20

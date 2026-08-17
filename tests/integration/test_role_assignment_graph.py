@@ -39,6 +39,15 @@ before deciding a write was accepted, so a guard written as a deferred constrain
 trigger answers at the same moment an immediate one does, and this suite does not
 quietly pick between the two designs.
 
+**Three of the cycle tests turn the trigger off for one statement, on purpose.**
+E0-11's rank rule means an application write can no longer assemble a graph that
+holds a non-climbing edge, so E0-09's cycle walk has no reachable subject left
+through the front door — and ADR 0044 keeps it anyway, for the graph a superuser
+session leaves behind. `plant_an_edge_that_does_not_climb` is where that graph is
+built and where the reasoning sits; it uses the superuser-only bypass ADR 0027
+measured, restores it immediately, and asserts both halves before anything is read.
+Nothing it does is reachable by `pulse_app`.
+
 **Two small helpers are copied here rather than imported from `tests/
 conftest.py`.** A test module importing the conftest module by name works only
 because of where pytest puts `tests/` on `sys.path`, and a collection error is
@@ -78,15 +87,34 @@ MAPPINGS = "lead_faculty_mapping"
 # …` — so the fragment would match every refusal of any kind, and this assertion
 # would pass against a message that said nothing at all (`docs/MISTAKES.md` entry
 # 3). The test reads `.orig`, the server's own message, for the same reason.
+#
+# **`supervis` and `reporting` were in this list and have been taken out**, which
+# is the same defect one layer up. E0-11's rank rule (ADR 0044) refuses a
+# non-climbing edge with "a supervision edge runs from a role to one that outranks
+# it in the chain…", so a set meant to identify the *cycle* guard was satisfied by
+# a different guard's message — and every cycle test in this module now reaches the
+# rank rule first. What is left names a loop and nothing else names a loop.
 CYCLE_ERROR_FRAGMENTS = (
     "cycle",
+    "cyclic",
     "circular",
     "loop",
     "ancestor",
+    "descendant",
     "self-reference",
-    "supervis",
-    "reporting",
+    "reports to itself",
 )
+
+# Fragments that identify E0-11's rank rule instead, so that the two guards can be
+# told apart where a test needs to know which one answered. Read off the message
+# the rank rule was measured producing, quoted in
+# [`docs/disputes/E0-11-01.md`](../../docs/disputes/E0-11-01.md): "…may not report
+# to … a supervision edge runs from a role to one that outranks it in the chain
+# INSTRUCTOR, LEAD_FACULTY, CHAIR, ASSISTANT_DEAN, DEAN, VP_ACADEMICS (SPEC 2.1),
+# and a role outside that chain holds no rank to compare". Narrow on purpose:
+# `chain` and `rank` on their own are words a cycle message might reasonably use,
+# and a false match here would report a working cycle guard as a broken one.
+RANK_ERROR_FRAGMENTS = ("outrank", "holds no rank", "no rank to compare")
 
 # **This file's choice**, in the sense that no ticket spells them: the two entry
 # doors of SPEC §2.1's table, and the words a schema might use for each. A door
@@ -326,7 +354,163 @@ def test_an_assignment_belongs_to_a_person_and_not_to_a_user(supervision_graph: 
 
 # ---------------------------------------------------------------------------
 # Criteria 2 and 3 — cycles, at four depths, plus the chain that must be legal.
+#
+# **Two guards can refuse a cycle now, and only one of them is this section's
+# subject.** E0-11's rank rule (ADR 0044) accepts an edge only where
+# `rank(child) < rank(parent)` over SPEC §2.1's chain, and every cycle contains at
+# least one edge that does not climb — so a loop assembled out of ordinary writes
+# is refused at that edge, and E0-09's cycle walk is never consulted. ADR 0044
+# keeps the walk anyway, as what still holds "if a later ticket changes the rank
+# order, adds a ranked role, or replaces this rule", and this section is where that
+# claim is either true or decorative.
+#
+# So the cycle tests come in two shapes. The ones that write only what an
+# application can write assert that the loop is unreachable and **do not name the
+# guard that refused it**, because where two rules can refuse the same row a
+# behavioural test cannot say which one did (`docs/MISTAKES.md` entry 3). The ones
+# built on `plant_an_edge_that_does_not_climb` reach the one graph state where the
+# walk is the only rule with anything left to say — a graph that already holds a
+# non-climbing edge — and those assert that the message names the loop rather than
+# the ranks.
 # ---------------------------------------------------------------------------
+
+# SPEC §2.1's canonical chain as an order: `INSTRUCTOR(section) →
+# LEAD_FACULTY(course) → CHAIR(department) → DEAN(college) → VP_ACADEMICS`, with
+# the assistant dean inserted between chair and dean by the same paragraph. A third
+# copy — `test_supervision_edges_run_up_the_role_ranks.py` and
+# `test_supervision_graph_properties.py` hold the others — written out rather than
+# imported for the reason this module's docstring gives about importing the
+# conftest module by name.
+CLIMBING_CHAIN = ("INSTRUCTOR", "LEAD_FACULTY", "CHAIR", "ASSISTANT_DEAN", "DEAN", "VP_ACADEMICS")
+
+# The superuser bypass ADR 0027 measured while deciding that a trigger was the
+# right instrument: "`SET session_replication_role = replica` turns off every
+# non-replica trigger in the session, with no `ALTER TABLE`, no ownership check and
+# nothing in the schema to notice: measured, two inserts and two updates in such a
+# session store a two-row cycle." It is superuser-only — the same ADR measured
+# `pulse_app` refused both it and `ALTER TABLE … DISABLE TRIGGER` — so using it
+# here widens nothing the application can reach.
+BYPASS_THE_TRIGGER = "SET session_replication_role = replica"
+RESTORE_THE_TRIGGER = "SET session_replication_role = origin"
+BYPASS_STATE = "SHOW session_replication_role"
+
+
+def plant_an_edge_that_does_not_climb(graph: Any, child: Any, parent: Any) -> None:
+    """Store one edge the rank rule refuses, the way a superuser can, and prove it landed.
+
+    **Why a test is allowed to do this.** ADR 0044's rank rule means an
+    application write can no longer build a graph containing a non-climbing edge,
+    and E0-09's cycle walk is therefore unreachable through the front door. It is
+    kept as defence in depth, and the state it defends is not hypothetical: rows
+    like these were writable before E0-11's migration, and ADR 0027 records two
+    superuser bypasses that still write them — this one and `ALTER TABLE …
+    DISABLE TRIGGER` — while naming E0-17's seed script as the identity that runs
+    with those privileges. "A seed run that does so is not writing test data past a
+    slow constraint; it is writing a supervision graph that no rule in this schema
+    has looked at." This helper builds exactly that graph, and the tests on top of
+    it ask what happens to the next ordinary write.
+
+    **Three things are asserted here, and none of them is ceremony.**
+
+      - the same edge is attempted **without** the bypass first and has to be
+        refused. Without that, a schema where the rank rule had simply gone away
+        would let the plant succeed for the wrong reason and every test built on
+        this helper would be asserting the refusal of an ordinary edge
+        (`docs/MISTAKES.md` entry 9: run both halves);
+      - the session is asserted back on `origin` afterwards, because the write
+        under test has to meet the trigger the rest of the suite meets. It is
+        restored in a `finally`, so a failure inside the plant does not leave the
+        rest of this test — or the assertion messages — running against a database
+        with its guards off;
+      - the edge is read back out of the database. A plant that silently did
+        nothing leaves the following assertion about an ordinary write, and it
+        would pass (`docs/MISTAKES.md` entry 16: check the mutation landed before
+        believing it).
+
+    `session_replication_role` is a session setting rather than a schema change, so
+    it takes no lock and nothing outside this transaction sees it; the whole thing
+    is undone with the rest of `db_session` in any case.
+    """
+    session = graph.session
+    key = graph.assignment_key
+
+    unbypassed = graph.refusal(lambda: graph.repoint(child, parent[key]))
+    assert unbypassed is not None, (
+        f"The edge {child[key]} → {parent[key]} was stored by an ordinary write, with no bypass in "
+        "place. It runs from a role to one that does not outrank it, which ADR 0044 refuses — so "
+        "either the rank rule is gone, in which case "
+        "`test_supervision_edges_run_up_the_role_ranks.py` is the module that says so, or this "
+        "helper has been handed the two rows the wrong way round. Everything below would then be "
+        "asserting that an ordinary climbing edge is refused, which is the opposite of what it "
+        "reads as."
+    )
+
+    session.execute(text(BYPASS_THE_TRIGGER))
+    try:
+        planted = graph.refusal(lambda: graph.repoint(child, parent[key]))
+    finally:
+        session.execute(text(RESTORE_THE_TRIGGER))
+
+    setting = session.execute(text(BYPASS_STATE)).scalar_one()
+    assert setting == "origin", (
+        f"`session_replication_role` is {setting!r} after the plant rather than 'origin', so the "
+        "write under test would meet a database with its triggers off and would be accepted "
+        "whatever the guards say."
+    )
+    if planted is not None:
+        pytest.fail(
+            f"The planted edge was refused even with `{BYPASS_THE_TRIGGER}` in force: {planted}. "
+            "That setting turns off ordinary triggers and nothing else, so the rule that refused "
+            "this row is a `CHECK` constraint, a trigger created `ENABLE ALWAYS`, or something "
+            "else a replica session still meets. If the rank rule has moved somewhere this cannot "
+            "reach, the graph state the cycle walk defends may be genuinely unreachable — which is "
+            "worth saying in the pull request, and would retire the cycle walk rather than this "
+            "helper. ADR 0027's other bypass, `ALTER TABLE role_assignment DISABLE TRIGGER`, is "
+            "the alternative to try."
+        )
+    assert graph.parent_of(child[key]) == parent[key], (
+        f"The planted edge did not land: {child[key]} reports to "
+        f"{graph.parent_of(child[key])} rather than to {parent[key]}, although the write was "
+        "accepted. A trigger that clears the column instead of refusing the row would do this, and "
+        "so would a bypass that did not take. Either way the graph below holds no non-climbing "
+        "edge, so the closing write is an ordinary one and the assertion about it means nothing."
+    )
+
+
+def the_cycle_rather_than_the_rank(refused: Any, what: str) -> None:
+    """Fail unless the server's own message names the loop instead of the role ranks.
+
+    Both halves matter and neither is enough alone. The positive half is E0-09
+    criterion 2's "with a clear error": this write is an admin re-pointing
+    somebody's reporting line in the People editor (§6.3), and "duplicate key value
+    violates unique constraint" tells them to try a different name while "you have
+    created a reporting loop" tells them what they did.
+
+    The negative half is which guard answered. Every write these helpers set up is
+    a **climbing** edge, so ADR 0044's rank rule has no grounds to refuse it — a
+    rank message here means the rank comparison is reading rows it should not be,
+    and the cycle walk has once again not been reached.
+
+    `.orig` is the server's own message, without the statement SQLAlchemy appends —
+    see the note on `CYCLE_ERROR_FRAGMENTS` above.
+    """
+    from_the_server = str(getattr(refused, "orig", refused)).lower()
+
+    assert any(fragment in from_the_server for fragment in CYCLE_ERROR_FRAGMENTS), (
+        f"{what} was refused, and Postgres said {from_the_server!r}. None of "
+        f"{list(CYCLE_ERROR_FRAGMENTS)} appears in it, so this is either a message an admin cannot "
+        "act on or a refusal that came from some other rule entirely — and the second would mean "
+        "this test is green for a reason that has nothing to do with cycles. Naming the constraint "
+        "or the trigger after what it refuses is enough."
+    )
+    named_the_rank = [fragment for fragment in RANK_ERROR_FRAGMENTS if fragment in from_the_server]
+    assert not named_the_rank, (
+        f"{what} was refused with a message naming {named_the_rank}: {from_the_server!r}. That is "
+        "ADR 0044's rank rule answering, and the edge under test climbs SPEC §2.1's chain, so the "
+        "rank rule has no grounds to refuse it — it is comparing something other than the two "
+        "roles the edge joins. E0-09's cycle walk is the guard this test exists to reach, and it "
+        "was not reached."
+    )
 
 
 def test_an_assignment_that_reports_to_itself_is_refused(supervision_graph: Any) -> None:
@@ -343,6 +527,17 @@ def test_an_assignment_that_reports_to_itself_is_refused(supervision_graph: Any)
     The control is an ordinary assignment written through the same helper, so that
     a refusal below is known to be about the row pointing at itself rather than
     about the table refusing an explicit primary key.
+
+    **This test cannot say which guard refused the row, and no version of it
+    can.** A self-edge joins one row to itself, so the two roles are equal
+    whatever the role is, and ADR 0044's rank rule refuses every equal-rank edge
+    before E0-09's cycle walk is consulted — measured on this branch. There is no
+    role for which a self-edge climbs, so unlike the two- and three-assignment
+    cases below there is no rank-legal version of this row to write, and the
+    planted construction has no second write to make. What is left is still the
+    criterion: the shortest loop in the schema cannot be inserted, on the path an
+    insert takes. Which rule stops it is `docs/MISTAKES.md` entry 3's question, and
+    the tests that answer it are the planted ones below.
     """
     graph = supervision_graph
     identifier = uuid4()
@@ -367,44 +562,58 @@ def test_an_assignment_that_reports_to_itself_is_refused(supervision_graph: Any)
 def test_a_two_assignment_cycle_is_refused(supervision_graph: Any) -> None:
     """Criterion 2: A reports to B, B is then pointed at A, and that is rejected clearly.
 
-    The chain is built first and has to be accepted — a guard that refused the
-    *first* edge would satisfy a bare `pytest.raises` here while breaking every
-    supervision line in the product.
+    **The first of the two edges is planted rather than written**, and that is
+    E0-11 changing how this criterion has to be reached rather than what it says.
+    A two-assignment loop needs one edge each way, and one of the two can never
+    climb SPEC §2.1's ranks — so under ADR 0044 the pair is refused at the first
+    edge, and the closing write this criterion is about never happens. Planting the
+    non-climbing edge the way a superuser can (see
+    `plant_an_edge_that_does_not_climb`) puts the graph in the state E0-09's guard
+    was written for, and leaves the closing edge — `INSTRUCTOR → VP_ACADEMICS`,
+    which climbs six ranks and is a reporting line the product has — as the write
+    under test. The version this replaces closed the loop with `CHAIR →
+    LEAD_FACULTY`, an inversion, which the rank rule now refuses first: that row is
+    still asserted refused, as `[chair-lead_faculty]` in
+    `test_supervision_edges_run_up_the_role_ranks.py`'s matrix, and on the `UPDATE`
+    path by `test_re_pointing_a_lead_at_a_sibling_lead_is_refused_on_update`.
 
-    **"With a clear error" is asserted too**, loosely, because the criterion says
-    it and because of what the failure looks like from the other end. This write
-    is an admin re-pointing somebody's reporting line in the People editor (§6.3);
-    "duplicate key value violates unique constraint" tells them to try a different
-    name, and "you have created a reporting loop" tells them what they did.
+    **The control is the same row re-pointed at an unrelated legal parent**,
+    written first, in the same transaction — so the refusal below is known to be
+    about the loop rather than about the `UPDATE` being refused at all.
+
+    **"With a clear error" is asserted too**, and it now has to discriminate.
+    `the_cycle_rather_than_the_rank` requires the message to name the loop and not
+    the ranks: before this change the assertion was satisfied by the fragment
+    `supervis`, which appears in the rank rule's message and not necessarily in the
+    cycle walk's at all.
     """
     graph = supervision_graph
     key = graph.assignment_key
 
-    top = written(graph, lambda: graph.assign("CHAIR"), "A chair assignment")
-    below = written(
+    below = written(graph, lambda: graph.node("INSTRUCTOR"), "An instructor assignment")
+    above = written(graph, lambda: graph.node("VP_ACADEMICS"), "A VP of Academics assignment")
+    elsewhere = written(graph, lambda: graph.node("LEAD_FACULTY"), "An unrelated lead assignment")
+
+    plant_an_edge_that_does_not_climb(graph, above, below)
+    written(
         graph,
-        lambda: graph.assign("LEAD_FACULTY", reports_to=top[key]),
-        "A lead-faculty assignment reporting to that chair",
+        lambda: graph.repoint(below, elsewhere[key]),
+        "Re-pointing that instructor at the unrelated lead",
     )
 
-    refused = graph.refusal(lambda: graph.repoint(top, below[key]))
+    refused = graph.refusal(lambda: graph.repoint(below, above[key]))
     assert refused is not None, (
         "Two assignments were stored reporting to each other. E0-09 criterion 2: 'Creating a "
-        "two-assignment cycle is rejected at write time with a clear error.' Neither row is wrong "
-        "on its own, which is why nothing downstream can detect this: SPEC §2.1's purview is "
-        "defined as a transitive union, and over a loop that union has no fixed point."
+        "two-assignment cycle is rejected at write time with a clear error.' The VP assignment "
+        "already reported to this instructor, so pointing the instructor at the VP closes the "
+        "loop — and the edge itself climbs SPEC §2.1's chain, so ADR 0044's rank rule accepts it "
+        "and E0-09's cycle walk is the only thing left to refuse it. Neither row is wrong on its "
+        "own, which is why nothing downstream can detect this: §2.1's purview is defined as a "
+        "transitive union, and over a loop that union has no fixed point. ADR 0044 keeps the walk "
+        "for exactly this graph — 'what still holds if a later ticket changes the rank order' — "
+        "and a green suite with the walk deleted is that claim being decorative."
     )
-
-    # `.orig` is the server's own message, without the statement SQLAlchemy
-    # appends — see the note on `CYCLE_ERROR_FRAGMENTS` above.
-    from_the_server = str(getattr(refused, "orig", refused))
-    assert any(fragment in from_the_server.lower() for fragment in CYCLE_ERROR_FRAGMENTS), (
-        f"The cycle was refused, and Postgres said {from_the_server!r}. None of "
-        f"{list(CYCLE_ERROR_FRAGMENTS)} appears in it, so this is either a message an admin "
-        "cannot act on or a refusal that came from some other rule entirely — and the second "
-        "would mean the cycle tests below are green for a reason that has nothing to do with "
-        "cycles. Naming the constraint or the trigger after what it refuses is enough."
-    )
+    the_cycle_rather_than_the_rank(refused, "The two-assignment cycle")
 
 
 def test_a_three_assignment_cycle_is_refused(supervision_graph: Any) -> None:
@@ -416,55 +625,91 @@ def test_a_three_assignment_cycle_is_refused(supervision_graph: Any) -> None:
     and both let this through, and a three-step loop is not exotic: it is what an
     admin produces by re-pointing a chair at an assistant dean who already reports
     to that chair's dean.
+
+    **The walk has to take two steps here and one step above**, which is the whole
+    difference between this test and the one before it. The closing edge points at
+    the chair; the chair reports to the instructor; the instructor is the row being
+    written. A guard that compares the new parent's own `reports_to` against the
+    row — one level, which is what "check for a cycle" usually gets written as —
+    accepts this and passes the two-assignment test.
+
+    Like that test, the single edge of the loop that does not climb is planted
+    rather than written, because ADR 0044 leaves no other way to reach a graph that
+    holds one. Every edge this test writes itself climbs SPEC §2.1's chain.
     """
     graph = supervision_graph
     key = graph.assignment_key
 
-    top = written(graph, lambda: graph.assign("DEAN"), "A dean assignment")
-    middle = written(
+    bottom = written(graph, lambda: graph.node("INSTRUCTOR"), "An instructor assignment")
+    middle = written(graph, lambda: graph.node("LEAD_FACULTY"), "A lead-faculty assignment")
+    top = written(graph, lambda: graph.node("CHAIR"), "A chair assignment")
+    elsewhere = written(graph, lambda: graph.node("CHAIR"), "An unrelated chair assignment")
+
+    plant_an_edge_that_does_not_climb(graph, top, bottom)
+    written(
         graph,
-        lambda: graph.assign("CHAIR", reports_to=top[key]),
-        "A chair reporting to that dean",
+        lambda: graph.repoint(bottom, middle[key]),
+        "Pointing that instructor at the lead, which climbs and closes nothing",
     )
-    bottom = written(
+    written(
         graph,
-        lambda: graph.assign("LEAD_FACULTY", reports_to=middle[key]),
-        "A lead reporting to that chair",
+        lambda: graph.repoint(middle, elsewhere[key]),
+        "Re-pointing that lead at the unrelated chair",
     )
 
-    refused = graph.refusal(lambda: graph.repoint(top, bottom[key]))
+    refused = graph.refusal(lambda: graph.repoint(middle, top[key]))
     assert refused is not None, (
         "A three-assignment cycle was stored. E0-09 criterion 3: 'Creating a three-assignment "
         "cycle is also rejected — test the transitive case, not just the direct one.' A guard "
         "that compares the new parent against the row itself accepts this, and passes every "
-        "shorter test in this module."
+        "shorter test in this module. The closing edge runs from a lead to a chair, which climbs "
+        "SPEC §2.1's chain, so ADR 0044's rank rule accepts it and the ancestor walk is what has "
+        "to answer."
     )
+    the_cycle_rather_than_the_rank(refused, "The three-assignment cycle")
 
 
 def test_a_six_assignment_cycle_is_refused(supervision_graph: Any) -> None:
-    """Longer than the criteria ask for, because a guard can be right at two and wrong at six.
+    """The deepest chain this schema can hold, and the loop that would close it.
 
-    A depth-limited walk — three levels, five, whatever fits the reporting lines
-    somebody had in mind — passes both criteria and fails here. SPEC §2.1's
-    canonical chain is already five roles deep before any insertion, and the
-    ticket exists to make insertions possible "without schema change", so a guard
-    whose depth is a guess about org shape is a guard with a shelf life.
+    Six assignments, one per rank of SPEC §2.1's chain from the top down, each
+    reporting to the one above it. Under ADR 0044 that is not one arrangement among
+    many: every edge climbs and there are six ranks, so **six is the deepest chain
+    the supervision graph can hold at all**, and the five edges below are the
+    control that says the deepest legal shape is still writable. The chain used to
+    be six chairs, which the rank rule makes unwritable — dispute E0-11-01.
 
     The chain is read back before the loop is closed, because a schema that
     dropped some of these edges would leave this closing a shorter cycle than the
     one the test is named for.
+
+    **It does not name the guard that refuses the closing edge**, and it no longer
+    catches a depth-limited walk. The edge from the instructor back up to the VP
+    runs down five ranks, so ADR 0044's rank rule refuses it without walking
+    anything, and a behavioural test cannot say which of the two rules answered
+    (`docs/MISTAKES.md` entry 3). What is asserted is the property that matters to
+    §2.1's purview union — the loop is unreachable — and the walk's own depth is
+    asserted by `test_a_six_assignment_cycle_closed_by_a_climbing_edge_is_refused`
+    below.
     """
     graph = supervision_graph
     key = graph.assignment_key
+    descending = tuple(reversed(CLIMBING_CHAIN))
 
-    chain = [written(graph, lambda: graph.node("CHAIR"), "The root of a six-assignment chain")]
-    for depth in range(5):
+    chain = [
+        written(
+            graph,
+            lambda: graph.node(descending[0]),
+            f"The root of a six-assignment chain, a {descending[0]} assignment",
+        )
+    ]
+    for depth, role in enumerate(descending[1:]):
         parent = chain[-1][key]
         chain.append(
             written(
                 graph,
-                lambda parent=parent: graph.node("CHAIR", reports_to=parent),
-                f"Link {depth + 2} of a six-assignment chain",
+                lambda role=role, parent=parent: graph.node(role, reports_to=parent),
+                f"Link {depth + 2} of a six-assignment chain, a {role} assignment",
             )
         )
 
@@ -476,10 +721,83 @@ def test_a_six_assignment_cycle_is_refused(supervision_graph: Any) -> None:
 
     refused = graph.refusal(lambda: graph.repoint(chain[0], chain[-1][key]))
     assert refused is not None, (
-        "A six-assignment cycle was stored. Criteria 2 and 3 name depths two and three; a guard "
-        "that walks a fixed number of levels satisfies both and fails here, and the number it "
-        "walks is somebody's estimate of how deep a college can nest."
+        f"A six-assignment cycle was stored, closed by an edge from the {descending[0]} assignment "
+        f"at the root down to the {descending[-1]} assignment at the leaf. E0-09: 'Reject "
+        "assignment-level cycles at write time'; ADR 0044: an edge is accepted only where "
+        "`rank(child) < rank(parent)`. Both rules refuse this row and it takes only one of them, "
+        "which is why this assertion names neither. SPEC §2.1 defines purview as a transitive "
+        "union over this graph, and over a loop that union does not terminate."
     )
+
+
+def test_a_six_assignment_cycle_closed_by_a_climbing_edge_is_refused(
+    supervision_graph: Any,
+) -> None:
+    """The walk's depth, on the one graph where the walk is still what answers.
+
+    A guard that walks a fixed number of levels — three, five, whatever fits the
+    reporting lines somebody had in mind — satisfies the two- and three-assignment
+    tests above and fails here, and the number it walks is somebody's estimate of
+    how deep a college can nest. That was `test_a_six_assignment_cycle_is_refused`'s
+    subject until E0-11's rank rule started answering first, and this is where it
+    went: the loop's one non-climbing edge is planted, every edge this test writes
+    climbs, and the closing write is five steps from the row it comes back to.
+
+    The shape is a full rank cycle: `INSTRUCTOR → LEAD_FACULTY → CHAIR →
+    ASSISTANT_DEAN → DEAN → VP_ACADEMICS`, with the VP planted as reporting to the
+    instructor. Four climbing edges are written from the lead upwards, all of them
+    ordinary reporting lines and all of them accepted; the closing edge is the
+    instructor's, and the ancestors between it and itself are the other five.
+
+    **The control is the instructor re-pointed at an unrelated lead**, which is
+    accepted, so the refusal below is about where this parent leads rather than
+    about the row or the statement.
+    """
+    graph = supervision_graph
+    key = graph.assignment_key
+
+    ring = [
+        written(graph, lambda role=role: graph.node(role), f"A {role} assignment in the ring")
+        for role in CLIMBING_CHAIN
+    ]
+    elsewhere = written(graph, lambda: graph.node("LEAD_FACULTY"), "An unrelated lead assignment")
+
+    plant_an_edge_that_does_not_climb(graph, ring[-1], ring[0])
+    for index in range(1, len(ring) - 1):
+        written(
+            graph,
+            lambda index=index: graph.repoint(ring[index], ring[index + 1][key]),
+            f"The climbing edge from the {CLIMBING_CHAIN[index]} assignment to the "
+            f"{CLIMBING_CHAIN[index + 1]} one",
+        )
+
+    assert len(graph.ancestors(ring[1][key])) == len(ring) - 1, (
+        f"Walking up from the {CLIMBING_CHAIN[1]} assignment reaches "
+        f"{graph.ancestors(ring[1][key])}, which is not the other five assignments in the ring. "
+        "The closing write below would then be closing a shorter loop than this test is named for, "
+        "or none at all."
+    )
+
+    # After this control the instructor has a parent, so the walk above would count
+    # one more; it is asserted first for that reason, and the closing write below
+    # replaces this edge rather than adding to it.
+    written(
+        graph,
+        lambda: graph.repoint(ring[0], elsewhere[key]),
+        "Re-pointing the instructor at the unrelated lead",
+    )
+
+    refused = graph.refusal(lambda: graph.repoint(ring[0], ring[1][key]))
+    assert refused is not None, (
+        "A six-assignment cycle was stored, closed by an edge from an instructor to a lead — the "
+        "first link of SPEC §2.1's own canonical chain, and a row ADR 0044's rank rule accepts "
+        "without hesitation. Five assignments separate that lead from the instructor it comes back "
+        "to, so a guard that walks a fixed number of levels stops before it finds the loop and "
+        "stores this. ADR 0044 keeps E0-09's cycle walk as what still holds 'if a later ticket "
+        "changes the rank order, adds a ranked role, or replaces this rule'; a walk that is right "
+        "at two levels and wrong at five is that guarantee in name only."
+    )
+    the_cycle_rather_than_the_rank(refused, "The six-assignment cycle closed by a climbing edge")
 
 
 def test_the_canonical_supervision_chain_is_accepted(supervision_graph: Any) -> None:
