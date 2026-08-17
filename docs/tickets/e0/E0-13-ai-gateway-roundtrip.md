@@ -19,9 +19,13 @@ tickets settled" in [the epic README](README.md)**.
 
 Two of those rules reach this ticket. The `classification` table means a model
 module, so it needs registering in `app/models/__init__.py` and must import
-`Base` from `app.models.base`. And the AI provider variables need `Settings`
-fields to resolve them before `.env.example` can document them — which this
-ticket is adding anyway, so the order is what matters, not the work.
+`Base` from `app.models.base`. And an `.env.example` entry needs a `Settings`
+field resolving it before the sync test will accept it. Two of the three
+provider variables are already there: E0-01 shipped `AI_PROVIDER_BASE_URL` and
+`AI_MODEL_NAME` with `ai_provider_base_url` and `ai_model_name` behind them, and
+`.env.example` says of the key that "the provider key is not read yet — the
+gateway and its masked key land in E0-13." So the new configuration here is the
+key alone, and its entry and its `Settings` field land together.
 
 ## Scope
 
