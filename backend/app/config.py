@@ -120,6 +120,28 @@ def _describe_invalid_settings(
     return lines
 
 
+def _blank_is_absent(value: object) -> object:
+    """Read a blank string as "this process was not given the value".
+
+    Blanking is how a value is *removed* in Compose: `env_file:` has already
+    handed a service the whole of `.env` by the time its own `environment:`
+    block is applied, so setting a variable to the empty string is what
+    withholds it and omitting the entry leaves it in place. An empty string that
+    validated would leave the withheld-from process looking configured and fail
+    later, somewhere else.
+
+    Whitespace is stripped first: a value that is only spaces is a blanking
+    somebody reformatted, not a value.
+
+    Written once and used by every optional field that can be withheld this way,
+    rather than copied per field — the copy is the one nobody updates
+    (`docs/MISTAKES.md` entry 13).
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
 def _configuration_error(problems: Iterable[str]) -> ConfigurationError:
     """Assemble the error operators read at three in the morning."""
     report = "\n".join(problems)
@@ -286,12 +308,10 @@ class Settings(BaseSettings):
         processes looking configured, and turn a deliberate withholding into a
         connection attempt with no credential in it.
 
-        Whitespace is stripped first: a value that is only spaces is a blanking
-        someone reformatted, not a URL.
+        `_blank_is_absent` above is the rule itself, and carries the rest of the
+        reasoning.
         """
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+        return _blank_is_absent(value)
 
     @field_validator("institution_timezone")
     @classmethod
