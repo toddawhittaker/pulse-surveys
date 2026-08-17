@@ -289,11 +289,17 @@ jobs:
       # skipped invariant test is indistinguishable from a deleted one in a
       # green checkmark, so the checker treats skip, xfail, and empty
       # collection as failures — not as skips.
+      #
+      # `--allow-empty` went with E0-10, which landed the first §4.1
+      # invariants. With it, deleting every invariant assertion in the
+      # repository was a green pipeline; without it, an empty collection is a
+      # build failure. `scripts/ci/check_invariants.py` keeps the flag as an
+      # option and nothing passes it.
       - name: Invariant suite (§4.1) — no skips permitted
         run: |
           mkdir -p reports
           pytest -m invariant --junitxml=reports/invariants.xml || true
-          python scripts/ci/check_invariants.py reports/invariants.xml --allow-empty
+          python scripts/ci/check_invariants.py reports/invariants.xml
 
       - name: Unit + integration with coverage
         env:

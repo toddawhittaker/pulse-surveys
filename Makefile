@@ -121,14 +121,17 @@ migration-check: ## Fail if the models have drifted from the migrations
 # Test gates
 # ---------------------------------------------------------------------------
 
-# `--allow-empty` stays until E0-10 adds the first §4.1 invariant; the workflow
-# passes it too, and the two move together.
+# No `--allow-empty`, from E0-10 on: the §4.1 invariants exist, so a run that
+# collected none of them is a suite that has lost them rather than one that has
+# not grown them yet. The workflow dropped the flag in the same change, and the
+# two move together. `scripts/ci/check_invariants.py` keeps the flag as an
+# option; what has gone is passing it.
 .PHONY: invariants
-invariants: ## Run the §4.1 invariant suite alone; a skip is a failure
+invariants: ## Run the §4.1 invariant suite alone; a skip and an empty run are both failures
 	$(call banner,invariant suite (SPEC §4.1))
 	@mkdir -p reports
 	@pytest -m invariant --junitxml=reports/invariants.xml || true
-	@$(PYTHON) scripts/ci/check_invariants.py reports/invariants.xml --allow-empty
+	@$(PYTHON) scripts/ci/check_invariants.py reports/invariants.xml
 
 # The integration tests start their own Postgres through testcontainers, so this
 # needs a running Docker daemon but not the Compose stack.

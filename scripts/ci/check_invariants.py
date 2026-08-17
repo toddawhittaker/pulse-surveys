@@ -9,7 +9,15 @@ is a failure, and collecting nothing at all is a failure.
 
 Usage:
     check_invariants.py reports/invariants.xml
-    check_invariants.py reports/invariants.xml --allow-empty   # pre-E0 only
+    check_invariants.py reports/invariants.xml --allow-empty   # nothing passes this
+
+`--allow-empty` existed so that the gate could ship before there was anything for
+it to check. E0-10 landed the first §4.1 invariants and took the flag out of both
+callers, so neither `.github/workflows/ci.yml` nor the `Makefile` passes it and
+`tests/unit/test_invariant_gate_is_strict.py` fails if either starts again. The
+option stays here because removing it would be a change to this checker's
+behaviour dressed up as tidying, and because the tolerance is a caller's decision
+to justify rather than a capability to delete.
 """
 
 from __future__ import annotations
@@ -27,9 +35,10 @@ def main() -> int:
         "--allow-empty",
         action="store_true",
         help=(
-            "Tolerate a suite that collected zero invariant tests. Only valid "
-            "before the first invariant test lands; remove this flag as part "
-            "of the ticket that adds one."
+            "Tolerate a suite that collected zero invariant tests. The first "
+            "§4.1 invariants landed in E0-10 and no caller in this repository "
+            "passes this any more; passing it again is a decision to say out "
+            "loud in the pull request that does it."
         ),
     )
     args = parser.parse_args()
@@ -37,8 +46,9 @@ def main() -> int:
     if not args.junit_xml.exists():
         if args.allow_empty:
             print(
-                f"note: {args.junit_xml} not written — no invariant tests exist yet.\n"
-                "      This is tolerated until the first §4.1 invariant lands."
+                f"note: {args.junit_xml} not written — no invariant run to read.\n"
+                "      Tolerated because --allow-empty was passed. No caller in "
+                "this repository passes it since E0-10."
             )
             return 0
         print(
@@ -71,8 +81,8 @@ def main() -> int:
         if args.allow_empty:
             print(
                 "note: the invariant suite collected 0 tests.\n"
-                "      Tolerated until the first §4.1 invariant lands; drop "
-                "--allow-empty in that ticket."
+                "      Tolerated because --allow-empty was passed. No caller in "
+                "this repository passes it since E0-10."
             )
             return 0
         print(
