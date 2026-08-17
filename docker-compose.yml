@@ -47,6 +47,14 @@ x-application: &application
     # always been the same answer, so the container gets an expanded URL
     # either way.
     DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
+    # The Care queue's own connection, expanded here for the same reason and
+    # under the same rule. It names `pulse_care`, which holds no privilege on
+    # the identity table and one EXECUTE on the audited reveal (SPEC §6.2,
+    # ADR 0001) — so it is not the superuser credential the two blanked lines
+    # below withhold, and it does reach every application service. `worker` and
+    # `beat` never serve this queue; `app.services.safety` opens the pool on
+    # first use, so a process that never reveals anything never connects as it.
+    CARE_DATABASE_URL: ${CARE_DATABASE_URL:?CARE_DATABASE_URL is not set — copy .env.example to .env}
     # Second: `.env` also carries the superuser credential, because `db` needs
     # it, and `env_file:` would hand the whole file to this container. No
     # application container may hold it. `db:5432` is reachable from all three
@@ -194,7 +202,7 @@ services:
     # built from instead, which keeps each password in one place rather than in
     # two that can disagree. See docs/adr/0008.
     #
-    # Two roles, and the split is the point. POSTGRES_USER is the role `initdb`
+    # Three roles, and the split is the point. POSTGRES_USER is the role `initdb`
     # creates; it is the cluster superuser, and ADR 0009 sanctions it for
     # migrations and system-level tasks only. DB_APP_USER is the role the
     # application connects as, created by scripts/db-init, and it is granted
@@ -204,12 +212,22 @@ services:
     # is what this buys: a runtime role that is superuser bypasses grants and
     # row-level security entirely, which would make the whole
     # identity-separation scheme decorative.
+    #
+    # DB_CARE_USER is E0-10's third role, created the same way and for the
+    # opposite job: it is the only role in the cluster that can execute the
+    # audited reveal, and it holds no SELECT on the identity table either, so a
+    # name cannot be obtained without an audit row (SPEC §6.2, ADR 0001). Both
+    # runtime roles get their privileges and their grants from the E0-10
+    # migration; what these two pairs carry is the login credential, which a
+    # migration cannot hold without holding it in the repository.
     environment:
       POSTGRES_USER: ${DB_SUPERUSER:?DB_SUPERUSER is not set — copy .env.example to .env}
       POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:?DB_SUPERUSER_PASSWORD is not set — copy .env.example to .env}
       POSTGRES_DB: ${DB_NAME:?DB_NAME is not set — copy .env.example to .env}
       DB_APP_USER: ${DB_APP_USER:?DB_APP_USER is not set — copy .env.example to .env}
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD is not set — copy .env.example to .env}
+      DB_CARE_USER: ${DB_CARE_USER:?DB_CARE_USER is not set — copy .env.example to .env}
+      DB_CARE_PASSWORD: ${DB_CARE_PASSWORD:?DB_CARE_PASSWORD is not set — copy .env.example to .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       # Runs once, against an empty data directory. An existing volume never

@@ -198,6 +198,20 @@ class Settings(BaseSettings):
     # credential becomes an explicit act with a name a reviewer can search for,
     # instead of something that happens by writing an attribute.
     database_url: SecretStr = Field(description="SQLAlchemy URL for the application database.")
+    # The second pool, and the reason it is a second entry rather than something
+    # derived from the first: it names a different role, `pulse_care`, with a
+    # credential of its own. Deriving it would mean one credential opening both
+    # connections, which is the whole of ADR 0001's separation undone in a string
+    # substitution. Only `app.services.safety` reads it (ADR 0042); every other
+    # read path in the application runs on `database_url` and cannot reach
+    # identity at all.
+    #
+    # Required, not optional. A deployment missing it fails at start-up in every
+    # process rather than at the first reveal, which is the one moment in this
+    # system where a configuration error costs the most.
+    care_database_url: SecretStr = Field(
+        description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2)."
+    )
     redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
 
     # --- deployment wiring, no credential: required, no default ---------------
