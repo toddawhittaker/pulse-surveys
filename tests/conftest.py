@@ -64,10 +64,16 @@ is written here rather than imported from any of them. What the builder refuses
 to decide — what a scope node is made of, and how a role is spelled — is written
 on the class.
 
-E0-10 adds `seed_rows`, beside `supervision_graph` and built out of the same
-helper. Its Care reveal can only be asserted against an identity that exists, and
-the seeding it needs is "one row of whatever table, with its ancestors" rather
-than a graph shape.
+E0-10 adds three, all at the bottom. `seed_rows` sits beside `supervision_graph`
+and is built out of the same helper: its Care reveal can only be asserted against
+an identity that exists, and the seeding it needs is "one row of whatever table,
+with its ancestors" rather than a graph shape. `committed_rows` and
+`care_service_environment` exist for the one thing the rest of this file cannot
+do — `app.services.safety` opens its **own** connection from `CARE_DATABASE_URL`,
+so it sees nothing written inside `db_session`'s transaction, and a test that
+calls it needs committed rows and an environment pointing at this container. The
+Care role itself is provisioned beside the application role now, mirroring
+`scripts/db-init/02-care-role.sh`: a login and no grant.
 """
 
 import base64
@@ -448,9 +454,25 @@ TEST_SUPERUSER_CREDENTIAL = "test-only-admin-9d41c7ba"
 # by `test_alembic_upgrade_head_succeeds_where_the_roles_already_exist`.
 TEST_APP_USER = "pulse_app"
 TEST_APP_CREDENTIAL = "test-only-app-4b8e0257"
+
+# The Care role, provisioned here for the same reason and by the same route as
+# the application role. `scripts/db-init/02-care-role.sh` creates it with a login
+# and a password on a Compose volume; a testcontainers Postgres runs no init hook,
+# so this file is its provisioning (ADR 0009's table gives this fixture its own
+# row). The E0-10 migration creates the role too, guarded, and writes every
+# privilege it holds — the script and this fixture only hand it a way to log in,
+# which a migration cannot do without keeping a password in the repository.
+TEST_CARE_USER = "pulse_care"
+TEST_CARE_CREDENTIAL = "test-only-care-71c3f2ad"
+
 TEST_DATABASE = "pulse_test"
 
 DATABASE_URL_VARIABLE = "DATABASE_URL"
+
+# The Care connection's own URL. Not this file's invention and not a choice left
+# open: `.env.example` documents it, and its comment says it is "read by
+# `app.services.safety` and by nothing else".
+CARE_DATABASE_URL_VARIABLE = "CARE_DATABASE_URL"
 
 # **This suite's choice**, and the one name in this file that a construction
 # decision could displace. E0-04 settles *which identity* runs migrations —
@@ -464,15 +486,20 @@ ALEMBIC_SUPERUSER_URL_VARIABLE = "ALEMBIC_DATABASE_URL"
 
 
 class DatabaseUnderTest(NamedTuple):
-    """One database in the test container, addressed as each of the two roles.
+    """One database in the test container, addressed as each of the three roles.
 
-    Both URLs name the same database on the same server. Which one a caller
-    reaches for is the whole subject of ADR 0009: migrations and bootstrap use
-    `superuser_url`, and everything the application does uses `application_url`.
+    All three URLs name the same database on the same server. Which one a caller
+    reaches for is the whole subject of ADR 0009 and ADR 0001: migrations and
+    bootstrap use `superuser_url`, everything the application does uses
+    `application_url`, and `care_url` is the one connection in the cluster that
+    can execute the audited reveal (SPEC §6.2). The third arrived with E0-10, and
+    `.env.example` documents its variables as `CARE_DATABASE_URL`, `DB_CARE_USER`
+    and `DB_CARE_PASSWORD`.
     """
 
     superuser_url: str
     application_url: str
+    care_url: str
 
 
 def container_url(container: Any, *, username: str, credential: str, database: str) -> str:
@@ -506,6 +533,36 @@ def migration_environment(database: DatabaseUnderTest) -> dict[str, str]:
         "DB_APP_USER": application.username or "",
         "DB_APP_PASSWORD": application.password or "",
         "DB_NAME": superuser.path.lstrip("/"),
+    }
+
+
+def application_environment(database: DatabaseUnderTest) -> dict[str, str]:
+    """Every variable an `app.*` module could need to reach `database` at run time.
+
+    The same over-supply `migration_environment` above makes, for the same reason
+    and one ticket later. `.env.example` gives the Care connection a URL of its
+    own *and* a user/password pair, and `app.services.safety` could reasonably
+    read either — a whole `CARE_DATABASE_URL`, or the pair against the address in
+    `DATABASE_URL`, which is the shape ADR 0012 chose for Alembic. Supplying only
+    one would make that choice for the implementer by failing the other, so both
+    are set and they agree.
+
+    `DATABASE_URL` names the application role and `CARE_DATABASE_URL` names the
+    Care role, never each other and never the superuser — `.env.example` calls
+    pointing both at one role "the separation undone in one line", and a fixture
+    that did it would test the separation against a database that does not have
+    one.
+    """
+    application = urlsplit(database.application_url)
+    care = urlsplit(database.care_url)
+    return {
+        DATABASE_URL_VARIABLE: database.application_url,
+        CARE_DATABASE_URL_VARIABLE: database.care_url,
+        "DB_APP_USER": application.username or "",
+        "DB_APP_PASSWORD": application.password or "",
+        "DB_CARE_USER": care.username or "",
+        "DB_CARE_PASSWORD": care.password or "",
+        "DB_NAME": care.path.lstrip("/"),
     }
 
 
@@ -592,6 +649,39 @@ def provision_application_role(superuser_url: str, database: str) -> None:
         engine.dispose()
 
 
+def provision_care_role(superuser_url: str) -> None:
+    """Create the role the Care queue connects as, as `scripts/db-init` does.
+
+    The counterpart to `provision_application_role` above, and it mirrors
+    `scripts/db-init/02-care-role.sh` line for line in what it does *and* in what
+    it refuses to do: a login, and **no grant of any kind**. Every privilege
+    `pulse_care` holds is written by the E0-10 migration, which is the one
+    mechanism that runs in all four environments ADR 0009's table lists; a
+    fixture that granted anything here would be a second place the grant model
+    lives, and the §4.1 assertions would be measuring it rather than the
+    migration.
+
+    No `GRANT CONNECT` either, and that is the script's choice rather than an
+    omission: Postgres grants `CONNECT` to `PUBLIC` by default, so the role can
+    reach the database without one, and the E0-10 grants are what decide what it
+    can do once there.
+    """
+    from sqlalchemy import create_engine, text
+
+    create_role = (
+        f'CREATE ROLE "{TEST_CARE_USER}" LOGIN'
+        f" PASSWORD '{TEST_CARE_CREDENTIAL}'"
+        " NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+    )
+
+    engine = create_engine(superuser_url, isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as connection:
+            connection.execute(text(create_role))
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture(scope="session")
 def postgres_container() -> Iterator[Any]:
     """A Postgres container on the image `docker-compose.yml` deploys.
@@ -631,7 +721,15 @@ def postgres_container() -> Iterator[Any]:
 
 @pytest.fixture(scope="session")
 def provisioned_database(postgres_container: Any) -> DatabaseUnderTest:
-    """The container's database, with both roles, before any migration runs."""
+    """The container's database, with all three roles, before any migration runs.
+
+    The two runtime roles are created *before* the migration, which is the
+    Compose stack's order exactly — `initdb` runs `scripts/db-init` against an
+    empty data directory, and the migration meets roles that already exist. E0-10
+    requires it to tolerate that (`CREATE ROLE` guarded by a `pg_roles` lookup,
+    the `ALTER`/`GRANT`/`REVOKE` applied unconditionally), so this ordering is
+    also what exercises the requirement rather than working around it.
+    """
     urls = DatabaseUnderTest(
         superuser_url=container_url(
             postgres_container,
@@ -645,8 +743,15 @@ def provisioned_database(postgres_container: Any) -> DatabaseUnderTest:
             credential=TEST_APP_CREDENTIAL,
             database=TEST_DATABASE,
         ),
+        care_url=container_url(
+            postgres_container,
+            username=TEST_CARE_USER,
+            credential=TEST_CARE_CREDENTIAL,
+            database=TEST_DATABASE,
+        ),
     )
     provision_application_role(urls.superuser_url, TEST_DATABASE)
+    provision_care_role(urls.superuser_url)
     return urls
 
 
@@ -670,8 +775,8 @@ def empty_database(
     "`alembic upgrade head` succeeds against an empty database" is a claim about
     an empty one, and the session database stops being empty the moment the
     first migration lands on it. A second database in the same container is far
-    cheaper than a second container, and roles are cluster-wide, so both URLs
-    still name the two roles ADR 0009 separates.
+    cheaper than a second container, and roles are cluster-wide, so all three
+    URLs still name the three roles ADR 0009 and ADR 0001 separate.
     """
     from sqlalchemy import create_engine, text
 
@@ -691,6 +796,12 @@ def empty_database(
                 postgres_container,
                 username=TEST_APP_USER,
                 credential=TEST_APP_CREDENTIAL,
+                database=name,
+            ),
+            care_url=container_url(
+                postgres_container,
+                username=TEST_CARE_USER,
+                credential=TEST_CARE_CREDENTIAL,
                 database=name,
             ),
         )
@@ -2800,3 +2911,135 @@ def supervision_graph(db_session: Any, metadata_tables: dict[str, Any]) -> Super
     """
     _GRAPH_INTEGER_COUNTERS.clear()
     return SupervisionGraph(db_session, metadata_tables)
+
+
+# ---------------------------------------------------------------------------
+# E0-10 — rows a *second connection* can see, and the environment that points
+# `app.services.safety` at this container.
+# ---------------------------------------------------------------------------
+
+
+class CommittedRows:
+    """Seeding for a service that opens its own connection, undone when the test ends.
+
+    Every other database fixture here writes inside `db_session`'s transaction and
+    rolls it back, which is the right default and is useless for one case: a
+    service that connects for itself sees none of it. `app.services.safety` is
+    that case — `CARE_DATABASE_URL` is a second connection by design (ADR 0001:
+    "the connection pool is bound to the service module"), so a test that calls
+    `reveal_identity` has to hand it committed rows or it is testing a reveal of
+    nothing.
+
+    So this commits, and the fixture below removes afterwards **whatever appeared**
+    rather than whatever it wrote. That difference is not tidiness: the service's
+    own audit row is written on its connection, inside its transaction, and no
+    amount of bookkeeping on this side would know its key. A snapshot of every
+    single-key table before and after does.
+    """
+
+    def __init__(self, session: Any, tables: dict[str, Any]) -> None:
+        self.session = session
+        self.tables = tables
+        self.graph = SupervisionGraph(session, tables)
+
+    def seed(self, name: str, chain: dict[str, Any] | None = None, **overrides: Any) -> Any:
+        """One row of `name`, with its ancestors. Not visible elsewhere until `commit`."""
+        return seed_row(self.session, self.tables, name, chain, **overrides)
+
+    def commit(self) -> None:
+        """Make everything seeded so far visible to every other connection."""
+        self.session.commit()
+
+
+def keyed_tables(tables: dict[str, Any]) -> list[Any]:
+    """Every declared table with exactly one primary key column, parents first.
+
+    Sorted by dependency so the caller can delete in reverse and never orphan a
+    row. `MetaData.sorted_tables` is what does the sorting — the metadata is
+    reached through any one table rather than passed in, because every table here
+    comes from the same `Base.metadata`. A self-referential table —
+    `role_assignment` — is safe inside one statement: Postgres queues
+    referential-integrity checks as after-row triggers and fires them at the end
+    of the statement, so a parent and its child leave together.
+    """
+    if not tables:
+        return []
+    ordered = next(iter(tables.values())).metadata.sorted_tables
+    return [table for table in ordered if len(list(table.primary_key.columns)) == 1]
+
+
+def row_keys(connection: Any, tables: list[Any]) -> dict[str, set[Any]]:
+    """The primary key of every row in each of `tables`, right now."""
+    from sqlalchemy import select
+
+    found: dict[str, set[Any]] = {}
+    for table in tables:
+        key = next(iter(table.primary_key.columns))
+        found[table.name] = {row[0] for row in connection.execute(select(key))}
+    return found
+
+
+def delete_rows_added_since(engine: Any, tables: list[Any], before: dict[str, set[Any]]) -> None:
+    """Remove every row that appeared since `before` was taken, children first."""
+    from sqlalchemy import delete, select
+
+    with engine.begin() as connection:
+        for table in reversed(tables):
+            key = next(iter(table.primary_key.columns))
+            present = {row[0] for row in connection.execute(select(key))}
+            added = present - before.get(table.name, set())
+            if added:
+                connection.execute(delete(table).where(key.in_(list(added))))
+
+
+@pytest.fixture
+def committed_rows(
+    migrated_engine: Any, metadata_tables: dict[str, Any]
+) -> Iterator[CommittedRows]:
+    """`CommittedRows` on the migrated database, with the database left as it was found.
+
+    The teardown is a diff rather than a rollback, so it also removes what the
+    *service under test* wrote — which for E0-10 is the audit row every reveal
+    leaves, on a connection this fixture never sees. A test that leaks a row here
+    would fail somebody else's non-vacuity guard three tickets from now, which is
+    the expensive kind of flake.
+    """
+    from sqlalchemy.orm import Session
+
+    _GRAPH_INTEGER_COUNTERS.clear()
+    tables = keyed_tables(metadata_tables)
+    with migrated_engine.connect() as probe:
+        before = row_keys(probe, tables)
+
+    connection = migrated_engine.connect()
+    session = Session(bind=connection)
+    try:
+        yield CommittedRows(session, metadata_tables)
+    finally:
+        session.close()
+        connection.close()
+        delete_rows_added_since(migrated_engine, tables, before)
+
+
+@pytest.fixture
+def care_service_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_env: dict[str, str],
+    migrated_database: DatabaseUnderTest,
+) -> dict[str, str]:
+    """Point an `app.*` import at this container, as the application and as Care.
+
+    `configured_env` first, so every documented variable has a value and
+    `Settings()` constructs; then the database variables are overwritten with the
+    container's, because `.env.example`'s placeholders name the Compose service
+    `db` and resolve to nothing here.
+
+    `migrated_database` rather than `provisioned_database`: the Care role can log
+    in from the moment the fixture creates it, and it can *do* nothing until the
+    E0-10 migration grants it, so a service test against an unmigrated database
+    would be measuring the wrong refusal.
+    """
+    values = application_environment(migrated_database)
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    return values

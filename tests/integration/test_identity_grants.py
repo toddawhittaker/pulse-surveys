@@ -9,6 +9,17 @@ the mechanism: three roles, no grant of any kind on `user_identity` for either
 runtime role, and one `SECURITY DEFINER` function that returns identity and
 writes the audit row in the same transaction.
 
+**A fourth role exists and is not a runtime one**: the function's owner. A
+`SECURITY DEFINER` function executes as whoever owns it, so the owner *is* the
+privilege the door opens, and owning it with the identity that runs migrations
+makes the door a superuser one — measured on this stack, such a function read
+`pg_catalog.pg_authid` for a `pulse_care` session that was refused that table
+directly one statement later. The two tests at the end of the Care section below
+hold the repair: no `SECURITY DEFINER` function in `public` is owned by a
+superuser, and the owner's grants are exactly the three its job needs. Neither
+names the role or the function, because E10 replaces the function and a rule
+spelled with its name would retire with it.
+
 **Denial, never absence.** Every confidentiality assertion here is that the
 server *refused* a statement, with the SQLSTATE that says why. "The name was not
 in the result" is satisfied by a query that returned nothing for an unrelated
@@ -71,10 +82,13 @@ from sqlalchemy.exc import DatabaseError
 
 pytestmark = pytest.mark.integration
 
-# The three roles E0-10's scope names, and ADR 0001 before it. `pulse_migrate` is
-# deliberately absent from the assertions below: the ticket's own "Reconcile
-# first" section leaves open whether it exists at all or is the bootstrap
-# identity under another name, and a test requiring it would settle that.
+# The two roles that serve requests, named by E0-10's scope and by ADR 0001
+# before it. Two other roles are deliberately *not* named here. `pulse_migrate`,
+# because the ticket's own "Reconcile first" section leaves open whether it
+# exists at all or is the bootstrap identity under another name, and a test
+# requiring it would settle that. And the `SECURITY DEFINER` function's owner,
+# because it is discovered from the catalog rather than spelled: it is not a
+# runtime role, nothing connects as it, and E10 replaces the function it owns.
 APPLICATION_ROLE = "pulse_app"
 CARE_ROLE = "pulse_care"
 RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
@@ -97,6 +111,27 @@ READ_IDENTITY = f'SELECT * FROM public."{IDENTITY_TABLE}" LIMIT 1'  # noqa: S608
 # already knows, and `REFERENCES` lets a foreign key be built that probes for the
 # existence of a value.
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
+
+# What the reveal function's owner may do, and the whole of it. **Derived from
+# three sentences of E0-10 rather than copied from the migration**, so that this
+# constant can be checked against the ticket instead of against the SQL it is
+# supposed to police (`docs/MISTAKES.md` entry 19):
+#
+#   - it "returns identity"                              → user_identity: SELECT
+#   - it "verifies a live `CARE` assignment itself"       → role_assignment: SELECT
+#   - it "writes the audit row in the same transaction"   → audit_log: INSERT
+#
+# The second is the one that surprises people and is not padding: it is the half
+# of the two-condition design that has to hold when the service is bypassed, so
+# the function reads the supervision table on its own account. The audit table's
+# name is SPEC §8's.
+REVEAL_DEFINER_PRIVILEGES = frozenset(
+    {
+        ("user_identity", "SELECT"),
+        ("role_assignment", "SELECT"),
+        ("audit_log", "INSERT"),
+    }
+)
 
 # Postgres reports an insufficient privilege as SQLSTATE 42501. Asserted on the
 # code rather than on the message text, because "permission denied" also appears
@@ -152,6 +187,19 @@ PUBLIC_TABLES = """
     ORDER BY 1
 """
 
+# Everything `has_table_privilege` can be asked about: tables, partitioned
+# tables, views and materialised views. Wider than "the tables the function's
+# body names" on purpose — the question is what the definer *can* reach, and a
+# grant on something its body does not mention today is exactly the kind that
+# arrives unnoticed.
+PUBLIC_RELATIONS = """
+    SELECT c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm')
+    ORDER BY 1
+"""
+
 READ_VIEWS = """
     SELECT c.relname
     FROM pg_class c
@@ -166,6 +214,7 @@ READ_VIEWS = """
 SECURITY_DEFINER_FUNCTIONS = """
     SELECT p.oid::regprocedure::text AS signature,
            p.proname AS name,
+           pg_get_userbyid(p.proowner) AS owner,
            coalesce(p.proargnames, ARRAY[]::text[]) AS argument_names,
            array(
                SELECT format_type(a.argtype, NULL)
@@ -1241,6 +1290,158 @@ def test_a_shadowed_table_does_not_change_what_the_reveal_function_returns(
         "`SET search_path = pg_catalog, public, pg_temp`, naming `pg_temp` last because omitting "
         "it is what puts it first. `test_identity_separated_views.py` asserts each half out of the "
         "catalog; this is the one that shows what they are for."
+    )
+
+
+def test_no_security_definer_function_is_owned_by_a_superuser(db_session: Any) -> None:
+    """What the one door in the wall is allowed to spend, asserted over the owner.
+
+    A `SECURITY DEFINER` function runs with its **owner's** privileges, so the
+    owner is the privilege the door actually opens — the grants to `pulse_care`
+    only decide who may knock. Owned by the identity that runs migrations, the
+    reveal is a superuser-privileged execution path handed to a role that is
+    otherwise refused everything: measured on this stack, such a function
+    returned `count(*) = 19` from `pg_catalog.pg_authid` — every role's password
+    verifier — to a `pulse_care` session that was refused that same table one
+    statement later. That is not extra hygiene, it is a read of the cluster's
+    password hashes through the door this ticket deliberately opens.
+
+    **Phrased over every `SECURITY DEFINER` function rather than over this one by
+    name.** E10 replaces the reveal with the real audited one; a rule spelled
+    `reveal_student_identity` would retire with it while the hazard stays exactly
+    where it is. Any function added here later — E10's, or a future rebuild of
+    this one — meets the same rule without anybody remembering it exists.
+
+    **The mutation it exists to survive** is the one that produced the `pg_authid`
+    read: `ALTER FUNCTION … OWNER TO` the migration identity. That identity is a
+    superuser (ADR 0009 sanctions it for exactly that job), so re-owning turns
+    this red, which is the whole assertion.
+
+    `rolbypassrls` is asserted with `rolsuper` because they are one property with
+    two spellings here — either lets the definer read past a control the schema
+    thinks it has, and E0-02's review measured both reading straight through a
+    deny-all policy. `rolcanlogin` is deliberately *not* asserted: a login is a
+    credential surface rather than a privilege the function can spend, and
+    forbidding it here would pin a provisioning decision this ticket leaves to
+    whoever installs Pulse.
+    """
+    functions = security_definer_functions(db_session, CARE_ROLE)
+    assert functions, (
+        "This project defines no `SECURITY DEFINER` function in `public`, so this test swept "
+        "nothing and would report success. E0-10 ships exactly one, for the Care reveal; "
+        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` diagnoses "
+        "its absence."
+    )
+
+    connected_as = db_session.execute(text(CURRENT_ROLE)).scalar_one()
+    assert db_session.execute(text(ROLE_ATTRIBUTES), {"role": connected_as}).one().rolsuper, (
+        f"`pg_roles` does not report {connected_as!r} as a superuser, and that is the identity "
+        "these tests connect as — the bootstrap one ADR 0009 sanctions for migrations. So this "
+        "query cannot recognise a superuser at all, and the assertion below would pass against a "
+        "function owned by one."
+    )
+
+    unbounded: dict[str, str] = {}
+    for function in functions:
+        owner = function["owner"]
+        attributes = db_session.execute(text(ROLE_ATTRIBUTES), {"role": owner}).one_or_none()
+        assert attributes is not None, (
+            f"`{function['signature']}` is owned by {owner!r}, which has no row in `pg_roles`. "
+            "Then nothing below is true of anything, and the owner cannot be checked at all."
+        )
+        held = [name for name in ("rolsuper", "rolbypassrls") if getattr(attributes, name)]
+        if held:
+            unbounded[function["signature"]] = f"{owner} holds {held}"
+
+    assert not unbounded, (
+        f"{unbounded}. A `SECURITY DEFINER` function executes as its owner, so the owner's "
+        "attributes are what the function may do — and a superuser owner means the one function "
+        "`pulse_care` may execute can read anything in the cluster, including "
+        "`pg_catalog.pg_authid`, which holds every role's password verifier. That was reproduced "
+        "on this stack before the owner was separated out: 19 rows, to a session refused that "
+        "table directly one statement later. ADR 0001's whole scheme is that identity is reachable "
+        "by exactly one audited route; a superuser-owned definer makes that route a general "
+        "one.\n\n"
+        "The fix is a role that owns the function and holds nothing else — no login, no "
+        "membership, no relation of its own, and only the privileges "
+        "`test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs` pins. Note "
+        "this rule is about functions and says nothing about views: a view is only ever a "
+        "`SELECT`, so an added line in one cannot execute anything, and who owns a view is a "
+        "separate decision."
+    )
+
+
+def test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs(
+    db_session: Any,
+) -> None:
+    """Exactly three, because a fourth is what there is to catch.
+
+    The owner exists to be small. Once it is not a superuser
+    (`test_no_security_definer_function_is_owned_by_a_superuser`), what the door
+    opens is precisely the set of grants that role holds — so the interesting
+    assertion is not "it can do its job" but "it can do nothing else". **Exactly,
+    not at least**: a `UPDATE` on `user_identity` added to make some later
+    migration convenient is invisible to every other gate in this build, because
+    `alembic check` reads no grants at all and no test but this one enumerates
+    them.
+
+    The expected set is derived from three sentences of the ticket rather than
+    from the migration, and `REVEAL_DEFINER_PRIVILEGES` at the top of this file
+    shows the derivation: the function returns identity, checks the actor's `CARE`
+    assignment itself, and writes the audit row. The middle one is the half of the
+    design that has to hold when the service is bypassed, which is why
+    `role_assignment` is in the set and why two would have been the wrong number.
+
+    **What this cannot see, stated rather than implied** (`docs/MISTAKES.md` entry
+    14): a change *within* those three. The function may come to read a different
+    column of `user_identity`, or every row of `role_assignment` rather than the
+    actor's, and nothing here moves — the audit row records that an access
+    happened, not what was read. The grant is the outer bound on the blast radius,
+    not a description of the body.
+
+    Vacuity has no route in: the expected set is non-empty, so a
+    `has_table_privilege` that answered `false` to everything fails this rather
+    than passing it, and one that answered `true` to everything fails it too.
+    """
+    function = the_reveal_function(db_session)
+    owner = function["owner"]
+    relations = [row[0] for row in db_session.execute(text(PUBLIC_RELATIONS))]
+    assert relations, (
+        "There is no table or view in `public`, so this sweep has nothing to ask about and the "
+        "comparison below would be between an empty set and three expected members — failing for "
+        "a reason that has nothing to do with grants."
+    )
+
+    held = {
+        (relation, privilege)
+        for relation in relations
+        for privilege in TABLE_PRIVILEGES
+        if db_session.execute(
+            text("SELECT has_table_privilege(:role, :relation, :privilege)"),
+            {"role": owner, "relation": f"public.{relation}", "privilege": privilege},
+        ).scalar_one()
+    }
+
+    unexpected = sorted(
+        f"{relation}:{privilege}" for relation, privilege in held - REVEAL_DEFINER_PRIVILEGES
+    )
+    missing = sorted(
+        f"{relation}:{privilege}" for relation, privilege in REVEAL_DEFINER_PRIVILEGES - held
+    )
+    assert not unexpected and not missing, (
+        f"`{owner}` owns `{function['signature']}`, so what it holds is what that function can "
+        f"reach. Beyond what its job needs: {unexpected}. Missing from what its job needs: "
+        f"{missing}.\n\n"
+        "The first list is the one to read first. A `SECURITY DEFINER` function spends its "
+        "owner's privileges on behalf of a caller who does not have them, so every grant this "
+        "role holds is reachable through the one door `pulse_care` may open — and nothing else in "
+        "this build would notice a new one, because `alembic check` compares schema and not "
+        "grants. If the owner has come to own a relation rather than to be granted on it, that "
+        "shows up here as every privilege on that relation at once.\n\n"
+        "The second list means the reveal cannot do its job and some other test is about to fail "
+        "for a reason that reads as unrelated: without `role_assignment:SELECT` the function "
+        "cannot check the actor's `CARE` assignment, and without `audit_log:INSERT` it cannot "
+        "leave the record that makes the read legitimate."
     )
 
 

@@ -35,7 +35,15 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 21**
+**Caught: 22**
+
+*(The twenty-second: repairing the sixth incident below. The replacement sweep
+requires a `CREATE` of the view rather than a mention of it, and this entry is
+why it ships with six must-allow samples — `GRANT`, `REVOKE`, `DROP`,
+`COMMENT ON`, a name in a comment, and a different view whose name begins the
+same way — each of which the old version accepted as evidence that a view was
+defined. It is also why the E0-10 service test ends at `pytest.raises` rather
+than at `assert refused.value is not None`, which cannot fail.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
@@ -150,7 +158,14 @@ second case arrives.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 17**
+**Caught: 18**
+
+*(The eighteenth: E0-10's fixture change, `TEST_APP_USER` from `pulse_test_app`
+to `pulse_app`. This entry is why the sweep went outward from the constant rather
+than stopping at it — the epic README's "the fix is one line… until it lands, do
+not read a green `application_engine` test as evidence about a grant" was written
+about a state that had just stopped being true, and three test-module docstrings
+described the marker convention this ticket had just widened.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -285,7 +300,13 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 6**
+**Caught: 7**
+
+*(The seventh: E0-10 widened `IDENTITY_NAME_FRAGMENTS`, and this entry is why the
+author went looking for every copy rather than editing the one the dispute named.
+There were three — `test_identity_column_marker.py`, `test_identity_schema.py`,
+`test_role_assignment_graph.py` — and the comment on the first said there were
+two, which is exactly how the third stays behind.)*
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
