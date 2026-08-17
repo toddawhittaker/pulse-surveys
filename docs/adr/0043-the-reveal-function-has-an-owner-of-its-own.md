@@ -162,18 +162,38 @@ because nothing should ever authenticate as it, and E13's operator guide owes it
 a line beside ADR 0001's degradation note. ADR 0040's sentence "E0-10's migration
 establishes two roles" is amended by this record rather than left to disagree.
 
-**The downgrade revokes what the drop cannot.** Privileges on the function vanish
-with the function; the definer's grants on `user_identity` and `role_assignment`
-outlive the revision, so the downgrade removes them by hand. A downgraded
-database is left with an inert `NOLOGIN` role holding nothing, which is checked
-rather than assumed.
+**The downgrade revokes what the drop cannot** — and the set is larger than this
+paragraph first said. Privileges on the function and on the two views vanish with
+the objects, as does the definer's `INSERT` on `audit_log`. What outlives the
+revision has to be removed by hand, and this record originally named only the
+definer's grants on `user_identity` and `role_assignment`. E0-10's review found
+`GRANT SELECT ON public.role_assignment TO pulse_care` one statement away and
+still in place after `downgrade -1`, which is the same defect this paragraph was
+the record of having fixed. Enumerating the rest then found `USAGE ON SCHEMA
+public`, granted to all three roles by this revision and by nothing else.
 
-**Nothing asserts the ownership yet.** The suite has no test that
-`reveal_student_identity` is owned by a non-superuser holding exactly three
-privileges, so this is behaviour shipped with nothing asserting it
-(`docs/MISTAKES.md` entry 2) until one is written — the implementer does not
-write tests in this loop, and it has been routed. The two properties worth
-asserting are that the owner of every `SECURITY DEFINER` function in `public` is
-not a superuser, and that its privilege set on the tables its body names is
-exactly the three above; the first is the one that survives E10 replacing the
-function.
+So the rule is the object rather than the role: **a privilege on anything that
+outlives the downgrade is revoked, one guarded `IF EXISTS` per role** — the
+definer's two table grants and its schema `USAGE`, `pulse_care`'s grant on
+`role_assignment` and its schema `USAGE`, and `pulse_app`'s schema `USAGE`. One
+guard per role rather than one around all three, because a cluster missing
+`pulse_reveal_definer` is no reason to leave what `pulse_care` holds.
+
+**`CONNECT ON DATABASE` is the one deliberate exception**, and it is left because
+an ACL entry records no history. `scripts/db-init/01-application-role.sh` grants
+it to `pulse_app` at `initdb`, before this revision runs, so a single `REVOKE`
+removes both mechanisms' grants and takes the running application's login with it
+wherever `PUBLIC` no longer holds `CONNECT` — the same argument this revision
+already makes for not dropping the roles. `CONNECT` opens a session and reads no
+row. The migration says so at the point of the omission, and a test asserts the
+exception explicitly so that nobody later closes it as an oversight.
+
+**The ownership is asserted, in the two shapes named when it was not.**
+`test_no_security_definer_function_is_owned_by_a_superuser` sweeps every such
+function in `public` rather than naming this one, so it survives E10 replacing
+the function; `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
+pins the privilege set as an equality, so a fourth grant is a failure rather than
+a widening nobody sees. Both were routed to a test author and landed in the same
+pull request — the paragraph that stood here recorded behaviour shipped with
+nothing asserting it (`docs/MISTAKES.md` entry 2), and that is no longer the
+state.

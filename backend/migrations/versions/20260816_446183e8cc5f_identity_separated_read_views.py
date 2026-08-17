@@ -87,10 +87,47 @@ SCRIPTS = (
 
 # What the downgrade removes, and what it deliberately leaves. The views and the
 # function go, and the grants *on them* go with them, because a privilege cannot
-# outlive the object it is on. The definer's grants on tables that survive this
-# revision do not, so they are revoked by hand — otherwise a downgraded database
-# is left holding a `SELECT` on `user_identity` for a role with no function to
-# spend it through, which is the shape of privilege nobody ever notices again.
+# outlive the object it is on. A privilege on an object that **survives** the
+# downgrade does not, so every one of those is revoked by hand — otherwise a
+# downgraded database is left holding a `SELECT` on `user_identity` for a role
+# with no function to spend it through, which is the shape of privilege nobody
+# ever notices again.
+#
+# `identity_grants_v001.sql` and `identity_roles_v001.sql` between them hold every
+# grant this revision makes, and the block below is that list filtered by the rule
+# above:
+#
+#   - `SELECT` on `section_roster` and `section_enrollment_count` to `pulse_app`,
+#     and `EXECUTE` on the reveal to `pulse_care` — on objects this downgrade
+#     drops three statements earlier, so nothing to revoke;
+#   - `INSERT` on `audit_log` to `pulse_reveal_definer` — on a table `downgrade`
+#     drops a few lines further down, likewise;
+#   - `SELECT` on `user_identity` and on `role_assignment` to
+#     `pulse_reveal_definer`, and `SELECT` on `role_assignment` to `pulse_care` —
+#     on tables that survive, so all three are revoked below;
+#   - `USAGE ON SCHEMA public` to all three roles — the schema survives, and this
+#     revision is the only thing in the tree that writes those ACL entries, so
+#     they are revoked below too. On a stock cluster it changes nothing anybody
+#     can observe from a session: `PUBLIC` holds `USAGE` on `public` by default
+#     and the roles keep reaching the schema through that. It is revoked anyway,
+#     because "the default happens to cover it" is not the same as "this revision
+#     left nothing behind", and on a cluster where that default has been revoked
+#     the difference is real.
+#
+# **`CONNECT ON DATABASE` is the one grant deliberately left, and it is the only
+# exception to the rule above.** `identity_roles_v001.sql` grants it to
+# `pulse_app` and `pulse_care`, and the database survives, so the rule says
+# revoke. It is not revoked for the same reason the roles themselves are not
+# dropped: `scripts/db-init/01-application-role.sh` grants `pulse_app` exactly
+# that privilege at `initdb`, before this revision ever runs, and an ACL entry
+# records no history — one `REVOKE` would remove that mechanism's grant along
+# with this one and take the running application's login with it on any cluster
+# where `PUBLIC` no longer holds `CONNECT`. Revoking `pulse_care`'s alone would
+# leave the two connection roles in different states according to which
+# provisioning script happened to run, which is worse than leaving both. Nothing
+# is exposed by that: `CONNECT` opens a session and reads no row, and a role that
+# can connect and holds no table privilege is precisely the pre-revision state
+# `01-application-role.sh` sets out to establish.
 #
 # **All three roles stay.** On any Compose volume `pulse_app` was created by
 # `scripts/db-init` before this revision ever ran (ADR 0009), so dropping it here
@@ -99,15 +136,23 @@ SCRIPTS = (
 # elsewhere in the cluster that depends on it, which is a confusing way for a
 # downgrade to stop halfway. `pulse_reveal_definer` is created only by this
 # revision and could be dropped — it is kept for consistency and because a
-# NOLOGIN role holding nothing is inert, which the revokes above are what make
+# NOLOGIN role holding nothing is inert, which the revokes below are what make
 # true.
-# The revokes are guarded on the role existing, like the `CREATE ROLE` in
+#
+# The revokes are guarded on each role existing, like the `CREATE ROLE` in
 # `identity_roles_v001.sql` and for the same reason: `REVOKE … FROM <role>` is an
 # error rather than a no-op when the role is absent, and a downgrade is exactly
 # the moment somebody is already dealing with a database in a state nobody
 # planned. Reproduced by downgrading a database that had applied an earlier
 # spelling of this revision — `role "pulse_reveal_definer" does not exist`, with
-# the downgrade stopped half-done.
+# the downgrade stopped half-done. Measured again for the wider block, on a
+# throwaway cluster at this revision with all three roles dropped: the bare
+# `REVOKE ALL ON public.role_assignment FROM pulse_care` fails the same way, and
+# the guarded downgrade runs to completion and leaves both views, the function,
+# `audit_log` and the enum type gone.
+#
+# One guard per role rather than one around all three: a cluster missing
+# `pulse_reveal_definer` is no reason to skip revoking what `pulse_care` holds.
 DROP_OBJECTS = (
     "DROP FUNCTION IF EXISTS public.reveal_student_identity(uuid, uuid, uuid)",
     "DROP VIEW IF EXISTS public.section_enrollment_count",
@@ -118,6 +163,16 @@ DROP_OBJECTS = (
         IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pulse_reveal_definer') THEN
             REVOKE ALL ON public.user_identity FROM pulse_reveal_definer;
             REVOKE ALL ON public.role_assignment FROM pulse_reveal_definer;
+            REVOKE USAGE ON SCHEMA public FROM pulse_reveal_definer;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pulse_care') THEN
+            REVOKE ALL ON public.role_assignment FROM pulse_care;
+            REVOKE USAGE ON SCHEMA public FROM pulse_care;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pulse_app') THEN
+            REVOKE USAGE ON SCHEMA public FROM pulse_app;
         END IF;
     END
     $$
