@@ -155,17 +155,22 @@ configuration and should expect this.
 From E0-10 the migration grants `SELECT` on the read views to `pulse_app` and
 nothing at all on `user_identity`, so *which role a fixture authenticates as* is
 now the difference between a test that can detect a missing grant and one that
-cannot. `tests/conftest.py`'s `application_engine` provisions and connects as
-`pulse_test_app`, which holds none of those grants — a name chosen in E0-04, when
-no grant existed for it to be wrong about. Two consequences for anyone writing a
-read-path test: an assertion made over `application_engine` today is an assertion
-about a role holding nothing, and it passes for the wrong reason
-(`docs/MISTAKES.md` entry 3); and E0-10's own grant tests therefore reach the
-roles with `SET ROLE` from the bootstrap session instead. The fix is one line —
-`TEST_APP_USER = "pulse_app"` — and it works because the fixture creates the role
-before the migration runs and the migration's `CREATE ROLE` is guarded, exactly
-as on a Compose volume. Until it lands, do not read a green `application_engine`
-test as evidence about a grant.
+cannot. `tests/conftest.py`'s `application_engine` provisioned and connected as
+`pulse_test_app` — a name chosen in E0-04, when no grant existed for it to be
+wrong about — which held none of those grants, so an assertion made over it was
+an assertion about a role holding nothing and passed for the wrong reason
+(`docs/MISTAKES.md` entry 3). **E0-10 changed it to `pulse_app`**, one line, and it
+works because the fixture creates the role before the migration runs and the
+migration's `CREATE ROLE` is guarded, exactly as on a Compose volume. Two things
+follow for anyone writing a read-path test: `application_engine` is now evidence
+about a grant, and
+`test_the_suites_application_connection_authenticates_as_the_granted_role` in
+`tests/integration/test_identity_grants.py` is what keeps the fixture's name and
+the migration's name from drifting apart again — they are two constants in two
+files and nothing else would notice. E0-10's own grant tests reach both runtime
+roles with `SET ROLE` from the bootstrap session, because `pulse_care` has no
+login credential in the fixture and because a control and the refusal it
+qualifies then sit in one transaction.
 
 **Adding a read view means adding SQL to `backend/app/views_sql/` and an
 invariant test** (SPEC §13, [ADR

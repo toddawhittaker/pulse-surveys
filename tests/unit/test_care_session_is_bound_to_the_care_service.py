@@ -14,12 +14,30 @@ the *code path* decides: their instructor requests run on `pulse_app`, with no
 route to identity, however many hats they hold. That is the two-hat criterion,
 and this file is the half of it that can be asserted today.
 
-**What is asserted here, and what is waiting.** The runtime half — a reporting
-path asking for a Care session and being refused — needs the session factory's
-symbol, and E0-10 does not spell one. Inventing a name here would settle an
-interface the ticket leaves open, so the structural half is what this file holds:
-no module outside `services/safety.py` so much as names a Care session. The
-runtime test arrives when the interface does.
+**What is asserted here, and what is not available to assert.** Three things are:
+no module outside `services/safety.py` names a Care session; that module does name
+one; and — at runtime, against the imported module rather than its text — its
+public surface hands out nothing that is or returns one. `reveal_identity`,
+`NotCareStaffError` and `RevealedIdentity` are public; the engine, the
+sessionmaker and the session are `_care_engine`, `_care_sessions` and
+`_care_session`, and the third test below is what keeps them that way.
+
+**The runtime two-hat call is not written, and that is a result rather than a
+gap.** "A reporting-path caller cannot obtain a `pulse_care` session even when the
+acting person also holds a `CARE` assignment" describes a call that has no
+subject: there is no public factory to ask, which is the criterion being satisfied
+by construction. A test could only reach one of two ways, and both are worse than
+none — call `_care_session` itself, which asserts that a private thing works and
+inverts the rule; or ask for a public factory to exist so that something can be
+refused by it, which builds the door the criterion forbids. What *is* missing and
+nameable is the service-side assignment check as behaviour: calling
+`reveal_identity` as a person with no live `CARE` assignment and seeing
+`NotCareStaffError`. That needs a `pulse_care` login credential in the test
+fixture and the variable names that carry it in `.env.example`, neither of which
+E0-10 settles — the migration cannot hold a password. Until it does, the function
+half of that check is asserted against the database in
+`tests/integration/test_identity_grants.py`, which is the half the ticket says has
+to hold when the service is bypassed.
 
 **Why the syntax tree rather than the file text**, exactly as
 `test_care_is_not_reachable_from_a_claim.py` reasons: a correct implementation is
@@ -47,6 +65,7 @@ refuses an actor with no live `CARE` assignment, whatever session reached it.
 
 import ast
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -55,6 +74,7 @@ APP_ROOT = REPO_ROOT / "backend" / "app"
 
 # The module E0-10 names, and the only one allowed to obtain a Care session.
 CARE_SERVICE = APP_ROOT / "services" / "safety.py"
+CARE_SERVICE_MODULE = "app.services.safety"
 
 # What a Care session is called, in the two shapes a sweep can recognise: an
 # identifier that says both "care" and "session-ish", and the role name itself in
@@ -63,6 +83,20 @@ CARE_SERVICE = APP_ROOT / "services" / "safety.py"
 # guess fail loudly rather than quietly.
 CARE_ROLE_NAME = "pulse_care"
 SESSION_FRAGMENTS = ("session", "engine", "pool", "connection", "connect", "sessionmaker")
+
+
+def holds_a_session(value: Any) -> bool:
+    """Is this object a database connection, or a thing that makes one?
+
+    By type rather than by name, so the runtime test below catches a public
+    `engine` whatever it is called. Classes are deliberately not matched — a
+    module doing `from sqlalchemy.orm import Session` has imported a type, not
+    acquired a session — so this asks about instances.
+    """
+    from sqlalchemy.engine import Connection, Engine
+    from sqlalchemy.orm import Session, sessionmaker
+
+    return isinstance(value, Engine | Connection | Session | sessionmaker)
 
 
 def parsed_modules() -> dict[Path, ast.Module]:
@@ -217,10 +251,12 @@ def test_the_care_service_is_the_module_that_obtains_the_care_session() -> None:
     service obtains the session *and* "independently verifies the actor holds a
     live `CARE` assignment before doing anything. Two conditions, both required,
     so neither a routing mistake nor a stale assignment is enough on its own."
-    This asserts the first condition is wired where the ticket puts it; the second
-    is the function's own check, asserted against the database in
-    `test_identity_grants.py`, and the service's copy of it is a runtime test that
-    waits on the interface.
+    This asserts the first condition is wired where the ticket puts it. The second
+    is asserted where it can be: the function's own check, against the database,
+    in `test_identity_grants.py`. The service's independent copy of that check
+    needs `reveal_identity` to be *called*, which needs a `pulse_care` login
+    credential the test fixture does not have and a variable name for it that
+    `.env.example` does not carry — see this module's docstring.
     """
     assert CARE_SERVICE.is_file(), (
         f"{CARE_SERVICE.relative_to(REPO_ROOT)} does not exist. E0-10 names it — 'The Care service "
@@ -239,4 +275,68 @@ def test_the_care_service_is_the_module_that_obtains_the_care_session() -> None:
         "ticket proves it' — or it is reached under a name this sweep does not recognise, in "
         f"which case `SESSION_FRAGMENTS` in this file needs that spelling and the test above is "
         "currently blind in the same way."
+    )
+
+
+def test_the_care_service_exposes_nothing_that_hands_out_a_care_session(
+    configured_env: dict[str, str],
+    import_app_module: Any,
+) -> None:
+    """The pool is private, asserted against the imported module rather than its text.
+
+    E0-10: "A caller can never choose its own pool, and no general-purpose helper
+    hands out a `pulse_care` session." The two sweeps above say no *other module*
+    reaches for one; this says there is nothing for another module to reach for.
+    They are different failures — an import that has not been written yet is not
+    the same as a door that is locked — and this is the one that stays true as the
+    application grows, because it constrains the surface rather than the current
+    set of callers.
+
+    **Public means importable, and that is the whole rule.** A `care_session` with
+    no underscore is `from app.services.safety import care_session` away from any
+    reporting path, and the two-hat case is why that matters: §2.1 permits a Care
+    staffer who also teaches, so nothing about the person can decide which pool
+    their request runs on. Only the path can, and a public factory is a path
+    anybody can take.
+
+    **The canary is that something private *is* a session.** Without it, a module
+    that had not built the second pool at all would pass this cleanly — which is
+    the state E0-10 exists to leave behind, and reads identically in a green run
+    (`docs/MISTAKES.md` entry 3).
+
+    Objects are matched by *type* as well as by name, so a public engine is caught
+    whatever it is called; callables are matched by name, because a factory's
+    return type is not visible until it is called and calling one here would open
+    a connection this test has no business opening.
+    """
+    module = import_app_module(CARE_SERVICE_MODULE)
+    assert module is not None, (
+        f"There is no `{CARE_SERVICE_MODULE}` module. E0-10 names it — SPEC §13 already gives "
+        "`services/safety.py` the Care queue — and it is where the second connection pool and the "
+        "actor's assignment check both live."
+    )
+
+    exposed = {
+        name: value
+        for name, value in vars(module).items()
+        if holds_a_session(value) or (callable(value) and reads_as_a_care_session(name))
+    }
+    private = sorted(name for name in exposed if name.startswith("_"))
+    public = sorted(name for name in exposed if not name.startswith("_"))
+
+    assert private, (
+        f"`{CARE_SERVICE_MODULE}` holds nothing private that is a database session, engine or "
+        f"sessionmaker: it exposes {sorted(vars(module))}. Then 'the pool is private' is true of a "
+        "module with no pool, and this test would go on passing after the Care path was deleted. "
+        "E0-10 asks for two runtime connection pools, the second reachable only from here."
+    )
+    assert not public, (
+        f"`{CARE_SERVICE_MODULE}` exposes {public} without a leading underscore, and each is a "
+        f"session, an engine, a sessionmaker, or a callable named like one (it keeps {private} "
+        "private). E0-10: 'A caller can never choose its own pool, and no general-purpose helper "
+        "hands out a `pulse_care` session.' A public one is a single import away from every "
+        "reporting path in the application, and the person it would be misused for is the two-hat "
+        "case §2.1 permits and §6.2 spends a paragraph on — a Care staffer who also teaches, whose "
+        "instructor requests must run on `pulse_app` with no path to identity. `reveal_identity`, "
+        "`NotCareStaffError` and `RevealedIdentity` are the surface this module is meant to have."
     )

@@ -430,7 +430,23 @@ POSTGRES_CONTAINER_PORT = 5432
 # real thing; `tests/unit/test_config_settings.py` made the same choice.
 TEST_SUPERUSER = "pulse_test_admin"
 TEST_SUPERUSER_CREDENTIAL = "test-only-admin-9d41c7ba"
-TEST_APP_USER = "pulse_test_app"
+
+# **`pulse_app`, not a test-only name, and E0-10 is what changed it.** E0-04 chose
+# `pulse_test_app` when no grant existed anywhere for the name to be wrong about;
+# from E0-10 on, every grant in the schema belongs to `pulse_app` — the name
+# `.env.example` gives `DB_APP_USER` and the name the migration establishes — so a
+# fixture connecting as anything else holds nothing, and `application_engine`
+# stops being able to tell a missing grant from a present one. That is precisely
+# the failure this fixture exists to prevent: "tests that pass under privileges
+# production does not have", now in its mirror image.
+#
+# It works because the order here is the Compose stack's order exactly:
+# `provision_application_role` creates the role before any migration runs, as
+# `scripts/db-init` does at `initdb`, and E0-10's migration guards its
+# `CREATE ROLE` with a `pg_roles` lookup and applies its `ALTER`/`GRANT`/`REVOKE`
+# unconditionally — which is the ticket's "Reconcile first" requirement, asserted
+# by `test_alembic_upgrade_head_succeeds_where_the_roles_already_exist`.
+TEST_APP_USER = "pulse_app"
 TEST_APP_CREDENTIAL = "test-only-app-4b8e0257"
 TEST_DATABASE = "pulse_test"
 

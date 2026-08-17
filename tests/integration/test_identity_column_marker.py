@@ -44,18 +44,23 @@ column whose name contains neither "name" nor "email" — `login_id`, `picture`,
 `lis_person_sourcedid` — was not in it; and the table walk was one foreign-key
 hop rather than a fixed point, so a table linking to a table that links to `user`
 was never swept at all. Neither was exploitable in E0-08, because nothing there
-has a read path or a grant. **E0-10 lands the grants, and closes both**: its two
-new tests at the foot of this file plant the cases and require the sweep to
-report them, and the enumeration this file computes is what E0-10's views and the
-CI invariant pass are both built on.
+has a read path or a grant. **E0-10 lands the grants, and closes both — here, in
+this module.** `IDENTITY_NAME_FRAGMENTS` is widened and `people_tables` now
+iterates to a fixed point; the two new tests at the foot of the file plant the
+cases and require the sweep to report them. The enumeration this file computes is
+what E0-10's views and the CI invariant pass are both built on.
 
-What remains outside the search is still worth stating rather than implying
-(`docs/MISTAKES.md` entry 14): the sweep is over the tables that hold a person —
-`user`, `user_identity`, `person`, and anything reaching one of them through
-foreign keys — so a column on a table with no such link is not in it, and E0-10's
-pull request owes a sentence saying what its chosen convention cannot see,
-because every version of this has a blind spot and the unstated one is the one
-that bites.
+**That the fix lives in a test module is the decision, not an accident**, and
+dispute E0-10-01 is where it was settled: the discovery rule is a judgement about
+*names*, so there is nothing in the schema for it to be read off, and shipping the
+list from `app.models` for this file to import would leave the test holding its
+expectation inside the thing it checks (`docs/MISTAKES.md` entry 19). ADR 0022 and
+E0-10 both already put it here. The consequence to keep in view: no implementation
+change can move these two assertions, so **a mutation of this module is the only
+way to check them**, and both were mutated in that dispute before being believed.
+
+What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
+rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
 """
 
 from importlib import import_module
@@ -75,31 +80,76 @@ MARKER_TOKEN = "identity"  # noqa: S105 — the marker convention's token, not a
 # LMS-owned columns. Two spellings because the ticket names neither.
 MARKER_PREFIXES = ("identity_", "pii_")
 
-# Name and email spellings, as fragments of a column name. A copy of the tuple in
-# `test_identity_schema.py`, deliberately: a test module importing a sibling test
-# module works only because of where pytest puts `tests/` on `sys.path`, and a
-# collection error is not a failing test. Change one, look at the other.
-IDENTITY_NAME_FRAGMENTS = ("name", "email")
+# How a column name is recognised as holding a person. **Widened by E0-10**, whose
+# fourth criterion is that "an identity column whose name contains neither 'name'
+# nor 'email' is still caught": a roster sync storing an NRPS or LTI claim as
+# `login_id`, `picture` or `lis_person_sourcedid` used to land an identity column
+# that the sweep passed unnoticed.
+#
+# **`login_id`, never a bare `login`**, and that is measured rather than chosen.
+# With `login` the sweep pulls in `role_assignment.permits_web_login` — a boolean
+# about which doors a role opens (ADR 0026), on a table that reaches `person` and
+# that carries no identity at all — and turns this module's own tripwire and
+# `test_role_assignment_graph.py`'s sweep red over it. Both the implementer and
+# the arbitrator of dispute E0-10-01 ran that; with `login_id` the widened set
+# adds no member to what ("name", "email") already finds on today's schema.
+#
+# **Three copies of this tuple live in `tests/`** — this module,
+# `test_identity_schema.py` and `test_role_assignment_graph.py` — and each runs
+# its own sweep. They are copies deliberately: a test module importing a sibling
+# test module works only because of where pytest puts `tests/` on `sys.path`, and
+# a collection error is not a failing test. Change one, change all three; the
+# dispute found the comment here claiming there were two.
+#
+# **What the widened set still cannot see**, stated rather than implied
+# (`docs/MISTAKES.md` entry 14, and E0-10's criterion asks the pull request for
+# this sentence): an identity column named none of these — `sis`, `banner`,
+# `external_ref`, `initials`, `dob` — and any identity column on a table with no
+# foreign-key path to `user`, `user_identity` or `person`. Both are *naming*
+# judgements, and no test that reads a database can make one: a `text` column
+# called `external_ref` and a `text` column holding a student number are the same
+# object to Postgres. What closes that gap is not this tuple but the grant model,
+# which withholds `user_identity` from `pulse_app` whatever anything is called.
+IDENTITY_NAME_FRAGMENTS = (
+    "name",
+    "email",
+    "login_id",
+    "picture",
+    "sourcedid",
+    "phone",
+    "sortable",
+    "given",
+    "family",
+    "surname",
+    "address",
+    "photo",
+    "avatar",
+    "username",
+)
 
 # The tables that hold a person by construction. Anything with a foreign key to
 # one of them is swept too — see `people_tables`.
 PERSON_TABLES = ("user", "user_identity", "person")
 
 # ---------------------------------------------------------------------------
-# E0-10 widens this module. Three additions, and they are here rather than in a
-# module of E0-10's own for one reason: this file is where the convention is
-# *defined*, and criterion 3 changes it. A copy of the discovery next door would
-# be a copy that keeps the old definition — `docs/MISTAKES.md` entry 13, which
-# has cost this project two dispute rounds. So the marker sweep, the two holes
-# E0-08's security review found in it, and the view test built on top of it all
-# read the same `database_marked_columns` and `identity_bearing_columns`.
+# E0-10 changes this module in two places and adds three tests, and all of it is
+# here rather than in a module of E0-10's own for one reason: this file is where
+# the convention is *defined*, so the file that asserts the widened rule has to be
+# the file that holds it. A copy of the discovery next door would be a copy that
+# keeps the old definition — `docs/MISTAKES.md` entry 13, which has cost this
+# project two dispute rounds. So the marker sweep, the two holes E0-08's security
+# review found in it, and the view test built on top of them all read the same
+# `IDENTITY_NAME_FRAGMENTS`, `people_tables` and `database_marked_columns`.
 # ---------------------------------------------------------------------------
 
 # Columns a roster sync could plausibly land that contain neither "name" nor
-# "email". E0-10's third criterion names exactly these three, so they are the
+# "email". E0-10's fourth criterion names exactly these three, so they are the
 # ticket's words rather than this file's guess — `docs/MISTAKES.md` entry 19 is
 # about the difference, and this constant is the kind that must not drift from
-# the document it came from.
+# the document it came from. Deliberately *not* derived from
+# `IDENTITY_NAME_FRAGMENTS`: these are the cases the ticket requires to be
+# caught, and the tuple above is one answer to them, so a test that read the
+# planted names out of the answer would be checking the answer against itself.
 PLAUSIBLE_IDENTITY_COLUMN_NAMES = ("login_id", "picture", "lis_person_sourcedid")
 
 # A column today's fragments already catch, planted beside them as the control.
@@ -200,15 +250,37 @@ def declared_marked_columns(tables: dict[str, Table]) -> set[tuple[str, str]]:
 
 
 def people_tables(engine: Any) -> set[str]:
-    """Tables that hold a person: the three named ones, and anything linking to them."""
+    """Tables that hold a person: the three named ones, and anything that reaches one.
+
+    **Iterated to a fixed point, which is E0-10's third criterion.** As E0-08
+    shipped it this tested each table's foreign keys against `PERSON_TABLES`
+    rather than against the set it was building, so it walked exactly one hop and
+    a table linking to a table that links to `user` was never swept at all. The
+    tables that was written about are `answer` and `threat_case` — the second
+    being §6.2's Care queue — and neither exists yet, so the property is asserted
+    over a planted chain in
+    `test_the_marker_sweep_follows_the_foreign_key_walk_to_a_fixed_point` below.
+
+    The loop terminates because `found` only grows and is bounded by `present`.
+    On today's schema it reaches exactly the tables the one-hop version reached,
+    so widening it changed no existing result — measured in dispute E0-10-01
+    rather than reasoned about. (No count is written here on purpose: the set
+    grows with every ticket that adds a table, and a number in a docstring is a
+    record with a scheduled expiry, `docs/MISTAKES.md` entry 1.)
+    """
     inspector = inspect(engine)
     present = set(inspector.get_table_names())
     found = {name for name in PERSON_TABLES if name in present}
-    for table_name in present:
-        for key in inspector.get_foreign_keys(table_name):
-            if key.get("referred_table") in PERSON_TABLES:
-                found.add(table_name)
-    return found
+    while True:
+        reaching = {
+            table_name
+            for table_name in present
+            for key in inspector.get_foreign_keys(table_name)
+            if key.get("referred_table") in found
+        }
+        if reaching <= found:
+            return found
+        found |= reaching
 
 
 def identity_bearing_columns(engine: Any) -> set[tuple[str, str]]:
@@ -297,7 +369,8 @@ def test_every_identity_bearing_column_is_discoverable_through_the_marker(
 
     unmarked = sorted(f"{table}.{column}" for table, column in bearing - marked_columns)
     assert not unmarked, (
-        f"{unmarked} hold a person's name or email address and carry no identity marker. E0-10 "
+        f"{unmarked} are named as a person's identity — one of {list(IDENTITY_NAME_FRAGMENTS)} — "
+        "and carry no identity marker. E0-10 "
         "builds its views and its grants from this enumeration, and the CI invariant suite "
         "asserts against it, so a column missing from it is a column those two believe is safe "
         "to expose. Mark it — a column comment containing "
@@ -421,11 +494,12 @@ def primary_key_of(connection: Any, table: str) -> str:
 def test_the_marker_sweep_follows_the_foreign_key_walk_to_a_fixed_point(db_session: Any) -> None:
     """Criterion: "the marker sweep reaches every table that can hold identity".
 
-    `people_tables` above tests each table's foreign keys against the three-table
-    constant rather than against the set it is building, so it walks **one hop**.
-    A table linking to a table that links to `user` is never swept, and the two
-    named in E0-10 are `answer` and `threat_case` — the second being §6.2's Care
-    queue, the most identity-adjacent table in the system.
+    As E0-08 shipped it, `people_tables` above tested each table's foreign keys
+    against the three-table constant rather than against the set it was building,
+    so it walked **one hop**: a table linking to a table that links to `user` was
+    never swept. The two E0-10 names are `answer` and `threat_case` — the second
+    being §6.2's Care queue, the most identity-adjacent table in the system. This
+    test is what holds the repair in place.
 
     **Neither of those tables exists yet**, and the criterion now says so and asks
     for the property instead: "plant a chain at least **three** links from a
@@ -473,37 +547,48 @@ def test_the_marker_sweep_follows_the_foreign_key_walk_to_a_fixed_point(db_sessi
     bearing = identity_bearing_columns(session.connection())
     assert (third, "full_name") in bearing, (
         f"`{third}.full_name` holds a person's name and the sweep never looked at it. It reaches "
-        f"`person` in three steps — {third} → {second} → {first} → person — and `people_tables` "
-        "tests each table's foreign keys against `PERSON_TABLES` rather than against the set it "
-        f"is building, so it stops after one. It reached {sorted(reached)}. E0-10 lands the "
-        "grants, which is what turns an unswept identity column into an instructor-visible one: "
-        "its views and its CI invariant are both computed over this enumeration, so a table "
-        "outside it is a table they believe holds nothing to protect. `answer` and `threat_case` "
-        "are the two the ticket names, both two hops out, and `threat_case` is the Care queue."
+        f"`person` in three steps — {third} → {second} → {first} → person — and the walk in "
+        f"`people_tables` stopped short of it; it reached {sorted(reached)}. That is either the "
+        "one-hop version E0-08 shipped, which tests each table's foreign keys against "
+        "`PERSON_TABLES` rather than against the set it is building, or a walk repaired by "
+        "hard-coding a second hop — which is why this test plants three links and not two. E0-10 "
+        "lands the grants, which is what turns an unswept identity column into an "
+        "instructor-visible one: its views and its CI invariant pass are both computed over this "
+        "enumeration, so a table outside it is a table they believe holds nothing to protect. "
+        "`answer` and `threat_case` are the tables the criterion was written about, both two hops "
+        "out, and `threat_case` is §6.2's Care queue."
     )
 
 
 def test_an_identity_column_named_neither_name_nor_email_is_still_caught(db_session: Any) -> None:
     """Criterion: a plausibly-named identity column, added unmarked, fails the tripwire.
 
-    Discovery is by the fragments `("name", "email")`. A roster sync storing an
-    NRPS or LTI claim as `login_id`, `picture` or `lis_person_sourcedid` lands an
-    identity column that the sweep passes unmarked and unnoticed — the convention
-    requires a human to name a column in a way the sweep happens to recognise,
-    which is the property a tripwire is supposed to remove.
+    As E0-08 shipped it, discovery was by the fragments `("name", "email")`. A
+    roster sync storing an NRPS or LTI claim as `login_id`, `picture` or
+    `lis_person_sourcedid` landed an identity column that the sweep passed
+    unmarked and unnoticed — the convention required a human to name a column in a
+    way the sweep happened to recognise, which is the property a tripwire is
+    supposed to remove.
 
-    E0-10 leaves the mechanism open — "a declared list on the model, a type, a
-    `Column.info` flag carried into the database, or a widened fragment set" —
-    and asks the pull request to say what the new convention cannot see. This
-    test asserts the outcome and not the mechanism: whatever the answer, an
-    unmarked `login_id` on a table that holds a person has to end up in the set
-    `test_every_identity_bearing_column_is_discoverable_through_the_marker`
-    requires to be empty.
+    **The mechanism is a widened `IDENTITY_NAME_FRAGMENTS`, and the ticket's menu
+    of four turned out to be a menu of one.** Dispute E0-10-01 measured the other
+    three: a model declaration, a `Column.info` flag and a column comment are all
+    ways of *marking* a column, and `database_marked_columns` is **subtracted**
+    below — so each of them moves a planted column out of the failing set rather
+    than into it, and a type-based marker is invisible because this sweep reads
+    names and never types. The criterion's own second sentence settles it: the
+    column is "added unmarked", by raw DDL, so it carries no model declaration and
+    no type, and only a name-based rule can catch it.
 
-    **The control is the fourth planted column.** `display_name` is caught by
-    today's fragments, so it proves the planted table is being swept at all —
-    without it, a failure here reads as "the sweep never saw this table", which
-    is a different defect with a different fix (`docs/MISTAKES.md` entry 3).
+    **The control is the fourth planted column.** `display_name` was caught before
+    this ticket widened anything, so it proves the planted table is being swept at
+    all — without it, a failure here reads as "the sweep never saw this table",
+    which is a different defect with a different fix (`docs/MISTAKES.md` entry 3).
+
+    **Nothing outside `tests/` can change this test's outcome, which is the
+    decision rather than the defect** — see the module docstring and dispute
+    E0-10-01. It follows that only a mutation of `IDENTITY_NAME_FRAGMENTS` checks
+    it: remove `login_id` and this test names it.
     """
     session = db_session
     user_key = primary_key_of(session.connection(), "user")

@@ -26,18 +26,23 @@ which one did. So the grant model is also asserted as *stated*, out of
 second rule, in its own words: "the catalog test cannot see whether the rule
 works and the behavioural test cannot see whether it exists".
 
-**How these tests become `pulse_app`, and the question it leaves open.** They
-`SET ROLE` from the bootstrap session, which drops superuser and applies the
-target role's privileges exactly as a login would. That is deliberate: E0-10
-creates `pulse_app` and `pulse_care` in a migration and says nothing about
-whether either can log in, and `tests/conftest.py`'s `application_engine`
-authenticates as `pulse_test_app` — the role *the fixture* provisions, which is
-not the role this ticket's migration grants to. Until the ticket says which role
-the suite's application connection is, an assertion made over `application_engine`
-would be an assertion about a role holding nothing, which passes for the wrong
-reason. This is raised with the ticket rather than settled here; if the answer is
-that the fixture's role becomes `pulse_app`, these tests get shorter and
-`tests/conftest.py` changes, not the assertions.
+**How these tests become `pulse_app`.** They `SET ROLE` from the bootstrap
+session, which drops superuser and applies the target role's privileges exactly as
+a login would. The question this used to leave open is now closed the other way:
+`tests/conftest.py` provisions the suite's application role as **`pulse_app`
+itself**, so a login and a `SET ROLE` reach the same privileges and the choice is
+no longer about which role is measured. Two reasons it stays a `SET ROLE`.
+`pulse_care` has no login credential in this fixture — the migration establishes
+the role and nothing hands it a password — so the Care tests have no alternative,
+and one mechanism for both roles is worth more than two. And a `SET ROLE` runs
+inside `db_session`'s transaction, which is what lets a control and the refusal it
+qualifies sit in the same transaction on the same connection; over a second engine
+they would be two, and "the view was readable" would no longer be a fact about the
+moment the identity read was refused.
+
+`test_the_suites_application_connection_authenticates_as_the_granted_role` is what
+keeps those two facts tied together, because they are two constants in two files
+and nothing else would notice them drifting apart.
 
 **The two halves of the Care check are asserted separately, and that is the
 ticket's instruction rather than a preference.** The `SECURITY DEFINER` function
@@ -537,6 +542,39 @@ def seed_identity(seed_rows: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # The roles themselves: the two properties that would void every grant below.
 # ---------------------------------------------------------------------------
+
+
+def test_the_suites_application_connection_authenticates_as_the_granted_role(
+    application_engine: Any,
+) -> None:
+    """The role the suite connects as and the role this ticket grants to are one role.
+
+    Two constants in two files decide this — `TEST_APP_USER` in
+    `tests/conftest.py` and `APPLICATION_ROLE` here — and nothing else in the
+    suite would notice them drifting apart. What drift costs is specific and
+    silent: `application_engine` would authenticate as a role holding no grant on
+    anything, every "permission denied" assertion in this module would pass
+    whatever the migration did or did not revoke, and
+    `test_application_role_privileges.py`'s guard against "tests that pass under
+    privileges production does not have" would be inverted — passing under
+    privileges production *exceeds*.
+
+    That is not hypothetical: it was the state until E0-10, when
+    `TEST_APP_USER` was still E0-04's `pulse_test_app` and this ticket's grants
+    all belonged to `pulse_app`.
+    """
+    with application_engine.connect() as connection:
+        current = connection.execute(text(CURRENT_ROLE)).scalar_one()
+
+    assert current == APPLICATION_ROLE, (
+        f"`application_engine` authenticates as {current!r}, and this ticket's grants belong to "
+        f"`{APPLICATION_ROLE}` — the name `.env.example` gives `DB_APP_USER` and the name E0-10's "
+        "migration establishes. Change `TEST_APP_USER` in `tests/conftest.py`, or, if the "
+        "deployment's application role is genuinely spelled some other way, change it here and in "
+        "the migration together. Two spellings is the one outcome that reads as working: the "
+        "connection succeeds, the queries run, and every grant assertion in this module measures a "
+        "role nothing granted anything to."
+    )
 
 
 @pytest.mark.parametrize("role", RUNTIME_ROLES)

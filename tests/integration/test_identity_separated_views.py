@@ -108,7 +108,7 @@ SCHEMA_FUNCTIONS = """
 # believed. A pattern searched against text is a test that can go blind and
 # report success (`docs/MISTAKES.md` entry 3), and the samples below are the
 # cheapest way to notice — one of each shape the sweep must catch, and one of
-# each it must allow. `test_the_relation_sweep_catches_what_it_claims_to`
+# each it must allow. `test_the_text_sweeps_in_this_file_catch_what_they_claim_to`
 # runs them.
 CANARY = "canary_relation"
 
@@ -135,10 +135,55 @@ SWEEP_MUST_ALLOW = (
     f"SELECT 1 FROM {CANARY}s",  # noqa: S608
 )
 
+# The same treatment for the other text sweep in this file, `creates_view`, and
+# here the must-allow samples are the ones that carry the weight: each is a way a
+# real `views_sql/` file names a view it does not define, and the first version of
+# that sweep — a search for the bare name — accepted every one of them as evidence
+# that the view was defined there. Subjects, never queries, as above.
+CANARY_VIEW = "canary_view"
+
+VIEW_CREATE_MUST_CATCH = (
+    f"CREATE VIEW public.{CANARY_VIEW} AS SELECT 1",
+    f"create or replace view {CANARY_VIEW} as select 1",
+    f'CREATE MATERIALIZED VIEW IF NOT EXISTS public."{CANARY_VIEW}" AS SELECT 1',
+    f"CREATE OR REPLACE VIEW\n    public.{CANARY_VIEW} AS\nSELECT 1",
+)
+
+VIEW_CREATE_MUST_ALLOW = (
+    f"GRANT SELECT ON public.{CANARY_VIEW} TO pulse_app",
+    f"REVOKE ALL ON public.{CANARY_VIEW} FROM PUBLIC",
+    f"DROP VIEW IF EXISTS public.{CANARY_VIEW}",
+    f"COMMENT ON VIEW public.{CANARY_VIEW} IS 'section membership, no identity'",
+    f"-- {CANARY_VIEW} is the section roster; the migration that creates it is next door",
+    f"CREATE VIEW public.{CANARY_VIEW}_totals AS SELECT 1",
+)
+
 
 def read_views(connection: Any) -> list[str]:
     """Every view and materialised view in `public`, by name."""
     return [row[0] for row in connection.execute(text(READ_VIEWS))]
+
+
+def creates_view(sql: str, view: str) -> bool:
+    """Does `sql` contain a statement that *creates* the view called `view`?
+
+    A mention is not a creation, and the difference is the whole of what this
+    helper exists for. The first version of the test that uses it searched for the
+    view's name anywhere under `views_sql/`, and the mutation the test's own
+    docstring named — delete `section_roster_v001.sql` and inline its
+    `CREATE VIEW` into the revision — kept it green, because the grants file names
+    every view in order to `GRANT SELECT` on it. So `GRANT`, `DROP`, `COMMENT ON`
+    and a name in a comment all have to fail here, and each is a sample in
+    `VIEW_CREATE_MUST_ALLOW` below.
+    """
+    pattern = re.compile(
+        r"\bcreate\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+"
+        r"(?:if\s+not\s+exists\s+)?"
+        r'(?:"?\w+"?\s*\.\s*)?'
+        rf'(?:"{re.escape(view)}"|{re.escape(view)}\b)',
+        re.IGNORECASE,
+    )
+    return pattern.search(without_comments(sql)) is not None
 
 
 def public_relation_names(connection: Any) -> list[str]:
@@ -292,21 +337,26 @@ def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     assert files, f"{VIEWS_SQL_DIR} holds no `.sql` file, so there is no view SQL to check."
 
     combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
-    assert re.search(r"(?i)\bselect\b", combined), (
-        f"None of the {len(files)} file(s) under {VIEWS_SQL_DIR} contains the word `select`. "
-        "That is the canary for this test's own search: if it cannot find a word certain to be "
-        "in a view definition, the name search below proves nothing."
+    assert re.search(r"(?i)\bcreate\b", combined), (
+        f"None of the {len(files)} file(s) under {VIEWS_SQL_DIR} contains the word `create`. "
+        "That is the canary for this test's own search: if it cannot find a word certain to be in "
+        "a file that defines a view, the search below proves nothing."
     )
 
-    missing = [view for view in views if not re.search(rf"\b{re.escape(view)}\b", combined)]
+    missing = [view for view in views if not creates_view(combined, view)]
     assert not missing, (
-        f"{missing} exist as views in the migrated database and are named in no file under "
-        f"{VIEWS_SQL_DIR} (it holds {[path.name for path in files]}). SPEC §13 ships the read "
-        "views as SQL there rather than as ORM convention, and this suite's qualification rule is "
-        "asserted over those files because Postgres does not keep the text a `CREATE VIEW` was "
-        "written with — it keeps a parse tree of oids, and `pg_get_viewdef` regenerates names "
-        "against whatever `search_path` asks. A view defined inline in a migration is therefore a "
-        "view whose `public.` prefixes nothing checks."
+        f"{missing} exist as views in the migrated database and no file under {VIEWS_SQL_DIR} "
+        f"contains a `CREATE VIEW` for them (it holds {[path.name for path in files]}). SPEC §13 "
+        "ships the read views as SQL there rather than as ORM convention, and this suite's "
+        "qualification rule is asserted over those files because Postgres does not keep the text a "
+        "`CREATE VIEW` was written with — it keeps a parse tree of oids, and `pg_get_viewdef` "
+        "regenerates names against whatever `search_path` asks. A view defined inline in a "
+        "migration is therefore a view whose `public.` prefixes nothing checks.\n\n"
+        "**This requires the `CREATE`, not a mention**, and that is a repair rather than a "
+        "preference: the first version searched for the view's *name* anywhere under `views_sql/`, "
+        "and the mutation this test's own docstring named — delete the view's file, inline the "
+        "`CREATE VIEW` into the revision — left it green, because the grants file names every view "
+        "in order to grant on it. `docs/MISTAKES.md` entry 3's sixth incident."
     )
 
 
@@ -355,37 +405,60 @@ def test_no_read_view_is_also_declared_as_an_orm_table(
 # reveal is, and a second copy of it would be `docs/MISTAKES.md` entry 13.
 
 
-def test_the_relation_sweep_catches_what_it_claims_to() -> None:
-    """The sweep is run against a sample of each shape before anything trusts it.
+def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
+    """Both sweeps are run against a sample of each shape before anything trusts them.
 
     A pattern searched against text is a test that can go blind and report
     success — `docs/MISTAKES.md` entry 3 records one that matched nothing because
     a comment wrapped at 80 columns, and went green against the exact text it
-    existed to catch. So this runs the sweep over the shape it must catch *and*
-    the shape it must allow, and it is a test of its own rather than a guard
-    inside the two tests below, because both of them consume it and one failure
-    should not be reported twice with different names.
+    existed to catch. So each sweep is run over the shapes it must catch *and* the
+    shapes it must allow, in a test of its own rather than as a guard inside the
+    tests that consume them, because several do and one blind sweep should not be
+    reported four times under four names.
 
-    The `s`-suffixed sample is the one that looks unnecessary: `public.canary_
-    relations` is a different table, and a sweep whose word boundary is wrong
-    would report the correct spelling of one table as an unqualified reference to
-    another.
+    Two samples look unnecessary and are the point of the exercise. The
+    `s`-suffixed relation: `canary_relations` is a *different* table, and a sweep
+    whose word boundary is wrong reports the correct spelling of one as an
+    unqualified reference to the other. And `GRANT SELECT ON public.canary_view`:
+    the first version of `creates_view` searched for the view's bare name, which
+    that line satisfies — so deleting a view's `.sql` file and inlining its
+    `CREATE VIEW` into the revision left the test green, because the grants file
+    names every view in order to grant on it. That mutation was named in the
+    test's own docstring and not run; entry 3's sixth incident is that a mutation
+    a test names is a claim until someone runs it.
     """
     names = [CANARY]
 
     for sample in SWEEP_MUST_CATCH:
         assert unqualified_references(sample, names), (
-            f"The sweep in this file does not flag {sample!r}, which is a shape it exists to "
-            "catch. It has gone blind, and every assertion built on it would pass against SQL "
-            "that names its relations unqualified everywhere."
+            f"The relation sweep does not flag {sample!r}, which is a shape it exists to catch. It "
+            "has gone blind, and every assertion built on it would pass against SQL that names "
+            "its relations unqualified everywhere."
         )
 
     for sample in SWEEP_MUST_ALLOW:
         assert not unqualified_references(sample, names), (
-            f"The sweep in this file flags {sample!r}, which is either the fixed form, a comment, "
-            "or a different relation. It would report correct SQL as vulnerable — and the "
-            "casualty of that is usually the comment, deleted by the next person to meet a red "
-            "test they cannot otherwise explain."
+            f"The relation sweep flags {sample!r}, which is either the fixed form, a comment, or a "
+            "different relation. It would report correct SQL as vulnerable — and the casualty of "
+            "that is usually the comment, deleted by the next person to meet a red test they "
+            "cannot otherwise explain."
+        )
+
+    for sample in VIEW_CREATE_MUST_CATCH:
+        assert creates_view(sample, CANARY_VIEW), (
+            f"`creates_view` does not recognise {sample!r} as creating `{CANARY_VIEW}`, which is a "
+            "shape it exists to catch. Every view in `views_sql/` would then look undefined, and "
+            "`test_every_read_view_is_created_from_a_sql_file_under_views_sql` would be red for a "
+            "reason that has nothing to do with where the views live."
+        )
+
+    for sample in VIEW_CREATE_MUST_ALLOW:
+        assert not creates_view(sample, CANARY_VIEW), (
+            f"`creates_view` reads {sample!r} as creating `{CANARY_VIEW}`. It names the view "
+            "without defining it — a grant, a revoke, a drop, a comment, or a different view whose "
+            "name begins the same way — and accepting one is exactly the defect this sweep was "
+            "repaired for: with a `GRANT` counted as a definition, a view can be moved out of "
+            "`views_sql/` entirely with the suite green."
         )
 
 
