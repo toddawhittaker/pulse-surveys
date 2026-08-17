@@ -134,6 +134,20 @@ for. **This belongs to [E0-20](E0-20-gate-fidelity.md)**, whose subject is
 exactly a gate reporting green over something it does not look at, and it is
 recorded here only so the finding is not lost between two tickets.
 
+### 9. A `sub` containing a slash makes a result URL the platform cannot route
+
+Found by the second review pass. `result_url` percent-encodes the user
+identifier with `safe=''`, so a score posted for a `userId` of `a/b` answers 200
+with a `resultUrl` of `…/results/a%2Fb` — and a `GET` of that URL is Starlette's
+own 404, because ASGI hands the router the decoded path. The `Result` in the
+container advertises the same dead `id`.
+
+Rare while every `sub` is a UUID, and precisely the hazard the per-user results
+route was added to close: a URL the platform composes and does not serve. **Done
+when** either the route matches an identifier containing a slash, or such a
+`userId` is refused at the score post with a message saying why — the second is a
+narrowing of AGS and would need recording as one.
+
 ## Out of scope
 
 - Reopening the "every member carries a window" ruling itself, or the "every
@@ -154,6 +168,8 @@ recorded here only so the finding is not lost between two tickets.
 - [ ] The client-credentials grant is built, or its four moving parts are
       written into the ticket that will build the roster sync.
 - [ ] `read_line_item` has a criterion or is gone.
+- [ ] A `userId` containing a slash either routes or is refused, and no result
+      URL the platform hands out 404s.
 
 ## Definition of done
 
@@ -173,7 +189,8 @@ already reviewed the deferral once.
 ## What E0-15's own pull request closed
 
 Indexed so this file is a record of the round rather than of its remainder. Four
-HIGH and three MED were fixed in place:
+HIGH, five MED and one LOW were fixed in place — the count is spelled out because
+an index the next ticket trusts is worth more than a tidy sentence:
 
 - A score carrying `scoreGiven` with no `scoreMaximum` was accepted (HIGH).
 - A stale `timestamp` silently regressed a grade where AGS requires 409, and a
@@ -186,5 +203,15 @@ HIGH and three MED were fixed in place:
 - The `resultUrl` the platform handed back 404'd (MED).
 - A posted `scoreMaximum` differing from the line item's was silently dropped
   (MED).
-- `"end": null` present-rather-than-omitted was asserted, and the roster walk
-  stopped resting on a lower bound that both launch users satisfied (MED).
+- `"end": null` present-rather-than-omitted was unasserted, so a window emitted
+  with no `end` key at all passed (MED).
+- The roster walk's "no member is dropped" rested on a lower bound that both
+  launch users satisfied, so a slice losing one member per page boundary passed
+  (MED).
+- "Two start letters" was wrong in four records; the seed uses three (LOW).
+
+A second review pass over those fixes found one HIGH, seven MED and seven LOW,
+and the same rule was applied again: the HIGH and the easy MED were fixed, and
+what remains is in the scope above. Two of that pass's findings were about this
+file and the pull request body rather than about the code, and both are corrected
+rather than carried forward.
