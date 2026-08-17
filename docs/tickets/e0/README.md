@@ -150,6 +150,43 @@ Compose service — cannot be documented there as things stand, and
 `tests/unit/test_env_example_sync.py` will say so. Tickets 08, 13 and 16 all add
 configuration and should expect this.
 
+**The application role is `pulse_app`, and a read-path test must connect as it**
+([ADR 0001](../../adr/0001-identity-separation-by-database-role.md), E0-10).
+From E0-10 the migration grants `SELECT` on the read views to `pulse_app` and
+nothing at all on `user_identity`, so *which role a fixture authenticates as* is
+now the difference between a test that can detect a missing grant and one that
+cannot. `tests/conftest.py`'s `application_engine` provisions and connects as
+`pulse_test_app`, which holds none of those grants — a name chosen in E0-04, when
+no grant existed for it to be wrong about. Two consequences for anyone writing a
+read-path test: an assertion made over `application_engine` today is an assertion
+about a role holding nothing, and it passes for the wrong reason
+(`docs/MISTAKES.md` entry 3); and E0-10's own grant tests therefore reach the
+roles with `SET ROLE` from the bootstrap session instead. The fix is one line —
+`TEST_APP_USER = "pulse_app"` — and it works because the fixture creates the role
+before the migration runs and the migration's `CREATE ROLE` is guarded, exactly
+as on a Compose volume. Until it lands, do not read a green `application_engine`
+test as evidence about a grant.
+
+**Adding a read view means adding SQL to `backend/app/views_sql/` and an
+invariant test** (SPEC §13, [ADR
+0041](../../adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)).
+A view is read with its *owner's* privileges, so no grant protects it: a view
+that reads an identity column hands that column to every role that may read the
+view. `CONTRIBUTING.md` has the rule; the short version is a new versioned
+`.sql` file, never an edit to one a migration already executed, every relation
+schema-qualified, and a `@pytest.mark.invariant` test for the §4.1 rule the view
+is subject to.
+
+**Only `app/services/safety.py` may obtain a `pulse_care` session** ([ADR
+0042](../../adr/0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md)).
+The pool is bound to the code path, not to the actor, because §2.1 permits one
+person to hold a Care assignment and a teaching assignment at once. A module that
+imports, calls or attributes a Care session fails
+`tests/unit/test_care_session_is_bound_to_the_care_service.py` by name. Care's
+route to identity is `reveal_identity`, which checks the actor and calls a
+`SECURITY DEFINER` function that checks the actor again and writes the audit row
+in the same transaction.
+
 **The session is synchronous** ([ADR
 0013](../../adr/0013-the-database-session-is-synchronous.md)). Handlers that
 touch the database are written `def`, not `async def`, and FastAPI runs them in

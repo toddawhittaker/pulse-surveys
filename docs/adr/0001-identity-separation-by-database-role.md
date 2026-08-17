@@ -1,7 +1,9 @@
 # 0001 — Identity separation enforced by database role and grant
 
 **Status:** Accepted — one consequence amended by
-[ADR 0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md)
+[ADR 0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md),
+and `pulse_migrate` resolved by
+[ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md)
 **Date:** 2026-08-12
 **Tickets:** E0-08, E0-10, E0-11
 
@@ -10,6 +12,12 @@
 > bootstrap and application roles. **The decision recorded here is unchanged,
 > and so is the first consequence** — runtime roles must not own tables and must
 > not be superuser. That is the rule ADR 0009 exists to protect, not to relax.
+>
+> ADR 0040 settles the third name in the decision below: `pulse_migrate` **is**
+> that bootstrap identity, and E0-10 creates no role by that name. What this
+> record needs from it is that the schema's owner is not a role that serves
+> requests, and that holds — `pulse_app` and `pulse_care` own nothing, are
+> members of nothing, and E0-10 asserts all three.
 
 ## Context
 
@@ -91,7 +99,11 @@ apart.
   fresh `docker compose up` still works in one command. *(Amended by ADR 0009:
   the bootstrap role comes from `initdb` and the application role from
   `scripts/db-init`, because the identity a migration runs as cannot itself be
-  created by a migration. E0-10's read roles are still migrations.)*
+  created by a migration. Amended again by ADR 0040, which found the same split
+  inside E0-10's own roles: the migration creates each role and writes every
+  grant, idempotently and in every environment, and `scripts/db-init` or the
+  operator gives it a login, because a migration cannot hold a password without
+  holding it in the repository.)*
 - **If a deployment target cannot create roles** — some managed databases
   restrict it — the guarantee degrades to views that merely omit the columns.
   E0-10 requires documenting that fallback plainly rather than implying the

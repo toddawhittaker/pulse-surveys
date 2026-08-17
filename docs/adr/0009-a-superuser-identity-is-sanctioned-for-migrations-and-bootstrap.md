@@ -1,8 +1,16 @@
 # 0009 — A superuser identity is sanctioned for migrations and bootstrap
 
-**Status:** Accepted
+**Status:** Accepted — one row of the provisioning table amended by
+[ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md)
 **Date:** 2026-08-13
 **Tickets:** E0-02 (decided here), E0-04, E0-10
+
+> ADR 0040 settles what this record left as a name without an owner:
+> `pulse_migrate` **is** the bootstrap identity below, and no such role is
+> created. It also splits the "E0-10's read roles" row in two — the migration
+> establishes the role, its attributes and its grants; a deployment establishes
+> whether it can log in and with what credential, because a migration cannot hold
+> a password. The decision here is unchanged.
 **Amends:** [ADR 0001](0001-identity-separation-by-database-role.md) — one
 consequence of it, not its decision. ADR 0001's rule that *runtime* roles must
 not own tables and must not be superuser is untouched and is the thing this
@@ -48,7 +56,7 @@ each with a stated job:
 |---|---|---|---|
 | **Bootstrap / migration** — `DB_SUPERUSER` | `initdb`, from `POSTGRES_USER` | Alembic migrations, creating roles, extensions, and the `views_sql/` grants E0-10 needs | Serving a request. It is not delivered to the application container at all. |
 | **Application** — `DB_APP_USER` | `scripts/db-init`, at first start | Everything the running application does. This is what `DATABASE_URL` points at | Owning tables. Running migrations. Anything requiring superuser |
-| **E0-10's read roles** | Migrations, unchanged | The identity-separated read paths in SPEC §8 and §4.1 | Unchanged by this record |
+| **E0-10's read roles** — `pulse_app`, `pulse_care` | Migrations, for the role and its grants; `scripts/db-init` or the operator, for the login credential ([ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md)) | The identity-separated read paths in SPEC §8 and §4.1 | Owning a table. Running migrations. Anything requiring superuser |
 
 **Migrations run as the bootstrap identity.** That answers the question E0-04
 was carrying: Alembic uses `DB_SUPERUSER`, not `Settings.database_url`, and the
@@ -114,8 +122,10 @@ migrations. Todd's ruling says simplify, and this is the thing it simplifies.
 ## Consequences
 
 - **ADR 0001's "roles are created in migrations" consequence no longer holds**
-  for the bootstrap and application pair. It still holds for E0-10's read roles.
-  ADR 0001 carries a pointer to this record.
+  for the bootstrap and application pair. It holds for E0-10's read roles in the
+  half a migration can reach — the role and its grants — and not in the half it
+  cannot, which is the login credential (ADR 0040). ADR 0001 carries a pointer to
+  both records.
 - **There are now two provisioning mechanisms**, and the table above is the only
   thing that says which owns what. If a third environment appears, it needs a
   row, or its Postgres will have no application role and the failure will be an
