@@ -197,19 +197,25 @@ of E1 and E3 needs a token first is where that belongs.
   launch, so what the container answers is only what a tool put there.
 - **What the Score service refuses** is as much of the contract as what it takes,
   because a score this mock accepts is a score a tool learns to send. A
-  `scoreGiven` with no `scoreMaximum`, a non-positive maximum, an
+  `scoreGiven` with no `scoreMaximum`, a negative one, a non-positive maximum, a
+  `userId` that is not a string, `true` where a number belongs, an
   `activityProgress` or `gradingProgress` outside AGS's two fixed vocabularies,
-  and a `timestamp` that is not RFC 3339 with an offset are all refused. A score
-  older than the one already held for that student on that line item is `409`;
-  one at the *same* instant is taken, because a passback that times out re-sends
-  an identical body and a `409` there would say the retry failed. And a
-  `scoreMaximum` that disagrees with the line item's own is refused rather than
-  rescaled — stricter than AGS, deliberately, so that post against the line
-  item's maximum is the habit E3 forms
+  and a `timestamp` that is not RFC 3339 are all refused. A score *above* the
+  maximum is taken, because AGS permits it and Canvas records it as extra credit.
+  A score older than the one already held for that student on that line item is
+  `409`; one at the *same* instant is taken, because a passback that times out
+  re-sends an identical body and a `409` there would say the retry failed
+  ([ADR 0052](docs/adr/0052-an-equal-score-timestamp-is-accepted-as-a-retry.md)).
+  And a `scoreMaximum` that disagrees with the line item's own is refused rather
+  than rescaled — stricter than AGS, deliberately, so that posting against the
+  line item's maximum is the habit E3 forms
   ([ADR 0051](docs/adr/0051-a-disagreeing-score-maximum-is-refused-rather-than-rescaled.md)).
 - **The conformant `Result`** is served per line item, filtered by `user_id`, and
   at its own URL — which is also the `resultUrl` a score post answers with, so a
-  tool can follow what the platform just handed it.
+  tool can follow what the platform just handed it. A score only becomes a
+  `Result` if it is a grade: `gradingProgress` of `FullyGraded` or
+  `PendingManual` produces one, and `NotReady`, `Failed` or `Pending` does not,
+  because those say the grading process has not produced a grade yet.
 - **`GET /mock/posted-scores`** answers with every score the platform has been
   sent, verbatim and in arrival order. It is outside the AGS namespace on
   purpose — a conformant `Result` has no timestamp and no progress fields, so

@@ -45,9 +45,17 @@ records those. All three are values this platform invented or was handed by a
 test; none is a person. Measured against the running container rather than
 assumed.
 
-The Advantage routes add nothing to that surface: every one of them carries the
-context in its path, and a context identifier is this platform's own invention.
-A member's address appears only in a response body.
+**One Advantage route does add to that surface, and this paragraph used to deny
+it.** Most of them carry only a context identifier, which is this platform's own
+invention, and a member's address appears in a response body where no log
+follows. The per-user result route is different: `<lineitem>/results/<userId>`
+puts an LTI `sub` in a request path, and uvicorn's access log records every path.
+On this platform that is a seeded identifier describing nobody, so nothing here
+is at risk — but it is a shape E1 must not copy, because on a real deployment the
+same route would write a student's LMS user ID into an access log, which SPEC
+§10 forbids. The route is served because AGS makes a `Result`'s `id` a URL and a
+platform that composes one it will not answer is worse; a real platform would put
+an opaque per-result identifier there rather than the user's.
 """
 
 import json

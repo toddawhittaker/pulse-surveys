@@ -200,13 +200,13 @@ class LineItemFilters:
     did that would answer a filter for placement A with a line item that belongs
     to nobody.
 
-    **A line item that carries no such member at all does not match either**, and
-    nothing asserts it. Every line item the suite creates carries a `tag` and a
-    `resourceId`, so widening this comparison to `in (value, None)` — the fail-open
-    shape, where a filter hands back everything that lacks the member — leaves all
-    28 tests in the AGS module green. Reported rather than worked around; the test
-    it needs creates a line item with the member absent and requires a filter for
-    that member not to return it.
+    **A line item that carries no such member at all does not match either.**
+    That was a declared gap for one round — every line item the suite created
+    carried a `tag` and a `resourceId`, so widening this comparison to
+    `in (value, None)`, the fail-open shape where a filter hands back everything
+    lacking the member, left the whole module green. It is closed: a test now
+    creates a line item with the member omitted and requires the filter not to
+    return it, and that widening dies against it alone.
     """
 
     resource_link_id: str | None = None

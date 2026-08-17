@@ -283,6 +283,16 @@ def student(context: MockContext, ordinal: int) -> MockUser:
     student is one more chance to typo one person into two. The identifier
     carries the section so that a member seen in a response says which roster it
     came from without a lookup.
+
+    **The zero-padded ordinal is load-bearing, and renumbering the seed means
+    changing a test.** It is contiguous from 01 within a section, and E0-15's
+    scope says so in as many words, because it is the only ground truth on this
+    surface for the definition of done's "no member is dropped" — an NRPS
+    container carries no total, so nothing in a roster can say whether the roster
+    is short. A test assembles one section's ordinals and requires them to run
+    without a gap. That replaced a weaker check against the two users the launch
+    page offers, which sit at the head of every roster and so survived a page
+    slice that lost a member per boundary.
     """
     slug = f"{context.label.lower()}-student-{ordinal:02d}"
     return MockUser(

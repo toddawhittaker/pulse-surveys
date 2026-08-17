@@ -473,7 +473,7 @@ say in the commit that you did.
 
 *(The twenty-sixth, in E0-15's review round, and it is four survivors of one
 mutation run rather than one defect. Nineteen mutations against the new AGS rules:
-fourteen killed by the test named for what each broke, and **four survived, of which
+fifteen killed by the test named for what each broke, and **four survived, of which
 exactly one is a gap**. That ratio is the reason to write this down — a survivor is a
 result about the mutation until it has been read, and three of these four are a
 second guard already refusing the same input. The score's positive-maximum check is
@@ -1733,3 +1733,58 @@ guard that produces an escalation rather than a fix, which is sometimes right �
 is right here — but it should be a chosen outcome and written down, not a surprise.
 Where a test's subject is a particular revision, **name the revision**; `-1` and
 `head` are convenient and neither is a subject.
+
+---
+
+## 23. A validation created the appearance of a behaviour
+
+**Caught: 0**
+
+**What happened.** In E0-15's mock platform, the AGS Result fold ignored
+`gradingProgress` entirely. A score posted `NotReady` — the value that says the
+grading process has not started — read back as a finished grade, and so did
+`Failed` and `Pending`; measured across all five values by a reviewer.
+
+That is an ordinary omission. What makes it worth an entry is the round in
+between. The previous review pass found the field checked only for presence, and
+the fix added a vocabulary check: `gradingProgress` had to be one of AGS 2.0's
+five exact strings, refused loudly otherwise, with a control asserting all five
+were accepted. Every one of those things is correct and none of them made the
+grade right. After that fix the field was **validated on the way in, recorded
+verbatim in the log, echoed in the readback, and consulted by nothing** — and it
+now looked handled from every angle a reader has. The code had a named constant
+for its vocabulary. The suite had a case per value. Anyone scanning either would
+conclude the field was understood.
+
+**Root cause.** Checking that a value is *well-formed* and never asking what it
+is *for*. A vocabulary check is an assertion about the shape of an input; it says
+nothing about whether anything downstream reads it. The two are easy to confuse
+because a validated field looks like a used field: it appears in a constant, in
+an error message, and in the name of something green.
+
+It is entry 2's family — behaviour with nothing asserting it — and it is the
+inverse of it, which is why it needs its own heading. There, a guard exists and
+nothing covers it. Here, the coverage exists, it passes, and the field it
+describes was never wired to anything. Entry 2's rule — try to reintroduce the
+defect, and a green suite means you wrote a convention — cannot find this,
+because there is nothing to reintroduce: removing the fold's use of the field is
+a no-op, since it had none.
+
+**Consequence.** Two rounds, and the second made the defect harder to see than
+the first. Had it shipped, E3 would post a score at submit time — before SPEC
+§3.3's classification has decided whether the response counts — and the gradebook
+would show a participation grade computed from a week that has not been graded.
+The student sees a number that will change, and nothing on the tool's side could
+find it, because the tool is built against this mock.
+
+**Rule.** **For every field a service validates, name the code that reads it.**
+If the answer is "nothing", the field is decorative, and one of two things has to
+happen: it gets acted on, or the validation says in writing that it is a shape
+check and nothing more. The question to ask of an input is not only "is this
+checked?" but "what changes when it changes?".
+
+The cheap version is a search: grep the field name and count the sites that are
+not the validator. One hit means the value goes in and stops there. And **a round
+that adds validation to a field is the round to ask this**, because adding a
+check to a field nothing consumes makes the gap less visible rather than more —
+the next reader inherits a field that looks settled.
