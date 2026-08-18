@@ -35,7 +35,7 @@ Pulse.
 
 import os
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 # The variable names, together, so that a reader can see the whole configuration
 # surface of this service in one place — and so that `docker-compose.yml` and
@@ -93,6 +93,12 @@ LOGIN_PATH = "/oidc/login"
 # registration endpoint — which this provider does not serve, and an advertised
 # endpoint that answers nothing is a record asserting something untrue.
 MOCK_REGISTRATION_PATH = "/mock/registration"
+
+
+# What the authorization response appends to the registered redirect URI
+# (RFC 6749 §4.1.2). Named here because `validate()` refuses a registration that
+# would collide with them; `app.flow.authorization_response` is what appends them.
+RESPONSE_PARAMETERS = frozenset({"code", "state"})
 
 
 class ConfigurationError(RuntimeError):
@@ -182,11 +188,38 @@ class ProviderSettings:
         # issued nothing. E0-18 is expected to repoint this variable at a
         # published host address, which is exactly when a hand-edited value picks
         # a fragment up.
-        if urlsplit(self.redirect_uri).fragment:
+        # `"#" in ...` rather than `urlsplit(...).fragment`, and the difference is
+        # a measured hole rather than a style: a URI ending in a bare `#` has an
+        # **empty** fragment, which is falsy, so the truthiness test registered it.
+        # What followed was the confusing failure this check exists to prevent,
+        # one step later — `urlunsplit` drops the empty fragment from the
+        # authorization response, the tool echoes back the address it was actually
+        # sent, and the token endpoint refuses the exchange with `invalid_grant`
+        # about a `redirect_uri` mismatch nobody can see.
+        if "#" in self.redirect_uri:
             raise ConfigurationError(
-                f"{REDIRECT_URI_VARIABLE} is {self.redirect_uri!r}, which carries a fragment. "
-                "RFC 6749 §3.1.2: a redirection endpoint URI MUST NOT include a fragment "
-                "component."
+                f"{REDIRECT_URI_VARIABLE} is {self.redirect_uri!r}, which carries a fragment — "
+                "an empty one still counts. RFC 6749 §3.1.2: a redirection endpoint URI MUST NOT "
+                "include a fragment component."
+            )
+
+        # A query is legal on a redirection URI and this provider merges its own
+        # parameters into it. What is not legal is a query that already carries
+        # the two names the authorization response appends: the browser would be
+        # sent `?state=preset&code=…&state=…`, so this service would emit the
+        # duplicate it refuses on the way in — and a client reading the first
+        # `state` would compare against a value it never generated.
+        preset = sorted(
+            name
+            for name, _ in parse_qsl(urlsplit(self.redirect_uri).query, keep_blank_values=True)
+            if name in RESPONSE_PARAMETERS
+        )
+        if preset:
+            raise ConfigurationError(
+                f"{REDIRECT_URI_VARIABLE} is {self.redirect_uri!r}, whose query already carries "
+                f"{preset}. The authorization response appends {sorted(RESPONSE_PARAMETERS)} to "
+                "this URI (RFC 6749 §4.1.2), so registering either name here produces a redirect "
+                "carrying it twice."
             )
 
     def absolute(self, path: str) -> str:

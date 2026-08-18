@@ -100,6 +100,18 @@ async def form_body(request: Request, subject: str) -> dict[str, str]:
     A repeated parameter is refused here rather than in the mapping, because a
     mapping is where the repetition disappears: `dict()` keeps the last pair and
     nothing after it can tell there were two (RFC 6749 §3.1).
+
+    **The duplicate check spans the whole request and the values do not.** RFC
+    6749 §3.1 is a statement about the request, not about one encoding of it, so
+    the query string is counted here even though nothing reads a value out of it:
+    a `POST` carrying `code` in the body and `code` in the query is one parameter
+    sent twice, and this provider refused it in neither place until it was
+    measured doing so. Values still come from the body alone — §4.1.3 puts a
+    token request there — because honouring a query parameter as well would be a
+    second place a parameter can arrive, which is the shape being closed rather
+    than a fix for it. A server that merges the two, as Spring Authorization
+    Server and anything behind a query-folding gateway does, sees the duplicate
+    this one now sees.
     """
     media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if media_type != FORM_MEDIA_TYPE:
@@ -108,11 +120,12 @@ async def form_body(request: Request, subject: str) -> dict[str, str]:
         )
     body = (await request.body()).decode("utf-8", errors="replace")
     pairs = parse_qsl(body, keep_blank_values=True)
-    repeated = repeated_parameters(pairs)
+    repeated = repeated_parameters([*request.query_params.multi_items(), *pairs])
     if repeated:
         raise ValueError(
-            f"The {subject} carries {repeated} more than once. RFC 6749 §3.1: a request "
-            "parameter MUST NOT be included more than once."
+            f"The {subject} carries {repeated} more than once, counting its query string and "
+            "its body together. RFC 6749 §3.1: a request parameter MUST NOT be included more "
+            "than once."
         )
     return dict(pairs)
 

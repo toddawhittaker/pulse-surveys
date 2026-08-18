@@ -79,6 +79,22 @@ PROFILE_SCOPE = "profile"
 EMAIL_SCOPE = "email"
 SUPPORTED_SCOPES = (OPENID_SCOPE, PROFILE_SCOPE, EMAIL_SCOPE)
 
+# What a scope is made of, from RFC 6749 Appendix A.4: `scope-token = 1*NQCHAR`,
+# and NQCHAR is `%x21 / %x23-5B / %x5D-7E` — printable ASCII without the space,
+# the double quote and the backslash. The tokens are separated by **one space**
+# and by nothing else.
+#
+# **Written out because `str.split()` is not that grammar, and the difference
+# undoes the check below.** A bare `split()` treats a tab, a newline and U+00A0
+# as separators, so `openid\temail` — a scope string a conformant server reads as
+# one unknown token — arrives here as two well-known ones and is granted. The
+# sequences that produce it are ordinary: a list joined with a newline, a YAML
+# block scalar, a value pasted from a rendered document carrying a non-breaking
+# space. Measured before this constant existed: the token response echoed
+# "openid email" and the session carried the `email` claims.
+SCOPE_DELIMITER = " "
+SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+")
+
 # Which claims each scope grants. The roles claim is deliberately not in here: it
 # is bound to `openid` because it is the whole reason this provider exists to be
 # asked, and a client that had to know to ask for it would be a client that finds
@@ -194,7 +210,7 @@ class PendingAuthorization:
     redirect_uri: str
     state: str
     nonce: str
-    scope: str
+    scopes: tuple[str, ...]
     code_challenge: str
     expires_at: float
 
@@ -208,7 +224,7 @@ class AuthorizationCode:
     redirect_uri: str
     nonce: str
     subject: str
-    scope: str
+    scopes: tuple[str, ...]
     code_challenge: str
     expires_at: float
 
@@ -395,7 +411,19 @@ class Flows:
             )
 
         scope = required(parameters, "scope", subject)
-        asked = scope.split()
+        asked = scope.split(SCOPE_DELIMITER)
+        # The grammar first, because every check below reads these tokens and a
+        # token this provider invented by splitting on the wrong character is a
+        # token no client sent.
+        illegal = [token for token in asked if not SCOPE_TOKEN.fullmatch(token)]
+        if illegal:
+            raise AuthorizationRequestError(
+                f"The authorization request asks for scope {scope!r}, which is not a scope: "
+                f"{illegal!r} is not `1*NQCHAR`. RFC 6749 Appendix A.4 makes a scope one or "
+                "more tokens of printable ASCII — no space, quote or backslash — separated by "
+                "single spaces, so a tab, a newline, a non-breaking space or a doubled space is "
+                "part of a token rather than a gap between two."
+            )
         if OPENID_SCOPE not in asked:
             raise AuthorizationRequestError(
                 f"The authorization request asks for scope {scope!r}, which does not include "
@@ -417,8 +445,11 @@ class Flows:
                 "in `scopes_supported` (RFC 6749 §3.3, §4.1.2.1 `invalid_scope`)."
             )
         # Deduplicated, in the order asked, so what comes back in the token
-        # response is a grant a client can compare with its own request.
-        granted = " ".join(dict.fromkeys(asked))
+        # response is a grant a client can compare with its own request. Carried
+        # from here as a tuple and never re-split: this is the one place a scope
+        # string is parsed, and a second parse somewhere downstream is a second
+        # grammar to keep in step with this one.
+        granted = tuple(dict.fromkeys(asked))
 
         state = required(parameters, "state", subject)
         nonce = required(parameters, "nonce", subject)
@@ -445,7 +476,7 @@ class Flows:
             redirect_uri=redirect_uri,
             state=state,
             nonce=nonce,
-            scope=granted,
+            scopes=granted,
             code_challenge=code_challenge,
             expires_at=now() + PENDING_REQUEST_LIFETIME_SECONDS,
         )
@@ -501,7 +532,7 @@ class Flows:
             redirect_uri=pending.redirect_uri,
             nonce=pending.nonce,
             subject=person.subject,
-            scope=pending.scope,
+            scopes=pending.scopes,
             code_challenge=pending.code_challenge,
             expires_at=now() + AUTHORIZATION_CODE_LIFETIME_SECONDS,
         )
@@ -527,7 +558,17 @@ class Flows:
         refusals from this endpoint, and a provider that refused for an unsent
         secret would satisfy both while asserting nothing about either.
         """
+        # Two refusals, because RFC 6749 §5.2 gives them two codes and a client
+        # library branches on the code: a *missing* parameter is `invalid_request`,
+        # and `unsupported_grant_type` means the server cannot do this grant at
+        # all. Answering the second for an absent field tells a client to stop
+        # trying the authorization code flow, when the fix is one form field.
         grant_type = submitted(parameters, "grant_type")
+        if not grant_type.strip():
+            raise TokenRequestError(
+                error="invalid_request",
+                description="The token request carries no `grant_type` (RFC 6749 §4.1.3).",
+            )
         if grant_type != GRANT_TYPE:
             raise TokenRequestError(
                 error="unsupported_grant_type",
@@ -661,7 +702,6 @@ class Flows:
         a mock with an authorization model, which is E1's and E9's work.
         """
         issued_at = int(now())
-        granted = issued.scope.split()
         available = {
             "preferred_username": person.subject,
             "email": person.email,
@@ -681,7 +721,7 @@ class Flows:
         # `openid` and carried `email` would contradict itself, and a client
         # reading `id_token["email"]` here would be reading a claim no real
         # provider sends on an `openid`-only grant (OIDC Core 1.0 §5.4).
-        for scope in granted:
+        for scope in issued.scopes:
             for claim in CLAIMS_BY_SCOPE.get(scope, ()):
                 claims[claim] = available[claim]
 
@@ -694,7 +734,7 @@ class Flows:
             # refuses the scopes it does not serve rather than narrowing them
             # silently — so what a client reads here is what it asked for, and
             # the claims above are exactly what it covers.
-            "scope": issued.scope,
+            "scope": SCOPE_DELIMITER.join(issued.scopes),
             "id_token": key.compact_jws(claims),
         }
 
