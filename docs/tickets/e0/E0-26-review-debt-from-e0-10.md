@@ -4,6 +4,28 @@
 **Branch:** `e0/review-debt-e0-10`
 **Depends on:** E0-10
 
+## Status — what is left here
+
+**Nothing moved.** No item here fits a batch, because four of the five need a
+thing that does not exist until E10 and the fifth is a decision.
+
+| Item | Now |
+|---|---|
+| 1 — the audit row and the identity read come apart on rollback | **Todd's decision** among three mechanisms, and it must land **before E10** |
+| 2 — the reveal writes no conflict-of-interest marking | **Carried to E10** |
+| 3 — the acting person is a parameter, not a property of the connection | **Carried to E10**, which is the first thing with a request-bound actor to bind |
+| 4 — the Care sweep does not cover the module's own public entry point | **Carried to E10**, which supplies the second legitimate caller the rule needs to name |
+| 5 — §4.1 item 1's deferral to E2 has no home in a document E2 will read | **Todd's decision** — the fix is a line in SPEC §14.3's E2 entry |
+
+Item 5 is partly discharged in the meantime: the README now carries a
+carried-out-of-E0 table, which is the bookkeeping half of what item 5 asks for.
+The spec half is still owed.
+
+Item 1 is the only item anywhere in E0-19 to E0-37 whose subject is a live gap in
+a guarantee the spec states rather than a missing assertion. It blocks nothing in
+E0 and it is not hardening.
+
+
 ## Context
 
 What E0-10's review found and could not close in place, collected the way E0-21

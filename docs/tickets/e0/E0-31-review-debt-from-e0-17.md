@@ -4,6 +4,23 @@
 **Branch:** `e0/review-debt-e0-17`
 **Depends on:** E0-17
 
+## Status — what is left here
+
+**Item 1 stays and is the only blocker in this range.** The rest moved or closed.
+
+| Item | Now |
+|---|---|
+| 1 — E0-18 needs an `lti_platform` row and nothing creates one | **This ticket**, and it **blocks [E0-18](E0-18-e0-exit-smoke.md)** |
+| 2 — `design/`'s 27 course numbers all fail SPEC §8's bands | **Todd's decision** |
+| 3 — `DEVELOPMENT_ENVIRONMENT` is spelled in two files | [E0-37](E0-37-small-corrections.md) item 2 |
+| 4 — an unreachable adoption path worth a sentence | [E0-37](E0-37-small-corrections.md) item 6 |
+| 5 — two files outside `scripts/` that E0-17 touched | **Closed** — a record, made in E0-17's own pull request |
+
+Item 1 is the only item in E0-19 to E0-37 that blocks the E0 exit. Whoever takes
+it needs to have read [ADR 0038](../../adr/0038-the-mock-platform-ships-in-the-base-compose-file.md)
+first: adding the row carelessly is what makes that ADR wrong.
+
+
 ## Context
 
 What E0-17's two review passes found and could not close in place, plus the two

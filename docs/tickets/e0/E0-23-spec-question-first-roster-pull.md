@@ -4,6 +4,17 @@
 **Branch:** `e0/spec-question-first-roster-pull`
 **Depends on:** none
 
+## Status — what is left here
+
+**The question is recorded; the answer is not.** PR #20 created this file and
+answered nothing, deliberately — the answer is a spec edit and spec edits are
+Todd's.
+
+It blocks nothing in E0 and **E1's roster sync cannot be built without it**, so
+it wants settling by the end of this epic rather than at the start of the next
+one. It does not batch with anything.
+
+
 ## Context
 
 This came out of confirming where section data comes from before starting

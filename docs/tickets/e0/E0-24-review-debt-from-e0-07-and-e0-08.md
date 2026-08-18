@@ -4,6 +4,28 @@
 **Branch:** `e0/review-debt-e0-07-e0-08`
 **Depends on:** E0-07, E0-08
 
+## Status — what is left here
+
+**Partly moved.** One item is now a batch item, one is a decision for Todd, and
+two are carried out of this epic with named owners.
+
+| Item | Now |
+|---|---|
+| 1 — `jwks_url` is credential-equivalent and unconstrained | **Carried to E1**, which writes and fetches the column and is the only code positioned to say what a legitimate value looks like |
+| 2 — nothing asserts there is no second writer of the derived section columns | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) |
+| 3 — nothing re-derives a section when a term's start-letter map is edited | **Carried to E2/E11**, the owners ADR 0021 and ADR 0018 already name |
+| 4 — the summer start-letter map is invented by the test suite | **Todd's decision** — a real seed map is a spec edit |
+
+Items 1 and 3 are in the README's carried-out-of-E0 table, so a deferral recorded
+only in the ticket that deferred it does not become a deferral nobody picks up.
+
+On item 4, this ticket's job until it is answered is unchanged: the invented
+constants stay marked as the test suite's choice, and **the gap at position 6
+survives any edit** — a contiguous 2-through-5 map is satisfiable by a range
+computed from the term's length, which is exactly the wrong implementation those
+tests exist to refuse.
+
+
 ## Context
 
 Findings from PR #22 and PR #23 that editing those tickets could not close,

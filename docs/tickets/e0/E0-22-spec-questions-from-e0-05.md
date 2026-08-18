@@ -4,6 +4,19 @@
 **Branch:** `e0/spec-questions-from-e0-05`
 **Depends on:** E0-05
 
+## Status — what is left here
+
+**Both questions are Todd's and neither has been answered.** Nothing here batches
+with anything, because the work each one implies does not exist until the answer
+does.
+
+Question 1 is the one with a deadline. It is a confidentiality rule that is
+currently unenforced, and **E4 builds the reports it governs**. If the answer is
+"every comparison-set figure", it becomes a §4.1 invariant with a test, and the
+place that test goes is the same suite [E0-33](E0-33-catalog-drift-assertions.md)
+and [E0-34](E0-34-view-file-identity-guards.md) extend.
+
+
 ## Context
 
 E0-05 settled the course-number-to-level bands, which had never been written

@@ -4,6 +4,21 @@
 **Branch:** `e0/review-debt-e0-15`
 **Depends on:** E0-15
 
+## Status — what is left here
+
+**Built as written, minus two.** Eight of the ten items are one batch in
+`mock-lms/app/`; PR #31's review comment carries a reproduction for each.
+
+| Item | Now |
+|---|---|
+| 1, 2, 3, 4, 5, 7, 9, 10 | **This ticket** — build them together |
+| 6 — the client-credentials grant is deferred | **Todd's decision** — build it here, or write its four moving parts into E1's ticket |
+| 8 — `make docker-build` waits on fewer services than CI | **Closed** — the Makefile now waits on `api worker beat mock-lms mock-idp` |
+
+Item 6 is the one that changes what this ticket costs, so decide it before
+starting rather than during.
+
+
 ## Context
 
 What E0-15's review found and could not close in place, collected the way E0-21

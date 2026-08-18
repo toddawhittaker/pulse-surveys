@@ -4,6 +4,21 @@
 **Branch:** `e0/review-debt-e0-16`
 **Depends on:** E0-16
 
+## Status — what is left here
+
+**Built as written.** All four items are in `mock-idp/` or in the one Compose
+line that points at it, so this ticket is already the batch.
+
+Item 1 is the work — the reviewer's estimate is about 40 lines plus tests, and
+the split point already exists in `begin()` immediately after `redirect_uri`
+validates. Items 2 and 4 are records that ride with it.
+
+Item 3 stays here rather than moving to [E0-18](E0-18-e0-exit-smoke.md), because
+it is a `mock-idp` variable — but **E0-18 settles its value**, since only E0-18
+knows how the browser reaches `api`. Confirmed still
+`http://api:8000/auth/oidc/callback` in `docker-compose.yml`.
+
+
 ## Context
 
 What E0-16's two review passes found and could not close in place, collected the

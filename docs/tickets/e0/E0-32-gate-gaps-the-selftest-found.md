@@ -4,6 +4,24 @@
 **Branch:** `e0/gate-gaps-from-selftest`
 **Depends on:** E0-10
 
+## Status — where this ticket's items went
+
+**Not built as written. All three items have moved**, and they did not move
+together — item 1 is a pipeline script and items 2 and 3 are the same test
+surface as a finding from another ticket.
+
+| Item | Now |
+|---|---|
+| 1 — `check_invariants.py` cannot see a test that asserts nothing | [E0-36](E0-36-ci-gate-fidelity.md) item 3 |
+| 2 — the identity-column guard only sees views a migration executed | [E0-34](E0-34-view-file-identity-guards.md) |
+| 3 — the sweep that does fire invites a repair that leaves the leak | [E0-34](E0-34-view-file-identity-guards.md) |
+
+E0-34 also carries [E0-27](E0-27-review-debt-from-e0-11.md) item 2, which is the
+same directory reached from the grant model rather than from the gate. The two
+tickets disagreed about whether building the guard was required or optional;
+E0-34 resolves that in favour of building it.
+
+
 ## Context
 
 `/review-selftest` was run over seven fixtures after E0-13, E0-16 and E0-17
