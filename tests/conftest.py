@@ -82,23 +82,27 @@ calls it needs committed rows and an environment pointing at this container. The
 Care role itself is provisioned beside the application role now, mirroring
 `scripts/db-init/02-care-role.sh`: a login and no grant.
 
-E0-17 adds three at the very bottom, and two of them are the first fixtures here
-that run a *process* rather than a function. The third, `seed_module`, is the
-opposite and arrived a round later: the guard in `scripts/seed.py` reads *resolved*
-configuration — the process environment with `.env` filling in what it does not
-set (ADR 0063) — and a subprocess cannot be asked about that resolution, because
-the fixture starting it supplies one of the two sources and the developer's
-working tree supplies the other. `docs/MISTAKES.md` entry 30 is what that cost.
+E0-17 adds a group at the very bottom, and they are the first fixtures here that
+run a *process* rather than a function. `demo_database` and `seeded_demo` are
+about running the script the way `make seed` does: it invokes `scripts/seed.py` as
+a program and the program reaches a database on its own, so the fixture gives it a
+database of its own — created in the session container, migrated to head, and
+dropped afterwards — and starts it the way the Makefile does. They are here rather
+than in the test module because E0-17's definition of done says the seeded
+institution "is also the fixture E9 will reuse", and because `seed_environment`
+below is the third place in this file that answers "which variables could a
+program need to reach this container", which is a question `docs/MISTAKES.md`
+entry 13 says to answer once.
 
-The first two are about running the script the way `make seed` does: it invokes
-`scripts/seed.py` as a program and the program reaches a database on its own, so
-the fixture gives it a database of its own — created in the session container,
-migrated to head, and dropped afterwards — and starts it the way the Makefile does.
-It is here rather than in the test module because E0-17's definition of done says
-the seeded institution "is also the fixture E9 will reuse", and because
-`seed_environment` below is the third place in this file that answers "which
-variables could a program need to reach this container", which is a question
-`docs/MISTAKES.md` entry 13 says to answer once.
+The other three each arrived from something that went wrong, and each says so
+where it sits. `seed_module` imports the script instead of starting it, because
+the guard in it reads *resolved* configuration — the process environment with
+`.env` filling in what it does not set (ADR 0063) — and a subprocess cannot be
+asked about that resolution, since the fixture starting it supplies one of the two
+sources and the developer's working tree supplies the other (entry 30).
+`demo_databases` and `plant_in` exist so that rows can be put in front of the seed
+rather than only after it: a database only the seed has written cannot pose the
+question idempotency is about (entry 31).
 
 E0-11 adds fixtures further up, and one of them is unlike everything
 above it. `authz` reaches the authorization chokepoint **by name**: E0-11's
@@ -129,7 +133,7 @@ import string
 import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from html.parser import HTMLParser
@@ -4091,11 +4095,11 @@ class DemoSeed:
             engine.dispose()
 
 
-@pytest.fixture(scope="module")
-def demo_database(
+@contextmanager
+def migrated_demo_database(
     postgres_container: Any, provisioned_database: DatabaseUnderTest
 ) -> Iterator[DemoSeed]:
-    """A database of its own, at head, with all three roles, for one test module.
+    """One database of its own, at head, with all three roles, then dropped.
 
     A database of its own because a seed script commits: it opens its own
     connection, so `db_session`'s rollback cannot reach it, and rows left in the
@@ -4103,13 +4107,15 @@ def demo_database(
     from now. Dropped `WITH (FORCE)` at the end, so a connection the script left
     open does not keep it alive.
 
-    Module-scoped because migrating costs seconds and the seed run itself is the
-    subject: a test that wants a *second* run asks for one, which is E0-17's
-    idempotency criterion and is the whole reason this hands back a runner rather
-    than a database that has already been seeded.
-
     Roles are cluster-wide, so all three URLs name the three roles ADR 0009 and
     ADR 0001 separate, exactly as `empty_database` above does.
+
+    A context manager rather than a fixture, because two fixtures want it: one
+    database per module for the ordinary case, and a factory for the tests that
+    need a database the seed has **not** run against — E0-17's idempotency
+    criterion is a claim about a second run meeting rows that are already there,
+    and a database only the seed has ever written cannot pose it
+    (`docs/MISTAKES.md` entry 31).
     """
     from alembic import command
     from sqlalchemy import create_engine, text
@@ -4146,6 +4152,83 @@ def demo_database(
         with admin.connect() as connection:
             connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
         admin.dispose()
+
+
+@pytest.fixture(scope="module")
+def demo_database(
+    postgres_container: Any, provisioned_database: DatabaseUnderTest
+) -> Iterator[DemoSeed]:
+    """The module's own migrated database, for the ordinary case.
+
+    Module-scoped because migrating costs seconds and the seed run itself is the
+    subject: a test that wants a *second* run asks for one, which is E0-17's
+    idempotency criterion and is the whole reason this hands back a runner rather
+    than a database that has already been seeded.
+    """
+    with migrated_demo_database(postgres_container, provisioned_database) as demo:
+        yield demo
+
+
+@pytest.fixture(scope="module")
+def demo_databases(
+    postgres_container: Any, provisioned_database: DatabaseUnderTest
+) -> Iterator[Callable[[], DemoSeed]]:
+    """A factory for more migrated databases, each fresh, all dropped together.
+
+    For the tests that have to put rows in front of the seed rather than after it.
+    The seed's idempotency is a claim about what a second run does to rows that
+    are already there, and the module database cannot pose it: everything in it
+    was written by the seed, so "the rows I find" and "the rows I wrote" are the
+    same set by construction — which is how a loader that adopted a *real*
+    institution's prefix passed every idempotency test in this suite
+    (`docs/MISTAKES.md` entry 31, ADR 0064).
+
+    Each call is a whole `alembic upgrade head`, so ask for one per scenario and
+    not per assertion.
+    """
+    with ExitStack() as databases:
+
+        def another() -> DemoSeed:
+            return databases.enter_context(
+                migrated_demo_database(postgres_container, provisioned_database)
+            )
+
+        yield another
+
+
+@pytest.fixture(scope="session")
+def plant_in(metadata_tables: dict[str, Any]) -> Callable[..., Any]:
+    """Insert one row, with whatever ancestors it needs, into a database and commit.
+
+    `seed_row` above, pointed at a database of the caller's choosing instead of at
+    the session one, so that a test can put rows somewhere **before** the seed
+    script runs. It commits, because the script is another process and sees
+    nothing that has not.
+
+    `chain` is `seed_row`'s, so two calls sharing one chain put both rows under
+    one set of ancestors — which is how a prefix and a course under it are planted
+    without naming either's parent.
+
+    Nothing here asserts. A row the schema refuses raises from the insert, and
+    that is a defect in the plant rather than in the script under test; the tests
+    that use this say what they were planting in their own messages.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    def plant(
+        demo: DemoSeed, name: str, chain: dict[str, Any] | None = None, **overrides: Any
+    ) -> Any:
+        engine = create_engine(demo.database.superuser_url)
+        try:
+            with Session(bind=engine) as session:
+                row = seed_row(session, metadata_tables, name, chain, **overrides)
+                session.commit()
+                return row
+        finally:
+            engine.dispose()
+
+    return plant
 
 
 @pytest.fixture(scope="module")

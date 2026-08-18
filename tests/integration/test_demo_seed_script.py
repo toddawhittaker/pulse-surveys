@@ -1,13 +1,17 @@
 """The demo institution `scripts/seed.py` loads — ticket E0-17.
 
-Every acceptance criterion the database can answer for. What is asserted
-elsewhere, or not at all: `make seed` losing its tolerance for an absent script
-is `tests/unit/test_seed_target_is_enforcing.py`, which needs no database; and
-the half of the last criterion about names — "no name resembles a real person at
-a real institution" — is not machine-checkable and is deliberately not asserted
-under a weaker reading. What *is* checkable about that criterion is the address:
-an email that could be delivered to is the one way a demo seed becomes somebody's
-mail, and that is asserted below.
+Every acceptance criterion the database can answer for. `make seed` losing its
+tolerance for an absent script is asserted elsewhere, in
+`tests/unit/test_seed_target_is_enforcing.py`, which needs no database.
+
+**Criterion 9 is held at the mechanism rather than at the criterion, and the
+difference is worth knowing before reading its two tests.** "No name resembles a
+real person at a real institution" is not decidable. What is decidable is the
+shape ADR 0066 chose to make it true by construction — every seeded person named
+for the role they hold, `Demo Chair of Mathematics` — and that is what is
+asserted, so a green run says every name is a role description rather than saying
+no name resembles anybody. The address half comes from the ticket's security
+review rather than from the criterion, and is decidable outright.
 
 **Why this runs a process instead of calling a function.** The criteria are about
 `make seed`, which runs the file as a program. `tests/conftest.py`'s `DemoSeed`
@@ -24,6 +28,14 @@ its own connection sees none of that and is seen by none of it, so rows it left 
 the session database would surface as somebody else's failed non-vacuity guard
 three tickets from now.
 
+**And a database only the seed has written cannot answer the question idempotency
+asks.** Every test in this file ran against one until the last section was added,
+so "the rows I find" and "the rows I wrote" were the same set by construction, and
+a loader that adopted a *real* institution's prefix — re-pointing it at the demo's
+department and overwriting a real course's title, with a zero exit and a success
+line — passed all of them. That section plants rows in front of the seed instead.
+`docs/MISTAKES.md` entry 31 and ADR 0064 are what it holds.
+
 **Not every criterion here is about the database.** Two sections towards the end
 assert the guard ADR 0063 put in front of the script — it refuses to run unless
 `ENVIRONMENT` is `development` — and they ask it in two different ways, because
@@ -37,12 +49,12 @@ while failing on every workstation.
 
 **Order in this file is deliberate.** Everything above the idempotency section
 measures the state *one* run produces, which is the state every criterion
-describes. The second run happens last, so a script that duplicates rows produces
-one failure naming duplication rather than six failures about shapes. The guard
-sections are harmless to what is around them: the refused runs open no
-connection, the in-process ones open no process at all, and the one run that is
-admitted is a run of an idempotent seed against the database that already holds
-it.
+describes. The second run happens near the end, so a script that duplicates rows
+produces one failure naming duplication rather than six failures about shapes,
+and the section after it runs against databases of its own. The guard sections
+are harmless to what is around them: the refused runs open no connection, the
+in-process ones open no process at all, and the one run that is admitted is a run
+of an idempotent seed against the database that already holds it.
 
 **What this file does not decide.** The role spellings, the parent edge and what a
 scope node is made of are read off the schema through `SupervisionGraph`, which
@@ -61,6 +73,7 @@ them — `UNROUTABLE_EMAIL_DOMAINS` — has a twin in
 `tests/integration/test_mock_lms_seed_data.py`. Change one, change both.
 """
 
+import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import date
@@ -174,6 +187,29 @@ UNROUTABLE_EMAIL_DOMAINS = (
 # because no ticket says which table carries one — `person`, `user_identity` and
 # `lti_platform` are all plausible and the sweep should reach whichever it is.
 EMAIL_COLUMN_FRAGMENTS = ("email", "mail")
+
+# Where a *person's* name lives, and how a column holding one is recognised.
+# Scoped to these two tables on purpose, unlike the address sweep above: every
+# containment table has a `name` too, and `Pulse Demo University` is an
+# institution rather than a person (ADR 0066 names it for the same reason and by
+# a different rule). `person.identity_name` is the column ADR 0064 and ADR 0066
+# both spell; `user_identity` is included because the seed writes the same string
+# into both, and it is the table SPEC §4.1 protects.
+PERSON_TABLES = ("person", "user_identity")
+NAME_COLUMN_FRAGMENTS = ("name",)
+
+# What every seeded person's name begins with. ADR 0066: "Every seeded person is
+# named for the role they hold: `Demo Chair of Mathematics`, `Demo Assistant Dean
+# of Arts and Sciences`, `Demo Instructor of Calculus I`."
+SEEDED_NAME_PREFIX = "Demo "
+
+# What a human name looks like when somebody copies one out of `design/`: a title,
+# or an initial and a full stop. `Dr. A. Okafor` and `Dr. J. Whitfield` — ADR
+# 0066's own example of the edit nothing would catch — carry both. The single
+# capital and full stop is its own alternative because `Dr.` is two letters and
+# would not match it; `St.` and other two-letter abbreviations do not match
+# either, which is why a role name containing one is not caught here.
+HUMAN_NAME_MARKS = re.compile(r"\b(?:Dr|Prof|Mr|Mrs|Ms)\.|\b[A-Z]\.")
 
 # **Settled by the implementation, and no longer this file's guess.** These two
 # were written here as a choice — E0-17 leaves the mechanism open, and
@@ -870,36 +906,38 @@ def test_the_mock_platform_matcher_catches_the_compose_issuer_and_allows_a_real_
     )
 
 
-def test_the_seed_registers_no_mock_platform_unless_a_deployed_run_is_refused(
+def test_no_seeded_lti_platform_row_names_the_mock_platform(
     seeded_demo: Any,
     demo_database: Any,
     metadata_tables: dict[str, Any],
     base_compose: dict[str, Any],
     mock_lms_service: str,
 ) -> None:
-    """Criterion 2, both branches, with the branch that was taken named in the failure.
+    """Criterion 2, at the branch ADR 0065 took: the seed registers a fictional platform.
 
-    E0-17 permits either answer and asks for evidence of whichever one is given:
-    "Any `lti_platform` row naming the mock LMS is unreachable from a deployed
-    environment… If this script seeds no registration, say so and leave ADR 0038
-    alone."
+    E0-17 permits two answers — register the mock and make the registration
+    unreachable from a deployment, or register nothing that names it — and ADR
+    0065 takes the second: `https://lms.pulse-demo.invalid`, a host that resolves
+    nowhere and that no process holds a key for.
 
-    So this looks first, and then asserts the thing the answer obliges. **No
-    registration** — nothing more to prove, and the test says which rows it read
-    so that a database with no `lti_platform` table at all cannot pass as one.
-    **A registration** — then running the same script with the deployment named as
-    production has to be refused, because ADR 0038's whole argument that the mock
-    is safe rests on "a tool only trusts it if a registration says so… A production
-    Pulse with no such row rejects every launch it signs, and that is the boundary
-    that actually matters." A seed that writes the row on a path a deployment also
-    runs closes that boundary in the wrong direction.
+    That keeps ADR 0038 standing **unamended**, which is the whole reason it was
+    worth doing. ADR 0038's fourth property is the one carrying the weight: "A
+    tool only trusts it if a registration says so… A production Pulse with no such
+    row rejects every launch it signs, and that is the boundary that actually
+    matters" — true because no such row exists anywhere in this repository. ADR
+    0065 declined to move that boundary from "a fact about the repository" to "a
+    fact about a script's control flow", and this is the assertion that the fact
+    still holds of what the script writes.
 
-    **This test's `ENVIRONMENT=production` branch does not run, and must not be
-    read as covering the guard.** The seed registers a fictional platform rather
-    than the mock (ADR 0065), so the condition above is false and the run below
-    never happens — which is exactly how a guard ships with nothing asserting it.
-    The guard itself is asserted unconditionally in the section further down;
-    ADR 0063's own consequences named this gap before there was a test for it.
+    **An earlier version of this test asserted the disjunction rather than the
+    branch, and could not fail.** It ran an `ENVIRONMENT=production` run only when
+    a seeded row named the mock, which none does, so registering the mock tomorrow
+    would have kept it green. This one is unconditional: seed the mock's issuer
+    and it goes red on the next run.
+
+    It is the database half of the check ADR 0065 asks a reviewer to make. The
+    other half is a grep for the mock's address across the repository, which
+    catches the paths this test cannot see, and that record is where it lives.
     """
     seeded(seeded_demo)
     addresses = mock_platform_addresses(base_compose, mock_lms_service)
@@ -911,38 +949,34 @@ def test_the_seed_registers_no_mock_platform_unless_a_deployed_run_is_refused(
 
     assert read_the_table, (
         f"`{PLATFORMS}` is declared on `Base.metadata` and this test read no rows from it at all, "
-        "so 'the seed registered no mock platform' would be a statement about a query that never "
-        "ran. Every table here is read by its single uuid primary key (ADR 0016); a table without "
-        "one is skipped, which is the only way to get here."
+        "so 'no seeded row names the mock' would be a statement about a query that never ran. "
+        "Every table here is read by its single uuid primary key (ADR 0016); a table without one "
+        "is skipped, which is the only way to get here."
+    )
+    assert registrations, (
+        f"The seed wrote no `{PLATFORMS}` rows, so this assertion is about an empty table. ADR "
+        "0065: the seed cannot avoid the table — its people are `person` rows, a `person` is "
+        "linked to a `user`, and `user.lti_platform_id` is `NOT NULL` — so it registers one "
+        "invented platform. A seed that registers nothing has taken the identity split out of "
+        "the demo institution, which is what E9, E10 and E0-18 develop the separation against."
     )
 
-    naming_the_mock = [
-        row
+    naming_the_mock = {
+        f"{column}={value!r}"
         for row in registrations
-        if any(
-            names_the_mock_platform(value, addresses, mock_lms_service)
-            for column, value in row.items()
-            if column in platforms.c
-        )
-    ]
-
-    if not naming_the_mock:
-        return
-
-    refused = demo_database.run(**{DEPLOYED_ENVIRONMENT_VARIABLE: DEPLOYED_ENVIRONMENT_VALUE})
-    assert not refused.succeeded, (
-        f"The seed registers the mock platform — {len(naming_the_mock)} of {len(registrations)} "
-        f"`{PLATFORMS}` rows name it — and it ran to completion with "
-        f"`{DEPLOYED_ENVIRONMENT_VARIABLE}={DEPLOYED_ENVIRONMENT_VALUE}` set.\n"
-        f"{refused.report()}\n"
+        for column, value in row.items()
+        if column in platforms.c and names_the_mock_platform(value, addresses, mock_lms_service)
+    }
+    assert not naming_the_mock, (
+        f"A seeded `{PLATFORMS}` row names the in-repo mock platform: {sorted(naming_the_mock)}. "
         "E0-17: 'Seeding an `lti_platform` row for the mock LMS is what would make ADR 0038 "
         "wrong.' That record argues the mock is safe in the base Compose file because it holds "
         "nothing, reaches nothing, publishes no port outside the development override, and is "
         "trusted only by a row in `lti_platform` — and because no such row exists anywhere in "
         "this repository. The mock authenticates nobody: it signs a launch as either seeded user "
-        "for whoever can reach the container. If this script is to write that row, something has "
-        "to stop a deployment running the path that writes it, and ADR 0038 has to be amended to "
-        "say what."
+        "for whoever can reach the container. If this script is to write that row, ADR 0038 has "
+        "to be amended to say what keeps it out of a deployment, and ADR 0065's argument for the "
+        "fictional issuer has to be reopened rather than worked around here."
     )
 
 
@@ -1422,16 +1456,31 @@ def test_the_seeded_graph_holds_an_assistant_dean_between_chairs_and_a_dean(
 def test_the_assistant_deans_led_course_sits_outside_the_departments_they_supervise(
     seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any], supervision_graph: Any
 ) -> None:
-    """Criterion 6's other half: the purview §2.1 says no containment node holds.
+    """Criterion 6's other half: the own-grant term of §2.1's union is exercised.
 
     §2.1's worked example is not "an extra level in the chain". It is a purview:
     "own led courses union every supervised chair's department — a set no single
     containment node holds" — a transcription with §2.1's set symbol spelled out,
-    as everywhere else in this file. That sentence is only true of seeded rows
-    where the assistant dean *leads a course* and that course sits outside the
-    departments of the chairs they supervise. Seed it the other way and the union
-    collapses into one department subtree, E9's development data stops
-    distinguishing a correct roll-up from a containment walk, and nothing says so.
+    as everywhere else in this file. §2 says in as many words that "an assistant
+    dean can hold a lead-faculty assignment while supervising a chair", and the
+    worked example's own grant is non-empty.
+
+    **What the "outside" is for.** A purview is a union of two terms, and this
+    seeds data that can tell them apart. Where the assistant dean leads nothing,
+    the union is the supervised departments and a resolver that computed only the
+    transitive term would be right on this institution; where they lead a course
+    *inside* a supervised chair's department, the own grant is a subset of the
+    transitive term and the same resolver is still right. Only a led course
+    outside those departments makes the own-grant term observable — and E9 is the
+    epic that writes the resolver against exactly this data.
+
+    **An earlier version of this docstring justified the row differently and was
+    wrong about the graph**: it said that without the outside course "the union
+    collapses into one department subtree". It does not — the assistant dean
+    supervises chairs in two departments, so the union spans both, and the college
+    holds a third department besides. The assertion is worth having for the reason
+    above; the reason it used to give was one a reader could disprove from the
+    seeded rows, which is how a sound test gets relaxed.
 
     Its own test rather than a fifth clause above, because it fails for a
     different reason: the shape above can be right while this is missing, and the
@@ -1486,9 +1535,12 @@ def test_the_assistant_deans_led_course_sits_outside_the_departments_they_superv
         + "\n".join(f"  - {complaint}" for complaint in complaints)
         + "\n\n§2.1: 'The assistant dean is the worked example for why purview comes from the "
         "graph: own led courses union every supervised chair's department — a set no single "
-        "containment node holds.' Where the led course sits inside a supervised chair's "
-        "department, that union *is* held by a single node, and E9 can pass its own tests with a "
-        "containment walk. The shape is cheap to seed and impossible to notice missing."
+        "containment node holds', and §2: 'an assistant dean can hold a lead-faculty assignment "
+        "while supervising a chair'. Both terms of that union have to be observable in the demo "
+        "data or E9 cannot tell a resolver that computes both from one that computes only the "
+        "supervised part — which is the case where the assistant dean leads nothing, and equally "
+        "the case where what they lead sits inside a department they already supervise. The shape "
+        "is cheap to seed and impossible to notice missing."
     )
 
 
@@ -1595,18 +1647,98 @@ def test_at_least_one_seeded_course_has_no_lead_faculty_mapping(
 # ---------------------------------------------------------------------------
 
 
+def test_every_seeded_person_is_named_for_the_role_they_hold(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """Criterion 9's name half, held at the shape ADR 0066 chose rather than at the criterion.
+
+    The criterion is "seeded people are obviously fictional; no name resembles a
+    real person at a real institution", and "resembles a real person" is not
+    decidable. **What is decidable is the mechanism the ticket's implementation
+    chose to make it true**: ADR 0066 names every seeded person for their part in
+    the institution — `Demo Chair of Mathematics`, `Demo Assistant Dean of Arts
+    and Sciences` — with "no invented human names, no initials, no surnames", so
+    that "the criterion becomes true by construction rather than by somebody
+    having checked a list of twenty names against the world".
+
+    That is what this asserts, and the distinction is worth stating: a green run
+    here does not mean no seeded name resembles a real person, it means every
+    seeded name is a role description, which is the property the ADR argues from.
+
+    **ADR 0066's own consequences said this was unheld** — "a future edit adding
+    `Dr. J. Whitfield` to `PEOPLE` passes every test in the suite" — and the edit
+    it describes is the likely one, because `design/` is full of `Dr. A. Okafor`
+    and `Dr. K. Sorensen` and a developer matching the prototype would copy them.
+    The prefix assertion refuses that string outright. The second assertion
+    catches the version that keeps the prefix and appends a person, which the
+    first would let through.
+    """
+    seeded(seeded_demo)
+    named: dict[str, list[str]] = {}
+    with reading(demo_database, metadata_tables) as rows:
+        for table_name in PERSON_TABLES:
+            table = metadata_tables.get(table_name)
+            if table is None:
+                continue
+            columns = [
+                column.name
+                for column in table.columns
+                if any(fragment in column.name.lower() for fragment in NAME_COLUMN_FRAGMENTS)
+            ]
+            for row in rows.get(table_name, {}).values():
+                for column in columns:
+                    value = row.get(column)
+                    if isinstance(value, str) and value.strip():
+                        named.setdefault(f"{table_name}.{column}", []).append(value)
+
+    assert named, (
+        f"No column on {list(PERSON_TABLES)} whose name carries {list(NAME_COLUMN_FRAGMENTS)} "
+        "holds anything, so this assertion has nothing to be about. `person.identity_name` is "
+        "`NOT NULL` (ADR 0066), so a seeded person has a name — an empty sweep means the tables "
+        "are empty or the naming convention has moved, and both are worth seeing rather than "
+        "passing over."
+    )
+
+    not_a_role = {
+        where: [value for value in values if not value.startswith(SEEDED_NAME_PREFIX)]
+        for where, values in named.items()
+    }
+    not_a_role = {where: values for where, values in not_a_role.items() if values}
+    assert not not_a_role, (
+        f"These seeded names do not begin {SEEDED_NAME_PREFIX!r}: {not_a_role}. ADR 0066: 'Every "
+        "seeded person is named for the role they hold… No invented human names, no initials, no "
+        "surnames.' A demo seed is copied into staging environments by people in a hurry, and a "
+        "plausible name attached to a plausible course, in a system whose whole subject is "
+        "confidential student feedback, is the kind of screenshot that gets read as real. If the "
+        "naming rule is being changed rather than broken, ADR 0066 is what changes and this "
+        "assertion follows it."
+    )
+
+    like_a_person = {
+        where: [value for value in values if HUMAN_NAME_MARKS.search(value)]
+        for where, values in named.items()
+    }
+    like_a_person = {where: values for where, values in like_a_person.items() if values}
+    assert not like_a_person, (
+        f"These seeded names carry a title or an initial: {like_a_person}. ADR 0066 rules out "
+        "both by name, and this is the half the prefix above does not reach: `Demo Chair A. "
+        "Okafor` describes a role and names a person, and the person is the part that ends up in "
+        "a screenshot. Every name in `design/` has this shape, which is why it is the edit worth "
+        "catching."
+    )
+
+
 def test_no_seeded_person_carries_a_routable_email_address(
     seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
 ) -> None:
-    """Criterion 9, the half a test can check: nothing here could be delivered to.
+    """Criterion 9's address half, which comes from the security review rather than the criterion.
 
     E0-17's security review asks that "no seeded person carries a real email
-    address or anything resembling real student data". Whether a *name* resembles a
-    real person at a real institution is not something this can decide, and the
-    module docstring says so rather than asserting a weaker thing under the same
-    name. An address is decidable: RFC 2606 and RFC 6761 reserve `.invalid`,
-    `.test`, `.example` and the `example.*` second-level names precisely so that a
-    fixture cannot reach anybody's mailbox.
+    address or anything resembling real student data". An address is decidable
+    where "resembles a real person" is not: RFC 2606 and RFC 6761 reserve
+    `.invalid`, `.test`, `.example` and the `example.*` second-level names
+    precisely so that a fixture cannot reach anybody's mailbox. The name half is
+    the test above, held at ADR 0066's shape.
 
     The sweep is over every column in the schema whose name reads as an address,
     not over a named table, because no ticket says which table carries one — and
@@ -2426,4 +2558,395 @@ def test_running_the_seed_a_second_time_leaves_the_same_rows(
         "row it should have matched, keeps the count and moves the data underneath every fixture "
         "built on it. Row identities are deliberately not compared — see `row_label` in this "
         "file for why — so this is a difference in values or in what a row points at."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Criterion 4, against rows the seed did not write.
+#
+# **Every test above this line runs against a database only the seed has ever
+# touched, and that is why none of them could fail.** Idempotency is a claim about
+# what a run does when it meets rows that are already there; over a database the
+# loader filled itself, "the rows I find" and "the rows I wrote" are the same set
+# by construction, so a loader that adopts somebody else's row looks identical to
+# one that re-uses its own. `docs/MISTAKES.md` entry 31 is that gap, and this
+# section is what closes it.
+#
+# The scenario is the one the review measured, not one invented here. A real
+# institution holds the prefix `MATH` and a course under it; `make seed` runs;
+# `prefix` is `UNIQUE (code)` across the whole table rather than per institution
+# (ADR 0017), so matching on the code found *the* prefix rather than *my* prefix.
+# The real prefix was re-pointed at the demo's department, the real course's title
+# was overwritten, and the run exited zero printing its success line. Because
+# purview is computed from the containment tree and from `lead_faculty_mapping`,
+# what that yields is an authorization change: demo staff gain purview over real
+# courses and the real lead faculty loses theirs.
+#
+# ADR 0064 states the rule the guard now follows, and it is the rule to hold while
+# reading these tests: every natural key is either scoped to a row the seed
+# created, or a root matched by a value the seed invented. `prefix.code` was
+# neither. A table of keys does not show that — which is why the record now says
+# it in words, and why the tests below plant a foreign row rather than trusting
+# either.
+# ---------------------------------------------------------------------------
+
+# Where the prefix's code lives. ADR 0064's key table spells it — `prefix | code`
+# — and the alternatives are here for the same reason every other candidate list
+# in this file is: a rename should be a one-line change rather than a rewrite.
+PREFIX_CODE_COLUMNS = ("code", "lms_code", "prefix_code")
+
+# The name column on the containment tables the guard's message has to quote.
+# ADR 0064's key table gives `college` and `department` a `name`, and
+# `institution` is matched on one.
+NAME_COLUMNS = ("name",)
+
+# What the planted course is called, and what it must still be called afterwards.
+# Deliberately nothing the seed would write: the measured failure was a real
+# course's title being overwritten with `Calculus I`, so the assertion is worth
+# nothing if the two strings could coincide.
+PLANTED_COURSE_TITLE = "A Course The Demo Seed Did Not Write"
+
+# The course number planted when the seed's own courses cannot be read to choose a
+# colliding one. Inside SPEC §8's UG band, like every other number this file
+# invents.
+FALLBACK_PLANTED_COURSE_NUMBER = "210"
+
+# A prefix code for the control, chosen to be one no seed and no institution would
+# use. The control asserts it is not among the seeded codes before it means
+# anything.
+UNCLAIMED_PREFIX_CODE = "ZZQ"
+
+
+class ForeignRowsSeed:
+    """A database holding rows the seed did not write, and what the seed did to them."""
+
+    def __init__(
+        self,
+        demo: Any,
+        code: str | None,
+        department: str | None,
+        course_number: str | None,
+        before: dict[str, Any],
+        run: Any,
+        after: dict[str, Any],
+    ) -> None:
+        self.demo = demo
+        self.code = code
+        self.department = department
+        self.course_number = course_number
+        self.before = before
+        self.run = run
+        self.after = after
+
+
+def seeded_prefixes_and_courses(
+    demo_database: Any, metadata_tables: dict[str, Any]
+) -> tuple[dict[str, str], set[str]]:
+    """The seed's own prefix codes with a course number under each, and the institution names.
+
+    Read out of the database the seed filled rather than written down here, so
+    that the collision below is a collision with **whatever this seed uses**
+    rather than with a string this file guessed. A test that planted a hardcoded
+    `MATH` would go quietly vacuous the day the demo institution is renumbered or
+    renamed.
+    """
+    prefix_table = require_table(metadata_tables, "prefix")
+    course_table = require_table(metadata_tables, "course")
+    code_column = require_column(prefix_table, PREFIX_CODE_COLUMNS)
+    institution_name = require_column(require_table(metadata_tables, "institution"), NAME_COLUMNS)
+    prefix_key = single_primary_key(prefix_table)
+    course_to_prefix = one_foreign_key_column(course_table, "prefix")
+
+    with reading(demo_database, metadata_tables) as rows:
+        codes = {row[prefix_key]: str(row[code_column]) for row in rows_of(rows, "prefix")}
+        numbers: dict[str, str] = {}
+        for course in rows_of(rows, "course"):
+            code = codes.get(course[course_to_prefix])
+            if code is not None:
+                numbers.setdefault(code, str(course[COURSE_NUMBER_COLUMN]))
+        institutions = {str(row[institution_name]) for row in rows_of(rows, "institution")}
+
+    for code in codes.values():
+        numbers.setdefault(code, FALLBACK_PLANTED_COURSE_NUMBER)
+    return numbers, institutions
+
+
+def plant_a_foreign_institution(
+    plant_in: Any, metadata_tables: dict[str, Any], demo: Any, code: str, number: str
+) -> str:
+    """One institution the seed did not create, holding `code` and a course under it.
+
+    Everything but the prefix code and the course number is invented by
+    `seed_row`, which is the point: the institution, the college and the
+    department are somebody else's, with names the seed has never heard of. Only
+    the prefix code is shared, because ADR 0017 makes that the one containment
+    value that is unique across the whole deployment.
+
+    Answers the department's name, which is what the refusal has to quote.
+    """
+    prefix_table = require_table(metadata_tables, "prefix")
+    code_column = require_column(prefix_table, PREFIX_CODE_COLUMNS)
+    department_name = require_column(require_table(metadata_tables, "department"), NAME_COLUMNS)
+
+    chain: dict[str, Any] = {}
+    plant_in(demo, "prefix", chain, **{code_column: code})
+    plant_in(
+        demo,
+        "course",
+        chain,
+        **{COURSE_NUMBER_COLUMN: number, COURSE_TITLE_COLUMN: PLANTED_COURSE_TITLE},
+    )
+    return str(chain["department"][department_name])
+
+
+@pytest.fixture(scope="module")
+def collided_seed(
+    demo_database: Any,
+    seeded_demo: Any,
+    demo_databases: Any,
+    plant_in: Any,
+    metadata_tables: dict[str, Any],
+) -> ForeignRowsSeed:
+    """A fresh database holding a foreign institution whose prefix code the seed uses.
+
+    `seeded_demo` is requested so the module database has been seeded and its
+    prefix codes can be read; the run under test happens somewhere else entirely.
+    Nothing here asserts — a seed that wrote no prefixes leaves `code` unset and
+    the tests below say which failure to read first.
+    """
+    numbers, _ = seeded_prefixes_and_courses(demo_database, metadata_tables)
+    if not numbers:
+        return ForeignRowsSeed(None, None, None, None, {}, None, {})
+
+    code = sorted(numbers)[0]
+    number = numbers[code]
+    demo = demo_databases()
+    department = plant_a_foreign_institution(plant_in, metadata_tables, demo, code, number)
+
+    with demo.connect() as connection:
+        before = read_rows(connection, metadata_tables)
+    run = demo.run()
+    with demo.connect() as connection:
+        after = read_rows(connection, metadata_tables)
+    return ForeignRowsSeed(demo, code, department, number, before, run, after)
+
+
+@pytest.fixture(scope="module")
+def uncollided_seed(
+    demo_databases: Any, plant_in: Any, metadata_tables: dict[str, Any]
+) -> ForeignRowsSeed:
+    """The control: the same foreign institution, holding a prefix code the seed does not use.
+
+    Unlike `collided_seed` it needs nothing from the module's own seeded database
+    — the code it plants is a constant precisely because it is meant to be one the
+    seed never uses, and the test asserts that rather than this fixture assuming
+    it.
+    """
+    demo = demo_databases()
+    department = plant_a_foreign_institution(
+        plant_in,
+        metadata_tables,
+        demo,
+        UNCLAIMED_PREFIX_CODE,
+        FALLBACK_PLANTED_COURSE_NUMBER,
+    )
+
+    with demo.connect() as connection:
+        before = read_rows(connection, metadata_tables)
+    run = demo.run()
+    with demo.connect() as connection:
+        after = read_rows(connection, metadata_tables)
+    return ForeignRowsSeed(
+        demo,
+        UNCLAIMED_PREFIX_CODE,
+        department,
+        FALLBACK_PLANTED_COURSE_NUMBER,
+        before,
+        run,
+        after,
+    )
+
+
+def planted(collided: ForeignRowsSeed) -> None:
+    """Stop unless there was a prefix code to collide with, naming the test that owns it."""
+    if collided.code is None:
+        pytest.fail(
+            "The seeded database holds no prefixes, so there was no code to plant a collision "
+            "with and nothing below can mean anything. "
+            "`test_seeding_a_freshly_migrated_database_completes_without_error` asserts that the "
+            "containment tables are non-empty after a run, and that is the failure to read first."
+        )
+
+
+def test_a_prefix_code_another_department_already_holds_is_refused(
+    seeded_demo: Any, collided_seed: ForeignRowsSeed
+) -> None:
+    """The seed refuses to adopt a prefix it did not create, and says whose it is.
+
+    ADR 0064: "Where a prefix with a seeded code exists and does not already
+    belong to the department this file wants, it raises, naming the code and the
+    department that holds it." Both halves are asserted, and the second is not
+    politeness: the person meeting this refusal has a demo seed and a real
+    institution in one database, and the only thing that tells them which of their
+    own prefixes is in the way is the message.
+
+    **The refusal is what makes the whole containment tree safe, not just this
+    row.** Purview is computed from that tree and from `lead_faculty_mapping`, so a
+    prefix quietly re-pointed at the demo's Mathematics department hands demo
+    staff purview over real courses and takes the real lead faculty's away. Both
+    sides of that are invisible: no error, no duplicate row, and a success line.
+
+    The college is deliberately not asserted although the guard names it too. ADR
+    0064's sentence commits to the code and the department, and pinning a third
+    element here would make this file the record of a message rather than of a
+    rule.
+    """
+    seeded(seeded_demo)
+    planted(collided_seed)
+    said = said_by(collided_seed.run)
+
+    assert not collided_seed.run.succeeded, (
+        f"The seed ran to completion against a database where the prefix "
+        f"`{collided_seed.code}` already belonged to the department "
+        f"`{collided_seed.department}`.\n{collided_seed.run.report()}\n"
+        "ADR 0017 makes `prefix.code` unique across the whole deployment rather than per "
+        "institution, so matching on it finds *the* prefix rather than *this seed's* prefix. "
+        "Measured before the guard existed: the real prefix moved to the demo's department, the "
+        "real course under it was reached by `(prefix_id, lms_number)` and its title overwritten, "
+        "and the run exited zero. ADR 0064's rule is that a natural key must be scoped to a row "
+        "the seed created or be a value the seed invented, and that where it is neither the "
+        "loader refuses rather than matches."
+    )
+    assert collided_seed.code in said, (
+        f"The refusal does not name the prefix code `{collided_seed.code}`.\n"
+        f"{collided_seed.run.report()}\n"
+        "ADR 0064: it raises 'naming the code and the department that holds it'. A refusal that "
+        "says a prefix is in the way without saying which one leaves the reader grepping their "
+        "own institution for it."
+    )
+    assert collided_seed.department is not None and collided_seed.department in said, (
+        f"The refusal does not name the department that holds the prefix, "
+        f"`{collided_seed.department}`.\n{collided_seed.run.report()}\n"
+        "That is the half that tells the reader this is *their* row rather than a bug in the "
+        "seed — the code alone reads like the demo colliding with itself."
+    )
+
+
+def test_the_refused_run_leaves_the_pre_existing_rows_and_writes_no_demo_institution(
+    seeded_demo: Any,
+    collided_seed: ForeignRowsSeed,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+) -> None:
+    """A refused run leaves nothing behind, including nothing half-built.
+
+    Two claims, and the second is why the whole load is one transaction (ADR
+    0064). The rows that were there are exactly as they were — the planted
+    prefix still belongs to its own department and the planted course still has
+    its own title, which are the two the review measured being changed. And
+    nothing the seed writes is left over: no demo institution, no orphan college,
+    no partial term.
+
+    The demo institution is named from the seeded database rather than written
+    down, so this cannot pass by looking for a string the seed stopped using.
+
+    The whole-snapshot comparison after it is the general form, and it is what
+    would catch a refusal that had already written something further down the
+    tree. It uses the same labels the idempotency test does, so a row is compared
+    by its values and by what its keys point at, never by its uuid.
+    """
+    seeded(seeded_demo)
+    planted(collided_seed)
+    _, demo_institutions = seeded_prefixes_and_courses(demo_database, metadata_tables)
+    institution_name = require_column(require_table(metadata_tables, "institution"), NAME_COLUMNS)
+
+    assert demo_institutions, (
+        "The seeded database names no institution, so 'the refused run wrote no demo institution' "
+        "would be a search for nothing. "
+        "`test_seeding_a_freshly_migrated_database_completes_without_error` is where that is "
+        "asserted."
+    )
+
+    left_behind = sorted(
+        demo_institutions
+        & {str(row[institution_name]) for row in rows_of(collided_seed.after, "institution")}
+    )
+    assert not left_behind, (
+        f"The refused run left {left_behind} behind in a database it was supposed not to touch.\n"
+        f"{collided_seed.run.report()}\n"
+        "ADR 0064: 'the whole load is one transaction. A run that fails half way leaves nothing, "
+        "so the next run does not build on a partial institution.' A refusal that leaves a demo "
+        "institution standing is worse than the adoption it prevented — the next run matches its "
+        "own half-built rows and the failure becomes invisible."
+    )
+
+    counts_before = counted(collided_seed.before)
+    counts_after = counted(collided_seed.after)
+    assert sum(counts_before.values()), (
+        "The database held no rows before the run, so this is a comparison between two empty "
+        "databases. The plant is what should have filled it, and a plant that inserted nothing "
+        "would make the refusal above a refusal about nothing."
+    )
+
+    labels_before = labelled(metadata_tables, collided_seed.before)
+    labels_after = labelled(metadata_tables, collided_seed.after)
+    changed = {
+        name: (
+            sorted(set(labels_before.get(name, [])) - set(rows))[:5],
+            sorted(set(rows) - set(labels_before.get(name, [])))[:5],
+        )
+        for name, rows in labels_after.items()
+        if sorted(rows) != sorted(labels_before.get(name, []))
+    }
+    assert not changed, (
+        f"The refused run changed the database (gone, arrived — up to five of each): {changed}.\n"
+        f"Row counts before: {counts_before}\nRow counts after: {counts_after}\n"
+        "The rows here belong to somebody else. The two the review measured being changed are a "
+        "prefix's `department_id`, re-pointed at the demo's department, and a course's "
+        "`lms_title`, overwritten with the demo's — neither of which raises anything, and both of "
+        "which move purview."
+    )
+
+
+def test_a_foreign_institution_the_seed_does_not_collide_with_is_seeded_successfully(
+    seeded_demo: Any,
+    uncollided_seed: ForeignRowsSeed,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+) -> None:
+    """The control: a database that is merely non-empty is seeded, not refused.
+
+    Without this, the refusal above is satisfied by a seed that refuses any
+    database holding rows it did not write — which would make `make seed`
+    unusable against a developer's working database, and would pass every
+    assertion in this section.
+
+    The guard that the planted code is genuinely unused is what makes the control
+    a control: if the seed ever adopts `ZZQ` as one of its own prefixes, this test
+    stops being about a database without a collision and starts being a duplicate
+    of the one above it, silently.
+    """
+    seeded(seeded_demo)
+    numbers, _ = seeded_prefixes_and_courses(demo_database, metadata_tables)
+
+    assert numbers, (
+        "The seeded database holds no prefixes, so there is no set of seeded codes for "
+        f"`{UNCLAIMED_PREFIX_CODE}` to be outside of."
+    )
+    assert UNCLAIMED_PREFIX_CODE not in numbers, (
+        f"The seed now uses `{UNCLAIMED_PREFIX_CODE}` as one of its own prefix codes, which is "
+        "the code this control plants to represent a database the seed does *not* collide with. "
+        "Change `UNCLAIMED_PREFIX_CODE` at the top of this section to something the demo "
+        "institution does not use; leaving it makes this test a second copy of the refusal test "
+        "above and nothing would say so."
+    )
+    assert uncollided_seed.run is not None and uncollided_seed.run.succeeded, (
+        "The seed was refused against a database holding a foreign institution whose prefix code "
+        f"it does not use (`{UNCLAIMED_PREFIX_CODE}`, held by "
+        f"`{uncollided_seed.department}`).\n"
+        f"{uncollided_seed.run.report() if uncollided_seed.run else 'no run'}\n"
+        "ADR 0064 refuses a *collision*, not company: a developer's database holding their own "
+        "work is the ordinary case for `make seed`, and refusing it would make the guard "
+        "unusable. This is what keeps the refusal above attributable to the shared code rather "
+        "than to the database being non-empty."
     )
