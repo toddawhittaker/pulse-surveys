@@ -81,18 +81,13 @@ SUPPORTED_SCOPES = (OPENID_SCOPE, "profile", "email")
 # request and so protects nothing against anyone who can read one.
 CODE_CHALLENGE_METHOD = "S256"
 
-# RFC 7636 §4.1's bounds on a verifier, checked before it is compared. A verifier
-# outside them is not a near miss, it is a client that has not read the
-# specification, and saying so is more use than "the code did not match".
-VERIFIER_MINIMUM_LENGTH = 43
-VERIFIER_MAXIMUM_LENGTH = 128
-
-# And §4.1's alphabet: the unreserved characters of RFC 3986. Checked for the
-# same reason as the lengths, plus one of its own — the challenge is computed
-# over the verifier's **ASCII** octets, so a character outside this set has no
-# ASCII encoding and would raise inside the comparison rather than be refused by
-# it.
-VERIFIER_ALPHABET = re.compile(r"[A-Za-z0-9\-._~]+")
+# RFC 7636's shape for **both** PKCE parameters: `43*128unreserved`, which §4.1's
+# ABNF gives the verifier and §4.3's gives the challenge. One rule and one pair of
+# bounds, because it is one production in the specification and two copies could
+# disagree about a parameter whose whole job is to be compared with the other.
+PKCE_MINIMUM_LENGTH = 43
+PKCE_MAXIMUM_LENGTH = 128
+PKCE_ALPHABET = re.compile(r"[A-Za-z0-9\-._~]+")
 
 # How long a login page is good for, and how long an unspent authorization code
 # is. RFC 6749 §4.1.2 recommends a maximum code lifetime of ten minutes; one
@@ -224,6 +219,35 @@ def challenge_for(verifier: str) -> str:
     return base64url(hashlib.sha256(verifier.encode("ascii")).digest())
 
 
+def pkce_shape_problem(value: str) -> str | None:
+    """Why `value` is not a well-formed PKCE parameter, or `None` if it is.
+
+    Checked at both ends — the challenge when it is registered, the verifier when
+    it is compared — because **neither check is only about conformance**. The
+    challenge is compared with `secrets.compare_digest`, which refuses two strings
+    it cannot treat as ASCII, and the verifier is hashed as ASCII because RFC 7636
+    §4.2 computes the digest over those octets. So a character outside this set
+    raises inside the comparison instead of being refused by it, and the provider
+    answers "we fell over" where the honest answer is "your grant is invalid".
+    Both were reproduced before this function existed.
+
+    A reason rather than an exception, because the two callers refuse in different
+    vocabularies: an authorization request is answered with a page, and a token
+    request with RFC 6749 §5.2's `error` object.
+    """
+    if not PKCE_MINIMUM_LENGTH <= len(value) <= PKCE_MAXIMUM_LENGTH:
+        return (
+            f"it is {len(value)} characters, and RFC 7636 makes it between "
+            f"{PKCE_MINIMUM_LENGTH} and {PKCE_MAXIMUM_LENGTH}"
+        )
+    if not PKCE_ALPHABET.fullmatch(value):
+        return (
+            "it carries characters outside the unreserved set RFC 7636 allows — "
+            "`A-Z`, `a-z`, `0-9`, `-`, `.`, `_` and `~`"
+        )
+    return None
+
+
 def required(parameters: Mapping[str, Any], name: str, subject: str) -> str:
     """One parameter that must be present and non-empty, or a refusal naming it."""
     value = str(parameters.get(name) or "").strip()
@@ -302,6 +326,13 @@ class Flows:
         nonce = required(parameters, "nonce", subject)
 
         code_challenge = required(parameters, "code_challenge", subject)
+        malformed = pkce_shape_problem(code_challenge)
+        if malformed is not None:
+            raise AuthorizationRequestError(
+                f"`code_challenge` is malformed: {malformed}. Registering it as it stands would "
+                "produce a code no exchange could ever redeem."
+            )
+
         method = str(parameters.get("code_challenge_method") or "").strip()
         if method != CODE_CHALLENGE_METHOD:
             raise AuthorizationRequestError(
@@ -472,16 +503,11 @@ class Flows:
     def _require_pkce(self, parameters: Mapping[str, Any], issued: AuthorizationCode) -> None:
         """RFC 7636 §4.6: the verifier must be present, well formed, and match.
 
-        Four refusals rather than one, because they are four different mistakes
+        Three refusals rather than one, because they are three different mistakes
         and a client reading `error_description` should be told which it made. All
-        four are `invalid_grant`, which is what §4.6 specifies.
-
-        The alphabet check is not tidiness. `challenge_for` encodes the verifier
-        as **ASCII**, because §4.2 says the challenge is computed over the ASCII
-        octets, so a verifier carrying a character outside that raises inside the
-        comparison — and a provider that answered a malformed parameter with a
-        500 would be answering "we fell over" where the honest answer is "your
-        grant is invalid". Checked before the digest, not caught after it.
+        three are `invalid_grant`, which is what §4.6 specifies. What "well formed"
+        means, and why it is checked rather than caught, is on `pkce_shape_problem`
+        above — the challenge is checked against the same rule when it arrives.
 
         The comparison is `compare_digest`, not `==`. Both values are public in
         the sense that neither is a long-lived secret, and the timing of a
@@ -501,21 +527,11 @@ class Flows:
                     "since anyone holding a stolen code would simply omit the parameter."
                 ),
             )
-        if not VERIFIER_MINIMUM_LENGTH <= len(verifier) <= VERIFIER_MAXIMUM_LENGTH:
+        malformed = pkce_shape_problem(verifier)
+        if malformed is not None:
             raise TokenRequestError(
                 error="invalid_grant",
-                description=(
-                    f"`code_verifier` is {len(verifier)} characters. RFC 7636 §4.1 makes it "
-                    f"between {VERIFIER_MINIMUM_LENGTH} and {VERIFIER_MAXIMUM_LENGTH}."
-                ),
-            )
-        if not VERIFIER_ALPHABET.fullmatch(verifier):
-            raise TokenRequestError(
-                error="invalid_grant",
-                description=(
-                    "`code_verifier` carries characters outside the unreserved set RFC 7636 §4.1 "
-                    "allows — `A-Z`, `a-z`, `0-9`, `-`, `.`, `_` and `~`."
-                ),
+                description=f"`code_verifier` is malformed: {malformed}.",
             )
         if not secrets.compare_digest(challenge_for(verifier), issued.code_challenge):
             raise TokenRequestError(

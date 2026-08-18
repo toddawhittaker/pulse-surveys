@@ -756,7 +756,20 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 15**
+**Caught: 16**
+
+*(The sixteenth, in E0-16, an hour after the fifteenth and found because of it.
+A review pass over the finished provider found that a `code_verifier` carrying a
+character outside ASCII crashed the comparison rather than being refused by it —
+RFC 7636 computes the challenge over ASCII octets, so `.encode("ascii")` raises
+and the container answers 500. The fix was one check. This entry is why the next
+question was "what else faces the same hazard", and the answer was the
+`code_challenge`, which is the *other* half of the same comparison and was
+crashing `secrets.compare_digest` at the token endpoint from a value the
+authorization endpoint had accepted an hour earlier. Both were reproduced before
+and after. The repair is one function, `pkce_shape_problem`, called at both ends,
+because RFC 7636 gives the two parameters one ABNF production and two copies of
+it could disagree about the one thing they exist to be compared against.)*
 
 *(The fifteenth, in E0-16, and it is the same hazard reaching a second mock. Two
 services in this repository now ship a package called `app` beside the backend's,
