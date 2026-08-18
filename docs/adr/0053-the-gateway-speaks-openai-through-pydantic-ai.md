@@ -125,16 +125,26 @@ checker reads it as a conjunction and cannot classify every part. Both are
 permissive in fact. Widening `scripts/ci/check_licenses.py` to say so is a change
 to a gate, and is not made here.
 
-**`Agent.run_sync` is unusable in this project, and the gateway owns an event
-loop instead.** It calls `asyncio.get_event_loop()`, which emits a
-`DeprecationWarning` on a thread with no loop set; `pyproject.toml` turns a
-`DeprecationWarning` into an error on purpose, so every model call failed under
-the suite the first time this was wired. `asyncio.run` per call is not the fix
-either — the HTTP client's connection pool binds to the loop that first used it,
-so the second call would reach into a closed one. `_model_call_loop()` keeps one
-loop per thread, which is what the deprecated function used to do. It is the one
-piece of machinery in the gateway that exists because of the library rather than
-because of the spec, and it goes when `run_sync` stops calling a deprecated API.
+**`Agent.run_sync` is unusable in this project, and the gateway drives a loop
+itself.** It calls `asyncio.get_event_loop()`, which emits a `DeprecationWarning`
+on a thread with no loop set; `pyproject.toml` turns a `DeprecationWarning` into
+an error on purpose, so every model call failed under the suite the first time
+this was wired. `asyncio.run` per call is not the fix either — the client's
+connection pool binds to the loop that first used it, so the second call would
+reach into a closed one.
+
+**And the loop cannot be separated from the client**, which the first fix got
+wrong and E0-13's review measured: one shared client across per-thread loops
+answered every *second* submission from the character floor while the provider was
+healthy, because a pooled connection raises when it is reused from another loop
+and the layers above report that as "could not be reached". `_ThreadBound` now
+holds the loop, the client and the agents together, one per thread, and
+`app.ai.tasks` shares a single gateway so the count is bounded by threads rather
+than by comments. Measured after the fix: 100 calls over a four-thread pool, 100
+real verdicts, and file descriptors flat at a ceiling reached during the first
+batch. This is the one piece of machinery in the gateway that exists because of
+the library rather than because of the spec, and it goes when `run_sync` stops
+calling a deprecated API.
 
 **The client's own retry has to be turned off, and the only way in is the
 provider's client object.** Left at its default of two, `openai` retries a
