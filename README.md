@@ -22,7 +22,8 @@ Early, but no longer empty. The backend package exists — a FastAPI application
 factory, the environment-driven settings object, a health endpoint, and a
 database engine with a session per request — and it runs in a container
 alongside a Celery worker, a Celery beat scheduler, Postgres, Redis, Mailpit,
-and the mock LMS described below. CI enforces lint, typing, the test suite,
+and the two mocks described below — a fake LMS to launch from and a fake identity
+provider to log in through, one for each of the two entry doors in SPEC §2. CI enforces lint, typing, the test suite,
 migration drift, dependency audit, license compatibility, and that the stack
 comes up healthy.
 
@@ -50,8 +51,8 @@ make down           # docker compose down -v — discards the database too
 `GET http://localhost:8000/healthz` answers with the service name, the version,
 and the environment it was configured with. The interactive API documentation is
 at `/docs`, the captured mail is at <http://localhost:8025>, the mock LMS is at
-<http://localhost:8080>, and Postgres and Redis are on their usual ports. All of
-them bind to `127.0.0.1` only.
+<http://localhost:8080>, the mock IdP is at <http://localhost:8081>, and Postgres
+and Redis are on their usual ports. All of them bind to `127.0.0.1` only.
 
 `docker compose up` merges [`docker-compose.override.yml`](docker-compose.override.yml)
 over the base file automatically, and that override is what publishes those
@@ -265,6 +266,101 @@ of E1 and E3 needs a token first is where that belongs.
 All of that is per-process and in memory: restart the container and the line
 items and the posted scores are gone
 ([ADR 0049](docs/adr/0049-the-mock-gradebook-is-per-application-state-in-memory.md)).
+
+## The mock IdP
+
+Pulse has two entry doors (SPEC §2). Instructors and students arrive by LTI
+launch, which is what the mock LMS above stands in for. Everybody else —
+leadership, Care and Admin — logs in over OpenID Connect, because an LTI launch
+requires being enrolled in some course and they are not. Nobody has a spare Entra
+ID tenant either, so the stack brings its own provider: `mock-idp`, a small
+FastAPI application in [`mock-idp/`](mock-idp/) serving discovery, an
+authorization endpoint, a token endpoint and a JWKS (SPEC §9.2). It is
+development and test only, and nothing in Pulse trusts it unless Pulse's own
+configuration says so.
+
+`make up` starts it with everything else. Open <http://localhost:8081> to see the
+registered client and the seeded identities; the same values are JSON at
+<http://localhost:8081/mock/registration>, which is what E1's login work and the
+end-to-end specs read
+([ADR 0058](docs/adr/0058-the-mock-provider-publishes-its-registration-and-its-seed.md)).
+
+A login **starts at the client**, not on that page: send an authorization request
+to `/oidc/authorize` with a PKCE challenge, pick an identity on the form that
+comes back, and redeem the code at `/oidc/token` with the verifier. Until E1
+builds the tool's side, the redirect at the end lands on a 404 — the honest state
+of a provider whose client does not exist yet.
+
+Four things about it are worth knowing before debugging anything:
+
+- **It has no passwords.** The form offers the seeded people and signs in
+  whichever one is posted. Which people it offers is not a list: a person may use
+  this door when they hold an assignment whose role is not instructor or student,
+  which is SPEC §2's rule computed rather than copied
+  ([ADR 0060](docs/adr/0060-the-mock-provider-authenticates-a-seeded-subject.md)).
+- **It is strict where a real provider is strict, and a little stricter.** PKCE is
+  required and S256 only; `state` and `nonce` are required; an authorization code
+  is good once, for sixty seconds, and a failed exchange spends it too; a
+  `redirect_uri` that is not the registered one is refused with a page rather than
+  a redirect; a parameter sent twice — in the query, in the body, or once in each
+  — is refused rather than resolved last-wins; a scope it does not serve is
+  refused rather than quietly dropped, and one whose tokens are separated by
+  anything but a single space is refused rather than split into tokens the client
+  never sent. A mock that shrugged at any of those would teach the tool side to
+  shrug too.
+- **Nothing a client sends is trimmed, and that is load-bearing.** Values are
+  checked exactly as they arrived and refused, never repaired: a `code_verifier`
+  wrapped in whitespace — which is what `base64.encodebytes()` produces — is
+  `invalid_grant` here as it is at Keycloak, Okta and Auth0, and `state` and
+  `nonce` come back byte for byte, because a client compares both against what it
+  sent.
+- **A session carries what the granted scopes cover.** `openid` alone gets the
+  subject, the audience, the nonce and the Pulse roles claim, and **not** `email`
+  or `preferred_username`: ask for `email` and `profile` if you want those, as you
+  would at Azure AD, Okta or Google. The token response echoes the grant, so what
+  it declares and what the ID token carries cannot disagree. The roles claim is
+  not gated on any scope — it is namespaced rather than one of the registered
+  claims OIDC Core §5.4's table governs, which is how Azure AD, Auth0 and Okta
+  release role claims too.
+- **Its signing key is generated per process, and never written down.** Restart
+  the container and it is a different provider with a different key set, so
+  anything that cached the old keys stops verifying. No private key is committed
+  anywhere in this repository — a test sweeps the tree to make sure.
+- **It has no reload.** Like the mock LMS, the development override mounts your
+  checkout into the three application containers and not into this one, so
+  editing `mock-idp/` means `docker compose up -d --build mock-idp`.
+
+### Who it can sign in
+
+Eight people, one per web-login role plus the person who holds two assignments.
+Nobody has a name — Pulse owns person records (§2.1), so a fake IdP inventing one
+would be inventing the half Pulse is responsible for — and every address is at a
+domain RFC 2606 reserves.
+
+| Sign in as | Roles the session states | Also holds |
+|---|---|---|
+| `mock-idp-user-vpaa` | `VP_ACADEMICS` | — |
+| `mock-idp-user-dean` | `DEAN` | — |
+| `mock-idp-user-assistant-dean` | `ASSISTANT_DEAN` | — |
+| `mock-idp-user-chair` | `CHAIR` | — |
+| `mock-idp-user-lead-faculty` | `LEAD_FACULTY` | — |
+| `mock-idp-user-admin` | `ADMIN` | — |
+| `mock-idp-user-care` | `CARE` | — |
+| `mock-idp-user-care-who-teaches` | `CARE` | an `INSTRUCTOR` assignment, which uses the other door |
+
+The last row is the one worth understanding. She really does teach a section, and
+she really does work in the Office of Community Standards; she logs in here for
+the second and launches from the mock LMS as `mock-lms-user-instructor` for the
+first. Her session here states `CARE` and nothing else — not because anything
+filters her teaching out, but because entry doors belong to the assignment rather
+than to the person (SPEC §2), and an instructor assignment does not open this one.
+
+A session carries who she is and which roles she may act under, and **no purview
+of any kind** — no college, no department, no course, no supervision edge.
+Purview is computed by Pulse from its own supervision graph (§2.1), so the roles
+arrive in one namespaced claim and everything about what she can see is worked
+out on this side of the door
+([ADR 0061](docs/adr/0061-a-session-states-roles-in-a-namespaced-claim.md)).
 
 ## Working on the backend without containers
 

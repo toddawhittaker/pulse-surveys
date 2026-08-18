@@ -23,6 +23,15 @@ sweep below holds the second. Neither implies the other: a key generated per run
 and *also* checked in is caught only here, and a key that is absent from the tree
 and pinned in a Dockerfile is caught only there.
 
+**The sweep is repository-wide, so it also holds E0-16's ninth criterion** — "no
+private key is committed; keys are generated at startup" — for the mock OIDC
+provider, and would hold the same criterion for anything else that signs. That is
+why E0-16 adds no second sweep of its own: a key checked into `mock-idp/` and a
+key checked in anywhere else are the same credential, and two rooted sweeps would
+be one rule written twice. The half that belongs to each ticket separately is the
+positive one — two starts producing two keys — which each mock asserts against
+itself.
+
 The sweep asserts an absence, which is `docs/MISTAKES.md` entry 3's subject, so
 it is guarded twice. It counts what it read, because a scan that visited nothing
 finds nothing; and the matcher itself is exercised against a private key header

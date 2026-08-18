@@ -63,10 +63,14 @@ laptop.
 a small ergonomic loss for an operator and a real gain for the `.env.example`
 rule, which is only useful for as long as every entry in it has a reader.
 
-**E0-16's mock IdP faces the same choice**, and should reach the same answer for
-the same reasons — or say why not. `tests/unit/test_env_example_sync.py`'s
-docstring already anticipates both tickets: "E0-14 and E0-16 add readers to the
-Compose files and need no edit here."
+**E0-16's mock IdP faced the same choice and reached the same answer**, for the
+same reasons: its three values are literals in the `mock-idp` service's
+`environment:` block, `mock-idp/app/config.py` defaults to the same three, and
+`.env.example` gained nothing. See
+[0058](0058-the-mock-provider-publishes-its-registration-and-its-seed.md) for
+where a client learns the two of them it needs.
+`tests/unit/test_env_example_sync.py`'s docstring anticipated both tickets:
+"E0-14 and E0-16 add readers to the Compose files and need no edit here."
 
 **If a later ticket does need one of these values in `.env`** — a public base URL
 for a tunnelled demo is the plausible case — then it becomes an interpolation and
