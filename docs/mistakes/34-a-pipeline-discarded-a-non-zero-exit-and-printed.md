@@ -1,6 +1,17 @@
 # Entry 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 0**
+**Caught: 1**
+
+*1 instance recorded.*
+
+*(In E0-33, by the orchestrating session, against this entry's own
+command. `make ci 2>&1 | tail -45` printed the tail of a run in which `lint` had
+died on `ruff: command not found`, and the harness reported the *pipeline's*
+exit code of zero. The failing line `make: *** [Makefile:82: lint] Error 127`
+was visible in the output that was read, and was read past, because the exit
+status said success. Re-running as `make ci > ci.log 2>&1; echo $?` reported 2.
+The entry was written five commits earlier in the same epic and was not recalled
+while typing the pipe — which is the point of it having a number.)*
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 

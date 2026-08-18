@@ -237,4 +237,17 @@ you have removed the only signal that would have told you it did not work.
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+
+**Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
+exit status of `tail`, so a failing gate prints a passing line. Redirect to a
+file and check the status, or run the gate bare.
+
+## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+
+**Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
+subject that certainly has it, as a control. A guard that only ever reports
+absence cannot tell you which mechanisms it can see — and the role a scheme is
+built around is the one least likely to hold its privileges the ordinary way.

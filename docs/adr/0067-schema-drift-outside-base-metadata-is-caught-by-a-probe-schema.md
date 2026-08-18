@@ -59,6 +59,17 @@ self-tests execute `upper(value)` against `UPPER ( ( value ) )` and require
 deparsed expressions is worth exactly what the deparser is worth, and that is a
 claim to run rather than to assert.
 
+**Reachability is asked per mechanism, from a table of probes.** A privilege can
+be held as a grant, by ownership, by a role attribute, by membership, or as
+`EXECUTE` on something that runs as somebody else, and a guard phrased over one
+currency is systematically blind to a scheme that deliberately uses another. Two
+probes cover identity here — a table privilege on the identity table, which also
+answers an owner and a superuser, and `EXECUTE` on a `SECURITY DEFINER` function
+in `public` — and each sweep carries a control requiring it to *find* a route on
+a role known to have one. The probes sit one per line in a table so that
+disabling one is a single edit that still parses, which is what makes the control
+demonstrable rather than merely asserted.
+
 For roles, grants, views and functions — which are in no metadata at all — the
 expectation is held as a **frozenset derived from the ticket and spec sentences
 that justify each entry**, and compared as an equality. This is not a new
@@ -98,11 +109,21 @@ of scope here and named as such in E0-33.
 ## Consequences
 
 A generated-column expression, a check-constraint expression, an exclusion
-constraint, a fourth ACL grantee, a runtime role's privilege on a base table, a
-non-inheriting role membership, a dropped view and a re-owned `SECURITY DEFINER`
-function each now fail a named test. Fifteen mutations were run against these
-assertions, including three near-misses that must stay green; the table is in
-E0-33's pull request.
+constraint, a fourth ACL grantee on a relation or on a definer function, a
+runtime role's privilege on a base table, a non-inheriting role membership, a
+dropped view and a re-owned `SECURITY DEFINER` function each now fail a named
+test. Twenty-six mutations were run against these assertions, including six
+near-misses that must stay green; the table is in E0-33's pull request.
+
+**An earlier version of this paragraph claimed that "a non-inheriting role
+membership" failed a named test, without qualification, and that was false when
+written.** The first version of the sweep built its dangerous set from *table*
+privileges on the identity table, so it caught a membership into a role holding
+a grant there and missed a membership into `pulse_care` — which by ADR 0001's
+design holds no such grant, and reaches identity by `EXECUTE` on the reveal
+function instead. The independent security review found it; it was confirmed by
+measurement and fixed before merge, and `docs/MISTAKES.md` entry 35 is the rule
+it produced.
 
 **The probe schema costs a `create_all` per test that uses it.** Measured on
 this stack with `--durations`: 0.04s of setup per test, against 1.85s for the
