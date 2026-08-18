@@ -95,6 +95,16 @@ thing E0-16 does not say — how a client learns the seeded `client_id` and
 redirect URI — is looked for in three places and then failed on by name rather
 than guessed at.
 
+Two things arrived with the review round. That question is settled: the provider
+publishes a registration document, and [ADR 0058](../docs/adr/0058-the-registration-document-is-the-contract-between-the-mocks.md)
+makes `roles`, `launch_only_roles`, `lms_user_id` and `roles_claim` contract
+members of it — so the driver now reads the *people* out of that document as well
+as the client, which is what lets a test name one seeded person instead of
+asserting over whoever happens to be seeded. And `mock_idp_settings` imports a
+class rather than driving a route, because one rule — a redirect URI may carry no
+fragment — is enforced when the settings are built and has no request that can
+ask it.
+
 E0-11 adds fixtures near the bottom, and one of them is unlike everything
 above it. `authz` reaches the authorization chokepoint **by name**: E0-11's
 surface was settled before any code was written, so there is nothing to discover,
@@ -1616,6 +1626,42 @@ class MockPackageFinder:
         return PathFinder.find_spec(fullname, search)
 
 
+@contextmanager
+def mock_package_resolved(root: Path, package: str = MOCK_PACKAGE) -> Iterator[None]:
+    """Resolve `package` out of `root` for the body, and put `sys.modules` back after.
+
+    Split out of `import_mock_application` below when E0-16 needed to import a
+    *class* out of a mock rather than its application — the settings object whose
+    redirect-URI validation has no HTTP surface to be tested through. The finder
+    dance is the same either way and a second copy of it would be two copies of
+    one rule about `sys.meta_path` (`docs/MISTAKES.md` entry 13).
+
+    **Held open for the whole of the caller's work, not just the import.** A class
+    taken out of a mock and used after the resolution closed would re-resolve any
+    lazy import against this repository's own `app`, which is a different program;
+    keeping the finder in place until the caller is finished means a method that
+    imports something at call time still gets the mock's module.
+    """
+    saved = {
+        name: module
+        for name, module in list(sys.modules.items())
+        if name == package or name.startswith(f"{package}.")
+    }
+    for name in saved:
+        sys.modules.pop(name, None)
+
+    finder = MockPackageFinder(root, package)
+    sys.meta_path.insert(0, finder)
+    try:
+        yield
+    finally:
+        if finder in sys.meta_path:
+            sys.meta_path.remove(finder)
+        for name in [n for n in list(sys.modules) if n == package or n.startswith(f"{package}.")]:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+
 def import_mock_application(
     root: Path,
     modules: Sequence[str],
@@ -1648,44 +1694,27 @@ def import_mock_application(
     if not root.is_dir():
         pytest.fail(absent_directory)
 
-    saved = {
-        name: module
-        for name, module in list(sys.modules.items())
-        if name == package or name.startswith(f"{package}.")
-    }
-    for name in saved:
-        sys.modules.pop(name, None)
-
-    finder = MockPackageFinder(root, package)
-    sys.meta_path.insert(0, finder)
     imported: list[ModuleType] = []
-    try:
-        with environment(dict(values)):
-            for name in modules:
-                try:
-                    module = importlib.import_module(name)
-                except ModuleNotFoundError as failure:
-                    absent = failure.name
-                    if absent is not None and (name == absent or name.startswith(f"{absent}.")):
-                        continue
-                    raise
-                imported.append(module)
-                for attribute in sorted(vars(module)):
-                    candidate = getattr(module, attribute, None)
-                    if isinstance(candidate, FastAPI):
-                        return candidate
-                for attribute in APPLICATION_FACTORY_NAMES:
-                    factory = getattr(module, attribute, None)
-                    if callable(factory) and not inspect.isclass(factory):
-                        built = factory()
-                        if isinstance(built, FastAPI):
-                            return built
-    finally:
-        if finder in sys.meta_path:
-            sys.meta_path.remove(finder)
-        for name in [n for n in list(sys.modules) if n == package or n.startswith(f"{package}.")]:
-            sys.modules.pop(name, None)
-        sys.modules.update(saved)
+    with mock_package_resolved(root, package), environment(dict(values)):
+        for name in modules:
+            try:
+                module = importlib.import_module(name)
+            except ModuleNotFoundError as failure:
+                absent = failure.name
+                if absent is not None and (name == absent or name.startswith(f"{absent}.")):
+                    continue
+                raise
+            imported.append(module)
+            for attribute in sorted(vars(module)):
+                candidate = getattr(module, attribute, None)
+                if isinstance(candidate, FastAPI):
+                    return candidate
+            for attribute in APPLICATION_FACTORY_NAMES:
+                factory = getattr(module, attribute, None)
+                if callable(factory) and not inspect.isclass(factory):
+                    built = factory()
+                    if isinstance(built, FastAPI):
+                        return built
 
     pytest.fail(nothing_found.format(imported=[m.__name__ for m in imported] or "nothing"))
 
@@ -3985,6 +4014,17 @@ MOCK_IDP_SERVICE = "mock-idp"
 # provider-shaped ones. Nothing in E0-16 spells a module, so it is discovered.
 MOCK_IDP_MODULES = ("app.main", "app", "app.provider", "app.idp", "app.server", "app.api")
 
+# Where the provider's settings object might sit, and what it might be called.
+# `mock-lms/app/config.py` holds `PlatformSettings`, so a provider written beside
+# it probably mirrors that; the rest are here so a different arrangement is found
+# rather than reported as a missing deliverable. The *factory* name is the review's
+# — `ProviderSettings.from_environment` is the callable whose redirect-URI
+# validation has no HTTP surface to be reached through, which is why it is
+# imported at all.
+MOCK_IDP_SETTINGS_MODULES = ("app.config", "app.settings", "app.main", "app")
+PROVIDER_SETTINGS_NAMES = ("ProviderSettings", "IdpSettings", "OidcSettings", "Settings")
+SETTINGS_FACTORY_NAME = "from_environment"
+
 # **Not this suite's choice.** OpenID Connect Discovery 1.0 §4 fixes this path,
 # and E0-16's scope spells it out: "Discovery document at
 # `/.well-known/openid-configuration`". A provider serving its metadata anywhere
@@ -4280,6 +4320,8 @@ class MockIdentityProvider:
         self.client.__enter__()
         self._discovery: dict[str, Any] | None = None
         self._registration: dict[str, str] | None = None
+        self._registration_document: dict[str, Any] | None = None
+        self._registration_source: str | None = None
 
     def close(self) -> None:
         self.client.__exit__(None, None, None)
@@ -4427,7 +4469,14 @@ class MockIdentityProvider:
         return None
 
     def registration_in_a_document(self) -> dict[str, str] | None:
-        """A JSON document the provider serves that names its seeded client."""
+        """A JSON document the provider serves that names its seeded client.
+
+        The document itself is kept, not only the two values pulled out of it:
+        [ADR 0058](../docs/adr/0058-the-registration-document-is-the-contract-between-the-mocks.md)
+        makes `launch_only_roles`, `lms_user_id` and `roles_claim` contract
+        members of it, which is how a test names one seeded person rather than
+        asserting over whichever set of people happens to be there.
+        """
         for path in self.paths("GET"):
             if path == DISCOVERY_PATH:
                 continue
@@ -4442,6 +4491,8 @@ class MockIdentityProvider:
                 continue
             found = self.client_registration_in(document)
             if found is not None:
+                self._registration_document = document if isinstance(document, dict) else None
+                self._registration_source = f"the JSON document at `{path}`"
                 return found
         return None
 
@@ -4456,6 +4507,7 @@ class MockIdentityProvider:
             for form in forms_in(response.text):
                 found = self.client_registration_in(form["fields"])
                 if found is not None:
+                    self._registration_source = f"a form on the page at `{path}`"
                     return found
         return None
 
@@ -4474,6 +4526,107 @@ class MockIdentityProvider:
         if client and redirect:
             return {"client_id": client, "redirect_uri": redirect}
         return None
+
+    # -- the seeded people, out of the published document (ADR 0058) ---------
+
+    def registration_document(self) -> dict[str, Any]:
+        """The whole published registration document, or a failure saying there is none."""
+        self.registration()
+        if self._registration_document is None:
+            pytest.fail(
+                "This provider publishes no registration *document*, so the seeded people cannot "
+                f"be read off it — the client registration was found in {self._registration_source}"
+                ". ADR 0058 makes that document the contract between the two mocks: `roles`, "
+                "`launch_only_roles`, `lms_user_id` and `roles_claim` are how E0-18 finds the same "
+                "person on both doors, and how a test names one seeded person instead of asserting "
+                "over whoever happens to be seeded."
+            )
+        return self._registration_document
+
+    @staticmethod
+    def mappings_carrying(node: Any, member: str) -> list[dict[str, Any]]:
+        """Every mapping anywhere in `node` that carries `member` as a key.
+
+        The document's shape below the contract members is not written down, so
+        the people are found by what a person *has* — a `roles` list — rather than
+        by the name of the array holding them. That keeps this from pinning a key
+        ADR 0058 does not fix.
+        """
+        found: list[dict[str, Any]] = []
+        if isinstance(node, Mapping):
+            if member in node:
+                found.append(dict(node))
+            for value in node.values():
+                found.extend(MockIdentityProvider.mappings_carrying(value, member))
+        elif isinstance(node, list):
+            for item in node:
+                found.extend(MockIdentityProvider.mappings_carrying(item, member))
+        return found
+
+    @staticmethod
+    def first_member(node: Any, member: str) -> Any:
+        """The first value of `member` found anywhere in `node`, or `None`."""
+        if isinstance(node, Mapping):
+            if member in node:
+                return node[member]
+            for value in node.values():
+                found = MockIdentityProvider.first_member(value, member)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for item in node:
+                found = MockIdentityProvider.first_member(item, member)
+                if found is not None:
+                    return found
+        return None
+
+    def published_users(self) -> list[dict[str, Any]]:
+        """Every seeded person the registration document publishes."""
+        found = self.mappings_carrying(self.registration_document(), "roles")
+        assert found, (
+            "The registration document publishes nobody — no mapping in it carries a `roles` "
+            f"member (it carries {sorted(self.registration_document())}). ADR 0058 makes the "
+            "seeded people part of that document, and every assertion about who is seeded reads "
+            "them from there."
+        )
+        return found
+
+    def roles_claim_name(self) -> str:
+        """The claim a session states its roles in, as the document declares it."""
+        declared = self.first_member(self.registration_document(), "roles_claim")
+        if not isinstance(declared, str) or not declared:
+            pytest.fail(
+                "The registration document declares no `roles_claim` (it carries "
+                f"{sorted(self.registration_document())}). ADR 0058 makes it a contract member "
+                "because it is how a client knows which claim to read a session's roles out of — "
+                "without it, every reader guesses, and this suite's own scan is a guess that "
+                "happens to work."
+            )
+        return declared
+
+    def identity_of(self, user: Mapping[str, Any], attempt: AuthorizationAttempt) -> dict[str, str]:
+        """The login-form submission that signs in as `user`.
+
+        Matched on the form's *choice* values only, never on its hidden fields:
+        the hidden fields carry the client id, the redirect URI and the request's
+        own state, and a published person who happened to share one of those
+        strings would otherwise match the first submission in the list — which is
+        the submission this would have returned anyway, so the test would pass
+        having signed in as somebody else.
+        """
+        form = self.require_login_form(attempt)
+        wanted = {value for value in user.values() if isinstance(value, str) and value}
+        offered: list[dict[str, str]] = []
+        for submission in self.offered_identities(attempt):
+            chosen = {name: str(submission[name]) for name in form["choices"] if name in submission}
+            offered.append(chosen)
+            if wanted & set(chosen.values()):
+                return submission
+        pytest.fail(
+            f"The login form offers no identity matching the published user {user!r} — it offers "
+            f"{offered}. A person the registration document publishes and the login form cannot "
+            "sign in is a person E0-18 would find on one door and not on the other."
+        )
 
     # -- the authorization code flow ----------------------------------------
 
@@ -4507,10 +4660,25 @@ class MockIdentityProvider:
     def begin(self, *, omitting: Sequence[str] = (), **overrides: str) -> AuthorizationAttempt:
         """Send an authorization request and follow it to the page that asks who you are."""
         request, verifier = self.authorization_request(omitting=omitting, **overrides)
+        return self.begin_from(list(request.items()), verifier)
+
+    def begin_from(
+        self, parameters: Sequence[tuple[str, str]], verifier: str
+    ) -> AuthorizationAttempt:
+        """The same, from a parameter *list* rather than a mapping.
+
+        A mapping cannot express a query string that carries one name twice, and
+        `client_id=evil&client_id=real` is a request a real client never sends and
+        an attacker does. Which of the two a server reads is undefined by RFC 6749
+        and decided by the framework underneath it, so a provider that takes the
+        last wins for one ordering and loses for the other — which means a test
+        written with a mapping cannot ask the question at all.
+        """
         path = self.endpoint_path(
             "authorization_endpoint", "where an authorization request is sent"
         )
-        response = self.client.get(path, params=request)
+        response = self.client.get(path, params=list(parameters))
+        request = dict(parameters)
         page_url, form, final = self.follow_to_a_login_form(path, response, request)
         return AuthorizationAttempt(
             request=request, verifier=verifier, page_url=page_url, form=form, response=final
@@ -4675,6 +4843,25 @@ class MockIdentityProvider:
         all, which is the downgrade case and is not the same request as sending a
         wrong one.
         """
+        return self.redeem_from(
+            list(self.token_body(code, verifier, omitting=omitting, **overrides).items())
+        )
+
+    def token_body(
+        self,
+        code: str,
+        verifier: str | None,
+        *,
+        omitting: Sequence[str] = (),
+        **overrides: str,
+    ) -> dict[str, str]:
+        """What a conformant client posts to redeem `code`.
+
+        Built here rather than inside `redeem` so that a test asking what the
+        endpoint does with a *repeated* field can start from the same body a
+        correct client sends and add one entry to it — one definition of the
+        request, two ways of encoding it (`docs/MISTAKES.md` entry 13).
+        """
         registration = self.registration()
         body = {
             "grant_type": "authorization_code",
@@ -4687,8 +4874,20 @@ class MockIdentityProvider:
         body.update(overrides)
         for name in omitting:
             body.pop(name, None)
+        return body
+
+    def redeem_from(self, parameters: Sequence[tuple[str, str]]) -> Any:
+        """Post one token request as a list of fields, so a name may appear twice.
+
+        Gathered into a mapping of name to values because that is the shape httpx
+        form-encodes with `doseq`; the order of the values under one name is what
+        decides the question being asked, and it survives the gathering.
+        """
+        fields: dict[str, list[str]] = {}
+        for name, value in parameters:
+            fields.setdefault(name, []).append(value)
         path = self.endpoint_path("token_endpoint", "where an authorization code is redeemed")
-        return self.client.post(path, data=body)
+        return self.client.post(path, data=fields)
 
     @staticmethod
     def body_of(response: Any) -> dict[str, Any]:
@@ -4793,6 +4992,92 @@ class MockIdentityProvider:
         return roles_in(login.claims)
 
 
+def find_mock_idp_settings_class() -> Any:
+    """The provider's settings class, found rather than imported by path.
+
+    Called inside `mock_package_resolved`, and only from the fixture below, which
+    keeps that resolution open for the whole test: a settings class is used after
+    it is imported, and its `from_environment` reads the environment at call time.
+
+    Looked for by name first and by *capability* second — any class the mock
+    defines that carries a `from_environment` — because E0-16 spells no module and
+    no class, and a fixture that insisted on one spelling would report a rename as
+    a missing deliverable.
+    """
+    imported: list[str] = []
+    candidates: list[Any] = []
+    for name in MOCK_IDP_SETTINGS_MODULES:
+        try:
+            module = importlib.import_module(name)
+        except ModuleNotFoundError as failure:
+            absent = failure.name
+            if absent is not None and (name == absent or name.startswith(f"{absent}.")):
+                continue
+            raise
+        imported.append(name)
+        for attribute, value in vars(module).items():
+            if attribute.startswith("_") or not inspect.isclass(value):
+                continue
+            if getattr(value, "__module__", "").split(".")[0] != MOCK_PACKAGE:
+                continue
+            if not hasattr(value, SETTINGS_FACTORY_NAME):
+                continue
+            if attribute in PROVIDER_SETTINGS_NAMES:
+                return value
+            candidates.append(value)
+    if candidates:
+        return candidates[0]
+    pytest.fail(
+        f"Nothing under `mock-idp/app/` defines a class with a `{SETTINGS_FACTORY_NAME}` — looked "
+        f"in {list(MOCK_IDP_SETTINGS_MODULES)}, imported {imported or 'nothing'}. That callable is "
+        "where the redirect URI is validated, and validation with no HTTP surface can only be "
+        "reached by importing it. If it is there under a spelling none of "
+        "`PROVIDER_SETTINGS_NAMES` reaches, that constant in tests/conftest.py is the one line "
+        "that changes."
+    )
+
+
+@pytest.fixture
+def mock_idp_settings() -> Iterator[Any]:
+    """The provider's settings class, with `mock-idp/`'s `app` resolving for the test.
+
+    The resolution is held open for the body rather than just for the import, so
+    that anything `from_environment` imports when it runs still comes out of the
+    mock. See `mock_package_resolved` above.
+    """
+    if not MOCK_IDP_DIR.is_dir():
+        pytest.fail(
+            f"{MOCK_IDP_DIR} does not exist, so there is no settings object to import. E0-16's "
+            "scope is a `mock-idp/` FastAPI application with a Dockerfile."
+        )
+    with mock_package_resolved(MOCK_IDP_DIR):
+        yield find_mock_idp_settings_class()
+
+
+@pytest.fixture
+def mock_idp_compose_environment() -> dict[str, str]:
+    """The literal environment `docker-compose.yml` gives the `mock-idp` service.
+
+    Literal values only — anything carrying a `${...}` is dropped, because this is
+    handed to a settings object as if it were the container's environment and an
+    uninterpolated string is not a value any container ever sees.
+
+    Deliberately asserts nothing: an absent service yields an empty mapping and
+    the test that needs it says so, which is the choice every other Compose
+    reader in this file makes.
+    """
+    services = load_compose(BASE_COMPOSE_PATH).get("services") or {}
+    service = services.get(MOCK_IDP_SERVICE)
+    block = service.get("environment") if isinstance(service, dict) else None
+    if not isinstance(block, dict):
+        return {}
+    return {
+        str(name): str(value)
+        for name, value in block.items()
+        if value is not None and "$" not in str(value)
+    }
+
+
 @pytest.fixture
 def mock_idp_dir() -> Path:
     """Where the mock provider must live (SPEC §13). Asserted by the test, not here."""
@@ -4814,6 +5099,21 @@ def discovery_path() -> str:
     being two different strings.
     """
     return DISCOVERY_PATH
+
+
+@pytest.fixture
+def padded() -> Callable[[str], str]:
+    """Wrap a value in whitespace that a `.strip()` would remove.
+
+    One helper rather than a literal at each call site, because the review round
+    that added it found one defect reaching four parameters — a value trimmed
+    before the check that judges it — and a second spelling of "padded" would be
+    a second definition of the thing under test (`docs/MISTAKES.md` entry 13).
+
+    A leading space and a trailing newline. Neither is exotic: `base64.encodebytes`
+    ends every line with the second, which is how the defect arrived.
+    """
+    return lambda value: f" {value}\n"
 
 
 @pytest.fixture

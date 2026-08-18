@@ -27,12 +27,26 @@ independently started providers must publish different keys.
 The Compose files are parsed in `tests/conftest.py`, unmerged and one at a time,
 which is the whole point: `docker compose config` would merge the override back
 in and hide the property under test.
+
+**One rule here has no HTTP surface at all**, and that is why the last test
+imports the provider's settings class instead of driving it: a redirect URI
+carrying a fragment is refused when the settings are built, before anything is
+served, so the only way to ask the question is to build them. RFC 6749 §3.1.2 is
+the rule — "the redirect URI MUST NOT include a fragment component" — and the
+cost of not enforcing it is that a client configured with one gets a redirect the
+browser rewrites, with the authorization response landing somewhere nobody
+declared.
 """
 
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+# A redirect URI that is fine, and the same URI with the one thing RFC 6749
+# §3.1.2 forbids added to it. The pair is the test: a settings object that raised
+# on both would satisfy "the bad one is refused" while refusing every deployment.
+FRAGMENT = "#stolen"
 
 
 def compose_service(base_compose: dict[str, Any], name: str) -> dict[str, Any]:
@@ -157,3 +171,63 @@ def test_the_mock_idp_service_declares_a_health_check_in_the_base_compose_file(
         "development override instead — passes the merged run while every other deployment "
         "reports nothing."
     )
+
+
+def test_a_redirect_uri_carrying_a_fragment_is_refused_when_the_settings_are_built(
+    mock_idp_settings: Any,
+    mock_idp_compose_environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RFC 6749 §3.1.2: "the endpoint URI MUST NOT include a fragment component".
+
+    There is no request that can ask this. The redirect URI is configuration, and
+    a provider that accepted one with a fragment would serve every flow perfectly
+    — right up to the redirect, where the browser keeps the fragment it was
+    configured with, drops the one the response carried, or merges them depending
+    on which browser it is. The authorization response then lands somewhere
+    nobody declared, which is the same class of failure as an unregistered
+    redirect URI and arrives without anyone having attacked anything.
+
+    **The clean value goes first, and it is not ceremony.** A settings object that
+    raised on every redirect URI would satisfy "the one with a fragment is
+    refused" and would also refuse every deployment; the control is what says the
+    refusal is about the fragment. Both are built from the environment the
+    container is actually given — the Compose service's own literals — so this
+    asks the question against the configuration that ships rather than against a
+    URI invented here.
+
+    The exception type is deliberately not pinned. What is asserted is that the
+    failure *names* what was wrong with the value, which is what a person reading
+    a container that will not start needs; E0-07's definition of done asks the
+    same of the section-code parser, in the same words.
+    """
+    assert mock_idp_compose_environment, (
+        "`docker-compose.yml` gives the `mock-idp` service no literal environment, so this test "
+        "has no configuration to build settings from. The mock platform is configured by Compose "
+        "literals for the reason ADR 0037 gives, and this provider was expected to be too — if it "
+        "reads its configuration another way, this test needs to be pointed at it."
+    )
+
+    redirect_names = sorted(name for name in mock_idp_compose_environment if "REDIRECT" in name)
+    assert len(redirect_names) == 1, (
+        f"The `mock-idp` service's environment carries {redirect_names} — this cannot tell which "
+        "one is the redirect URI whose fragment is being refused, and setting the wrong one would "
+        "make the refusal below a fact about a different variable."
+    )
+    name = redirect_names[0]
+    clean = mock_idp_compose_environment[name]
+
+    for variable, value in mock_idp_compose_environment.items():
+        monkeypatch.setenv(variable, value)
+
+    monkeypatch.setenv(name, clean)
+    settings = mock_idp_settings.from_environment()
+    assert settings is not None, (
+        f"Building the provider's settings from the Compose environment with `{name}` set to "
+        f"{clean!r} produced {settings!r}. That is the configuration the container runs with, so "
+        "the refusal below would be a fact about settings that never build."
+    )
+
+    monkeypatch.setenv(name, f"{clean}{FRAGMENT}")
+    with pytest.raises(Exception, match=r"(?i)fragment|#"):
+        mock_idp_settings.from_environment()

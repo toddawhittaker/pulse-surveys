@@ -30,6 +30,18 @@ Nothing in this suite could reach either. Every PKCE value it sends comes from
 on — a driver that only emits well-formed input makes the invalid half of every
 guard unreachable, and the suite reads as covering a path no test can enter.
 
+**A third group came from the security review, and it is the same sentence
+again.** A parameter was trimmed *before* the check that judges it, so the check
+never saw what made the value wrong — and for PKCE that meant a challenge
+registered over a verifier `v` was satisfied by every string that trims to `v`.
+The values this suite sends could not express that either, because a client that
+builds a request and reads the answer with the same code trims on both sides and
+cancels the defect out. The exactness tests below therefore pad **one** side on
+purpose and say so where it would be tempting to simplify. Alongside them: what a
+scope releases, what a repeated parameter must not buy, and — because presence is
+judged on the trimmed value while the untrimmed one is what is handed on — that a
+parameter which is nothing but whitespace is still absent.
+
 **Where the seeded client comes from.** An authorization request names a
 `client_id` and a redirect URI, and E0-16 spells neither. `MockIdentityProvider.
 registration()` in `tests/conftest.py` looks in the three places a reasonable
@@ -54,6 +66,7 @@ library.
 """
 
 import time
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -175,6 +188,47 @@ MALFORMED_VERIFIERS = {
     "a verifier past the 128-character maximum": OVERLONG_PKCE_VERIFIER,
 }
 
+# The status RFC 6749 §5.2 fixes for a rejected grant. Its only other status is
+# the 401 for `invalid_client`, which this suite never provokes and which
+# `refusal` below rules out by name before it gets here.
+REJECTED_GRANT_STATUS = 400
+
+# The error code RFC 6749 §5.2 defines for a code, a redirect URI or a PKCE
+# verifier that does not match what the authorization request registered. Named
+# because the exactness tests below are about *which* refusal came back: a
+# provider that answered `invalid_request` for a verifier one byte from correct
+# would be saying the request was malformed rather than that the proof failed.
+INVALID_GRANT = "invalid_grant"
+
+# The scopes a client may ask for, and what each is supposed to bring back. Not
+# this suite's invention: `openid` is required of every OIDC request (Core §3.1.2.1)
+# and `email` and `profile` are the standard claim sets Core §5.4 defines, with
+# the claims each releases named there.
+BASE_SCOPE = "openid"
+FULL_SCOPE = "openid email profile"
+UNKNOWN_SCOPE = "openid wibble"
+
+# The claims §5.4 attaches to those two optional scopes and to nothing else, so a
+# session issued for `openid` alone may not carry any of them.
+SCOPED_CLAIMS = ("email", "email_verified", "preferred_username")
+
+# Values this suite sends and then looks for coming back. **This suite's choice**,
+# and chosen to say where they came from: one of these turning up in a log, a
+# seed or a claim is traceable to this file.
+MARKER_STATE = "e0-16-state-marker"
+MARKER_NONCE = "e0-16-nonce-marker"
+
+# A `client_id` and a `code` no registration and no flow ever produced, submitted
+# beside the real one under the same name. Both spell out what they are.
+FORGED_CLIENT_ID = "e0-16-forged-client"
+FORGED_CODE = "e0-16-forged-authorization-code"
+
+# Where the forged value sits relative to the real one. **Both orders are the
+# test**, not thoroughness: a server that reads the last value for a repeated
+# name refuses one ordering and accepts the other, so a single-order test reports
+# a pass for whichever half it happened to pick and says nothing about the other.
+REPEAT_ORDERS = {"the forged value first": True, "the forged value last": False}
+
 
 def refusal(provider: Any, response: Any, subject: str) -> None:
     """Require `response` to be a refusal, and to be a refusal about `subject`.
@@ -183,16 +237,18 @@ def refusal(provider: Any, response: Any, subject: str) -> None:
     by several things that are not the rule under test:
 
       - A 2xx would be the defect itself, so the status is checked first.
-      - **A 5xx is not a refusal.** A provider that raises on the input answers no
-        token either, so a check for "not 2xx" passes against a crash — and a
-        crash is a different defect with a different fix, reached by input the
-        provider failed to parse rather than by a decision it made. This is not
-        hypothetical: two malformed PKCE values produced a 500 here, and the
-        version of this helper that said only "not 2xx" would have called both
-        refusals. The range is the whole 4xx rather than the 400 RFC 6749 §5.2
-        fixes, because 400-against-401 is a conformance question and this helper
-        is about the difference between deciding and falling over; the shape
-        question is raised in the pull request instead of pinned here.
+      - **The status is 400, which RFC 6749 §5.2 fixes for a rejected grant.** Two
+        earlier versions of this line were weaker, and each was weaker in a way
+        worth recording. "Not 2xx" admits a 5xx, and a 5xx is not a refusal — it
+        is input the provider failed to parse rather than a decision it made,
+        which is a different defect with a different fix, and two malformed PKCE
+        values produced exactly that here. "Any 4xx" replaced it, leaving the
+        400-against-401 question to the pull request; the answer came back that
+        §5.2's only other status is the 401 for `invalid_client`, which the
+        assertion below already rules out by name, and that every refusal this
+        provider raises carries the default 400. The loose range was therefore
+        looser than both the specification and the code, and asserting the number
+        is what would make a 401, a 403 or a 422 arriving later visible.
       - A body carrying an `id_token` or an `access_token` is a session issued
         alongside an error status, which is the failure that matters and which a
         status check alone would miss.
@@ -208,12 +264,13 @@ def refusal(provider: Any, response: Any, subject: str) -> None:
         f"The token endpoint accepted {subject}: it answered {response.status_code}. "
         f"Body begins {response.text[:200]!r}."
     )
-    assert 400 <= response.status_code < 500, (
-        f"The token endpoint answered {response.status_code} for {subject}, which is not a "
-        "refusal — it is the provider failing to handle the request. RFC 6749 §5.2 makes a "
-        "rejected grant a 4xx carrying an `error`; a 5xx says the input reached something that "
-        "raised on it, which is what a malformed PKCE value did here before it was fixed. "
-        f"Body begins {response.text[:300]!r}."
+    assert response.status_code == REJECTED_GRANT_STATUS, (
+        f"The token endpoint answered {response.status_code} for {subject} rather than "
+        f"{REJECTED_GRANT_STATUS}. RFC 6749 §5.2 makes a rejected grant a 400 carrying an "
+        "`error`, and its one other status — 401 for `invalid_client` — is ruled out above. A 5xx "
+        "here would not be a refusal at all: it is the provider failing to handle the request, "
+        f"which is what a malformed PKCE value did before it was fixed. Body begins "
+        f"{response.text[:300]!r}."
     )
     issued = sorted(name for name in ("id_token", "access_token") if body.get(name))
     assert not issued, (
@@ -252,6 +309,27 @@ def outcome_of(provider: Any, attempt: Any) -> tuple[str, Any]:
     if submitted.code is None:
         return "login form", submitted.response
     return "token endpoint", provider.redeem(submitted.code, attempt.verifier)
+
+
+def with_repeated(
+    parameters: Sequence[tuple[str, str]], name: str, value: str, *, first: bool
+) -> list[tuple[str, str]]:
+    """`parameters` with `value` added under `name`, beside the value already there.
+
+    `first` puts the added value before the real one and otherwise after it. The
+    rest of the request is untouched and stays in order, so the only difference
+    between the two calls — and between either of them and a conformant request —
+    is the duplicate and where it sits.
+    """
+    built: list[tuple[str, str]] = []
+    for key, existing in parameters:
+        if key != name:
+            built.append((key, existing))
+        elif first:
+            built.extend([(name, value), (name, existing)])
+        else:
+            built.extend([(name, existing), (name, value)])
+    return built
 
 
 def session_issued(provider: Any, stage: str, response: Any) -> bool:
@@ -998,6 +1076,365 @@ def test_an_authorization_request_with_a_malformed_pkce_challenge_does_not_crash
         "no verifier can ever match is PKCE removed rather than PKCE applied — the code becomes "
         "spendable by whoever holds it, which is the whole of what the challenge exists to "
         "prevent."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The value the provider judges is the value it was sent, byte for byte.
+# ---------------------------------------------------------------------------
+
+
+def test_a_code_verifier_that_only_trims_to_the_right_value_is_refused(
+    mock_idp: Any, padded: Any
+) -> None:
+    """The review's HIGH: a parameter trimmed before the check that judges it.
+
+    `.strip()` ran before the shape check, so for a challenge registered over a
+    verifier `v` **every string that trims to `v`** satisfied the proof — PKCE was
+    binding an unbounded set of values rather than the one the client held. A
+    stolen code plus any padding of the verifier is the same session.
+
+    **The pairing is the whole test, and the obvious way to write it passes
+    against the defect.** The first reproduction of this used a self-consistent
+    client — the same padded value used to compute the challenge *and* sent as the
+    verifier — and got a refusal before the fix, because trimming both sides
+    cancels out and the comparison is between two clean values. It looks like a
+    test and it closes a real HIGH as "cannot reproduce". So the challenge here is
+    bound over the **clean** verifier, by an ordinary conformant `begin()`, and
+    only the redemption is padded. Do not simplify this into one padded value.
+
+    The control is the same construction with the padding left off, on the same
+    provider, in the same test: without it a token endpoint that refused every
+    exchange would pass.
+    """
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A flow redeemed with its own unpadded verifier produced no `id_token`, so the refusal "
+        "below would say nothing about padding."
+    )
+
+    attempt = mock_idp.begin()
+    identity = mock_idp.offered_identities(attempt)[0]
+    submitted = mock_idp.submit_login(attempt, identity)
+    assert submitted.code, (
+        f"Signing in as {identity} produced no authorization code (status "
+        f"{submitted.response.status_code}), so there is nothing to redeem."
+    )
+
+    response = mock_idp.redeem(submitted.code, padded(attempt.verifier))
+
+    refusal(mock_idp, response, "a code exchange whose verifier only trims to the right value")
+    assert mock_idp.body_of(response).get("error") == INVALID_GRANT, (
+        f"The exchange was refused as {mock_idp.body_of(response).get('error')!r}. RFC 6749 §5.2 "
+        f"makes {INVALID_GRANT!r} the code for a grant whose proof does not match — which is what "
+        "a verifier one whitespace character away from correct is. `invalid_request` would say "
+        "the request was malformed, and it is not: it is a well-formed request carrying the "
+        "wrong value."
+    )
+
+
+def test_the_state_comes_back_exactly_as_it_was_sent(mock_idp: Any, padded: Any) -> None:
+    """The same defect reaching `state`, where the cost is a client that cannot match it.
+
+    RFC 6749 §4.1.2 returns `state` unchanged, and a client compares it to what it
+    stored. A provider that trims it hands back a value the client never sent, so
+    the comparison fails for a login that was perfectly legitimate — or, on a
+    client that trims its own copy before comparing, silently succeeds for one
+    that was not.
+
+    Clean control first, padded value second, both on values that say where they
+    came from.
+    """
+    clean = mock_idp.begin(state=MARKER_STATE)
+    clean_submitted = mock_idp.submit_login(clean, mock_idp.offered_identities(clean)[0])
+    assert clean_submitted.state == MARKER_STATE, (
+        f"An unpadded `state` came back as {clean_submitted.state!r} rather than "
+        f"{MARKER_STATE!r}, so the assertion below would be about a provider that does not echo "
+        "`state` at all."
+    )
+
+    padded_state = padded(MARKER_STATE)
+    attempt = mock_idp.begin(state=padded_state)
+    submitted = mock_idp.submit_login(attempt, mock_idp.offered_identities(attempt)[0])
+
+    assert submitted.state == padded_state, (
+        f"The authorization response returned state {submitted.state!r}; the request sent "
+        f"{padded_state!r}. RFC 6749 §4.1.2 requires the value back exactly — a provider that "
+        "trims it is answering about a value the client never sent, and the client's own "
+        "comparison then fails on a login it started itself."
+    )
+
+
+def test_the_nonce_is_issued_exactly_as_it_was_sent(mock_idp: Any, padded: Any) -> None:
+    """The same defect reaching `nonce`, where the cost is the replay check itself.
+
+    OIDC Core 1.0 §3.1.3.7 step 11 has the client compare the `nonce` claim to the
+    value it sent. A provider that trims it breaks that comparison for a
+    legitimate login and — the direction that matters — makes two different
+    requests indistinguishable in the session they produce, which is the property
+    the nonce exists to give.
+    """
+    clean = mock_idp.login(nonce=MARKER_NONCE)
+    assert clean.claims.get("nonce") == MARKER_NONCE, (
+        f"An unpadded `nonce` was issued as {clean.claims.get('nonce')!r} rather than "
+        f"{MARKER_NONCE!r}, so the assertion below would be about a provider that does not carry "
+        "the nonce at all."
+    )
+
+    padded_nonce = padded(MARKER_NONCE)
+    login = mock_idp.login(nonce=padded_nonce)
+
+    assert login.claims.get("nonce") == padded_nonce, (
+        f"The `id_token` carries nonce {login.claims.get('nonce')!r}; the authorization request "
+        f"sent {padded_nonce!r}. The client compares exactly these two (OIDC Core §3.1.3.7), so a "
+        "provider that trims one of them has removed the check rather than performed it."
+    )
+
+
+def test_a_state_that_is_only_whitespace_is_refused_as_absent(mock_idp: Any, padded: Any) -> None:
+    """The other half of the fix, and the half that could silently invert later.
+
+    Presence is judged on the *trimmed* value and the *untrimmed* one is what gets
+    handed on — two rules about one parameter, and the three tests above pin only
+    the second. A parameter that is nothing but whitespace is therefore absent,
+    and a required parameter that is absent is a request the provider may not
+    honour.
+
+    Written with `padded("")` rather than a whitespace literal so that it is
+    visibly the same padding as the tests above with nothing inside it: together
+    they say that the whitespace is stripped for the question "is it there" and
+    kept for the question "what is it". If someone later judges presence on the
+    untrimmed value, `"   "` becomes a present state, this flow succeeds, and this
+    test is the only thing that notices.
+    """
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A well-formed flow produced no session on this provider, so 'a whitespace state produces "
+        "none' would be a fact about the provider being broken for everyone."
+    )
+
+    attempt = mock_idp.begin(state=padded(""))
+    stage, response = outcome_of(mock_idp, attempt)
+
+    assert response.status_code < 500, (
+        f"An authorization request whose `state` is only whitespace reached the {stage} and "
+        f"answered {response.status_code} — the provider raised on it rather than deciding about "
+        f"it. Body begins {response.text[:300]!r}."
+    )
+    assert not session_issued(mock_idp, stage, response), (
+        f"An authorization request whose `state` is only whitespace was honoured by the {stage}. "
+        "A value that trims to nothing is an absent parameter, and `state` is what a client "
+        "matches its own login against; a provider that accepts one has issued a session no "
+        "client can attribute to a request it made."
+    )
+
+
+# ---------------------------------------------------------------------------
+# One name, two values. What a repeated parameter must not buy.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("case", sorted(REPEAT_ORDERS))
+def test_an_authorization_request_repeating_the_client_id_is_refused(
+    mock_idp: Any, case: str
+) -> None:
+    """`client_id=forged&client_id=real`, and the same pair the other way round.
+
+    RFC 6749 says nothing about a parameter that appears twice, so what a server
+    does with one is decided by the web framework underneath it — and every
+    framework picks an end. A provider that reads the last value refuses the
+    forged-first ordering and accepts the forged-last one, which means **a test
+    written in one order reports a pass for the half it happened to pick**. Both
+    orders are therefore the test rather than a pair of similar tests, and
+    `begin_from` in `tests/conftest.py` exists because a mapping cannot express
+    the question at all.
+
+    What it buys an attacker if it is accepted: the request one endpoint validates
+    and the request another reads are two different requests, which is how a code
+    ends up issued for one client and redeemable by another.
+
+    The control is a conformant flow on the same provider.
+    """
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A conformant flow produced no session on this provider, so the refusal below would be a "
+        "fact about a provider that is broken for everyone."
+    )
+
+    request, verifier = mock_idp.authorization_request()
+    repeated = with_repeated(
+        list(request.items()), "client_id", FORGED_CLIENT_ID, first=REPEAT_ORDERS[case]
+    )
+    attempt = mock_idp.begin_from(repeated, verifier)
+    stage, response = outcome_of(mock_idp, attempt)
+
+    assert response.status_code < 500, (
+        f"An authorization request carrying two `client_id` values, with {case}, reached the "
+        f"{stage} and answered {response.status_code} — the provider raised rather than deciding. "
+        f"Body begins {response.text[:300]!r}."
+    )
+    assert not session_issued(mock_idp, stage, response), (
+        f"An authorization request carrying two `client_id` values, with {case}, was honoured by "
+        f"the {stage}: it handed back a session for a request naming two different clients. Which "
+        "of the two a reader takes is a framework's choice rather than the specification's, so "
+        "one of these two orderings will always be the attacker's — the request has to be refused "
+        "rather than resolved."
+    )
+
+
+@pytest.mark.parametrize("case", sorted(REPEAT_ORDERS))
+def test_a_token_request_repeating_the_code_is_refused(mock_idp: Any, case: str) -> None:
+    """The same question at the token endpoint, where the duplicate is the grant itself.
+
+    `code` rather than `client_id` here, for two reasons. It is the field where
+    last-wins is worth the most — a forged value beside a real one, in whichever
+    order the reader does not take, redeems a grant the request did not present —
+    and it keeps the refusal readable: a duplicated `client_id` may legitimately
+    come back as `invalid_client`, which `refusal` treats as a gap in this suite's
+    own client authentication rather than as an answer about the duplicate.
+
+    The control is the *same* body, single-valued, redeemed on its own flow and
+    required to succeed.
+    """
+    control_attempt = mock_idp.begin()
+    control_submitted = mock_idp.submit_login(
+        control_attempt, mock_idp.offered_identities(control_attempt)[0]
+    )
+    assert control_submitted.code, "Signing in produced no authorization code for the control."
+    control = mock_idp.redeem_from(
+        list(mock_idp.token_body(control_submitted.code, control_submitted.verifier).items())
+    )
+    assert mock_idp.tokens(control).get("id_token"), (
+        "A single-valued token request built the same way produced no `id_token`, so the refusal "
+        "below would be about `redeem_from` rather than about the duplicate."
+    )
+
+    attempt = mock_idp.begin()
+    submitted = mock_idp.submit_login(attempt, mock_idp.offered_identities(attempt)[0])
+    assert submitted.code, "Signing in produced no authorization code, so there is nothing to send."
+
+    body = mock_idp.token_body(submitted.code, submitted.verifier)
+    repeated = with_repeated(list(body.items()), "code", FORGED_CODE, first=REPEAT_ORDERS[case])
+    response = mock_idp.redeem_from(repeated)
+
+    assert response.status_code < 500, (
+        f"A token request carrying two `code` values, with {case}, answered "
+        f"{response.status_code} — the provider raised rather than deciding. Body begins "
+        f"{response.text[:300]!r}."
+    )
+    refusal(mock_idp, response, f"a token request carrying two `code` values, with {case}")
+
+
+# ---------------------------------------------------------------------------
+# Scope: what a client asked for is what it gets, and no more.
+# ---------------------------------------------------------------------------
+
+
+def test_the_openid_scope_alone_releases_no_email_or_username_claim(mock_idp: Any) -> None:
+    """OIDC Core 1.0 §5.4: `email` and `profile` claims come with `email` and `profile`.
+
+    A provider that releases them for `openid` alone teaches every client that
+    scope is decorative, and the client E1 writes against it will ask for `openid`
+    and read a `preferred_username` that a real IdP would not have sent — which
+    fails at the institution rather than here.
+
+    **The roles claim is asserted present in the same test**, and that is not a
+    stray extra assertion. It is the live control: a session carrying no claims at
+    all satisfies "none of these three is here", and the absence would then be a
+    fact about an empty token. It is also the rule itself — the roles claim stays
+    bound to `openid` deliberately, because a client that had to know to ask for
+    it would discover the omission at role resolution, with an empty purview
+    looking like a person who supervises nothing.
+    """
+    login = mock_idp.login(scope=BASE_SCOPE)
+    roles_claim = mock_idp.roles_claim_name()
+
+    assert roles_claim in login.claims, (
+        f"A session issued for {BASE_SCOPE!r} carries no `{roles_claim}` claim (it carries "
+        f"{sorted(login.claims)}). The registration document names that claim as where a client "
+        "reads its roles, and it is not gated on a scope — so its absence here is both a missing "
+        "rule and the reason the assertion below would otherwise be vacuous."
+    )
+
+    released = sorted(claim for claim in SCOPED_CLAIMS if claim in login.claims)
+    assert not released, (
+        f"A session issued for {BASE_SCOPE!r} alone carries {released}. OIDC Core 1.0 §5.4 "
+        f"attaches those to the `email` and `profile` scopes; releasing them unasked means this "
+        "provider grants more than it was asked for, and a client built against it will ask for "
+        "less than it needs from a real one."
+    )
+
+
+def test_the_email_and_profile_scopes_release_their_claims(mock_idp: Any) -> None:
+    """The other direction, without which the test above passes on a provider that releases nothing.
+
+    A provider that never emits `email` satisfies "no email for `openid` alone"
+    perfectly, and E0-18's browser path would then have no identity to show. So
+    the same three claims are required when the scopes that carry them are asked
+    for.
+    """
+    login = mock_idp.login(scope=FULL_SCOPE)
+
+    missing = sorted(claim for claim in SCOPED_CLAIMS if claim not in login.claims)
+    assert not missing, (
+        f"A session issued for {FULL_SCOPE!r} is missing {missing} (it carries "
+        f"{sorted(login.claims)}). OIDC Core 1.0 §5.4 attaches `email` and `email_verified` to the "
+        "`email` scope and `preferred_username` to `profile`, and a scope that releases nothing is "
+        "a scope a client cannot use."
+    )
+    assert mock_idp.roles_claim_name() in login.claims, (
+        f"A session issued for {FULL_SCOPE!r} carries no roles claim. The claim is bound to "
+        "`openid` rather than to an optional scope, so asking for more must not take it away — a "
+        "widening request that quietly drops the one claim authorization depends on is worse than "
+        "one that fails."
+    )
+
+
+@pytest.mark.parametrize("requested", [BASE_SCOPE, FULL_SCOPE])
+def test_the_token_response_says_which_scope_it_granted(mock_idp: Any, requested: str) -> None:
+    """RFC 6749 §5.1: the response tells the client what it actually got.
+
+    Both scopes, because an echo asserted for one value is satisfied by a
+    provider that answers a constant — and the constant it would answer is
+    `openid`, which is the case that looks correct.
+    """
+    login = mock_idp.login(scope=requested)
+
+    assert login.tokens.get("scope") == requested, (
+        f"Asking for {requested!r} produced a token response declaring scope "
+        f"{login.tokens.get('scope')!r}. RFC 6749 §5.1 has the response state the granted scope, "
+        "and a client reads it to find out whether what it asked for is what it may rely on."
+    )
+
+
+def test_an_unknown_scope_yields_no_session(mock_idp: Any) -> None:
+    """A request for something this provider does not offer is refused, not quietly narrowed.
+
+    The failure this exists for is the silent one: a provider that drops the part
+    of the scope it does not recognise issues a session that looks like the one
+    the client asked for and is missing what it asked for, and the client finds
+    out downstream — at role resolution, or in a claim that is absent for a reason
+    nothing recorded.
+    """
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A conformant flow produced no session on this provider, so the refusal below would be a "
+        "fact about a provider that is broken for everyone."
+    )
+
+    attempt = mock_idp.begin(scope=UNKNOWN_SCOPE)
+    stage, response = outcome_of(mock_idp, attempt)
+
+    assert response.status_code < 500, (
+        f"An authorization request for {UNKNOWN_SCOPE!r} reached the {stage} and answered "
+        f"{response.status_code} — the provider raised rather than deciding. Body begins "
+        f"{response.text[:300]!r}."
+    )
+    assert not session_issued(mock_idp, stage, response), (
+        f"An authorization request for {UNKNOWN_SCOPE!r} was honoured by the {stage}. RFC 6749 "
+        "§3.3 lets a server refuse or narrow, and narrowing silently is what leaves a client "
+        "holding a session that is missing something it asked for with nothing saying so — "
+        "`invalid_scope` exists for this."
     )
 
 

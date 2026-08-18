@@ -21,28 +21,56 @@ here — run against the values it is claimed to catch and the values it is clai
 to let past — and each absence assertion carries a live control beside it: a
 session in the same provider that *does* state the thing being looked for.
 
-**What this module cannot see, stated rather than implied.** E0-16 seeds "one
-person who holds **both** a Care assignment and an instructor assignment", and
-the whole point of that person is that the instructor half is invisible from this
-door. Nothing here can identify her by name, because nothing in the ticket says
-how a test would — so criterion 8 is asserted over *every* session that holds
-Care: each one holds no reporting role and carries no purview. That is a stronger
-statement than one about a named person and a weaker one in a single respect,
-which is that it cannot prove the two-hat person was seeded at all. If E0-10 and
-E0-18 are to reuse this fixture, the ticket needs to say where a test reads the
-seed from — the mock platform publishes its own registration as a document
-(ADR 0036), which is the shape that would answer it.
+**The two-hat person is asserted twice, and the second way is there because the
+first was not enough.** E0-16 seeds "one person who holds **both** a Care
+assignment and an instructor assignment", and the point of her is that the
+instructor half is invisible from this door. When this module was written nothing
+in the ticket said how a test would identify her, so criterion 8 was asserted over
+*every* session holding Care — each one states no reporting role and carries no
+purview. That property is worth keeping and it is what makes a session built from
+`assignments` rather than from web-login roles fail here. What it cannot do is
+prove she was seeded: **deleting her left all of these tests green**, and
+quantifying over "every session that holds Care" is precisely what let the
+deletion pass, because a set with nobody in it satisfies every statement about
+its members. The non-emptiness guard this module already carried did not close it
+either — it required *a* Care session to exist, and a Care-only person satisfies
+that.
+
+She is nameable now. [ADR 0058](../../docs/adr/0058-the-registration-document-is-the-contract-between-the-mocks.md)
+makes `roles`, `launch_only_roles`, `lms_user_id` and `roles_claim` contract
+members of the published registration document, so the tests below select her by
+identity rather than by scanning: exactly one published person carries a
+launch-only assignment, she holds Care and nothing else, and signing in **as her**
+yields Care without it. Selecting her is what makes her deletion a failure.
 """
 
 from typing import Any
 
 import pytest
 
-# The six roles E0-16 seeds for web login, spelled as this project spells roles.
-# The ticket's own list — "VPAA, dean, chair, lead faculty, Care, and admin" —
+# The roles seeded for web login, spelled as this project spells roles. Six are
+# the ticket's own list — "VPAA, dean, chair, lead faculty, Care, and admin" —
 # transcribed rather than derived, so a seed that quietly loses one fails here by
 # name instead of passing unnoticed. That enumeration *is* criterion 6.
-WEB_LOGIN_ROLES = ("VP_ACADEMICS", "DEAN", "CHAIR", "LEAD_FACULTY", "CARE", "ADMIN")
+#
+# **`ASSISTANT_DEAN` is a seventh, seeded beyond the ticket's six.** That is
+# defensible on SPEC §2's own terms — the web door belongs to every leadership and
+# staff role, and §2.1 makes the assistant dean the worked example of a reporting
+# line containment cannot express — but a person seeded without being enumerated
+# here is exactly the failure this list exists to prevent, and it was live: while
+# the role was missing, deleting the `assistant-dean` block from the seed left
+# every test in this module green, where deleting `admin` correctly failed.
+# Enumerating the role rather than removing the person is the right direction, and
+# the rule to carry forward is that a seeded role and this list move together.
+WEB_LOGIN_ROLES = (
+    "VP_ACADEMICS",
+    "DEAN",
+    "ASSISTANT_DEAN",
+    "CHAIR",
+    "LEAD_FACULTY",
+    "CARE",
+    "ADMIN",
+)
 
 # The two roles that enter by launch only, from the same sentence: "Web login is
 # available to every role **except instructor and student**, who enter by launch
@@ -128,6 +156,31 @@ def identity_field(form: dict[str, Any]) -> str:
 def sessions_with(provider: Any, logins: list[Any], roles: tuple[str, ...]) -> list[Any]:
     """Every session in `logins` stating any of `roles`."""
     return [login for login in logins if provider.roles(login) & set(roles)]
+
+
+def launch_only_users(provider: Any) -> list[dict[str, Any]]:
+    """Every published person carrying an assignment that enters by launch (ADR 0058)."""
+    return [user for user in provider.published_users() if user.get("launch_only_roles")]
+
+
+def two_hat_user(provider: Any) -> dict[str, Any]:
+    """The one person who holds a Care assignment here and a teaching one on the platform.
+
+    Fails rather than picking when there is not exactly one, because every test
+    that calls this is about *her* — a second such person would mean the tests
+    below are about whichever one the document lists first, which is the shape
+    that reads as a pass.
+    """
+    found = launch_only_users(provider)
+    if len(found) != 1:
+        pytest.fail(
+            f"The registration document publishes {len(found)} people carrying a "
+            f"`launch_only_roles` assignment rather than one: {found!r}. E0-16 seeds exactly one "
+            "person who logs in here for Care work and launches from the mock LMS for teaching, "
+            "and `test_exactly_one_published_user_holds_a_launch_only_assignment` is the test "
+            "that says so."
+        )
+    return found[0]
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +473,151 @@ def test_a_session_holding_care_carries_no_purview(mock_idp: Any, purview_claims
             "computed by the tool in E1 and E9 — a provider that ships one has invented a scope "
             "nothing granted.",
         ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# The person the criterion is actually about, selected rather than scanned for.
+# ---------------------------------------------------------------------------
+
+
+def test_exactly_one_published_user_holds_a_launch_only_assignment(
+    mock_idp: Any, roles_in_claims: Any
+) -> None:
+    """Criterion 8's subject exists, and there is one of her.
+
+    "Seed one person who holds **both** a Care assignment and an instructor
+    assignment. Unlikely in practice but legitimate, and it is the case that
+    proves the doors are a property of the assignment rather than the person."
+
+    Everything else this module says about Care is quantified over the sessions
+    the provider issues, and **deleting her satisfied all of it** — an empty set
+    agrees with every statement about its members. This is the assertion that
+    cannot be satisfied by her absence, and it is why the others are worth having:
+    they say what a Care session may not carry, and this one says whose.
+
+    `roles == ["CARE"]` exactly, not "contains Care". Her second assignment is
+    real and it is not a web-login role; a document that listed it under `roles`
+    would be publishing the composition §2 forbids, one layer before any session
+    is issued.
+    """
+    users = mock_idp.published_users()
+    assert users, "The registration document publishes nobody, so there is nobody to find."
+
+    carried = launch_only_users(mock_idp)
+    assert len(carried) == 1, "\n".join(
+        [
+            f"{len(carried)} of the {len(users)} published people carry a `launch_only_roles` "
+            "assignment; E0-16 seeds exactly one.",
+            *(f"  {user}" for user in users),
+            "",
+            "She is the case that proves the doors belong to the assignment rather than to the "
+            "person: she signs in here for Care work and launches from the mock LMS for teaching. "
+            "E0-10 and E0-18 both reuse her, and with nobody carrying the marker, every other "
+            "assertion in this module about Care is satisfied by a seed she is missing from.",
+        ]
+    )
+
+    user = carried[0]
+    stated = roles_in_claims({"roles": user.get("roles") or []})
+    assert stated == {"CARE"} and len(user.get("roles") or []) == 1, (
+        f"The two-hat person is published with `roles` {user.get('roles')!r}. It has to be Care "
+        "and nothing else: her teaching assignment belongs to the other door, and SPEC §2 makes "
+        "Care non-composable with reporting roles — a document that lists both under `roles` has "
+        "published the composition before any session exists to carry it."
+    )
+    assert user.get("launch_only_roles"), (
+        f"The two-hat person's `launch_only_roles` is {user.get('launch_only_roles')!r}. That "
+        "member is what records the assignment this door may not honour."
+    )
+    assert user.get("lms_user_id"), (
+        f"The two-hat person carries `lms_user_id` {user.get('lms_user_id')!r}. ADR 0058 makes it "
+        "the member that says which LMS user she is, and it is how E0-18 finds the same person "
+        "on the launch door — without it the two doors resolve to two people."
+    )
+
+
+def test_the_two_hat_person_signs_in_holding_care_and_no_launch_only_role(mock_idp: Any) -> None:
+    """Criterion 8, over the person it names rather than over whoever holds Care.
+
+    She is selected by identity — the login form's own choice for the person the
+    registration document publishes — so a seed she has been removed from fails
+    here instead of quietly having nothing to check. That selection is the whole
+    difference between this test and `test_a_session_holding_care_states_no_
+    reporting_role` above, which stays because the two fail for different reasons:
+    that one catches a session built from every assignment a person holds, and
+    this one catches the person disappearing.
+
+    Both halves are asserted on the one session: Care is there, and the assignment
+    that belongs to the other door is not. §2: "Care is deliberately not
+    composable with reporting roles — its sole power is the threat queue, kept
+    isolated so safety re-identification never rides alongside routine oversight
+    access."
+    """
+    user = two_hat_user(mock_idp)
+    attempt = mock_idp.begin()
+    identity = mock_idp.identity_of(user, attempt)
+
+    login = mock_idp.login(identity)
+    stated = mock_idp.roles(login)
+
+    assert "CARE" in stated, (
+        f"Signing in as the two-hat person ({identity}) produced a session stating "
+        f"{sorted(stated)}. She holds a Care assignment and web login is the door she uses for "
+        "it, so a session without Care in it is the queue she cannot reach."
+    )
+    assert not stated & set(LAUNCH_ONLY_ROLES), (
+        f"Her session states {sorted(stated & set(LAUNCH_ONLY_ROLES))} beside Care. That "
+        "assignment is real and it enters by LTI launch: the launch context is where her teaching "
+        "lives, and a web session carrying it hands the one role that can re-identify a student "
+        "to a person acting in their teaching capacity — which is the composition §2 exists to "
+        "prevent, arriving through the door rather than through a union."
+    )
+
+
+def test_the_lms_user_id_the_provider_publishes_names_a_user_the_platform_will_launch(
+    mock_idp: Any, mock_platform: Any
+) -> None:
+    """The two mocks agree about who she is, which nothing else checks.
+
+    `lms_user_id` is a claim this provider makes about the *other* mock's seed,
+    and the two are edited by different tickets. Rename the instructor in
+    `mock-lms/app/seed.py` and both suites stay green while `/mock/registration`
+    publishes an id matching no LMS user — E0-18 then discovers it as a browser
+    test that finds her on one door and not on the other, which is an expensive
+    place to find a two-character difference.
+
+    Both mocks are fetchable in process, so the comparison costs one launch. It is
+    made against a launch the platform actually signs rather than against the
+    option value on its page: the `sub` in an `id_token` is what a tool resolves a
+    person by, and a page that offers a login hint the launch does not honour
+    would satisfy the weaker check.
+    """
+    user = two_hat_user(mock_idp)
+    published = str(user.get("lms_user_id") or "")
+    assert published, "The two-hat person carries no `lms_user_id`, so there is nothing to match."
+
+    offers = mock_platform.require_offers()
+    hints = {offer.parameters.get("login_hint") for offer in offers}
+    assert published in hints, "\n".join(
+        [
+            f"The provider publishes `lms_user_id` {published!r}, and the mock platform offers no "
+            "launch for that user.",
+            f"  the platform's launch page offers: {sorted(hint for hint in hints if hint)}",
+            "",
+            "The two mocks are the two doors of SPEC §2 and this member is the only thing tying "
+            "them to one person. Nothing else compares them: rename the user on either side and "
+            "both suites stay green while the doors resolve to two different people.",
+        ]
+    )
+
+    hers = next(offer for offer in offers if offer.parameters.get("login_hint") == published)
+    launch = mock_platform.mint(hers)
+    assert str(launch.claims.get("sub")) == published, (
+        f"The platform signed a launch for login hint {published!r} whose `sub` is "
+        f"{launch.claims.get('sub')!r}. A tool resolves a person by the `sub` in the `id_token`, "
+        "not by the hint the page offered, so those two disagreeing is the same failure one step "
+        "further in."
     )
 
 
