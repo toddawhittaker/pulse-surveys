@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Twenty-eight tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Thirty-one tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -46,6 +46,9 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 26 | [Review debt from E0-10](E0-26-review-debt-from-e0-10.md) | 10 | Five findings PR #29 could not close, and an index of what it did close. Four harden a guard or settle a record; the first is a live gap in SPEC §4's logging guarantee — a caller that rolls back keeps the name and discards the audit row — which blocks nothing in E0 but must land before E10 opens the Care queue. |
 | 27 | [Review debt from E0-11](E0-27-review-debt-from-e0-11.md) | 11 | Two findings E0-11's security review could not close, plus a sort debt, and an index of what it did close. Both are the same weakness: the read path is guarded three ways and the write path and the view files are guarded once each, by a person reading a diff. E1 is the first ticket that can trip either. |
 | 28 | [Review debt from E0-15](E0-28-review-debt-from-e0-15.md) | 15 | Eight findings E0-15's review could not close, and an index of the eight it did. Every one is the same shape: the mock platform is smoother than the platforms it stands in for, so a tool built against it passes here and fails against Canvas or Moodle — silently, because the tool's own tests run against this mock. |
+| 29 | [Review debt from E0-13](E0-29-review-debt-from-e0-13.md) | 13 | Two decisions that are Todd's — cleartext to an off-machine endpoint with no credential, and whether 429 and 500 belong in the fail-open set — plus three taxonomy rows no loopback stub can reach, a superseded resolution in MISTAKES entry 26, and the supply-chain tail `pydantic-ai-slim[openai]` drags in. |
+| 30 | [Review debt from E0-16](E0-30-review-debt-from-e0-16.md) | 16 | RFC 6749 §4.1.2.1 error redirects, which E1's callback error branch and E0-18's Playwright path both need and neither can reach; the three limits of ADR 0062's new gate; a Compose redirect URI E0-18 must repoint; and a strictness choice to affirm. |
+| 31 | [Review debt from E0-17](E0-31-review-debt-from-e0-17.md) | 17 | The `lti_platform` row E0-18 needs and E0-17 deliberately did not create, which cannot be added carelessly without falsifying ADR 0038; the `design/` course numbers that all fail §8; a literal spelled in two files; and an unreachable adoption path worth naming. |
 
 ## Dependency graph
 
@@ -69,13 +72,17 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 10 ── 26            (independent; blocks nothing in E0, gates E10's Care queue)
 11 ── 27            (independent; blocks nothing in E0, wants landing before E1's sync)
 15 ── 28            (independent; blocks nothing in E0, gates nothing until E1 and E3)
+13 ── 29            (independent; two items are Todd's decisions)
+16 ── 30            (independent; item 1 is on E1's path and wants settling first)
+17 ── 31            (independent; item 1 blocks E0-18's launch)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 28 hang
-off 03, 04, 05, 07, 08, 09, 10, 11, 12, 14 and 15 or off nothing at all, and block nothing —
+chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 31 hang
+off 03 through 17 or off nothing at all, and block nothing except where
+E0-31 says otherwise —
 they harden tests or settle records rather than adding behaviour, so they can
 land any time afterwards and none is on the path to the E0 exit. Ticket 21 in
 particular is cheapest done while passing through for another reason: **E0-11
@@ -84,7 +91,7 @@ the marker misses is still uncaught, and the code that would catch it is E1's
 roster sync — the only code that sees both which field came from the platform and
 which column it went into. Ticket 27 carries the other half of that same seam.
 
-Five of them are exceptions to "no hurry". Ticket 22's first question is a
+Seven of them are exceptions to "no hurry". Ticket 22's first question is a
 confidentiality rule that is currently unenforced, and E4 builds the reports it
 governs. Ticket 23 blocks nothing inside E0 but is a question E1's roster sync
 has to have answered before it can be built, so it wants settling by the end of
@@ -99,7 +106,17 @@ if it does not call the guard, nothing fails and the rule quietly becomes a
 description of a former intention. Ticket 28's first item has the same deadline
 from the other side: E1's sync is the code that reads the enrollment windows E0-15
 puts on every seeded member, and no real platform supplies them, so the fallback
-E1 needs has no fixture here until 28 adds one.
+E1 needs has no fixture here until 28 adds one. **E0-30's first item and
+E0-31's first item are the two hardest deadlines in this list.** E0-31's is the
+only item anywhere in the epic that blocks the E0 exit itself: E0-18 drives a
+launch from the mock LMS and no `lti_platform` row trusts it, because E0-17
+deliberately registered a fictional platform instead so that ADR 0038's argument
+would survive. Adding that row carelessly is what makes ADR 0038 wrong, so it has
+to be done by somebody who has read why it does not exist. E0-30's is not a
+blocker but is worse to defer: E1's OIDC callback has an error branch this mock
+makes unreachable, so leaving it means E1 ships that branch untested or does not
+ship it, and the case it handles — the user cancelling — is the one that actually
+occurs.
 
 Two deferrals from E0-10 are recorded elsewhere and repeated here so they are not
 lost: `alembic check` reading no roles, grants, views or functions is **E0-20
