@@ -22,7 +22,8 @@ non-LMS column there, saved today only by being unwritable
 Nothing in this module asserts that ownership is *fully* enforced, and nothing in
 it should be cited as if it did;
 [ADR 0014](../../docs/adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)'s
-open half stays open, and [E0-21](../../docs/tickets/e0/E0-21-review-debt.md)
+open half stays open, and
+[E0-35](../../docs/tickets/e0/E0-35-the-writer-and-the-marker-nobody-routed.md)
 carries the residue.
 
 **"Per column rather than once" is the last sweep below**, and it is the one that
