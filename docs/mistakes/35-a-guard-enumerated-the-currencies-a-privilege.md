@@ -1,10 +1,25 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 1**
+**Caught: 3**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*1 instance recorded.*
+*3 instances recorded.*
+
+*(Twice more on the same pull request, after this entry was
+written. **A column grant** is recorded in `pg_attribute.attacl`, which neither
+`has_table_privilege` nor `pg_class.relacl` reads — a fourth currency, found by a
+reviewer one round after the entry naming the third. And when the probe for it
+was added, nothing asked it about the roles that hold the grant: the sweep
+consulted the probes only for roles a runtime role could *become*, and a grant
+made directly to `pulse_app` is not a membership. Measured: 28 tests passed while
+that connection could read every student's name. **The control was the second
+half of the same miss.** It called the probe function directly rather than
+through the table of probes, so deleting the probe from the table left it green —
+a control that cannot fail when the thing it guards is removed is not a control.
+The repair on both was the same: ask the enumeration the question you actually
+care about, and make the control run the whole path rather than the piece you
+were thinking about.)*
 
 **What happened.** E0-33 added a sweep asserting that neither runtime connection
 role can *become* a role that may read identity. It was written because

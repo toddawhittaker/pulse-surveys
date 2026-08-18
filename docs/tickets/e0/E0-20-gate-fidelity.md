@@ -224,10 +224,22 @@ written, and this paragraph went on asserting otherwise until E0-33 was built on
 both live, and ADR 0043's closing paragraph records them landing. E0-33 item 3
 was written from the sentence above and inherited the error; both are corrected
 in the same pull request, and `docs/MISTAKES.md` entry 1 carries the instance.
-What remained genuinely unasserted — a fourth grantee in an ACL, the runtime
-roles' privileges on base tables other than `user_identity`, a membership granted
-`WITH INHERIT FALSE`, and the file-to-catalog direction on views — is listed in
-E0-33 item 3 and is what E0-33 built.
+What remained genuinely unasserted — a fourth grantee in an ACL, whether on a
+relation or on a `SECURITY DEFINER` function; the runtime roles' privileges on
+base tables other than `user_identity`; a privilege held on a *column* rather
+than on a table, which is recorded in `pg_attribute.attacl` and answers neither
+`has_table_privilege` nor `pg_class.relacl`; a membership granted `WITH INHERIT
+FALSE`; and the file-to-catalog direction on **both the view set and the function
+set** — is listed in E0-33 item 3 and is what E0-33 built.
+
+**This sentence said "on views" until 2026-08-18 and that was a second stale
+claim inside a correction.** The function half of item 3's fourth property had
+not been built, and the wording quietly narrowed to match what had been
+delivered — in a paragraph whose whole purpose was to stop a stale claim being
+believed. `spec-conformance` found it on PR #40; the function half is built and
+the sentence now names both. The column route was not in the original list at
+all; `privacy-authz` found that one, and it is the sharpest of the set, because
+`SELECT *` stays refused while `SELECT identity_name` succeeds.
 
 The trap to name here is the one item 3a names in a different place: **a grant
 written into the migration that creates the object reads like coverage and is

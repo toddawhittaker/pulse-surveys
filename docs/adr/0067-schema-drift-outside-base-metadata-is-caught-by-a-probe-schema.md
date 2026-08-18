@@ -60,15 +60,38 @@ deparsed expressions is worth exactly what the deparser is worth, and that is a
 claim to run rather than to assert.
 
 **Reachability is asked per mechanism, from a table of probes.** A privilege can
-be held as a grant, by ownership, by a role attribute, by membership, or as
-`EXECUTE` on something that runs as somebody else, and a guard phrased over one
-currency is systematically blind to a scheme that deliberately uses another. Two
-probes cover identity here — a table privilege on the identity table, which also
-answers an owner and a superuser, and `EXECUTE` on a `SECURITY DEFINER` function
-in `public` — and each sweep carries a control requiring it to *find* a route on
-a role known to have one. The probes sit one per line in a table so that
-disabling one is a single edit that still parses, which is what makes the control
-demonstrable rather than merely asserted.
+be held as a grant on a table, a grant on one of its columns, by ownership, by a
+role attribute, by membership, or as `EXECUTE` on something that runs as somebody
+else — and a guard phrased over one of those is systematically blind to a scheme
+that deliberately uses another.
+
+Three probes cover identity, and the argument for closure is about catalogs
+rather than about a list, because a list has now been wrong twice here. A
+privilege that yields identity *data* is recorded in exactly one of three places:
+`pg_class.relacl` for the table, `pg_attribute.attacl` for one of its columns,
+and `pg_proc.proacl` for a function that reads it — which counts only when
+`SECURITY DEFINER`, since an ordinary function runs as its caller and hands out
+nothing the caller lacks. Each probe reads one. `pg_database.datacl` and
+`pg_namespace.nspacl` are deliberately not probed: `CONNECT` and `USAGE` gate
+whether an object can be *reached* and confer no read. A superuser, an owner and
+a membership in a predefined role such as `pg_read_all_data` are subsumed by the
+table probe rather than omitted, because each answers `has_table_privilege` with
+no ACL entry existing at all.
+
+**The probes are asked about two different questions and the answers differ.**
+Asked about a role a runtime role can *become*, every mechanism is dangerous.
+Asked about the runtime roles themselves, `EXECUTE` is filtered, because
+`pulse_care` holds it by design and a rule reporting it would fail against a
+correct schema. Missing the second question entirely is what left a direct column
+grant unguarded through a whole review round while the probe that could see it
+already existed.
+
+Each sweep carries a control requiring it to *find* a route on a subject known to
+have one, and the probes sit one per line in a table so that disabling one is a
+single edit that still parses. That is what makes the control demonstrable rather
+than merely asserted — and the control has to be asked *through* the table, not
+of the probe function directly, or deleting the row leaves it green and it guards
+nothing.
 
 For roles, grants, views and functions — which are in no metadata at all — the
 expectation is held as a **frozenset derived from the ticket and spec sentences
@@ -112,8 +135,9 @@ A generated-column expression, a check-constraint expression, an exclusion
 constraint, a fourth ACL grantee on a relation or on a definer function, a
 runtime role's privilege on a base table, a non-inheriting role membership, a
 dropped view and a re-owned `SECURITY DEFINER` function each now fail a named
-test. Twenty-six mutations were run against these assertions, including six
-near-misses that must stay green; the table is in E0-33's pull request.
+test. Thirty-six distinct mutations were run against these assertions across
+four rounds, including eight near-misses that must stay green; the table is in
+E0-33's pull request.
 
 **An earlier version of this paragraph claimed that "a non-inheriting role
 membership" failed a named test, without qualification, and that was false when
@@ -143,4 +167,17 @@ that.
 **Two properties are asserted twice**, once behaviourally and once out of the
 catalog, and that is deliberate: `docs/MISTAKES.md` entry 3 records that the
 catalog test cannot see whether the rule works and the behavioural test cannot
-see whether it exists.
+see whether it exists. For the column-grant route the pair is uneven and the
+catalog half carries it alone — a behavioural `SELECT *` stays refused while
+`SELECT identity_name` succeeds — which is why that catalog assertion is
+`invariant`-marked.
+
+**A constraint must now be declared on the model, not only written into a
+migration.** The database-to-model direction means a check or exclusion
+constraint stated in SQL alone — a legitimate choice for a rule SQLAlchemy cannot
+express — fails `test_the_database_carries_no_constraint_of_this_kind_the_model_does_not_declare`.
+That is a standing obligation on every future migration and the author would
+otherwise meet it as a surprise. If a later migration deliberately states a rule
+in SQL alone, that test is where the decision is recorded and the exemption
+argued; it is not a reason to drop the direction, because the direction is what
+catches a constraint removed from the model.

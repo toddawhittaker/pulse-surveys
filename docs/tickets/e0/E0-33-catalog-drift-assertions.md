@@ -97,7 +97,18 @@ What is genuinely unasserted, and what this item therefore owes:
   leaves `SELECT` on `user_identity` one `SET ROLE` away from the Care
   connection. Asked in `'MEMBER'` mode, it is visible.
 - **The view set and the function set**, which no test compares against the files
-  that create them in the file-to-catalog direction.
+  that create them in the file-to-catalog direction. Both are built. Where a
+  *function's* SQL belongs is unsettled — SPEC §13 places view SQL under
+  `views_sql/` and says nothing about functions — so the function half tolerates
+  an empty expectation rather than pinning a decision no ticket has made, and
+  says so where it is implemented.
+- **A privilege held on a column rather than on a table.** Added 2026-08-18 from
+  PR #40's review, and it is the sharpest entry here: a column grant is recorded
+  in `pg_attribute.attacl`, which neither `has_table_privilege` nor
+  `pg_class.relacl` reads, so `GRANT SELECT (identity_name) ON
+  public.user_identity TO pulse_app` left `SELECT *` refused — every behavioural
+  refusal green — while the connection behind every instructor screen read every
+  student's name.
 
 The rest of E0-10's grant model is genuinely asserted by
 `tests/integration/test_identity_grants.py`, three of whose tests are
