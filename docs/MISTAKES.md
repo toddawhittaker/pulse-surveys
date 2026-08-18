@@ -500,7 +500,22 @@ say in the commit that you did.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 26**
+**Caught: 27**
+
+*(The twenty-seventh, in E0-17, and the interesting part is the delay. The
+`ENVIRONMENT` guard on `scripts/seed.py` shipped with nothing in the suite
+executing it — the module's one run with a deployment name sat behind a condition
+that is false — and the implementer noticed, said so in ADR 0063's own
+consequences and in the pull request, and shipped anyway because it may not write
+under `tests/`. That is this entry working as far as it can reach: **the
+behaviour was still unasserted, and what the entry bought was that nobody had to
+discover it.** The test author then wrote ten tests against the record's
+description, and the tenth failed — the guard is satisfied by `.env` when the
+process environment does not supply the variable, which no hand measurement had
+asked. So: an entry that turns "shipped unasserted" into "shipped unasserted, in
+writing, with an owner" is worth its counter even when it cannot stop the ship,
+because the sentence in the record is what got the tests written and the tests
+are what found the defect.)*
 
 *(The twenty-sixth, in E0-15's review round, and it is four survivors of one
 mutation run rather than one defect. Nineteen mutations against the new AGS rules:
@@ -635,7 +650,22 @@ second case arrives.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 17**
+**Caught: 18**
+
+*(The eighteenth, in E0-17, and it is the entry catching its own half-application.
+The `ENVIRONMENT` guard was not cited — it was executed, twice, by hand, and the
+results went into ADR 0063 as a table because this entry says a guard you have not
+run is a convention. The table was still wrong. It recorded "`ENVIRONMENT` absent"
+as covered on the strength of a run that set the variable to the empty string, and
+`load_dotenv(override=False)` does not overwrite an empty string — so the case
+that was actually asked was "present and blank", and the case the row claimed,
+"absent", was never run at all. The test author asked it properly, by removing the
+variable, and the guard let the run through. **Executing a guard is only as good
+as the case you chose to execute it with, and the cases that differ by one
+character — set to nothing, versus not set — are the ones where choosing wrong
+looks exactly like choosing right.** The full account is
+`docs/disputes/E0-17-01.md`; whether the behaviour or the test is at fault is
+still open, and this entry's catch is independent of that ruling.)*
 
 *(The seventeenth, in the test that migrates over a stored edge that does not
 climb. The plant rests on E0-09's trigger accepting a row E0-11's refuses, so the

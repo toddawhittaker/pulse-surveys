@@ -34,10 +34,36 @@ use is open — `prod`, `production`, `live`, a customer's own word, a typo — 
 check that enumerated names to refuse would let every name nobody thought of
 through. The one name that is safe is the one this script exists for.
 
-An unset or empty `ENVIRONMENT` is refused for the same reason. `app.config`
-already makes the variable required for the application, so a developer who can
-start Pulse can run the seed; a context where it is absent is a context nobody
-configured, and that is not one to write people into.
+An empty `ENVIRONMENT` is refused for the same reason: a value somebody set to
+nothing is not the one name that is safe.
+
+**What "unset" means here needs saying precisely, because an earlier draft of
+this paragraph said two things at once and a test was built against the wrong
+one.** The guard reads the variable *after* `load_dotenv(REPO_ROOT / ".env",
+override=False)`, which is how every other reader in this repository resolves
+configuration (ADR 0008, ADR 0012). So there are two different absences and the
+code treats them differently:
+
+| `ENVIRONMENT` in the process | `.env` on disk | Result |
+|---|---|---|
+| absent | absent, or carrying no `ENVIRONMENT` | **refused** — measured |
+| absent | supplying `development` | **admitted** — measured |
+| set to anything but `development`, empty included | either | **refused** — measured |
+
+The second row is the one under dispute. `.env` is the development
+configuration — `app/config.py`: "in every deployed environment the process
+environment is the only source" — so admitting it is what lets `make seed` work
+on a stock checkout, and refusing it would make an exported
+`ENVIRONMENT=development` the string a developer must type to seed at all, which
+is the opt-in flag rejected below under another name. Against that:
+`DATABASE_URL` and `ENVIRONMENT` can then come from different sources, so an
+operator who exports a production address over a development checkout and never
+touches the environment name is admitted.
+
+**That question is open and this record does not settle it.** It is
+[`docs/disputes/E0-17-01.md`](../disputes/E0-17-01.md), with both measurements
+and both arguments; the table above is what the code does today, whichever way it
+is ruled.
 
 `app/db.py` compares against the same literal before it lets the engine echo SQL,
 so the string `"development"` now appears twice. Consolidating the two crosses a
@@ -74,22 +100,38 @@ port-forward is allowed.
 
 ## Consequences
 
-**Nothing in the test suite executes this guard.** `tests/integration/
-test_demo_seed_script.py` runs the seed with `ENVIRONMENT=production` only in the
-branch where the seed registered the mock platform, and this seed does not
-([ADR 0065](0065-the-demo-institution-registers-a-fictional-platform.md)), so the
-guard ships asserted by nothing — `docs/MISTAKES.md` entry 9. It was measured by
-hand instead, against the shipped script:
+**This guard shipped with nothing in the test suite executing it, and that is now
+closed.** The only run this module made with a deployment name sat behind the
+mock-platform condition, which is false under
+[ADR 0065](0065-the-demo-institution-registers-a-fictional-platform.md), so the
+guard was a convention rather than a guarantee — `docs/MISTAKES.md` entry 9,
+which is why this paragraph named the gap rather than leaving it to be found. The
+hand measurements that stood in for a test have been replaced by ten tests in
+`tests/integration/test_demo_seed_script.py`: two controls — a `development` run
+is admitted, and a `development` run pointed at an unreachable address gets past
+the guard and fails on the address — and six refusal cases, each asserting that
+the run failed, that the message names the variable, the value found and the
+value wanted, and that no connection was attempted.
 
-| Run | Result |
-|---|---|
-| `ENVIRONMENT=production python scripts/seed.py`, with a valid URL and credentials | exit 2, refusal printed, no connection opened |
-| `ENVIRONMENT= python scripts/seed.py` | exit 2, refusal printed |
-| `ENVIRONMENT` absent, `.env` supplying `development` | runs |
+**Nine of the ten pass. The tenth is `docs/disputes/E0-17-01.md`** and is the
+"absent from the process, supplied by `.env`" row of the table in the Decision
+above.
 
-A test asserting the first two rows is work for the test author and is named in
-E0-17's pull request. The measurement above is what stands until it exists, and
-it is a measurement rather than an argument.
+Two things about that round are worth keeping, because neither is visible in the
+result:
+
+- **The hand measurement that preceded the tests missed the case the tests
+  found.** It ran `ENVIRONMENT=` — the variable present and empty, which
+  `load_dotenv` does not override — and reported the unset case as covered.
+  Setting a variable to nothing and not setting it at all are different
+  questions, and only one of them had been asked. A measurement is better than an
+  argument and it is still only as good as the case it chose.
+- **The obvious fix turns the whole module green while breaking the one path no
+  test covers.** `seed_environment` in `tests/conftest.py` lays every documented
+  `.env.example` entry into the child environment, so `ENVIRONMENT` is present in
+  the process for every run the suite makes; reading it before `.env` therefore
+  passes 29 of 29 and refuses `make seed` on a developer's machine. Anyone acting
+  on the ruling should measure that path by hand, because the suite cannot.
 
 **A developer whose `.env` says anything else gets a refusal rather than a seed.**
 That is the intended cost. The message names the variable, the value it found and
