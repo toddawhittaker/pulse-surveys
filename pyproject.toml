@@ -53,6 +53,23 @@ dependencies = [
     "celery==5.6.3",
     "redis==8.1.0",
     "httpx==0.28.1",
+    # The AI provider client, imported by `backend/app/ai/gateway.py` and by
+    # nothing else — SPEC §7.4 puts every model call behind one internal gateway,
+    # and `tests/unit/test_provider_library_is_confined_to_the_gateway.py` holds
+    # it to one importer so that replacing the library stays a day's work.
+    #
+    # §7.4 names `pydantic-ai` as the intended implementation, and this is not
+    # it. docs/adr/0053 records the decision and the measurement behind it: that
+    # metapackage resolves to 100 packages — `anthropic`, `google-genai`, `mcp`,
+    # `logfire`, `keyring` and a D-Bus client among them — against 16 here, in
+    # the image of the process that ships student comment text to a third party.
+    # The spec sentence it contradicts is raised in the pull request rather than
+    # edited on the way past.
+    #
+    # The 2.x line rather than 3.x: openai 3 depends on `httpx2`, and this
+    # project already pins `httpx` above. Two HTTP client stacks in one image buy
+    # nothing.
+    "openai==2.54.0",
     # The IANA database as a package, so `zoneinfo` resolves
     # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
     # container that ships no system tzdata (§3.1 — windows are timezone-bound).

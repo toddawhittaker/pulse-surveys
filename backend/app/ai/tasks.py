@@ -1,0 +1,221 @@
+"""The §7.4 tasks, one function each (SPEC §7.4, §3.3, §8).
+
+SPEC §13 gives this module "validity / moderation / summary / draft / draft-check
+calls". E0-13 implements the first of them end to end; the other four have
+contracts in `contracts.py` and prompts that belong to E2, E4, E6 and E7.
+
+A task here is the only thing that knows what its task *means*: which prompt file
+to render, how long a student may be kept waiting for it, what to do when the
+endpoint does not answer, and what to record afterwards. `gateway.py` knows none
+of that — it takes text and a contract and hands back a validated object — which
+is what keeps "replacing the provider library touches one file" true (§7.4,
+E0-13's sixth criterion).
+
+**Failing open means accepting the submission, not skipping the classification.**
+§3.3: "Classifier latency budget: p95 < 2s; on provider timeout, the heuristic
+floor applies and the submission is accepted, then classified async (fail open,
+never block a student on an outage)." So `classify_comment_validity` catches the
+one error that means "the endpoint did not answer", applies the character floor,
+and returns the contract — and the row it writes says a floor decided it, under a
+prompt version and a model ID that name no prompt and no model
+([ADR 0054](../../../docs/adr/0054-a-floored-classification-names-the-floor-in-its-audit-pair.md)).
+Everything else the gateway raises propagates: a rejected credential is not an
+outage, and absorbing one would classify every comment by length for as long as
+the credential stayed wrong, with nothing saying so.
+
+**This fail-open is the only one in this codebase.** `CLAUDE.md` says so and says
+why it may not be generalised from: §3.3 sanctions it for the validity check
+alone, and §6.2's moderation path — the one that routes a threat or a self-harm
+disclosure to the Care queue — has none.
+
+**Every classification row is written here.** One function, `record_classification`,
+so that "what gets stored when a model answers" is a question with one place to
+read rather than a line at each call site. It writes and does not commit: the
+caller owns the transaction, because E2's submit path stores the response and the
+classification together or stores neither.
+"""
+
+from importlib.resources import files
+
+from sqlalchemy.orm import Session
+
+from app.ai.contracts import CommentValidityOutput, ValidityVerdict
+from app.ai.gateway import AIGateway, AIProviderUnavailableError
+from app.models.ai import Classification, ClassificationTask
+
+# The prompt this task renders, named as ADR 0031 spells a `prompt_version`: the
+# file's path stem under `app/ai/prompts/`, so the stored value names exactly one
+# immutable file (ADR 0032). Changing the prompt means adding `validity.v2.md`
+# beside it and changing this constant — never editing the file this names.
+VALIDITY_PROMPT_VERSION = "validity.v1"
+
+# Where the student's text goes, spelled exactly as `prompts/README.md` requires:
+# "The placeholder is `[[STUDENT_COMMENT]]`, replaced literally — with
+# `str.replace`, never `str.format` or an f-string. These files carry JSON braces
+# in their output examples, so `.format` raises on the example object before it
+# ever reaches the placeholder."
+COMMENT_PLACEHOLDER = "[[STUDENT_COMMENT]]"
+
+# How long a student may wait for this classification before the floor takes over.
+# §3.3 budgets the check at "p95 < 2s", and this is deliberately above that
+# rather than equal to it: a hard limit at the budget would fall open on the
+# slowest twentieth of ordinary calls, which is the floor deciding participation
+# for one student in twenty on a healthy day. Twice the budget is the point where
+# waiting longer costs the student more than the heuristic does.
+#
+# Not a configuration knob. The number follows from a figure in the spec, and an
+# operator who could raise it could quietly spend a student's time to get a
+# slightly better verdict.
+VALIDITY_TIMEOUT_SECONDS = 4.0
+
+# §3.3: "The prototype's ≥25-character heuristic is a placeholder only; production
+# substantiveness is the classifier's call, with the character heuristic retained
+# solely as the fail-open floor below." The comparison is `>=`, as written.
+HEURISTIC_MINIMUM_CHARACTERS = 25
+
+# What a floored classification records instead of a prompt version and a model
+# ID. Neither is a prompt stem under `app/ai/prompts/` and neither names a model,
+# deliberately: a reader resolving a stored version against that directory finds
+# nothing, and knows no model was asked (ADR 0054). §7.4 rests auditability on
+# "a specific prompt version and model ID produced a specific classification for
+# a specific comment" — so a floor result carrying a real pair would be a record
+# asserting that a model produced a verdict it was never asked for, and E2's
+# async re-classification would have nothing to find.
+FLOOR_PROMPT_VERSION = "character-floor"
+FLOOR_MODEL_ID = "no-model"
+
+
+class PromptError(Exception):
+    """A prompt file is missing, or is not the prompt this code expects.
+
+    Loud and early, because the quiet version is worse: a prompt whose
+    `[[STUDENT_COMMENT]]` marker has been edited away renders to instructions
+    with no comment after them, and the model then classifies nothing at all —
+    confidently, and in the contract's own shape.
+    """
+
+
+def load_prompt(version: str) -> str:
+    """The text of one prompt file, named by its path stem (ADR 0031).
+
+    Read through `importlib.resources` rather than by building a path from
+    `__file__`, so the lookup goes through the same mechanism that decides
+    whether the file is in the installed distribution at all — `pyproject.toml`
+    ships `app/ai/prompts/**/*` as package data for that reason, and
+    `docs/MISTAKES.md` entry 18 is a directory that existed in the source tree
+    and in no built artifact. `app.views_sql.read_sql` reads its SQL the same way.
+    """
+    source = files("app.ai") / "prompts" / f"{version}.md"
+    try:
+        return source.read_text(encoding="utf-8")
+    except OSError:
+        # `FileNotFoundError` is the case this is written for and it is an
+        # `OSError`; the wider catch also covers a distribution where the
+        # directory shipped and the file did not (`docs/MISTAKES.md` entry 18).
+        problem = f"There is no prompt file `{version}.md` under `app/ai/prompts/`."
+    raise PromptError(problem)
+
+
+def render_prompt(version: str, comment: str) -> str:
+    """One prompt with the student's comment in it, and nothing after it.
+
+    `prompts/README.md`: "The marker opens the input and has no closing half. A
+    closing marker is a string the input can contain, and then the boundary sits
+    wherever the student put it. 'To the end of the message' cannot be forged,
+    and it means the gateway must append nothing after the comment." The
+    placeholder is the last thing in the file, so replacing it in place is what
+    keeps that true.
+
+    A prompt with no placeholder is refused rather than sent. The alternative is
+    a request that asks a model to classify a comment it was never given.
+    """
+    prompt = load_prompt(version)
+    if COMMENT_PLACEHOLDER not in prompt:
+        raise PromptError(
+            f"The prompt `{version}.md` carries no {COMMENT_PLACEHOLDER} marker, so the comment "
+            "has nowhere to go. `app/ai/prompts/README.md` states the scheme."
+        )
+    return prompt.replace(COMMENT_PLACEHOLDER, comment)
+
+
+def character_floor(comment: str) -> CommentValidityOutput:
+    """§3.3's fail-open floor: the verdict a comment's length alone decides.
+
+    Two verdicts and never the third. `nonsense` is a judgement about content —
+    §3.3's example is "adfasdfa" — and length cannot tell keyboard mashing from a
+    terse real answer. Calling a short comment `nonsense` during an outage would
+    reduce the section's validity rate over something the student did not do.
+
+    The pair it carries says a model was not asked. See `FLOOR_PROMPT_VERSION`.
+    """
+    long_enough = len(comment.strip()) >= HEURISTIC_MINIMUM_CHARACTERS
+    return CommentValidityOutput(
+        verdict=ValidityVerdict.SUBSTANTIVE if long_enough else ValidityVerdict.INSUFFICIENT,
+        prompt_version=FLOOR_PROMPT_VERSION,
+        model_id=FLOOR_MODEL_ID,
+    )
+
+
+def record_classification(
+    session: Session,
+    task: ClassificationTask,
+    output: CommentValidityOutput,
+) -> Classification:
+    """Store one verdict, with the pair that says what produced it (SPEC §8).
+
+    Appended, never updated: a re-run under a new prompt version is what §6.1's
+    drift panel and §9.3's eval floors compare against the earlier answer, and an
+    `UPDATE` deletes the row the comparison is with. The application's connection
+    holds `SELECT` and `INSERT` on this table and nothing else, so that is a
+    property of the database rather than of this function
+    (`classification_grants_v001.sql`, ADR 0055).
+
+    Flushed and not committed. The caller owns the transaction: E2's submit path
+    writes the response and its classification together or writes neither, and a
+    commit here would take that choice away from it.
+    """
+    row = Classification(
+        task=task,
+        verdict=output.verdict.value,
+        prompt_version=output.prompt_version,
+        model_id=output.model_id,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def classify_comment_validity(
+    session: Session,
+    comment: str,
+    gateway: AIGateway | None = None,
+) -> CommentValidityOutput:
+    """§7.4's comment-validity task: substantive / insufficient / nonsense.
+
+    One call in, one validated object out, one row stored. §3.3 gates
+    participation on the verdict, and refuses an `insufficient` comment to the
+    student's face at submit time with coaching copy — so what this returns
+    decides both what a student is told and what a section's validity rate says.
+
+    On an endpoint that does not answer, the character floor decides and the
+    submission goes through: "fail open, never block a student on an outage"
+    (§3.3). Every other gateway failure propagates, and E2's submit path is where
+    a caller decides what to do with one.
+
+    The gateway is a parameter so that a caller holding one can pass it —
+    building a client per comment is a connection pool per comment. E2 passes the
+    one on `app.state`; today's callers let it build its own.
+    """
+    gateway = gateway or AIGateway()
+    try:
+        output = gateway.run_task(
+            prompt=render_prompt(VALIDITY_PROMPT_VERSION, comment),
+            prompt_version=VALIDITY_PROMPT_VERSION,
+            output_model=CommentValidityOutput,
+            timeout=VALIDITY_TIMEOUT_SECONDS,
+        )
+    except AIProviderUnavailableError:
+        output = character_floor(comment)
+
+    record_classification(session, ClassificationTask.COMMENT_VALIDITY, output)
+    return output

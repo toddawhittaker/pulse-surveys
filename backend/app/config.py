@@ -248,6 +248,26 @@ class Settings(BaseSettings):
         description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2).",
     )
     redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
+    # The AI provider credential (§6.3: "AI provider (base URL, model, masked
+    # key)"). `SecretStr` for the reason the block above gives, and it is the
+    # field that reason was written for: `app.ai.gateway` hands this value to a
+    # third-party HTTP client, and the errors that client raises are printed to
+    # the container log.
+    #
+    # Optional, and absent is an ordinary state rather than a misconfiguration:
+    # `.env.example` says the base URL may name "a hosted provider, a proxy, or
+    # a local server such as vLLM or Ollama", and the last two commonly want no
+    # credential at all. A required field would make a local model impossible to
+    # run against without inventing a value for it.
+    #
+    # An empty string is read as absent, by the same rule and for the same
+    # reason as `care_database_url` below: blanking is how a value is withheld,
+    # and a `SecretStr('')` that validated would send an empty bearer token
+    # rather than no header.
+    ai_provider_api_key: SecretStr | None = Field(
+        default=None,
+        description="Credential for the AI provider, when the endpoint wants one (SPEC §6.3).",
+    )
 
     # --- deployment wiring, no credential: required, no default ---------------
     ai_provider_base_url: str = Field(description="OpenAI-compatible API base URL (§7.4).")
@@ -291,6 +311,22 @@ class Settings(BaseSettings):
         ge=1,
         description="Respondents a comparison set needs before it is shown (§5.1).",
     )
+
+    @field_validator("ai_provider_api_key", mode="before")
+    @classmethod
+    def blank_provider_key_is_absent(cls, value: object) -> object:
+        """A blank `AI_PROVIDER_API_KEY` means this endpoint wants no credential.
+
+        A local OpenAI-compatible server — vLLM, Ollama, a proxy on the same
+        host — authenticates nobody, and the way a developer says so is to leave
+        the entry empty rather than to delete a line from `.env`. Read as `None`,
+        `app.ai.gateway` sends no `Authorization` header at all; read as
+        `SecretStr('')` it would send an empty bearer token, which some servers
+        refuse and none is helped by.
+
+        `_blank_is_absent` above is the rule itself.
+        """
+        return _blank_is_absent(value)
 
     @field_validator("care_database_url", mode="before")
     @classmethod
