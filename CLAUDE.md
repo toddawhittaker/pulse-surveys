@@ -7,7 +7,8 @@ feature decisions, system behavior, rationale, status, or history.
 - Why a construction choice was made → `docs/adr/`
 - What is being built next → `docs/tickets/`
 - How it should look → `docs/DESIGN_BRIEF.md`, `design/`
-- What has already gone wrong here → `docs/MISTAKES.md`, read before you start
+- What has already gone wrong here → `docs/MISTAKES.md`, read whole before you
+  start; it is the rules, and each links to its incident in `docs/mistakes/`
 
 Before adding a line here, ask whether it would still be true if the process
 changed. If yes, it belongs elsewhere. Do not append feature decisions, status,
