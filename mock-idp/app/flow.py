@@ -47,6 +47,7 @@ started in one test process share nothing.
 
 import base64
 import hashlib
+import re
 import secrets
 import time
 from collections.abc import Mapping
@@ -85,6 +86,13 @@ CODE_CHALLENGE_METHOD = "S256"
 # specification, and saying so is more use than "the code did not match".
 VERIFIER_MINIMUM_LENGTH = 43
 VERIFIER_MAXIMUM_LENGTH = 128
+
+# And §4.1's alphabet: the unreserved characters of RFC 3986. Checked for the
+# same reason as the lengths, plus one of its own — the challenge is computed
+# over the verifier's **ASCII** octets, so a character outside this set has no
+# ASCII encoding and would raise inside the comparison rather than be refused by
+# it.
+VERIFIER_ALPHABET = re.compile(r"[A-Za-z0-9\-._~]+")
 
 # How long a login page is good for, and how long an unspent authorization code
 # is. RFC 6749 §4.1.2 recommends a maximum code lifetime of ten minutes; one
@@ -464,9 +472,16 @@ class Flows:
     def _require_pkce(self, parameters: Mapping[str, Any], issued: AuthorizationCode) -> None:
         """RFC 7636 §4.6: the verifier must be present, well formed, and match.
 
-        Three refusals rather than one, because they are three different mistakes
+        Four refusals rather than one, because they are four different mistakes
         and a client reading `error_description` should be told which it made. All
-        three are `invalid_grant`, which is what §4.6 specifies.
+        four are `invalid_grant`, which is what §4.6 specifies.
+
+        The alphabet check is not tidiness. `challenge_for` encodes the verifier
+        as **ASCII**, because §4.2 says the challenge is computed over the ASCII
+        octets, so a verifier carrying a character outside that raises inside the
+        comparison — and a provider that answered a malformed parameter with a
+        500 would be answering "we fell over" where the honest answer is "your
+        grant is invalid". Checked before the digest, not caught after it.
 
         The comparison is `compare_digest`, not `==`. Both values are public in
         the sense that neither is a long-lived secret, and the timing of a
@@ -492,6 +507,14 @@ class Flows:
                 description=(
                     f"`code_verifier` is {len(verifier)} characters. RFC 7636 §4.1 makes it "
                     f"between {VERIFIER_MINIMUM_LENGTH} and {VERIFIER_MAXIMUM_LENGTH}."
+                ),
+            )
+        if not VERIFIER_ALPHABET.fullmatch(verifier):
+            raise TokenRequestError(
+                error="invalid_grant",
+                description=(
+                    "`code_verifier` carries characters outside the unreserved set RFC 7636 §4.1 "
+                    "allows — `A-Z`, `a-z`, `0-9`, `-`, `.`, `_` and `~`."
                 ),
             )
         if not secrets.compare_digest(challenge_for(verifier), issued.code_challenge):
