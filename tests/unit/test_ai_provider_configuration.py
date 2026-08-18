@@ -14,9 +14,19 @@ the exception a refused configuration raises. Its last test covers the ticket's
 seventh acceptance criterion, which is about a different secret in a different
 place: no `secrets.*` reference added to a workflow.
 
-**The transport rule arrived from a review**, and it is the other half of "the key
-is a secret": a key masked in every log and then sent in clear over a network is
-a key in the open. Plain HTTP stays legal to this machine, where a local model
+**A credential may not arrive through the URL at all**, which a second review pass
+found the transport rule missing: it gated on the key *variable* being set, so
+`http://user:pass@host/v1` with no key configured met no check — and httpx turns
+userinfo into a real `Authorization: Basic` header, so the credential went out on
+the wire and, the field being a plain `str`, rendered in `repr(settings)` and
+`model_dump()` on the way. It is now refused outright, over https and on loopback
+too. That is the stronger rule and also the cheaper one: it keeps the field a
+plain displayable string, which is what §6.3 wants of a base URL, instead of
+adding a second field that has to be masked.
+
+**The transport rule arrived from the first review**, and it is the other half of
+"the key is a secret": a key masked in every log and then sent in clear over a
+network is a key in the open. Plain HTTP stays legal to this machine, where a local model
 server needs no TLS and there is no network to read anything off, and is refused
 to any other host while a key is configured. The refusal is asserted **through
 `create_app()`**, because a `Settings` validator's own message never reaches the
@@ -147,6 +157,32 @@ LOOPBACK_HTTP_URLS = (
     "http://[::1]:11434/v1",
 )
 
+# A username and a password written into the URL. Both are needles as well as
+# credentials: the refusal has to quote neither, so neither may share an
+# eight-character run with the field name, with the field's own `description`, or
+# with pydantic's error code — and the test asserting that silence runs a control
+# saying they do not.
+USERINFO_USER = "Kj3PxE8mZt5UwGh"
+USERINFO_CREDENTIAL = "Tf2YcRbVn8LqxWd"
+
+# The four shapes a credential can arrive in through the URL, and they are four
+# rather than one because the rule that let this through was conditional. The
+# scheme check gated on the key *variable* being set, so a URL carrying its
+# credential **instead of** setting that variable met no check at all — and httpx
+# turns userinfo into a real `Authorization: Basic` header, so the credential left
+# the process exactly as if it had been configured properly, and was captured at
+# the server. Over https and on loopback too, because the field must never hold a
+# secret at all: that is what keeps it a plain displayable `str`, which §6.3 wants
+# (base URL shown, key masked), rather than a second field needing masking of its
+# own — and a plain `str` renders its password in `repr(settings)` and
+# `model_dump()`, which is how this one did.
+USERINFO_URLS = {
+    "https, off machine": f"https://{USERINFO_USER}:{USERINFO_CREDENTIAL}@{OFF_MACHINE_HOST}/v1",
+    "http, loopback": f"http://{USERINFO_USER}:{USERINFO_CREDENTIAL}@127.0.0.1:11434/v1",
+    "https, username only": f"https://{USERINFO_USER}@{OFF_MACHINE_HOST}/v1",
+    "https, empty password": f"https://{USERINFO_USER}:@{OFF_MACHINE_HOST}/v1",
+}
+
 # The repository secrets a workflow may reference today. `GITHUB_TOKEN` is
 # supplied by Actions itself rather than configured, so it is not a stored secret
 # in the sense CLAUDE.md's policy is about. Everything else is Todd's call, in
@@ -169,6 +205,26 @@ def load_settings_class() -> type:
     from app.config import Settings
 
     return Settings
+
+
+def load_configuration_error() -> type[BaseException]:
+    """The error type the application promises its callers, imported inside the test.
+
+    The same loader, spelled the same way, as
+    `tests/unit/test_create_app_startup_errors.py`. That module owns the claim
+    that bad configuration *reaches a caller* as this type and that pydantic's own
+    error does not escape; this one only names the type so that a refusal asserted
+    here is a configuration refusal rather than whatever happened to come out.
+
+    Worth separating, because the two could read as duplication. Owning the
+    startup surface is "every shape of bad configuration arrives as one type".
+    Naming it here is narrower and is about this file's own assertions: it is what
+    stops `pytest.raises` being satisfied by an `AttributeError` raised because a
+    symbol moved, which is a broken test reading as a rule that fired.
+    """
+    from app.config import ConfigurationError
+
+    return ConfigurationError
 
 
 def documented_key_variables(documented_env: Mapping[str, str]) -> list[str]:
@@ -521,11 +577,22 @@ def test_the_needle_matches_nothing_a_refused_configuration_prints(
     fail validation, and the first validator added to it in E2 turns it red
     against a perfectly masked key, with the failure reading as a credential in a
     startup log.
+
+    **The type is deliberately not named on this path**, unlike the transport
+    refusals further down, and the reason is that nobody has measured it: what
+    `Settings()` raises for an *absent* variable — pydantic's error, or this
+    project's conversion of it — is E0-01's business and either answer is in scope
+    here, since the subject is what a refusal renders rather than what it is. What
+    is not left open is the import: `load_settings_class()` is called outside the
+    block, so a `Settings` that has been renamed or moved fails this test loudly
+    instead of counting as a refused configuration and letting the needle search
+    below run over an unrelated exception.
     """
+    settings_cls = load_settings_class()
     monkeypatch.delenv(REQUIRED_DEPLOYMENT_VARIABLE, raising=False)
 
     with pytest.raises(Exception) as refused:
-        load_settings_class()()
+        settings_cls()
 
     for link in exception_chain(refused.value):
         renderings = [(str(link), "str"), (repr(link), "repr")]
@@ -659,17 +726,138 @@ def test_a_plain_http_provider_url_to_another_host_is_refused_when_a_key_is_set(
     floors, and the misconfiguration is invisible while participation credit is
     handed out on a character count.
 
-    The exception *type* is not asserted here — that is E0-01's subject and
-    `tests/unit/test_create_app_startup_errors.py` owns it — and neither is the
-    message, which the test below reads from the surface an operator actually
-    sees. `pytest.raises` is the whole assertion, deliberately: an
-    `assert refused.value is not None` after it cannot fail, and this file has
-    written one before (`docs/MISTAKES.md` entry 3, its twenty-fifth instance).
+    The *message* is not asserted here — the test below reads that from the
+    surface an operator actually sees. The type is, and it is the whole assertion:
+    an `assert refused.value is not None` after `pytest.raises` cannot fail, and
+    this file has written one before (`docs/MISTAKES.md` entry 3, its
+    twenty-fifth instance).
+
+    **`ConfigurationError` rather than `Exception`**, and the reason is not the
+    lint rule that noticed it. A bare `Exception` is satisfied by an
+    `AttributeError` from `load_settings_class()` if `Settings` is renamed or
+    moved — a broken test reading as a refused configuration, which is the exact
+    inversion this suite is for. Measured on this path rather than assumed: an
+    off-machine `http://` URL with a key set raises
+    `app.config.ConfigurationError` out of `Settings()` directly.
     """
     configure_provider(monkeypatch, OFF_MACHINE_HTTP_URL)
 
-    with pytest.raises(Exception):  # noqa: B017 - the type is E0-01's subject
+    with pytest.raises(load_configuration_error()):
         load_settings_class()()
+
+
+@pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
+@pytest.mark.parametrize("shape", list(USERINFO_URLS))
+def test_a_provider_url_carrying_a_credential_is_refused(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    shape: str,
+    with_key: bool,
+) -> None:
+    """A credential in the URL is refused outright — over TLS, on this machine, key or no key.
+
+    The defect this is written against was the *condition* rather than the check:
+    the transport rule ran only when the key variable was set, so a URL that
+    carried its credential instead of setting that variable was never examined.
+    httpx turns userinfo into a real `Authorization: Basic` header, so the
+    credential went on the wire, was captured at the receiving server, and — the
+    field being a plain `str` — rendered in `repr(settings)` and `model_dump()` on
+    the way past.
+
+    **Both parametrisations are the point.** Without a key set is the case the old
+    rule missed entirely; over https and on loopback are the cases a narrower fix
+    would have left legal. The last two shapes are the ones a rule written around
+    a `user:password@` pattern misses: a username with no password at all, and a
+    username with an empty one.
+
+    The control that this is a rule about userinfo rather than a rule that refuses
+    everything is `test_an_https_provider_url_is_accepted_wherever_it_points` and
+    `test_a_plain_http_provider_url_is_accepted_on_this_machine` — the same URLs
+    without a credential in them, required to build.
+
+    The type is named for the reason given on the test above: a bare `Exception`
+    is satisfied by an `AttributeError` from a moved symbol, and eight
+    parametrisations all passing on one would read as a rule holding everywhere.
+    """
+    configure_provider(monkeypatch, USERINFO_URLS[shape], with_key=with_key)
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+def test_the_refusal_of_a_url_carrying_a_credential_quotes_neither_it_nor_the_host(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal has to be readable without repeating what it refused.
+
+    Same shape and same reason as the insecure-transport refusal below it, and a
+    sharper case: what is being refused *is* a credential, so a diagnostic that
+    quotes the URL back publishes the thing the rule exists to keep out of every
+    other surface. A startup error goes to the container log and into whatever the
+    operator pastes when asking for help.
+
+    Control first: an unrelated refusal, with none of these three values
+    configured, has to contain no fragment of any of them. That is what says the
+    username, the password and the host do not collide with the report's own
+    vocabulary, so the silence asserted afterwards means something rather than
+    nothing (`docs/MISTAKES.md` entry 3).
+    """
+    restored = configured_env.get(REQUIRED_DEPLOYMENT_VARIABLE)
+    assert restored is not None, (
+        f"`.env.example` documents no {REQUIRED_DEPLOYMENT_VARIABLE}, so the control below cannot "
+        "put the configuration back before the assertion that matters runs."
+    )
+    needles = {
+        "the username": USERINFO_USER,
+        "the password": USERINFO_CREDENTIAL,
+        "the host": OFF_MACHINE_HOST,
+    }
+
+    monkeypatch.delenv(REQUIRED_DEPLOYMENT_VARIABLE, raising=False)
+    with pytest.raises(load_configuration_error()) as unrelated:
+        build_app()
+
+    control = renderings_of(unrelated.value)
+    collisions = {
+        f"{label} in {where}": leaked_fragments(rendering, needle)
+        for label, needle in needles.items()
+        for where, rendering in control.items()
+        if leaked_fragments(rendering, needle)
+    }
+    assert not collisions, (
+        f"These needles share fragments with a startup refusal none of them was configured in: "
+        f"{collisions}. The assertions below would then report ordinary words as a leaked "
+        "credential. The repair is the needle in this file, not the threshold."
+    )
+
+    monkeypatch.setenv(REQUIRED_DEPLOYMENT_VARIABLE, restored)
+    configure_provider(monkeypatch, USERINFO_URLS["https, off machine"], with_key=False)
+    with pytest.raises(load_configuration_error()) as refused:
+        build_app()
+
+    surfaces = renderings_of(refused.value)
+    variable = AI_PROVIDER_BASE_URL_VARIABLE.lower()
+
+    assert any(variable in rendering.lower() for rendering in surfaces.values()), (
+        f"The refusal of a URL carrying a credential never names "
+        f"{AI_PROVIDER_BASE_URL_VARIABLE} — the renderings were {surfaces}. An operator meets "
+        "this in a container log with no traceback into the validator, and a diagnostic that does "
+        "not say which variable is wrong sends them to change whichever one makes it stop."
+    )
+
+    for label, needle in needles.items():
+        leaked = {
+            where: leaked_fragments(rendering, needle)
+            for where, rendering in surfaces.items()
+            if leaked_fragments(rendering, needle)
+        }
+        assert not leaked, (
+            f"The startup refusal quotes {label}: {leaked}. The renderings were {surfaces}. What "
+            "this rule refuses is a credential, so a diagnostic that repeats the URL puts it in "
+            "the container log — the one place §10 exists to keep it out of. Naming the variable "
+            "is what the message is for."
+        )
 
 
 def test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_nothing_else(
@@ -704,7 +892,7 @@ def test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_n
     )
 
     monkeypatch.delenv(REQUIRED_DEPLOYMENT_VARIABLE, raising=False)
-    with pytest.raises(Exception) as unrelated:  # noqa: B017 - the type is E0-01's subject
+    with pytest.raises(load_configuration_error()) as unrelated:
         build_app()
 
     control = renderings_of(unrelated.value)
@@ -725,7 +913,7 @@ def test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_n
     # firing on the wrong variable.
     monkeypatch.setenv(REQUIRED_DEPLOYMENT_VARIABLE, restored)
     configure_provider(monkeypatch, OFF_MACHINE_HTTP_URL)
-    with pytest.raises(Exception) as refused:  # noqa: B017 - the type is E0-01's subject
+    with pytest.raises(load_configuration_error()) as refused:
         build_app()
 
     surfaces = renderings_of(refused.value)

@@ -55,8 +55,19 @@ same value is used as a *positive* detector to prove the key was sent at all.
 `test_the_needle_matches_nothing_a_request_carries_without_it` removes the key,
 makes the same call, and requires zero matches anywhere in it.
 
-**Three subjects were added after a review, and each closes a gap this module had
-rather than a criterion it had missed.** The fail-open tests asserted a property
+**A second review pass added two more subjects, and both are about a line rather
+than a behaviour.** ADR 0056's taxonomy is exercised row by row: what floors is
+a request that reached an endpoint which could have answered and did not answer
+in time, and everything else raises — including a connect that never completed,
+which the first attempt at this narrowing did not actually exclude, because
+`httpx.ConnectTimeout` subclasses `httpx.TimeoutException`. And the model name a
+provider reports is asserted to be a value the provider cannot choose: half the
+audit pair was being taken from the response envelope unvalidated, so an endpoint
+could name itself 200,000 characters, whitespace, a forged log line, or the very
+marker that means no model answered.
+
+**Three subjects were added after the first review, and each closes a gap this
+module had rather than a criterion it had missed.** The fail-open tests asserted a property
 of two returned objects while claiming one about the stored record, so moving the
 `classification` write inside the gateway's `try` — the fail-open path returning a
 verdict and storing nothing — left the whole suite green; they read the row now.
@@ -95,7 +106,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from pydantic import BaseModel
@@ -111,7 +122,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # validity / moderation / summary / draft / draft-check calls". The package root
 # is `backend/`, so the import paths are these.
 TASKS_MODULE = "app.ai.tasks"
+GATEWAY_MODULE = "app.ai.gateway"
 CONTRACTS_MODULE = "app.ai.contracts"
+
+# The one exception class §3.3's submit path is told to catch. Named rather than
+# discovered, unlike everything else this module reaches inside `app.ai`: E0-13
+# left the error surface open and this file declined to pin it, and ADR 0056 has
+# since settled it, so a lookup here transcribes a decision instead of guessing at
+# one.
+GATEWAY_ERROR_BASE = "AIGatewayError"
+
+# `.env.example` documents it and E0-01 ships the `Settings` field behind it.
+AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
 
 # The exceptions that mean the gateway fell over rather than reported. E0-13 names
 # no error type, so requiring one would pin an interface the ticket leaves open;
@@ -284,6 +306,32 @@ VERDICT_FIELD_NAMES = (
 PROVIDER_DELAY_SECONDS = 20.0
 FAIL_OPEN_MARGIN_SECONDS = 2.0
 
+# How long a call is given before this module stops waiting for it, and how many
+# connections are opened to fill a listener's accept queue. Both are **this
+# suite's choice**, and both exist for the one condition that can hang rather than
+# fail: a connect that never completes. The deadline is generous enough that a
+# gateway with any connect timeout at all comes back inside it, and short enough
+# that a gateway with none fails with a message rather than holding CI open.
+CALL_DEADLINE_SECONDS = 60.0
+BACKLOG_FILLERS = 16
+
+# What a provider may report as the model that answered, and what it may not.
+# The honest name differs from `STUB_MODEL_ID` on purpose: it is the control that
+# says a reported name is read at all, without which "the configured name was
+# recorded" passes against a gateway that never looks at the response envelope.
+#
+# The four dishonest ones are what a reviewer and then the implementer measured,
+# and each fails differently: a reserved name forges ADR 0054's "no model
+# answered" marker, 200,000 characters is a row nobody bounded, whitespace is a
+# name that is not one, and a control character forges a log line — the NUL in the
+# last is refused by Postgres outright, so an unguarded insert fails rather than
+# storing anything.
+HONEST_MODEL_ID = "gpt-4o-2026-01-31"
+OVERLONG_MODEL_ID = "A" * 200_000
+WHITESPACE_MODEL_ID = "   "
+FORGED_LOG_LINE_MODEL_ID = "gpt-4o\nlevel=INFO msg=classification approved by operator"
+NUL_MODEL_ID = "gpt-4o\x00"
+
 # The table SPEC §8 names and E0-13 creates.
 CLASSIFICATION_TABLE = "classification"
 
@@ -315,12 +363,18 @@ class Answer:
     `body` replaces the whole HTTP body, for the case where the envelope itself is
     wrong. `delay` is how long the request is held before answering, which is the
     timeout simulation.
+
+    `reported_model` is what the completion envelope claims answered. Left unset,
+    the stub echoes whatever the request asked for, which is what a real provider
+    does; set, it is a provider naming itself something the gateway did not ask
+    for, which is the case a review found being recorded unvalidated.
     """
 
     content: str | None = None
     status: int = 200
     delay: float = 0.0
     body: str | None = None
+    reported_model: str | None = None
 
 
 @dataclass
@@ -381,15 +435,27 @@ def chat_completion(content: str | None, request: Any, model: str) -> dict[str, 
         ]
         finish_reason = "tool_calls"
 
-    requested_model = request.get("model") if isinstance(request, Mapping) else None
     return {
         "id": "chatcmpl-e0-13-stub",
         "object": "chat.completion",
         "created": 1_750_000_000,
-        "model": requested_model if isinstance(requested_model, str) and requested_model else model,
+        "model": model,
         "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
     }
+
+
+def reported_model_for(answer: Answer, request: Any, configured: str) -> str:
+    """What the completion envelope should say answered.
+
+    The answer's own choice if it made one — that is a provider naming itself.
+    Otherwise the model the request asked for, which is what a real provider
+    echoes, falling back to the stub's own name.
+    """
+    if answer.reported_model is not None:
+        return answer.reported_model
+    requested = request.get("model") if isinstance(request, Mapping) else None
+    return requested if isinstance(requested, str) and requested else configured
 
 
 class StubHandler(BaseHTTPRequestHandler):
@@ -437,9 +503,10 @@ class StubHandler(BaseHTTPRequestHandler):
         if answer.body is not None:
             self._send(answer.status, answer.body)
             return
+        reported = reported_model_for(answer, received.payload, provider.model)
         self._send(
             answer.status,
-            json.dumps(chat_completion(answer.content, received.payload, provider.model)),
+            json.dumps(chat_completion(answer.content, received.payload, reported)),
         )
 
     def do_GET(self) -> None:  # noqa: N802
@@ -550,7 +617,7 @@ def ai_environment(
     look for.
     """
     values = {
-        "AI_PROVIDER_BASE_URL": stub_provider.base_url,
+        AI_PROVIDER_BASE_URL_VARIABLE: stub_provider.base_url,
         "AI_MODEL_NAME": STUB_MODEL_ID,
     }
     for name in provider_key_variables(documented_env):
@@ -1182,11 +1249,15 @@ def classification_rows(
 # ---------------------------------------------------------------------------
 
 
-def well_formed(contract: type[BaseModel], token: str) -> Answer:
+def well_formed(
+    contract: type[BaseModel], token: str, *, reported_model: str | None = None
+) -> Answer:
     """A provider answer carrying the task's output for `token` and nothing else."""
     _, verdicts = verdict_field(contract)
     member = verdict_member(verdicts, token)
-    return Answer(content=json.dumps(provider_payload(contract, member)))
+    return Answer(
+        content=json.dumps(provider_payload(contract, member)), reported_model=reported_model
+    )
 
 
 def test_a_validity_call_against_the_stub_returns_the_validity_contract(
@@ -2020,6 +2091,467 @@ def test_a_provider_that_cannot_be_reached_raises_rather_than_flooring(
 
 
 # ---------------------------------------------------------------------------
+# ADR 0056's taxonomy: which provider conditions floor, and which do not
+# ---------------------------------------------------------------------------
+
+
+def gateway_error_base(
+    import_app_module: Callable[[str], ModuleType | None],
+) -> type[BaseException]:
+    """`AIGatewayError`, the base class a caller on §3.3's submit path catches.
+
+    Named rather than discovered, and that is a change from how the rest of this
+    module reaches the gateway. E0-13 left the error surface open and this file
+    refused to pin it; ADR 0056 has now settled it — four classes under one base,
+    each answering "did the request reach an endpoint that could have answered,
+    and was the answer about the endpoint or about the request?" — so a lookup
+    here transcribes a decision rather than guessing at one. A name this cannot
+    find is a deliverable that is not there, reported as a failed assertion rather
+    than as a collection error.
+    """
+    module = require_module(
+        import_app_module,
+        GATEWAY_MODULE,
+        "'`backend/app/ai/gateway.py` — provider-agnostic client against an OpenAI-compatible "
+        "base URL', and ADR 0056 puts the error taxonomy in it.",
+    )
+    base = getattr(module, GATEWAY_ERROR_BASE, None)
+    if not isinstance(base, type) or not issubclass(base, BaseException):
+        pytest.fail(
+            f"`{GATEWAY_MODULE}` exposes no `{GATEWAY_ERROR_BASE}` exception class — it defines "
+            f"{sorted(name for name in vars(module) if not name.startswith('_'))}. ADR 0056 makes "
+            "it the base every provider failure arrives as, and §3.3's submit path has to catch "
+            "one type deliberately: a caller that must enumerate error classes will miss one, and "
+            "the one it misses is the one that reaches a student."
+        )
+    return base
+
+
+@contextlib.contextmanager
+def saturated_endpoint() -> Iterator[str]:
+    """A loopback address that accepts no connection, without dropping a packet off this machine.
+
+    A listener whose accept queue is full: the kernel stops completing handshakes,
+    so a connect neither completes nor is refused. That is the shape of the
+    condition ADR 0056 puts outside the floor and the one the previous fix did not
+    actually cover — `httpx.ConnectTimeout` subclasses `httpx.TimeoutException`,
+    so a narrowing written against the base class still floored a connection that
+    never opened.
+
+    **What this can and cannot promise.** It stays on the loopback interface, so
+    the module's own "no live network call" guarantee holds and no packet reaches
+    a real route. What it cannot promise is *which* member of the connect family
+    the platform produces: a kernel that refuses instead of dropping yields a
+    connection error rather than a connect timeout. Both are in ADR 0056's
+    no-floor column, so the expected outcome is the same either way — but on such
+    a platform this test exercises the same row as the refused-connection case
+    rather than the subclass edge, and that is worth knowing before reading a
+    green result as proof of the narrowing.
+    """
+    listener = socket.socket()
+    fillers: list[socket.socket] = []
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        host, port = listener.getsockname()[:2]
+        for _ in range(BACKLOG_FILLERS):
+            filler = socket.socket()
+            filler.setblocking(False)
+            # Non-blocking, so filling the queue cannot itself block on the queue
+            # being full. The return value is not consulted: what matters is that
+            # the handshake was started, not that it finished.
+            with contextlib.suppress(OSError):
+                filler.connect_ex((host, port))
+            fillers.append(filler)
+        yield f"http://{host}:{port}/v1"
+    finally:
+        for filler in fillers:
+            filler.close()
+        listener.close()
+
+
+class Outcome(NamedTuple):
+    """What a call did, when waiting for it forever is not an option."""
+
+    state: str
+    value: Any
+
+
+def call_with_deadline(work: Callable[[], Any], seconds: float = CALL_DEADLINE_SECONDS) -> Outcome:
+    """Run `work` on a daemon thread and stop waiting after `seconds`.
+
+    Only used for the condition that can hang rather than fail. A daemon thread
+    rather than a `ThreadPoolExecutor`, because a pool joins its workers at
+    interpreter exit and a worker blocked on a socket would hold the whole session
+    open long after the assertion had been reported.
+    """
+    outcome: list[Outcome] = []
+
+    def run() -> None:
+        try:
+            outcome.append(Outcome("returned", work()))
+        except BaseException as failure:
+            # Caught rather than allowed to end the thread, because a failure on a
+            # thread nobody joins is a failure nobody sees. It is carried back to
+            # the assertion instead of handled here.
+            outcome.append(Outcome("raised", failure))
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    return outcome[0] if outcome else Outcome("did not finish", None)
+
+
+def status_answer(status: int) -> Answer:
+    """A provider replying with an HTTP status and an error envelope rather than a completion."""
+    return Answer(
+        status=status,
+        body=json.dumps({"error": {"message": f"e0-13 stub answering {status}"}}),
+    )
+
+
+class ProviderCondition(NamedTuple):
+    """One row of ADR 0056's table, and how to produce it against the stub."""
+
+    key: str
+    floors: bool
+    quoting: str
+    arrange: Callable[[StubProvider, type[BaseModel]], None]
+
+
+PROVIDER_CONDITIONS = (
+    ProviderCondition(
+        key="read-timeout",
+        floors=True,
+        quoting="a read timeout: the request arrived and the endpoint did not answer in time",
+        arrange=lambda provider, contract: provider.script(timed_out()),
+    ),
+    ProviderCondition(
+        key="http-503",
+        floors=True,
+        quoting="503: the endpoint answered, about itself, and said it is unavailable",
+        arrange=lambda provider, contract: provider.script(status_answer(503)),
+    ),
+    ProviderCondition(
+        key="http-504",
+        floors=True,
+        quoting="504: a gateway upstream of the endpoint did not answer in time",
+        arrange=lambda provider, contract: provider.script(status_answer(504)),
+    ),
+    ProviderCondition(
+        key="connection-refused",
+        floors=False,
+        quoting="a refused connection: nothing was reached, so nothing was slow",
+        arrange=lambda provider, contract: provider.stop(),
+    ),
+    ProviderCondition(
+        key="http-500",
+        floors=False,
+        quoting="500: the endpoint answered about *our request* — the request is the problem",
+        arrange=lambda provider, contract: provider.script(status_answer(500)),
+    ),
+    ProviderCondition(
+        key="http-429",
+        floors=False,
+        quoting="429: a rate limit is a capacity decision an operator has to see",
+        arrange=lambda provider, contract: provider.script(status_answer(429)),
+    ),
+    ProviderCondition(
+        key="http-401",
+        floors=False,
+        quoting="401: a credential the provider refused is not an outage",
+        arrange=lambda provider, contract: provider.script(status_answer(401)),
+    ),
+)
+
+RAISING_CONDITIONS = tuple(case for case in PROVIDER_CONDITIONS if not case.floors)
+
+
+def test_the_taxonomy_this_module_exercises_has_a_case_on_each_side_of_the_floor() -> None:
+    """`PROVIDER_CONDITIONS` covers both columns of ADR 0056's table.
+
+    The non-vacuity control for the two tests below, and not ceremony: each of
+    them is parametrised over one column, so a table that had drifted to all
+    floors or all raises would leave one of them reporting complete coverage of a
+    set it was never given. A parametrisation cannot fail for a case it does not
+    have (`docs/MISTAKES.md` entry 3).
+
+    It also states what this module does *not* reach. ADR 0056's no-floor column
+    names DNS failure, a TLS handshake failure and a pool timeout as well; none of
+    the three can be produced from a loopback stub without a network this suite
+    refuses to touch, so they are asserted by nothing here and that is a gap to
+    know about rather than one to paper over.
+    """
+    floors = [case.key for case in PROVIDER_CONDITIONS if case.floors]
+    raises = [case.key for case in PROVIDER_CONDITIONS if not case.floors]
+
+    assert floors and raises, (
+        f"The provider conditions this module exercises floor in {floors} and raise in {raises}. "
+        "With either side empty, the parametrised test for that side runs over nothing and "
+        "reports the taxonomy as held. ADR 0056's table has rows on both sides, and the whole "
+        "point of it is the line between them."
+    )
+
+
+@pytest.mark.parametrize(
+    "case", PROVIDER_CONDITIONS, ids=[case.key for case in PROVIDER_CONDITIONS]
+)
+def test_a_provider_condition_floors_or_raises_as_the_taxonomy_says(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+    case: ProviderCondition,
+) -> None:
+    """ADR 0056's table, row by row, and the line it draws.
+
+    The question the taxonomy turns on is not which exception a library raised: it
+    is **whether the request reached an endpoint that could have answered, and
+    whether the answer was about the endpoint or about the request.** §3.3
+    sanctions the floor for one thing only — "on provider timeout, the heuristic
+    floor applies and the submission is accepted" — and everything else in the
+    table is a condition that does not resolve by waiting.
+
+    Two rows carry the argument this test expects to have. **429 and 500 are
+    deliberately outside the floor.** A rate limit is a capacity decision an
+    operator has to see, and a 500 says our request is the problem; flooring
+    either would hide a permanent condition one comment at a time, handing out
+    participation credit on a character count while nothing anywhere goes red.
+
+    The floored side is asserted by the *verdict*, not by the absence of an
+    exception, because the floor never raises: every comment here is over §3.3's
+    ≥25-character threshold, so the floor says `substantive` and no provider in
+    this test says anything at all. The raising side is asserted by the type as
+    well as the raise — ADR 0056 makes `AIGatewayError` the one class a caller
+    catches, and an error outside it is one E2's submit path cannot handle
+    deliberately.
+    """
+    contract = validity_contract(import_app_module)
+    base = gateway_error_base(import_app_module)
+    name, verdicts = verdict_field(contract)
+    from_the_floor = verdict_member(verdicts, SUBSTANTIVE_VERDICT)
+    case.arrange(stub_provider, contract)
+
+    try:
+        result = run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    except FELL_OVER as failure:
+        pytest.fail(
+            f"The `{case.key}` condition raised {failure!r}, which is the gateway falling over "
+            "rather than reporting. §7.4 has it surface failures as errors, and ADR 0056 makes "
+            "every one of them an `AIGatewayError` a caller can catch on purpose."
+        )
+    except Exception as failure:
+        assert not case.floors, (
+            f"The `{case.key}` condition raised {failure!r}, and ADR 0056 puts it inside the "
+            f"floor: {case.quoting}. §3.3 accepts the submission and classifies async in exactly "
+            "this case, so raising here blocks a student on somebody else's outage."
+        )
+        assert isinstance(failure, base), (
+            f"The `{case.key}` condition raised {type(failure).__name__}, which is not an "
+            f"`{GATEWAY_ERROR_BASE}`: {failure!r}. ADR 0056 makes that the one class a caller "
+            "catches — §3.3's submit path has to be able to decide what to do about a provider "
+            "failure, and a caller enumerating types will miss the one that reaches a student."
+        )
+        return
+
+    assert case.floors, (
+        f"The `{case.key}` condition returned {getattr(result, name, result)!r} rather than "
+        f"raising, and ADR 0056 puts it outside the floor: {case.quoting}. §3.3 sanctions the "
+        "heuristic floor on a provider **timeout**, and a condition that does not resolve by "
+        "waiting is not one — flooring it hides a permanent fault one comment at a time while "
+        "participation credit is handed out on a character count."
+    )
+    assert isinstance(result, contract) and getattr(result, name) is from_the_floor, (
+        f"The `{case.key}` condition returned {result!r}, and ADR 0056 puts it inside the floor: "
+        f"{case.quoting}. What the floor returns is the character heuristic's answer — "
+        f"{from_the_floor!r} for a comment over §3.3's {HEURISTIC_MINIMUM_CHARACTERS}-character "
+        "threshold — carried by the contract, because E2's submit path has one shape to read."
+    )
+
+
+@pytest.mark.parametrize("case", RAISING_CONDITIONS, ids=[case.key for case in RAISING_CONDITIONS])
+def test_a_condition_outside_the_floor_leaves_no_floored_classification_behind(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+    classification_rows: ClassificationRows,
+    case: ProviderCondition,
+) -> None:
+    """A condition that raises writes no row claiming the floor decided it.
+
+    The other half of the taxonomy, and the half a return-value test cannot see.
+    A gateway that raises *and* records a floored classification on the way out
+    has satisfied every assertion in the test above while leaving §6.1's drift
+    panel and §9.3's eval sets a verdict that no model produced and no floor was
+    entitled to produce either — and E2's async re-classification, which selects
+    on exactly that marker, would find work it must not do.
+
+    **The floor's marker is derived rather than named**, and read in one column
+    rather than compared across the whole row. ADR 0054 settles what a floored row
+    records and this file does not transcribe it: an answered call locates the
+    column that holds the model, a read timeout then says what the floor writes
+    into it, and that value is what the raising case must not produce. Comparing
+    whole rows instead would match on the verdict — both rows carry `substantive`
+    for a comment this long — and report a collision that says nothing about the
+    marker.
+
+    Those two calls are also this test's non-vacuity guard. Without a floored row
+    to take a marker from, "no row carries the marker" is true of a database with
+    nothing in it (`docs/MISTAKES.md` entry 3).
+    """
+    contract = validity_contract(import_app_module)
+    before = classification_rows.keys()
+
+    stub_provider.script(
+        well_formed(contract, INSUFFICIENT_VERDICT, reported_model=HONEST_MODEL_ID)
+    )
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    answered_keys = classification_rows.keys() - before
+    assert len(answered_keys) == 1, (
+        f"An answered call added {len(answered_keys)} `{CLASSIFICATION_TABLE}` row(s), so this "
+        "test cannot learn which column holds the model. "
+        "`test_an_honest_model_name_is_recorded_as_the_provider_reported_it` owns that."
+    )
+    answered_row = classification_rows.row(next(iter(answered_keys)))
+    assert answered_row is not None, "The answered row could not be read back."
+    model_column = model_column_of(
+        answered_row, HONEST_MODEL_ID, "This test needs one column to read the floor's marker in."
+    )
+
+    after_answered = classification_rows.keys()
+    stub_provider.script(timed_out())
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    floored_keys = classification_rows.keys() - after_answered
+    assert len(floored_keys) == 1, (
+        f"A read timeout added {len(floored_keys)} `{CLASSIFICATION_TABLE}` row(s), so this test "
+        "has no floored row to take a marker from and nothing below would mean anything. "
+        "`test_a_floored_classification_is_recorded_rather_than_skipped` owns that failure."
+    )
+    floored_row = classification_rows.row(next(iter(floored_keys)))
+    assert floored_row is not None, "The floored row could not be read back after being written."
+    marker = stored_text(floored_row[model_column])
+
+    after_floor = classification_rows.keys()
+    case.arrange(stub_provider, contract)
+    with contextlib.suppress(Exception):
+        run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+
+    marked = {}
+    for key in classification_rows.keys() - after_floor:
+        row = classification_rows.row(key)
+        if row is not None and stored_text(row[model_column]) == marker:
+            marked[key] = stored_text(row[model_column])
+
+    assert not marked, (
+        f"The `{case.key}` condition raised and still left a row recording {marker!r} — what a "
+        f"floored classification writes into `{CLASSIFICATION_TABLE}.{model_column}` — in "
+        f"{marked}. ADR 0056 puts this condition outside the floor: {case.quoting}. ADR 0054's "
+        "marker is what says a verdict came from the character heuristic rather than from a "
+        "model, so a row claiming it for a failure the floor does not cover is a classification "
+        "nobody made: §6.1's drift panel samples it, §9.3's eval sets grow from it, and E2's "
+        "async pass selects on that marker and would find work it must not do."
+    )
+
+
+def test_a_connect_that_never_completes_raises_rather_than_flooring(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    migrated_engine: Any,
+    classification_rows: ClassificationRows,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row the previous narrowing claimed and did not have.
+
+    ADR 0056's first version justified moving connection failures out of the floor
+    with an argument about availability: an attacker who can force a handshake
+    failure can force no classification indefinitely. `httpx.ConnectTimeout`
+    subclasses `httpx.TimeoutException`, so a rule written against the base class
+    still floored a connect that never completed — and dropping packets is cheaper
+    than forcing a handshake failure and has the same effect. Measured against a
+    blackholed route with **zero requests reaching any server**: the classification
+    was floored on a connection that never opened.
+
+    So the distinction the taxonomy actually turns on is not the exception class:
+    it is whether the request reached an endpoint that could have answered. This
+    is the case where it did not, produced without leaving the machine — a
+    listener whose accept queue is full neither completes the handshake nor
+    refuses it.
+
+    **Bounded rather than trusted.** A connect that never completes is the one
+    condition here that hangs rather than fails, so the call runs on a daemon
+    thread with a deadline: a gateway with no connect timeout at all fails this
+    test with a message instead of holding CI open until the kernel gives up.
+    """
+    with saturated_endpoint() as unreachable:
+        # Set before anything under `app.` is imported: a gateway that builds its
+        # client out of `Settings()` at import reads the environment once, and
+        # `import_app_module` is what makes that observable rather than a matter
+        # of which test ran first.
+        monkeypatch.setenv(AI_PROVIDER_BASE_URL_VARIABLE, unreachable)
+        base = gateway_error_base(import_app_module)
+        task = validity_task(import_app_module)
+
+        def submit() -> Any:
+            session = Session(bind=migrated_engine)
+            try:
+                return call_task(task, session=session, comment=SUBSTANTIVE_COMMENT)
+            finally:
+                session.close()
+
+        outcome = call_with_deadline(submit)
+
+    assert outcome.state != "did not finish", (
+        f"A validity call against {unreachable}, where no connection can be completed, had not "
+        f"returned after {CALL_DEADLINE_SECONDS:.0f} seconds. A gateway with no connect timeout "
+        "holds a request thread for as long as the kernel retries a handshake, which on §3.3's "
+        "synchronous submit path is a student watching a spinner rather than a p95 under two "
+        "seconds."
+    )
+    assert outcome.state == "raised", (
+        f"A connect that never completed produced {outcome.value!r} rather than raising. ADR 0056 "
+        "puts it outside the floor, and the reason is measured rather than argued: a connection "
+        "that never opens sends nothing, so no comment was classified and no amount of waiting "
+        "would have classified it. `httpx.ConnectTimeout` subclasses `httpx.TimeoutException`, "
+        "which is exactly how this case came to be floored by a rule that meant to exclude it."
+    )
+    assert isinstance(outcome.value, base) and not isinstance(outcome.value, FELL_OVER), (
+        f"A connect that never completed raised {type(outcome.value).__name__}: "
+        f"{outcome.value!r}. ADR 0056 makes `{GATEWAY_ERROR_BASE}` the one class a caller catches."
+    )
+
+
+def test_a_two_hundred_that_is_not_json_raises_a_catchable_gateway_error(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+) -> None:
+    """A captive portal answers 200 with HTML, and that has to arrive as a gateway error.
+
+    The shape a review found escaping every branch: the transport succeeded, the
+    status was 200, and the body was not JSON — so the failure surfaced as a bare
+    `json.JSONDecodeError` from underneath the gateway. Nothing about that is
+    catchable by a caller who has been told to catch `AIGatewayError`, and it is
+    the single most likely thing to meet a deployment behind a hotel network or a
+    corporate proxy that intercepts.
+
+    Asserted as a type rather than as "it raised", because `AIGatewayError`'s
+    whole reason for existing is that §3.3's submit path decides what to do about
+    a provider failure, and it cannot decide about an exception class it has never
+    heard of. A caller that has to enumerate the library's error types will miss
+    one, and the one it misses reaches a student.
+    """
+    base = gateway_error_base(import_app_module)
+    stub_provider.script(
+        Answer(status=200, body="<html><head><title>Sign in to continue</title></head></html>")
+    )
+
+    with pytest.raises(base):
+        run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+
+
+# ---------------------------------------------------------------------------
 # One gateway, many threads
 # ---------------------------------------------------------------------------
 
@@ -2811,6 +3343,255 @@ def test_the_application_role_may_write_a_classification_row(
         "them writing a classification for every comment — so the first one in a real deployment "
         "fails with a permission error while every test in this module, which writes on the "
         "bootstrap connection, stays green."
+    )
+
+
+def model_column_of(row: Mapping[str, Any], recorded: str, where: str) -> str:
+    """The one column of a classification row holding the model that answered.
+
+    Found by value rather than by name, like everything else this module reads out
+    of that table: E0-13 spells the table and none of its columns. The caller
+    passes a value it knows was recorded — an honest model name it watched go
+    out — and gets back the column to read in every later row.
+    """
+    columns = columns_holding(row, recorded)
+    if len(columns) != 1:
+        pytest.fail(
+            f"{len(columns)} columns of the `{CLASSIFICATION_TABLE}` row hold {recorded!r} "
+            f"({columns}); the row is {row!r}. {where} None means the model that answered was not "
+            "recorded at all, which "
+            "`test_a_validity_call_writes_a_classification_row_carrying_its_audit_pair` owns; more "
+            "than one means this cannot tell which column the later rows should be read in."
+        )
+    return columns[0]
+
+
+def test_an_honest_model_name_is_recorded_as_the_provider_reported_it(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+    classification_rows: ClassificationRows,
+) -> None:
+    """A provider naming the model it really used is believed, and that is the control.
+
+    ADR 0031 decides what the value means: "`model_id` is the provider's own
+    identifier for the model, as the provider spells it, because §9.3's eval
+    floors compare runs of different models and a normalised name loses the
+    distinction the comparison is about." A hosted endpoint routinely answers as
+    something more precise than the model that was asked for — a dated build of
+    it — and that precision is the whole value of the field.
+
+    **Without this test the four below are satisfied by a gateway that never reads
+    the response envelope at all.** "The configured name was recorded" is exactly
+    what such a gateway does, for honest and dishonest reports alike, and §9.3
+    would then be comparing every run under one name whatever answered.
+    """
+    contract = validity_contract(import_app_module)
+    stub_provider.script(
+        well_formed(contract, INSUFFICIENT_VERDICT, reported_model=HONEST_MODEL_ID)
+    )
+    before = classification_rows.keys()
+
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+
+    added = classification_rows.keys() - before
+    assert len(added) == 1, (
+        f"One validity call added {len(added)} `{CLASSIFICATION_TABLE}` row(s). "
+        "`test_a_validity_call_writes_a_classification_row_carrying_its_audit_pair` owns that."
+    )
+    row = classification_rows.row(next(iter(added)))
+    assert row is not None, "The row that was just added could not be read back."
+
+    stored = {stored_text(value) for value in row.values() if value is not None}
+    assert HONEST_MODEL_ID in stored, (
+        f"The provider answered as {HONEST_MODEL_ID!r} and the row records {row!r}, which does not "
+        f"carry it — `AI_MODEL_NAME` was {STUB_MODEL_ID!r}. ADR 0031: the recorded value is 'the "
+        "provider's own identifier for the model, as the provider spells it', because §9.3's eval "
+        "floors compare runs of different models. A gateway that records what it asked for rather "
+        "than what answered reports every run under one name, and the dated build that produced a "
+        "classification is unrecoverable."
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "reported"),
+    [
+        ("two hundred thousand characters", OVERLONG_MODEL_ID),
+        ("whitespace only", WHITESPACE_MODEL_ID),
+        ("a forged log line", FORGED_LOG_LINE_MODEL_ID),
+        ("a null byte", NUL_MODEL_ID),
+    ],
+)
+def test_a_provider_cannot_choose_what_the_classification_records_as_its_model(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+    classification_rows: ClassificationRows,
+    case: str,
+    reported: str,
+) -> None:
+    """Half the audit pair came from the provider's envelope, unvalidated.
+
+    §7.4 makes the model ID an audit value — "a specific prompt version and model
+    ID produced a specific classification for a specific comment" — and an audit
+    value a third party can write is not one. A review measured 200,000 characters
+    stored in full; the implementer then found the sharper three. Each fails
+    differently and none of them is exotic:
+
+      - **200,000 characters** is a row nobody bounded, written once per
+        classification, from a value the provider chooses.
+      - **Whitespace** is a name that is not one: it satisfies every "is it
+        present" check and identifies nothing.
+      - **A newline** forges a log line. A model ID rendered into a structured log
+        with `msg=` after it is a provider writing entries in this system's voice.
+      - **A null byte** is refused by Postgres outright, so an unguarded insert
+        fails and the classification is lost — the provider deciding that this
+        submission gets no record at all.
+
+    **The gateway records the configured name instead, and deliberately does not
+    raise.** A wrong model name is not a wrong verdict, and refusing the
+    classification would fail the student for the provider's misbehaviour — so
+    this test asserts the verdict still arrives as well as the name being replaced.
+    `test_an_honest_model_name_is_recorded_as_the_provider_reported_it` is the
+    control that stops this passing against a gateway that ignores the envelope.
+    """
+    contract = validity_contract(import_app_module)
+    name, verdicts = verdict_field(contract)
+    from_the_model = verdict_member(verdicts, INSUFFICIENT_VERDICT)
+
+    stub_provider.script(
+        well_formed(contract, INSUFFICIENT_VERDICT, reported_model=HONEST_MODEL_ID)
+    )
+    before = classification_rows.keys()
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    honest_keys = classification_rows.keys() - before
+    assert len(honest_keys) == 1, (
+        f"The control call added {len(honest_keys)} rows, so this test has no row to learn the "
+        "model column from. The control test above owns that failure."
+    )
+    honest_row = classification_rows.row(next(iter(honest_keys)))
+    assert honest_row is not None, "The control row could not be read back."
+    model_column = model_column_of(
+        honest_row, HONEST_MODEL_ID, "This test needs one column to read the reported model in."
+    )
+
+    stub_provider.script(well_formed(contract, INSUFFICIENT_VERDICT, reported_model=reported))
+    after_control = classification_rows.keys()
+    result = run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+
+    added = classification_rows.keys() - after_control
+    assert len(added) == 1, (
+        f"A call whose provider reported {case} added {len(added)} `{CLASSIFICATION_TABLE}` "
+        "row(s) rather than one. A provider naming itself badly must not cost the student their "
+        "classification: the name is replaced, the verdict is kept, and the row is written."
+    )
+    row = classification_rows.row(next(iter(added)))
+    assert row is not None, "The row written under a dishonest model name could not be read back."
+
+    assert isinstance(result, contract) and getattr(result, name) is from_the_model, (
+        f"A provider reporting {case} as its model changed the verdict: the task returned "
+        f"{result!r} rather than the {from_the_model!r} the provider actually gave. A wrong model "
+        "name is not a wrong verdict, and refusing the classification would fail the student for "
+        "the provider's misbehaviour."
+    )
+    assert stored_text(row[model_column]) == STUB_MODEL_ID, (
+        f"A provider reporting {case} had it written into `{CLASSIFICATION_TABLE}."
+        f"{model_column}` as {row[model_column]!r}; the configured `AI_MODEL_NAME` is "
+        f"{STUB_MODEL_ID!r}. §7.4 makes the model ID an audit value, and an audit value the "
+        "audited party writes is not one — 200,000 characters is an unbounded row, whitespace "
+        "identifies nothing, a newline forges a log line in this system's voice, and a null byte "
+        "is refused by Postgres so the classification is lost altogether. A name that cannot be "
+        "believed is replaced by the one this deployment configured, which is at least true about "
+        "what was asked."
+    )
+
+
+def test_a_provider_cannot_report_the_marker_that_means_no_model_answered(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+    classification_rows: ClassificationRows,
+) -> None:
+    """The sharpest of the reserved names: a provider forging "the floor decided this".
+
+    ADR 0054 gives a floored classification a marker of its own, and every
+    downstream reader turns on it — §6.1's drift panel excludes floored rows from
+    a sample of model behaviour, §9.3 cannot score a verdict no model produced,
+    and E2's async pass selects exactly those rows to classify again. A provider
+    that can write that marker into a row it *did* answer removes its own
+    classification from review and hands it to a re-classification queue, or the
+    reverse, depending on which way the deployment reads it.
+
+    **The marker is derived, never transcribed.** A read timeout is run first and
+    its row read; whatever distinguishes it is what the provider then claims. That
+    keeps the assertion true whatever ADR 0054 chose, and it means this test
+    cannot go stale by the marker being renamed — `docs/MISTAKES.md` entry 19, a
+    test holding its expectation in a copy of the thing it checks.
+    """
+    contract = validity_contract(import_app_module)
+    before = classification_rows.keys()
+
+    stub_provider.script(
+        well_formed(contract, INSUFFICIENT_VERDICT, reported_model=HONEST_MODEL_ID)
+    )
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    honest_keys = classification_rows.keys() - before
+    assert len(honest_keys) == 1, (
+        f"The answered call added {len(honest_keys)} rows, so this test cannot learn which column "
+        "holds the model. The control test above owns that failure."
+    )
+    honest_row = classification_rows.row(next(iter(honest_keys)))
+    assert honest_row is not None, "The answered row could not be read back."
+    model_column = model_column_of(
+        honest_row, HONEST_MODEL_ID, "This test needs one column to read the floor's marker in."
+    )
+
+    after_honest = classification_rows.keys()
+    stub_provider.script(timed_out())
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    floored_keys = classification_rows.keys() - after_honest
+    assert len(floored_keys) == 1, (
+        f"A timed-out call added {len(floored_keys)} rows, so there is no floored row to take the "
+        "marker from. `test_a_floored_classification_is_recorded_rather_than_skipped` owns that."
+    )
+    floored_row = classification_rows.row(next(iter(floored_keys)))
+    assert floored_row is not None, "The floored row could not be read back."
+    marker = stored_text(floored_row[model_column])
+
+    assert marker != STUB_MODEL_ID and marker != HONEST_MODEL_ID, (
+        f"A floored classification records {marker!r} as its model, which is a name a provider "
+        "could honestly report. `test_a_timed_out_classification_is_not_recorded_as_one_the_model_"
+        "produced` owns that: the floor needs a value that says a model was never asked."
+    )
+
+    after_floor = classification_rows.keys()
+    stub_provider.script(well_formed(contract, INSUFFICIENT_VERDICT, reported_model=marker))
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+
+    added = classification_rows.keys() - after_floor
+    assert len(added) == 1, (
+        f"A call whose provider claimed the floor's marker added {len(added)} rows rather than "
+        "one."
+    )
+    forged = classification_rows.row(next(iter(added)))
+    assert forged is not None, "The row written under the forged marker could not be read back."
+
+    assert stored_text(forged[model_column]) != marker, (
+        f"A provider reported {marker!r} — the value a floored classification records — and the "
+        f"row believed it: `{CLASSIFICATION_TABLE}.{model_column}` holds "
+        f"{forged[model_column]!r}. That row now says no model answered a comment a model did "
+        "answer. ADR 0054 makes that marker the thing §6.1's drift panel, §9.3's eval sets and "
+        "E2's async re-classification all turn on, so a provider that can write it decides which "
+        "of its own classifications are reviewed and which are quietly done again."
+    )
+    assert stored_text(forged[model_column]) == STUB_MODEL_ID, (
+        f"A provider claiming the floor's marker had `{CLASSIFICATION_TABLE}.{model_column}` "
+        f"recorded as {forged[model_column]!r}. A reported name that cannot be believed is "
+        f"replaced by the configured `AI_MODEL_NAME` ({STUB_MODEL_ID!r}), which is at least true "
+        "about what was asked — and not by a third value that would need its own meaning."
     )
 
 
