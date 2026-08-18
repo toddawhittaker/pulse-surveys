@@ -14,7 +14,7 @@ two are carried out of this epic with named owners.
 | 1 — `jwks_url` is credential-equivalent and unconstrained | **Carried to E1**, which writes and fetches the column and is the only code positioned to say what a legitimate value looks like |
 | 2 — nothing asserts there is no second writer of the derived section columns | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) |
 | 3 — nothing re-derives a section when a term's start-letter map is edited | **Carried to E2/E11**, the owners ADR 0021 and ADR 0018 already name |
-| 4 — the summer start-letter map is invented by the test suite | **Todd's decision** — a real seed map is a spec edit |
+| 4 — the summer start-letter map is invented by the test suite | **Decided 2026-08-18: no spec seed map.** The invented constants stay, marked as the suite's own choice, and the gap at position 6 survives any edit. |
 
 Items 1 and 3 are in the README's carried-out-of-E0 table, so a deferral recorded
 only in the ticket that deferred it does not become a deferral nobody picks up.
@@ -92,6 +92,12 @@ rediscovered separately: a map is admin-configured data (§2.2, §6.3), so it
 row silently keeps its old calendar.
 
 ### 4. The summer start-letter map is invented by the test suite
+
+**Decided 2026-08-18: no spec seed map.** The invented constants stay and stay
+marked as this suite's own choice. The acceptance criterion below is therefore
+the whole of the item, and **the gap at position 6 is the part that matters** —
+a contiguous 2-through-5 map is satisfiable by a range computed from the term's
+length, which is exactly the wrong implementation these tests exist to refuse.
 
 E0-07's per-term tests seed a 12-week summer term because §2.2 gives summer 12
 weeks but seeds no summer map. The start date (5/11/2026), the three-week block

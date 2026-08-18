@@ -48,10 +48,12 @@ becomes a description of something the codebase used to intend.
 Read first: [ADR 0045](../../adr/0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md),
 ADR 0014, ADR 0021, SPEC §2.1, and `docs/MISTAKES.md` entries 2 and 3.
 
-## Decide first: sweep the source, or refuse the write
+## Decided 2026-08-18: sweep the source
 
 This is the decision the three source tickets each declined to make, and making
-it once is most of the reason to batch them.
+it once is most of the reason to batch them. **Todd settled it on 2026-08-18:
+build the static sweep.** The rejected alternative stays below, because a
+record of what was weighed is what stops it being re-litigated.
 
 **A static sweep over the source.** Ask whether a module that writes those
 relations also names the guard. Cheap, matches the read-side sweep already in the
@@ -66,9 +68,16 @@ sweep would miss, including the indirect ones. Costs a hook on every write in th
 system from now on, and the failure mode when it is wrong is a refused legitimate
 write in production rather than a red test.
 
-E0-27 says plainly that neither is obviously right. **The choice affects item 3
-directly and items 1 and 2 by analogy**, so decide it once and apply it
-consistently rather than picking per item.
+E0-27 said plainly that neither is obviously right. **The sweep wins on cost and
+on precedent** — it matches the read-side check already in the tree, and the
+hook's failure mode is a refused legitimate write in production rather than a
+red test. Apply it to all three items rather than picking per item, and
+**record what a syntactic sweep cannot see** the way ADR 0062 does for the
+mock-idp gate: it sees the shape of a call, never where the value came from,
+so a write reached through a helper or an ORM cascade is invisible to it.
+
+If E1's roster sync turns out to write in a way the sweep cannot follow, that
+reopens the question with evidence rather than by argument.
 
 Note that items 1 and 3 are the two halves of one seam and closing either does
 not close the other: item 1 is a column nobody marked, item 3 is a writer nobody
@@ -97,8 +106,8 @@ adding `course.canvas_id` leaves the prefixed set unchanged.
       something, **or** ADR 0021 is amended to say plainly that this is
       unenforced and why that is acceptable. Do not leave E0-07's "exactly one
       path" wording standing with nothing behind it.
-- [ ] The sweep-versus-hook decision is recorded where the rule lives, with what
-      the chosen one cannot see.
+- [ ] The sweep's limits are recorded where the rule lives — what it cannot see,
+      stated as plainly as ADR 0062 states the same limits for the mock-idp gate.
 - [ ] All three verified by mutation, and the mutation set includes the nearest
       passing case rather than only the obvious failure.
 
@@ -109,8 +118,10 @@ adding `course.canvas_id` leaves the prefixed set unchanged.
 **Docs apply.** ADR 0014 gains a line if item 1 is closed at table grain — the
 marker stops being the enforcement mechanism and becomes documentation, which
 retires one of the two reasons that ADR gives for a name prefix over an `info={}`
-dict. ADR 0021 gains a line either way. If the session hook wins, that is its own
-ADR.
+dict. ADR 0021 gains a line either way. The sweep-over-hook choice is a
+construction decision the spec does not answer and a reasonable engineer might
+make differently, so **it wants its own ADR in this pull request**, recording the
+hook as the alternative rejected and why.
 
 **AI evals do not apply. Accessibility does not apply.**
 

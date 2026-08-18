@@ -6,13 +6,31 @@
 
 ## Status — what is left here
 
-**The question is recorded; the answer is not.** PR #20 created this file and
-answered nothing, deliberately — the answer is a spec edit and spec edits are
-Todd's.
+**Answered 2026-08-18; the spec edit is still owed.** PR #20 created this file
+and deliberately answered nothing. The answer now exists and the spec change
+that carries it does not — that change is Todd's.
 
-It blocks nothing in E0 and **E1's roster sync cannot be built without it**, so
-it wants settling by the end of this epic rather than at the start of the next
-one. It does not batch with anything.
+**Any instructor or leadership launch triggers a roster pull, and the roster
+service address is stored from that launch. A student launch does not.** Every
+later scheduled sync works from the stored address, which is what gives the
+scheduled job the discovery it otherwise lacks. An operator sees "no roster
+yet" on a section that has never had one.
+
+That answer is chosen against the failure state this ticket names: a section
+whose first launch is a student on a platform that withheld the address, where
+Pulse knows the section exists and cannot ask who is in it — no roster, no
+survey windows, no participation denominator, and nothing errors. Restricting
+the trigger to staff launches does not make that state impossible, because a
+platform can withhold the claim from a staff launch too; it makes it rare and
+it keeps student traffic from causing outbound calls.
+
+**What the spec edit has to say**, beyond the trigger: that the service address
+is stored, and what an operator sees when a section has never had a roster. The
+column that stores it, its migration and its tests are **E1's**, built with the
+sync that reads it.
+
+It blocks nothing in E0 and E1's roster sync cannot be built without it. It does
+not batch with anything.
 
 
 ## Context

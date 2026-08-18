@@ -10,8 +10,8 @@
 
 | Item | Now |
 |---|---|
-| 1 — E0-18 needs an `lti_platform` row and nothing creates one | **This ticket**, and it **blocks [E0-18](E0-18-e0-exit-smoke.md)** |
-| 2 — `design/`'s 27 course numbers all fail SPEC §8's bands | **Todd's decision** |
+| 1 — E0-18 needs an `lti_platform` row and nothing creates one | **This ticket**, and it **blocks [E0-18](E0-18-e0-exit-smoke.md)**. Mechanism decided 2026-08-18: reuse the seed script's development-environment guard. |
+| 2 — `design/`'s 27 course numbers all fail SPEC §8's bands | **Decided 2026-08-18: the design corpus is illustration**, not a source of seedable data, and says so. No renumbering. |
 | 3 — `DEVELOPMENT_ENVIRONMENT` is spelled in two files | [E0-37](E0-37-small-corrections.md) item 2 |
 | 4 — an unreachable adoption path worth a sentence | [E0-37](E0-37-small-corrections.md) item 6 |
 | 5 — two files outside `scripts/` that E0-17 touched | **Closed** — a record, made in E0-17's own pull request |
@@ -57,10 +57,25 @@ This is E0-17's criterion 2 arriving one ticket later, on the ticket that actual
 needs the row. It cannot be settled by E0-17, because E0-17 correctly declined to
 create a registration it did not need.
 
+**Decided 2026-08-18.** Register the mock behind the guard `scripts/seed.py`
+already carries — the one that refuses to run outside a development
+environment, whose reading of resolved configuration was settled in
+`docs/disputes/E0-17-01.md`. Nothing new is invented, and the rule that keeps
+the row out of a deployment is one that has already been argued through and
+ruled on. The residual gap that dispute accepted by decision — an operator
+exporting a production `DATABASE_URL` over a development checkout — is
+inherited here and should be named rather than re-discovered.
+
 Done when: E0-18 can launch, the registration is unreachable from a deployment,
-and ADR 0038 says what makes it so.
+and ADR 0038 is amended to name that guard as what makes it so.
 
 ### 2. `design/`'s 27 course numbers all fail SPEC §8's bands
+
+**Decided 2026-08-18: the design corpus is illustration.** It is a design
+deliverable, not a source of seedable data, and it gains a line saying so. No
+renumbering, and nobody reconciles it against §8. What that line has to prevent
+is the confusion this item names: a developer reading E0-17's README section
+beside a screenshot and assuming one of them is wrong.
 
 Every distinct course number written across `design/` is four digits and below
 `8000`, which is the gap between the two bands: `BIOL 2150`, `CHEM 1210`,

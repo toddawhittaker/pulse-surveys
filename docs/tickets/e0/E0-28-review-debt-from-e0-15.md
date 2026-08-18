@@ -12,11 +12,17 @@
 | Item | Now |
 |---|---|
 | 1, 2, 3, 4, 5, 7, 9, 10 | **This ticket** — build them together |
-| 6 — the client-credentials grant is deferred | **Todd's decision** — build it here, or write its four moving parts into E1's ticket |
+| 6 — the client-credentials grant is deferred | **Decided 2026-08-18: not built here.** Its four moving parts go into E1's ticket. The other eight items proceed without it. |
 | 8 — `make docker-build` waits on fewer services than CI | **Closed** — the Makefile now waits on `api worker beat mock-lms mock-idp` |
 
-Item 6 is the one that changes what this ticket costs, so decide it before
-starting rather than during.
+Item 6 was the one that changed what this ticket costs, and it is settled: **the
+grant is not built here.** Its four moving parts — the token endpoint in
+discovery, the AGS and NRPS scopes in `scopes_supported`, `auth_token_url` in
+`/registration` and in `lti_platform`, and somewhere for the platform to fetch
+the tool's JWKS — go into E1's ticket, so whoever builds the roster sync meets
+them before writing the client rather than after. That is the second branch of
+this ticket's own criterion, and it is only worth anything if the paragraph
+actually reaches E1's ticket, so **that is the deliverable for item 6**.
 
 
 ## Context

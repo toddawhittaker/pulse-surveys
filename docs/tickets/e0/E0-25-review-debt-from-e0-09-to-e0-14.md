@@ -16,7 +16,7 @@ decision for Todd, and one is carried to E1.
 | 3 — `fresh_scope`'s docstring overclaims | [E0-37](E0-37-small-corrections.md) item 5 |
 | 4 — `MISTAKES` entry 16 wants its database-shaped variant | **Closed** |
 | 5 — the mock LMS cannot mint a deliberately wrong launch | **Carried to E1** |
-| 6 — two spec lines describe things that no longer exist | **Todd's decision** — both are spec edits |
+| 6 — two spec lines describe things that no longer exist | **Decided 2026-08-18: correct both.** Spec edits, still owed — see the README's Decided table. |
 
 On item 4: `docs/mistakes/16-a-mutation-harness-reported-kills-it-had-not-made.md`
 now carries the clause — a mutation that lives in the database is read from the
@@ -101,6 +101,11 @@ now so E1 does not discover it after starting. Belongs in E1's ticket or an E0-1
 amendment; it is not work for this ticket.
 
 ### 6. Two spec lines describe things that no longer exist
+
+**Decided 2026-08-18: correct both.** Both changes were deliberate and both are
+already explained in an ADR, so this is transcription rather than a decision —
+but it is a spec edit, so it is Todd's to make. It is tracked in the README's
+*Decided* table until it lands.
 
 Both raised by implementers who declined to edit the spec themselves, correctly:
 
