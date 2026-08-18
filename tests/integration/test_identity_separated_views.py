@@ -16,12 +16,12 @@ the marker convention they are built on, so that widening the convention widens
 both (`docs/MISTAKES.md` entry 13).
 
 **One test here is E0-33's** —
-`test_every_view_created_under_views_sql_exists_in_the_migrated_database`, the
-direction this file did not have. It is here rather than in
-`test_objects_the_drift_gate_cannot_compare.py` with the rest of that ticket for
-the same entry-13 reason: it needs the `CREATE VIEW` sweep below, whose word
-boundary took an incident to get right, and a second copy of that regex is worth
-more trouble than the file boundary is.
+`test_every_object_created_under_views_sql_exists_in_the_migrated_database`, the
+direction this file did not have, over the view set *and* the function set. It is
+here rather than in `test_objects_the_drift_gate_cannot_compare.py` with the rest
+of that ticket for the same entry-13 reason: it needs the `CREATE` sweeps below,
+whose word boundary took an incident to get right, and a second copy of that
+regex is worth more trouble than the file boundary is.
 
 **Nothing here names a view.** E0-10's scope asks for "a section-roster view and
 an enrollment-count view" and spells neither, so every view in `public` is
@@ -59,7 +59,7 @@ inherits that view's text into its own plan.
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from sqlalchemy import text
@@ -168,7 +168,7 @@ VIEW_CREATE_MUST_ALLOW = (
 )
 
 # And the same for the drop sweep, which is what keeps
-# `test_every_view_created_under_views_sql_exists_in_the_migrated_database` from
+# `test_every_object_created_under_views_sql_exists_in_the_migrated_database` from
 # being a tripwire on a view that was deliberately retired. The must-allow samples
 # carry the weight again: `DROP TABLE` and a differently-named view both have to
 # fail, or a retired view would excuse a missing one that shares a prefix with it.
@@ -198,6 +198,53 @@ VIEW_DROP_MUST_ALLOW = (
 # that was created twice. The consequence was not theoretical: `section_roster`
 # would have dropped out of the expected set permanently, taking with it the
 # mutation the test that uses this was written for (E0-20 item 3b, row five).
+# The same four sample sets for the function half, which E0-33 item 3 asks for
+# beside the view half and which nothing compared until now: a `views_sql/` file
+# containing a `CREATE FUNCTION` and left out of every revision's `SCRIPTS` was
+# measured leaving all 42 tests green, where the same file shaped as a
+# `CREATE VIEW` turned the view test red.
+#
+# **The must-allow set is where the weight is, and every member of it is a line
+# this repository really writes.** `identity_grants_v001.sql` grants and revokes on
+# the reveal function by name, and ADR 0043's `ALTER FUNCTION … OWNER TO` is one
+# statement in the same family. If any of those read as a creation, the expected
+# set would contain a function the files never define — and the test would then be
+# asserting something about the catalog on the strength of a `GRANT`, which is
+# `docs/MISTAKES.md` entry 3's sixth incident in a new place.
+CANARY_FUNCTION = "canary_function"
+
+FUNCTION_CREATE_MUST_CATCH = (
+    f"CREATE FUNCTION public.{CANARY_FUNCTION}(uuid) RETURNS text",
+    f"create or replace function {CANARY_FUNCTION}() returns void",
+    f'CREATE OR REPLACE FUNCTION public."{CANARY_FUNCTION}"(a uuid, b text)',
+    f"CREATE PROCEDURE public.{CANARY_FUNCTION}()",
+    f"CREATE FUNCTION\n    public.{CANARY_FUNCTION}(uuid)",
+)
+
+FUNCTION_CREATE_MUST_ALLOW = (
+    f"GRANT EXECUTE ON FUNCTION public.{CANARY_FUNCTION}(uuid) TO pulse_care",
+    f"REVOKE ALL ON FUNCTION public.{CANARY_FUNCTION}(uuid) FROM PUBLIC",
+    f"ALTER FUNCTION public.{CANARY_FUNCTION}(uuid) OWNER TO pulse_reveal_definer",
+    f"COMMENT ON FUNCTION public.{CANARY_FUNCTION}(uuid) IS 'the audited reveal'",
+    f"DROP FUNCTION IF EXISTS public.{CANARY_FUNCTION}(uuid)",
+    f"-- {CANARY_FUNCTION} is created by the revision, not by this file",
+    f"CREATE FUNCTION public.{CANARY_FUNCTION}_v2(uuid) RETURNS text",
+)
+
+FUNCTION_DROP_MUST_CATCH = (
+    f"DROP FUNCTION public.{CANARY_FUNCTION}(uuid)",
+    f"drop function if exists {CANARY_FUNCTION}",
+    f'DROP PROCEDURE public."{CANARY_FUNCTION}"()',
+)
+
+FUNCTION_DROP_MUST_ALLOW = (
+    f"CREATE FUNCTION public.{CANARY_FUNCTION}(uuid) RETURNS text",
+    f"DROP FUNCTION public.{CANARY_FUNCTION}_v2(uuid)",
+    f"DROP TABLE IF EXISTS public.{CANARY_FUNCTION}",
+    f"-- drop function public.{CANARY_FUNCTION}(uuid) when E10 replaces it",
+    f"GRANT EXECUTE ON FUNCTION public.{CANARY_FUNCTION}(uuid) TO pulse_care",
+)
+
 VIEW_HISTORY_SAMPLES: tuple[tuple[tuple[str, ...], bool], ...] = (
     ((f"DROP VIEW public.{CANARY_VIEW};\nCREATE VIEW public.{CANARY_VIEW} AS SELECT 1;",), True),
     ((f"CREATE VIEW public.{CANARY_VIEW} AS SELECT 1;\nDROP VIEW public.{CANARY_VIEW};",), False),
@@ -225,28 +272,76 @@ def read_views(connection: Any) -> list[str]:
     return [row[0] for row in connection.execute(text(READ_VIEWS))]
 
 
-# The view a `CREATE` or a `DROP` names, with an optional schema and optional
+# The object a `CREATE` or a `DROP` names, with an optional schema and optional
 # double quotes on either part. The name is captured greedily as a whole word, so
 # `canary_view_totals` reads as itself rather than as a match for `canary_view` —
 # the boundary the name-anchored first version of this sweep needed a `\b` for.
-VIEW_NAME = r'(?:"?(?P<schema>\w+)"?\s*\.\s*)?"?(?P<view>\w+)"?'
+# A function's argument list stops the capture on its own, because `(` is not a
+# word character: `CREATE FUNCTION public.reveal(uuid, uuid)` yields `reveal`.
+OBJECT_NAME = r'(?:"?(?P<schema>\w+)"?\s*\.\s*)?"?(?P<name>\w+)"?'
 
 CREATES_A_VIEW = re.compile(
     r"\bcreate\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+"
-    r"(?:if\s+not\s+exists\s+)?" + VIEW_NAME,
+    r"(?:if\s+not\s+exists\s+)?" + OBJECT_NAME,
     re.IGNORECASE,
 )
 
 DROPS_A_VIEW = re.compile(
-    r"\bdrop\s+(?:materialized\s+)?view\s+(?:if\s+exists\s+)?" + VIEW_NAME,
+    r"\bdrop\s+(?:materialized\s+)?view\s+(?:if\s+exists\s+)?" + OBJECT_NAME,
+    re.IGNORECASE,
+)
+
+# `procedure` beside `function` because the catalog sweep this is compared against
+# filters `prokind IN ('f', 'p')`: a rule that read one and compared against both
+# would report a procedure as an object the files never created.
+CREATES_A_FUNCTION = re.compile(
+    r"\bcreate\s+(?:or\s+replace\s+)?(?:function|procedure)\s+" + OBJECT_NAME,
+    re.IGNORECASE,
+)
+
+DROPS_A_FUNCTION = re.compile(
+    r"\bdrop\s+(?:function|procedure)\s+(?:if\s+exists\s+)?" + OBJECT_NAME,
     re.IGNORECASE,
 )
 
 
-def view_history(sql: str) -> tuple[tuple[str, bool], ...]:
-    """Every statement in `sql` that creates or drops a view, **in source order**.
+class ObjectKind(NamedTuple):
+    """One kind of object a `views_sql/` file can create, and how to find it.
 
-    Each entry is the view's name and whether that statement created it. Order is
+    Two kinds, one mechanism. E0-33 item 3 asks for the view set *and* the function
+    set compared against the files that create them, and the fold is identical for
+    both — only the keyword differs. Two near-copies of it would be
+    `docs/MISTAKES.md` entry 13, and the copy is the one that does not get the next
+    repair: the ordering defect this fold exists to fix was found in the view half
+    and would have been written into the function half the same day.
+
+    `must_exist` is where they genuinely differ, and it is deliberately not
+    symmetric. SPEC §13 and E0-10 put the read views' SQL under `views_sql/`, so a
+    directory that creates no view is a defect. **Nothing in any record I can read
+    says where a *function's* SQL belongs**, so requiring the files to create one
+    would pin a decision no ticket has made — and would fail loudly on a repository
+    where every function is written inline in its revision, which is a legitimate
+    arrangement. The sweep is proven by
+    `test_the_text_sweeps_in_this_file_catch_what_they_claim_to` instead, which is
+    what lets an empty expectation here mean "the files create none" rather than
+    "the pattern is blind".
+    """
+
+    label: str
+    creates: re.Pattern[str]
+    drops: re.Pattern[str]
+    must_exist: bool
+
+
+VIEW = ObjectKind("view", CREATES_A_VIEW, DROPS_A_VIEW, must_exist=True)
+FUNCTION = ObjectKind("function", CREATES_A_FUNCTION, DROPS_A_FUNCTION, must_exist=False)
+OBJECT_KINDS = (VIEW, FUNCTION)
+
+
+def object_history(sql: str, kind: ObjectKind) -> tuple[tuple[str, bool], ...]:
+    """Every statement in `sql` that creates or drops one of `kind`, **in source order**.
+
+    Each entry is the object's name and whether that statement created it. Order is
     the whole point and was the defect: the first version of this file answered
     "which views are created" and "which are dropped" as two independent sets and
     subtracted one from the other, which cannot see a `DROP` *followed by* a
@@ -265,50 +360,55 @@ def view_history(sql: str) -> tuple[tuple[str, bool], ...]:
     and a name in a comment all have to fail as *creations*, and each is a sample
     in `VIEW_CREATE_MUST_ALLOW` above.
 
-    One function rather than three off these two patterns, because a regex whose
-    word boundary took an incident to establish is the last thing to copy
-    (`docs/MISTAKES.md` entry 13).
+    **A function is matched by name and not by signature**, which is a deliberate
+    narrowing. `pg_proc` identifies a function by name *and* argument types, and a
+    `DROP FUNCTION` may spell them or — since Postgres 10, where the name is
+    unambiguous — omit them; the two spellings of a type (`varchar` and `character
+    varying`) are a third way for a signature comparison to be wrong about
+    something that is right. The property being asserted is that the function the
+    file creates *exists*, so the name carries it, and the cost is stated: two
+    overloads of one name are one key here.
 
     **What it does not catch** (`docs/MISTAKES.md` entry 14): a `DROP VIEW a, b`
-    naming several views in one statement, of which it sees only the first. One
-    statement per view is what every file here writes, and the failure direction is
-    safe — an unseen drop leaves a red naming the view, not a silent green.
+    naming several objects in one statement, of which it sees only the first. One
+    statement per object is what every file here writes, and the failure direction
+    is safe — an unseen drop leaves a red naming the object, not a silent green.
 
     `without_comments` replaces each comment with a single space, which shifts
     offsets but never reorders what is left, so sorting on them is sound.
     """
     code = without_comments(sql)
-    events = [(match.start(), match.group("view"), True) for match in CREATES_A_VIEW.finditer(code)]
-    events += [(match.start(), match.group("view"), False) for match in DROPS_A_VIEW.finditer(code)]
-    return tuple((view, created) for _, view, created in sorted(events))
+    events = [(found.start(), found.group("name"), True) for found in kind.creates.finditer(code)]
+    events += [(found.start(), found.group("name"), False) for found in kind.drops.finditer(code)]
+    return tuple((name, created) for _, name, created in sorted(events))
 
 
-def views_standing_after(sources: Iterable[str]) -> set[str]:
-    """Which views `sources`, executed in the order given, leave standing.
+def objects_standing_after(sources: Iterable[str], kind: ObjectKind) -> set[str]:
+    """Which objects of `kind` `sources`, executed in the order given, leave standing.
 
-    The last statement naming a view decides, which is what makes a drop-then-
-    recreate a view that still has to exist and a create-then-drop a view that
-    does not. Across files, the order is the order the caller passes them in;
-    within a file it is source order.
+    The last statement naming an object decides, which is what makes a drop-then-
+    recreate an object that still has to exist and a create-then-drop one that does
+    not. Across files, the order is the order the caller passes them in; within a
+    file it is source order.
 
     **The cross-file order is the file name's**, and that is a limit worth
     stating. It is exact for the only case where cross-file order can matter —
-    two files naming the *same* view, which under ADR 0041 are `…_v001.sql` and
-    `…_v002.sql` and sort the way they run. Two different views are independent
-    keys, so nothing about their order matters. A pair of files that share a view
-    name and do not sort in execution order would fold wrongly, and the fix is the
+    two files naming the *same* object, which under ADR 0041 are `…_v001.sql` and
+    `…_v002.sql` and sort the way they run. Two different objects are independent
+    keys, so nothing about their order matters. A pair of files that share a name
+    and do not sort in execution order would fold wrongly, and the fix is the
     naming convention rather than this function.
     """
     standing: dict[str, bool] = {}
     for sql in sources:
-        for view, created in view_history(sql):
-            standing[view] = created
-    return {view for view, created in standing.items() if created}
+        for name, created in object_history(sql, kind):
+            standing[name] = created
+    return {name for name, created in standing.items() if created}
 
 
 def creates_view(sql: str, view: str) -> bool:
     """Does `sql` contain a statement that creates the view called `view`?"""
-    return (view, True) in view_history(sql)
+    return (view, True) in object_history(sql, VIEW)
 
 
 def public_relation_names(connection: Any) -> list[str]:
@@ -389,6 +489,35 @@ def schema_functions(connection: Any) -> list[tuple[str, str, list[str], bool]]:
 def view_sql_files() -> list[Path]:
     """Every `.sql` file shipped under `backend/app/views_sql/`, at any depth."""
     return sorted(VIEWS_SQL_DIR.rglob("*.sql")) if VIEWS_SQL_DIR.is_dir() else []
+
+
+def objects_in_catalog(connection: Any, kind: ObjectKind) -> set[str]:
+    """Every object of `kind` this project defines in `public`, by bare name.
+
+    The function side is derived from `schema_functions` rather than from a query
+    of its own, so the filter that decides which functions are *this project's* —
+    `public`, `prokind IN ('f', 'p')`, nothing owned by an extension — lives in one
+    place (`docs/MISTAKES.md` entry 13). `regprocedure` renders as
+    `[schema.]name(argtypes)`, and the name is what is compared: `object_history`
+    matches a function by name for the reasons its docstring gives.
+
+    The `else` is not unreachable defensiveness. A third `ObjectKind` added without
+    a catalog reader here would otherwise be compared against whichever branch fell
+    through, and an enumeration silently missing a member is the shape
+    `docs/MISTAKES.md` entry 14 records.
+    """
+    if kind is VIEW:
+        return set(read_views(connection))
+    if kind is FUNCTION:
+        return {
+            signature.split("(")[0].rsplit(".", 1)[-1].strip('"')
+            for signature, *_ in schema_functions(connection)
+        }
+    pytest.fail(
+        f"`objects_in_catalog` has no reader for the object kind {kind.label!r}. It was added to "
+        "`OBJECT_KINDS` without a way to ask the catalog about it, so the test comparing the "
+        "files against the database has nothing to compare that kind with."
+    )
 
 
 def test_alembic_upgrade_head_creates_the_identity_separated_read_views(
@@ -485,16 +614,38 @@ def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     )
 
 
-def test_every_view_created_under_views_sql_exists_in_the_migrated_database(
-    migrated_engine: Any,
+@pytest.mark.parametrize("kind", OBJECT_KINDS, ids=[kind.label for kind in OBJECT_KINDS])
+def test_every_object_created_under_views_sql_exists_in_the_migrated_database(
+    migrated_engine: Any, kind: ObjectKind
 ) -> None:
-    """E0-33 item 3, the view set: the other direction of the test above.
+    """E0-33 item 3, the view set **and the function set**: the other direction.
 
     The test above walks from the catalog outwards — every view in the database
     was created by a file. That direction cannot see a view that is *missing*: a
     database with one view, or with none, satisfies it perfectly. This one walks
-    from the files outwards, and together they are a set equality with no view
+    from the files outwards, and together they are a set equality with no object
     named anywhere in this module.
+
+    **Both kinds, in one test parametrised over them**, because E0-33 item 3 asks
+    for the function set beside the view set and the fold is identical — only the
+    keyword differs. The function half was demonstrated missing: a `views_sql/`
+    file containing a `CREATE FUNCTION` and left out of every revision's `SCRIPTS`
+    left all 42 tests green, where the same file shaped as a `CREATE VIEW` turned
+    this one red. Two near-copies of the fold would have been
+    `docs/MISTAKES.md` entry 13, and the copy is the one that would not have got
+    the ordering repair below.
+
+    **The function half does not require the files to create anything**, and that
+    asymmetry is deliberate rather than an oversight — `ObjectKind.must_exist`
+    carries it. SPEC §13 and E0-10 put the read views' SQL under `views_sql/`, so a
+    directory creating no view is a defect. Nothing in any record settles where a
+    *function's* SQL belongs, so requiring one here would pin a decision no ticket
+    has made, and would fail on a repository that writes its functions inline in
+    revisions — a legitimate arrangement. What keeps the empty case honest is that
+    the sweep is proven elsewhere: `test_the_text_sweeps_in_this_file_catch_what_
+    they_claim_to` runs the `CREATE FUNCTION` pattern against five shapes it must
+    catch and seven it must allow, so an empty expectation here means the files
+    create none rather than that the pattern is blind.
 
     **The gap it closes is measured rather than supposed.** E0-20 item 3b dropped
     `public.section_roster` from a freshly upgraded container and `alembic check`
@@ -507,7 +658,7 @@ def test_every_view_created_under_views_sql_exists_in_the_migrated_database(
 
     **Retired views drop out, and that is what keeps this from being a tripwire on
     the directory.** A view replaced by one of another name leaves its `CREATE` in
-    the file that shipped it, and `views_standing_after` is what lets that be true
+    the file that shipped it, and `objects_standing_after` is what lets that be true
     without this test going red. It does mean a retirement has to be written under
     `views_sql/` rather than inline in a revision — the rule SPEC §13 already sets
     for a view's creation, applied to the other end of its life.
@@ -520,21 +671,27 @@ def test_every_view_created_under_views_sql_exists_in_the_migrated_database(
     public.section_roster …;` — subtracted that view despite it being created
     twice. The test would then have stopped requiring the schema's most
     identity-sensitive view to exist, permanently and silently, including against
-    the very mutation below. `views_standing_after` lets the last statement naming
+    the very mutation below. `objects_standing_after` lets the last statement naming
     a view decide, and `VIEW_HISTORY_SAMPLES` carries the drop-then-recreate pair
     so that nobody regresses it back to a subtraction.
 
     **The mutation it exists to survive**: `DROP VIEW public.section_roster`
-    against the migrated database — E0-20 item 3b's fifth row — or a revision that
-    stops executing one of the files under `views_sql/`.
-    **The near miss it tolerates**: a third view added, in a file and in the
-    database together; a view renamed, with the drop and the create both under
-    `views_sql/`; and a view dropped and recreated in one file, which stays
+    against the migrated database — E0-20 item 3b's fifth row — and `DROP FUNCTION
+    public.<the reveal>`, which is that table's fourth row and the one row of the
+    six never mutated. It survives, too, a revision that stops executing one of the
+    files under `views_sql/`, which is how the function half was demonstrated
+    missing.
+    **The near miss it tolerates**: a third object added, in a file and in the
+    database together; one renamed, with the drop and the create both under
+    `views_sql/`; and one dropped and recreated in a single file, which stays
     expected because it stands at the end.
 
-    **The canary is the set of expected names itself.** A sweep that found nothing
-    to expect would compare an empty set against the catalog and report success,
-    which is `docs/MISTAKES.md` entry 3's shape exactly.
+    **The canary is the set of expected names itself, where there has to be one.**
+    A sweep that found nothing to expect would compare an empty set against the
+    catalog and report success (`docs/MISTAKES.md` entry 3) — so for views, which
+    SPEC §13 requires to be here, an empty expectation is a failure; for functions,
+    which no record places, it is a fact, and the sweep's own self-test is what
+    makes it a trustworthy one.
     """
     files = view_sql_files()
     assert files, (
@@ -543,31 +700,32 @@ def test_every_view_created_under_views_sql_exists_in_the_migrated_database(
         "`test_every_read_view_is_created_from_a_sql_file_under_views_sql` diagnoses that."
     )
 
-    expected = views_standing_after(path.read_text(encoding="utf-8") for path in files)
-    assert expected, (
-        f"No `.sql` file under {VIEWS_SQL_DIR} leaves a view standing at the end of it — the files "
-        f"are {[path.name for path in files]}. Either the views have moved out of the directory "
-        "SPEC §13 puts them in, every one of them is dropped again by a later file, or this sweep "
-        "has gone blind; in all three the comparison below is between an empty set and whatever "
-        "the database holds, and passes."
-    )
+    expected = objects_standing_after((path.read_text(encoding="utf-8") for path in files), kind)
+    if kind.must_exist:
+        assert expected, (
+            f"No `.sql` file under {VIEWS_SQL_DIR} leaves a {kind.label} standing at the end of it "
+            f"— the files are {[path.name for path in files]}. Either they have moved out of the "
+            "directory SPEC §13 puts them in, every one of them is dropped again by a later file, "
+            "or this sweep has gone blind; in all three the comparison below is between an empty "
+            "set and whatever the database holds, and passes."
+        )
 
     with migrated_engine.connect() as connection:
-        present = set(read_views(connection))
+        present = objects_in_catalog(connection, kind)
 
     absent = sorted(expected - present)
     assert not absent, (
-        f"{absent} are created by a file under {VIEWS_SQL_DIR} and are not views in the migrated "
-        f"database, which holds {sorted(present)}.\n\n"
-        "A view is invisible to the drift gate in both directions: `alembic check` compares "
-        "`Base.metadata` against the database, and a view has no entry there — E0-20 item 3b "
-        "dropped one from a freshly upgraded container and the check reported clean, with a "
-        "dropped column in the same run detected as the canary. So both ways this happens reach "
-        "`main` green: a `DROP VIEW` run against a database, and a revision that stops executing "
-        "the file that creates it.\n\n"
-        "If the view was retired on purpose, the `DROP VIEW` belongs under "
-        f"{VIEWS_SQL_DIR} beside the `CREATE` it retires — which is where this test looks for it, "
-        "and where the next reader will look for what happened to it."
+        f"{absent} are created as a {kind.label} by a file under {VIEWS_SQL_DIR} and are not in "
+        f"the migrated database, which holds {sorted(present)}.\n\n"
+        "Neither a view nor a function is visible to the drift gate, in either direction: "
+        "`alembic check` compares `Base.metadata` against the database, and `Base.metadata` holds "
+        "tables and columns. E0-20 item 3b measured both — a dropped view reported **clean**, a "
+        "dropped function reported **clean**, and a dropped column in the same run was detected as "
+        "the canary. So both ways this happens reach `main` green: the object dropped against a "
+        "database, and a revision that stops executing the file that creates it.\n\n"
+        f"If the {kind.label} was retired on purpose, its `DROP` belongs under {VIEWS_SQL_DIR} "
+        "beside the `CREATE` it retires — which is where this test looks for it, and where the "
+        "next reader will look for what happened to it."
     )
 
 
@@ -681,31 +839,70 @@ def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
         )
 
     for sample in VIEW_DROP_MUST_CATCH:
-        assert (CANARY_VIEW, False) in view_history(sample), (
-            f"`view_history` does not read {sample!r} as dropping `{CANARY_VIEW}`, which is a "
+        assert (CANARY_VIEW, False) in object_history(sample, VIEW), (
+            f"`object_history` does not read {sample!r} as dropping `{CANARY_VIEW}`, which is a "
             "shape it exists to catch. A view retired in `views_sql/` would then still be expected "
             "in the database, and "
-            "`test_every_view_created_under_views_sql_exists_in_the_migrated_database` would be "
+            "`test_every_object_created_under_views_sql_exists_in_the_migrated_database` would be "
             "red at the next view anybody replaces."
         )
 
     for sample in VIEW_DROP_MUST_ALLOW:
-        assert (CANARY_VIEW, False) not in view_history(sample), (
-            f"`view_history` reads {sample!r} as dropping `{CANARY_VIEW}`. It drops something "
+        assert (CANARY_VIEW, False) not in object_history(sample, VIEW), (
+            f"`object_history` reads {sample!r} as dropping `{CANARY_VIEW}`. It drops something "
             "else, drops nothing, or is a comment — and reading it as a drop excuses the view's "
             "absence from the database, which is the one thing that test exists to notice."
         )
 
+    for sample in FUNCTION_CREATE_MUST_CATCH:
+        assert (CANARY_FUNCTION, True) in object_history(sample, FUNCTION), (
+            f"`object_history` does not read {sample!r} as creating `{CANARY_FUNCTION}`, which is "
+            "a shape it exists to catch. The function half of "
+            "`test_every_object_created_under_views_sql_exists_in_the_migrated_database` then "
+            "expects nothing, and — because that half deliberately does not require its "
+            "expectation to be non-empty, since no record says function SQL belongs in "
+            "`views_sql/` — it would report success having compared an empty set. This loop is "
+            "what stands in for that missing canary."
+        )
+
+    for sample in FUNCTION_CREATE_MUST_ALLOW:
+        assert (CANARY_FUNCTION, True) not in object_history(sample, FUNCTION), (
+            f"`object_history` reads {sample!r} as creating `{CANARY_FUNCTION}`. It names the "
+            "function without defining it — a `GRANT EXECUTE`, a `REVOKE`, an `ALTER FUNCTION … "
+            "OWNER TO`, a comment, or a different function whose name begins the same way. Every "
+            "one of those is a line this repository really writes about the reveal function, so "
+            "accepting one would put a function in the expected set on the strength of a grant, "
+            "and the comparison against the catalog would be asserting something the files never "
+            "said."
+        )
+
+    for sample in FUNCTION_DROP_MUST_CATCH:
+        assert (CANARY_FUNCTION, False) in object_history(sample, FUNCTION), (
+            f"`object_history` does not read {sample!r} as dropping `{CANARY_FUNCTION}`, which is "
+            "a shape it exists to catch. A function retired in `views_sql/` would then still be "
+            "expected in the database, and the test that consumes this would be red at the next "
+            "function anybody replaces — E10 replaces the reveal."
+        )
+
+    for sample in FUNCTION_DROP_MUST_ALLOW:
+        assert (CANARY_FUNCTION, False) not in object_history(sample, FUNCTION), (
+            f"`object_history` reads {sample!r} as dropping `{CANARY_FUNCTION}`. It drops "
+            "something else, drops nothing, or is a comment — and reading it as a drop excuses "
+            "the function's absence from the database, which is the one thing that test exists "
+            "to notice."
+        )
+
     for sources, standing in VIEW_HISTORY_SAMPLES:
-        assert (CANARY_VIEW in views_standing_after(sources)) is standing, (
+        assert (CANARY_VIEW in objects_standing_after(sources, VIEW)) is standing, (
             f"Executed in order, {sources!r} should leave `{CANARY_VIEW}` "
-            f"{'standing' if standing else 'retired'}, and `views_standing_after` says otherwise. "
-            "Order is the whole of what this fold adds over the two sweeps above: a set of "
-            "creates minus a set of drops cannot tell a view that was dropped and recreated — "
-            "which is what a `…_v002.sql` changing a column list has to write, because "
-            "`CREATE OR REPLACE VIEW` cannot alter one — from a view that was retired. Getting "
-            "that backwards drops the most identity-sensitive view in the schema out of the "
-            "expected set for good, and the test below then passes with it missing."
+            f"{'standing' if standing else 'retired'}, and `objects_standing_after` says "
+            "otherwise. Order is the whole of what this fold adds over the two sweeps above: a "
+            "set of creates minus a set of drops cannot tell an object that was dropped and "
+            "recreated — which is what a `…_v002.sql` changing a column list has to write, "
+            "because `CREATE OR REPLACE VIEW` cannot alter one — from an object that was "
+            "retired. Getting that backwards drops the most identity-sensitive view in the schema "
+            "out of the expected set for good, and the test that consumes the fold then passes "
+            "with it missing."
         )
 
 
