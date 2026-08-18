@@ -52,11 +52,13 @@ anything built out of one is masked too; a guard written on the model would have
 had to be repeated for every container the value can end up in.
 """
 
+import ipaddress
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, ValidationInfo, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -118,6 +120,45 @@ def _describe_invalid_settings(
         if description:
             lines.append(f"      {description}")
     return lines
+
+
+def _blank_is_absent(value: object) -> object:
+    """Read a blank string as "this process was not given the value".
+
+    Blanking is how a value is *removed* in Compose: `env_file:` has already
+    handed a service the whole of `.env` by the time its own `environment:`
+    block is applied, so setting a variable to the empty string is what
+    withholds it and omitting the entry leaves it in place. An empty string that
+    validated would leave the withheld-from process looking configured and fail
+    later, somewhere else.
+
+    Whitespace is stripped first: a value that is only spaces is a blanking
+    somebody reformatted, not a value.
+
+    Written once and used by every optional field that can be withheld this way,
+    rather than copied per field — the copy is the one nobody updates
+    (`docs/MISTAKES.md` entry 13).
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _is_on_this_machine(host: str | None) -> bool:
+    """Whether a URL's host names this machine, so nothing crosses a network.
+
+    `localhost` by name, and any address in a loopback range by value —
+    `127.0.0.0/8` and `::1`. A name this cannot resolve is not this machine: the
+    check is used to *permit* cleartext, so an unknown answer has to be "no".
+    """
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _configuration_error(problems: Iterable[str]) -> ConfigurationError:
@@ -226,9 +267,37 @@ class Settings(BaseSettings):
         description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2).",
     )
     redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
+    # The AI provider credential (§6.3: "AI provider (base URL, model, masked
+    # key)"). `SecretStr` for the reason the block above gives, and it is the
+    # field that reason was written for: `app.ai.gateway` hands this value to a
+    # third-party HTTP client, and the errors that client raises are printed to
+    # the container log.
+    #
+    # Optional, and absent is an ordinary state rather than a misconfiguration:
+    # `.env.example` says the base URL may name "a hosted provider, a proxy, or
+    # a local server such as vLLM or Ollama", and the last two commonly want no
+    # credential at all. A required field would make a local model impossible to
+    # run against without inventing a value for it.
+    #
+    # An empty string is read as absent, by the same rule and for the same
+    # reason as `care_database_url` below: blanking is how a value is withheld,
+    # and a `SecretStr('')` that validated would send an empty bearer token
+    # rather than no header.
+    ai_provider_api_key: SecretStr | None = Field(
+        default=None,
+        description="Credential for the AI provider, when the endpoint wants one (SPEC §6.3).",
+    )
 
     # --- deployment wiring, no credential: required, no default ---------------
-    ai_provider_base_url: str = Field(description="OpenAI-compatible API base URL (§7.4).")
+    ai_provider_base_url: str = Field(
+        description=(
+            "OpenAI-compatible API base URL (§7.4). It carries no credential of its own — no "
+            "user:password@ prefix; the key belongs in AI_PROVIDER_API_KEY. And it must be "
+            "https when that key is set, unless it names this machine: plain http off this "
+            "machine would put the credential and the comment being classified on the wire in "
+            "the clear (§10)."
+        )
+    )
     ai_model_name: str = Field(description="Model identifier passed to that provider.")
     institution_timezone: str = Field(
         description="IANA timezone the survey window follows (§3.1), such as America/New_York."
@@ -270,6 +339,103 @@ class Settings(BaseSettings):
         description="Respondents a comparison set needs before it is shown (§5.1).",
     )
 
+    @field_validator("ai_provider_api_key", mode="before")
+    @classmethod
+    def blank_provider_key_is_absent(cls, value: object) -> object:
+        """A blank `AI_PROVIDER_API_KEY` means this endpoint wants no credential.
+
+        A local OpenAI-compatible server — vLLM, Ollama, a proxy on the same
+        host — authenticates nobody, and the way a developer says so is to leave
+        the entry empty rather than to delete a line from `.env`.
+
+        **What absent means on the wire**, since three documents described it
+        wrongly until E0-13's review measured it: the request still carries an
+        `Authorization` header, holding `app.ai.gateway`'s inert
+        `UNAUTHENTICATED` placeholder. The client the gateway builds refuses to
+        be constructed without a credential, and removing the header would mean
+        building that client here rather than letting the provider library build
+        it — which would put a second provider-library import in the tree. What a
+        blank value avoids is an *empty* bearer token, which some servers refuse
+        and none is helped by; an endpoint that authenticates nobody ignores the
+        placeholder.
+
+        `_blank_is_absent` above is the rule itself.
+        """
+        return _blank_is_absent(value)
+
+    @field_validator("ai_provider_base_url")
+    @classmethod
+    def the_provider_url_carries_no_credential(cls, value: str) -> str:
+        """Refuse `https://user:password@host/...`. The key has its own variable.
+
+        A URL may carry userinfo, and an HTTP client turns it into a real
+        `Authorization: Basic ...` header — measured on this stack. Two things go
+        wrong at once when it does. This field is a plain `str`, not a
+        `SecretStr`, so a password inside it appears in `repr(settings)`, in
+        `model_dump()`, and in §6.3's admin configuration view, which is specified
+        to show "AI provider (base URL, model, masked key)" and would render the
+        password beside the masked key. And the rule below, which asks whether a
+        credential is configured, would answer "no" while a credential was sitting
+        in this string.
+
+        Refusing it is what keeps both of those true by construction rather than
+        by a second mechanism: the base URL stays a plain, displayable string
+        because it cannot hold a secret, and "no `AI_PROVIDER_API_KEY`" really
+        does mean "no credential". A proxy that wants Basic authentication is
+        reached with `AI_PROVIDER_API_KEY`, or through one that does not.
+
+        No value is quoted, as in every validator here: this message reaches the
+        startup log, and the thing being refused is the credential itself.
+        """
+        parsed = urlsplit(value)
+        if parsed.username or parsed.password:
+            raise ValueError(
+                "carries a credential in the URL itself, where it is neither masked in this "
+                "application's own configuration view nor covered by the transport rule below; "
+                "put the credential in AI_PROVIDER_API_KEY and remove the user:password@ prefix"
+            )
+        return value
+
+    @field_validator("ai_provider_base_url")
+    @classmethod
+    def a_credentialled_endpoint_is_encrypted(cls, value: str, info: ValidationInfo) -> str:
+        """Refuse to carry the provider key, or a student's comment, in cleartext.
+
+        SPEC §10 makes transport encryption a requirement, and this is the one
+        configuration in the surface that can quietly break it: `http://` with a
+        key configured puts the bearer token *and* the comment being classified on
+        the wire in the clear, and nothing else in the system would object.
+
+        The rule is narrow on purpose. An endpoint **on this machine** may be
+        plain `http`, because nothing leaves the host — that is how a local vLLM
+        or Ollama is reached, which `.env.example` and `README.md` both document.
+        Anything else, with a credential configured, must be `https`.
+
+        Reading `ai_provider_api_key` out of `info.data` is sound because the
+        field is declared above this one and pydantic validates in declaration
+        order; a key that failed its own validation is absent here, and the
+        failure it caused is reported beside this one. The validator above is what
+        makes "no key configured" mean "no credential at all".
+
+        **What this deliberately does not refuse**: cleartext to an off-machine
+        endpoint with *no* credential, which is a service inside a private
+        network — a vLLM pod reached over `http://` in the same cluster. That case
+        still puts comment text on a network, and whether it is acceptable is the
+        operator's call rather than this file's (ADR 0056).
+
+        No value is quoted, as in every validator here.
+        """
+        if info.data.get("ai_provider_api_key") is None:
+            return value
+        parsed = urlsplit(value)
+        if parsed.scheme == "https" or _is_on_this_machine(parsed.hostname):
+            return value
+        raise ValueError(
+            "would send the configured provider credential, and the comment being classified, "
+            "in cleartext to an address off this machine — use https, or plain http only for an "
+            "endpoint on this machine"
+        )
+
     @field_validator("care_database_url", mode="before")
     @classmethod
     def blank_care_database_url_is_absent(cls, value: object) -> object:
@@ -286,12 +452,10 @@ class Settings(BaseSettings):
         processes looking configured, and turn a deliberate withholding into a
         connection attempt with no credential in it.
 
-        Whitespace is stripped first: a value that is only spaces is a blanking
-        someone reformatted, not a URL.
+        `_blank_is_absent` above is the rule itself, and carries the rest of the
+        reasoning.
         """
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+        return _blank_is_absent(value)
 
     @field_validator("institution_timezone")
     @classmethod
