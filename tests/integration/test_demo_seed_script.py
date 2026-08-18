@@ -24,19 +24,25 @@ its own connection sees none of that and is seen by none of it, so rows it left 
 the session database would surface as somebody else's failed non-vacuity guard
 three tickets from now.
 
-**Not every criterion here is about the database.** The last section but one
-asserts the guard ADR 0063 put in front of the script — it refuses to run unless
-`ENVIRONMENT` is `development` — and it asserts it the same way, by running the
-process and reading what it did. That guard shipped with nothing executing it and
-said so in its own consequences; this is what closes that.
+**Not every criterion here is about the database.** Two sections towards the end
+assert the guard ADR 0063 put in front of the script — it refuses to run unless
+`ENVIRONMENT` is `development` — and they ask it in two different ways, because
+two different questions are being asked. What the script *does* with a value is
+asked by running the process, which is how anyone meets it. Which of two sources
+supplied that value is asked in-process, against the resolution the script
+exposes as a function, because a subprocess started from here inherits one source
+from a fixture and the other from whatever untracked file the developer has:
+`docs/MISTAKES.md` entry 30 is a case that measured exactly that and passed in CI
+while failing on every workstation.
 
 **Order in this file is deliberate.** Everything above the idempotency section
 measures the state *one* run produces, which is the state every criterion
 describes. The second run happens last, so a script that duplicates rows produces
 one failure naming duplication rather than six failures about shapes. The guard
-section runs the script again, and is harmless to what is around it: its refused
-runs open no connection, and the one run it makes that is admitted is a run of an
-idempotent seed against the database that already holds it.
+sections are harmless to what is around them: the refused runs open no
+connection, the in-process ones open no process at all, and the one run that is
+admitted is a run of an idempotent seed against the database that already holds
+it.
 
 **What this file does not decide.** The role spellings, the parent edge and what a
 scope node is made of are read off the schema through `SupervisionGraph`, which
@@ -55,10 +61,11 @@ them — `UNROUTABLE_EMAIL_DOMAINS` — has a twin in
 `tests/integration/test_mock_lms_seed_data.py`. Change one, change both.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import date
 from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -1669,6 +1676,13 @@ def test_no_seeded_person_carries_a_routable_email_address(
 # answers on: a run that prints the guard's refusal from there cannot have
 # connected first, and the second control is what proves this file can tell the
 # two failures apart rather than being blind to both.
+#
+# **What this section can and cannot ask.** Every value it sets is set in the
+# *process*, which beats `.env` under ADR 0063's precedence, so these are claims
+# about the script wherever it is run. Which of the two sources supplied a value
+# is a different question and is not askable from out here — the section after
+# this one asks it against the seam instead, and `docs/MISTAKES.md` entry 30 is
+# what the attempt to ask it from a subprocess cost.
 # ---------------------------------------------------------------------------
 
 # What a failure to reach a database looks like in this project's output,
@@ -1681,24 +1695,33 @@ def test_no_seeded_person_carries_a_routable_email_address(
 # entry 3, third case).
 CONNECTION_FAILURE_FRAGMENTS = ("psycopg", "operationalerror", "traceback", "127.0.0.1")
 
-# The values a deployment might carry, and the two ways it might carry nothing.
-# ADR 0063 chose an equality against `development` rather than a deny-list, so
-# what this list is for is the names nobody would have thought to enumerate: the
-# first two are `.env.example`'s own conventions, the third is a spelling no
-# record in this repository mentions, and the fourth contains the safe name
-# without being it — which is the case a guard written as a substring test lets
-# through. `None` removes the variable; see `DemoSeed.run` in tests/conftest.py.
+# The values a deployment might carry, each set **in the process**. ADR 0063 chose
+# an equality against `development` rather than a deny-list, so what this list is
+# for is the names nobody would have thought to enumerate: the first two are
+# `.env.example`'s own conventions, the third is a spelling no record in this
+# repository mentions, and the fourth contains the safe name without being it —
+# which is the case a guard written as a substring test lets through.
+#
+# **Every value here is present rather than absent, and that is a repair rather
+# than an omission.** A case that removed `ENVIRONMENT` from the child used to sit
+# at the end of this list, and it measured the machine instead of the script: the
+# child reads `.env` too, so its verdict was decided by whether an untracked file
+# exists in the working tree — passing in CI, which never creates one, and failing
+# on every checkout that followed README step one. That is `docs/MISTAKES.md`
+# entry 30 and `docs/disputes/E0-17-01.md`. Absence is asked of the *resolution*
+# instead, in the section below this one, where both sources are arguments. What
+# is left here is machine-independent: a value in the process beats `.env` under
+# ADR 0063's precedence, whatever the file happens to say.
 REFUSED_ENVIRONMENTS = (
     pytest.param(DEPLOYED_ENVIRONMENT_VALUE, id="production"),
     pytest.param("staging", id="staging"),
     pytest.param("prod", id="a-name-no-record-here-enumerates"),
     pytest.param(f"staging-{DEVELOPMENT_ENVIRONMENT}", id="a-name-containing-the-safe-one"),
     pytest.param("", id="set-to-nothing"),
-    pytest.param(None, id="not-set-at-all"),
 )
 
 
-def unreachable_overrides(environment_value: str | None) -> dict[str, str | None]:
+def unreachable_overrides(environment_value: str) -> dict[str, str | None]:
     """One `ENVIRONMENT` value, and every database URL pointed at nothing."""
     overrides: dict[str, str | None] = dict.fromkeys(
         DATABASE_URL_VARIABLES, UNREACHABLE_DATABASE_URL
@@ -1794,7 +1817,7 @@ def test_a_development_run_gets_past_the_guard_and_fails_on_the_address(
 
 @pytest.mark.parametrize("environment_value", REFUSED_ENVIRONMENTS)
 def test_the_seed_is_refused_wherever_the_environment_is_not_development(
-    demo_database: Any, environment_value: str | None
+    demo_database: Any, environment_value: str
 ) -> None:
     """E0-17's security review item: the seed cannot run against a non-development environment.
 
@@ -1807,9 +1830,13 @@ def test_the_seed_is_refused_wherever_the_environment_is_not_development(
     record here mentions are what separate the two designs, and a name that
     *contains* `development` separates an equality from a substring test.
 
-    Set to nothing and not set at all are both here because ADR 0063 refuses both
-    and gives a reason for it: "a context where it is absent is a context nobody
-    configured, and that is not one to write people into."
+    Set to nothing is here because ADR 0063 spells it: "an empty `ENVIRONMENT` is
+    refused for the same reason — a value somebody set to nothing is not the one
+    name that is safe." **Not set at all is deliberately not here**, and used to
+    be: a process started without the variable still reads `.env`, so that case
+    measured the working tree rather than the script. It is asked of the
+    resolution instead, in the section below, as
+    `nothing-sets-it-and-there-is-no-file`.
 
     **The refusal is the first assertion and the weakest one; what follows is
     what makes it mean something.** The run has to fail. The message has to name
@@ -1828,16 +1855,16 @@ def test_the_seed_is_refused_wherever_the_environment_is_not_development(
     said = said_by(refused)
 
     assert not refused.succeeded, (
-        f"The seed ran to completion with `{DEPLOYED_ENVIRONMENT_VARIABLE}` "
-        f"{'unset' if environment_value is None else repr(environment_value)}.\n"
+        f"The seed ran to completion with `{DEPLOYED_ENVIRONMENT_VARIABLE}` set to "
+        f"{environment_value!r} in the process.\n"
         f"{refused.report()}\n"
         "E0-17's definition of done asks the security review to 'confirm the seed script cannot "
         "run against a non-development environment', and ADR 0063 is how it does: the script "
         "writes an invented institution, an invented term and invented people into whatever "
         "database `DATABASE_URL` names, connecting as the bootstrap superuser, which bypasses "
-        "every grant "
-        "ADR 0001 puts between a read path and a student's name. The failure this guard is about "
-        "is not malice — it is `make seed` typed in a terminal whose `.env` points at staging."
+        "every grant ADR 0001 puts between a read path and a student's name. The failure this "
+        "guard is about is not malice — it is `make seed` typed in a terminal whose `.env` "
+        "points at staging."
     )
 
     assert DEPLOYED_ENVIRONMENT_VARIABLE in said, (
@@ -1881,6 +1908,348 @@ def test_the_seed_is_refused_wherever_the_environment_is_not_development(
         "script rather than about a boundary. `test_a_development_run_gets_past_the_guard_and_"
         "fails_on_the_address` is what proves these fragments are visible when a connection is "
         "genuinely attempted."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Which source supplied the permission — ADR 0063's resolution, asked in-process.
+#
+# **Why these are not subprocess tests, when everything above them is.** The guard
+# reads the process environment with `.env` filling in what it does not set, and
+# *which of the two supplied a value* is the one question a subprocess cannot be
+# asked from here: `seed_environment` in tests/conftest.py lays every documented
+# `.env.example` entry into the child, and whether an untracked `.env` sits in the
+# working tree decides the rest. A case written that way measures the machine —
+# it passed in CI, which never creates that file, and failed on every checkout
+# that followed the README. That is `docs/MISTAKES.md` entry 30, and it cost a
+# dispute, an arbitration and a decision escalated to Todd
+# (`docs/disputes/E0-17-01.md`).
+#
+# The script now answers it directly: `resolved_configuration(environ,
+# dotenv_path)` returns the merge as a value rather than mutating `os.environ`,
+# and the guard takes that mapping. So both sources are arguments here, neither is
+# inherited, and no test below can be decided by what is or is not on disk in the
+# repository — every `.env` they read is one they wrote in `tmp_path`.
+#
+# **The admitted rows are the ruling and are asserted as such.** Todd chose that
+# `.env` may supply the permission; a later change that reinstates the refusal is
+# reversing a decision rather than tightening a guard, and the failures below say
+# so in those words.
+# ---------------------------------------------------------------------------
+
+# The seam ADR 0063 records: "`resolved_configuration(environ, dotenv_path)`
+# returns a mapping instead of mutating `os.environ`, and `main` takes both as
+# optional arguments defaulting to the real thing." Looked up by name rather than
+# discovered, for the reason `AuthzModule` in tests/conftest.py gives: this
+# surface was settled in writing before these tests were, so a name that is not
+# there is a missing deliverable rather than a rename to accommodate.
+RESOLVE_CONFIGURATION = "resolved_configuration"
+CHECK_ENVIRONMENT = "check_environment_is_development"
+
+# One `.env` this suite writes, for the cases where the file is meant to say
+# nothing about the environment. It carries an unrelated entry rather than being
+# empty, so that "the file exists and does not set this" is what is being asked
+# rather than "the file is empty" — and so that the three-way message test below
+# can hold the file constant while only the process changes.
+SILENT_DOTENV = {"DATABASE_URL": UNREACHABLE_DATABASE_URL}
+
+# The rows of ADR 0063's own table, as `(process environment, .env contents)`.
+# `None` for the file means there is no file at all, which is what a deployment
+# looks like; a mapping means this suite writes one in `tmp_path`.
+REFUSED_CONFIGURATIONS = (
+    pytest.param({}, None, id="nothing-sets-it-and-there-is-no-file"),
+    pytest.param({}, SILENT_DOTENV, id="the-file-exists-and-sets-no-environment"),
+    pytest.param(
+        {},
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEPLOYED_ENVIRONMENT_VALUE},
+        id="the-file-alone-names-a-deployment",
+    ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: ""},
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
+        id="the-process-sets-it-to-nothing-over-a-development-file",
+    ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: "   "},
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
+        id="the-process-sets-it-to-whitespace-over-a-development-file",
+    ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEPLOYED_ENVIRONMENT_VALUE},
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
+        id="the-process-names-a-deployment-over-a-development-file",
+    ),
+)
+
+ADMITTED_CONFIGURATIONS = (
+    pytest.param(
+        {},
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
+        id="the-file-alone-says-development",
+    ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
+        {DEPLOYED_ENVIRONMENT_VARIABLE: DEPLOYED_ENVIRONMENT_VALUE},
+        id="the-process-says-development-over-a-deployment-file",
+    ),
+)
+
+
+def dotenv_at(path: Path, values: Mapping[str, str] | None) -> Path:
+    """Write a `.env` holding `values`, or answer a path where no file exists.
+
+    Nothing here interpolates: a `${...}` in one of these would be resolved by
+    the script's own reader, which is a behaviour of that reader rather than
+    anything these cases are about.
+    """
+    if values is None:
+        return path
+    path.write_text(
+        "".join(f"{name}={value}\n" for name, value in values.items()), encoding="utf-8"
+    )
+    return path
+
+
+def seam(module: Any, name: str) -> Any:
+    """One name off the seam ADR 0063 records, or a failure saying it is missing."""
+    found = getattr(module, name, None)
+    if found is None:
+        defined = sorted(attribute for attribute in vars(module) if not attribute.startswith("_"))
+        pytest.fail(
+            f"`scripts/seed.py` defines no `{name}` — it defines {defined}. ADR 0063 records that "
+            "seam by name: '`resolved_configuration(environ, dotenv_path)` returns a mapping "
+            "instead of mutating `os.environ`, and `main` takes both as optional arguments'. It is "
+            "what makes the question below askable at all; without it the only way to ask is to "
+            "start a process in a directory that does or does not hold an untracked file, which "
+            "is what `docs/MISTAKES.md` entry 30 is about."
+        )
+    return found
+
+
+def resolve(module: Any, environ: Mapping[str, str], dotenv_path: Path) -> Mapping[str, str]:
+    """The configuration the script would read from those two sources."""
+    return seam(module, RESOLVE_CONFIGURATION)(environ, dotenv_path)
+
+
+def guard_refusal(module: Any, configuration: Mapping[str, str], capsys: Any) -> tuple[Any, str]:
+    """Run the guard over `configuration`; answer what it raised and what it said.
+
+    Both, because ADR 0063 promises a message and does not say where it comes out.
+    A guard that raises an error carrying the text and one that prints the text
+    and exits are the same refusal to an operator, and pinning either here would
+    make this file the record of a decision nobody wrote down. `SystemExit` is
+    caught for that reason and `KeyboardInterrupt` is not.
+    """
+    check = seam(module, CHECK_ENVIRONMENT)
+    raised: BaseException | None = None
+    try:
+        check(configuration)
+    except (Exception, SystemExit) as refused:
+        raised = refused
+    captured = capsys.readouterr()
+    return raised, "\n".join(
+        part
+        for part in (str(raised) if raised is not None else "", captured.out, captured.err)
+        if part
+    )
+
+
+@pytest.mark.parametrize(("environ", "dotenv"), REFUSED_CONFIGURATIONS)
+def test_the_guard_refuses_these_resolved_configurations(
+    seed_module: Any,
+    tmp_path: Path,
+    capsys: Any,
+    environ: dict[str, str],
+    dotenv: dict[str, str] | None,
+) -> None:
+    """ADR 0063's table, row by row, with both sources supplied rather than inherited.
+
+    `nothing-sets-it-and-there-is-no-file` and
+    `the-file-exists-and-sets-no-environment` are the cases the subprocess section
+    above cannot reach at all, and they are the ones that sent this round back:
+    absence in the process is not absence in the resolution.
+
+    `the-file-alone-names-a-deployment` is the mirror of Todd's ruling. If the
+    file may grant permission it must equally be able to withhold it, or "reads
+    resolved configuration" would mean "reads the file only when it agrees".
+
+    The cases that set a value in the process over a `.env` saying `development`
+    assert the precedence in the direction that matters: a developer with a
+    development checkout who has exported `ENVIRONMENT=production` for something
+    else, and then types `make seed`, must be refused. Whitespace is one of them
+    because ADR 0063 spells it — "set to anything but `development`, empty and
+    whitespace included" — and because it is the value a trailing space in a
+    `.env` line produces.
+    """
+    configuration = resolve(seed_module, environ, dotenv_at(tmp_path / ".env", dotenv))
+    found = configuration.get(DEPLOYED_ENVIRONMENT_VARIABLE)
+    refused, said = guard_refusal(seed_module, configuration, capsys)
+
+    assert refused is not None, (
+        f"The guard admitted a configuration resolving `{DEPLOYED_ENVIRONMENT_VARIABLE}` to "
+        f"{found!r}, out of a process holding {environ} and a `.env` holding {dotenv}.\n"
+        "ADR 0063: the seed 'refuses to run unless `ENVIRONMENT` is exactly `development`', and "
+        "the check is 'an equality, not a deny-list'. What it protects is a superuser connection "
+        "to whatever `DATABASE_URL` names, which bypasses every grant ADR 0001 puts between a "
+        "read path and a student's name."
+    )
+    assert DEPLOYED_ENVIRONMENT_VARIABLE in said, (
+        f"The refusal names no variable: {said!r}.\n"
+        "ADR 0063: 'The message names the variable, the value it found and the value it wants.' "
+        "The person meeting this is a developer whose `.env` is one word wrong, and a refusal "
+        "they cannot act on sends them to the source."
+    )
+    if found and found.strip():
+        assert found.strip() in said, (
+            f"The refusal does not quote the value it resolved, {found!r}: {said!r}.\n"
+            "That value is the whole of what is wrong, and where it came from — the process or "
+            "the file — is the thing the reader has to work out next."
+        )
+
+
+@pytest.mark.parametrize(("environ", "dotenv"), ADMITTED_CONFIGURATIONS)
+def test_the_guard_admits_these_resolved_configurations(
+    seed_module: Any,
+    tmp_path: Path,
+    capsys: Any,
+    environ: dict[str, str],
+    dotenv: dict[str, str],
+) -> None:
+    """The other half of the equality, and the first case is a ruling rather than a detail.
+
+    **`.env` alone may grant permission.** That was disputed, arbitrated, and
+    decided by Todd: "the guard reads resolved configuration", so `make seed`
+    works on a stock checkout with nothing exported and `README.md`'s promise
+    about that stands. A change that made this refuse would be reversing a
+    decision, not tightening a guard.
+
+    The second case is the precedence in the admitting direction: a developer who
+    exports `ENVIRONMENT=development` over a `.env` that says something else is
+    admitted, because the process wins. Without it, "the file may grant
+    permission" could be implemented as "the file decides", which would refuse a
+    developer who did exactly what an operator is told to do.
+    """
+    configuration = resolve(seed_module, environ, dotenv_at(tmp_path / ".env", dotenv))
+    refused, said = guard_refusal(seed_module, configuration, capsys)
+
+    assert refused is None, (
+        f"The guard refused a configuration resolving `{DEPLOYED_ENVIRONMENT_VARIABLE}` to "
+        f"{configuration.get(DEPLOYED_ENVIRONMENT_VARIABLE)!r}, out of a process holding "
+        f"{environ} and a `.env` holding {dotenv}: {said!r}\n"
+        "ADR 0063's decision, after `docs/disputes/E0-17-01.md` went to arbitration and then to "
+        "Todd: 'the guard reads *resolved* configuration — the process environment with `.env` "
+        "filling in only what it does not set'. Refusing here does not tighten that guard, it "
+        "reverses the ruling — and it breaks `make seed` on a stock checkout, which is the case "
+        "the ruling was about. Reopen the decision rather than the code: the record says the gap "
+        "it leaves is accepted, and that 'anyone reaching for this gap later should reopen the "
+        "address question, not this one'."
+    )
+
+
+def test_the_address_may_come_from_the_process_while_the_permission_comes_from_the_file(
+    seed_module: Any, tmp_path: Path, capsys: Any
+) -> None:
+    """The residual gap Todd accepted, asserted as the decision it is.
+
+    ADR 0063: "An operator who exports a production `DATABASE_URL` over a
+    development checkout, leaving `ENVIRONMENT` to `.env`, is admitted: the
+    address comes from the process and the permission from the file, and nothing
+    here notices they describe different systems. Todd took that knowingly."
+
+    This is that configuration exactly, and it is a test rather than a comment for
+    two reasons. It is the case the dispute was about, so the day somebody changes
+    it, the failure should say that a decision is being reversed and where to
+    reopen it — which is the address check, not this one. And it is the case the
+    parametrized admissions above cannot express: what makes it interesting is
+    that the two sources supply *different* values, so the resolution is asserted
+    as well as the verdict — without that, a `resolved_configuration` that ignored
+    `environ` entirely would satisfy it.
+
+    The address used is unreachable, so nothing here can connect to anything even
+    if a later change moves work into the guard.
+    """
+    dotenv = dotenv_at(tmp_path / ".env", {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT})
+    environ = {"DATABASE_URL": UNREACHABLE_DATABASE_URL}
+    configuration = resolve(seed_module, environ, dotenv)
+
+    assert configuration.get("DATABASE_URL") == UNREACHABLE_DATABASE_URL, (
+        f"The resolved configuration's `DATABASE_URL` is "
+        f"{configuration.get('DATABASE_URL')!r} rather than the one the process supplied. This "
+        "case is named for two sources reaching the script at once; if the process's value does "
+        "not arrive, the verdict below is about one source and says nothing about the gap."
+    )
+    assert configuration.get(DEPLOYED_ENVIRONMENT_VARIABLE) == DEVELOPMENT_ENVIRONMENT, (
+        f"The resolved configuration's `{DEPLOYED_ENVIRONMENT_VARIABLE}` is "
+        f"{configuration.get(DEPLOYED_ENVIRONMENT_VARIABLE)!r}, and the `.env` written for this "
+        f"test sets it to {DEVELOPMENT_ENVIRONMENT!r}. The permission is supposed to come from "
+        "the file here, and it did not."
+    )
+
+    refused, said = guard_refusal(seed_module, configuration, capsys)
+    assert refused is None, (
+        f"The guard refused an address from the process and a permission from the file: {said!r}\n"
+        "ADR 0063 records this exact combination as admitted, knowingly, after the dispute: "
+        "'Reading B refuses only the slice where the operator forgot to export the name, and "
+        "admits the slice where they exported `development` alongside a production address. The "
+        "check that would close it properly is a check on the *address*.' So a refusal here is a "
+        "reversal of Todd's ruling rather than a fix, and the thing to reopen is the address "
+        "question."
+    )
+
+
+def test_the_refusal_says_which_of_the_three_ways_the_environment_was_wrong(
+    seed_module: Any, tmp_path: Path, capsys: Any
+) -> None:
+    """Not set anywhere, set to nothing, and set to something else are three messages.
+
+    ADR 0063: "the refusal names which of the three ways it was wrong — an earlier
+    version reported the first and the third identically, which is how the two got
+    conflated in the first place." That conflation is the reason a case that
+    measured the machine went unnoticed for a round, so the distinction is worth
+    holding rather than trusting.
+
+    **The three cases share one `.env` file, and that is what makes the assertion
+    mean something.** They differ only in what the process supplies, so three
+    messages that differ cannot be differing because the file's path or contents
+    changed — which is the shape a "these are distinct" assertion usually passes
+    for (`docs/MISTAKES.md` entry 3). The wording is nobody's business here: what
+    is asserted is that an operator can tell the three apart.
+    """
+    dotenv = dotenv_at(tmp_path / ".env", SILENT_DOTENV)
+    ways = {
+        "not set anywhere": {},
+        "set to nothing": {DEPLOYED_ENVIRONMENT_VARIABLE: ""},
+        "set to a deployment name": {DEPLOYED_ENVIRONMENT_VARIABLE: DEPLOYED_ENVIRONMENT_VALUE},
+    }
+
+    said_by_way: dict[str, str] = {}
+    for way, environ in ways.items():
+        refused, said = guard_refusal(seed_module, resolve(seed_module, environ, dotenv), capsys)
+        assert refused is not None, (
+            f"The guard admitted the configuration where `{DEPLOYED_ENVIRONMENT_VARIABLE}` is "
+            f"{way}. Every one of these is refused by ADR 0063's table, and the parametrized "
+            "cases above are where that is asserted; this test needs all three refused before it "
+            "can ask whether they read differently."
+        )
+        assert (
+            DEPLOYED_ENVIRONMENT_VARIABLE in said
+        ), f"The refusal for `{DEPLOYED_ENVIRONMENT_VARIABLE}` {way} names no variable: {said!r}."
+        said_by_way[way] = said
+
+    identical = [
+        (one, other)
+        for index, one in enumerate(said_by_way)
+        for other in list(said_by_way)[index + 1 :]
+        if said_by_way[one] == said_by_way[other]
+    ]
+    assert not identical, (
+        f"These refusals are word for word the same: {identical}.\n"
+        + "\n".join(f"  {way}: {text!r}" for way, text in said_by_way.items())
+        + "\nADR 0063 asks the refusal to name 'which of the three ways it was wrong', because an "
+        "earlier version printed the unset case and the empty case identically — and that "
+        "conflation is what hid a defect for a round: a hand measurement ran `ENVIRONMENT=`, read "
+        "the message, and reported the unset case as covered when it had never been asked "
+        "(`docs/MISTAKES.md` entry 30)."
     )
 
 

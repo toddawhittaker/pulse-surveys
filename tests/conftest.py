@@ -82,11 +82,18 @@ calls it needs committed rows and an environment pointing at this container. The
 Care role itself is provisioned beside the application role now, mirroring
 `scripts/db-init/02-care-role.sh`: a login and no grant.
 
-E0-17 adds two at the very bottom, and they are the first fixtures here that run
-a *process* rather than a function. Its subject is `scripts/seed.py`, which
-`make seed` invokes as a program and which reaches the database on its own, so
+E0-17 adds three at the very bottom, and two of them are the first fixtures here
+that run a *process* rather than a function. The third, `seed_module`, is the
+opposite and arrived a round later: the guard in `scripts/seed.py` reads *resolved*
+configuration — the process environment with `.env` filling in what it does not
+set (ADR 0063) — and a subprocess cannot be asked about that resolution, because
+the fixture starting it supplies one of the two sources and the developer's
+working tree supplies the other. `docs/MISTAKES.md` entry 30 is what that cost.
+
+The first two are about running the script the way `make seed` does: it invokes
+`scripts/seed.py` as a program and the program reaches a database on its own, so
 the fixture gives it a database of its own — created in the session container,
-migrated to head, and dropped afterwards — and runs it the way the Makefile does.
+migrated to head, and dropped afterwards — and starts it the way the Makefile does.
 It is here rather than in the test module because E0-17's definition of done says
 the seeded institution "is also the fixture E9 will reuse", and because
 `seed_environment` below is the third place in this file that answers "which
@@ -111,6 +118,7 @@ import base64
 import hashlib
 import hmac
 import importlib
+import importlib.util
 import inspect
 import itertools
 import json
@@ -3997,12 +4005,19 @@ class DemoSeed:
         values here win over a developer's local file.
 
         **An override of `None` removes the variable** rather than setting it to
-        an empty string, and the two are different questions to ask of a guard:
+        an empty string, since those are different questions to ask of a guard:
         `ENVIRONMENT=` is a value somebody configured to nothing, and no
-        `ENVIRONMENT` at all is a context nobody configured. ADR 0063 refuses both
-        and gives different reasons, so a test has to be able to produce both. It
-        is removed from the assembled environment, so the parent's own copy and
-        the `.env.example` layer go with it.
+        `ENVIRONMENT` at all is a context nobody configured. It is removed from
+        the assembled environment, so the parent's own copy and the
+        `.env.example` layer go with it.
+
+        **Removing a variable does not make the child unable to see it.** The
+        child reads `.env` too, so absence here is absence in the *process* and
+        not in the resolved configuration — which is exactly the distinction
+        `docs/MISTAKES.md` entry 30 was filed for. A test about which source
+        supplied a value belongs against `seed_module` below, where both sources
+        are arguments; this keyword is for asking what a *process* started without
+        something does.
         """
         argv = (sys.executable, str(SEED_SCRIPT_PATH))
         if not SEED_SCRIPT_PATH.is_file():
@@ -4143,3 +4158,68 @@ def seeded_demo(demo_database: DemoSeed) -> SeedRun:
     as the same failure.
     """
     return demo_database.run()
+
+
+# The name `scripts/seed.py` is imported under. Not `seed`, which is a plausible
+# name for something else on `sys.path` to own, and not `scripts.seed`, which
+# would imply a package that does not exist.
+SEED_MODULE_NAME = "pulse_demo_seed"
+
+# What `ENVIRONMENT` holds while that import runs. **A safety net, and nothing
+# asserts anything about it.** `scripts/seed.py` is a program: if its `main()`
+# were ever called at import time rather than under `if __name__ == "__main__"`,
+# importing it here would seed whatever `.env` on this machine names, as the
+# developer running the suite. A value the script's own guard refuses makes such a
+# module fail at import instead, which is the cheapest way to keep that mistake
+# from being destructive. It is not evidence of anything: the guard is the net
+# here rather than the subject, and the tests that measure it pass their own
+# configuration in.
+SEED_IMPORT_ENVIRONMENT = {"ENVIRONMENT": "not-a-development-environment"}
+
+
+@pytest.fixture(scope="module")
+def seed_module() -> Iterator[Any]:
+    """`scripts/seed.py` as a module, for the question a subprocess cannot ask.
+
+    ADR 0063's guard reads the process environment with `.env` filling in what it
+    does not set, and **which of those two supplied a value is not something the
+    suite can observe from outside**: `seed_environment` above lays every
+    documented `.env.example` entry into the child, and whether an untracked
+    `.env` exists in the working tree decides the rest. A test written that way
+    measures the machine — green in CI, where no `.env` is created, and red on
+    every developer's checkout (`docs/MISTAKES.md` entry 30).
+
+    The script answers it directly instead: `resolved_configuration(environ,
+    dotenv_path)` returns the merge as a value rather than mutating `os.environ`,
+    and `main` takes both as optional arguments. This fixture is how a test
+    reaches those.
+
+    Imported by path, because `scripts/` is not a package and nothing puts it on
+    `sys.path`. `sys.modules` is left as it was found afterwards, the way
+    `import_app_module` above leaves it.
+    """
+    if not SEED_SCRIPT_PATH.is_file():
+        pytest.fail(
+            f"{SEED_SCRIPT_PATH} does not exist, so there is nothing to import. SPEC §13 puts the "
+            "demo seed there and E0-17 is the ticket that writes it."
+        )
+
+    specification = importlib.util.spec_from_file_location(SEED_MODULE_NAME, SEED_SCRIPT_PATH)
+    if specification is None or specification.loader is None:
+        pytest.fail(
+            f"Python cannot build an import specification for {SEED_SCRIPT_PATH}, so it cannot be "
+            "imported as a module. That is a defect in this fixture or a file that is not Python."
+        )
+
+    module = importlib.util.module_from_spec(specification)
+    saved = sys.modules.get(SEED_MODULE_NAME)
+    sys.modules[SEED_MODULE_NAME] = module
+    try:
+        with environment(SEED_IMPORT_ENVIRONMENT):
+            specification.loader.exec_module(module)
+        yield module
+    finally:
+        if saved is None:
+            sys.modules.pop(SEED_MODULE_NAME, None)
+        else:
+            sys.modules[SEED_MODULE_NAME] = saved
