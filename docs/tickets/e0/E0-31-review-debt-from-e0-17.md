@@ -14,7 +14,7 @@ E0-17's own pull request was, and it is indexed at the bottom.
 test is built. The rest are a product decision about the design corpus, a
 duplicated literal, and a docstring.
 
-Read first: [ADR 0038](../../adr/0038-the-mock-platform-is-safe-in-the-base-compose-file.md),
+Read first: [ADR 0038](../../adr/0038-the-mock-platform-ships-in-the-base-compose-file.md),
 [ADR 0064](../../adr/0064-the-demo-seed-is-idempotent-by-natural-key.md),
 [ADR 0065](../../adr/0065-the-demo-institution-registers-a-fictional-platform.md),
 SPEC §8 and §2.1.
