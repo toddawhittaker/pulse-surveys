@@ -55,12 +55,27 @@ same value is used as a *positive* detector to prove the key was sent at all.
 `test_the_needle_matches_nothing_a_request_carries_without_it` removes the key,
 makes the same call, and requires zero matches anywhere in it.
 
+**Three subjects were added after a review, and each closes a gap this module had
+rather than a criterion it had missed.** The fail-open tests asserted a property
+of two returned objects while claiming one about the stored record, so moving the
+`classification` write inside the gateway's `try` — the fail-open path returning a
+verdict and storing nothing — left the whole suite green; they read the row now.
+Nothing asserted that the student's comment or the versioned prompt reached the
+provider at all, so an empty prompt or an unsubstituted placeholder also passed.
+And two failure modes a reviewer found in the gateway have regression tests here:
+one client shared across per-thread event loops, whose reused connections raised
+and were misread as an outage, so a healthy provider's answer was fetched and
+discarded; and a shape-violation message built by interpolating the keys of the
+payload that violated it, which reassembles a student's comment in a log when a
+model returns the comment as field names.
+
 **What is deliberately not asserted here.** Whether the validity prompt produces
 good classifications is a distribution, not an assertion — SPEC §9.3 answers that
 with versioned eval sets and per-task precision and recall floors, and nothing in
-this file can make that gate easier to pass. Prompt *content* is never read. The
-synchronous submit path, its p95 budget, and what a student sees when the floor
-applies are E2's (§3.3), and this module asserts only what the gateway does.
+this file can make that gate easier to pass. Prompt *content* is read only to the
+extent of checking that it was sent. The synchronous submit path, its p95 budget,
+and what a student sees when the floor applies are E2's (§3.3), and this module
+asserts only what the gateway does.
 """
 
 import asyncio
@@ -75,6 +90,7 @@ import time
 import types
 import typing
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -84,6 +100,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.integration
 
@@ -153,6 +170,30 @@ HEURISTIC_MINIMUM_CHARACTERS = 25
 SUBSTANTIVE_COMMENT = "The pacing in week three was too fast for the lab work."
 INSUFFICIENT_COMMENT = "it was okay"
 BOUNDARY_COMMENT = "the lab work was hard ok!"
+
+# The same comment carrying a nonce, for the two tests that ask whether the
+# student's words reached the provider. The nonce is what makes a match evidence:
+# an ordinary English sentence could in principle turn up in a prompt template,
+# and then "the comment was sent" would be satisfied by a request that carried the
+# prompt and dropped the comment.
+TRACEABLE_COMMENT = "The pacing in week three was too fast for the lab work [Kj3PxE8mZt5UwGh]."
+
+# A comment made of tokens that appear nowhere else in this repository, and long
+# enough per token that an eight-character window of one is unambiguous. It is the
+# needle for the two tests asking whether a shape violation quotes a student back
+# into an error message, and the chunks are sent as the *keys* of the payload
+# because that is the shape the reviewer found: a message built by interpolating
+# the names a model invented reassembles the comment in order.
+NEEDLE_COMMENT = "Rb9NsWqvZm Xt4LdKj3Px E8mZt5UwGh Tf2YcRbVn8"
+NEEDLE_COMMENT_CHUNKS = tuple(NEEDLE_COMMENT.split())
+
+# How many submissions the concurrency regression makes, and over how many
+# threads. **This suite's choice.** The defect it is written against floored every
+# other call — measured at 1, 3 and 5 of six — so a dozen over four workers is
+# comfortably more than one round of it, and each call is a loopback round trip
+# costing milliseconds.
+CONCURRENT_SUBMISSIONS = 12
+CONCURRENT_WORKERS = 4
 
 # The model the stub answers as. Distinctive so that a `model_id` recorded from
 # the configuration and one recorded from the provider's response are the same
@@ -453,7 +494,15 @@ class StubProvider:
         return f"http://{host}:{port}/v1"
 
     def script(self, *answers: Answer) -> None:
-        """Set what the stub will answer, in order. The last answer repeats."""
+        """Set what the stub will answer, in order. The last answer repeats.
+
+        **A script of more than one answer is not safe to use concurrently.**
+        `next_answer` advances a plain counter and the server handles each request
+        on its own thread, so two overlapping requests can take the same entry or
+        skip one. The concurrency test below scripts exactly one answer, where the
+        counter cannot change which answer is given; anything that needs an
+        ordered script under load needs a lock here first.
+        """
         self.answers = list(answers)
         self._index = 0
 
@@ -988,6 +1037,51 @@ def leaked_fragments(text_value: str, secret: str, size: int = LEAK_FRAGMENT_LEN
     return sorted({window for window in windows if window in text_value})
 
 
+def json_strings(document: Any) -> list[str]:
+    """Every string in a parsed JSON document, keys included.
+
+    Keys as well as values, because a provider request carries text in both and
+    because the shape-violation tests below send a comment *as* a set of keys.
+    """
+    if isinstance(document, Mapping):
+        found: list[str] = []
+        for key, value in document.items():
+            if isinstance(key, str):
+                found.append(key)
+            found.extend(json_strings(value))
+        return found
+    if isinstance(document, list):
+        return [text_value for item in document for text_value in json_strings(item)]
+    return [document] if isinstance(document, str) else []
+
+
+def sent_text(call: Received) -> str:
+    """Everything one request said, read out of the parsed body rather than the raw text.
+
+    Parsed, because the body is JSON: a prompt line containing an apostrophe or a
+    quotation mark reaches the wire escaped, and a search over the raw text would
+    report it missing. The raw body is the fallback for a request that is not JSON
+    at all, so a search never silently has nothing to look at.
+    """
+    strings = json_strings(call.payload)
+    return "\n".join(strings) if strings else call.body
+
+
+def all_sent_text(provider: StubProvider) -> str:
+    """Everything every request said, for a search that does not care which call carried it."""
+    return "\n".join(sent_text(call) for call in provider.calls)
+
+
+def columns_holding(row: Mapping[str, Any], value: str) -> list[str]:
+    """The columns of `row` whose stored value reads as `value`.
+
+    Used to find where a row keeps the two audit values without naming the
+    columns: E0-13 spells the table and none of its columns, so the way to read a
+    stored prompt version is to look for the one the returned object carried.
+    """
+    return sorted(name for name, held in row.items() if stored_text(held) == value)
+
+
 def exception_chain(failure: BaseException) -> list[BaseException]:
     """`failure` and everything it was raised from, `__cause__` and `__context__` alike."""
     chain: list[BaseException] = []
@@ -1250,6 +1344,152 @@ def test_the_returned_object_is_usable_as_an_eval_fixture(
         "are typed objects built from the same Pydantic contracts the tasks return (§7.4), so a "
         "contract change breaks its evals at type-check time rather than silently passing' — and "
         "a case that loads to a different object compares two things that were never the same."
+    )
+
+
+def prompt_file_named(version: str) -> Path | None:
+    """The prompt file whose path stem is `version` (ADR 0031), if there is one."""
+    if not PROMPTS_DIR.is_dir():
+        return None
+    for path in sorted(PROMPTS_DIR.rglob("*")):
+        if not path.is_file() or path.name.lower() in NON_PROMPT_NAMES:
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        relative = path.relative_to(PROMPTS_DIR).as_posix()
+        if version in (path.name.removesuffix(path.suffix), relative.removesuffix(path.suffix)):
+            return path
+    return None
+
+
+# The shortest line of a prompt this file will treat as evidence that the prompt
+# was sent, and the marks that say a line is a template rather than text. A line
+# carrying a placeholder is rewritten on substitution, so requiring it verbatim
+# would fail against a correct gateway; a short line is too likely to appear in a
+# request for some other reason. **This suite's choice**, both of them.
+MINIMUM_QUOTABLE_LINE = 24
+PLACEHOLDER_MARKS = ("{", "}", "$", "<", ">", "%")
+
+
+def quotable_lines(text_value: str) -> list[str]:
+    """The lines of a prompt that a request carrying that prompt should hold verbatim."""
+    return sorted(
+        (
+            line.strip()
+            for line in text_value.splitlines()
+            if len(line.strip()) >= MINIMUM_QUOTABLE_LINE
+            and not any(mark in line for mark in PLACEHOLDER_MARKS)
+        ),
+        key=len,
+        reverse=True,
+    )
+
+
+def test_the_students_comment_reaches_the_provider(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+) -> None:
+    """ "A comment goes in" — the half of the round trip nothing here was asserting.
+
+    E0-13's context states the exit criterion in one sentence: "a comment goes in,
+    a validated Pydantic object comes back, and the prompt version and model ID
+    are recorded". Every test in this module covered the second and third clauses.
+    None covered the first, and the stub answers from its script whatever it is
+    sent — so setting the prompt to the empty string, or leaving the placeholder
+    unsubstituted so the marker ships in place of the comment, passed the whole
+    suite. The classification then describes a comment the model never saw, which
+    §7.4's audit sentence — "a specific prompt version and model ID produced a
+    specific classification for **a specific comment**" — makes a false record
+    rather than a wrong answer.
+
+    The comment carries a nonce so that a match is evidence. An ordinary English
+    sentence could plausibly appear in a prompt template, and then "the comment
+    was sent" would be satisfied by a request that carried the prompt and dropped
+    the comment.
+
+    The search is over the parsed request body rather than its raw text, because
+    the body is JSON and a comment containing a quotation mark reaches the wire
+    escaped.
+    """
+    contract = validity_contract(import_app_module)
+    stub_provider.script(well_formed(contract, INSUFFICIENT_VERDICT))
+
+    run_validity(import_app_module, db_session, TRACEABLE_COMMENT)
+
+    assert stub_provider.calls, (
+        "The validity task sent the stub no request at all, so this test could not look at what "
+        "was in one. The first test in this module owns that failure."
+    )
+    assert TRACEABLE_COMMENT in all_sent_text(stub_provider), (
+        f"The comment the task was given does not appear in anything it sent the provider. It "
+        f"asked for {TRACEABLE_COMMENT!r}; the requests carried "
+        f"{all_sent_text(stub_provider)!r}. A classification produced without the comment in the "
+        "request is a verdict about nothing, and §7.4's audit record — 'a specific prompt version "
+        "and model ID produced a specific classification for a specific comment' — then names a "
+        "comment that was never sent."
+    )
+
+
+def test_the_versioned_prompt_reaches_the_provider(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+) -> None:
+    """The prompt whose version gets recorded is the text that was actually sent.
+
+    The sibling of the test above, and the one that catches an empty prompt: with
+    the comment appended to nothing, the comment still reaches the provider, the
+    contract still validates, and the recorded `prompt_version` still names a file
+    on disk. Everything about that is green and the file's contents played no part
+    in the classification — which makes the stored version a citation of a
+    document that was never used, and §9.3's eval sets incomparable across a
+    prompt change for the same reason ADR 0032 makes a prompt file immutable.
+
+    The prompt is found from the version the call itself recorded rather than
+    named here, so this follows whichever prompt the task chose. The longest line
+    carrying no template marker is what must appear verbatim: a line with a
+    placeholder in it is rewritten on substitution, and requiring it would fail
+    against a correct gateway.
+
+    **What it does not cover**, since it reads stronger than it is: it asserts the
+    prompt's text was sent, not that it was sent as a system instruction, and not
+    that it was sent unmodified. A gateway that reflows the prompt's whitespace
+    would fail this for a reason that is not a defect; that is a fixture question
+    and the docstring is where it gets raised rather than the assertion where it
+    gets weakened.
+    """
+    contract = validity_contract(import_app_module)
+    stub_provider.script(well_formed(contract, INSUFFICIENT_VERDICT))
+
+    result = run_validity(import_app_module, db_session, TRACEABLE_COMMENT)
+    _, prompt_version = require_audit_value(result, "prompt_version", "prompt version")
+
+    prompt_path = prompt_file_named(str(prompt_version))
+    assert prompt_path is not None, (
+        f"The task recorded a prompt version of {prompt_version!r} and no file under "
+        f"{PROMPTS_DIR} has that path stem, so this test has no text to look for. "
+        "`test_the_returned_object_carries_the_prompt_version_and_the_model_that_produced_it` "
+        "owns that failure."
+    )
+
+    lines = quotable_lines(prompt_path.read_text(encoding="utf-8"))
+    assert lines, (
+        f"{prompt_path} holds no line of at least {MINIMUM_QUOTABLE_LINE} characters free of "
+        f"{list(PLACEHOLDER_MARKS)}, so this test has nothing it can require verbatim. That is a "
+        "gap in this file — or a prompt that is entirely template — rather than a failed "
+        "criterion."
+    )
+
+    assert lines[0] in all_sent_text(stub_provider), (
+        f"The prompt the task recorded as {prompt_version!r} was not sent: its longest plain line, "
+        f"{lines[0]!r}, appears nowhere in what the provider received "
+        f"({all_sent_text(stub_provider)!r}). §7.4: 'Prompts are versioned in-repo; every "
+        "classification stores prompt version and model ID for reproducibility.' A version "
+        "recorded against text that took no part in the classification reproduces nothing, and "
+        "ADR 0032's immutable prompt file is then a document nobody read."
     )
 
 
@@ -1589,56 +1829,303 @@ def test_the_character_floor_takes_effect_at_the_length_the_spec_names(
     )
 
 
+def test_a_floored_classification_is_recorded_rather_than_skipped(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+    classification_rows: ClassificationRows,
+) -> None:
+    """A provider timeout still leaves a row. This is the half nothing here asserted.
+
+    E0-13's definition of done sends the security review after one distinction:
+    the fail-open path must fail open "in the intended sense — accepting the
+    submission — rather than open in the sense of skipping a safety classification
+    silently". A floored submission that writes nothing at all is the second of
+    those exactly, and until this test existed the whole suite passed against it:
+    moving the classification write inside the gateway's `try` was run as a
+    mutation and every test stayed green, because every timeout test asserted on
+    the object returned and only the answered-path tests read a row.
+
+    That silence is the expensive kind. §3.3 has the submission accepted and "then
+    classified async", and the thing that finds it later is the record saying a
+    model was never asked. No row means nothing to find, and the comment is
+    counted as validated on a character count nobody revisits.
+    """
+    stub_provider.script(timed_out())
+    before = classification_rows.keys()
+
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+
+    added = classification_rows.keys() - before
+    assert len(added) == 1, (
+        f"A validity call the provider never answered added {len(added)} "
+        f"`{CLASSIFICATION_TABLE}` row(s). §3.3: on a provider timeout 'the heuristic floor "
+        "applies and the submission is accepted, then classified async'. The async pass has "
+        "nothing to look for unless the floored classification is on record, and E0-13's "
+        "definition of done calls a submission accepted with no record of the classification "
+        "being skipped the failure mode the security review exists to catch."
+    )
+
+
 def test_a_timed_out_classification_is_not_recorded_as_one_the_model_produced(
     ai_environment: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     stub_provider: StubProvider,
     db_session: Any,
+    classification_rows: ClassificationRows,
 ) -> None:
     """Failing open must mean accepting the submission, not pretending a model answered.
 
-    This is the distinction E0-13's definition of done asks the security review
-    for: "the fail-open path failing *open* in the intended sense — accepting the
-    submission — rather than open in the sense of skipping a safety classification
-    silently." The two are indistinguishable from the caller unless the record
-    says which happened.
+    The test above requires the floored classification to be recorded; this one
+    requires the record to say so. The two are separate because the ways they fail
+    are separate: one is a row that is not there, the other is a row that is there
+    and lies.
 
     §7.4 is what makes it checkable: "every classification stores prompt version
     and model ID for reproducibility", and the single-shot boundary exists so that
     "a specific prompt version and model ID produced a specific classification for
-    a specific comment". A floor result carrying the same pair as a real one is a
-    record asserting that a model produced a verdict no model was asked for — and
-    E2's async re-classification has nothing to find, because every row already
-    looks classified.
+    a specific comment". A floor row carrying the same pair as a real one asserts
+    that a model produced a verdict no model was asked for — and E2's async
+    re-classification has nothing to select, because every row already looks
+    classified.
 
-    **What is asserted is a difference, not a particular value.** How a gateway
-    marks the floor is E0-13's to choose; that a reader can tell the two apart is
-    not optional. The comparison is against a result produced by the same
-    configuration seconds earlier, which is the control that stops this passing
-    because of some unrelated variation.
+    **This reads the stored rows, not the returned objects**, and that is the
+    repair a review asked for. It used to compare the two objects the calls
+    returned, which is a claim about what a caller sees rather than about what the
+    record says, and the two come apart in exactly the case that matters: a
+    gateway that marks the object and writes the answered pair to the table.
+    ADR 0054 names the stored distinction as what makes a floored verdict
+    identifiable.
+
+    **What is asserted is a difference, not a particular value.** How the floor is
+    marked is E0-13's to choose; that a reader can tell the two apart is not
+    optional. The answered row, written seconds earlier under the same
+    configuration, is the control that stops this passing on some unrelated
+    variation — and the columns compared are found by looking for the answered
+    object's own values, since the ticket spells the table and none of its columns.
     """
     contract = validity_contract(import_app_module)
+    before = classification_rows.keys()
 
     stub_provider.script(well_formed(contract, SUBSTANTIVE_VERDICT))
     answered = run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    after_answered = classification_rows.keys()
+
+    stub_provider.script(timed_out())
+    run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    after_floored = classification_rows.keys()
+
+    answered_keys = after_answered - before
+    floored_keys = after_floored - after_answered
+    assert len(answered_keys) == 1 and len(floored_keys) == 1, (
+        f"The answered call added {len(answered_keys)} row(s) and the floored call added "
+        f"{len(floored_keys)}, so there is no pair of rows to compare. The two tests that own "
+        "those failures are the one above and "
+        "`test_a_validity_call_writes_a_classification_row_carrying_its_audit_pair`."
+    )
+
+    answered_row = classification_rows.row(next(iter(answered_keys)))
+    floored_row = classification_rows.row(next(iter(floored_keys)))
+    assert (
+        answered_row is not None and floored_row is not None
+    ), "One of the two rows could not be read back after being written."
 
     _, answered_prompt = require_audit_value(answered, "prompt_version", "prompt version")
     _, answered_model = require_audit_value(answered, "model_id", "model ID")
 
-    stub_provider.script(timed_out())
-    floored = run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    prompt_columns = columns_holding(answered_row, str(answered_prompt))
+    model_columns = columns_holding(answered_row, str(answered_model))
+    assert prompt_columns and model_columns, (
+        f"The `{CLASSIFICATION_TABLE}` row written for an answered call holds neither the prompt "
+        f"version {answered_prompt!r} nor the model ID {answered_model!r} that the returned object "
+        f"carried — the row is {answered_row!r}. This test cannot then say which columns the "
+        "floored row should differ in. "
+        "`test_a_validity_call_writes_a_classification_row_carrying_its_audit_pair` owns that."
+    )
 
-    _, floored_prompt = require_audit_value(floored, "prompt_version", "prompt version")
-    _, floored_model = require_audit_value(floored, "model_id", "model ID")
+    audit_columns = sorted(set(prompt_columns) | set(model_columns))
+    answered_pair = {name: stored_text(answered_row[name]) for name in audit_columns}
+    floored_pair = {name: stored_text(floored_row[name]) for name in audit_columns}
 
-    assert (floored_prompt, floored_model) != (answered_prompt, answered_model), (
-        "A classification the provider never made carries the same prompt version and model ID "
-        f"as one it did: both read {answered_prompt!r} / {answered_model!r}. Nothing downstream "
-        "can then tell a verdict a model produced from one the character floor produced during an "
-        "outage — SPEC §7.4 requires that a stored classification say which prompt version and "
-        "which model produced it, and this one says a model produced something it was never "
-        "asked. E0-13's definition of done: failing open must mean accepting the submission, not "
-        "silently skipping a classification. The floor's own answer needs a value that says so."
+    assert floored_pair != answered_pair, (
+        f"The row stored for a classification the provider never made carries the same audit "
+        f"values as the row stored for one it did: both read {answered_pair}. Nothing reading "
+        f"`{CLASSIFICATION_TABLE}` can then tell a verdict a model produced from one the "
+        "character floor produced during an outage — SPEC §7.4 requires a stored classification "
+        "to say which prompt version and which model produced it, and this row says a model "
+        "produced something it was never asked. E0-13's definition of done: failing open means "
+        "accepting the submission, not silently skipping a classification, and the row is the "
+        "only place that distinction survives."
+    )
+
+
+def test_a_provider_that_cannot_be_reached_raises_rather_than_flooring(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+) -> None:
+    """The edge of the sanctioned fail-open: a timeout floors, a connection failure does not.
+
+    §3.3 sanctions exactly one fail-open and names its cause: "Classifier latency
+    budget: p95 < 2s; **on provider timeout**, the heuristic floor applies and the
+    submission is accepted". A review found the gateway catching the library's
+    whole error hierarchy and treating everything in it as an outage, so a refused
+    connection, a failed TLS handshake and a misconfigured base URL all produced a
+    verdict based on a character count with no sign anything was wrong. That is
+    the fail-open widened from "the provider was slow" to "anything at all went
+    wrong", and every one of those causes is permanent rather than transient: the
+    async re-classification it defers to would fail the same way.
+
+    The provider is made unreachable rather than slow by stopping the stub, so the
+    port in `AI_PROVIDER_BASE_URL` refuses the connection immediately. **The
+    timeout tests above are this test's control**: they are what says the
+    sanctioned case still floors, so a gateway that simply stopped flooring
+    everything would fail there rather than pass here.
+
+    **This is a behaviour change rather than a criterion**, recorded in ADR 0056:
+    an unreachable provider now blocks where it used to floor, and whether E2's
+    submit path catches it there is E2's to decide. It is asserted here because
+    the alternative is silent — a permanently misconfigured provider handing out
+    participation credit on a character count, with nothing red anywhere.
+    """
+    contract = validity_contract(import_app_module)
+    unreachable = stub_provider.base_url
+    stub_provider.script(well_formed(contract, INSUFFICIENT_VERDICT))
+    stub_provider.stop()
+
+    try:
+        result = run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+    except FELL_OVER as failure:
+        pytest.fail(
+            f"An unreachable provider made the validity task raise {failure!r}, which is the "
+            "gateway falling over rather than surfacing a failure. A caller on §3.3's submit path "
+            "has to be able to catch this one deliberately."
+        )
+    except Exception:
+        return
+
+    name, _ = verdict_field(contract)
+    pytest.fail(
+        f"The provider at {unreachable} was not listening, and the validity task returned "
+        f"{getattr(result, name)!r} instead of raising. §3.3 sanctions the heuristic floor on a "
+        "provider **timeout** and on nothing else, and a connection that is refused is not a "
+        "provider that was slow — it is one that is not there, which no amount of waiting fixes "
+        "and which the async re-classification will meet again. A gateway that floors it hands "
+        "out participation credit on a character count for as long as the misconfiguration lasts, "
+        "with nothing anywhere reporting a problem. ADR 0056 records the choice; the timeout "
+        "tests above are what say the sanctioned case still floors."
+    )
+
+
+# ---------------------------------------------------------------------------
+# One gateway, many threads
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_submissions_all_carry_the_verdict_the_provider_gave(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    migrated_engine: Any,
+    classification_rows: ClassificationRows,
+) -> None:
+    """One gateway across threads keeps classifying, rather than quietly flooring alternate calls.
+
+    The defect this is written against: a single HTTP client shared across
+    per-thread event loops. A connection created under one loop and reused under
+    another raised, the gateway read the raise as an outage, and §3.3's sanctioned
+    fail-open turned it into a verdict from the character floor. Measured before
+    the fix at six submissions against a healthy provider — three real answers and
+    three floored, alternating.
+
+    **The stub saw all six.** The comment was sent to the third party, the model
+    answered, and the answer was discarded — so the cost is a wrong verdict *and* a
+    disclosure of a student's words that bought nothing. That is why the request
+    count is asserted here as well: it is not the discriminator, it is what makes
+    the failure's price legible.
+
+    **"Nothing raised" would pass against the defect**, which is the whole trap:
+    the floor never raises. So the stub is scripted with a verdict the character
+    floor *cannot* produce — the comments are all comfortably over §3.3's
+    ≥25-character threshold, so the floor says `substantive` and the model says
+    `insufficient` — and every result has to carry the model's. A floored call is
+    then visible as a verdict rather than as an error.
+
+    Each thread gets its own `Session`, because a SQLAlchemy session is not
+    thread-safe and sharing `db_session` across a pool would be this module
+    breaking in its own fixture rather than the gateway breaking (`docs/MISTAKES.md`
+    entry 13).
+    """
+    contract = validity_contract(import_app_module)
+    task = validity_task(import_app_module)
+    stub_provider.script(well_formed(contract, INSUFFICIENT_VERDICT))
+
+    name, verdicts = verdict_field(contract)
+    from_the_model = verdict_member(verdicts, INSUFFICIENT_VERDICT)
+    from_the_floor = verdict_member(verdicts, SUBSTANTIVE_VERDICT)
+
+    def submit(index: int) -> Any:
+        session = Session(bind=migrated_engine)
+        try:
+            return call_task(
+                task, session=session, comment=f"{SUBSTANTIVE_COMMENT} (submission {index})"
+            )
+        except Exception as failure:  # returned rather than raised, so all of them are reported
+            return failure
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=CONCURRENT_WORKERS) as pool:
+        results = list(pool.map(submit, range(CONCURRENT_SUBMISSIONS)))
+
+    raised = {index: item for index, item in enumerate(results) if isinstance(item, BaseException)}
+    assert not raised, (
+        f"{len(raised)} of {CONCURRENT_SUBMISSIONS} concurrent submissions raised: {raised}. A "
+        "gateway serving one request at a time and failing on the second is not a gateway E2 can "
+        "put behind a submit path."
+    )
+
+    assert len(stub_provider.calls) == CONCURRENT_SUBMISSIONS, (
+        f"{CONCURRENT_SUBMISSIONS} submissions produced {len(stub_provider.calls)} requests to a "
+        "healthy provider. §7.4's single-shot boundary makes it one call per submission, and this "
+        "count is also what says whether a floored verdict below cost a disclosure: a request the "
+        "provider answered and the gateway discarded sent the student's comment to a third party "
+        "for nothing."
+    )
+
+    floored = {
+        index: getattr(item, name, None)
+        for index, item in enumerate(results)
+        if getattr(item, name, None) is not from_the_model
+    }
+    assert not floored, (
+        f"{len(floored)} of {CONCURRENT_SUBMISSIONS} concurrent submissions came back with a "
+        f"verdict the provider did not give: {floored}, against {from_the_model!r} from the stub. "
+        f"A verdict of {from_the_floor!r} is the character floor — every comment here is over "
+        f"§3.3's {HEURISTIC_MINIMUM_CHARACTERS}-character threshold — so this is the sanctioned "
+        "fail-open firing against a provider that was healthy and answered. One HTTP client "
+        "shared across per-thread event loops is what produced it: the reused connection raises, "
+        "the raise reads as an outage, and the student is graded on a character count. Nothing "
+        "raises, nothing is logged as an error, and the stub still saw every request."
+    )
+
+    stems = prompt_stems()
+    assert stems, (
+        f"There are no prompt files under {PROMPTS_DIR}, so the check below would accept any "
+        "recorded version. `tests/unit/test_prompt_directory_layout.py` owns that failure."
+    )
+    unresolvable = {
+        index: require_audit_value(item, "prompt_version", "prompt version")[1]
+        for index, item in enumerate(results)
+        if str(require_audit_value(item, "prompt_version", "prompt version")[1]) not in stems
+    }
+    assert not unresolvable, (
+        f"These concurrent submissions recorded a prompt version naming no file under "
+        f"{PROMPTS_DIR}: {unresolvable}. ADR 0031 makes the recorded value a prompt file's path "
+        "stem, so a result carrying anything else was produced without loading a prompt — which "
+        "is what a floored verdict looks like from the audit side."
     )
 
 
@@ -1946,6 +2433,179 @@ def test_the_needle_matches_nothing_a_request_carries_without_it(
     )
 
 
+def raised_by_a_persistent_shape_violation(
+    import_app_module: Callable[[str], ModuleType | None],
+    session: Any,
+    comment: str,
+) -> BaseException:
+    """Run the validity task against a provider that never answers correctly, and return the error.
+
+    A failure that is the gateway falling over rather than reporting is refused
+    here rather than searched, for the reason
+    `test_a_persistently_malformed_provider_answer_raises_rather_than_returning_a_partial_object`
+    gives at length: a `TypeError` is not a surfaced failure, and searching one
+    for a comment would be reading whatever Python happened to say.
+    """
+    try:
+        result = run_validity(import_app_module, session, comment)
+    except FELL_OVER as failure:
+        pytest.fail(
+            f"A persistently malformed provider answer raised {failure!r}, which is the gateway "
+            "falling over rather than surfacing a failure. The test named above owns that."
+        )
+    except Exception as failure:
+        return failure
+    pytest.fail(
+        f"The provider answered malformed on every attempt and the task returned {result!r} "
+        "rather than raising, so there is no failure message to search. "
+        "`test_a_persistently_malformed_provider_answer_raises_rather_than_returning_a_partial_"
+        "object` owns that."
+    )
+
+
+def rendered_chain(failure: BaseException) -> dict[str, str]:
+    """Every rendering of every link in an exception chain, labelled by where it came from.
+
+    Three surfaces per link, because a fix can address one and miss the others:
+    the message a traceback prints, the repr a structured logger reaches for, and
+    the payload a JSON error handler would serialise. The chain rather than the
+    outermost exception, because `raise X() from exc` leaves the original holding
+    whatever it held and Python prints a cause's message too.
+    """
+    surfaces: dict[str, str] = {}
+    for index, link in enumerate(exception_chain(failure)):
+        label = f"{type(link).__name__}[{index}]"
+        surfaces[f"str() of {label}"] = str(link)
+        surfaces[f"repr() of {label}"] = repr(link)
+        errors = getattr(link, "errors", None)
+        if callable(errors):
+            surfaces[f"errors() of {label}"] = json.dumps(errors(), default=str)
+    return surfaces
+
+
+def assert_the_failure_describes_the_shape(surfaces: dict[str, str], field_name: str) -> None:
+    """The message says something about the payload's shape, so an absence below means something.
+
+    The non-vacuity guard for the two tests beneath, and not ceremony: "no part of
+    the comment appears in the failure" is satisfied completely by a gateway whose
+    message is the empty string, and a message that cannot say which field was
+    wrong is a message nobody can act on. A field the *contract* declares is the
+    thing a shape violation is entitled to name — it is the project's own
+    vocabulary rather than the model's.
+    """
+    assert any(field_name in rendering for rendering in surfaces.values()), (
+        f"No rendering of the raised failure mentions `{field_name}`, a field the contract "
+        f"declares — the renderings were {surfaces}. The assertions below say that no part of the "
+        "student's comment appears in this failure, and a failure that says nothing at all "
+        "satisfies them without the guarantee holding. §7.4 has the gateway surface persistent "
+        "failures as errors, and an error that cannot name the field that was wrong leaves an "
+        "operator with a comment they may not read and nothing else."
+    )
+
+
+def test_a_shape_violation_message_does_not_carry_the_students_comment(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+) -> None:
+    """A comment must not reach a log through the error a bad answer produced.
+
+    §4 keeps a student's words out of every surface that is not the ones it names,
+    and §10 keeps them out of logs; a gateway error is printed to the container
+    log with its whole chain. This is the general case: the provider answers
+    malformed, the gateway gives up, and whatever it says must describe the
+    *shape* it refused rather than the text it was asked about.
+
+    It is also the control for the test below. The comment here is made of tokens
+    that appear nowhere else in this repository, so this test passing is what says
+    those tokens do not collide with the gateway's own vocabulary — without it, a
+    green result there would be as consistent with a needle that matches nothing
+    as with a message that leaks nothing (`docs/MISTAKES.md` entry 3).
+    """
+    contract = validity_contract(import_app_module)
+    field_name, _ = verdict_field(contract)
+    stub_provider.script(Answer(content='{"' + field_name + '": "spicy-take"}'))
+
+    failure = raised_by_a_persistent_shape_violation(import_app_module, db_session, NEEDLE_COMMENT)
+    surfaces = rendered_chain(failure)
+    assert_the_failure_describes_the_shape(surfaces, field_name)
+
+    leaked = {
+        where: leaked_fragments(rendering, NEEDLE_COMMENT)
+        for where, rendering in surfaces.items()
+        if leaked_fragments(rendering, NEEDLE_COMMENT)
+    }
+    assert not leaked, (
+        f"The failure a malformed provider answer produced carries fragments of the student's "
+        f"comment: {leaked}. The renderings were {surfaces}. SPEC §4 permits a comment on the "
+        "surfaces it names and no others, and §10 keeps it out of logs — a gateway error is "
+        "printed to the container log with its whole chain, so a comment quoted into one is a "
+        "comment in the log aggregator."
+    )
+
+
+def test_a_shape_violation_does_not_reassemble_the_comment_out_of_the_answers_keys(
+    ai_environment: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+) -> None:
+    """The route a review found, and the reason a message may not interpolate what it refused.
+
+    A message that names the offending field by interpolating the key it came from
+    is quoting the *model's* invention, and a model asked to classify a comment
+    can return that comment as its field names. With the number of details
+    unbounded, the keys arrive in order and the comment reassembles itself inside
+    the error — in a log, from a gateway that has done nothing else wrong.
+
+    So the stub answers with a payload whose keys are the chunks of the comment,
+    in order. What must survive is the distinction between vocabularies: a name
+    the *contract* declares may be named, and a name the model invented may not be
+    echoed. The fix sanitises every element of the location against the payload's
+    own schema and caps how many are reported; this asserts the property rather
+    than either mechanism.
+
+    Its non-vacuity guard is `assert_the_failure_describes_the_shape` — a message
+    that says nothing leaks nothing — and its needle control is the test above,
+    which sends the same comment with ordinary keys and requires the same silence.
+    """
+    contract = validity_contract(import_app_module)
+    field_name, _ = verdict_field(contract)
+    invented = {chunk: "..." for chunk in NEEDLE_COMMENT_CHUNKS}
+    assert field_name not in invented, (
+        f"The comment this test chops into keys happens to contain `{field_name}`, the "
+        "contract's own field name, so a message that legitimately names the field would read as "
+        "a leak. `NEEDLE_COMMENT` in this file is the one line that changes."
+    )
+    stub_provider.script(Answer(content=json.dumps(invented)))
+
+    failure = raised_by_a_persistent_shape_violation(import_app_module, db_session, NEEDLE_COMMENT)
+    surfaces = rendered_chain(failure)
+    assert_the_failure_describes_the_shape(surfaces, field_name)
+
+    leaked: dict[str, list[str]] = {}
+    for where, rendering in surfaces.items():
+        found = sorted(
+            fragment
+            for needle in (NEEDLE_COMMENT, *NEEDLE_COMMENT_CHUNKS)
+            for fragment in leaked_fragments(rendering, needle)
+        )
+        if found:
+            leaked[where] = found
+
+    assert not leaked, (
+        f"A provider answered with the student's comment as its field names, and the failure the "
+        f"gateway raised quotes those names back: {leaked}. The renderings were {surfaces}. The "
+        "comment was "
+        f"{NEEDLE_COMMENT!r}, chopped into {list(NEEDLE_COMMENT_CHUNKS)} and sent as the payload's "
+        "keys. A message built by interpolating the keys of the payload it refused reassembles "
+        "the comment in a container log, and the number of them reported is what decides how much "
+        "of it. A name the contract declares may be named; a name the model invented may not be "
+        "echoed."
+    )
+
+
 # ---------------------------------------------------------------------------
 # The classification row (SPEC §8: append-only)
 # ---------------------------------------------------------------------------
@@ -2151,4 +2811,135 @@ def test_the_application_role_may_write_a_classification_row(
         "them writing a classification for every comment — so the first one in a real deployment "
         "fails with a permission error while every test in this module, which writes on the "
         "bootstrap connection, stays green."
+    )
+
+
+# The privileges that would let a stored classification be changed or removed.
+# SPEC §8's "append-only (re-runs create new rows)" is enforced by their absence
+# and by nothing else: no constraint, no trigger and no application code stops an
+# `UPDATE` that the grant permits.
+FORBIDDEN_APPEND_ONLY_PRIVILEGES = ("UPDATE", "DELETE", "TRUNCATE")
+
+
+@pytest.mark.parametrize("privilege", FORBIDDEN_APPEND_ONLY_PRIVILEGES)
+def test_the_application_role_may_not_change_or_remove_a_classification_row(
+    migrated_engine: Any,
+    metadata_tables: dict[str, Any],
+    privilege: str,
+) -> None:
+    """Append-only, asserted as the absence that actually enforces it.
+
+    The test above asserts `INSERT` is present. Nothing asserted these were
+    absent, and they are the whole of the enforcement: §8 says "`classification`
+    is append-only (re-runs create new rows) with prompt/model versioning", and no
+    constraint, trigger or line of application code holds that — the grant does.
+    A later migration adding `UPDATE` would pass every other test in this module,
+    and ADR 0055 names the temptation by name: E2's re-classification pass will
+    have a row it would rather amend than supersede.
+
+    **The two append-only behaviour tests cannot see this**, which is why it is
+    separate rather than folded into them. They run on the bootstrap connection,
+    which holds every privilege in the cluster whatever `pulse_app` holds, so they
+    would stay green against a role that could rewrite every verdict ever stored.
+    `tests/integration/test_identity_grants.py` sets this repository's bar for the
+    shape — a catalog assertion paired with a behavioural one — and the
+    behavioural half is the test below.
+
+    `TRUNCATE` is in the set for completeness: it removes every row without being
+    a `DELETE`, and a grant of it is the same guarantee lost by a different verb.
+    """
+    table = classification_table(metadata_tables)
+    with migrated_engine.connect() as connection:
+        readable = connection.execute(
+            text("SELECT has_table_privilege(:role, :name, 'SELECT')"),
+            {"role": APPLICATION_ROLE, "name": f"public.{table.name}"},
+        ).scalar()
+        held = connection.execute(
+            text("SELECT has_table_privilege(:role, :name, :privilege)"),
+            {"role": APPLICATION_ROLE, "name": f"public.{table.name}", "privilege": privilege},
+        ).scalar()
+
+    assert readable, (
+        f"`{APPLICATION_ROLE}` cannot even SELECT `public.{table.name}`, so this test is asking "
+        "about a table the role has no relationship with at all and its answer says nothing about "
+        "append-only. E0-13 has the application reading its own classifications back."
+    )
+    assert not held, (
+        f"`{APPLICATION_ROLE}` holds {privilege} on `public.{table.name}`. SPEC §8: "
+        "'`classification` is append-only (re-runs create new rows) with prompt/model "
+        "versioning' — and the grant is the only thing enforcing it, since no constraint or "
+        "trigger refuses an amendment. With this privilege held, a re-classification can rewrite "
+        "the verdict that decided a participation grade, §9.3 compares a new answer against a row "
+        "edited to agree with it, and §6.1's drift panel samples a history that has been "
+        "rewritten. ADR 0055 records that E2 will want exactly this; the answer is a second row."
+    )
+
+
+@pytest.mark.parametrize("statement", ("UPDATE", "DELETE"))
+def test_the_application_role_is_refused_a_write_that_would_amend_a_classification(
+    application_engine: Any,
+    metadata_tables: dict[str, Any],
+    statement: str,
+) -> None:
+    """The behavioural half: the statement itself is refused on the connection production uses.
+
+    The catalog test above says the privilege is not in `relacl`; this says the
+    database acts on that. `docs/MISTAKES.md` entry 3's rule for a guarantee two
+    mechanisms could produce: "the catalog test cannot see whether the rule works
+    and the behavioural test cannot see whether it exists. Both, not either."
+
+    `application_engine` is the connection that matters — `pulse_app`, holding
+    only what the migrations grant it — and the epic README is explicit that from
+    E0-10 on, which role a fixture authenticates as is the difference between a
+    test that can detect a missing grant and one that cannot.
+
+    **The control comes first.** A `SELECT` on the same table over the same
+    connection has to succeed, because "the statement was refused" is equally
+    satisfied by a table that is not there, a role that cannot connect and a
+    schema nobody migrated — and all three would read as append-only holding.
+
+    No row is seeded and none is needed: Postgres checks the privilege before it
+    looks for rows, so the refusal is the same on an empty table and is a
+    statement about the grant rather than about what happens to be stored.
+    """
+    from sqlalchemy.exc import ProgrammingError
+
+    table = classification_table(metadata_tables)
+    key = primary_key_of(table)
+    # Built through SQLAlchemy Core rather than as text, so the statement is
+    # rendered from the table this test was handed rather than from a name spliced
+    # into a string. Neither is a `commit()`, and a connection closed without one
+    # rolls back — so a grant that should not be there fails this test rather than
+    # emptying the table on its way through.
+    amendments = {
+        "UPDATE": table.update().values({key.name: key}),
+        "DELETE": table.delete(),
+    }
+
+    with application_engine.connect() as connection:
+        current = connection.execute(text("SELECT current_user")).scalar()
+        assert current == APPLICATION_ROLE, (
+            f"This test connected as {current!r} rather than as `{APPLICATION_ROLE}`, so a "
+            "refusal here would be about some other role's privileges. `tests/conftest.py` "
+            "carries the reasoning beside `TEST_APP_USER`, and "
+            "`test_the_suites_application_connection_authenticates_as_the_granted_role` in "
+            "`tests/integration/test_identity_grants.py` is what keeps the two names in step."
+        )
+        try:
+            connection.execute(select(key)).first()
+        except ProgrammingError as refusal:
+            pytest.fail(
+                f"`{APPLICATION_ROLE}` could not read `public.{table.name}`: {refusal}. The "
+                "refusal asserted below would then be indistinguishable from a table this role "
+                "cannot reach at all."
+            )
+
+    with application_engine.connect() as connection, pytest.raises(ProgrammingError) as refused:
+        connection.execute(amendments[statement])
+
+    assert "permission denied" in str(refused.value).lower(), (
+        f"`{APPLICATION_ROLE}` was refused `{statement}` on `public.{table.name}`, but not for "
+        f"want of a privilege: {refused.value}. A syntax error or a missing relation refuses the "
+        "same statement and says nothing about append-only, which is the distinction this "
+        "assertion exists to keep."
     )

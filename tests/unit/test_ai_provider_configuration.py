@@ -14,6 +14,16 @@ the exception a refused configuration raises. Its last test covers the ticket's
 seventh acceptance criterion, which is about a different secret in a different
 place: no `secrets.*` reference added to a workflow.
 
+**The transport rule arrived from a review**, and it is the other half of "the key
+is a secret": a key masked in every log and then sent in clear over a network is
+a key in the open. Plain HTTP stays legal to this machine, where a local model
+server needs no TLS and there is no network to read anything off, and is refused
+to any other host while a key is configured. The refusal is asserted **through
+`create_app()`**, because a `Settings` validator's own message never reaches the
+operator — the startup report is built from the field name, the field's static
+`description` and pydantic's error code, so asserting on a message the validator
+raises would be asserting on something nobody sees.
+
 **The key's variable is not named here.** E0-13 spells no variable and no field,
 so both are found — the `.env.example` entry by the words in its name, and the
 `Settings` field by the words in *its* name — and one test requires the two to be
@@ -110,6 +120,32 @@ LEAK_FRAGMENT_LENGTH = 8
 # error it raises can be searched. Its own absence is E0-01's subject; here it is
 # only the cause of an exception that has the provider key in scope.
 REQUIRED_DEPLOYMENT_VARIABLE = "DATABASE_URL"
+
+# The base URL, and the shapes the transport rule has to sort. `.env.example`
+# already names the whole range of deployments this has to serve: "a hosted
+# provider, a proxy, or a local server such as vLLM or Ollama".
+AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
+
+# A host that is certainly not this machine — and a needle as well as a host,
+# because the refusal must quote neither the URL nor the key. It has to share no
+# eight-character run with the field name, with the field's own `description`, or
+# with pydantic's error code, and
+# `test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_nothing_else`
+# runs a control that says it does not.
+OFF_MACHINE_HOST = "qv7zmxt4ld9rbnsw.test"
+OFF_MACHINE_HTTPS_URL = f"https://{OFF_MACHINE_HOST}/v1"
+OFF_MACHINE_HTTP_URL = f"http://{OFF_MACHINE_HOST}/v1"
+
+# Plain HTTP is safe to exactly one place: this machine, where there is no network
+# for anything to be read off. All three spellings, because a rule written against
+# the address alone refuses a developer running Ollama on `localhost`, and one
+# written against the name alone refuses the address — and each of those is a
+# working local setup turned away at startup with a security message.
+LOOPBACK_HTTP_URLS = (
+    "http://127.0.0.1:11434/v1",
+    "http://localhost:11434/v1",
+    "http://[::1]:11434/v1",
+)
 
 # The repository secrets a workflow may reference today. `GITHUB_TOKEN` is
 # supplied by Actions itself rather than configured, so it is not a stored secret
@@ -508,8 +544,215 @@ def test_the_needle_matches_nothing_a_refused_configuration_prints(
 
 
 # ---------------------------------------------------------------------------
-# The other secret, in the other place
+# How the key is allowed to travel
 # ---------------------------------------------------------------------------
+
+
+def build_app() -> Any:
+    """Call the application factory inside the test, so a missing module fails loudly.
+
+    The same entry point `tests/unit/test_create_app_startup_errors.py` uses, and
+    for the reason it gives: nothing guarantees the factory does not catch and
+    re-raise, and the factory is what the caller holds. It matters more here than
+    there — a `Settings` validator's own message does not reach the operator at
+    all, because the report is assembled from the field name, the field's static
+    `description` and pydantic's error code, so a rule that lives in a validator's
+    message is a rule nobody is told about.
+    """
+    from app.main import create_app
+
+    return create_app()
+
+
+def renderings_of(failure: BaseException) -> dict[str, str]:
+    """Every rendering of every link in a chain, labelled by where it came from."""
+    surfaces: dict[str, str] = {}
+    for index, link in enumerate(exception_chain(failure)):
+        label = f"{type(link).__name__}[{index}]"
+        surfaces[f"str() of {label}"] = str(link)
+        surfaces[f"repr() of {label}"] = repr(link)
+        errors = getattr(link, "errors", None)
+        if callable(errors):
+            surfaces[f"errors() of {label}"] = json.dumps(errors(), default=str)
+    return surfaces
+
+
+def configure_provider(
+    monkeypatch: pytest.MonkeyPatch, base_url: str, *, with_key: bool = True
+) -> None:
+    """Point the provider at `base_url`, with or without a key configured."""
+    settings_cls = load_settings_class()
+    name, info = one_key_field(settings_cls)
+    monkeypatch.setenv(AI_PROVIDER_BASE_URL_VARIABLE, base_url)
+    if with_key:
+        monkeypatch.setenv(variable_for(name, info), FAKE_PROVIDER_CREDENTIAL)
+    else:
+        monkeypatch.delenv(variable_for(name, info), raising=False)
+
+
+def test_an_https_provider_url_is_accepted_wherever_it_points(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordinary deployment: a hosted provider over TLS, with a key.
+
+    The permitted case, asserted first and separately, because a rule that refuses
+    plain HTTP is trivially satisfiable by refusing everything — and a startup
+    that turns away the configuration `.env.example` documents is a rule nobody
+    can deploy behind.
+    """
+    configure_provider(monkeypatch, OFF_MACHINE_HTTPS_URL)
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings` refused {OFF_MACHINE_HTTPS_URL}, a hosted provider reached over TLS with a "
+        "key configured. That is the deployment `.env.example` documents."
+    )
+
+
+@pytest.mark.parametrize("base_url", LOOPBACK_HTTP_URLS)
+def test_a_plain_http_provider_url_is_accepted_on_this_machine(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+) -> None:
+    """Plain HTTP to this machine stays legal, in all three spellings of it.
+
+    §7.4's whole provider argument is that the endpoint may be "a hosted provider,
+    a proxy, or a local server such as vLLM or Ollama", and the local server is
+    reached over plain HTTP on the loopback interface, where there is no network
+    to read a key off. A transport rule that refuses it refuses the cheapest way
+    to run this project without a hosted provider at all — the thing E0-13's
+    definition of done asks `README.md` to explain.
+
+    Three spellings rather than one, because they are three separate ways to write
+    the same permission and a rule written against any one of them turns the other
+    two away. `[::1]` in particular is what a machine with IPv6 first resolves
+    `localhost` to.
+    """
+    configure_provider(monkeypatch, base_url)
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings` refused {base_url}, which is plain HTTP to this machine. There is no network "
+        "between the process and a local model server, so there is nothing for the transport rule "
+        "to protect — and refusing it makes running without a hosted provider impossible."
+    )
+
+
+def test_a_plain_http_provider_url_to_another_host_is_refused_when_a_key_is_set(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A key sent in clear over a network is refused at startup rather than at the first call.
+
+    The two things travelling over that connection are the provider key in a
+    header and the student's comment in the body. SPEC §10 keeps secrets in the
+    environment or the secret store, and §4 keeps a comment to the surfaces it
+    names; plain HTTP to another host puts both on the wire for anything between
+    here and there.
+
+    At startup rather than on first use, because the alternative fails in the
+    §3.3 fail-open direction: a call that cannot be made is an outage, an outage
+    floors, and the misconfiguration is invisible while participation credit is
+    handed out on a character count.
+
+    The exception *type* is not asserted here — that is E0-01's subject and
+    `tests/unit/test_create_app_startup_errors.py` owns it — and neither is the
+    message, which the test below reads from the surface an operator actually
+    sees. `pytest.raises` is the whole assertion, deliberately: an
+    `assert refused.value is not None` after it cannot fail, and this file has
+    written one before (`docs/MISTAKES.md` entry 3, its twenty-fifth instance).
+    """
+    configure_provider(monkeypatch, OFF_MACHINE_HTTP_URL)
+
+    with pytest.raises(Exception):  # noqa: B017 - the type is E0-01's subject
+        load_settings_class()()
+
+
+def test_the_refusal_of_an_insecure_provider_url_names_the_variable_and_quotes_nothing_else(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What the operator is told: which variable, and neither the URL nor the key.
+
+    **Asserted through `create_app()` rather than through the validator**, because
+    a validator's own message does not reach the operator. The startup report is
+    assembled from the field name, the field's static `description` and pydantic's
+    error code, so a `value_error` renders as a generic sentence however carefully
+    it was worded — the implementer put the rule in the field's `description` for
+    that reason, and widening the report to interpolate a validator's message
+    would mean trusting every future validator not to quote its own input, which
+    is `docs/MISTAKES.md` entry 2's shape pointed at a credential.
+
+    Three things, and the order is the point. The control runs first: an unrelated
+    refusal, with this test's host configured nowhere, must contain no fragment of
+    it — that is what says the host token does not collide with the report's own
+    vocabulary, so the silence asserted afterwards means something. Then the
+    refusal has to name `AI_PROVIDER_BASE_URL`, since an operator who cannot tell
+    which variable is wrong will reach for the one thing that makes the message go
+    away. And then it must quote neither the URL it refused nor the key that made
+    it refuse: a startup diagnostic is printed to the container log and pasted
+    into chat windows, which is exactly where a `.env` line does not belong.
+    """
+    restored = configured_env.get(REQUIRED_DEPLOYMENT_VARIABLE)
+    assert restored is not None, (
+        f"`.env.example` documents no {REQUIRED_DEPLOYMENT_VARIABLE}, so the control below cannot "
+        "put the configuration back before the assertion that matters runs."
+    )
+
+    monkeypatch.delenv(REQUIRED_DEPLOYMENT_VARIABLE, raising=False)
+    with pytest.raises(Exception) as unrelated:  # noqa: B017 - the type is E0-01's subject
+        build_app()
+
+    control = renderings_of(unrelated.value)
+    collisions = {
+        where: leaked_fragments(rendering, OFF_MACHINE_HOST)
+        for where, rendering in control.items()
+        if leaked_fragments(rendering, OFF_MACHINE_HOST)
+    }
+    assert not collisions, (
+        f"`OFF_MACHINE_HOST` shares {collisions} with a startup refusal it was configured nowhere "
+        "in, so the assertion below would report an ordinary word as a leaked URL. The repair is "
+        "the host token in this file, not the threshold."
+    )
+
+    # Restored by name rather than with `monkeypatch.undo()`, which would also
+    # undo `configured_env` — the whole documented environment and the working
+    # directory it moved out of the repository — and leave the refusal below
+    # firing on the wrong variable.
+    monkeypatch.setenv(REQUIRED_DEPLOYMENT_VARIABLE, restored)
+    configure_provider(monkeypatch, OFF_MACHINE_HTTP_URL)
+    with pytest.raises(Exception) as refused:  # noqa: B017 - the type is E0-01's subject
+        build_app()
+
+    surfaces = renderings_of(refused.value)
+    variable = AI_PROVIDER_BASE_URL_VARIABLE.lower()
+
+    assert any(variable in rendering.lower() for rendering in surfaces.values()), (
+        f"The refusal of an insecure provider URL never names {AI_PROVIDER_BASE_URL_VARIABLE} — "
+        f"the renderings were {surfaces}. An operator meets this in a container log with no "
+        "traceback into the validator, and a diagnostic that does not say which variable is wrong "
+        "sends them to change whichever one makes it stop."
+    )
+
+    for label, secret in (
+        ("the URL it refused", OFF_MACHINE_HOST),
+        ("the provider key", FAKE_PROVIDER_CREDENTIAL),
+    ):
+        leaked = {
+            where: leaked_fragments(rendering, secret)
+            for where, rendering in surfaces.items()
+            if leaked_fragments(rendering, secret)
+        }
+        assert not leaked, (
+            f"The startup refusal quotes {label}: {leaked}. The renderings were {surfaces}. SPEC "
+            "§10 keeps secrets in the environment or the secret store, and a startup diagnostic "
+            "goes to the container log and into whatever the operator pastes when asking for "
+            "help. Naming the variable is what the message is for; repeating its value is not."
+        )
 
 
 def test_no_workflow_references_a_repository_secret_beyond_the_permitted_set() -> None:
