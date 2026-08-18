@@ -1571,6 +1571,22 @@ def local_target(url: str) -> str:
     return f"{target}?{split.query}" if split.query else target
 
 
+def url_with_query(url: str, query: Mapping[str, Any]) -> str:
+    """`url` with `query` appended to whatever it already carries.
+
+    Both mocks ask this — the platform to filter a line-item container, the
+    provider to send a parameter in the query as well as in the body — so it is
+    answered once (`docs/MISTAKES.md` entry 13). Appends rather than replaces: a
+    name already in the URL and the same name added here is a URL carrying it
+    twice, which for the provider is the whole question.
+    """
+    if not query:
+        return url
+    split = urlsplit(url)
+    merged = parse_qsl(split.query) + [(name, str(value)) for name, value in query.items()]
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(merged), split.fragment))
+
+
 def declared_paths(application: Any, method: str = "GET") -> list[str]:
     """Every path `application` declares that answers `method` and takes no parameter.
 
@@ -2463,13 +2479,7 @@ class MockPlatform:
 
     def with_query(self, url: str, query: Mapping[str, Any]) -> str:
         """`url` with `query` appended to whatever it already carries."""
-        if not query:
-            return url
-        split = urlsplit(url)
-        merged = parse_qsl(split.query) + [(name, str(value)) for name, value in query.items()]
-        return urlunsplit(
-            (split.scheme, split.netloc, split.path, urlencode(merged), split.fragment)
-        )
+        return url_with_query(url, query)
 
     def line_item_container(self, url: str) -> list[dict[str, Any]]:
         """One page of an AGS line-item container, as a list.
@@ -4048,6 +4058,11 @@ MAX_LOGIN_HOPS = 4
 # right answer is a named failure rather than a guess at a seeded password.
 TYPED_INPUT_TYPES = frozenset({"text", "password", "email", "tel", "url", "number", "search"})
 
+# Words that name the field a login form picks a person with, consulted only when
+# the form offers more than one set of choices and the ambiguity has to be
+# resolved. Read by `MockIdentityProvider.identity_field` below.
+IDENTITY_FIELD_HINTS = ("user", "login", "identity", "account", "sub", "person", "email", "name")
+
 # The claims that carry a *person* rather than a *role*, from OIDC Core 1.0 §2
 # and §5.1, plus the registered JWT claims. Values under these keys are skipped
 # when scanning a session for roles, because a dean called "Dean" is a name and
@@ -4773,18 +4788,59 @@ class MockIdentityProvider:
         )
         return submissions
 
+    @staticmethod
+    def identity_field(form: Mapping[str, Any]) -> str:
+        """The name of the field a login form picks a person with.
+
+        A login form offering seeded identities offers them under one name — the
+        `<select>`, the radio group, the named submit buttons. Where a form offers
+        more than one set of choices, the one whose name reads as a person is
+        taken, and an ambiguity this cannot resolve stops rather than guesses:
+        choosing would let a test submit the wrong field and pass for a reason
+        unrelated to what it asserts.
+
+        On the driver rather than in a test module because two modules ask it —
+        the refusal tests over launch-only identities, and the duplicate-parameter
+        tests that send the same name in the query and the body — and two copies
+        of "which field names the person" would drift (`docs/MISTAKES.md` entry
+        13).
+        """
+        choices = sorted(name for name, options in form["choices"].items() if options)
+        if len(choices) == 1:
+            return choices[0]
+        hinted = [
+            name for name in choices if any(hint in name.lower() for hint in IDENTITY_FIELD_HINTS)
+        ]
+        if len(hinted) == 1:
+            return hinted[0]
+        pytest.fail(
+            f"The login form offers choices under {choices}, and this cannot tell which one names "
+            "the person signing in. Submitting the wrong field would make a refusal a fact about "
+            "something else. `IDENTITY_FIELD_HINTS` in tests/conftest.py is the one line that "
+            "changes."
+        )
+
     def submit_login(
-        self, attempt: AuthorizationAttempt, submission: Mapping[str, str]
+        self,
+        attempt: AuthorizationAttempt,
+        submission: Mapping[str, str],
+        *,
+        query: Mapping[str, str] | None = None,
     ) -> LoginAttempt:
         """Post one identity to the login form and read what came back.
 
         Asserts nothing about the outcome. Criterion 7 needs a refusal to be
         readable as a refusal rather than as a fixture failure, so the caller
         decides whether a missing code is the answer it wanted.
+
+        `query` puts parameters on the form's action URL *as well as* in the body,
+        which is the only way to ask whether a name arriving from two sources is
+        seen as one duplicate. A browser never sends that request; something
+        pretending to be a browser does.
         """
         form = self.require_login_form(attempt)
         action = urljoin(f"http://testserver{attempt.page_url}", form["action"] or "")
-        target = local_target(action)
+        target = url_with_query(local_target(action), query or {})
         values = dict(submission)
         if form["method"] == "post":
             response = self.client.post(target, data=values)
@@ -4876,18 +4932,29 @@ class MockIdentityProvider:
             body.pop(name, None)
         return body
 
-    def redeem_from(self, parameters: Sequence[tuple[str, str]]) -> Any:
+    def redeem_from(
+        self,
+        parameters: Sequence[tuple[str, str]],
+        *,
+        query: Mapping[str, str] | None = None,
+    ) -> Any:
         """Post one token request as a list of fields, so a name may appear twice.
 
         Gathered into a mapping of name to values because that is the shape httpx
         form-encodes with `doseq`; the order of the values under one name is what
         decides the question being asked, and it survives the gathering.
+
+        `query` puts parameters on the token endpoint's URL as well as in the
+        body. RFC 6749 §3.1's rule is about the *request* rather than about one
+        encoding of it, and a name arriving once from each source is the shape
+        that looks like two singletons to anything checking one collection at a
+        time.
         """
         fields: dict[str, list[str]] = {}
         for name, value in parameters:
             fields.setdefault(name, []).append(value)
         path = self.endpoint_path("token_endpoint", "where an authorization code is redeemed")
-        return self.client.post(path, data=fields)
+        return self.client.post(url_with_query(path, query or {}), data=fields)
 
     @staticmethod
     def body_of(response: Any) -> dict[str, Any]:
@@ -5099,6 +5166,17 @@ def discovery_path() -> str:
     being two different strings.
     """
     return DISCOVERY_PATH
+
+
+@pytest.fixture
+def claims_in_token() -> Callable[[str], dict[str, Any]]:
+    """Read the claims out of a bare `id_token`, for a test holding one raw.
+
+    `WebLogin.claims` covers every flow that completed; this is for the tests that
+    have a token endpoint's *response* in hand and need to say what a session the
+    provider should never have issued was carrying. Same splitter either way.
+    """
+    return lambda token: split_jws(str(token)).claims
 
 
 @pytest.fixture

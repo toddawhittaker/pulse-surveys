@@ -93,10 +93,6 @@ LAUNCH_ONLY_SUBJECTS = {
     "a student-only identity": "student-only-e0-16",
 }
 
-# Words that name the field a login form picks a person with, if the form offers
-# more than one choice. Only consulted when there is an ambiguity to resolve.
-IDENTITY_FIELD_HINTS = ("user", "login", "identity", "account", "sub", "person", "email", "name")
-
 # Control values for the role scanner: what it must recognise, and what it must
 # not. The last two are the ones that matter — a person *called* Dean is not a
 # dean, and an assistant dean is not a dean either, which is the failure a
@@ -125,32 +121,6 @@ PURVIEW_SHAPES = {
     "an oauth scope": ({"scope": "openid"}, set()),
     "a plain session": ({"sub": "u-1", "roles": ["CARE"]}, set()),
 }
-
-
-def identity_field(form: dict[str, Any]) -> str:
-    """The name of the field a login form picks a person with.
-
-    A login form offering seeded identities offers them under one name — the
-    `<select>`, the radio group, the named submit buttons. Where a form offers
-    more than one set of choices, the one whose name reads as a person is taken,
-    and an ambiguity this cannot resolve stops rather than guesses: choosing
-    would make the refusal test below submit the wrong field and pass for a
-    reason unrelated to what it asserts.
-    """
-    choices = sorted(name for name, options in form["choices"].items() if options)
-    if len(choices) == 1:
-        return choices[0]
-    hinted = [
-        name for name in choices if any(hint in name.lower() for hint in IDENTITY_FIELD_HINTS)
-    ]
-    if len(hinted) == 1:
-        return hinted[0]
-    pytest.fail(
-        f"The login form offers choices under {choices}, and this cannot tell which one names the "
-        "person signing in. Criterion 7 needs to submit an identity this provider does not offer, "
-        "and submitting the wrong field would make the refusal a fact about something else. "
-        "`IDENTITY_FIELD_HINTS` in this module is the one line that changes."
-    )
 
 
 def sessions_with(provider: Any, logins: list[Any], roles: tuple[str, ...]) -> list[Any]:
@@ -347,7 +317,7 @@ def test_a_launch_only_identity_cannot_obtain_a_session_here(mock_idp: Any, case
     attempt = mock_idp.begin()
     form = mock_idp.require_login_form(attempt)
     submission = dict(mock_idp.offered_identities(attempt)[0])
-    submission[identity_field(form)] = LAUNCH_ONLY_SUBJECTS[case]
+    submission[mock_idp.identity_field(form)] = LAUNCH_ONLY_SUBJECTS[case]
 
     refused = mock_idp.submit_login(attempt, submission)
 

@@ -28,14 +28,23 @@ The Compose files are parsed in `tests/conftest.py`, unmerged and one at a time,
 which is the whole point: `docker compose config` would merge the override back
 in and hide the property under test.
 
-**One rule here has no HTTP surface at all**, and that is why the last test
-imports the provider's settings class instead of driving it: a redirect URI
-carrying a fragment is refused when the settings are built, before anything is
-served, so the only way to ask the question is to build them. RFC 6749 §3.1.2 is
-the rule — "the redirect URI MUST NOT include a fragment component" — and the
-cost of not enforcing it is that a client configured with one gets a redirect the
-browser rewrites, with the authorization response landing somewhere nobody
-declared.
+**Two rules here have no HTTP surface at all**, and that is why the last tests
+import the provider's settings class instead of driving it: a redirect URI is
+judged when the settings are built, before anything is served, so the only way to
+ask the question is to build them. RFC 6749 §3.1.2 gives the first — "the
+endpoint URI MUST NOT include a fragment component" — and the second follows from
+what this provider does with the URI: the authorization response appends `code`
+and `state`, so a URI already carrying either is one it would return to with a
+duplicate parameter on it. Both are configuration, so both fail at startup or not
+at all, and the cost of missing either lands on whoever configured it rather than
+on whoever wrote it.
+
+Three of those four cases are ordinary. The fourth is the finding: a **bare** `#`
+was read through `urlsplit(...).fragment`, whose empty string is falsy, so the one
+spelling that looks like a typo registered cleanly while the obvious one was
+caught. The accepted cases beside them — the shipped URI, and one carrying an
+unrelated query parameter — are what keep the rules from being satisfied by a
+check that refuses everything.
 """
 
 from pathlib import Path
@@ -43,10 +52,33 @@ from typing import Any
 
 import pytest
 
-# A redirect URI that is fine, and the same URI with the one thing RFC 6749
-# §3.1.2 forbids added to it. The pair is the test: a settings object that raised
-# on both would satisfy "the bad one is refused" while refusing every deployment.
-FRAGMENT = "#stolen"
+# What is appended to the shipped redirect URI to make it one the authorization
+# response could not return to unchanged, with the pattern each refusal's message
+# has to match. Four cases, two rules:
+#
+#   - A fragment, which RFC 6749 §3.1.2 forbids outright. **The bare `#` is the
+#     finding**: the check read `urlsplit(...).fragment`, which is the empty
+#     string for a trailing `#` and therefore falsy, so that spelling registered
+#     while `#stolen` was caught. One rule, two results, and only one of them was
+#     ever wrong — which is why both are here.
+#   - A query already carrying `code` or `state`, the two names the authorization
+#     response appends. Registering either means the provider emits the duplicate
+#     parameter it refuses inbound.
+#
+# The patterns are deliberately loose about wording and tight about subject: a
+# message that quotes the offending URI contains the parameter name too, so
+# matching the name works whether the sentence spells it out or shows it.
+REFUSED_REDIRECT_SUFFIXES = {
+    "a fragment": ("#stolen", r"(?i)fragment|#"),
+    "an empty fragment": ("#", r"(?i)fragment|#"),
+    "a preset state parameter": ("?state=preset", r"(?i)state"),
+    "a preset code parameter": ("?code=preset", r"(?i)code"),
+}
+
+# A query parameter the authorization response will never collide with. The
+# control that the two rules above did not become "no query, no fragment, ever",
+# which would refuse configurations that are ordinary and correct.
+UNRELATED_QUERY = "?tenant=x"
 
 
 def compose_service(base_compose: dict[str, Any], name: str) -> dict[str, Any]:
@@ -173,61 +205,150 @@ def test_the_mock_idp_service_declares_a_health_check_in_the_base_compose_file(
     )
 
 
-def test_a_redirect_uri_carrying_a_fragment_is_refused_when_the_settings_are_built(
+def redirect_uri_variable(environment: dict[str, str]) -> str:
+    """The one Compose variable that carries the registered redirect URI."""
+    assert environment, (
+        "`docker-compose.yml` gives the `mock-idp` service no literal environment, so these tests "
+        "have no configuration to build settings from. The mock platform is configured by Compose "
+        "literals for the reason ADR 0037 gives, and this provider was expected to be too — if it "
+        "reads its configuration another way, these tests need to be pointed at it."
+    )
+    names = sorted(name for name in environment if "REDIRECT" in name)
+    assert len(names) == 1, (
+        f"The `mock-idp` service's environment carries {names} — this cannot tell which one is "
+        "the redirect URI, and setting the wrong one would make every refusal below a fact about "
+        "a different variable."
+    )
+    return names[0]
+
+
+def settings_built_with(
+    settings_class: Any,
+    environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    redirect_uri: str,
+) -> Any:
+    """Build the provider's settings from the container's environment, with one value swapped.
+
+    The whole Compose environment first, so the settings are built from what the
+    container is actually given rather than from a URI invented here, and then the
+    redirect URI replaced with the value under test.
+    """
+    name = redirect_uri_variable(environment)
+    for variable, value in environment.items():
+        monkeypatch.setenv(variable, value)
+    monkeypatch.setenv(name, redirect_uri)
+    return settings_class.from_environment()
+
+
+def test_the_registered_redirect_uri_the_provider_ships_with_is_accepted(
     mock_idp_settings: Any,
     mock_idp_compose_environment: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RFC 6749 §3.1.2: "the endpoint URI MUST NOT include a fragment component".
+    """The control every refusal below rests on, and the reason it is its own test.
 
-    There is no request that can ask this. The redirect URI is configuration, and
-    a provider that accepted one with a fragment would serve every flow perfectly
-    — right up to the redirect, where the browser keeps the fragment it was
-    configured with, drops the one the response carried, or merges them depending
-    on which browser it is. The authorization response then lands somewhere
-    nobody declared, which is the same class of failure as an unregistered
-    redirect URI and arrives without anyone having attacked anything.
+    A settings object that raised on *every* redirect URI would satisfy each of
+    those refusals perfectly and would also refuse every deployment. Asserting it
+    once, by name, is what makes the four refusals mean something — and it is
+    separate rather than repeated inside each of them because "the shipped
+    configuration builds" is a claim about this provider, not about any one bad
+    value.
 
-    **The clean value goes first, and it is not ceremony.** A settings object that
-    raised on every redirect URI would satisfy "the one with a fragment is
-    refused" and would also refuse every deployment; the control is what says the
-    refusal is about the fragment. Both are built from the environment the
-    container is actually given — the Compose service's own literals — so this
-    asks the question against the configuration that ships rather than against a
-    URI invented here.
+    It also pins the assumption the appended cases below depend on: the shipped
+    URI carries neither a query nor a fragment, so appending one produces exactly
+    the case each is named for.
+    """
+    clean = mock_idp_compose_environment.get(redirect_uri_variable(mock_idp_compose_environment))
+    assert clean and "?" not in clean and "#" not in clean, (
+        f"The shipped redirect URI is {clean!r}. The cases below append a query or a fragment to "
+        "it, so a value that already carries one would make each of them a different test than "
+        "its name says."
+    )
+
+    settings = settings_built_with(
+        mock_idp_settings, mock_idp_compose_environment, monkeypatch, clean
+    )
+    assert settings is not None, (
+        f"Building the provider's settings with `{redirect_uri_variable(mock_idp_compose_environment)}` "
+        f"set to the value `docker-compose.yml` ships, {clean!r}, produced {settings!r}."
+    )
+
+
+@pytest.mark.parametrize("case", sorted(REFUSED_REDIRECT_SUFFIXES))
+def test_a_redirect_uri_the_provider_could_not_return_to_exactly_is_refused(
+    mock_idp_settings: Any,
+    mock_idp_compose_environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """Configuration that has no request able to ask about it, so it is asked here.
+
+    Two rules, both about a URI the authorization response would have to *change*
+    before it could use it:
+
+      - **RFC 6749 §3.1.2: "the endpoint URI MUST NOT include a fragment
+        component".** A provider that accepted one would serve every flow up to the
+        redirect, where the browser keeps the configured fragment, drops the
+        response's, or merges them depending on which browser it is — and the
+        response lands somewhere nobody declared, with nobody having attacked
+        anything. **The bare `#` is the finding**: it was checked with
+        `urlsplit(...).fragment`, whose empty-string result for a trailing `#` is
+        falsy, so the one spelling that looks like an oversight registered
+        cleanly. It is here beside `#frag` because they are one rule and two
+        results, and only one of them was ever wrong.
+      - **A query already carrying `code` or `state`.** The authorization response
+        appends exactly those two, so a URI presenting them is a URI the provider
+        would return to carrying each name twice — the duplicate it refuses on the
+        way in, emitted on the way out. That is not in the RFC; it follows from
+        what this provider does with the URI, which is why it is checked where the
+        URI is registered rather than where a request arrives.
 
     The exception type is deliberately not pinned. What is asserted is that the
-    failure *names* what was wrong with the value, which is what a person reading
-    a container that will not start needs; E0-07's definition of done asks the
-    same of the section-code parser, in the same words.
+    failure *names* what was wrong with the value, which is what someone reading a
+    container that will not start needs — E0-07's definition of done asks the same
+    of the section-code parser, in the same words. The patterns match either the
+    word or the offending value, since a message quoting the URI names it too.
     """
-    assert mock_idp_compose_environment, (
-        "`docker-compose.yml` gives the `mock-idp` service no literal environment, so this test "
-        "has no configuration to build settings from. The mock platform is configured by Compose "
-        "literals for the reason ADR 0037 gives, and this provider was expected to be too — if it "
-        "reads its configuration another way, this test needs to be pointed at it."
+    suffix, pattern = REFUSED_REDIRECT_SUFFIXES[case]
+    clean = mock_idp_compose_environment.get(redirect_uri_variable(mock_idp_compose_environment))
+    assert clean, "The `mock-idp` service's environment carries no redirect URI to append to."
+
+    with pytest.raises(Exception, match=pattern):
+        settings_built_with(
+            mock_idp_settings, mock_idp_compose_environment, monkeypatch, f"{clean}{suffix}"
+        )
+
+
+def test_a_redirect_uri_carrying_an_unrelated_query_parameter_is_accepted(
+    mock_idp_settings: Any,
+    mock_idp_compose_environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other side of the query rule: what is refused is `code` and `state`, not a query.
+
+    A redirect URI carrying a tenant, a locale or a return path is ordinary — real
+    clients register them — and the authorization response appends its own
+    parameters to whatever is there without touching them. So the check has to
+    refuse the two names it would collide with and accept the rest, and a check
+    that had quietly become "no query at all" would satisfy every refusal above
+    while rejecting configurations that are fine.
+
+    This is the assertion that would have caught the fragment rule being fixed by
+    widening rather than by correcting: `urlsplit(...).fragment` being falsy for
+    `#` is repaired either by looking for the character or by refusing anything
+    with a `?` or a `#` in it, and only one of those two is right.
+    """
+    clean = mock_idp_compose_environment.get(redirect_uri_variable(mock_idp_compose_environment))
+    assert clean, "The `mock-idp` service's environment carries no redirect URI to append to."
+
+    settings = settings_built_with(
+        mock_idp_settings,
+        mock_idp_compose_environment,
+        monkeypatch,
+        f"{clean}{UNRELATED_QUERY}",
     )
-
-    redirect_names = sorted(name for name in mock_idp_compose_environment if "REDIRECT" in name)
-    assert len(redirect_names) == 1, (
-        f"The `mock-idp` service's environment carries {redirect_names} — this cannot tell which "
-        "one is the redirect URI whose fragment is being refused, and setting the wrong one would "
-        "make the refusal below a fact about a different variable."
-    )
-    name = redirect_names[0]
-    clean = mock_idp_compose_environment[name]
-
-    for variable, value in mock_idp_compose_environment.items():
-        monkeypatch.setenv(variable, value)
-
-    monkeypatch.setenv(name, clean)
-    settings = mock_idp_settings.from_environment()
     assert settings is not None, (
-        f"Building the provider's settings from the Compose environment with `{name}` set to "
-        f"{clean!r} produced {settings!r}. That is the configuration the container runs with, so "
-        "the refusal below would be a fact about settings that never build."
+        f"Building the provider's settings with a redirect URI of {clean + UNRELATED_QUERY!r} "
+        f"produced {settings!r}."
     )
-
-    monkeypatch.setenv(name, f"{clean}{FRAGMENT}")
-    with pytest.raises(Exception, match=r"(?i)fragment|#"):
-        mock_idp_settings.from_environment()

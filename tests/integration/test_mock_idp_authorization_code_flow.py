@@ -42,6 +42,19 @@ scope releases, what a repeated parameter must not buy, and — because presence
 judged on the trimmed value while the untrimmed one is what is handed on — that a
 parameter which is nothing but whitespace is still absent.
 
+**A fourth group came from the second review pass, and by then the shape had a
+name.** [ADR 0062](../../docs/adr/0062-a-request-is-parsed-once-at-the-edge.md)
+records it: a value transformed between the wire and the check that was supposed
+to judge it, five times across three rounds. What is new here is the two ways that
+transformation hid a *test*. `scope.split()` treats a tab, a newline and U+00A0 as
+separators, so it turned a malformed scope into a well-formed one before the
+unknown-scope refusal written the round before could fire — a guard tested through
+a repair that runs first is a guard nothing tests. And the duplicate-parameter
+rule ran over one collection at a time, so a name sent once in the query and once
+in the body was two singletons; the test for it has to send a request no browser
+sends. The grant-type pair and the token endpoint's own padded fields are the same
+subject on the endpoint the earlier rounds did not reach.
+
 **Where the seeded client comes from.** An authorization request names a
 `client_id` and a redirect URI, and E0-16 spells neither. `MockIdentityProvider.
 registration()` in `tests/conftest.py` looks in the three places a reasonable
@@ -193,12 +206,18 @@ MALFORMED_VERIFIERS = {
 # `refusal` below rules out by name before it gets here.
 REJECTED_GRANT_STATUS = 400
 
-# The error code RFC 6749 §5.2 defines for a code, a redirect URI or a PKCE
-# verifier that does not match what the authorization request registered. Named
-# because the exactness tests below are about *which* refusal came back: a
-# provider that answered `invalid_request` for a verifier one byte from correct
-# would be saying the request was malformed rather than that the proof failed.
+# The error codes RFC 6749 §5.2 defines, and the three this suite distinguishes
+# between. They are not interchangeable and the tests below are about *which* one
+# came back: `invalid_grant` says the grant presented does not match what was
+# registered, `invalid_request` says the request was malformed or repeated a
+# parameter, and `unsupported_grant_type` is reserved for a grant type the server
+# does not support. A provider answering `invalid_request` for a verifier one byte
+# from correct would be calling a well-formed request malformed; one answering
+# `invalid_request` for an unknown grant type would be saying nothing about the
+# thing the client got wrong.
 INVALID_GRANT = "invalid_grant"
+INVALID_REQUEST = "invalid_request"
+UNSUPPORTED_GRANT_TYPE = "unsupported_grant_type"
 
 # The scopes a client may ask for, and what each is supposed to bring back. Not
 # this suite's invention: `openid` is required of every OIDC request (Core §3.1.2.1)
@@ -212,11 +231,74 @@ UNKNOWN_SCOPE = "openid wibble"
 # session issued for `openid` alone may not carry any of them.
 SCOPED_CLAIMS = ("email", "email_verified", "preferred_username")
 
+# Scopes that are two valid tokens to `str.split()` and one invalid token to the
+# grammar. RFC 6749 Appendix A.4: `scope = scope-token *( SP scope-token )` with
+# `scope-token = 1*NQCHAR` — separated by one space and by nothing else.
+#
+# **All four separate the fix from the defect, by two different routes**, and the
+# routes are worth keeping apart because they fail for different reasons:
+#
+#   - A tab, a newline and U+00A0 are *separators* to a bare `split()`. Each of
+#     those values is one unknown token to a conformant server and arrived as two
+#     known ones, so it was granted — and the unknown-scope refusal added the
+#     round before could not fire at all, because the value had been made
+#     well-formed before anything judged it.
+#   - A doubled space is the mirror image. A bare `split()` *drops* the empty
+#     token, so the value reads as two valid tokens and is granted; under the
+#     grammar the empty token is not `1*NQCHAR` and the request is refused. The
+#     same outcome by the opposite mechanism.
+#
+# An earlier version of this comment said the doubled space could not detect a
+# bare `split()`, and said it in that case's own parameter name — the worst place
+# for a wrong claim, because a parameter name is what the next person reads when
+# deciding whether the case is worth keeping. It was reasoned from `split()`
+# dropping empty tokens and never measured. Restoring `scope.split()` reddens all
+# four.
+MALFORMED_SCOPES = {
+    "a tab between the tokens": "openid\temail",
+    "a newline between the tokens": "openid\nemail",
+    # "a non-breaking space between the tokens" is assigned below, with `chr`.
+    "an empty token between two valid ones": "openid  email",
+}
+
+# Built with `chr` rather than typed or written as an escape. An editor, a
+# formatter or a paste can turn an escape into the character and the character
+# into a plain space, and the plain space is the dangerous one: `openid email`
+# with an ordinary space is a *valid* scope, so that case would be granted rather
+# than refused and the failure would say nothing about why. `chr(0xA0)` cannot be
+# rewritten into something that looks the same, and it is reviewable on the page.
+MALFORMED_SCOPES["a non-breaking space between the tokens"] = f"openid{chr(0xA0)}email"
+
 # Values this suite sends and then looks for coming back. **This suite's choice**,
 # and chosen to say where they came from: one of these turning up in a log, a
 # seed or a claim is traceable to this file.
 MARKER_STATE = "e0-16-state-marker"
 MARKER_NONCE = "e0-16-nonce-marker"
+
+# The two `grant_type` refusals RFC 6749 §5.2 keeps apart, as (what to leave out,
+# what to override, which error). Written as one mapping because the pair is the
+# rule: asserted in two separate tests they can both pass against a provider that
+# answers one code for both, since neither test ever sees the other's case.
+GRANT_TYPE_REFUSALS = {
+    "no grant type at all": (["grant_type"], {}, INVALID_REQUEST),
+    "a grant type this provider does not support": (
+        [],
+        {"grant_type": "client_credentials"},
+        UNSUPPORTED_GRANT_TYPE,
+    ),
+}
+
+# The token request's own fields, and the refusal each must produce when the value
+# arrives with whitespace around it. Three fields rather than one because the
+# never-repair rule is about the endpoint rather than about a parameter, and three
+# *different* expected errors because a provider answering one code for all of
+# them has stopped distinguishing an unsupported grant type from a grant that does
+# not match.
+PADDED_TOKEN_FIELDS = {
+    "grant_type": UNSUPPORTED_GRANT_TYPE,
+    "code": INVALID_GRANT,
+    "client_id": INVALID_GRANT,
+}
 
 # A `client_id` and a `code` no registration and no flow ever produced, submitted
 # beside the real one under the same name. Both spell out what they are.
@@ -330,6 +412,27 @@ def with_repeated(
         else:
             built.extend([(name, existing), (name, value)])
     return built
+
+
+def scoped_claims_released(
+    provider: Any, stage: str, response: Any, claims_in_token: Any
+) -> list[str]:
+    """The scope-bound claims a session carried, or nothing when none was issued.
+
+    Read into the failure message of the assertion below rather than asserted
+    separately, because a session that exists at all has already failed that
+    assertion — a second `assert` for it would be a line that can never run. What
+    it buys is the message: "it granted a session" and "it granted a session
+    carrying this person's email address" are the same defect described at two
+    different distances from the consequence.
+    """
+    if stage != "token endpoint":
+        return []
+    token = provider.body_of(response).get("id_token")
+    if not isinstance(token, str) or not token:
+        return []
+    claims = claims_in_token(token)
+    return sorted(claim for claim in SCOPED_CLAIMS if claim in claims)
 
 
 def session_issued(provider: Any, stage: str, response: Any) -> bool:
@@ -1325,6 +1428,114 @@ def test_a_token_request_repeating_the_code_is_refused(mock_idp: Any, case: str)
     refusal(mock_idp, response, f"a token request carrying two `code` values, with {case}")
 
 
+def test_a_login_naming_one_person_in_the_query_and_another_in_the_body_is_refused(
+    mock_idp: Any,
+) -> None:
+    """The same rule across two *sources*, which is where the first fix did not reach.
+
+    The duplicate check ran over one collection at a time, so a name sent once in
+    the query string and once in the body was two singletons rather than one
+    duplicate — and RFC 6749 §3.1 is a statement about the request, not about one
+    encoding of it (ADR 0062, rule 3: whole-request questions are asked before a
+    mapping exists, because `dict()` is where a repetition stops being visible).
+
+    Two *different people* rather than the same value twice, because that is what
+    makes the answer matter: whichever source the provider reads is the person it
+    signs in, and the other one is what a reviewer reading the other half of the
+    request would think happened.
+
+    The control is the same submission with no query string on it.
+    """
+    control_attempt = mock_idp.begin()
+    control = mock_idp.submit_login(
+        control_attempt, mock_idp.offered_identities(control_attempt)[0]
+    )
+    assert control.code, (
+        f"A login with nothing added to its URL produced no code (status "
+        f"{control.response.status_code}), so the refusal below would be a fact about a login "
+        "form that never works."
+    )
+
+    attempt = mock_idp.begin()
+    form = mock_idp.require_login_form(attempt)
+    field = mock_idp.identity_field(form)
+    offered = mock_idp.offered_identities(attempt)
+    people = sorted({submission[field] for submission in offered if submission.get(field)})
+    assert len(people) >= 2, (
+        f"The login form offers {people} under `{field}`, so there is no second person to name in "
+        "the query. This test needs two."
+    )
+    signing_in = offered[0][field]
+    other = next(person for person in people if person != signing_in)
+
+    submitted = mock_idp.submit_login(attempt, offered[0], query={field: other})
+
+    assert submitted.response.status_code < 500, (
+        f"A login naming one person in the body and another in the query answered "
+        f"{submitted.response.status_code} — the provider raised rather than deciding. Body "
+        f"begins {submitted.response.text[:300]!r}."
+    )
+    assert submitted.refused, (
+        f"A login naming `{field}`={signing_in!r} in the body and "
+        f"`{field}`={other!r} in the query issued a code ({submitted.code!r}). One request "
+        "named two people and the provider picked one: whichever source it reads, the other is "
+        "what the request also says, and a session was issued for a request that does not say who "
+        "it is for."
+    )
+
+
+def test_a_token_request_repeating_a_field_across_the_query_and_the_body_is_refused(
+    mock_idp: Any,
+) -> None:
+    """The same rule at the token endpoint, and the probe that would have understated it.
+
+    The body here is **valid** — a real code, its own verifier, the registered
+    client — and the query carries `code` and `grant_type` again with values that
+    are not. That pairing is the test: the first probe of this used a bogus code
+    in the body and got a 400 either way, which reads as "already refused" and
+    would have closed the finding. Only a request the provider would otherwise
+    accept can show that the duplicate is what stopped it.
+
+    The control is that same valid body posted with no query string, which must
+    succeed. It runs on its own flow, because an authorization code is single-use
+    and reusing one would make the second exchange a replay test.
+    """
+    control_attempt = mock_idp.begin()
+    control_submitted = mock_idp.submit_login(
+        control_attempt, mock_idp.offered_identities(control_attempt)[0]
+    )
+    assert control_submitted.code, "Signing in produced no authorization code for the control."
+    control = mock_idp.redeem_from(
+        list(mock_idp.token_body(control_submitted.code, control_submitted.verifier).items())
+    )
+    assert mock_idp.tokens(control).get("id_token"), (
+        "The same body with no query string produced no `id_token`, so the refusal below would "
+        "not be about the query string."
+    )
+
+    attempt = mock_idp.begin()
+    submitted = mock_idp.submit_login(attempt, mock_idp.offered_identities(attempt)[0])
+    assert submitted.code, "Signing in produced no authorization code, so there is nothing to send."
+
+    response = mock_idp.redeem_from(
+        list(mock_idp.token_body(submitted.code, submitted.verifier).items()),
+        query={"code": FORGED_CODE, "grant_type": "bogus"},
+    )
+
+    assert response.status_code < 500, (
+        f"A token request repeating `code` and `grant_type` in the query answered "
+        f"{response.status_code} — the provider raised rather than deciding. Body begins "
+        f"{response.text[:300]!r}."
+    )
+    refusal(mock_idp, response, "a token request repeating fields across the query and the body")
+    assert mock_idp.body_of(response).get("error") == INVALID_REQUEST, (
+        f"The exchange was refused as {mock_idp.body_of(response).get('error')!r}. RFC 6749 §5.2 "
+        f"makes {INVALID_REQUEST!r} the code for a request that 'includes a parameter more than "
+        "once' — the grant itself was valid, and saying `invalid_grant` here would send a client "
+        "looking at its code rather than at its request."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Scope: what a client asked for is what it gets, and no more.
 # ---------------------------------------------------------------------------
@@ -1341,10 +1552,10 @@ def test_the_openid_scope_alone_releases_no_email_or_username_claim(mock_idp: An
     **The roles claim is asserted present in the same test**, and that is not a
     stray extra assertion. It is the live control: a session carrying no claims at
     all satisfies "none of these three is here", and the absence would then be a
-    fact about an empty token. It is also the rule itself — the roles claim stays
-    bound to `openid` deliberately, because a client that had to know to ask for
-    it would discover the omission at role resolution, with an empty purview
-    looking like a person who supervises nothing.
+    fact about a session with nothing in it. It is also the rule itself — the
+    roles claim stays bound to `openid` deliberately, because a client that had to
+    know to ask for it would discover the omission at role resolution, with an
+    empty purview looking like a person who supervises nothing.
     """
     login = mock_idp.login(scope=BASE_SCOPE)
     roles_claim = mock_idp.roles_claim_name()
@@ -1407,6 +1618,79 @@ def test_the_token_response_says_which_scope_it_granted(mock_idp: Any, requested
     )
 
 
+@pytest.mark.parametrize("case", sorted(MALFORMED_SCOPES))
+def test_a_scope_separated_by_anything_but_a_space_yields_no_session(
+    mock_idp: Any, claims_in_token: Any, case: str
+) -> None:
+    """RFC 6749 Appendix A.4's grammar, and the defect that made the last round's test unable to fire.
+
+    `scope.split()` treats a tab, a newline and U+00A0 as separators, so
+    `openid<TAB>email` reached the provider as two tokens it knew and was granted
+    — one unknown token to any conformant server, and a session carrying claims
+    the client never asked for. Okta answers `invalid_scope` for it; Azure AD
+    answers `AADSTS70011`.
+
+    **It also made the unknown-scope refusal written the round before unable to
+    fire at all**, which is the part worth keeping in mind while reading this
+    module: that test sends `openid wibble`, and a repair upstream of it turned
+    every malformed value into a well-formed one before the check it was aimed at
+    could see it. A guard cannot be tested through a repair that runs first.
+
+    **The doubled space is here for the opposite reason from the other three**,
+    and it took a measurement to say which. A bare `split()` *drops* the empty
+    token, so `openid  email` reads as two valid tokens and is granted; the
+    grammar refuses it, because an empty token is not `1*NQCHAR`. The two
+    implementations therefore disagree about the outcome, which is what makes the
+    case detect the defect — by outcome rather than by what either does with a
+    separator. The strictness is deliberate: some servers tolerate a doubled space,
+    and refusing it is the right direction for a mock, because a client that
+    satisfies this provider satisfies a lenient one and the reverse is what E0-28
+    exists to catalogue.
+
+    An earlier version of this paragraph said that case could not detect the
+    defect at all, and its parameter name said so too. It was reasoned from
+    `split()` dropping empty tokens and never run; restoring `scope.split()`
+    reddens all four cases. A prediction about which mutations a test kills is a
+    claim like any other, and this one had been written where it reads as
+    documentation.
+
+    The control is `openid email profile` on the same provider in the same test.
+    The fix's own risk is over-refusal — a grammar check that rejects every
+    multi-token scope would satisfy every assertion below and break every real
+    client — and nothing else in this test would notice.
+    """
+    control = mock_idp.login(scope=FULL_SCOPE)
+    assert control.tokens.get("id_token"), (
+        f"A conformant multi-token scope ({FULL_SCOPE!r}) produced no session, so the refusals "
+        "below would be a fact about a provider that refuses every scope with more than one token "
+        "in it — which is this fix's own failure mode rather than the defect it closes."
+    )
+
+    scope = MALFORMED_SCOPES[case]
+    attempt = mock_idp.begin(scope=scope)
+    stage, response = outcome_of(mock_idp, attempt)
+
+    assert response.status_code < 500, (
+        f"An authorization request with {case} ({scope!r}) reached the {stage} and answered "
+        f"{response.status_code} — the provider raised rather than deciding. Body begins "
+        f"{response.text[:300]!r}."
+    )
+
+    released = scoped_claims_released(mock_idp, stage, response, claims_in_token)
+    assert not session_issued(mock_idp, stage, response), "\n".join(
+        [
+            f"An authorization request with {case} ({scope!r}) was granted by the {stage}"
+            + (f", releasing {released}" if released else "")
+            + ".",
+            "",
+            "RFC 6749 Appendix A.4: `scope = scope-token *( SP scope-token )`, one space and "
+            "nothing else. A separator the grammar does not have, treated as one, turns a value "
+            "the client got wrong into two tokens the provider knows — so the client is granted "
+            "what it did not ask for and told it asked for it.",
+        ]
+    )
+
+
 def test_an_unknown_scope_yields_no_session(mock_idp: Any) -> None:
     """A request for something this provider does not offer is refused, not quietly narrowed.
 
@@ -1435,6 +1719,114 @@ def test_an_unknown_scope_yields_no_session(mock_idp: Any) -> None:
         "§3.3 lets a server refuse or narrow, and narrowing silently is what leaves a client "
         "holding a session that is missing something it asked for with nothing saying so — "
         "`invalid_scope` exists for this."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The token endpoint's own parameters: which refusal, and on which value.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("case", sorted(GRANT_TYPE_REFUSALS))
+def test_the_token_endpoint_distinguishes_a_missing_grant_type_from_an_unsupported_one(
+    mock_idp: Any, case: str
+) -> None:
+    """RFC 6749 §5.2 gives these two different codes, and the module gave them one.
+
+    `invalid_request` is for a request "missing a required parameter";
+    `unsupported_grant_type` is reserved for a grant type "not supported by the
+    authorization server". A client reading the first goes looking at what it
+    failed to send and a client reading the second goes looking at what it
+    supports, and they are different afternoons.
+
+    **The two are one parametrized test on purpose.** Asserted separately they can
+    both pass against a provider that answers one code for both, because each
+    assertion would only ever see its own case — the pair is the rule, and a
+    single test with two parameters is what makes the pair fail as a pair. The
+    same module already answered this correctly one check later, for a missing
+    `code`, so the two refusals disagreed with each other about the same rule.
+
+    Each case gets its own flow: a code is single-use, and a control login proves
+    the endpoint answers at all before either refusal is believed.
+    """
+    omitting, overrides, expected = GRANT_TYPE_REFUSALS[case]
+
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A conformant exchange produced no session, so the refusal below would be a fact about a "
+        "token endpoint that refuses everything."
+    )
+
+    attempt = mock_idp.begin()
+    submitted = mock_idp.submit_login(attempt, mock_idp.offered_identities(attempt)[0])
+    assert submitted.code, "Signing in produced no authorization code, so there is nothing to send."
+
+    response = mock_idp.redeem(submitted.code, submitted.verifier, omitting=omitting, **overrides)
+
+    refusal(mock_idp, response, f"a token request with {case}")
+    assert mock_idp.body_of(response).get("error") == expected, (
+        f"A token request with {case} was refused as "
+        f"{mock_idp.body_of(response).get('error')!r} rather than {expected!r}. RFC 6749 §5.2 "
+        "assigns `invalid_request` to a missing required parameter and reserves "
+        "`unsupported_grant_type` for a grant type the server does not support; a provider that "
+        "answers the same code for both has told the client nothing it can act on."
+    )
+
+
+@pytest.mark.parametrize("field", sorted(PADDED_TOKEN_FIELDS))
+def test_a_padded_token_request_field_is_refused_rather_than_repaired(
+    mock_idp: Any, padded: Any, field: str
+) -> None:
+    """The never-repair rule on the endpoint the earlier round did not reach.
+
+    The authorization endpoint's exactness is asserted three tests above — a
+    padded verifier, `state` and `nonce` returned byte for byte — and this is the
+    same property on the token endpoint's own parameters, which nothing covered:
+    a `grant_type`, a `code` or a `client_id` arriving with whitespace around it
+    must be the value that arrived, not the value it trims to.
+
+    What repairing them costs is not symmetry. A trimmed `code` means two
+    different strings redeem one grant, which is the PKCE defect again in the
+    field the grant is named by; a trimmed `client_id` means a client identifier
+    is matched loosely, which is how one client's code becomes another's; a
+    trimmed `grant_type` is the mildest and is still a request the provider
+    answered as though it said something it did not say.
+
+    Which refusal each produces is asserted, not just that one did: they are
+    different rules — an unsupported grant type against a grant that does not
+    match — and a provider answering one code for all three would be treating a
+    request it could not parse as a request it could.
+    """
+    expected = PADDED_TOKEN_FIELDS[field]
+
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A conformant exchange produced no session, so the refusal below would be a fact about a "
+        "token endpoint that refuses everything."
+    )
+
+    attempt = mock_idp.begin()
+    submitted = mock_idp.submit_login(attempt, mock_idp.offered_identities(attempt)[0])
+    assert submitted.code, "Signing in produced no authorization code, so there is nothing to send."
+
+    body = mock_idp.token_body(submitted.code, submitted.verifier)
+    assert field in body, (
+        f"A conformant token request carries no `{field}` (it carries {sorted(body)}), so there is "
+        "nothing to pad. `token_body` in tests/conftest.py builds RFC 6749 §4.1.3's request."
+    )
+    body[field] = padded(body[field])
+    response = mock_idp.redeem_from(list(body.items()))
+
+    assert response.status_code < 500, (
+        f"A token request whose `{field}` carried surrounding whitespace answered "
+        f"{response.status_code} — the provider raised rather than deciding. Body begins "
+        f"{response.text[:300]!r}."
+    )
+    refusal(mock_idp, response, f"a token request whose `{field}` was padded with whitespace")
+    assert mock_idp.body_of(response).get("error") == expected, (
+        f"A padded `{field}` was refused as {mock_idp.body_of(response).get('error')!r} rather "
+        f"than {expected!r}. The value that arrived is the value the provider must judge — a "
+        f"`{field}` that only trims to the right one is a different `{field}`."
     )
 
 
