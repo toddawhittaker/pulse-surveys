@@ -1,6 +1,8 @@
-# 0056 — Only a timeout fails open, and a credentialled endpoint must be encrypted
+# 0056 — What fails open, what raises, and what the provider URL may carry
 
-**Status:** Accepted
+**Status:** Accepted. Rewritten after E0-13's second review pass measured two of
+its rows wrong; the decision that the fail-open is narrower than "any failure"
+stands, and where the line sits has moved.
 **Date:** 2026-08-18
 **Tickets:** E0-13
 
@@ -12,106 +14,142 @@ SPEC §3.3 sanctions exactly one fail-open in this codebase:
 > applies and the submission is accepted, then classified async (fail open, never
 > block a student on an outage).
 
-E0-13's first implementation read "provider timeout" broadly. The gateway had one
-class, `AIProviderUnavailableError`, covering every failure that was not an HTTP
-status — a read timeout, a refused connection, a DNS failure, a TLS handshake that
-did not complete — and the validity task fell open on all of them.
+E0-13's gateway first read that broadly: one class covered every failure that was
+not an HTTP status, and the validity task fell open on all of it — including a TLS
+handshake that did not complete, which is what an active network attacker looks
+like.
 
-E0-13's review measured what that means. Pointing `AI_PROVIDER_BASE_URL` at an
-`https://` endpoint whose handshake fails produced the message "The model endpoint
-did not answer within the task's timeout" and applied the character floor. A
-certificate that does not validate is what an active network attacker looks like,
-and §10 makes transport encryption mandatory rather than optional.
+The first correction split "timeout" from "unreachable" and said only a timeout
+floors. **The second review pass measured that the split did not hold at either
+end.** `httpx.ConnectTimeout` is a subclass of `httpx.TimeoutException`, so a chain
+walk looking for the parent matched it: against a blackholed route the classifier
+floored with **zero requests reaching any server**, while the class's own
+docstring said "the endpoint accepted the request". Dropping packets is cheaper
+than forcing a TLS failure and had the same effect — which is the argument the
+first version of this record used *against* flooring on TLS. At the other end, an
+HTTP 503 — a load balancer answering while the model behind it is down, the
+ordinary shape of a hosted outage — raised, blocking every student on precisely
+the case §3.3's sentence was written for.
 
-The same review found the configuration side of it: `ai_provider_base_url` is a
-bare string with no scheme check, so `http://` with a credential configured sends
-the bearer token *and* the student's comment in cleartext, and nothing in the
-system objects.
+Separately, the transport rule this record introduced asked whether
+`AI_PROVIDER_API_KEY` was set. A credential in the URL's userinfo made it answer
+"no": `http://user:password@provider.example.com/v1` was accepted, and the client
+turned the userinfo into a real `Authorization: Basic` header. The password also
+appeared in `repr(settings)` and `model_dump()`, because the field is a plain
+`str` — beside `database_url`, which is masked, and inside the object §6.3's admin
+configuration view renders.
 
 ## Decision
 
-**A timeout is its own failure class, and it is the only one the validity task
-falls open on.** `AIProviderTimeoutError` means the endpoint accepted the request
-and did not answer in time. `AIProviderUnreachableError` means the request never
-arrived — a refused connection, a name that did not resolve, a handshake that did
-not complete. `app.ai.tasks` catches the first and lets the second propagate.
+**The line is whether the request reached an endpoint that could have answered,
+and then whether what came back was about the endpoint or about the request.**
 
-**The two are told apart by the exception chain, not by a message.** The layers
-above flatten both into one class carrying a sentence — "Request timed out."
-against "Connection error." — and a rule that reads either sentence breaks when
-the library rewords it. `_timed_out` walks `__cause__`/`__context__` looking for
-`httpx.TimeoutException`, the common parent of a connect timeout and a read
-timeout, and the deepest layer this project declares a dependency on. Measured on
-the pinned versions: a stub holding the request yields `ModelAPIError <-
-APITimeoutError <- httpx.ReadTimeout`; a refused connection and a failed TLS
-handshake both yield `ModelAPIError <- APIConnectionError <- httpx.ConnectError`,
-with no `TimeoutException` in either. **A chain the check cannot read answers
-`False`**, so an unrecognised failure is surfaced rather than absorbed.
+| What happened | Class | Floors? |
+|---|---|---|
+| Read timeout — connection open, request sent, no answer in time | `AIProviderUnavailableError` | **yes** |
+| Write timeout — connection open, request stalled going out | `AIProviderUnavailableError` | **yes** |
+| HTTP 408, 502, 503, 504 — the endpoint says it cannot serve now | `AIProviderUnavailableError` | **yes** |
+| Connect timeout — packets went into a hole, nothing arrived | `AIProviderUnreachableError` | no |
+| Connection refused, DNS failure, TLS handshake failure | `AIProviderUnreachableError` | no |
+| Connection reset or dropped mid-stream | `AIProviderUnreachableError` | no |
+| Pool timeout — the request never left this process | `AIProviderUnreachableError` | no |
+| HTTP 401, 403, 404, 429, 500, or any other status | `AIProviderRefusedError` | no |
+| An answer that is not the contract, twice — including a 200 that is not JSON | `AIResponseInvalidError` | no |
 
-**`AI_PROVIDER_BASE_URL` must be `https`, or name this machine, whenever
-`AI_PROVIDER_API_KEY` is set.** Refused at startup by a validator on `Settings`,
-with no value quoted, so a misconfiguration stops the container rather than
-leaking on every submission.
+Three rules produce that table, and they are worth stating apart from it:
+
+**Reached, and did not classify → the floor.** That is §3.3's sentence: the
+provider was there and no verdict came back. A read or write timeout and an
+availability status are the same event seen at two layers, and a student should
+not be blocked by either.
+
+**Never arrived → raise.** Nothing got as far as an endpoint that could have
+answered, so "the provider is having an outage" is one explanation among several,
+and the others are a typo in the base URL, a network that is down, and somebody on
+the path. A connect timeout is in this group *because* it is the cheapest thing an
+attacker can force: if it floored, anyone able to drop packets could decide that no
+classification happens.
+
+**Answered about the request → raise.** A rejected credential, a rate limit, a
+model that does not exist, a schema the endpoint will not accept. None of these
+resolves on its own, and flooring on them would hide a permanent misconfiguration
+one comment at a time.
+
+**The classification is made on the exception chain, never on a message.** The
+library flattens all of these into one class carrying a sentence — "Request timed
+out." against "Connection error." — and a rule that reads either breaks when the
+library rewords it. `_unanswered_outcome` looks for `httpx.ReadTimeout` and
+`httpx.WriteTimeout` *specifically* rather than for their common parent, which is
+the mistake this revision corrects. **A chain the check cannot read is treated as
+unreachable**, so an unrecognised failure surfaces rather than being absorbed.
+
+**`AI_PROVIDER_BASE_URL` carries no credential of its own**, and is refused at
+startup if it does — over https as well as http, and on loopback as well as off
+it, because the problem is not only the wire. And when `AI_PROVIDER_API_KEY` *is*
+set, the URL must be `https` or name this machine.
 
 ## Alternatives rejected
 
-**Keep one class and fail open on all of it.** The reading that "never block a
-student on an outage" covers every way a request can fail. Rejected because it
-hands the decision to whoever can interrupt the connection: an attacker who can
-force a handshake failure can force *no classification*, indefinitely, and the
-submission is accepted anyway. That is tolerable for a participation gate and not
-for §6.2's moderation path, which E2 puts through this same gateway — and a rule
-that has to be tightened later, on the safety path, is a rule that will be
-tightened after the first incident rather than before it.
+**One class for every failure, flooring on all of it.** The original state.
+Rejected because it hands the decision to whoever can interrupt a connection, and
+because it made "the provider is unreachable" indistinguishable from "the provider
+is slow" in the stored record.
 
-**Fail open on a refused connection but not on TLS.** The nearest thing to §3.3's
-intent: a provider container that is down is an outage in the ordinary sense, and
-blocking every student on it is exactly what §3.3 says not to do. Rejected as a
-distinction this code cannot draw honestly — a refused connection and a failed
-handshake arrive identically shaped, and telling them apart means reading the
-`ssl` module's exception types out of somebody else's chain. **The consequence is
-named rather than hidden**: with the provider unreachable, every submission now
-raises instead of being accepted by the floor, and E2's submit path is where that
-is caught and answered. E2 must decide it deliberately; today nothing but a test
-calls this code.
+**Flooring on any `httpx.TimeoutException`.** The first correction, and wrong for
+the reason above: the parent class contains the two cases where nothing arrived.
+The lesson generalises — matching on a base class is a decision about every
+subclass, including the ones added after you write it.
 
-**Classify on the exception's message.** One line instead of a chain walk, and
-wrong for the reason above: the message is the library's to reword, and the
-project pins that library precisely because it moves.
+**Flooring on every 5xx.** Simpler than a set, and it puts `500` in the floor —
+the status a provider returns when *our* request is the problem, so a schema it
+cannot parse would degrade every classification to the character floor silently
+and permanently. `429` is excluded for the same shape of reason: a rate limit is a
+capacity decision an operator has to see, and E2's queue owns the backoff.
 
-**Require `https` unconditionally.** Stricter and simpler, and it breaks a real
-deployment: a model server inside a private network, reached over `http://` with
-no credential — the vLLM-in-a-cluster case `.env.example` and `README.md` both
-document. Rejected in favour of the narrower rule, which leaves that case working.
+**Refusing to floor on a status at all**, keeping the floor to transport-level
+timeouts. Tidy, and it fails the case §3.3 is most likely to meet: hosted providers
+report outages with status codes, not with hanging sockets.
 
-**Check the scheme in the gateway rather than in `Settings`.** It would catch the
-same thing one layer later, at the first classification rather than at startup,
-which is the difference between a container that will not start and a container
-that serves for a week and then leaks on the first comment.
+**Masking `ai_provider_base_url` as a `SecretStr`** so a userinfo password cannot
+leak through `model_dump()`. Rejected because §6.3 specifies an admin view showing
+"AI provider (base URL, model, masked key)" — the base URL is meant to be
+*visible*, and masking it to defend against a credential that should not be there
+solves the wrong half. Refusing the credential keeps the field displayable and
+makes the transport rule's question ("is a credential configured?") answerable
+from one place.
+
+**Asking whether a credential is configured *anywhere*, including the URL, and
+then requiring TLS.** The narrower fix, and it leaves the password in
+`repr(settings)` and in the admin view. Refusing it outright closes both at once.
 
 ## Consequences
 
 **Cleartext to an off-machine endpoint with no credential is still permitted**,
-and that is a hole this record names rather than closes. Student comment text
-would cross a network unencrypted; whether the network is private enough for that
-is the operator's judgement, and §10's requirement then rests on them rather than
-on the configuration surface. Closing it means refusing `http://` to anything but
-this machine, which is a deployment policy decision and Todd's to make.
+and this record names it rather than closing it: student comment text would cross
+a network unencrypted, and whether the network is private enough for that is the
+operator's judgement. **That sentence is now true as written**, which it was not
+before — with userinfo refused, "no `AI_PROVIDER_API_KEY`" does mean "no
+credential", so the hole is exactly as wide as it says and no wider.
 
-**A provider outage now blocks the validity call rather than floors it**, unless
-the outage takes the shape of a timeout. In practice a down endpoint usually
-refuses the connection immediately, so this is the common case and not an exotic
-one. E2 owns the submit path and has to answer for it — accepting the submission
-on `AIGatewayError` generally, or on `AIProviderUnreachableError` specifically,
-is a decision with a student on the other end of it, and it is not E0-13's to
-make on E2's behalf.
+**A provider that is unreachable blocks the validity call.** With the availability
+statuses moved into the floor this is the narrower case it was meant to be — a
+hosted provider having an outage usually answers 502 or 503 — but a self-hosted
+endpoint that is simply down still refuses connections, and every submission then
+raises. E2 owns the submit path and has to answer for it deliberately: catching
+`AIGatewayError` there is a decision with a student on the other end of it, and it
+is not E0-13's to make on E2's behalf.
+
+**The four classes are the interface E2 branches on**, and they are named for the
+decision rather than for the mechanism. `AIProviderUnavailableError` means "the
+floor applies"; the other three mean "do not floor". A case added later belongs in
+the table above in the same change that adds it.
 
 **A `Settings` validator's own message does not reach the operator.**
 `_describe_invalid_settings` builds its report from the field name, the field's
 static `description=` and pydantic's error-type code, so a `value_error` renders
-as "rejected by this setting's own validation". The transport rule is therefore
-written into the field's `description`, where it is printed. That is a
-readability limitation of `app/config.py` rather than of this decision, and
-widening the report to include validator messages would mean trusting every
-future validator not to quote its input — which is the sort of convention
-`docs/MISTAKES.md` entry 2 exists to distrust.
+as "rejected by this setting's own validation". Both configuration rules above are
+therefore written into the field's `description`, where they are printed. That is
+a readability limitation of `app/config.py` rather than of this decision, and
+widening the report to include validator messages would mean trusting every future
+validator not to quote its input — the sort of convention `docs/MISTAKES.md` entry
+2 exists to distrust.

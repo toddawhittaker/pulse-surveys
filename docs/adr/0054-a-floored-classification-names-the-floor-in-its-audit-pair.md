@@ -89,8 +89,26 @@ the shape is pinned and the spelling stays this record's to change.
 
 **These two strings are now load-bearing in a way a rename would break quietly.**
 E2's async re-classification finds the floor rows by them, and §6.1's drift panel
-will group by them. They live in `app/ai/tasks.py` as named constants for that
-reason, and a change to either is a data migration over rows already stored.
+will group by them. A change to either is a data migration over rows already
+stored.
+
+**Amended 2026-08-18: a marker is only a marker if nobody else can write it.**
+E0-13's second review pass measured a provider answering `"model": "no-model"` —
+the model half of this pair, in the endpoint's own response envelope — and the
+gateway recording it verbatim. The row was then indistinguishable from a floored
+one, so the very query this record exists to serve ("which verdicts did the
+character floor decide") selected rows a model had answered. The model marker
+therefore lives in `app/ai/gateway.py` as `NOT_A_MODEL`, because the gateway is
+the module that can make it unforgeable: `_reported_model` refuses a
+provider-reported name that claims it, along with one that is empty, longer than
+`MODEL_ID_LIMIT`, or carries control characters. `app/ai/tasks.py` imports the
+constant rather than spelling it again.
+
+The *prompt* half needs no such guard and deliberately has none: a provider never
+supplies a prompt version at all — `_payload_model` does not declare the field, so
+an answer carrying it is refused as a shape violation (ADR 0031). The asymmetry is
+worth stating, because it is the reason one marker moved modules and the other did
+not.
 
 **A stored prompt version no longer always names a file.** Anything resolving one
 against `app/ai/prompts/` has to tolerate a miss, and the miss means "no model was

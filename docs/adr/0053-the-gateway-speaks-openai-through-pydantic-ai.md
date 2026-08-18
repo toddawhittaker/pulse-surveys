@@ -155,6 +155,20 @@ argument, so `provider.client.max_retries = 0` reaches for the object it built.
 The alternative is constructing the client here, which means importing `openai`
 in this file and making it the second provider-library importer.
 
+**The gateway must not be called from inside a running event loop**, and it does
+not defend against it. `_ThreadBound.loop.run_until_complete` raises
+`RuntimeError: Cannot run the event loop while another loop is running` — outside
+the gateway's own failure taxonomy, so a caller cannot catch it as an
+`AIGatewayError` and an async FastAPI handler calling `classify_comment_validity`
+directly would answer 500. That is not a defect today:
+[ADR 0013](0013-the-database-session-is-synchronous.md) makes handlers `def`, and
+FastAPI runs them in its threadpool, which is where every synchronous thing in
+this codebase already lives. It is recorded rather than guarded because the guard
+would be a nicer message for a call that must not be written, and E2 is the ticket
+that will be tempted to write it: an `async def` submit handler wanting a
+classification has to reach the gateway through `run_in_threadpool`, or the task
+has to grow an asynchronous entry point of its own.
+
 **Diagnostics are thinner than they were.** The `openai`-SDK version parsed the
 answer itself and could name each failing field with its pydantic error code. The
 library validates internally and raises `UnexpectedModelBehavior`, whose detail
