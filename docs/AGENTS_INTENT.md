@@ -19,13 +19,22 @@ reasoning has already been persuaded by it. The implementer, by contrast,
 benefits from remembering the approaches it already tried.
 
 **Mistakes are written down where the next agent will look, not remembered.**
-`docs/MISTAKES.md` holds what has actually gone wrong here — what happened, the
-root cause, the consequence, and the rule that prevents a repeat — ordered by how
-often each recurs. An agent reads it before starting, increments an entry's
-`Caught:` counter when that entry changes what it does, and appends a new entry
-when something goes wrong that is not yet there. The counter is the only ordering
-signal, which is why bumping it is part of the work rather than bookkeeping: an
-entry nobody bumps sinks, and the ones that keep saving people rise to the top.
+`docs/MISTAKES.md` holds the rules — one heading naming the shape of a real
+failure, and the rule that prevents a repeat — ordered by how often each recurs.
+Each links to `docs/mistakes/NN-slug.md`, which holds what happened, the root
+cause, the consequence and the three most recent instances. An agent reads the
+rules whole before starting and opens a linked file when a rule does not
+obviously apply, or when it thinks the rule is wrong.
+
+It increments an entry's `Caught:` counter when that entry **stops it making the
+mistake**, and appends a new entry when something goes wrong that is not yet
+there. The test for a bump is what would have shipped had the entry not been
+read: a prevention answers concretely, a detection cannot, and "a reviewer would
+have found it" is not a bump. The counter is the only ordering signal, which is
+why bumping it is part of the work rather than bookkeeping — an entry nobody
+bumps sinks, and the ones that keep saving people rise to the top. Counting
+detections would sort by what the project trips over rather than by what saves
+it.
 Every entry cites a real incident. A rule with no incident behind it is advice,
 and advice belongs in `CLAUDE.md`.
 
