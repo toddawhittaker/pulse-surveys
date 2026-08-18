@@ -263,9 +263,12 @@ Four things about it are worth knowing before debugging anything:
   required and S256 only; `state` and `nonce` are required; an authorization code
   is good once, for sixty seconds, and a failed exchange spends it too; a
   `redirect_uri` that is not the registered one is refused with a page rather than
-  a redirect; a parameter sent twice is refused rather than resolved last-wins; a
-  scope it does not serve is refused rather than quietly dropped. A mock that
-  shrugged at any of those would teach the tool side to shrug too.
+  a redirect; a parameter sent twice — in the query, in the body, or once in each
+  — is refused rather than resolved last-wins; a scope it does not serve is
+  refused rather than quietly dropped, and one whose tokens are separated by
+  anything but a single space is refused rather than split into tokens the client
+  never sent. A mock that shrugged at any of those would teach the tool side to
+  shrug too.
 - **Nothing a client sends is trimmed, and that is load-bearing.** Values are
   checked exactly as they arrived and refused, never repaired: a `code_verifier`
   wrapped in whitespace — which is what `base64.encodebytes()` produces — is
@@ -276,7 +279,10 @@ Four things about it are worth knowing before debugging anything:
   subject, the audience, the nonce and the Pulse roles claim, and **not** `email`
   or `preferred_username`: ask for `email` and `profile` if you want those, as you
   would at Azure AD, Okta or Google. The token response echoes the grant, so what
-  it declares and what the ID token carries cannot disagree.
+  it declares and what the ID token carries cannot disagree. The roles claim is
+  not gated on any scope — it is namespaced rather than one of the registered
+  claims OIDC Core §5.4's table governs, which is how Azure AD, Auth0 and Okta
+  release role claims too.
 - **Its signing key is generated per process, and never written down.** Restart
   the container and it is a different provider with a different key set, so
   anything that cached the old keys stops verifying. No private key is committed

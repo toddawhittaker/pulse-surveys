@@ -301,7 +301,20 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 29**
+**Caught: 30**
+
+*(The thirtieth, in E0-16, and the record was **written in the same commit as the
+code it describes** — which is the version of this entry that no sweep catches,
+because there is no earlier record to go looking for. `README.md` gained "a
+parameter sent twice is refused rather than resolved last-wins" beside the fix
+that refused a duplicate within one collection; the reviewer measured a parameter
+sent once in the query and once in the body being accepted, so the sentence was
+false on the day it was written. The code now does what the line says and the
+line says which cases it covers. The lesson is about tense rather than staleness:
+a record written from the *intent* of a change asserts the property the author
+meant to build, and the gap between that and the property they built is exactly
+what a reviewer measures. Write the sentence from what you have run, not from
+what you have just fixed.)*
 
 *(The twenty-ninth, in E0-16, and the sweep started from a list rather than from
 a file. Adding a service to the health gate's `REQUIRED_SERVICES` is one line;
@@ -803,7 +816,24 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 16**
+**Caught: 17**
+
+*(The seventeenth, in E0-16's second review pass, and the hazard is a duplicated
+request parameter. RFC 6749 §3.1 forbids one, the provider refused one, and the
+rule ran over **one collection at a time**: `form_body` read the body and never
+looked at the query string, so a name sent once in each was two singletons rather
+than one duplicate. Measured: a token request with a valid body and
+`?code=bogus&grant_type=bogus` on the URL answered 200 with an `id_token`, and a
+login with `?sub=<one person>` and `sub=<another>` in the body issued a code. The
+rule now runs over the query and the body together, and values still come from
+the body alone, because honouring a query parameter would add the second place
+rather than close it. The same hazard was open at a third place, in the opposite
+direction and found in the same pass: the registered redirect URI was not checked
+for a query already carrying `code` or `state`, so a provider that refuses
+duplicates inbound would have **emitted** one — `?state=preset&code=…&state=…` —
+and a client comparing the first `state` would compare against a value it never
+generated. Refusing a shape on the way in says nothing about producing it on the
+way out, and that is the direction this entry is easiest to miss in.)*
 
 *(The sixteenth, in E0-16, an hour after the fifteenth and found because of it.
 A review pass over the finished provider found that a `code_verifier` carrying a
@@ -2025,7 +2055,26 @@ against a driver that is still polite.
 
 ## 29. A value was repaired before the check that should have refused it
 
-**Caught: 0**
+**Caught: 1**
+
+*(The first, one review pass after the entry was written, and it is the same
+class with a different tool — which is the sharpening worth keeping: **the repair
+need not look like a repair.** The scope string was split with a bare
+`str.split()`, which treats a tab, a newline and U+00A0 as separators, where RFC
+6749 Appendix A.4 separates scope tokens by one space and by nothing else. So
+`openid<TAB>email` — a single unknown token to any conformant server — arrived at
+the checks as two well-known ones and was granted, with the token response
+echoing "openid email" and the session releasing the `email` claims. The
+unknown-scope refusal that had been added *the round before*, three lines below,
+could not fire: the value it was written to catch had already been turned into
+two values it was written to accept. A standard-library parser named after a
+concept is not a check against that concept's grammar, and `split()`, `int()`,
+`urlsplit()` and `fromisoformat()` are all repairs in this sense — each accepts a
+wider language than the specification it is standing in for. Fixed by writing the
+grammar out where it is used and carrying the result as a tuple that nothing
+re-splits;
+[ADR 0062](adr/0062-a-request-is-parsed-once-at-the-edge.md) is the rule
+generalised, since this was the fifth instance of the shape in three rounds.)*
 
 **What happened.** The mock OIDC provider read every request parameter through one
 helper, and that helper ended in `.strip()`. One habit, three specification
