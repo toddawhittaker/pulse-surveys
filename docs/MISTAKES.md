@@ -35,7 +35,24 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 31**
+**Caught: 32**
+
+*(The thirty-second, in E0-16's fix round, and it decided three things about five
+tests written *after* the code they cover — which is the position this entry is
+hardest to hold, because such a test passes on its first run and proves nothing.
+First, the malformed value is 43 characters long, the minimum RFC 7636 allows,
+because at any shorter length the provider's length check answers first and the
+alphabet check is never reached: the test would pass, name the handling it never
+touched, and the mutation run would have shown it too — the implementer's own
+pass had already found these two guards masking each other. Second, and sharpest,
+the module's shared `refusal` helper said "not 2xx", so a **500 counted as a
+refusal** — meaning the replay, mismatch and missing-verifier tests, three
+acceptance criteria, would each have passed against the exact crash the round was
+about. It now requires a 4xx. Third, the malformed-challenge test walks the whole
+flow rather than judging the authorization response, because the value enters at
+one endpoint and the crash lands at another: a test that stopped where the value
+was submitted would have watched the provider accept it and reported a pass, with
+the defect intact one step further on.)*
 
 *(The thirty-first, in E0-16, and it decided work on both sides of the test wall.
 Writing the tests: both scanners this ticket needed — one for a role stated
@@ -510,7 +527,22 @@ say in the commit that you did.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 26**
+**Caught: 27**
+
+*(The twenty-seventh, in E0-16, and it is the twenty-fifth's shape one ticket
+later: a gap declared by the agent that could not close it. Two malformed-PKCE
+500s were found by the implementer reading its own finished code, and both fixes
+shipped with nothing asserting them — every PKCE value the suite sends comes from
+`secrets.token_urlsafe`, so no test could produce the byte either guard broke on.
+Saying "no test covers this" would have been enough to be honest and not enough
+to be acted on. What made it actionable was naming the *reason* nothing covered
+it, in the commit message, the attempt log and the report alike: the sentence
+about `secrets.token_urlsafe` tells a test author what to build, where "this is
+untested" tells them only that something is missing. Both tests exist now, one
+per entry point, and the coordinator mutated each to prove they fail
+independently — which matters here because the second defect was the first one's
+mirror image and a single test covering "malformed PKCE" would have gone green
+with either half regressed.)*
 
 *(The twenty-sixth, in E0-15's review round, and it is four survivors of one
 mutation run rather than one defect. Nineteen mutations against the new AGS rules:
@@ -1225,6 +1257,12 @@ than trusting a wide range to wander into it. Where a bound stays, say in the
 docstring what it does not reach; a stated bound is a scope, and an unstated one
 is a false claim of totality.
 
+**Entry 28 is this entry's sibling and not a duplicate of it.** Here a claim
+exists and the generator narrowed under it, so the two can be read against each
+other in one file. There no claim exists at all: a shared driver that speaks a
+protocol correctly makes the malformed half of every guard unreachable, and there
+is nothing to compare it with.
+
 ---
 
 ## 14. An enumeration was reported as an impossibility
@@ -1896,3 +1934,74 @@ text by redirecting to a file whose name does not carry the word, or by writing
 the script with `Write` and running it by name. And when a guard's refusal seems
 to forbid *reading*, say so and check, rather than proceeding on a narrower
 picture of the ticket than the loop intended you to have.
+
+---
+
+## 28. A driver that could only speak correctly made the invalid half of every guard unreachable
+
+**Caught: 0**
+
+**What happened.** E0-16's mock OIDC provider answered a 500 to two malformed PKCE
+values: a `code_verifier` outside ASCII raised when the token endpoint hashed it,
+because RFC 7636 computes the challenge over ASCII octets, and a `code_challenge`
+outside ASCII — accepted and stored by the authorization endpoint an hour of
+protocol earlier — raised when the same redemption compared it with
+`secrets.compare_digest`, which refuses two strings it cannot treat as ASCII.
+
+Both were found by the implementer reading its own finished code. **Nothing in the
+suite could have found either**, and the reason is structural rather than an
+oversight: every PKCE value the suite sends is built by `pkce_pair` in
+`tests/conftest.py` out of `secrets.token_urlsafe`, whose alphabet is exactly the
+unreserved set both guards accept. Seven refusal tests across the two provider
+modules — a replayed code, a mismatched verifier, an absent verifier, an
+unregistered redirect URI, two launch-only identities, a launch-only role — all
+sending values that were well formed by construction. The suite read as covering
+the refusal path thoroughly, and could not enter the half of it that was broken.
+
+**Root cause.** A driver that impersonates a correct client is, by construction,
+incapable of misbehaving. It is written to make the working path work — build the
+challenge, echo the state, sign the launch — and every test that reaches the
+system through it inherits that competence, including the tests whose whole
+subject is what happens when a client gets something wrong. Nothing marks the
+gap: there is no narrowed bound to notice and no claim to read a strategy
+against, because no test names the malformed case at all. The absence is in the
+fixture, and it is invisible from every file that uses it.
+
+**This is entry 15's family and a different mechanism, which is why it is its own
+heading.** There, a property test *stated* the case its generator could not
+produce, and the two could be read against each other inside one file. Here there
+is no such pair — the tell is not a bound that looks too small but a fixture that
+looks correct. The blast radius differs too: a narrowed strategy weakens one
+property, while a driver's competence weakens every refusal in every module it
+serves, all in the same direction. Entry 15 split from entry 3 on exactly this
+reasoning about mechanism.
+
+**It had already been written down once, and nothing acted on it.** E0-14's own
+`tests/integration/test_mock_lms_launch.py` docstring says "what E1 will
+additionally need is a way to mint a deliberately wrong launch", which is this
+rule stated as a future need — and the launch driver still cannot mint one, so
+the platform side of the repository is in the same position today. A hazard named
+in a docstring is a note; nothing turns it into coverage.
+
+**Consequence.** Two crashes reachable by any client, in the service whose stated
+job is to teach E1's client what a strict provider does. E0-16's definition of
+done says "an identity provider that is lenient in the wrong place teaches the
+tool-side code bad habits"; a provider that raises where it should refuse teaches
+E1 to expect a 500 from a shape every real IdP answers with a 400, and the
+crashes were reachable from the outside by a client sending one wrong character.
+
+**Rule.** **When a fixture speaks a protocol, ask what it cannot say.** Enumerate
+the values the driver builds for the system under test, and for each one ask
+whether any test could send a malformed version — not a *wrong* version, which
+drivers usually do allow, but one that violates the shape. A refusal criterion is
+only asserted over the inputs the driver can express, so where it cannot express
+the malformed shape, either give it a way to send one or write the constant out
+by hand in the test module and say why.
+
+The cheap version is a search with a reliable signal: **every value a driver draws
+from `secrets`, `uuid4`, a formatter or a specification-conformant builder is a
+value no test can malform.** Those are the parameters to write bad constants for.
+And when a fixture's own docstring says a future ticket "will need a way to send a
+deliberately wrong X", that is this entry firing — treat it as a missing fixture
+now rather than a note for later, because the ticket that inherits it will build
+against a driver that is still polite.

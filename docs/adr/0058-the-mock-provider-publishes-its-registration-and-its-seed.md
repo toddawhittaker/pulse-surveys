@@ -54,6 +54,24 @@ The path sits under `/mock/`, the prefix
 for a route no real service serves. The index page renders the same values from
 the same functions, so a human and a script cannot be told different things.
 
+**Six of those members are a contract, and the rest are prose.** A later ticket
+may depend on `client_id`, `redirect_uri`, and on each entry of `users` carrying
+`sub`, `roles`, `launch_only_roles` and `lms_user_id` — those six are what E1's
+login work and E0-18's browser paths were given this document for, and changing
+the name, the type or the meaning of any of them is a breaking change that has to
+move its callers in the same pull request. Everything else here — `label`,
+`email`, `assignments` with their scope strings, and the endpoint URLs a client
+should be reading out of the discovery document instead — is documentation for a
+human, and may be reworded or dropped without ceremony.
+
+The line is drawn here rather than left to whoever depends on it first, for the
+reason `docs/MISTAKES.md` entry 2 gives: E0-18 is about to build on
+`launch_only_roles` and `lms_user_id`, and a field depended on by a later ticket
+and asserted by nothing is a field that gets renamed by somebody tidying a
+document. With the set named, a test can hold exactly it — which is what E0-16's
+own suite deliberately does not do, since pinning members from the test side
+before anything settled them would have been the tests choosing the contract.
+
 ## Alternatives rejected
 
 **`GET /registration`, without the prefix.** The obvious spelling, and it
@@ -96,6 +114,13 @@ platform's. It is built from the settings object and the seed rather than writte
 out, so a changed client ID or a renamed person moves both the flow and the
 document — but a *new* field added to either has to be added here, and nothing
 fails if it is not.
+
+**The six contract members bind this ticket's document to two later ones**, which
+is the cost of naming them: a rename now moves E1's login work and E0-18's specs
+too. That is the intended trade — the alternative is those tickets depending on
+whatever the document happens to say, which is the same coupling with nobody
+responsible for it. The set is deliberately small, and `assignments` is outside it
+so that the seed can grow a person or a scope without touching anything.
 
 **One value in it is a claim about the other mock.** `lms_user_id` names a user
 in `mock-lms/app/seed.py`, and nothing checks that it still exists: if the
