@@ -233,6 +233,13 @@ class Settings(BaseSettings):
     institution_timezone: str = Field(
         description="IANA timezone the survey window follows (§3.1), such as America/New_York."
     )
+    # Free-form by this project's choice, not by the spec: `ENVIRONMENT` and
+    # `healthz` each appear zero times in `docs/SPEC.md`, and §6.3 — the
+    # configuration surface — names no environment variable. `.env.example` is
+    # where the vocabulary is documented, and `development`, `staging` and
+    # `production` are conventions nothing enforces. Two readers compare against
+    # the first of those: `app/db.py` before it lets the engine echo SQL, and
+    # `scripts/seed.py` before it will run at all (ADR 0063).
     environment: str = Field(description="Deployment name, reported by /healthz. Free-form.")
 
     # --- defaulted: optional, each for its own reason -------------------------

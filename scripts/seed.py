@@ -107,8 +107,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # once, by `main`.
 DOTENV_PATH = REPO_ROOT / ".env"
 
-# The environment name this script will run under, and the only one. Free-form by
-# §6.3, so this is a comparison against a convention rather than against an
+# The environment name this script will run under, and the only one. **Free-form,
+# and not by SPEC §6.3** — that section is three bullets on the admin console's
+# configuration surface and names no environment variable, and `ENVIRONMENT`
+# appears nowhere in the spec at all. The source is E0-01's
+# `app.config.Settings.environment`, and `.env.example` documents the vocabulary,
+# naming `development`, `staging` and `production` as conventions and enforcing
+# none. So this is a comparison against a convention rather than against an
 # enumeration `Settings` enforces — the same convention and the same literal
 # `app/db.py` compares against before it lets the engine echo SQL. Two copies of
 # one string today; consolidating them crosses a module boundary and is proposed

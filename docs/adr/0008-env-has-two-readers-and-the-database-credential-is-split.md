@@ -11,9 +11,13 @@ ordering requirement, and a reader being found rather than named — is unchange
 and `env.py` reads only variables that already had readers.
 
 **Amended again by E0-17** — the count only, a second time. `.env` has **four**
-readers from E0-17: `scripts/seed.py` reads it the same way, through
-`python-dotenv` with `override=False`, from the same named path rather than by
-searching upward. `make seed` runs on the host, so without it a stock checkout
+readers from E0-17: `scripts/seed.py` reads it with the same precedence — the
+process environment beats the file — from a named path rather than by searching
+upward. It uses `dotenv_values` and merges the result under the process
+environment rather than calling `load_dotenv`, so the resolution is a value it
+can be handed instead of a mutation of `os.environ`; the precedence this record
+sets is identical either way, and the two were measured to interpolate `${...}`
+identically. `make seed` runs on the host, so without it a stock checkout
 answers "DATABASE_URL — not set" while the value sits in the file every other
 part of the system reads — the complaint [ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md)
 makes for `alembic`, word for word. It introduces no name of its own: it reads

@@ -15,9 +15,18 @@ puts between a read path and a student's name.
 
 E0-17's definition of done asks the security review to "confirm the seed script
 cannot run against a non-development environment", and leaves the mechanism
-open. [SPEC §6.3](../SPEC.md) makes `ENVIRONMENT` a free-form deployment name
-reported by `/healthz`; `.env.example` names `development`, `staging` and
-`production` as conventions and nothing enforces the vocabulary.
+open.
+
+**`ENVIRONMENT` is not a spec concept, and an earlier version of this record said
+it was.** It cited [SPEC §6.3](../SPEC.md) for the variable being a free-form
+deployment name reported by `/healthz`. §6.3 is three bullets on the admin
+console's configuration surface — the term calendar, the n-threshold, the AI
+provider, the LTI registration, the people editor, the catalog viewer — and names
+no environment variable; `ENVIRONMENT` and `healthz` each appear **zero** times in
+the whole of `docs/SPEC.md`. Both sides of the dispute below argued partly from a
+sentence that does not exist. The real source is E0-01:
+`app.config.Settings.environment`, documented in `.env.example`, which names
+`development`, `staging` and `production` as conventions and enforces none.
 
 The failure this is about is not malice. It is `make seed` typed in a terminal
 whose `.env` is pointed at staging, and it is a `make seed` line inherited by a
@@ -37,33 +46,62 @@ through. The one name that is safe is the one this script exists for.
 An empty `ENVIRONMENT` is refused for the same reason: a value somebody set to
 nothing is not the one name that is safe.
 
-**What "unset" means here needs saying precisely, because an earlier draft of
-this paragraph said two things at once and a test was built against the wrong
-one.** The guard reads the variable *after* `load_dotenv(REPO_ROOT / ".env",
-override=False)`, which is how every other reader in this repository resolves
-configuration (ADR 0008, ADR 0012). So there are two different absences and the
-code treats them differently:
+**The guard reads *resolved* configuration — the process environment with `.env`
+filling in only what it does not set — and not the process environment alone.**
+That was disputed, arbitrated and decided by Todd. The subsection below is the
+decision; the table immediately under this paragraph is only what the decision
+looks like case by case, and is not itself the decision.
+
+`scripts/seed.py` builds that resolution once, in `resolved_configuration`, with
+the precedence every other reader in this repository uses (ADR 0008, ADR 0012),
+and hands the result to the guard and to the URL builder. So "unset" has two
+meanings here and they are answered differently:
 
 | `ENVIRONMENT` in the process | `.env` on disk | Result |
 |---|---|---|
-| absent | absent, or carrying no `ENVIRONMENT` | **refused** — measured |
-| absent | supplying `development` | **admitted** — measured |
-| set to anything but `development`, empty included | either | **refused** — measured |
+| absent | absent, or carrying no `ENVIRONMENT` | **refused** |
+| absent | supplying `development` | **admitted** |
+| set to anything but `development`, empty and whitespace included | either | **refused** |
 
-The second row is the one under dispute. `.env` is the development
-configuration — `app/config.py`: "in every deployed environment the process
-environment is the only source" — so admitting it is what lets `make seed` work
-on a stock checkout, and refusing it would make an exported
-`ENVIRONMENT=development` the string a developer must type to seed at all, which
-is the opt-in flag rejected below under another name. Against that:
-`DATABASE_URL` and `ENVIRONMENT` can then come from different sources, so an
-operator who exports a production address over a development checkout and never
-touches the environment name is admitted.
+Every row is measured, in-process and as a subprocess, and the refusal names
+which of the three ways it was wrong — an earlier version reported the first and
+the third identically, which is how the two got conflated in the first place.
 
-**That question is open and this record does not settle it.** It is
-[`docs/disputes/E0-17-01.md`](../disputes/E0-17-01.md), with both measurements
-and both arguments; the table above is what the code does today, whichever way it
-is ruled.
+### How the second row was decided, and what it leaves open
+
+[`docs/disputes/E0-17-01.md`](../disputes/E0-17-01.md) objected that the second
+row lets a gitignored file grant permission to a destructive script. Two readings
+were put, and both are defensible:
+
+- **Reading A — the guard reads resolved configuration.** `.env` *is* the
+  development configuration (`app/config.py`: "in every deployed environment the
+  process environment is the only source"), a deployment has no such file, and
+  requiring an exported `ENVIRONMENT=development` would make that string the
+  incantation a developer must type in order to seed at all — which is the opt-in
+  flag rejected below, under another name, travelling with the runbook that needs
+  it.
+- **Reading B — the guard reads the process environment alone.** It refuses the
+  case where an operator exports a production `DATABASE_URL` over a development
+  checkout and never touches the environment name, which is the ordinary-Tuesday
+  version of getting this wrong.
+
+**A fresh arbitrator ruled that no record in this repository decides between
+them, and it went to Todd, who chose Reading A.** The code is unchanged from what
+E0-17 shipped, `make seed` keeps working on a stock checkout with nothing
+exported, and `README.md`'s promise about that stands.
+
+**The gap Reading B would have narrowed is accepted, not closed, and that is now
+a decision rather than an oversight.** An operator who exports a production
+`DATABASE_URL` over a development checkout, leaving `ENVIRONMENT` to `.env`, is
+admitted: the address comes from the process and the permission from the file,
+and nothing here notices they describe different systems. Todd took that
+knowingly, on the arbitrator's observation that **no equality check on an
+environment name closes it anyway** — Reading B refuses only the slice where the
+operator forgot to export the name, and admits the slice where they exported
+`development` alongside a production address. The check that would close it
+properly is a check on the *address*, which this record rejects below for reasons
+that still hold. **Anyone reaching for this gap later should reopen the address
+question, not this one.**
 
 `app/db.py` compares against the same literal before it lets the engine echo SQL,
 so the string `"development"` now appears twice. Consolidating the two crosses a
@@ -113,25 +151,44 @@ the guard and fails on the address — and six refusal cases, each asserting tha
 the run failed, that the message names the variable, the value found and the
 value wanted, and that no connection was attempted.
 
-**Nine of the ten pass. The tenth is `docs/disputes/E0-17-01.md`** and is the
-"absent from the process, supplied by `.env`" row of the table in the Decision
-above.
+**Nine of the ten passed. The tenth was the second row of the table above, and it
+is `docs/disputes/E0-17-01.md`, ruled as described there.** It stays red until
+the case is re-specified, which is the test author's to do and not something to
+make green from this side.
 
-Two things about that round are worth keeping, because neither is visible in the
-result:
+**The guard's own resolution is now injectable, which is what that case needs.**
+`resolved_configuration(environ, dotenv_path)` returns a mapping instead of
+mutating `os.environ`, and `main` takes both as optional arguments defaulting to
+the real thing. All four ways `ENVIRONMENT` can be absent or wrong are therefore
+one function call with one mapping and one path, rather than a subprocess started
+in a directory that happens to contain a particular untracked file. The
+subprocess tests remain the right shape for the ordering claim — a refusal
+printed while pointed at an unreachable address cannot have connected first — and
+are the wrong shape for the resolution question.
+
+Three things about that round are worth keeping, because none of them is visible
+in the result:
 
 - **The hand measurement that preceded the tests missed the case the tests
   found.** It ran `ENVIRONMENT=` — the variable present and empty, which
   `load_dotenv` does not override — and reported the unset case as covered.
   Setting a variable to nothing and not setting it at all are different
-  questions, and only one of them had been asked. A measurement is better than an
-  argument and it is still only as good as the case it chose.
-- **The obvious fix turns the whole module green while breaking the one path no
-  test covers.** `seed_environment` in `tests/conftest.py` lays every documented
-  `.env.example` entry into the child environment, so `ENVIRONMENT` is present in
-  the process for every run the suite makes; reading it before `.env` therefore
-  passes 29 of 29 and refuses `make seed` on a developer's machine. Anyone acting
-  on the ruling should measure that path by hand, because the suite cannot.
+  questions, and only one had been asked. A measurement beats an argument and is
+  still only as good as the case it chose.
+- **The obvious fix turned the whole module green while breaking the one path no
+  test covers.** The suite's fixture lays every documented `.env.example` entry
+  into the child environment, so `ENVIRONMENT` is present in the process for
+  every run it makes; reading it before `.env` therefore passed 29 of 29 and
+  refused `make seed` on a developer's machine. That path cannot be measured by
+  the suite, and had to be measured by hand.
+- **The red carried as little information as the green.** The failing case is
+  decided by whether an untracked `.env` exists, so it measures the machine
+  rather than the script. Verified in `.github/workflows/ci.yml`: the `test` job
+  runs `pytest tests/unit tests/integration` and never creates `.env` — only the
+  `e2e` and `docker` jobs copy `.env.example` — so the case passes in the gate
+  that is supposed to be the guarantee and fails for every developer who followed
+  the README's first instruction. Neither side's suite evidence was worth much; the pair of hand
+  measurements was.
 
 **A developer whose `.env` says anything else gets a refusal rather than a seed.**
 That is the intended cost. The message names the variable, the value it found and
