@@ -37,6 +37,24 @@ them at a different incident.
 
 **Caught: 33**
 
+*(The thirty-first, on both sides of E0-17, and it did different work on each.
+Writing the tests, it put a control in front of nearly every assertion: a mapped
+course before "some course is unmapped", because a seed with no mappings at all
+makes every course unmapped; both leads' course sets asserted non-empty before
+disjointness, because an empty set is disjoint from anything; a row count
+asserted non-zero before "the same rows afterwards", because two empty databases
+have the same rows; and the edge count before acyclicity, because a graph with no
+edges passes every cycle check ever written. Building against them, it stopped a
+green run being believed: twenty-one tests passed in 3.6 seconds, which looked
+too fast to have started a container, migrated a database and run two
+subprocesses. Three mutations were applied and reverted rather than reasoned
+about — the assistant dean moved to lead a course inside a department they
+supervise, the one chair who reports straight to the dean re-pointed at the
+assistant dean, and `upsert` made never to find an existing row — and one, two
+and one tests failed, each of them the one that owns the property.
+`docs/tickets/e0/.attempts/E0-17.md` has the table. **The green run was real; the
+belief in it was not, until then.**)*
+
 *(The thirty-third, in E0-16's review round, and the subject is a *reproduction*
 rather than a test. A review reported that a PKCE verifier wrapped in whitespace
 redeemed successfully; the script written to reproduce it before fixing anything
@@ -320,6 +338,19 @@ cannot see whether it exists.
 
 **Caught: 30**
 
+*(The twenty-ninth, twice in E0-17 and both times about a sentence counting
+something. Writing the tests, it corrected a claim in `tests/conftest.py`'s own
+header that had gone stale — the file said E0-11 added its fixtures "at the very
+bottom", which stopped being true the moment E0-17 added two below them.
+Implementing, the sweep outward from "`scripts/seed.py` now reads `.env`" reached
+`.env.example`'s opening paragraph, which told every reader the file "has three
+readers, not one" and named them. It had four from the moment the seed landed, and
+nothing would have failed: no test counts readers, and the sentence is the one a
+person consults when deciding whether a new variable can be documented there.
+ADR 0008's amendment line and its index row carry the same count and were changed
+in the same commit. **A number in a prose sentence is a record with a scheduled
+expiry, and the expiry is whenever somebody adds the fourth of anything.**)*
+
 *(The thirtieth, in E0-16, and the record was **written in the same commit as the
 code it describes** — which is the version of this entry that no sweep catches,
 because there is no earlier record to go looking for. `README.md` gained "a
@@ -574,6 +605,21 @@ say in the commit that you did.
 
 **Caught: 27**
 
+*(The twenty-seventh, in E0-17, and the interesting part is the delay. The
+`ENVIRONMENT` guard on `scripts/seed.py` shipped with nothing in the suite
+executing it — the module's one run with a deployment name sat behind a condition
+that is false — and the implementer noticed, said so in ADR 0063's own
+consequences and in the pull request, and shipped anyway because it may not write
+under `tests/`. That is this entry working as far as it can reach: **the
+behaviour was still unasserted, and what the entry bought was that nobody had to
+discover it.** The test author then wrote ten tests against the record's
+description, and the tenth failed — the guard is satisfied by `.env` when the
+process environment does not supply the variable, which no hand measurement had
+asked. So: an entry that turns "shipped unasserted" into "shipped unasserted, in
+writing, with an owner" is worth its counter even when it cannot stop the ship,
+because the sentence in the record is what got the tests written and the tests
+are what found the defect.)*
+
 *(The twenty-seventh, in E0-16, and it is the twenty-fifth's shape one ticket
 later: a gap declared by the agent that could not close it. Two malformed-PKCE
 500s were found by the implementer reading its own finished code, and both fixes
@@ -737,7 +783,22 @@ second case arrives.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 17**
+**Caught: 18**
+
+*(The eighteenth, in E0-17, and it is the entry catching its own half-application.
+The `ENVIRONMENT` guard was not cited — it was executed, twice, by hand, and the
+results went into ADR 0063 as a table because this entry says a guard you have not
+run is a convention. The table was still wrong. It recorded "`ENVIRONMENT` absent"
+as covered on the strength of a run that set the variable to the empty string, and
+`load_dotenv(override=False)` does not overwrite an empty string — so the case
+that was actually asked was "present and blank", and the case the row claimed,
+"absent", was never run at all. The test author asked it properly, by removing the
+variable, and the guard let the run through. **Executing a guard is only as good
+as the case you chose to execute it with, and the cases that differ by one
+character — set to nothing, versus not set — are the ones where choosing wrong
+looks exactly like choosing right.** The full account is
+`docs/disputes/E0-17-01.md`; whether the behaviour or the test is at fault is
+still open, and this entry's catch is independent of that ruling.)*
 
 *(The seventeenth, in the test that migrates over a stored edge that does not
 climb. The plant rests on E0-09's trigger accepting a row E0-11's refuses, so the
@@ -849,6 +910,21 @@ you have removed the only signal that would have told you it did not work.
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
 **Caught: 17**
+
+*(The fifteenth, on both sides of E0-17, and both catches are about a second copy
+that was nearly written. Writing the tests, the module needed to know how an
+assignment's scope is spelled and which column carries the reporting edge —
+questions `tests/conftest.py`'s `SupervisionGraph` already answers off
+`Base.metadata` — so it requested that fixture **as a reader only**, over a
+session belonging to a different database, rather than becoming the fourth copy of
+the scope-shape logic. Implementing, the same entry caught the string
+`"development"`: `app/db.py` compares against it before it lets the engine echo
+SQL, and `scripts/seed.py` now compares against it before it will run at all. Two
+places facing one convention. The copy is still there, because consolidating it
+crosses a module boundary this ticket does not otherwise touch — but it is named
+at the new site, in ADR 0063, and in the pull request, instead of being left for
+somebody to find when the two disagree. **Naming a duplicate you decline to remove
+is not the same as removing it, and it is much better than not noticing.**)*
 
 *(The seventeenth, in E0-16's second review pass, and the hazard is a duplicated
 request parameter. RFC 6749 §3.1 forbids one, the provider refused one, and the
@@ -1223,7 +1299,19 @@ does this.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 4**
+**Caught: 5**
+
+*(The fifth, in E0-17's review round, applied to somebody else's prescription
+rather than my own. A reviewer reported that the seed adopts a `prefix` row it did
+not create and prescribed "refuse rather than adopt". Both halves were probed
+before either was believed: a throwaway script stood up the pinned Postgres,
+migrated it, planted a real institution holding `MATH` and a real `MATH 210`, and
+ran the seed — which moved the prefix to the demo's department, overwrote the
+course title, and **exited 0 with its success line**. The same script re-run
+against the fix showed exit 2, the real rows untouched, and no partial demo
+institution, which is the half a prescription cannot tell you: that the refusal
+lands inside the one transaction. Reading the schema would have confirmed the
+defect and told me nothing about the repair.)*
 
 *(The fourth, and it is the second time this entry has caught a prescription
 about the same tuple. A review of E0-10 found that the Care-session sweep in
@@ -2016,6 +2104,118 @@ check to a field nothing consumes makes the gap less visible rather than more �
 the next reader inherits a field that looks settled.
 
 ---
+
+## 30. A fixture supplied the value under test, so neither the green nor the red meant anything
+
+**Caught: 0**
+
+*(E0-17, and the consequence is the entry: a question the suite appeared to be
+answering had to be settled by two hand measurements, a written objection, an
+arbitration, and a decision escalated to Todd.)*
+
+**What happened.** `scripts/seed.py` refuses to run unless `ENVIRONMENT` is
+`development`, reading it after `.env` has filled in whatever the process
+environment does not set. A test case named `not-set-at-all` removed the variable
+from the child process and expected a refusal; it got a run, because `.env`
+supplied the name.
+
+Both sides then reached for the suite, and the suite could not answer.
+
+- **The proposed fix turned everything green and proved nothing.** Reading the
+  variable before `.env` made all 29 tests in the module pass. It also made
+  `make seed` refuse on a correct stock checkout — measured — and *no test could
+  see that*, because `seed_environment` in `tests/conftest.py` lays every
+  documented `.env.example` entry into the child environment. The fixture supplies
+  `ENVIRONMENT` to every run the suite makes, so the one path the change altered
+  is the one path the suite never exercises. Its whole design is to over-supply,
+  and that design is right for what it was built for.
+- **The failing case proved nothing either.** Its verdict is decided by whether
+  an untracked `.env` exists in the working tree: absent, it passes; present, it
+  fails. So it measures the machine rather than the script — and since CI's unit
+  and integration job never creates `.env` while every developer does, it was
+  **green in the gate and red on every workstation**, reporting a guarantee from
+  the one environment in which nobody runs the script.
+
+**Root cause.** The subject of the test was not a behaviour but a *resolution* —
+which of two sources supplies a value — and the fixture is one of the sources. A
+suite cannot measure a change to a value it is itself providing.
+
+**Consequence.** A dispute file, an arbitration, a spec-silence finding, and a
+decision that had to go to a human, over a question two lines of code answer. The
+seed's configuration reading was restructured afterwards so the question could be
+asked directly (`resolved_configuration(environ, dotenv_path)` returns a mapping
+instead of mutating `os.environ`), which is the repair, and it arrived after the
+argument rather than before it.
+
+**Rule.** **Before treating a suite result as evidence about how a value is
+resolved, find out what the fixture supplies.** If the fixture provides the value
+under test, both colours are uninformative and the honest instrument is a hand
+measurement of the real path, recorded where somebody can re-run it.
+
+Two cheap checks, either of which would have caught this before the argument
+started:
+
+- Grep the fixture for the variable the test is about. If it is set there, the
+  test is asking the fixture, not the code.
+- Ask what the case would do on a machine configured differently — a missing
+  untracked file, a different working directory. **A test whose verdict depends
+  on something not in the repository is measuring the machine**, and one that
+  therefore disagrees between CI and a developer is worse than one that simply
+  fails, because each side believes the other is misconfigured.
+
+And the design rule that follows: **a guard worth testing should take what it
+reads as an argument.** A guard that reaches for `os.environ` or opens a file by a
+hardcoded path can only be interrogated by building a whole environment around it,
+which is how a one-line question turns into a subprocess, a fixture and a dispute.
+
+---
+
+## 31. "Running it twice is safe" was tested only against a database the loader itself had filled
+
+**Caught: 0**
+
+*(E0-17, found by review rather than by the suite, and the yield was an
+authorization change.)*
+
+**What happened.** `scripts/seed.py` is idempotent by matching each row on a
+natural key and re-using what it finds. Two tests asserted it: seed, seed again,
+compare every row. Both passed, every time, and neither could ever have failed —
+the database they ran against was created for the module and written to by
+nothing but the seed, so "the rows I find" and "the rows I wrote" were the same
+set by construction.
+
+The key for `prefix` was `code`, which is `UNIQUE` across the whole table rather
+than per institution (ADR 0017). Against a database that already held a real
+institution — which is what E1's roster sync will produce — the seed did not
+create a prefix, it **adopted** one: `MATH` was re-pointed at the demo's
+Mathematics department, the real `MATH 210` underneath it was then reached by
+`(prefix_id, lms_number)` and its title overwritten, and its lead-faculty mapping
+was replaced by a demo person. The run exited 0 and printed its success line.
+
+**Root cause.** Idempotency is a claim about a *second* run's interaction with
+whatever is already in the database. A fixture that starts empty tests only the
+loader's interaction with itself, which is the easy half and the half that
+cannot fail. Nothing in the suite ever put a row the loader did not write in
+front of it.
+
+**Consequence.** Purview is computed from the containment tree and from
+`lead_faculty_mapping`, so demo leadership gained purview over real courses and
+the real lead lost the mapping that granted theirs — silently, and surfacing much
+later as a scoping bug hunted in `authz.py`. The records made it worse rather than
+better: `README.md` promised "a second run writes nothing", and ADR 0064 listed
+the natural keys without noting that this one, alone, was scoped to nothing.
+
+**Rule.** **Test an idempotent loader against rows it did not write.** Before a
+second-run test means anything, put a foreign row in its way — one that shares
+the natural key the loader matches on — and assert what the loader does with it.
+The interesting answer is usually "refuse", and a loader that has never been
+shown a foreign row has not been asked the question.
+
+The design half, which is cheaper than the test half and catches it earlier:
+**every natural key must be scoped to a row the loader created, or be a value the
+loader invented.** Walk the list and classify each one. A key that is neither —
+a globally unique column holding a name the outside world also uses — is an
+adoption waiting to happen, and it does not look like one in a table of keys.
 
 ## 27. A guard that reads a command as text refused a command that was only reading
 

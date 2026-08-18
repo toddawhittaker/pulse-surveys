@@ -49,8 +49,12 @@ from app.models import Base
 
 __all__ = ["Base", "SessionLocal", "engine", "get_session"]
 
-# The only environment name that may see SQL in the log. Free-form by §6.3, so
-# this is a comparison against a convention rather than against an enumeration
+# The only environment name that may see SQL in the log. Free-form — but **not by
+# SPEC §6.3**, which is where an earlier version of this comment sent the reader.
+# That section is the admin console's configuration surface and names no
+# environment variable; `ENVIRONMENT` and `healthz` each appear zero times in the
+# spec. The vocabulary is documented in `.env.example` and the field is E0-01's.
+# So this is a comparison against a convention rather than against an enumeration
 # `Settings` enforces; anything that is not this string gets no echo.
 DEVELOPMENT_ENVIRONMENT = "development"
 
