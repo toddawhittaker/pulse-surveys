@@ -187,7 +187,9 @@ DEPLOYED_ENVIRONMENT_VALUE = "production"
 
 # The one value the guard admits. ADR 0063's check is an equality against this
 # string and deliberately not a deny-list, "because the set of names a deployment
-# might use is open".
+# might use is open" — an equality **after stripping surrounding whitespace**,
+# which the record does not yet say and which two of the cases further down are
+# what state. Case is not folded.
 DEVELOPMENT_ENVIRONMENT = "development"
 
 # An address nothing can connect to, used to prove *when* the guard runs rather
@@ -1953,9 +1955,28 @@ CHECK_ENVIRONMENT = "check_environment_is_development"
 # can hold the file constant while only the process changes.
 SILENT_DOTENV = {"DATABASE_URL": UNREACHABLE_DATABASE_URL}
 
-# The rows of ADR 0063's own table, as `(process environment, .env contents)`.
-# `None` for the file means there is no file at all, which is what a deployment
-# looks like; a mapping means this suite writes one in `tmp_path`.
+# **Two values whose verdict is measured rather than written down.** The guard
+# compares `(raw or "").strip()` against `development`, so it strips surrounding
+# whitespace and does not fold case: `development` with a space either side of it
+# is admitted, and `Development` is refused. ADR 0063 says the check is against
+# "exactly `development`", which is true of the case half and not of the
+# whitespace half — the record is being corrected in the same round as this
+# comment, and until it is, the two rows below are the only place the behaviour
+# is stated.
+#
+# They are worth keeping because they break in opposite directions under the same
+# tidying. Replacing `.strip() ==` with a plain `==` makes the guard match the
+# record and fails `the-safe-name-with-surrounding-whitespace` alone; adding a
+# `.casefold()` beside the strip fails `the-safe-name-in-the-wrong-case` alone.
+# The first of those is the one to notice: the strip makes this guard *more*
+# permissive than the equality the record describes, and nothing else says so.
+SPACED_DEVELOPMENT = f" {DEVELOPMENT_ENVIRONMENT} "
+MISCASED_DEVELOPMENT = DEVELOPMENT_ENVIRONMENT.capitalize()
+
+# The rows of ADR 0063's own table, as `(process environment, .env contents)`,
+# plus the two measured above. `None` for the file means there is no file at all,
+# which is what a deployment looks like; a mapping means this suite writes one in
+# `tmp_path`.
 REFUSED_CONFIGURATIONS = (
     pytest.param({}, None, id="nothing-sets-it-and-there-is-no-file"),
     pytest.param({}, SILENT_DOTENV, id="the-file-exists-and-sets-no-environment"),
@@ -1979,6 +2000,11 @@ REFUSED_CONFIGURATIONS = (
         {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
         id="the-process-names-a-deployment-over-a-development-file",
     ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: MISCASED_DEVELOPMENT},
+        SILENT_DOTENV,
+        id="the-safe-name-in-the-wrong-case",
+    ),
 )
 
 ADMITTED_CONFIGURATIONS = (
@@ -1991,6 +2017,11 @@ ADMITTED_CONFIGURATIONS = (
         {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
         {DEPLOYED_ENVIRONMENT_VARIABLE: DEPLOYED_ENVIRONMENT_VALUE},
         id="the-process-says-development-over-a-deployment-file",
+    ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: SPACED_DEVELOPMENT},
+        SILENT_DOTENV,
+        id="the-safe-name-with-surrounding-whitespace",
     ),
 )
 
@@ -2076,10 +2107,15 @@ def test_the_guard_refuses_these_resolved_configurations(
     The cases that set a value in the process over a `.env` saying `development`
     assert the precedence in the direction that matters: a developer with a
     development checkout who has exported `ENVIRONMENT=production` for something
-    else, and then types `make seed`, must be refused. Whitespace is one of them
-    because ADR 0063 spells it — "set to anything but `development`, empty and
-    whitespace included" — and because it is the value a trailing space in a
-    `.env` line produces.
+    else, and then types `make seed`, must be refused. Whitespace-only is one of
+    them because ADR 0063 spells it — "set to anything but `development`, empty
+    and whitespace included" — and because it is the value a line holding nothing
+    but a space produces.
+
+    `the-safe-name-in-the-wrong-case` is measured behaviour rather than a written
+    rule: the guard does not fold case, so `Development` is refused. See the
+    comment on `MISCASED_DEVELOPMENT` above for why it and its opposite number in
+    the admitted cases are both kept.
     """
     configuration = resolve(seed_module, environ, dotenv_at(tmp_path / ".env", dotenv))
     found = configuration.get(DEPLOYED_ENVIRONMENT_VARIABLE)
@@ -2123,11 +2159,18 @@ def test_the_guard_admits_these_resolved_configurations(
     about that stands. A change that made this refuse would be reversing a
     decision, not tightening a guard.
 
-    The second case is the precedence in the admitting direction: a developer who
-    exports `ENVIRONMENT=development` over a `.env` that says something else is
-    admitted, because the process wins. Without it, "the file may grant
-    permission" could be implemented as "the file decides", which would refuse a
-    developer who did exactly what an operator is told to do.
+    `the-process-says-development-over-a-deployment-file` is the precedence in the
+    admitting direction: a developer who exports `ENVIRONMENT=development` over a
+    `.env` that says something else is admitted, because the process wins.
+    Without it, "the file may grant permission" could be implemented as "the file
+    decides", which would refuse a developer who did exactly what an operator is
+    told to do.
+
+    `the-safe-name-with-surrounding-whitespace` is measured behaviour rather than
+    a written rule, and it is the one row here that asserts the guard is *wider*
+    than its own record: `(raw or "").strip()` admits ` development `, which
+    "exactly `development`" does not describe. See the comment on
+    `SPACED_DEVELOPMENT` above.
     """
     configuration = resolve(seed_module, environ, dotenv_at(tmp_path / ".env", dotenv))
     refused, said = guard_refusal(seed_module, configuration, capsys)
