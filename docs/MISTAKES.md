@@ -1895,15 +1895,93 @@ request, or editing the `.env.example` placeholder URL, either of which is
 removing a substring from a rendering to satisfy a search rather than satisfying
 the property the search stands for.
 
+**Ruled on**, outcome 1 — the test is wrong — and the needle is now random
+throughout (`ae7518d`). The ruling found one thing this entry did not, and it is
+the expensive half: the *same* needle is used in
+`tests/integration/test_ai_gateway_validity_roundtrip.py` as a **positive**
+detector, to prove the key was really sent before anything is asserted about it
+not leaking. There a collision does not go red at all — it satisfies the
+non-vacuity guard against a request that never carried the key, and every leak
+assertion beneath it then reports a guarantee that was never tested. A search term
+shared between a must-find rule and a must-not-find rule fails in both directions
+at once, and only one of those directions announces itself.
+
+*(This entry was written and committed in `6771d56`, before the arbitrator ran,
+stating an outcome that had not been reached. The rule was right and the ruling
+confirms it, which is luck rather than method: writing the record ahead of the
+ruling is the thing the dispute loop exists to prevent, and a record that had gone
+the other way would have had to be retracted rather than amended. Write the
+objection, then wait.)*
+
 **Rule.** **A fixture that will be searched for must share no substring with
 anything the assertion legitimately renders.** In practice: make it random-only,
 with no word in it. Put the human-readable label in the *constant's name*, where
 it helps a reader, not in its value, where it is a needle.
 
-The general form is worth stating because it is entry 3's mirror and costs the
-same. Entry 3 is a test that passes for a reason unrelated to what it asserts.
-This is a test that **fails** for a reason unrelated to what it asserts — and both
-end the same way, because a red assertion nobody can make green is one somebody
-eventually deletes. So: when a test goes red, the first question is still "what
-exactly is it measuring", and the answer "a word in a field name" means the test
-is the thing to fix.
+The general form is worth stating because it is entry 3's mirror — and **the two
+do not cost the same**, which the objection first argued and the arbitrator
+declined to accept. It was right to decline. A permanently red test is loud and
+can never ship a false guarantee; a wrongly green one ships one silently, and
+nobody is looking. The red one is the cheaper failure, and saying otherwise
+weakens a good objection by resting it on what is convenient to implement.
+
+What settled the dispute was narrower and sufficient: **the test reported a leak
+against text containing no part of the secret.** That is demonstrable in one line,
+with no appeal to cost, to effort, or to what the implementation would prefer. Use
+that shape of argument — the assertion is false about the text it was given —
+rather than the balance-of-inconvenience one.
+
+So: when a test goes red, the first question is still "what exactly is it
+measuring", and the answer "a word in a field name" means the test is the thing to
+fix. When the same term also drives a must-find assertion somewhere, check that
+one too, because it will have gone green rather than red.
+
+## 25. Two lockfiles resolved the same package to two versions
+
+**Caught: 0**
+
+**What happened.** E0-13 added one dependency. `make lock` compiles
+`requirements.txt` and `requirements-dev.txt` from `pyproject.toml` in two
+separate runs, and the new library brought `requests` — and under it
+`charset-normalizer` — into both closures for the first time. The runtime run
+pinned `charset-normalizer==3.5.1` and the dev run pinned `3.5.0`, from the same
+index, minutes apart, with nothing in either file constraining it and neither
+version yanked or restricted. Re-running the dev compile reproduced `3.5.0`, so it
+was not a transient.
+
+Nothing that reads one file at a time noticed. `pytest` passed on 654 tests,
+`ruff`, `mypy` and the checker self-test were clean, and `pip install
+--require-hashes -r requirements-dev.txt` installed happily. **`make audit` is the
+only thing in the build that reads both files at once**, and it failed with
+`ResolutionImpossible` — a message naming neither the package nor the lockfile,
+in a ticket whose change had nothing to do with either.
+
+**Root cause.** Two independent resolutions of overlapping requirement sets. The
+dev lock is not compiled against the runtime lock as a constraint, so a package
+that both closures pull in transitively is resolved twice, and pip-compile does
+not promise the same answer to two different questions.
+
+**Consequence.** A red supply-chain gate whose message points nowhere near the
+cause. It was found by running `pip-audit` locally with the same two arguments the
+Makefile passes, before opening a pull request; had that not been run, CI would
+have reported it against a diff whose only dependency line was for a different
+package entirely.
+
+**Rule.** **After `make lock`, check that the two lockfiles agree on every package
+they share.** One command, and it costs nothing:
+
+```sh
+diff <(grep -oE '^[A-Za-z0-9._-]+==\S+' requirements.txt | sort) \
+     <(grep -oE '^[A-Za-z0-9._-]+==\S+' requirements-dev.txt | sort) | grep '^<'
+```
+
+Anything it prints that is not simply absent from the dev file is a version skew,
+and `--upgrade-package <name>` on the dev compile is the immediate repair. The
+durable fix is to compile the dev lock with the runtime lock as a constraint file,
+which is a change to `make lock`'s recipe — proposed in E0-13's pull request
+rather than made inside it, because the recipe has to keep matching what CI does.
+
+**And run `make audit`'s two arguments together before pushing**, rather than
+`pip-audit -r requirements.txt` alone. A gate that reads two files is the only one
+that can see a disagreement between them, and reading one file at a time is how
+this survived a full green suite.
