@@ -908,6 +908,7 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.invariant
 def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: Any) -> None:
     """The rule as *stated*, beside the tests that provoke it.
 
@@ -918,45 +919,87 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     and lets a name be overwritten; `REFERENCES` lets a foreign key probe for a
     value's existence.
 
-    The control is the same function asked about a table the role *may* read, so
-    that "no privilege anywhere" cannot be the answer `has_table_privilege` gives
-    to everything.
+    **A column grant is the one that made "of any kind" false**, and closing it is
+    E0-33's last repair. `GRANT SELECT (identity_name) ON public.user_identity TO
+    pulse_app` is recorded in `pg_attribute.attacl`, which `has_table_privilege`
+    does not read: measured on the running stack, the whole-table grant fails four
+    tests in this file and the column grant failed **none**, because `SELECT *`
+    stays refused and every behavioural refusal here selects `*`. So for that
+    route this catalog assertion is not the second half of a pair — it is the only
+    guard there is, which is why this test is now `invariant`-marked and its
+    sibling behavioural tests cannot stand in for it.
+
+    **Asked through `ways_to_reach_identity`**, so the two questions this file asks
+    about identity are asked with one instrument: what a role a runtime role can
+    *become* may do, and what the runtime roles may do themselves.
+    `IDENTITY_PROBES` is the single place a mechanism is added, and a mechanism
+    added there reaches both without anybody remembering this test exists.
+
+    **The execute mechanism is filtered out here and nowhere else**, and that is
+    the asymmetry rather than an exemption. `pulse_care` holds `EXECUTE` on the
+    reveal *by design* — §4 and §6.2 require that door to be open — so a rule that
+    reported it would fail against the correct schema. It is asserted separately
+    and in both directions instead: `test_the_application_role_may_not_execute_the_
+    reveal_function` says `pulse_app` may call nothing, and `the_reveal_function`
+    says `pulse_care` may call exactly one. Asked about a role a runtime role can
+    *become*, the same mechanism is dangerous and is not filtered.
+
+    **Two controls.** The application role must be able to read a view, so that
+    "no privilege anywhere" cannot be the answer the probes give to everything.
+    And the definer must be reported as *having* a route, so that a probe set which
+    answers empty for every role fails here rather than passing.
+
+    (`ways_to_reach_identity`, `IDENTITY_PROBES` and the three probes themselves
+    live in E0-33's section at the end of this file, beside the membership sweep
+    that is the other caller.)
     """
     views = read_views(db_session)
     assert views, "There is no view in `public`, so the control below has nothing to check."
 
-    held: dict[str, list[str]] = {}
-    controls: dict[str, list[str]] = {}
+    routes: dict[str, list[str]] = {}
     for role in RUNTIME_ROLES:
         require_role(db_session, role)
-        held[role] = [
-            privilege
-            for privilege in TABLE_PRIVILEGES
-            if db_session.execute(
-                text("SELECT has_table_privilege(:role, :table, :privilege)"),
-                {"role": role, "table": f"public.{IDENTITY_TABLE}", "privilege": privilege},
-            ).scalar_one()
-        ]
-        controls[role] = [
-            view
-            for view in views
-            if db_session.execute(
-                text("SELECT has_table_privilege(:role, :table, 'SELECT')"),
-                {"role": role, "table": f"public.{view}"},
-            ).scalar_one()
+        routes[role] = [
+            description
+            for mechanism, description in ways_to_reach_identity(db_session, role)
+            if mechanism != IDENTITY_BY_EXECUTE
         ]
 
-    assert controls[APPLICATION_ROLE], (
+    readable = [
+        view
+        for view in views
+        if db_session.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {"role": APPLICATION_ROLE, "relation": f"public.{view}", "privilege": "SELECT"},
+        ).scalar_one()
+    ]
+    assert readable, (
         f"`has_table_privilege` reports that `{APPLICATION_ROLE}` may read none of {views}. It "
         "then reports nothing for any table, and the assertion below is true of a database with "
         "no grants at all rather than of this ticket's grant model."
     )
-    granted = {role: privileges for role, privileges in held.items() if privileges}
+
+    definer = the_reveal_function(db_session)["owner"]
+    assert ways_to_reach_identity(db_session, definer), (
+        f"The identity probes report no route at all for `{definer}`, the owner of the reveal "
+        f"function — which holds `SELECT` on `{IDENTITY_TABLE}` by construction (ADR 0043) and "
+        "may execute what it owns. So the probes answer empty for a role that certainly has a "
+        "route, and the assertion below is satisfied by an instrument that finds nothing for "
+        "anybody rather than by a schema that grants nothing."
+    )
+
+    granted = {role: found for role, found in routes.items() if found}
     assert not granted, (
-        f"The runtime roles hold privileges on `{IDENTITY_TABLE}`: {granted}. E0-10 gives "
-        "`pulse_app` 'no grant of any kind' on it, and `pulse_care` no `SELECT` either — Care's "
-        "access is the audited function and nothing else, so that a name cannot be obtained "
-        "without leaving a record."
+        f"The runtime roles can reach `{IDENTITY_TABLE}`: {granted}. E0-10 gives `pulse_app` 'no "
+        "grant of any kind' on it, and `pulse_care` no `SELECT` either — Care's access is the "
+        "audited function and nothing else, so that a name cannot be obtained without leaving a "
+        "record.\n\n"
+        "**A route naming a single column is the quiet one.** It leaves `SELECT *` refused, so "
+        "the three behavioural refusals in this file go on passing while every student's name is "
+        "readable one column at a time — measured: the whole-table grant fails four tests here, "
+        "the column grant failed none until this assertion existed. ADR 0001 rejects column "
+        "grants by name in its 'Alternatives rejected', which is precisely why somebody reaches "
+        "for one when a screen needs a name."
     )
 
 
@@ -2439,8 +2482,8 @@ IDENTITY_BY_COLUMN = "column"
 IDENTITY_BY_EXECUTE = "execute"
 
 
-def identity_by_grant(session: Any, role: str) -> list[str]:
-    """Where `role` may read the identity table directly, by any privilege.
+def identity_by_grant(session: Any, role: str, table: str) -> list[str]:
+    """Where `role` may read `table` directly, by any privilege.
 
     `has_table_privilege` answers for three situations at once, which is why this
     file needs no separate check for any of them: a role that was **granted** the
@@ -2448,11 +2491,11 @@ def identity_by_grant(session: Any, role: str) -> list[str]:
     hold it without any ACL entry existing anywhere.
     """
     return [
-        f"holds {privilege} on public.{IDENTITY_TABLE}"
+        f"holds {privilege} on public.{table}"
         for privilege in TABLE_PRIVILEGES
         if session.execute(
             text(HAS_TABLE_PRIVILEGE),
-            {"role": role, "relation": f"public.{IDENTITY_TABLE}", "privilege": privilege},
+            {"role": role, "relation": f"public.{table}", "privilege": privilege},
         ).scalar_one()
     ]
 
@@ -2495,12 +2538,12 @@ def column_grants_beyond_the_table(session: Any, role: str, table: str) -> list[
     return found
 
 
-def identity_by_column(session: Any, role: str) -> list[str]:
-    """Where `role` may read one column of the identity table without reading the table."""
-    return column_grants_beyond_the_table(session, role, IDENTITY_TABLE)
+def identity_by_column(session: Any, role: str, table: str) -> list[str]:
+    """Where `role` may read one column of `table` without reading the table."""
+    return column_grants_beyond_the_table(session, role, table)
 
 
-def identity_by_execute(session: Any, role: str) -> list[str]:
+def identity_by_execute(session: Any, role: str, table: str) -> list[str]:
     """Where `role` may call a function that reads the identity table for it.
 
     A `SECURITY DEFINER` function runs as its **owner**, and this schema's owner
@@ -2510,6 +2553,13 @@ def identity_by_execute(session: Any, role: str) -> list[str]:
     possible place: `pulse_care` holds no table privilege on `user_identity` at all,
     deliberately, so the role designed to reach identity was invisible to a rule
     phrased over table privileges.
+
+    **`table` is accepted and ignored**, so that the three probes share one
+    signature and `IDENTITY_PROBES` can be a plain table of them. It is not an
+    oversight: this route does not depend on which relation is named, because the
+    caller spends the *owner's* privileges on whatever the body reads. A probe
+    that filtered by table here would answer differently for a throwaway table
+    than for the real one and make the self-test measure something else.
     """
     return [
         f"may EXECUTE {function['signature']}"
@@ -2526,12 +2576,23 @@ def identity_by_execute(session: Any, role: str) -> list[str]:
 # two cannot drift apart.
 #
 # And it gives a mutation run **one syntactically valid line** to delete for
-# disabling a probe: remove either row and the module still parses, the sweep
-# still runs, and the control for that mechanism is what goes red. Deleting a
-# probe expression by hand leaves the file unparseable, which reports a collection
-# error rather than a failed control — and an error is not a red, it is a run that
-# proved nothing (`docs/MISTAKES.md` entry 16, a harness reporting kills it had not
-# made).
+# disabling a probe: remove any row and the module still parses, the sweep still
+# runs, and the control for that mechanism is what goes red. Deleting a probe
+# expression by hand leaves the file unparseable, which reports a collection error
+# rather than a failed control — and an error is not a red, it is a run that proved
+# nothing (`docs/MISTAKES.md` entry 16, a harness reporting kills it had not made).
+#
+# **Each of the three rows has a control that fires on its deletion alone**, with
+# no mutation of the schema, and that took two attempts to get right. The grant and
+# execute rows are covered by controls in
+# `test_neither_runtime_role_can_become_a_role_that_may_read_identity`, which
+# require each mechanism to be *found* on a role that certainly has it. The column
+# row is covered by `test_the_identity_probes_in_this_file_see_a_column_grant`,
+# which stands a column grant up on a throwaway table and asks **through this
+# table** rather than calling the probe directly. The first version called it
+# directly, so deleting the row left all 28 tests green and the control guarded
+# nothing (`docs/MISTAKES.md` entry 9: a guard that has never been executed against
+# the case it claims to stop is a comment).
 IDENTITY_PROBES: tuple[tuple[str, Any], ...] = (
     (IDENTITY_BY_GRANT, identity_by_grant),
     (IDENTITY_BY_COLUMN, identity_by_column),
@@ -2539,7 +2600,9 @@ IDENTITY_PROBES: tuple[tuple[str, Any], ...] = (
 )
 
 
-def ways_to_reach_identity(session: Any, role: str) -> list[tuple[str, str]]:
+def ways_to_reach_identity(
+    session: Any, role: str, table: str = IDENTITY_TABLE
+) -> list[tuple[str, str]]:
     """Every route by which `role` may obtain a name, as `(mechanism, description)`.
 
     **Why this is closed at three, argued from the catalog rather than from a
@@ -2587,12 +2650,23 @@ def ways_to_reach_identity(session: Any, role: str) -> list[tuple[str, str]]:
         cheap way to close it: one assertion in one place, instead of widening
         five queries and changing what four E0-10 tests mean.
 
-    **What it is scoped to** (`docs/MISTAKES.md` entry 14): `IDENTITY_TABLE`, the
-    constant this whole module is written around, rather than every relation the
-    identity marker names. Today they are the same one table. A second
+    **What it is scoped to** (`docs/MISTAKES.md` entry 14): `IDENTITY_TABLE` by
+    default — the constant this whole module is written around — rather than every
+    relation the identity marker names. Today they are the same one table. A second
     identity-bearing table is a change to this module's central constant and to
-    every test in it, not a gap in this helper — and the marker convention lives in
+    every test in it, not a gap in this helper, and the marker convention lives in
     another module, so reading it from here would be a second copy of it (entry 13).
+    `table` is an argument only so that
+    `test_the_identity_probes_in_this_file_see_a_column_grant` can run the probes
+    against a throwaway table of its own; nothing in this suite grants on
+    `user_identity`, not even inside a transaction it means to roll back.
+
+    **Two questions, and the caller decides which it is asking.** Asked about a
+    role a runtime role can *become*, every route is dangerous. Asked about the
+    runtime roles *themselves*, the execute route is the one legitimate door —
+    `pulse_care` holds it by design — so the caller filters that mechanism out and
+    says why. `test_neither_runtime_role_holds_any_privilege_on_user_identity` is
+    the one that does.
 
     **One route is outside the catalog entirely**, and no probe of any kind would
     see it: a connection to this database made from inside it, through `dblink` or
@@ -2603,7 +2677,7 @@ def ways_to_reach_identity(session: Any, role: str) -> list[tuple[str, str]]:
     return [
         (mechanism, description)
         for mechanism, probe in IDENTITY_PROBES
-        for description in probe(session, role)
+        for description in probe(session, role, table)
     ]
 
 
@@ -2807,11 +2881,23 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
     `GRANT pulse_reveal_definer TO pulse_app` writes no ACL entry anywhere and
     hands over `SELECT` on `user_identity`.
 
+    **And through `COLUMN_GRANTEES` beside it, because `has_table_privilege` is
+    blind to a column grant.** The expected set at column level is *empty*: every
+    grant this scheme writes is table-level — ADR 0043's enumeration and E0-13's
+    `SELECT, INSERT` on `classification` alike — so a runtime role named in any
+    column ACL on a base table is a widening by definition. Without this,
+    `GRANT UPDATE (verdict) ON public.classification TO pulse_app` would leave the
+    append-only property broken with this test green, which is the same shape as
+    the identity finding one table over and would have been left open by fixing
+    only that one.
+
     **The mutation it exists to survive**: `GRANT SELECT ON public.enrollment TO
     pulse_app` — the convenience grant E0-33 names, added to make one query work,
     invisible to `alembic check` and to every other test here. Also `GRANT UPDATE
     ON public.classification TO pulse_app`, which is a widening *within* a table
-    the role already reads and which no `>=` comparison could see.
+    the role already reads and which no `>=` comparison could see, and its
+    column-scoped form `GRANT UPDATE (verdict) ON public.classification TO
+    pulse_app`, which no `has_table_privilege` answer reports at all.
     **The near miss it tolerates**: `GRANT SELECT ON <a new read view> TO
     pulse_app`, which stays green.
 
@@ -2869,10 +2955,18 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
     )
 
     held = privileges_held(db_session, RUNTIME_ROLES, tables)
-    beyond = sorted(
+    on_columns = db_session.execute(text(COLUMN_GRANTEES)).mappings().all()
+    beyond_on_tables = [
         f"{role} holds {privilege} on public.{relation}"
         for role, relation, privilege in held - RUNTIME_BASE_TABLE_PRIVILEGES
-    )
+    ]
+    beyond_on_columns = [
+        f"{row['grantee']} holds {row['privilege']} on public.{row['relation']}"
+        f".{row['column_name']}"
+        for row in on_columns
+        if row["grantee"] in RUNTIME_ROLES and row["relation"] in tables
+    ]
+    beyond = sorted(beyond_on_tables + beyond_on_columns)
     missing = sorted(
         f"{role} should hold {privilege} on public.{relation}"
         for role, relation, privilege in RUNTIME_BASE_TABLE_PRIVILEGES - held
@@ -2888,6 +2982,12 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
         "every refusal test stays exactly as it was. Nothing else notices: `alembic check` reads "
         "no ACL at all (E0-20 item 3b), and asserting a refusal on `user_identity` proves the "
         "refusal without proving that nothing else was granted (E0-33 item 3).\n\n"
+        "**An entry naming a column** — `…public.classification.verdict` rather than "
+        "`…public.classification` — is a grant `has_table_privilege` does not report at all, so "
+        "it is read out of `pg_attribute.attacl` instead. The expected set at column level is "
+        "empty: every grant this scheme writes is table-level, so a runtime role named in any "
+        "column ACL is a widening by definition, and on an append-only table it is the whole of "
+        "how append-only stops being true.\n\n"
         "The second list means this scheme has lost a grant it needs: without `SELECT` on "
         "`role_assignment` the Care path cannot resolve the actor whose assignment it is about, "
         "and without `INSERT` on `classification` the moderation classifier cannot record a "
@@ -3107,24 +3207,36 @@ def test_the_identity_probes_in_this_file_see_a_column_grant(db_session: Any) ->
     **On a throwaway table, never on the identity table.** The transaction is
     rolled back by `db_session` either way, and a `GRANT` on `user_identity`
     written into a test file — even one intended to be undone — is a line whose
-    correctness rests entirely on a fixture behaving. `column_grants_beyond_the_table`
-    takes its table as an argument so that this test never has to write one.
+    correctness rests entirely on a fixture behaving. `ways_to_reach_identity` and
+    all three probes take their table as an argument so that this test never has to
+    write one.
+
+    **Asked through `ways_to_reach_identity`, not through the probe directly**, and
+    that is the repair rather than a detail. The first version of this test called
+    `column_grants_beyond_the_table` itself, so deleting
+    `(IDENTITY_BY_COLUMN, identity_by_column),` from `IDENTITY_PROBES` left all 28
+    tests in this file green: the helper still worked, and nothing asked the probe
+    *set* whether it still contained the column route. A control that cannot fail
+    when the thing it guards is removed is not a control
+    (`docs/MISTAKES.md` entry 9). Routed through the table, deleting that row turns
+    this test red on an unmutated schema, which is the only shape that proves the
+    row is load-bearing.
 
     **Three assertions, and the first is the finding.** The reviewer's measurement
-    is reproduced in order: `has_table_privilege` must answer **false** for a role
-    that holds only a column grant — which is what makes this mechanism invisible
-    to the probe that existed before it — while the column probe and the grantee
-    sweep must both answer **true**. Asserting only the last two would leave the
-    reason the mechanism is needed unstated and unchecked.
+    is reproduced in order: the *grant* mechanism must answer **nothing** for a role
+    that holds only a column grant — which is what makes this route invisible to
+    the probe that existed before it — while the *column* mechanism and the grantee
+    sweep must both find it. Asserting only the last two would leave the reason the
+    mechanism is needed unstated and unchecked.
 
     **The mutation it exists to survive**: deleting
     `(IDENTITY_BY_COLUMN, identity_by_column),` from `IDENTITY_PROBES`, or dropping
     `pg_attribute` from `COLUMN_GRANTEES`. Either leaves the schema untouched and
-    both sweeps reporting clean, and this is the only test that would notice.
+    every sweep reporting clean, and this is the only test that would notice.
     **The near miss it tolerates**: a role holding the privilege on the whole
-    table, which `column_grants_beyond_the_table` deliberately does not report —
-    that is the grant mechanism's finding, and reporting it twice would read as two
-    holes where there is one.
+    table, which the column mechanism deliberately does not report — that is the
+    grant mechanism's finding, and reporting it twice would read as two holes where
+    there is one.
     """
     probe_table = f"column_grant_probe_{uuid4().hex[:8]}"
     privilege = COLUMN_PRIVILEGES[0]
@@ -3134,11 +3246,7 @@ def test_the_identity_probes_in_this_file_see_a_column_grant(db_session: Any) ->
         db_session.execute(
             text(f'GRANT {privilege} (secret) ON public."{probe_table}" TO "{APPLICATION_ROLE}"')
         )
-        by_table = db_session.execute(
-            text(HAS_TABLE_PRIVILEGE),
-            {"role": APPLICATION_ROLE, "relation": f"public.{probe_table}", "privilege": privilege},
-        ).scalar_one()
-        by_column = column_grants_beyond_the_table(db_session, APPLICATION_ROLE, probe_table)
+        routes = ways_to_reach_identity(db_session, APPLICATION_ROLE, probe_table)
         swept = [
             dict(row)
             for row in db_session.execute(text(COLUMN_GRANTEES)).mappings()
@@ -3147,22 +3255,26 @@ def test_the_identity_probes_in_this_file_see_a_column_grant(db_session: Any) ->
     finally:
         savepoint.rollback()
 
+    by_table = [found for mechanism, found in routes if mechanism == IDENTITY_BY_GRANT]
+    by_column = [found for mechanism, found in routes if mechanism == IDENTITY_BY_COLUMN]
+
     assert not by_table, (
-        f"`has_table_privilege` reports `{APPLICATION_ROLE}` holding {privilege} on the whole of "
-        f"`public.{probe_table}` when it was granted that privilege on one column of it. Then a "
-        "column grant is not invisible to the table probe on this server, the mechanism this test "
-        "is about does not exist here, and the two assertions below are measuring something else. "
-        "That would be a change in Postgres's behaviour rather than in this schema — check the "
-        "server version before changing anything."
+        f"The grant mechanism reports {by_table} for `{APPLICATION_ROLE}`, which was granted "
+        f"{privilege} on *one column* of `public.{probe_table}`. `has_table_privilege` is "
+        "therefore answering true for a column-scoped grant, the route this test is about is not "
+        "invisible to the older probe on this server, and the two assertions below are measuring "
+        "something else. That would be a change in Postgres's behaviour rather than in this "
+        "schema — check the server version before changing anything."
     )
     assert by_column, (
-        f"`column_grants_beyond_the_table` reports no route for `{APPLICATION_ROLE}`, which was "
+        f"`ways_to_reach_identity` reports no column route for `{APPLICATION_ROLE}`, which was "
         f"just granted {privilege} on `public.{probe_table}.secret` and holds nothing on the "
-        "table. The column probe is blind, so `identity_by_column` is blind, so "
-        "`test_neither_runtime_role_can_become_a_role_that_may_read_identity` cannot see a "
-        f"membership into a role holding `GRANT {privilege} (<a column>) ON "
-        f"public.{IDENTITY_TABLE}` — the grant ADR 0001 rejects by name, which leaves `SELECT *` "
-        "refused and every `invariant`-marked refusal in this file passing."
+        "table. Either the probe is blind or `IDENTITY_BY_COLUMN` is no longer in "
+        "`IDENTITY_PROBES` — and this is the only test in the suite that can tell you either "
+        f"way. With it gone, `GRANT {privilege} (<a column>) ON public.{IDENTITY_TABLE} TO "
+        "pulse_app` is invisible to `test_neither_runtime_role_holds_any_privilege_on_user_"
+        "identity` and to the membership sweep alike: the grant ADR 0001 rejects by name, which "
+        "leaves `SELECT *` refused and every behavioural refusal in this file passing."
     )
     assert swept, (
         f"`COLUMN_GRANTEES` reports no entry for `public.{probe_table}` after a column grant was "
