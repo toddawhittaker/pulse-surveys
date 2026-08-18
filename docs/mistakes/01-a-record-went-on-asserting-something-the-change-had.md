@@ -1,23 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 31**
+**Caught: 32**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*14 instances recorded; the 3 most recent are below. The earlier 11 are in this file's git history and in the pull requests they cite.*
-
-*(Twice in E0-17 and both times about a sentence counting
-something. Writing the tests, it corrected a claim in `tests/conftest.py`'s own
-header that had gone stale — the file said E0-11 added its fixtures "at the very
-bottom", which stopped being true the moment E0-17 added two below them.
-Implementing, the sweep outward from "`scripts/seed.py` now reads `.env`" reached
-`.env.example`'s opening paragraph, which told every reader the file "has three
-readers, not one" and named them. It had four from the moment the seed landed, and
-nothing would have failed: no test counts readers, and the sentence is the one a
-person consults when deciding whether a new variable can be documented there.
-ADR 0008's amendment line and its index row carry the same count and were changed
-in the same commit. **A number in a prose sentence is a record with a scheduled
-expiry, and the expiry is whenever somebody adds the fourth of anything.**)*
+*15 instances recorded; the 3 most recent are below. The earlier 12 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-16, and the record was **written in the same commit as the
 code it describes** — which is the version of this entry that no sweep catches,
@@ -49,6 +36,21 @@ finished. The epic README's "How CI tightens" table listed a Compose-health row
 per mock and was missing one. And `README.md` introduced the stack as running
 "the mock LMS described below" while §9.2 requires two doors. None of the six
 fails anything.)*
+
+*(In E0-33, where the stale record was the **ticket**. Its item 3
+names two properties that "have no assertion anywhere today" — that no
+`SECURITY DEFINER` function in `public` is owned by a superuser, and that the
+reveal owner's grants are exactly the three its job needs — because it was written
+from E0-20's text, which predates E0-10's later review round. Both landed in that
+round, and ADR 0043's closing paragraph says so. Writing the two tests the ticket
+asks for would not have produced two duplicates: same module, same subject, and
+under a similar name a second `def` at module scope **replaces** the first
+silently, so a test that exists today would have been deleted by a change whose
+whole purpose was to add one. The item was routed instead at what is genuinely
+unasserted — who else is named in an ACL, what the connection roles hold on a base
+table, and a membership granted `WITH INHERIT FALSE`. **Before writing a test a
+ticket asks for, check what already asserts it; a ticket is a record like any
+other, and one written from another ticket's text is a copy that drifted.**)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`

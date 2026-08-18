@@ -1,25 +1,10 @@
 # Entry 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 19**
+**Caught: 20**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*13 instances recorded; the 3 most recent are below. The earlier 10 are in this file's git history and in the pull requests they cite.*
-
-*(On both sides of E0-17, and both catches are about a second copy
-that was nearly written. Writing the tests, the module needed to know how an
-assignment's scope is spelled and which column carries the reporting edge —
-questions `tests/conftest.py`'s `SupervisionGraph` already answers off
-`Base.metadata` — so it requested that fixture **as a reader only**, over a
-session belonging to a different database, rather than becoming the fourth copy of
-the scope-shape logic. Implementing, the same entry caught the string
-`"development"`: `app/db.py` compares against it before it lets the engine echo
-SQL, and `scripts/seed.py` now compares against it before it will run at all. Two
-places facing one convention. The copy is still there, because consolidating it
-crosses a module boundary this ticket does not otherwise touch — but it is named
-at the new site, in ADR 0063, and in the pull request, instead of being left for
-somebody to find when the two disagree. **Naming a duplicate you decline to remove
-is not the same as removing it, and it is much better than not noticing.**)*
+*14 instances recorded; the 3 most recent are below. The earlier 11 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-16's second review pass, and the hazard is a duplicated
 request parameter. RFC 6749 §3.1 forbids one, the provider refused one, and the
@@ -50,6 +35,20 @@ authorization endpoint had accepted an hour earlier. Both were reproduced before
 and after. The repair is one function, `pkce_shape_problem`, called at both ends,
 because RFC 7636 gives the two parameters one ABNF production and two copies of
 it could disagree about the one thing they exist to be compared against.)*
+
+*(Writing E0-33's tests. Its item 3 wants the view *set* compared
+with what the migrations wrote, which is the direction
+`test_identity_separated_views.py` does not have — it asks whether every view in
+the catalog is created by a file under `views_sql/`, and never whether every view
+a file creates is in the catalog. Writing that second direction in the new catalog
+module meant a second copy of the `CREATE VIEW` regex, and that regex is not
+incidental: its word boundary is the subject of an incident under entry 3, where
+a sweep for a view's bare *name* was satisfied by the `GRANT` beside it. So the
+name extractor was factored out of `creates_view`, which is now one line over it,
+the new test went into that module beside it, and the `DROP VIEW` sweep the new
+direction needs was added to the same self-test that already runs the create
+sweep against what it must catch and what it must allow. **A regex whose
+correctness took an incident to establish is the last thing to copy.**)*
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose
