@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Thirty-two tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Thirty-seven tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -36,20 +36,25 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 16 | [Mock OIDC identity provider](E0-16-mock-idp.md) | 02, 08 | Discovery, authorize, token, JWKS, PKCE, seeded leadership, Care, and admin users. |
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
 | 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
-| 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. |
-| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | Gates that report green while the thing they detect is happening: the aggregate `CI` check blind to a `migration-drift` failure, the drift job's two-role shape unasserted, a generated column's expression drifting unseen, `alembic check` comparing neither check-constraint expressions nor exclusion constraints, the same gate reading no roles, grants, views or functions at all, and `echo=False` not being what keeps SQL out of the log. The server-default half closed in 05. |
-| 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | Two findings from PR #19 that editing E0-05 cannot close: detecting an LMS-owned column that was never marked, and asserting that a prefix belongs to a department. |
-| 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | Does the benchmark minimum cover comparison-set numbers or only lines, and is one institution per deployment enforced or merely assumed. Both are product decisions a schema ticket declined to make. |
-| 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | Which launches may trigger a roster sync, whether the service URL is stored, and what an operator sees when a section has never had a roster. A spec edit E1 needs answered before it builds the sync. |
-| 24 | [Review debt from E0-07 and E0-08](E0-24-review-debt-from-e0-07-and-e0-08.md) | 07, 08 | Four findings those pull requests could not close: an unconstrained `jwks_url` that is credential-equivalent, the single-writer rule for the derived section columns being convention rather than enforcement, re-derivation when a term's map is edited, and a summer start-letter map the test suite invented. |
-| 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Six findings those pull requests could not close, and an index of the twelve that went to the ticket that owns them: an unguarded `.dockerignore`, a latent course-number literal in three modules, two overclaiming records, and two spec lines describing things that no longer exist. |
-| 26 | [Review debt from E0-10](E0-26-review-debt-from-e0-10.md) | 10 | Five findings PR #29 could not close, and an index of what it did close. Four harden a guard or settle a record; the first is a live gap in SPEC §4's logging guarantee — a caller that rolls back keeps the name and discards the audit row — which blocks nothing in E0 but must land before E10 opens the Care queue. |
-| 27 | [Review debt from E0-11](E0-27-review-debt-from-e0-11.md) | 11 | Two findings E0-11's security review could not close, plus a sort debt, and an index of what it did close. Both are the same weakness: the read path is guarded three ways and the write path and the view files are guarded once each, by a person reading a diff. E1 is the first ticket that can trip either. |
-| 28 | [Review debt from E0-15](E0-28-review-debt-from-e0-15.md) | 15 | Eight findings E0-15's review could not close, and an index of the eight it did. Every one is the same shape: the mock platform is smoother than the platforms it stands in for, so a tool built against it passes here and fails against Canvas or Moodle — silently, because the tool's own tests run against this mock. |
-| 29 | [Review debt from E0-13](E0-29-review-debt-from-e0-13.md) | 13 | Two decisions that are Todd's — cleartext to an off-machine endpoint with no credential, and whether 429 and 500 belong in the fail-open set — plus three taxonomy rows no loopback stub can reach, a superseded resolution in MISTAKES entry 26, and the supply-chain tail `pydantic-ai-slim[openai]` drags in. |
-| 30 | [Review debt from E0-16](E0-30-review-debt-from-e0-16.md) | 16 | RFC 6749 §4.1.2.1 error redirects, which E1's callback error branch and E0-18's Playwright path both need and neither can reach; the three limits of ADR 0062's new gate; a Compose redirect URI E0-18 must repoint; and a strictness choice to affirm. |
-| 31 | [Review debt from E0-17](E0-31-review-debt-from-e0-17.md) | 17 | The `lti_platform` row E0-18 needs and E0-17 deliberately did not create, which cannot be added carelessly without falsifying ADR 0038; the `design/` course numbers that all fail §8; a literal spelled in two files; and an unreachable adoption path worth naming. |
-| 32 | [Three gate gaps the reviewer self-test found](E0-32-gate-gaps-the-selftest-found.md) | 10 | Three gates that report green while the thing they detect is happening, found by reviewers on the way to something else: the invariant gate cannot see a test that asserts nothing, the identity-column guard only sees views a migration executed, and the sweep that does fire invites a repair that leaves the leak. |
+| 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | **Batch G.** Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. Already one coherent batch; nothing moved. |
+| 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | **Redistributed — not built as written.** Its measurements stay here and its items are now 33, 36 and 37. Read it for the mutation tables, not for the work. |
+| 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | **Redistributed — not built as written.** Item 1 is now 35, item 2 is now 37. Keeps the record of Todd's `course.lms_title` decision and its three-part cost. |
+| 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | **Both decided 2026-08-18, both spec edits still owed.** The benchmark minimum covers every comparison-set figure and becomes a §4.1 invariant; a deployment serves exactly one institution and a constraint enforces it. |
+| 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | **Decided 2026-08-18, spec edit still owed.** Any instructor or leadership launch triggers a pull and stores the service address; a student launch does not. |
+| 24 | [Review debt from E0-07 and E0-08](E0-24-review-debt-from-e0-07-and-e0-08.md) | 07, 08 | Item 2 is now 35. Item 4 is Todd's. Items 1 and 3 leave the epic — see the carried-out table. |
+| 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Item 1 is now 36; items 2 and 3 are now 37; item 4 is **closed**. Item 6 is Todd's, item 5 leaves the epic. Keeps the complete index of what the three reviews produced. |
+| 26 | [Review debt from E0-10](E0-26-review-debt-from-e0-10.md) | 10 | **Nothing moved — nothing here batches.** Item 1 is a live gap in SPEC §4's logging guarantee; the mechanism was decided on 2026-08-18 — the reveal returns nothing until a separately committed record exists — and it must land before **E10** opens the Care queue. Items 2 to 4 leave the epic with E10. |
+| 27 | [Review debt from E0-11](E0-27-review-debt-from-e0-11.md) | 11 | **Redistributed — not built as written.** Item 1 is now 35, item 2 is now 34, item 3 is **closed**. Keeps the record of E0-11's round, including the invented-statements note. |
+| 28 | [Review debt from E0-15](E0-28-review-debt-from-e0-15.md) | 15 | **Batch E.** Eight items in `mock-lms/app/`, each with a reproduction in PR #31. Item 6 is Todd's and changes what the batch costs; item 8 is **closed**. |
+| 29 | [Review debt from E0-13](E0-29-review-debt-from-e0-13.md) | 13 | Items 1a and 1b are Todd's; 4b and 4c are now 36; item 3 is **closed**. Item 4a stays as a recorded decision; items 2 and 5 leave the epic. |
+| 30 | [Review debt from E0-16](E0-30-review-debt-from-e0-16.md) | 16 | **Batch F.** RFC 6749 §4.1.2.1 error redirects, which E1's callback error branch and E0-18's Playwright path both need and neither can reach, plus ADR 0062's three limits, the Compose redirect URI E0-18 settles, and a strictness choice to affirm. |
+| 31 | [Review debt from E0-17](E0-31-review-debt-from-e0-17.md) | 17 | **Item 1 blocks 18** — the `lti_platform` row for the mock LMS, which cannot be added carelessly without falsifying ADR 0038. Item 2 is Todd's; items 3 and 4 are now 37; item 5 is **closed**. |
+| 32 | [Three gate gaps the reviewer self-test found](E0-32-gate-gaps-the-selftest-found.md) | 10 | **Redistributed — not built as written.** Item 1 is now 36; items 2 and 3 are now 34. |
+| 33 | [Assert the database objects `alembic check` never looks at](E0-33-catalog-drift-assertions.md) | 08, 10 | **Batch A.** One mechanism — read the object out of the catalog and compare — covering generated-column expressions, check-constraint expressions, exclusion constraints, roles, grants, views and function owners. Carries E0-20 items 3, 3a and 3b. |
+| 34 | [A view file that reads identity must fail on that ground](E0-34-view-file-identity-guards.md) | 10, 11 | **Batch B.** A `views_sql/*.sql` file joining `user_identity` passes the identity invariant vacuously and is caught only by a sweep whose message points at `public.` prefixes. Carries E0-32 items 2 and 3 and E0-27 item 2. |
+| 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C.** Three rules held by a docstring with nothing to notice a new violation. Carries E0-21 item 1, E0-24 item 2 and E0-27 item 1, and makes the sweep-versus-hook choice all three declined. |
+| 36 | [Gates that report green over something they did not look at](E0-36-ci-gate-fidelity.md) | 04 | **Batch D.** Five items in `ci.yml`, `scripts/ci/` and the `Makefile`, including the aggregate `CI` check that prints "All gates green" over a real `migration-drift` failure. Carries E0-20 items 1 and 2, E0-32 item 1, E0-25 item 1 and E0-29 items 4b and 4c. Produces two pull requests. |
+| 37 | [Seven small corrections](E0-37-small-corrections.md) | 05, 13, 17 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, and E0-31 items 3 and 4. Item 1 is the only one with a confidentiality consequence. |
 
 ## Dependency graph
 
@@ -64,82 +69,139 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 02 ── 16 ───────────────────────────────────────── ┤
 07, 09, 15 ── 17 ───────────────────────────────── ┘
 
-02, 03 ── 19        (independent; blocks nothing)
-04 ── 20            (independent; blocks nothing)
-05 ── 21, 22        (independent; block nothing)
-      23            (independent; blocks nothing in E0, gates E1's roster sync)
-07, 08 ── 24        (independent; blocks nothing)
-09, 12, 14 ── 25    (independent; blocks nothing)
-10 ── 26            (independent; blocks nothing in E0, gates E10's Care queue)
-11 ── 27            (independent; blocks nothing in E0, wants landing before E1's sync)
-15 ── 28            (independent; blocks nothing in E0, gates nothing until E1 and E3)
-13 ── 29            (independent; two items are Todd's decisions)
-16 ── 30            (independent; item 1 is on E1's path and wants settling first)
-17 ── 31            (independent; item 1 blocks E0-18's launch)
-10 ── 32            (independent; three gates blind to what they check)
+                     31 item 1 ─────────────────── ┘   (the only blocker on 18)
+
+08, 10 ── 33        Batch A — catalog comparison
+10, 11 ── 34        Batch B — view files that read identity
+07, 11 ── 35        Batch C — the writer and the marker sweeps
+04 ── 36            Batch D — the pipeline itself
+02, 03 ── 19        Batch G — Compose credential surface
+15 ── 28            Batch E — mock LMS conformance
+16 ── 30            Batch F — mock IdP error redirects
+05, 13, 17 ── 37    Batch H — seven small corrections
+
+20, 21, 27, 32      redistributed; read for their measurements, do not build
+22, 23              Todd's, and 22's first question has an E4 deadline
+24, 25, 26, 29, 31  partly moved; what is left is decisions and records
 ```
 
 Strictly sequential through 04. After that, three chains run independently and
 can be built in any interleaving: the schema chain (05 → 09 → 11), the AI chain
 (12 → 13), and the mock-platform chain (14 → 16). Ticket 17 needs the schema
-chain and the mock LMS; ticket 18 needs everything. Tickets 19 through 31 hang
-off 03 through 17 or off nothing at all, and block nothing except where
-E0-31 says otherwise —
-they harden tests or settle records rather than adding behaviour, so they can
-land any time afterwards and none is on the path to the E0 exit. Ticket 21 in
-particular is cheapest done while passing through for another reason: **E0-11
-chose table grain plus the instructor row** for its write refusal, so the column
-the marker misses is still uncaught, and the code that would catch it is E1's
-roster sync — the only code that sees both which field came from the platform and
-which column it went into. Ticket 27 carries the other half of that same seam.
+chain and the mock LMS; ticket 18 needs everything.
 
-Seven of them are exceptions to "no hurry". Ticket 22's first question is a
-confidentiality rule that is currently unenforced, and E4 builds the reports it
-governs. Ticket 23 blocks nothing inside E0 but is a question E1's roster sync
-has to have answered before it can be built, so it wants settling by the end of
-this epic rather than at the start of the next one. Ticket 26's first item is a
-measured gap in SPEC §4's logging guarantee rather than hardening: a caller
-holding the Care credential who rolls back keeps the student's name and leaves
-no audit row. Nothing in E0 opens that door, so it blocks no ticket here, but it
-has to be closed before E10 builds the queue that calls it. Ticket 27's first item
-wants landing before **E1's roster sync**, for a reason of the same shape: that
-sync is the first code to write all four relations E0-11's chokepoint refuses, and
-if it does not call the guard, nothing fails and the rule quietly becomes a
-description of a former intention. Ticket 28's first item has the same deadline
-from the other side: E1's sync is the code that reads the enrollment windows E0-15
-puts on every seeded member, and no real platform supplies them, so the fallback
-E1 needs has no fixture here until 28 adds one. **E0-30's first item and
-E0-31's first item are the two hardest deadlines in this list.** E0-31's is the
-only item anywhere in the epic that blocks the E0 exit itself: E0-18 drives a
-launch from the mock LMS and no `lti_platform` row trusts it, because E0-17
-deliberately registered a fictional platform instead so that ADR 0038's argument
-would survive. Adding that row carelessly is what makes ADR 0038 wrong, so it has
-to be done by somebody who has read why it does not exist. E0-30's is not a
-blocker but is worse to defer: E1's OIDC callback has an error branch this mock
-makes unreachable, so leaving it means E1 ships that branch untested or does not
-ship it, and the case it handles — the user cancelling — is the one that actually
-occurs.
+## How the remaining work is batched
 
-Two deferrals from E0-10 are recorded elsewhere and repeated here so they are not
-lost: `alembic check` reading no roles, grants, views or functions is **E0-20
-item 3b**, and §4.1 item 1 — "no student-visible path exposes another section" —
-**belongs to E2**, which is the first epic with a student-visible path and the
-scoping that gives "another section" its meaning. E0-26 item 5 carries the second
-of those into a document E2 will actually read.
+Tickets 19 to 32 were written one per source ticket, which is the right way to
+capture a review round and the wrong way to build. Fourteen tickets, but the work
+lands in **seven places in the code**, and three separate tickets kept arriving at
+the same test module. Tickets 33 to 37 carry the items that cross a ticket
+boundary; 19, 28 and 30 were already batches and keep their numbers.
 
-One caveat on 20, because "blocks nothing" is not quite "no hurry": its third
-item was `alembic check` being blind to server-default drift, and E0-05 is where
-the first server defaults landed. **E0-05 closed that item** — `env.py` now sets
-`compare_server_default=True` on both paths — so three of its original four
-remain, and it has gained three more since. A *generated* column's expression can
-still drift with `alembic check` green, because Alembic cannot `ALTER` one and so
-warns rather than failing; E0-07 and E0-08 found that the same gate compares
-neither check-constraint expressions nor exclusion constraints, which is no
-longer hypothetical now that E0-08's overlap rule is an exclusion constraint; and
-E0-10 measured that it reads no roles, grants, views or functions at all, so
-`GRANT SELECT ON user_identity TO pulse_app` and `ALTER ROLE pulse_care
-SUPERUSER` are each one statement that voids the confidentiality model with the
-drift gate clean. **Six open in total.** Details in E0-20 items 3, 3a and 3b.
+**Every source ticket says, item by item, where its items went.** Read the
+`## Status` block at the top of any of 19 to 32 rather than inferring it from
+here.
+
+| Batch | Ticket | Where the work is | Size |
+|---|---|---|---|
+| A | 33 | a new integration module reading `pg_catalog` | medium |
+| B | 34 | `views_sql/` and the identity-marker sweep | small |
+| C | 35 | a sweep in the shape of the read-side one | medium |
+| D | 36 | `ci.yml`, `scripts/ci/`, the `Makefile` | medium |
+| E | 28 | `mock-lms/app/` | medium |
+| F | 30 | `mock-idp/app/` | medium |
+| G | 19 | `tests/unit/test_compose_stack.py` and its neighbour | medium |
+| H | 37 | seven files, one to twenty lines each | small |
+
+**Suggested order: A and B first, as one sitting.** They are the same subject —
+the identity separation the whole of §4.1 rests on has no assertion over the
+objects that implement it — they are both cheap, and B is the smaller half of a
+hole A does not reach. Then **31 item 1 and then 18**, which is the only path to
+the epic actually exiting. Everything after that can land in any order.
+
+**A and B are the two batches where the thing being protected is the
+confidentiality model rather than a convenience.** Two of A's mutations —
+`GRANT SELECT ON public.user_identity TO pulse_app` and `ALTER ROLE pulse_care
+SUPERUSER` — are each one statement that voids the whole scheme with `alembic
+check` reporting clean.
+
+### One blocker
+
+**E0-31 item 1 is the only item in 19 to 37 that blocks the E0 exit.** E0-18
+drives a real launch from the mock LMS and no `lti_platform` row trusts it,
+because E0-17 deliberately registered a fictional platform instead so that ADR
+0038's argument would survive. Adding that row carelessly is what makes ADR 0038
+wrong, so it has to be done by somebody who has read why it does not exist.
+
+### Deadlines that are not blockers
+
+- **E0-30 item 1** is not a blocker and is the worst to defer. E1's OIDC callback
+  has an error branch this mock makes unreachable, so leaving it means E1 ships
+  that branch untested or does not ship it — and the case it handles, the user
+  cancelling, is the one that actually occurs.
+- **E0-35 and E0-28 item 1** both land on E1's roster sync from opposite sides.
+  That sync is the first code to write all four relations the E0-11 chokepoint
+  refuses, and it is also the code that reads the enrollment windows E0-15 puts
+  on every seeded member — windows no real platform supplies.
+- **E0-22 question 1** is a confidentiality rule that is currently unenforced,
+  and E4 builds the reports it governs.
+- **E0-26 item 1** is a measured gap in SPEC §4's logging guarantee rather than
+  hardening: a caller holding the Care credential who rolls back keeps the
+  student's name and leaves no audit row. Nothing in E0 opens that door; it has
+  to close before E10 builds the queue that calls it.
+- **E0-23** blocks nothing here and E1's sync cannot be built without it.
+
+## Carried out of E0
+
+Every item that leaves this epic, with the epic that owns it. This table exists
+because [E0-26](E0-26-review-debt-from-e0-10.md) item 5 is the finding that a
+deferral recorded only in the ticket that deferred it is a deferral nobody picks
+up.
+
+| Item | Owner | Why it cannot be done here |
+|---|---|---|
+| E0-24 item 1 — `jwks_url` is credential-equivalent and unconstrained | **E1** | E1 writes and fetches the column and is the only code positioned to say what a legitimate value looks like |
+| E0-24 item 3 — re-derive a section when its term's map is edited | **E2 / E11** | the owners ADR 0021 and ADR 0018 already name |
+| E0-25 item 5 — the mock LMS cannot mint a deliberately wrong launch | **E1** | tool-side launch validation is E1's, and E0-14 defined no interface for a bad launch deliberately |
+| E0-26 item 2 — the reveal writes no conflict-of-interest marking | **E10** | the wide case needs E9's purview union; the narrow case wants the queue that reads it |
+| E0-26 item 3 — the acting person is a parameter, not a property of the connection | **E10** | the first thing with a request-bound actor to bind |
+| E0-26 item 4 — the Care sweep misses the module's own entry point | **E10** | the rule is "only the Care queue imports it", and the queue is E10's to write |
+| E0-29 item 2 — three rows of ADR 0056's taxonomy nothing asserts | **out of E0** | DNS failure, TLS handshake failure and pool timeout are not producible from a loopback stub |
+| E0-29 item 5 — `run_task` from inside a running event loop | **E2** | E2 owns whether ADR 0013's `def` handler convention stays a convention |
+| SPEC §4.1 item 1 — no student-visible path exposes another section | **E2** | the first epic with a student-visible path, and the scoping that gives "another section" its meaning |
+| Database TLS on both engines | **E13** | the operator guide owns it; it matters before a managed or remote Postgres |
+
+## Decided
+
+All thirteen open questions were answered by Todd on **2026-08-18**. Nothing
+below is an implementer's call and nothing below is still open. Where an answer
+needs a spec edit, that edit is Todd's and has not been made yet — the **Spec
+edit owed** column says which.
+
+| # | Question | Decision | Spec edit owed |
+|---|---|---|---|
+| E0-31 item 1 | How is the mock LMS registration kept out of a deployed environment? | **Reuse the seed script's development-environment guard.** Register the mock behind the same guard `scripts/seed.py` already uses, and amend ADR 0038 to name that guard as what enforces its argument. | no |
+| E0-35 | Sweep the source, or hook the session? | **Sweep the source.** A test that reads our own modules and fails when one writes `course`, `section`, `enrollment` or an `INSTRUCTOR` `role_assignment` without naming `guard_write`. Record what a syntactic sweep cannot see, the way ADR 0062 does for the mock-idp gate. | no |
+| E0-30 item 1 | Does the mock identity provider learn RFC 6749 §4.1.2.1 error redirects? | **Yes, implement them.** About 40 lines plus tests, at the split point that already exists in `begin()` after `redirect_uri` validates. A refusal must arrive as a redirect carrying `error` and the `state` that was sent, and a test must fail if it reverts to a page. | no |
+| E0-28 item 6 | Does the mock LMS learn to authenticate now? | **Not now.** Its four moving parts go into E1's ticket so whoever builds the roster sync meets them before writing the client rather than after. E0-28's other eight items proceed without it. | no |
+| E0-22 q1 | Benchmark minimum — every figure, or only drawn lines? | **Every figure computed from a comparison set**, not only a drawn line. It becomes a §4.1 invariant with a test asserting it, and §5.1's paragraph points at it. | **yes** — §4.1 and §5.1 |
+| E0-22 q2 | Does one deployment serve exactly one institution? | **Yes, and enforce it.** A constraint permitting at most one `institution` row, which makes global and institution-scoped uniqueness the same rule. ADR 0017 is amended to say the assumption became a rule. | **yes** |
+| E0-23 | What triggers the first roster pull? | **Any instructor or leadership launch**, and the roster service address is stored from that launch. A student launch does not trigger one. Every later scheduled sync works from the stored address, and an operator sees "no roster yet" on a section that has never had one. | **yes** — §7.3 and §2.1 |
+| E0-26 item 1 | Which mechanism closes the rollback that keeps a name and leaves no audit row? | **Restructure the reveal so it returns nothing until a separately committed record exists.** Not `dblink`, not a loopback `postgres_fdw` — both put a database credential inside a `SECURITY DEFINER` function, which is a new privilege surface. Its ADR says what the chosen shape costs. | no |
+| E0-29 item 1a | Is cleartext to an off-machine model endpoint acceptable? | **No — refuse it.** Require an encrypted transport whenever the model is on another host, with or without a credential. A cluster deployment terminates TLS at the model or runs it alongside the app. `README.md` and `.env.example` change wherever they document the current allowance. | no |
+| E0-29 item 1b | Do HTTP 429 and 500 belong in the fail-open set? | **No — affirmed as built.** A rate limit is a capacity decision an operator must see and a 500 means our request is the problem; flooring either hides a condition that never resolves. The reasoning goes into ADR 0056 so it stops being an open row. | no |
+| E0-31 item 2 | `design/`'s 27 course numbers versus SPEC §8's bands. | **The design corpus is illustration.** It is not a source of seedable data and says so, so nobody reconciles it against §8 or seeds from it. No renumbering. | no |
+| E0-24 item 4 | Does the spec grow a real summer start-letter map? | **No.** The invented constants stay, marked as the test suite's own choice. **The gap at position 6 survives any edit** — a contiguous map is satisfiable by a range computed from the term's length, which is the wrong implementation those tests exist to refuse. | no |
+| E0-25 item 6 | Two spec lines describe things that no longer exist. | **Correct both.** §8's `scope_node_id` becomes the five nullable foreign keys E0-09 shipped (ADR 0025), and `user_identity` joins §8's core-table list with §13's `identity.py` comment corrected to match. | **yes** — §8 and §13 |
+
+**Four spec edits are owed and none has been made.** They are E0-22's two
+answers, E0-23's, and E0-25 item 6's. `CLAUDE.md` is explicit that an ADR is not
+the instrument for something the spec should decide, so these do not land as
+ADRs — the spec changes, and that change is Todd's.
+
+Three answers also want an existing record amended in the pull request that
+implements them: ADR 0038 for E0-31 item 1, ADR 0017 for E0-22 q2, and ADR 0056
+for E0-29 item 1b.
 
 ## What the built tickets settled
 
@@ -154,8 +216,10 @@ same change that adds it.** `migrations/env.py` autogenerates against
 `Base.metadata`, and a table whose module nobody imported is not on that
 metadata. So `alembic check` reports no drift, the migration nobody wrote is
 never missed, and the table does not exist in any deployed database. Nothing
-fails at the time; E0-04 left the rule in that file's docstring, and E0-20's
-"gate fidelity" subject is exactly this class of silence.
+fails at the time; E0-04 left the rule in that file's docstring, and it is the
+same class of silence [E0-33](E0-33-catalog-drift-assertions.md) and
+[E0-36](E0-36-ci-gate-fidelity.md) exist to break — a gate reporting green over a
+check it did not perform.
 
 **Model modules import `Base` from `app.models.base`, never from `app.db`.**
 `app.db` re-exports `Base` and that is the import the *application* writes, but

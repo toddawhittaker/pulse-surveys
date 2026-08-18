@@ -4,6 +4,29 @@
 **Branch:** `e0/review-debt-e0-13`
 **Depends on:** E0-13
 
+## Status — what is left here
+
+**Mostly decisions and records.** One item is a batch item, one is closed, two
+are Todd's, and the rest stay here or leave the epic.
+
+| Item | Now |
+|---|---|
+| 1a — cleartext to an off-machine endpoint with no credential | **Decided 2026-08-18: refuse it.** Require an encrypted transport whenever the model is on another host, credential or not. |
+| 1b — HTTP 429 and 500 outside the fail-open set | **Decided 2026-08-18: affirmed as built.** Both stay out of the fail-open set; the reasoning goes into ADR 0056. |
+| 2 — three taxonomy rows nothing asserts | **Carried out of E0** — none is producible from a loopback stub |
+| 3 — `MISTAKES` entry 26 presents a superseded resolution | **Closed** |
+| 4a — `tiktoken` reaches the network at first use | **This ticket**, as a recorded decision — it cannot be dropped without dropping the `[openai]` extra |
+| 4b — `regex` and `tiktoken` classify as `unknown` licence | [E0-36](E0-36-ci-gate-fidelity.md), which ships it as **its own pull request** because it is a gate change |
+| 4c — `make lock` should constrain the dev lockfile | [E0-36](E0-36-ci-gate-fidelity.md) item 5 |
+| 5 — `run_task` from inside a running event loop | **Carried to E2** |
+
+On item 3: `docs/mistakes/26-a-fallback-path-swallowed-the-defect-that-triggered-it.md`
+now says plainly that the narrowing the entry prescribes was made and did not
+hold, and points at entry 33.
+
+Both decisions land in ADR 0056 when they are made, not in a pull request comment.
+
+
 ## Context
 
 What E0-13's two review passes found and could not close in place, collected the
@@ -25,6 +48,16 @@ Read first: [ADR 0053](../../adr/0053-the-gateway-speaks-openai-through-pydantic
 ## Scope
 
 ### 1. Two decisions that are Todd's, not an implementer's
+
+**Both settled 2026-08-18.** 1a is **refused**: an encrypted transport is required
+whenever the model is on another host, with or without a credential. The vLLM
+case is served by terminating TLS at the model or running it alongside the app,
+and `README.md` and `.env.example` change wherever they document the current
+allowance. 1b is **affirmed as built**: 429 and 500 stay outside the fail-open
+set, for the implementer's stated reason. Both answers land in ADR 0056.
+
+The reasoning each was decided against is kept below, because a record of what
+was weighed is what stops it being re-litigated.
 
 **1a. Cleartext to an off-machine endpoint with no credential is permitted.**
 E0-13's transport rule refuses `http://` to another host when a credential is

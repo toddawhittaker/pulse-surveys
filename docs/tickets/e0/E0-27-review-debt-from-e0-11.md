@@ -4,6 +4,24 @@
 **Branch:** `e0/review-debt-e0-11`
 **Depends on:** E0-11
 
+## Status — where this ticket's items went
+
+**Not built as written. One item is closed and the other two have moved.**
+
+| Item | Now |
+|---|---|
+| 1 — nothing requires a write path to call `guard_write` | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) |
+| 2 — a view revision can widen identity access with no grant consulted | [E0-34](E0-34-view-file-identity-guards.md) |
+| 3 — `docs/MISTAKES.md` is out of order | **Closed** in PR #36 |
+
+On item 3: the file is now sorted by `Caught:` descending with every entry
+keeping its number, and the tier is re-derived from the same numbers.
+
+The section below headed *What E0-11 closed* is the record of that round,
+including the note on the invented statements committed to this branch's history.
+It moves nowhere.
+
+
 ## Context
 
 What E0-11's review found and could not close in place, collected the way E0-21

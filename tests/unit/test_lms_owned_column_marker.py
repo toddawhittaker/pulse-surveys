@@ -51,7 +51,8 @@ of §2.1 without reading a column name at all, and would catch the unprefixed
 when a Pulse-owned writable column lands on one of those tables, and the fifth
 item, the teaching-instructor link, may live on `role_assignment` rather than on
 any of them — so E0-11 has a real choice to make rather than an inherited limit.
-[E0-21](../../docs/tickets/e0/E0-21-review-debt.md) carries it.
+[E0-35](../../docs/tickets/e0/E0-35-the-writer-and-the-marker-nobody-routed.md)
+carries it, batched with the two other rules held by a docstring alone.
 
 **Why the metadata and not the migration.** The criterion says `Base.metadata`,
 and it is the right side to read: the authz layer will resolve a column through

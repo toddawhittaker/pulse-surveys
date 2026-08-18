@@ -4,6 +4,19 @@
 **Branch:** `e0/compose-credential-surface`
 **Depends on:** E0-02, E0-03
 
+## Status — what is left here
+
+**Built as written.** This ticket is already one coherent batch — four routes to
+the same ADR 0009 bound, all in `tests/unit/test_compose_stack.py` and
+`tests/unit/test_env_example_resolves.py` — so nothing moves out of it and
+nothing moves in.
+
+Confirmed still open on the epic branch: `SENSITIVE_BIND_SOURCES` is still a
+denylist, `ALLOWED_TOP_LEVEL_KEYS` bounds which sections may appear rather than
+what an allowed section may carry, and nothing resolves a named volume through
+`driver_opts`.
+
+
 ## Context
 
 ADR 0009 sanctions a Postgres superuser identity and bounds it: the application

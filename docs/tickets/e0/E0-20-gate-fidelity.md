@@ -4,6 +4,31 @@
 **Branch:** `e0/gate-fidelity`
 **Depends on:** E0-04
 
+## Status — where this ticket's items went
+
+**Not built as written. Every item below has moved.** The scope, the measurement
+tables and the reasoning stay here because the batch tickets link to them rather
+than copying them — a copy in six places drifts in five.
+
+| Item | Now |
+|---|---|
+| 1 — the aggregate `CI` check is blind to a `migration-drift` failure | [E0-36](E0-36-ci-gate-fidelity.md) |
+| 2 — the drift job's two-role shape is unasserted | [E0-36](E0-36-ci-gate-fidelity.md) |
+| 3 — server-default drift | **Closed in E0-05**, and the criterion below is ticked |
+| 3 — generated column expression drift | [E0-33](E0-33-catalog-drift-assertions.md) |
+| 3a — check-constraint expressions and exclusion constraints | [E0-33](E0-33-catalog-drift-assertions.md) |
+| 3b — roles, grants, views and functions | [E0-33](E0-33-catalog-drift-assertions.md) |
+| 4 — `echo=False` is not what keeps SQL out of the log | [E0-37](E0-37-small-corrections.md) item 1 |
+| also — delete the `ALEMBIC_DATABASE_URL` hedge | [E0-37](E0-37-small-corrections.md) item 7 |
+| also — ADR 0013's argument overstates its support | [E0-37](E0-37-small-corrections.md) item 8 |
+| out of scope — database TLS | unchanged: **E13's operator guide** |
+
+One item arrived here from elsewhere and left again in the same move:
+[E0-28](E0-28-review-debt-from-e0-15.md) item 8 routed `make docker-build`'s
+health wait to this ticket. **It is closed** — the Makefile now waits on `api
+worker beat mock-lms mock-idp`, matching `ci.yml`.
+
+
 ## Context
 
 E0-04 turned on the `migration-drift` and `test` gates. Its reviewer pass and

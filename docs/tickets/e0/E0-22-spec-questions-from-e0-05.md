@@ -4,6 +4,31 @@
 **Branch:** `e0/spec-questions-from-e0-05`
 **Depends on:** E0-05
 
+## Status — what is left here
+
+**Both questions were answered on 2026-08-18, and both spec edits are still
+owed.** The answers are in the README's *Decided* table; the spec change itself
+is Todd's and has not been made.
+
+**Question 1 — every comparison-set figure**, not only a drawn line. The minimum
+applies to any number computed from a comparison set, it lands in **§4.1 as an
+invariant with a test asserting it**, and §5.1's paragraph points at it rather
+than restating it. §4.1's preamble is what obliges the automated assertion, and
+a confidentiality rule stated where nothing obliges a test is a rule that ships
+unenforced.
+
+**Question 2 — one institution per deployment, enforced.** A constraint
+permitting at most one `institution` row, which makes global and
+institution-scoped uniqueness the same rule and turns a confusing constraint
+violation into an error at the row that is actually wrong. ADR 0017 is amended
+to say the assumption became a rule.
+
+Nothing here batches with anything. Question 1's test belongs in the same suite
+[E0-33](E0-33-catalog-drift-assertions.md) and
+[E0-34](E0-34-view-file-identity-guards.md) extend, and **E4 builds the reports
+it governs**, so it is the one with a deadline.
+
+
 ## Context
 
 E0-05 settled the course-number-to-level bands, which had never been written

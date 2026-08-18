@@ -4,6 +4,21 @@
 **Branch:** `e0/review-debt`
 **Depends on:** E0-05
 
+## Status — where this ticket's items went
+
+**Not built as written. Both items have moved**, and the reasoning stays here
+because the batch tickets link to it.
+
+| Item | Now |
+|---|---|
+| 1 — detect an LMS-owned column that was never marked | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) |
+| 2 — assert that a prefix belongs to a department | [E0-37](E0-37-small-corrections.md) item 3 |
+
+The section below headed *Considered and deliberately not carried* is a record of
+Todd's decision on `course.lms_title` and its three-part cost. It moves nowhere
+and stays readable here.
+
+
 ## Context
 
 PR #19 drew four independent passes — `privacy-authz`, `spec-conformance`,

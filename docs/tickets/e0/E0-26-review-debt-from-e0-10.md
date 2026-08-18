@@ -4,6 +4,28 @@
 **Branch:** `e0/review-debt-e0-10`
 **Depends on:** E0-10
 
+## Status — what is left here
+
+**Nothing moved.** No item here fits a batch, because four of the five need a
+thing that does not exist until E10 and the fifth is a decision.
+
+| Item | Now |
+|---|---|
+| 1 — the audit row and the identity read come apart on rollback | **Decided 2026-08-18: restructure the reveal** so it returns nothing until a separately committed record exists. Not `dblink`, not `postgres_fdw` — both put a credential inside a `SECURITY DEFINER` function. Must land **before E10**. |
+| 2 — the reveal writes no conflict-of-interest marking | **Carried to E10** |
+| 3 — the acting person is a parameter, not a property of the connection | **Carried to E10**, which is the first thing with a request-bound actor to bind |
+| 4 — the Care sweep does not cover the module's own public entry point | **Carried to E10**, which supplies the second legitimate caller the rule needs to name |
+| 5 — §4.1 item 1's deferral to E2 has no home in a document E2 will read | **Todd's, and still open** — the fix is a line in SPEC §14.3's E2 entry. Half discharged by the README's carried-out table. |
+
+Item 5 is partly discharged in the meantime: the README now carries a
+carried-out-of-E0 table, which is the bookkeeping half of what item 5 asks for.
+The spec half is still owed.
+
+Item 1 is the only item anywhere in E0-19 to E0-37 whose subject is a live gap in
+a guarantee the spec states rather than a missing assertion. It blocks nothing in
+E0 and it is not hardening.
+
+
 ## Context
 
 What E0-10's review found and could not close in place, collected the way E0-21
@@ -30,6 +52,16 @@ weaker than the door.
 ## Scope
 
 ### 1. The audit row and the identity read come apart when the caller rolls back
+
+**Mechanism decided 2026-08-18: the third option.** The reveal returns nothing
+until a separately committed record exists — a change to the function's shape
+rather than its plumbing. Neither `dblink` nor a loopback `postgres_fdw` is
+taken, because both put a database credential *inside* a `SECURITY DEFINER`
+function, which is a new privilege surface of exactly the kind
+[ADR 0043](../../adr/0043-the-reveal-function-has-an-owner-of-its-own.md) exists
+to keep small. Its own ADR still says what the chosen shape costs.
+
+The deadline is unchanged: **before E10 builds the queue that calls the door.**
 
 `public.reveal_student_identity` writes its `audit_log` row and reads
 `public.user_identity` in one transaction — the caller's. Postgres has already
