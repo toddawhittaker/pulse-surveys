@@ -47,6 +47,14 @@ the machine; and the credential-leak test asserts the stub actually *received* t
 key before asserting the error does not carry it, since an error cannot leak a
 value that was never sent.
 
+**The needle that credential rule searches with is itself asserted**, and that is
+a repair rather than a flourish. The value first used here contained the ordinary
+word `provider`; in the unit module that made a leak assertion false for every
+implementation, and here it would have done something quieter and worse, since the
+same value is used as a *positive* detector to prove the key was sent at all.
+`test_the_needle_matches_nothing_a_request_carries_without_it` removes the key,
+makes the same call, and requires zero matches anywhere in it.
+
 **What is deliberately not asserted here.** Whether the validity prompt produces
 good classifications is a distribution, not an assertion — SPEC §9.3 answers that
 with versioned eval sets and per-task precision and recall floors, and nothing in
@@ -152,17 +160,45 @@ BOUNDARY_COMMENT = "the lab work was hard ok!"
 # is that the value identifies the model that answered.
 STUB_MODEL_ID = "e0-13-stub-model-7c1f"
 
-# An obvious fake: nothing here resembles a real credential and nothing was copied
-# from a working `.env` (CLAUDE.md, secrets). Long and unlikely-looking so a
-# fragment appearing in an error message is unambiguously a leak. Named
-# `...CREDENTIAL` rather than `...KEY` for the reason `tests/conftest.py` gives:
-# it keeps ruff's S105 flagging the real thing.
-FAKE_PROVIDER_CREDENTIAL = "fake-ai-provider-Qv7ZmXt4Ld9RbNsW"
+# The value the provider key is configured with, and the needle
+# `leaked_fragments` searches for in **both** directions below.
+#
+# **The property it has to have is that it shares no run of
+# `LEAK_FRAGMENT_LENGTH` characters with anything a request or an error
+# legitimately carries.** The first version was
+# `fake-ai-provider-Qv7ZmXt4Ld9RbNsW`, and `provider` is an eight-character window
+# of it. In `tests/unit/test_ai_provider_configuration.py` that made a leak
+# assertion false for every possible implementation, which is how the collision
+# was found and ruled on. **Here it is worse, because this module also uses the
+# needle as a *positive* detector.**
+# `test_a_provider_error_does_not_carry_the_provider_key_into_the_failure` proves
+# the key was really sent by looking for it in the request headers, so a header
+# value containing the ordinary word `provider` satisfies that non-vacuity guard —
+# after which the leak assertions underneath it report a guarantee they never
+# tested. That is `docs/MISTAKES.md` entry 3 in the direction the unit module
+# cannot produce: a green test rather than a red one.
+#
+# The exception-chain half was surviving on capitalisation alone: the gateway
+# writes `AI_PROVIDER_BASE_URL` and `AIProviderRefusedError`, both of which miss a
+# lowercase needle, and one lowercased error message would have turned it red for
+# a reason that has nothing to do with a credential.
+#
+# `test_the_needle_matches_nothing_a_request_carries_without_it` below is what
+# makes this an asserted property rather than a value chosen carefully once.
+# Nothing here resembles a real credential and nothing was copied from a working
+# `.env` (CLAUDE.md, secrets); the readable label lives in the constant's name,
+# and the failure messages name it.
+FAKE_PROVIDER_CREDENTIAL = "Qv7ZmXt4Ld9RbNsW-Kj3PxE8mZt5UwGh"
 
 # How much of a credential has to appear contiguously to count as leaked.
 # Checking for the whole value is not enough — a truncated repr can print all but
 # one character and still not contain it. Same length and same reason as
 # `tests/unit/test_config_settings.py`.
+#
+# **Raising it is not a way to fix a colliding needle.** It is a threshold shared
+# with `test_config_settings.py` and `test_db_engine_configuration.py`, where a
+# larger value would let a rendering that truncated a real database password to
+# nine characters pass. Tune the needle instead.
 LEAK_FRAGMENT_LENGTH = 8
 
 # **This suite's choice**, and how a `.env.example` entry for the provider key is
@@ -1769,6 +1805,12 @@ def test_a_provider_error_does_not_carry_the_provider_key_into_the_failure(
     by nothing, arriving from the other direction. Every header the stub received
     is searched, not the `Authorization` header alone, because how a key is sent
     is the gateway's choice.
+
+    **That guard is only as good as the needle**, which is why
+    `test_the_needle_matches_nothing_a_request_carries_without_it` sits below it.
+    A needle sharing an ordinary word with a header value satisfies the guard
+    without the key having been sent at all, and then every assertion after it is
+    green about nothing.
     """
     variables = provider_key_variables(documented_env)
     assert variables, (
@@ -1812,12 +1854,96 @@ def test_a_provider_error_does_not_carry_the_provider_key_into_the_failure(
         for rendering, where in ((str(link), "str"), (repr(link), "repr")):
             fragments = leaked_fragments(rendering, FAKE_PROVIDER_CREDENTIAL)
             assert not fragments, (
-                f"The provider key leaked into {where}() of the raised "
-                f"{type(link).__name__}: {fragments}. The full text was:\n{rendering}\n"
+                f"{where}() of the raised {type(link).__name__} contains fragments of "
+                f"`FAKE_PROVIDER_CREDENTIAL`, the value the provider key was configured with: "
+                f"{fragments}. The full text was:\n{rendering}\n"
                 "E0-13's definition of done: 'Review for the provider key reaching a log or an "
                 "error message.' A gateway error is printed to the container log, so this is a "
-                "credential in a log (SPEC §10)."
+                "credential in a log (SPEC §10). If these fragments read as ordinary words rather "
+                "than as the key, suspect the needle first — "
+                "`test_the_needle_matches_nothing_a_request_carries_without_it` is the test that "
+                "answers that, and it should be red beside this one."
             )
+
+
+def test_the_needle_matches_nothing_a_request_carries_without_it(
+    ai_environment: dict[str, str],
+    documented_env: dict[str, str],
+    import_app_module: Callable[[str], ModuleType | None],
+    stub_provider: StubProvider,
+    db_session: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`FAKE_PROVIDER_CREDENTIAL` shares no fragment with a call that was never given it.
+
+    Not a test of the ticket — a test of the needle the two rules above are driven
+    by, and the control whose absence cost a dispute round in the unit module. The
+    original needle contained the word `provider`, and this module searches with
+    it in **both** directions: once to prove the key was sent, once to prove it did
+    not leak. A collision breaks the first silently — the guard passes on a header
+    that merely says "provider", and the leak assertions beneath it then report a
+    guarantee they never tested.
+
+    So the key is removed and the same call made. Everything the request carries
+    is searched, and so is every value this module configures apart from the key
+    itself: anything found is a collision between the needle and the vocabulary of
+    a request, not a credential.
+
+    Whether the call raises is not this test's subject — the criterion-5 test owns
+    that — but a call that reached the stub with no request at all would make this
+    control vacuous, so that is asserted first.
+    """
+    variables = provider_key_variables(documented_env)
+    assert variables, (
+        "`.env.example` documents no provider key variable, so nothing was removed and this "
+        "control is not testing what it says. The criterion-5 test above owns that failure."
+    )
+    for name in variables:
+        monkeypatch.delenv(name, raising=False)
+
+    contract = validity_contract(import_app_module)
+    stub_provider.script(well_formed(contract, SUBSTANTIVE_VERDICT))
+
+    with contextlib.suppress(Exception):
+        run_validity(import_app_module, db_session, SUBSTANTIVE_COMMENT)
+
+    assert stub_provider.calls, (
+        "The gateway sent the stub no request, so this control searched nothing and would report "
+        "the needle as clean whatever it collides with. The first test in this module owns the "
+        "failure that no round trip happened."
+    )
+
+    searched: list[tuple[str, str]] = [
+        (f"the {name} header of a request", value)
+        for call in stub_provider.calls
+        for name, value in call.headers.items()
+    ]
+    searched += [
+        (f"the path of a request ({call.path})", call.path) for call in stub_provider.calls
+    ]
+    searched += [("the body of a request", call.body) for call in stub_provider.calls]
+    searched += [
+        (f"the configured value of {name}", value)
+        for name, value in ai_environment.items()
+        if name not in variables
+    ]
+
+    collisions = {
+        where: leaked_fragments(text, FAKE_PROVIDER_CREDENTIAL)
+        for where, text in searched
+        if leaked_fragments(text, FAKE_PROVIDER_CREDENTIAL)
+    }
+
+    assert not collisions, (
+        f"`FAKE_PROVIDER_CREDENTIAL` shares fragments with things this module renders while the "
+        f"key was not configured at all: {collisions}. Both rules above are then broken, and in "
+        "opposite ways — the guard that proves the key was sent passes on a request that never "
+        "carried it, and the assertion that no error leaks it fails on ordinary words. The repair "
+        f"is the needle: choose a value sharing no run of {LEAK_FRAGMENT_LENGTH} characters with "
+        "what is searched here. Leave `LEAK_FRAGMENT_LENGTH` alone — it is shared with "
+        "`test_config_settings.py` and `test_db_engine_configuration.py`, where raising it would "
+        "let a truncated database password through."
+    )
 
 
 # ---------------------------------------------------------------------------

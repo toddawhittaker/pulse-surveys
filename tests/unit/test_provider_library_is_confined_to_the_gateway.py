@@ -23,15 +23,19 @@ imported *somewhere* — a repository where nothing imports one satisfies "exact
 one module does" the way an empty set satisfies anything, and that is precisely
 the state before this ticket lands.
 
-**What is deliberately left open.** Which library is used is §7.4's call rather
-than this file's: it names `pydantic-ai` as the intended implementation, and a
-gateway that speaks the OpenAI wire protocol through a plain HTTP client is a
-defensible different choice that would want an ADR. So the sweep looks for any of
-a small set of provider libraries and reports what it found; the failure message
-says what to do if the answer is "none of them, deliberately".
+**Which library is used is not this file's call, and it has been made.** §7.4
+names `pydantic-ai`; the implementer shipped the `openai` SDK and argued
+dependency footprint; **Todd chose `pydantic-ai-slim[openai]`** — the spec's
+library with the extras that would otherwise pull `anthropic`, `google-genai`,
+`mcp`, `logfire`, `keyring` and D-Bus into the image that handles student comment
+text. So `PROVIDER_LIBRARIES` below maps an import root to a distribution rather
+than assuming they are the same word, and the sweep still looks for any of a set
+rather than for the chosen one: the property is that a replacement touches one
+file, and it has to keep holding for the library nobody has chosen yet.
 """
 
 import ast
+import re
 import tomllib
 from pathlib import Path
 
@@ -46,12 +50,27 @@ PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 GATEWAY_PATH = APP_DIR / "ai" / "gateway.py"
 
 # The libraries that would make a module a place the provider is reached from,
-# mapped to the distribution that supplies each. **This suite's choice** of set;
-# §7.4 names only the first, and the others are here so that a deliberate
-# different choice fails as "the wrong file imports it" rather than as "nothing
-# imports anything".
+# mapped from the **import root** to the distribution that supplies it.
+#
+# The two are not the same string for the first entry, and that is now the point
+# of having a mapping rather than a set. **Todd chose `pydantic-ai-slim[openai]`**:
+# SPEC §7.4's library without `anthropic`, `google-genai`, `mcp`, `logfire`,
+# `keyring` and D-Bus riding into the image that handles student comment text — 30
+# packages against 100, resolved against PyPI rather than estimated. It installs
+# under the import root `pydantic_ai`, so the sweep below is unchanged and only
+# the pin check moves.
+#
+# **The set stays wider than the choice.** The property under test is that *any*
+# provider library is reached from one file, so an entry removed because "we do
+# not use that one" is an entry that stops noticing the day somebody does.
+# `openai` in particular stays after the implementer drops the direct dependency:
+# `pydantic-ai-slim[openai]` pulls the SDK in transitively, so a second module
+# importing it is exactly the thing that would still work and still be wrong.
+#
+# An extras marker is not part of a distribution name — `requirement_name` below
+# is what reads `pydantic-ai-slim[openai]==1.2.3` as a pin of `pydantic-ai-slim`.
 PROVIDER_LIBRARIES = {
-    "pydantic_ai": "pydantic-ai",
+    "pydantic_ai": "pydantic-ai-slim",
     "openai": "openai",
     "anthropic": "anthropic",
     "litellm": "litellm",
@@ -61,6 +80,57 @@ PROVIDER_LIBRARIES = {
 # instead of reporting a clean tree. E0-12 shipped it and this ticket builds on
 # it.
 SWEEP_CANARY = APP_DIR / "ai" / "contracts.py"
+
+
+# The distribution name at the head of a PEP 508 requirement, up to the extras
+# marker, the version specifier, the environment marker or a space.
+REQUIREMENT_HEAD = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+# What is left of a requirement once its name and extras are stepped over, when
+# that requirement fixes exactly one version. A comma is refused because
+# `==1.2,!=1.2.1` is a range wearing a pin's punctuation.
+PINNED_SPECIFIER = re.compile(r"^\s*==\s*[^\s,]+\s*$")
+
+
+def normalised_distribution(name: str) -> str:
+    """A distribution name in PEP 503 form: lowercase, runs of `-_.` as one `-`."""
+    return re.sub(r"[-_.]+", "-", name.strip()).lower()
+
+
+def requirement_name(entry: str) -> str:
+    """The distribution one dependency entry names, whatever it carries after it.
+
+    Written rather than matched by prefix because the two are not the same
+    question: `pydantic-ai-slim[openai]==1.2.3` is a pin, and a check asking
+    whether the entry starts with `pydantic-ai-slim==` reads it as a floating
+    range because the extras marker sits in between. It also stops
+    `pydantic-ai-slim` being read as `pydantic-ai`, which is a different
+    distribution.
+    """
+    match = REQUIREMENT_HEAD.match(entry)
+    return normalised_distribution(match.group(1)) if match else ""
+
+
+def is_pinned(entry: str) -> bool:
+    """Whether one dependency entry fixes an exact version.
+
+    The environment marker is dropped first, because it is allowed to contain
+    `python_version == "3.13"` — so an entry declaring a *range* for a particular
+    Python would read as pinned to anything searching the whole string for `==`.
+    Extras are stepped over rather than searched past, for the reason
+    `requirement_name` gives.
+    """
+    requirement = entry.partition(";")[0]
+    match = REQUIREMENT_HEAD.match(requirement)
+    if match is None:
+        return False
+    remainder = requirement[match.end() :].lstrip()
+    if remainder.startswith("["):
+        closing = remainder.find("]")
+        if closing == -1:
+            return False
+        remainder = remainder[closing + 1 :]
+    return bool(PINNED_SPECIFIER.match(remainder))
 
 
 def imported_roots(path: Path) -> set[str]:
@@ -113,25 +183,24 @@ def test_exactly_one_module_reaches_the_provider_library() -> None:
 
     importers: dict[Path, list[str]] = {}
     for path in modules:
-        found = sorted(imported_roots(path) & set(PROVIDER_LIBRARIES))
-        if found:
-            importers[path] = found
+        libraries = sorted(imported_roots(path) & set(PROVIDER_LIBRARIES))
+        if libraries:
+            importers[path] = libraries
 
     assert importers, (
         f"No module under {APP_DIR} imports any of {sorted(PROVIDER_LIBRARIES)}, so nothing here "
         "reaches a model provider and this test would report the library confined to one file "
         "without there being a file. E0-13's scope: '`backend/app/ai/gateway.py` — "
-        "provider-agnostic client against an OpenAI-compatible base URL', and SPEC §7.4 names "
-        "`pydantic-ai` as the intended implementation. If this gateway deliberately speaks the "
-        "wire protocol through a plain HTTP client instead, that is a construction decision the "
-        "spec does not settle and a reasonable engineer could differ on — it wants an ADR, and "
+        "provider-agnostic client against an OpenAI-compatible base URL', and Todd chose "
+        "`pydantic-ai-slim[openai]`, which imports as `pydantic_ai`. A gateway speaking the wire "
+        "protocol through a plain HTTP client instead would be a different decision again, and "
         "`PROVIDER_LIBRARIES` in this file is what changes with it."
     )
 
-    found = {str(path.relative_to(REPO_ROOT)): names for path, names in importers.items()}
+    where = {str(path.relative_to(REPO_ROOT)): names for path, names in importers.items()}
 
     assert sorted(importers) == [GATEWAY_PATH], (
-        f"The modules under `backend/app/` that reach a model provider library are {found}, "
+        f"The modules under `backend/app/` that reach a model provider library are {where}, "
         f"rather than `{GATEWAY_PATH.relative_to(REPO_ROOT)}` alone. "
         "E0-13's sixth criterion: 'The gateway interface is small enough that swapping the "
         "provider library touches one file.' SPEC §7.4: 'All model calls go through one internal "
@@ -174,17 +243,67 @@ def test_the_provider_library_the_gateway_imports_is_pinned() -> None:
         "through and would report the library as unpinned whatever the truth is."
     )
 
+    declared = {requirement_name(entry): entry for entry in dependencies if isinstance(entry, str)}
+
     for root in used:
-        distribution = PROVIDER_LIBRARIES[root]
-        pinned = [
-            entry
-            for entry in dependencies
-            if isinstance(entry, str) and entry.replace("_", "-").startswith(f"{distribution}==")
-        ]
-        assert pinned, (
-            f"`{distribution}` is imported by {GATEWAY_PATH.name} and is not pinned with `==` in "
-            f"{PYPROJECT_PATH}; the dependencies are {dependencies}. SPEC §7.4: '`pydantic-ai` is "
-            "the intended implementation … it is young and fast-moving, so pin it.' CLAUDE.md: "
-            "no floating ranges, and Dependabot proposes upgrades through the same gates as "
-            "anything else."
+        distribution = normalised_distribution(PROVIDER_LIBRARIES[root])
+        entry = declared.get(distribution)
+        assert entry is not None, (
+            f"`{GATEWAY_PATH.name}` imports `{root}`, which comes from `{distribution}`, and "
+            f"{PYPROJECT_PATH} declares no such dependency — it declares {sorted(declared)}. A "
+            "library reached from the source tree and not named in the project's dependencies is "
+            "one the image may or may not contain."
         )
+        assert is_pinned(entry), (
+            f"`{distribution}` is imported by {GATEWAY_PATH.name} and is declared as {entry!r}, "
+            "which is not a pin. SPEC §7.4: '`pydantic-ai` is the intended implementation … it is "
+            "young and fast-moving, so pin it.' CLAUDE.md: no floating ranges, and Dependabot "
+            "proposes upgrades through the same gates as anything else."
+        )
+
+
+def test_the_requirement_reader_sees_a_name_through_its_extras_and_its_specifier() -> None:
+    """The parser the pin check depends on, run against the forms it has to read.
+
+    Not a test of the ticket — a test of `requirement_name`, and it exists because
+    the first version of the pin check did not have one. It matched with
+    `entry.startswith(f"{distribution}==")`, which reads `pydantic-ai==1.2.3`
+    correctly and reads `pydantic-ai-slim[openai]==1.2.3` as unpinned: the extras
+    marker sits between the name and the specifier. Todd's choice of the slim
+    distribution is exactly that form, so a check written against the simpler one
+    would have refused a correct pin and reported it as a floating range.
+
+    `docs/MISTAKES.md` entry 3's rule for anything that parses text: run it
+    against what you claim it reads and against what you claim it distinguishes.
+    The last case is the one that matters in the other direction — a prefix match
+    would read `pydantic-ai-slim` as `pydantic-ai`, and the two are different
+    distributions.
+    """
+    assert requirement_name("pydantic-ai-slim[openai]==1.2.3") == "pydantic-ai-slim"
+    assert requirement_name("pydantic-ai==1.2.3") == "pydantic-ai"
+    assert requirement_name("pydantic_ai_slim [openai] == 1.2.3") == "pydantic-ai-slim"
+    assert requirement_name("openai>=1.0") == "openai"
+    assert requirement_name('httpx==0.28.1 ; python_version >= "3.13"') == "httpx"
+    assert requirement_name("pydantic-ai-slim==1.2.3") != requirement_name("pydantic-ai==1.2.3")
+
+
+def test_the_pin_reader_accepts_a_pin_behind_extras_and_refuses_a_range() -> None:
+    """`is_pinned` run against both halves of what it claims.
+
+    The must-allow case is Todd's chosen form, `pydantic-ai-slim[openai]==…`,
+    which a naive reader calls unpinned. The must-refuse cases are the two ways a
+    range passes a looser check: a caret or inequality specifier, and — the one
+    worth writing down — a range carrying an environment marker, since
+    `python_version == "3.13"` puts `==` in a string that pins nothing. A check
+    searching the whole entry for `==` accepts that, and `pyproject.toml` is
+    exactly where such an entry would appear.
+    """
+    assert is_pinned("pydantic-ai-slim[openai]==1.2.3")
+    assert is_pinned("pydantic_ai_slim [openai] == 1.2.3")
+    assert is_pinned('httpx==0.28.1 ; python_version >= "3.13"')
+
+    assert not is_pinned("pydantic-ai-slim[openai]>=1.2.3")
+    assert not is_pinned('openai>=1.0 ; python_version == "3.13"')
+    assert not is_pinned("openai~=1.2")
+    assert not is_pinned("openai==1.2,!=1.2.1")
+    assert not is_pinned("openai")

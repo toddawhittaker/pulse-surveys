@@ -22,6 +22,18 @@ variable, or an entry no field reads, is the shape
 `tests/unit/test_env_example_sync.py` exists for, and this file would otherwise
 be asserting masking on a value nothing configures.
 
+**The needle is asserted, not chosen.** Every leak rule here searches a rendering
+for fragments of one fake value, and the first version of that value shared the
+word `provider` with the field names being rendered — so all seven serialisation
+rules were false for every possible implementation, and their failure looked
+exactly like a leaked key. The implementer disputed it and an arbitrator ruled
+the test wrong. Two controls now hold the property the value has to have: one
+renders a `Settings` that was never given the needle, one renders a refusal that
+was never given it, and both require zero fragments. The rule they encode is that
+**a colliding needle is repaired by changing the needle** — never by raising
+`LEAK_FRAGMENT_LENGTH`, which is shared with two other modules and protects real
+database passwords there.
+
 **Why this is not folded into `tests/unit/test_config_settings.py`.** Every rule
 there is driven by a pair of mappings from a variable to the password *inside a
 URL*, with an interlock holding the two in step, and a bare key has no URL to sit
@@ -52,18 +64,46 @@ WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 PROVIDER_KEY_WORDS = ("KEY", "TOKEN", "SECRET", "CREDENTIAL")
 PROVIDER_KEY_QUALIFIERS = ("AI", "PROVIDER", "MODEL", "LLM")
 
-# An obvious fake: nothing here resembles a real credential and nothing was copied
-# from a working `.env` (CLAUDE.md, secrets). Long and unlikely-looking so a
-# fragment appearing in a rendering is unambiguously a leak rather than a
-# coincidence. Named `...CREDENTIAL` rather than `...KEY` so ruff's S105 keeps
-# flagging the real thing; `tests/conftest.py` made the same choice.
-FAKE_PROVIDER_CREDENTIAL = "fake-ai-provider-Qv7ZmXt4Ld9RbNsW"
+# The needle every leak assertion below searches for.
+#
+# **The property it has to have is not "long and unlikely-looking". It is that it
+# shares no run of `LEAK_FRAGMENT_LENGTH` characters with anything these
+# assertions legitimately render.** The first version of this constant was
+# `fake-ai-provider-Qv7ZmXt4Ld9RbNsW`, chosen for the first property and failing
+# the second: `provider` is an eight-character window of it, and every rendering
+# of `Settings` already contains that word — in the field name
+# `ai_provider_base_url` E0-01 shipped, in the key field's own name, and in the
+# `.env.example` placeholder `https://api.example-provider.test/v1` that
+# `configured_env` sets. The assertion was therefore false for every possible
+# implementation, including the correctly masked `SecretStr` in the tree, and the
+# "leak" it reported was the English word "provider". The implementer disputed it
+# and an arbitrator ruled the test wrong.
+#
+# Two things follow, and they are the repair rather than the value.
+# `test_the_needle_matches_nothing_settings_renders_without_it` below makes the
+# property an asserted invariant instead of a choice someone made carefully once,
+# and the readable label lives in the constant's *name* rather than in its value —
+# the failure messages name `FAKE_PROVIDER_CREDENTIAL` so a reader still knows
+# what the fragments belong to.
+#
+# Nothing here resembles a real credential and nothing was copied from a working
+# `.env` (CLAUDE.md, secrets). Named `...CREDENTIAL` rather than `...KEY` so
+# ruff's S105 keeps flagging the real thing; `tests/conftest.py` made the same
+# choice.
+FAKE_PROVIDER_CREDENTIAL = "Qv7ZmXt4Ld9RbNsW-Kj3PxE8mZt5UwGh"
 
 # Length of the contiguous run of a secret that counts as leaked. Checking for the
 # whole value is not enough: pydantic elides the middle of a long repr, so a leak
 # can print all but one character and still not contain the exact string.
 # Truncation is not redaction. Same length and same reason as
 # `tests/unit/test_config_settings.py`.
+#
+# **Raising it is not a way to fix a colliding needle**, and the arbitrator who
+# ruled on that collision measured that 10 would also have turned this module
+# green. It is a safety threshold shared with `test_config_settings.py` and
+# `test_db_engine_configuration.py`: at 10, a rendering that truncated a real
+# database password to nine characters passes all three. Tune the needle, never
+# this.
 LEAK_FRAGMENT_LENGTH = 8
 
 # A required deployment variable, removed to force a configuration failure so the
@@ -295,6 +335,15 @@ def test_the_provider_key_does_not_appear_in_settings_serialisation(
     `str()` and not `model_dump()` should report exactly that. Fragments rather
     than the whole value, because an elided rendering can print all but one
     character and still not contain it.
+
+    **Two guards, and the second is the one this test was ruled wrong for
+    lacking.** The first is that the field took the value, since a rendering of a
+    settings object that never held the key contains no key however bad the
+    masking is. The second is
+    `test_the_needle_matches_nothing_settings_renders_without_it` below: without
+    it, a needle sharing a word with the field names being rendered makes this
+    assertion false for every possible implementation, and the failure reads
+    exactly like a leak.
     """
     settings_cls = load_settings_class()
     name, info = one_key_field(settings_cls)
@@ -310,9 +359,57 @@ def test_the_provider_key_does_not_appear_in_settings_serialisation(
     rendered = SERIALISATIONS[surface](settings)
     fragments = leaked_fragments(rendered, FAKE_PROVIDER_CREDENTIAL)
     assert not fragments, (
-        f"The AI provider key leaked into {surface}: {fragments}. E0-13's scope calls it a masked "
-        "key and its definition of done sends the security review after 'the provider key "
-        f"reaching a log or an error message'. The full text was:\n{rendered}"
+        f"{surface} contains fragments of `FAKE_PROVIDER_CREDENTIAL`, the value this test "
+        f"configured the AI provider key with: {fragments}. E0-13's scope calls it a masked key "
+        "and its definition of done sends the security review after 'the provider key reaching a "
+        "log or an error message'. The full text was:\n"
+        f"{rendered}\n"
+        "If these fragments look like ordinary words rather than like the key, suspect the needle "
+        "before the masking: `test_the_needle_matches_nothing_settings_renders_without_it` is the "
+        "test that answers that question, and it should be red beside this one."
+    )
+
+
+@pytest.mark.parametrize("surface", list(SERIALISATIONS))
+def test_the_needle_matches_nothing_settings_renders_without_it(
+    configured_env: dict[str, str],
+    surface: str,
+) -> None:
+    """`FAKE_PROVIDER_CREDENTIAL` shares no fragment with a `Settings` that never held it.
+
+    Not a test of the ticket — a test of the needle every leak assertion in this
+    module is driven by, and the one whose absence cost a dispute round. The
+    original needle contained the word `provider`, which appears in
+    `ai_provider_base_url`, in the key field's own name and in the `.env.example`
+    placeholder for the base URL. Every rendering of `Settings` therefore
+    contained an eight-character run of the needle before any masking was
+    considered, so the leak assertions above could not pass against any
+    implementation at all — and their failure was indistinguishable from a real
+    leak, which is why it was read as one.
+
+    `configured_env` supplies `.env.example`'s own placeholders and nothing else,
+    so the object rendered here holds whatever the file documents for the provider
+    key and never the needle. Anything found is a collision between the needle and
+    the vocabulary of the thing being searched.
+
+    It is the discipline `WORKFLOW_CANARY` already applies further down this file,
+    in the direction that matters more: a canary says a search that found nothing
+    really looked, and this says a search that found something really found the
+    thing it was looking for.
+    """
+    settings = load_settings_class()()
+    rendered = SERIALISATIONS[surface](settings)
+
+    assert leaked_fragments(rendered, FAKE_PROVIDER_CREDENTIAL) == [], (
+        f"`FAKE_PROVIDER_CREDENTIAL` shares "
+        f"{leaked_fragments(rendered, FAKE_PROVIDER_CREDENTIAL)} with {surface} of a `Settings` "
+        "that was never given it. Every leak assertion in this module is therefore false for "
+        "every implementation, and each one reports an ordinary word as a leaked credential. The "
+        "repair is the needle, not the threshold: choose a value sharing no run of "
+        f"{LEAK_FRAGMENT_LENGTH} characters with what is rendered here, and leave "
+        "`LEAK_FRAGMENT_LENGTH` alone — it is shared with `test_config_settings.py` and "
+        "`test_db_engine_configuration.py`, where raising it would let a truncated database "
+        f"password through. The full text was:\n{rendered}"
     )
 
 
@@ -333,6 +430,16 @@ def test_a_refused_configuration_does_not_print_the_provider_key(
     about the key rather than about that variable: `Settings` must refuse the
     configuration, and this test says so first, since an exception that was never
     raised leaks nothing.
+
+    **This test carried the same needle collision as the serialisation tests and
+    did not show it**, which is worth writing down because it is the more
+    dangerous half. It passed only because the provider key field cannot currently
+    fail validation; the arbitrator who ruled on the collision forced it to fail
+    and it reported `['provider']`, sourced from the field's static `description=`
+    string rather than from any configured value. So a validator added to that
+    field in E2 would have turned this red against a correctly masked key.
+    `test_the_needle_matches_nothing_a_refused_configuration_prints` below is what
+    now sees that, without waiting for a validator to exist.
     """
     settings_cls = load_settings_class()
     name, info = one_key_field(settings_cls)
@@ -346,16 +453,57 @@ def test_a_refused_configuration_does_not_print_the_provider_key(
         for rendering, where in ((str(link), "str"), (repr(link), "repr")):
             fragments = leaked_fragments(rendering, FAKE_PROVIDER_CREDENTIAL)
             assert not fragments, (
-                f"The AI provider key leaked into {where}() of the raised "
-                f"{type(link).__name__}: {fragments}. The full text was:\n{rendering}"
+                f"{where}() of the raised {type(link).__name__} contains fragments of "
+                f"`FAKE_PROVIDER_CREDENTIAL`: {fragments}. The full text was:\n{rendering}\n"
+                "If these read as ordinary words rather than as the key, the needle is what is "
+                "wrong — see `test_the_needle_matches_nothing_a_refused_configuration_prints`."
             )
         errors = getattr(link, "errors", None)
         if callable(errors):
             payload = json.dumps(errors(), default=str)
             fragments = leaked_fragments(payload, FAKE_PROVIDER_CREDENTIAL)
             assert not fragments, (
-                f"The AI provider key leaked into the structured payload of "
-                f"{type(link).__name__}.errors(): {fragments}."
+                f"The structured payload of {type(link).__name__}.errors() contains fragments of "
+                f"`FAKE_PROVIDER_CREDENTIAL`: {fragments}."
+            )
+
+
+def test_the_needle_matches_nothing_a_refused_configuration_prints(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The needle control for the exception surface, which renders more than the values.
+
+    The serialisation control above renders a settings object. This renders a
+    *refusal*, which reaches things a successful `model_dump()` never does: field
+    names, error types, and — the case that actually bit — a field's static
+    `description=`. The provider key is left at whatever `.env.example` documents,
+    so nothing here has been given the needle and anything found is a collision.
+
+    Without this, the guarantee the test above claims is unfalsifiable in one
+    direction and false in the other: today it passes because that field cannot
+    fail validation, and the first validator added to it in E2 turns it red
+    against a perfectly masked key, with the failure reading as a credential in a
+    startup log.
+    """
+    monkeypatch.delenv(REQUIRED_DEPLOYMENT_VARIABLE, raising=False)
+
+    with pytest.raises(Exception) as refused:
+        load_settings_class()()
+
+    for link in exception_chain(refused.value):
+        renderings = [(str(link), "str"), (repr(link), "repr")]
+        errors = getattr(link, "errors", None)
+        if callable(errors):
+            renderings.append((json.dumps(errors(), default=str), "errors()"))
+        for rendering, where in renderings:
+            found = leaked_fragments(rendering, FAKE_PROVIDER_CREDENTIAL)
+            assert found == [], (
+                f"`FAKE_PROVIDER_CREDENTIAL` shares {found} with {where} of a refusal that was "
+                f"never given it ({type(link).__name__}). The leak assertion above is therefore "
+                "false for every implementation, and it reports ordinary words as a leaked "
+                "credential. Change the needle, not `LEAK_FRAGMENT_LENGTH`. The full text "
+                f"was:\n{rendering}"
             )
 
 
