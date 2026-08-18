@@ -53,6 +53,25 @@ dependencies = [
     "celery==5.6.3",
     "redis==8.1.0",
     "httpx==0.28.1",
+    # The AI provider client, imported by `backend/app/ai/gateway.py` and by
+    # nothing else — SPEC §7.4 puts every model call behind one internal gateway,
+    # and `tests/unit/test_provider_library_is_confined_to_the_gateway.py` holds
+    # it to one importer so that replacing the library stays a day's work.
+    #
+    # `pydantic-ai-slim[openai]` rather than `pydantic-ai`: the same library SPEC
+    # §7.4 names, importing under the same `pydantic_ai` root, without the eight
+    # other extras the metapackage turns on. Measured against PyPI rather than
+    # estimated — 30 packages against 100, and the seventy include `anthropic`,
+    # `google-genai`, `mcp`, `logfire`, `keyring` and a D-Bus client, in the image
+    # of the process that ships student comment text to a third party. Todd's
+    # decision; docs/adr/0053 records it and what was measured.
+    #
+    # The `openai` extra is what supplies the OpenAI-compatible client underneath.
+    # It is deliberately *not* declared here as well: nothing this project writes
+    # imports `openai`, and a direct dependency would say something imports it.
+    # `make lock` resolves the extra into explicit, hashed lines in both
+    # lockfiles, so what ships is still named and pinned.
+    "pydantic-ai-slim[openai]==2.31.0",
     # The IANA database as a package, so `zoneinfo` resolves
     # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
     # container that ships no system tzdata (§3.1 — windows are timezone-bound).

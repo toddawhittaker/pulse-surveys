@@ -1,0 +1,38 @@
+-- What the application may do to a classification row — ticket E0-13, SPEC §8.
+--
+-- E0-13 is the first ticket in which application code writes application data.
+-- Everything pulse_app held before this was CONNECT, USAGE ON SCHEMA public
+-- (identity_grants_v001.sql) and SELECT on five read views (that file and
+-- authz_grants_v001.sql). So a classification row written by the API or by the
+-- Celery worker needs a privilege that does not exist yet, and this file is it.
+--
+-- **SELECT and INSERT, and nothing else.** SPEC §8: "classification is
+-- append-only (re-runs create new rows) with prompt/model versioning." Withheld
+-- UPDATE and DELETE are what make that a property of the database rather than a
+-- rule the next writer has to know: §6.1's drift panel compares an earlier
+-- verdict with a later one, §9.3's eval floors compare runs of different prompts
+-- and different models, and a disputed participation grade under §3.3 is
+-- answered from the verdict that decided it. Every one of those reads a row that
+-- an UPDATE would have rewritten to agree with the answer it is being compared
+-- against.
+--
+-- No REVOKE is written here, and the absence is deliberate for the reason
+-- identity_grants_v001.sql gives at length: a table carries no privilege for
+-- anybody until one is granted, so a REVOKE of UPDATE would read as the control
+-- while changing nothing, and would still be sitting there looking like
+-- protection on the day somebody adds a GRANT beside it.
+--
+-- **pulse_care is granted nothing.** The Care queue reads a comment's safety
+-- classification through the surfaces E10 builds, and until then the role that
+-- can reach a student's name has no reason to hold anything here (ADR 0001,
+-- SPEC §6.2).
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and its own downgrade is the only thing in the tree that
+-- takes it back; an ACL entry records no history, so a second grant would be
+-- indistinguishable from that one and any matching revoke would remove both.
+--
+-- **The downgrade has nothing to revoke.** Every grant this file makes is on a
+-- table the revision drops, and a privilege cannot outlive the object it is on.
+
+GRANT SELECT, INSERT ON public.classification TO pulse_app;
