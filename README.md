@@ -120,9 +120,9 @@ model to ask for, and `AI_PROVIDER_API_KEY` is the credential — a secret, so a
 real one belongs in your `.env` or in the deployment's secret store and nowhere
 else.
 
-**You can run without a key.** Leave `AI_PROVIDER_API_KEY` empty and no
-`Authorization` header is sent at all, which is what a local server such as vLLM
-or Ollama wants:
+**You can run without a key.** Leave `AI_PROVIDER_API_KEY` empty and the request
+carries an inert placeholder bearer token instead of a real one, which a local
+server such as vLLM or Ollama ignores:
 
 ```sh
 # in your own .env
@@ -130,6 +130,10 @@ AI_PROVIDER_BASE_URL=http://localhost:11434/v1
 AI_MODEL_NAME=llama3.1
 AI_PROVIDER_API_KEY=
 ```
+
+Set a real key and the base URL becomes a TLS matter: it must be `https` unless
+it names this machine, and startup refuses anything else rather than putting the
+key and a student's comment on the wire in the clear.
 
 The test suite never reaches a real endpoint whatever those hold: it points the
 base URL at a stub on `127.0.0.1` and asserts, with a guard under the call, that

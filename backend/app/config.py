@@ -52,11 +52,13 @@ anything built out of one is masked too; a guard written on the model would have
 had to be repeated for every container the value can end up in.
 """
 
+import ipaddress
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, ValidationInfo, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -140,6 +142,23 @@ def _blank_is_absent(value: object) -> object:
     if isinstance(value, str) and not value.strip():
         return None
     return value
+
+
+def _is_on_this_machine(host: str | None) -> bool:
+    """Whether a URL's host names this machine, so nothing crosses a network.
+
+    `localhost` by name, and any address in a loopback range by value —
+    `127.0.0.0/8` and `::1`. A name this cannot resolve is not this machine: the
+    check is used to *permit* cleartext, so an unknown answer has to be "no".
+    """
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _configuration_error(problems: Iterable[str]) -> ConfigurationError:
@@ -270,7 +289,13 @@ class Settings(BaseSettings):
     )
 
     # --- deployment wiring, no credential: required, no default ---------------
-    ai_provider_base_url: str = Field(description="OpenAI-compatible API base URL (§7.4).")
+    ai_provider_base_url: str = Field(
+        description=(
+            "OpenAI-compatible API base URL (§7.4). Must be https when AI_PROVIDER_API_KEY is "
+            "set, unless it names this machine: plain http off this machine would put the "
+            "credential and the comment being classified on the wire in the clear (§10)."
+        )
+    )
     ai_model_name: str = Field(description="Model identifier passed to that provider.")
     institution_timezone: str = Field(
         description="IANA timezone the survey window follows (§3.1), such as America/New_York."
@@ -319,14 +344,57 @@ class Settings(BaseSettings):
 
         A local OpenAI-compatible server — vLLM, Ollama, a proxy on the same
         host — authenticates nobody, and the way a developer says so is to leave
-        the entry empty rather than to delete a line from `.env`. Read as `None`,
-        `app.ai.gateway` sends no `Authorization` header at all; read as
-        `SecretStr('')` it would send an empty bearer token, which some servers
-        refuse and none is helped by.
+        the entry empty rather than to delete a line from `.env`.
+
+        **What absent means on the wire**, since three documents described it
+        wrongly until E0-13's review measured it: the request still carries an
+        `Authorization` header, holding `app.ai.gateway`'s inert
+        `UNAUTHENTICATED` placeholder. The client the gateway builds refuses to
+        be constructed without a credential, and removing the header would mean
+        building that client here rather than letting the provider library build
+        it — which would put a second provider-library import in the tree. What a
+        blank value avoids is an *empty* bearer token, which some servers refuse
+        and none is helped by; an endpoint that authenticates nobody ignores the
+        placeholder.
 
         `_blank_is_absent` above is the rule itself.
         """
         return _blank_is_absent(value)
+
+    @field_validator("ai_provider_base_url")
+    @classmethod
+    def a_credentialled_endpoint_is_encrypted(cls, value: str, info: ValidationInfo) -> str:
+        """Refuse to carry the provider key, or a student's comment, in cleartext.
+
+        SPEC §10 makes transport encryption a requirement, and this is the one
+        configuration in the surface that can quietly break it: `http://` with a
+        key configured puts the bearer token *and* the comment being classified on
+        the wire in the clear, and nothing else in the system would object.
+
+        The rule is narrow on purpose. An endpoint **on this machine** may be
+        plain `http`, because nothing leaves the host — that is how a local
+        vLLM or Ollama is reached, which `.env.example` and `README.md` both
+        document. Anything else, with a credential configured, must be `https`.
+
+        **What this deliberately does not refuse**: cleartext to an off-machine
+        endpoint with *no* credential, which is a service inside a private
+        network — a vLLM pod reached over `http://` in the same cluster. That
+        case still puts comment text on a network, and whether it is acceptable
+        is the operator's call rather than this file's (ADR 0056).
+
+        No value is quoted, as in every validator here: this message reaches the
+        startup log.
+        """
+        if info.data.get("ai_provider_api_key") is None:
+            return value
+        parsed = urlsplit(value)
+        if parsed.scheme == "https" or _is_on_this_machine(parsed.hostname):
+            return value
+        raise ValueError(
+            "would send the configured provider credential, and the comment being classified, "
+            "in cleartext to an address off this machine — use https, or plain http only for an "
+            "endpoint on this machine"
+        )
 
     @field_validator("care_database_url", mode="before")
     @classmethod

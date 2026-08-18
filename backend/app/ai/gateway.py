@@ -8,8 +8,8 @@ of that contract. It loads no prompt, opens no database connection, and decides
 nothing about any particular task.
 
 **This is the only module in `backend/app/` that imports a provider library**,
-which is E0-13's sixth acceptance criterion; the confinement sweep under
-`tests/unit/` is what keeps it true. §7.4's reason: the library "is young and
+which is E0-13's sixth acceptance criterion; the confinement sweep in the unit
+suite is what keeps it true. §7.4's reason: the library "is young and
 fast-moving, so pin it and keep the gateway interface thin enough that replacing
 it is a day's work". A second importer — a task building its own client, a batch
 job, a helper — is another file that replacement has to touch, and each one looks
@@ -52,15 +52,26 @@ separate reasons, and they land on the same rule:
   comment in a log is confidential text outside the read paths §4 defines;
 * the answer is model output that may quote the comment back — and the library's
   own exceptions carry it: a validation failure arrives with the offending value
-  in `input`, and an HTTP failure with the endpoint's response body in its
-  message.
+  in `input`, an HTTP failure with the endpoint's response body in its message,
+  and a *rejected key* arrives as the key itself, because `extra="forbid"`
+  reports the location of the offending key and that location is a string the
+  model chose. E0-13's review measured a whole comment reconstructed out of four
+  such locations, so `_describe` now emits a field name only when the schema
+  declares it.
 
-So a failure here is built from static text, the contract's name, and pydantic's
-error-type codes — the same ingredients, for the same reason, as
-`app.config.ConfigurationError`. It is raised *outside* the `except` block that
-diagnosed it, because Python prints a chained cause's message too: `raise ...
-from None` suppresses the display and leaves `__context__` set for anything that
-inspects the chain.
+So a failure here is built from static text, the contract's name, declared field
+names, and pydantic's error-type codes — the same ingredients, for the same
+reason, as `app.config.ConfigurationError`. It is raised *outside* the `except`
+block that diagnosed it, because Python prints a chained cause's message too:
+`raise ... from None` suppresses the display and leaves `__context__` set for
+anything that inspects the chain.
+
+**One client per thread, and the loop it was built for.** The asynchronous client
+underneath pools its connections, and a pooled connection belongs to the event
+loop it was opened on: reuse it from another loop and it raises, which the layers
+above turn into "the endpoint could not be reached". A gateway shared across a
+threadpool therefore has to keep a client per thread — see `_ThreadBound`, which
+holds the loop, the client and the agents together for exactly that reason.
 """
 
 import asyncio
@@ -68,6 +79,7 @@ import threading
 from functools import cache
 from typing import Any, TypeVar
 
+import httpx
 from pydantic import BaseModel, create_model
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
@@ -92,6 +104,12 @@ SHAPE_VIOLATION_ATTEMPTS = 2
 # ignores it, and the client refuses to be constructed without something. It is a
 # fixed, obviously-inert string rather than an empty one because an empty bearer
 # token is a value some servers refuse outright.
+#
+# **It is sent, as `Authorization: Bearer pulse-no-key-configured`.** Removing the
+# header entirely would mean building the client here rather than letting the
+# provider build it, which means importing `openai` in this file. `.env.example`,
+# `README.md` and `app.config` all describe it as it is; E0-13's review found
+# them describing a header that was never sent.
 UNAUTHENTICATED = "pulse-no-key-configured"
 
 # The fields on every §7.4 contract that the gateway fills in and the model may
@@ -100,48 +118,17 @@ UNAUTHENTICATED = "pulse-no-key-configured"
 # remembering this module exists.
 _AUDIT_FIELDS = frozenset(AiTaskOutput.model_fields)
 
-# How much of a model-chosen string may appear in a failure message. A JSON key
-# the model invented is the one piece of provider text a shape violation has to
-# name in order to be diagnosable, and it is text a comment could have talked the
-# model into producing.
-_KEY_EXCERPT = 40
+# What a failure message says instead of a location the schema does not declare.
+# `extra="forbid"` reports the offending key as the error's location, and that key
+# is a string the model wrote — which, on this path, is a string a student's
+# comment can steer. A fixed token carries the same diagnostic weight as the key
+# itself, since what a reader needs is the error *type*.
+UNDECLARED_LOCATION = "<undeclared>"
 
-# One event loop per thread that makes a model call, held for the life of the
-# thread.
-_LOOPS = threading.local()
-
-
-def _model_call_loop() -> asyncio.AbstractEventLoop:
-    """The loop this thread runs model calls on, created on first use.
-
-    The gateway is synchronous — ADR 0013 makes the session synchronous, handlers
-    are `def` and run in FastAPI's threadpool, and Celery tasks are synchronous
-    too — while the library underneath it is not. Something has to drive a loop,
-    and the two obvious ways are both wrong here:
-
-    * `Agent.run_sync` calls `asyncio.get_event_loop()`, which emits a
-      `DeprecationWarning` when the thread has no loop set. `pyproject.toml` turns
-      a `DeprecationWarning` into an error on purpose — "a deprecated call our own
-      code makes is a defect" — so under the test suite every model call fails,
-      and in production it is a warning today and a `RuntimeError` in Python 3.14.
-    * `asyncio.run` per call builds and closes a loop each time. The HTTP client
-      is built once and its connection pool binds to the loop that first used it,
-      so the second call would reach into a closed loop — and rebuilding the
-      client per comment is a TLS handshake per comment, inside §3.3's p95 budget.
-
-    So the loop is owned here, one per thread, and reused. The count is bounded by
-    the size of the threadpool rather than by the number of comments, and a
-    `AIGateway` can be shared across threads because each one drives its own.
-
-    Calling this from a thread that already has a *running* loop raises — which is
-    correct and deliberate: an async caller must not block its own loop on a model
-    call, and there is no shape of this function that fixes that for it.
-    """
-    loop: asyncio.AbstractEventLoop | None = getattr(_LOOPS, "loop", None)
-    if loop is None or loop.is_closed():
-        loop = asyncio.new_event_loop()
-        _LOOPS.loop = loop
-    return loop
+# How many distinct problems one failure message names. A model can return a
+# hundred undeclared keys, and a hundred copies of the same token is a log line
+# nobody reads.
+_PROBLEM_LIMIT = 5
 
 
 class AIGatewayError(Exception):
@@ -154,20 +141,33 @@ class AIGatewayError(Exception):
     """
 
 
-class AIProviderUnavailableError(AIGatewayError):
-    """The endpoint did not answer: it timed out, or it could not be reached.
+class AIProviderTimeoutError(AIGatewayError):
+    """The endpoint accepted the request and did not answer in time.
 
-    §3.3 names one of the two — "on provider timeout, the heuristic floor applies
-    and the submission is accepted" — and the sentence it is in names the
-    principle: "fail open, never block a student on an outage". A refused
-    connection is that outage with a faster failure mode, so both arrive here and
-    a caller decides what its own task does about it.
+    **This is the only failure §3.3's fail-open covers**, and the name says so:
+    "Classifier latency budget: p95 < 2s; on provider timeout, the heuristic floor
+    applies and the submission is accepted, then classified async (fail open,
+    never block a student on an outage)."
 
-    **Deciding that is not this module's job**, and the split is deliberate.
-    Comment validity falls open onto §3.3's character floor; moderation (§6.2)
-    has no fail-open at all, because the verdict that routes a self-harm
-    disclosure to the Care queue is not something to guess at. A gateway that
-    absorbed the outage itself would have to hold both rules.
+    Deciding what to do about it is not this module's job. Comment validity falls
+    open onto §3.3's character floor; moderation (§6.2) has no fail-open at all,
+    because the verdict that routes a self-harm disclosure to the Care queue is
+    not something to guess at. A gateway that absorbed the timeout itself would
+    have to hold both rules.
+    """
+
+
+class AIProviderUnreachableError(AIGatewayError):
+    """The request never reached an endpoint: the connection failed.
+
+    A refused connection, a name that does not resolve, a TLS handshake that does
+    not complete. **Deliberately not the same class as a timeout**, and
+    [ADR 0056](../../../docs/adr/0056-only-a-timeout-fails-open.md) is why: §3.3
+    sanctions the floor for a provider *timeout*, and a certificate failure is
+    what an active network attacker looks like. Failing open on it would let
+    anybody who can interrupt the connection decide that no classification
+    happens — which is tolerable for a participation gate only until E2 puts
+    moderation through the same code.
     """
 
 
@@ -223,34 +223,59 @@ def _payload_model(contract: type[AiTaskOutput]) -> type[BaseModel]:
     )
 
 
-class AIGateway:
-    """One client against one OpenAI-compatible endpoint (SPEC §6.3, §7.4).
+@cache
+def _declared_names(payload: type[BaseModel]) -> frozenset[str]:
+    """Every property name anywhere in one payload's JSON schema.
 
-    Built from `Settings`, so the base URL, the model and the credential all come
-    from the environment and none of them is written down here. The client is
-    constructed with the instance rather than at import time: a module that built
-    one on import would need `AI_PROVIDER_BASE_URL` set to be importable at all,
-    and CI's `migration-drift` job supplies the database variables alone.
+    Read out of the schema rather than off `model_fields`, because a nested model
+    — `CommentTheme` inside a summary's `themes` — declares names too, and a
+    validation error can point at one of them. The schema is the same document the
+    endpoint was sent, so this is the exact set of locations a well-behaved answer
+    can produce.
 
-    An instance is reusable and worth reusing — one connection pool, one client —
-    and `_model_call_loop` is what makes that true across calls: the pool binds to
-    the loop it was first used on, and that loop belongs to the thread rather than
-    to the call.
+    Anything outside this set came from the model rather than from us, and
+    `_describe` refuses to print it.
+    """
+    names: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                names.update(str(key) for key in properties)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload.model_json_schema())
+    return frozenset(names)
+
+
+class _ThreadBound:
+    """The event loop, the client and the agents one thread uses.
+
+    All three are here together because they cannot be separated: the client pools
+    its connections, a pooled connection is bound to the loop it was opened on,
+    and an agent holds the model that holds the client. Hand a connection from one
+    loop to another and it raises — which arrives at this module as
+    `ModelAPIError`, so the gateway reports "the endpoint could not be reached"
+    about an endpoint that answered perfectly.
+
+    That is not hypothetical. E0-13's review measured one shared gateway across a
+    threadpool answering every *second* submission from the character floor while
+    the provider was healthy — the request went out, the answer came back, and it
+    was discarded — so the same comment was counted or refused depending on which
+    thread served it. Keeping the three together is what makes a gateway safe to
+    share, and sharing one is what keeps the client count bounded by threads
+    rather than by comments.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        """Open a client on the configured endpoint.
-
-        The credential is passed explicitly, always — including the inert
-        placeholder when none is configured. The client would otherwise read
-        `OPENAI_API_KEY` out of the ambient environment, and a process that picked
-        up somebody else's key would send this institution's student comments to
-        an endpoint on that account.
-        """
-        self._settings = settings or Settings()
-        key = self._settings.ai_provider_api_key
+    def __init__(self, settings: Settings) -> None:
+        key = settings.ai_provider_api_key
         provider = OpenAIProvider(
-            base_url=self._settings.ai_provider_base_url,
+            base_url=settings.ai_provider_base_url,
             api_key=key.get_secret_value() if key is not None else UNAUTHENTICATED,
         )
         # **The underlying client's own retry is turned off**, so that the number
@@ -267,8 +292,56 @@ class AIGateway:
         # the client here, which means importing `openai` in this file — the
         # second provider-library importer E0-13's sixth criterion is about.
         provider.client.max_retries = 0
-        self._model = OpenAIChatModel(self._settings.ai_model_name, provider=provider)
-        self._agents: dict[type[AiTaskOutput], Agent[None, Any]] = {}
+        self.loop = asyncio.new_event_loop()
+        self.model = OpenAIChatModel(settings.ai_model_name, provider=provider)
+        self.agents: dict[type[AiTaskOutput], Agent[None, Any]] = {}
+
+    def agent_for(self, output_model: type[AiTaskOutput]) -> Agent[None, Any]:
+        """The agent that asks for one task's output, built once per contract.
+
+        `NativeOutput` rather than the library's default tool output, and §7.4 is
+        the reason: "one call in, one validated object out — **no tool use**, no
+        planning loop, no iterative retrieval". Native output asks for a JSON
+        object against the payload's schema, so the request carries
+        `response_format` and declares no tool at all. It also keeps the wire
+        agreeing with the prompt, which tells the model to "return only this JSON
+        object".
+
+        `retries=0` because `AIGateway.run_task` owns the retry; see its
+        docstring.
+        """
+        agent = self.agents.get(output_model)
+        if agent is None:
+            agent = Agent(
+                self.model,
+                output_type=NativeOutput(_payload_model(output_model)),
+                retries=0,
+            )
+            self.agents[output_model] = agent
+        return agent
+
+
+class AIGateway:
+    """One client per thread against one OpenAI-compatible endpoint (SPEC §6.3, §7.4).
+
+    Built from `Settings`, so the base URL, the model and the credential all come
+    from the environment and none of them is written down here. Nothing is
+    constructed at import time: a module that built a client on import would need
+    `AI_PROVIDER_BASE_URL` set to be importable at all, and CI's
+    `migration-drift` job supplies the database variables alone.
+
+    **Share one per process.** `app.ai.tasks` does, and the reason is
+    `_ThreadBound`: an instance holds one client per thread that has used it, so
+    one shared gateway costs a client per threadpool thread while a gateway per
+    comment costs a client per comment — and E0-13's review measured that second
+    shape leaking sockets, from 6 to 23 file descriptors over 30 calls, reclaimed
+    only when the garbage collector got to it.
+    """
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        """Read the configuration; build nothing until a thread asks."""
+        self._settings = settings or Settings()
+        self._local = threading.local()
 
     @property
     def model_name(self) -> str:
@@ -306,7 +379,8 @@ class AIGateway:
         that made its mistake deterministically will make it again, so this buys
         less than a feedback retry would. ADR 0053 records the trade.
 
-        Raises `AIProviderUnavailableError` if the endpoint did not answer,
+        Raises `AIProviderTimeoutError` if the endpoint did not answer in time,
+        `AIProviderUnreachableError` if the connection never got there,
         `AIProviderRefusedError` if it answered with an error status, and
         `AIResponseInvalidError` if it kept answering with something that is not
         the contract.
@@ -335,6 +409,21 @@ class AIGateway:
 
     # -- the wire ----------------------------------------------------------
 
+    def _bound(self) -> _ThreadBound:
+        """This thread's loop, client and agents, built on first use.
+
+        One per thread rather than one per gateway, because a pooled connection
+        cannot cross an event loop and a loop cannot be driven by two threads at
+        once. The alternative shapes were measured and are worse: a shared client
+        across per-thread loops silently falls open on every second call, and a
+        gateway per call leaks sockets.
+        """
+        bound: _ThreadBound | None = getattr(self._local, "bound", None)
+        if bound is None:
+            bound = _ThreadBound(self._settings)
+            self._local.bound = bound
+        return bound
+
     def _ask(
         self, *, prompt: str, output_model: type[OutputT], timeout: float
     ) -> tuple[BaseModel, str]:
@@ -349,9 +438,10 @@ class AIGateway:
         display and leaves `__context__` set for anything that walks the chain.
         `app.config.Settings.__init__` takes the same shape for the same reason.
         """
-        agent = self._agent_for(output_model)
+        bound = self._bound()
+        agent = bound.agent_for(output_model)
         try:
-            result = _model_call_loop().run_until_complete(
+            result = bound.loop.run_until_complete(
                 agent.run(prompt, model_settings=ModelSettings(timeout=timeout))
             )
         except UnexpectedModelBehavior as violation:
@@ -360,7 +450,8 @@ class AIGateway:
             # gateway spends its own.
             failure: type[AIGatewayError] = AIResponseInvalidError
             message = (
-                f"The answer did not validate as {output_model.__name__}: {_describe(violation)}."
+                f"The answer did not validate as {output_model.__name__}: "
+                f"{_describe(violation, output_model)}."
             )
         except ModelHTTPError as refused:
             # The status code and nothing else. `ModelHTTPError` renders the
@@ -368,39 +459,24 @@ class AIGateway:
             # the endpoint wrote.
             failure = AIProviderRefusedError
             message = f"The model endpoint answered HTTP {refused.status_code}."
-        except ModelAPIError:
-            # The library's wrapper for a request that never got an answer: a
-            # timeout or a connection failure. `ModelHTTPError` is a subclass of
-            # it and is caught above.
-            failure = AIProviderUnavailableError
-            message = "The model endpoint did not answer within the task's timeout."
+        except ModelAPIError as unanswered:
+            # The library's wrapper for a request that never got an answer, and it
+            # covers two different things (`ModelHTTPError` is a third and is
+            # caught above). Only one of them is §3.3's fail-open case, so they
+            # are separated here rather than reported as one — ADR 0056.
+            if _timed_out(unanswered):
+                failure = AIProviderTimeoutError
+                message = "The model endpoint did not answer within the task's timeout."
+            else:
+                failure = AIProviderUnreachableError
+                message = (
+                    "The model endpoint could not be reached: the connection was refused, "
+                    "the name did not resolve, or the TLS handshake failed."
+                )
         else:
             return result.output, self._model_of(result)
 
         raise failure(message)
-
-    def _agent_for(self, output_model: type[OutputT]) -> Agent[None, Any]:
-        """The agent that asks for one task's output, built once per contract.
-
-        `NativeOutput` rather than the library's default tool output, and §7.4 is
-        the reason: "one call in, one validated object out — **no tool use**, no
-        planning loop, no iterative retrieval". Native output asks for a JSON
-        object against the payload's schema, so the request carries
-        `response_format` and declares no tool at all. It also keeps the wire
-        agreeing with the prompt, which tells the model to "return only this JSON
-        object".
-
-        `retries=0` because `run_task` owns the retry; see its docstring.
-        """
-        agent = self._agents.get(output_model)
-        if agent is None:
-            agent = Agent(
-                self._model,
-                output_type=NativeOutput(_payload_model(output_model)),
-                retries=0,
-            )
-            self._agents[output_model] = agent
-        return agent
 
     def _model_of(self, result: Any) -> str:
         """The model that produced this answer, as the endpoint spells it.
@@ -418,30 +494,97 @@ class AIGateway:
         return self.model_name
 
 
-def _describe(violation: UnexpectedModelBehavior) -> str:
-    """A refused answer as field paths and pydantic error codes, and no values.
+def _timed_out(failure: BaseException) -> bool:
+    """Whether this failure is the endpoint not answering in time.
+
+    Decided on the exception chain rather than on a message, because the layers
+    above flatten both cases into one class with a sentence in it — "Request timed
+    out." against "Connection error." — and a rule that reads either sentence is a
+    rule that breaks when the library rewords it. `httpx.TimeoutException` is the
+    common parent of a connect timeout and a read timeout, and it is the deepest
+    layer this project declares a dependency on.
+
+    Measured, on the pinned versions: a stub that holds the request produces
+    `ModelAPIError <- APITimeoutError <- httpx.ReadTimeout`; a refused connection
+    and a failed TLS handshake both produce `ModelAPIError <- APIConnectionError
+    <- httpx.ConnectError`, with no `TimeoutException` anywhere in either.
+
+    A chain this cannot read falls to `False`, which is the safe direction: an
+    unrecognised failure is surfaced rather than absorbed by §3.3's floor.
+    """
+    seen: list[BaseException] = []
+    current: BaseException | None = failure
+    while current is not None and not any(link is current for link in seen):
+        seen.append(current)
+        if isinstance(current, httpx.TimeoutException):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _describe(violation: UnexpectedModelBehavior, contract: type[AiTaskOutput]) -> str:
+    """A refused answer as declared field names and pydantic error codes.
 
     The library hands the detail over as the retry prompt it would otherwise have
     sent: a list of pydantic error dicts on the `tool_retry` part of the chained
-    `ToolRetryError`. Neither the message nor the input is read out of it.
-    Pydantic's `msg` is built from the value that failed for several error types,
-    and `input` is the value itself — which here is text a model wrote after
-    reading a student's comment. The code is a static string from the library, and
-    the location is a field name: the contract's, or a key the model invented,
-    which is truncated.
+    `ToolRetryError`. Three things are deliberately not read out of it, and the
+    third is the one that cost a HIGH finding in review:
 
-    Reached by attribute rather than by importing the exception type, so a library
-    that stops carrying it degrades to the general sentence below rather than
-    raising something else while reporting a shape violation.
+    * the `msg`, which pydantic builds out of the value that failed;
+    * the `input`, which *is* the value that failed;
+    * any part of the `loc` that the payload's schema does not declare. An
+      `extra_forbidden` error reports the offending key as its location, so the
+      location is a string the model wrote — and a model writes what it has just
+      read. The review measured a whole comment, name and email address included,
+      reconstructed across four such locations and joined into one message, on its
+      way to the container log through an exception nothing catches. SPEC §10
+      forbids student text in a log outright, and E2 puts moderation through this
+      same function, where the leaked class is a threat or a self-harm
+      disclosure.
+
+    So a location is printed when the schema declares it and replaced with
+    `UNDECLARED_LOCATION` otherwise, list indices pass through as themselves, and
+    the result is deduplicated and capped — a hundred invented keys are a hundred
+    copies of one token. What is left is the error *type*, which is what a reader
+    diagnosing a bad prompt actually needs.
+
+    The detail is reached by attribute rather than by importing the exception
+    type, so a library that stops carrying it degrades to the general sentence
+    below rather than raising something else while reporting a shape violation.
     """
     details = getattr(getattr(violation.__cause__, "tool_retry", None), "content", None)
     if not isinstance(details, list):
         return "the answer could not be read as the task's output"
 
+    declared = _declared_names(_payload_model(contract))
     problems = sorted(
-        f"{'.'.join(str(part) for part in detail.get('loc', ()))[:_KEY_EXCERPT]}: "
-        f"{detail.get('type', 'invalid')}"
-        for detail in details
-        if isinstance(detail, dict)
+        {
+            f"{_location(detail.get('loc', ()), declared)}: {detail.get('type', 'invalid')}"
+            for detail in details
+            if isinstance(detail, dict)
+        }
     )
-    return "; ".join(problems) or "the answer could not be read as the task's output"
+    if not problems:
+        return "the answer could not be read as the task's output"
+
+    shown = "; ".join(problems[:_PROBLEM_LIMIT])
+    hidden = len(problems) - _PROBLEM_LIMIT
+    return f"{shown} (and {hidden} more)" if hidden > 0 else shown
+
+
+def _location(loc: Any, declared: frozenset[str]) -> str:
+    """One error's location, with anything the model invented replaced.
+
+    An integer is a list index and passes through. A string passes through only
+    when it names something the schema declares; anything else is a key the model
+    chose, and is printed as `UNDECLARED_LOCATION` rather than as itself.
+    """
+    if not isinstance(loc, tuple | list) or not loc:
+        return "(root)"
+    parts = [
+        str(element)
+        if isinstance(element, int) or (isinstance(element, str) and element in declared)
+        else UNDECLARED_LOCATION
+        for element in loc
+    ]
+    return ".".join(parts)

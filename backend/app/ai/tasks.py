@@ -15,7 +15,7 @@ E0-13's sixth criterion).
 §3.3: "Classifier latency budget: p95 < 2s; on provider timeout, the heuristic
 floor applies and the submission is accepted, then classified async (fail open,
 never block a student on an outage)." So `classify_comment_validity` catches the
-one error that means "the endpoint did not answer", applies the character floor,
+one error that means "the endpoint did not answer *in time*", applies the floor,
 and returns the contract — and the row it writes says a floor decided it, under a
 prompt version and a model ID that name no prompt and no model
 ([ADR 0054](../../../docs/adr/0054-a-floored-classification-names-the-floor-in-its-audit-pair.md)).
@@ -35,12 +35,13 @@ caller owns the transaction, because E2's submit path stores the response and th
 classification together or stores neither.
 """
 
+import threading
 from importlib.resources import files
 
 from sqlalchemy.orm import Session
 
 from app.ai.contracts import CommentValidityOutput, ValidityVerdict
-from app.ai.gateway import AIGateway, AIProviderUnavailableError
+from app.ai.gateway import AIGateway, AIProviderTimeoutError
 from app.models.ai import Classification, ClassificationTask
 
 # The prompt this task renders, named as ADR 0031 spells a `prompt_version`: the
@@ -83,6 +84,34 @@ HEURISTIC_MINIMUM_CHARACTERS = 25
 # async re-classification would have nothing to find.
 FLOOR_PROMPT_VERSION = "character-floor"
 FLOOR_MODEL_ID = "no-model"
+
+# The gateway this process uses, built on first classification and kept.
+_GATEWAY_LOCK = threading.Lock()
+_GATEWAY: AIGateway | None = None
+
+
+def process_gateway() -> AIGateway:
+    """The one `AIGateway` this process shares (§7.4: "one internal `AIGateway`").
+
+    Shared rather than built per comment, because an `AIGateway` holds a client
+    per thread that has used it: one shared gateway costs a connection pool per
+    threadpool thread, and a gateway per comment costs one per comment. E0-13's
+    review measured the second shape leaking sockets — 6 file descriptors to 23
+    over 30 calls, reclaimed only at garbage collection.
+
+    Built on first use rather than at import: `Settings()` reads the environment,
+    and `backend/migrations/env.py` and CI's `migration-drift` job import this
+    package's neighbours with the database variables alone.
+
+    The lock covers construction only. Two threads arriving together must not
+    build two clients and leave one of them orphaned; after that the object is
+    read-only and each thread lazily builds its own bound state inside it.
+    """
+    global _GATEWAY
+    with _GATEWAY_LOCK:
+        if _GATEWAY is None:
+            _GATEWAY = AIGateway()
+        return _GATEWAY
 
 
 class PromptError(Exception):
@@ -197,16 +226,19 @@ def classify_comment_validity(
     student's face at submit time with coaching copy — so what this returns
     decides both what a student is told and what a section's validity rate says.
 
-    On an endpoint that does not answer, the character floor decides and the
-    submission goes through: "fail open, never block a student on an outage"
-    (§3.3). Every other gateway failure propagates, and E2's submit path is where
-    a caller decides what to do with one.
+    On an endpoint that does not answer *in time*, the character floor decides
+    and the submission goes through: "fail open, never block a student on an
+    outage" (§3.3). Every other gateway failure propagates — including a
+    connection that never arrived, which is a refused connection or a failed TLS
+    handshake and is not what §3.3 sanctions the floor for (ADR 0056). E2's
+    submit path is where a caller decides what to do with one.
 
-    The gateway is a parameter so that a caller holding one can pass it —
-    building a client per comment is a connection pool per comment. E2 passes the
-    one on `app.state`; today's callers let it build its own.
+    The gateway is a parameter so that a caller holding one can pass it; a
+    caller that passes nothing gets `process_gateway()`, which is the one this
+    process shares. Building one per comment is a connection pool per comment,
+    and that shape was measured leaking sockets in E0-13's review.
     """
-    gateway = gateway or AIGateway()
+    gateway = gateway or process_gateway()
     try:
         output = gateway.run_task(
             prompt=render_prompt(VALIDITY_PROMPT_VERSION, comment),
@@ -214,7 +246,7 @@ def classify_comment_validity(
             output_model=CommentValidityOutput,
             timeout=VALIDITY_TIMEOUT_SECONDS,
         )
-    except AIProviderUnavailableError:
+    except AIProviderTimeoutError:
         output = character_floor(comment)
 
     record_classification(session, ClassificationTask.COMMENT_VALIDITY, output)
