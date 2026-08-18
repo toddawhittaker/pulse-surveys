@@ -1,7 +1,7 @@
-# Build context for the two images this repository builds: backend/Dockerfile
-# (ticket E0-02) and mock-lms/Dockerfile (ticket E0-14). One file serves both,
-# because Docker reads it per build *context* and both are built from the
-# repository root.
+# Build context for the three images this repository builds:
+# backend/Dockerfile (ticket E0-02), mock-lms/Dockerfile (E0-14) and
+# mock-idp/Dockerfile (E0-16). One file serves all three, because Docker reads
+# it per build *context* and all three are built from the repository root.
 #
 # Deny everything, then name what the build needs. The other way round — listing
 # what to exclude — fails open: a file added later is in the context until
@@ -18,12 +18,12 @@
 # review, and was reaching the builder stage until the re-exclusions below were
 # added. Verified by planting all three and rebuilding.
 #
-# `mock-lms/` gets the same re-exclusions for the same reasons, and one more
-# reason of its own: it is the service that holds a signing key, so a `*.pem` or
-# `*.key` appearing under it is the exact file E0-14 criterion 3 says must never
-# exist. The key is generated per process and never written to disk, so these
-# patterns should never match anything — they are here so that the day one does,
-# it does not reach a layer.
+# `mock-lms/` and `mock-idp/` get the same re-exclusions for the same reasons,
+# and one more reason of their own: they are the services that hold a signing
+# key, so a `*.pem` or `*.key` appearing under either is the exact file E0-14
+# criterion 3 and E0-16 criterion 9 say must never exist. Both keys are generated
+# per process and never written to disk, so these patterns should never match
+# anything — they are here so that the day one does, it does not reach a layer.
 
 *
 
@@ -33,6 +33,7 @@
 !requirements-dev.txt
 !backend
 !mock-lms
+!mock-idp
 
 # Re-excluded inside the directories re-included above. Secrets first: these
 # mirror .gitignore, so a file git refuses to track cannot reach a layer either.
@@ -50,6 +51,13 @@ mock-lms/**/.env.*
 mock-lms/**/*.pem
 mock-lms/**/*.key
 
+mock-idp/.env
+mock-idp/.env.*
+mock-idp/**/.env
+mock-idp/**/.env.*
+mock-idp/**/*.pem
+mock-idp/**/*.key
+
 # Build and test debris; none of it belongs in an image.
 backend/**/__pycache__
 backend/**/*.py[cod]
@@ -57,6 +65,9 @@ backend/*.egg-info
 
 mock-lms/**/__pycache__
 mock-lms/**/*.py[cod]
+
+mock-idp/**/__pycache__
+mock-idp/**/*.py[cod]
 
 # Editor and merge debris. E0-12 made this reachable: `pyproject.toml` ships
 # `app/ai/prompts/**/*` as package data, so any non-hidden file left in that

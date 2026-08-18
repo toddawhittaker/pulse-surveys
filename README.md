@@ -22,7 +22,8 @@ Early, but no longer empty. The backend package exists — a FastAPI application
 factory, the environment-driven settings object, a health endpoint, and a
 database engine with a session per request — and it runs in a container
 alongside a Celery worker, a Celery beat scheduler, Postgres, Redis, Mailpit,
-and the mock LMS described below. CI enforces lint, typing, the test suite,
+and the two mocks described below — a fake LMS to launch from and a fake identity
+provider to log in through, one for each of the two entry doors in SPEC §2. CI enforces lint, typing, the test suite,
 migration drift, dependency audit, license compatibility, and that the stack
 comes up healthy.
 
@@ -50,8 +51,8 @@ make down           # docker compose down -v — discards the database too
 `GET http://localhost:8000/healthz` answers with the service name, the version,
 and the environment it was configured with. The interactive API documentation is
 at `/docs`, the captured mail is at <http://localhost:8025>, the mock LMS is at
-<http://localhost:8080>, and Postgres and Redis are on their usual ports. All of
-them bind to `127.0.0.1` only.
+<http://localhost:8080>, the mock IdP is at <http://localhost:8081>, and Postgres
+and Redis are on their usual ports. All of them bind to `127.0.0.1` only.
 
 `docker compose up` merges [`docker-compose.override.yml`](docker-compose.override.yml)
 over the base file automatically, and that override is what publishes those
@@ -111,6 +112,45 @@ is deliberately empty: every scheduled job — window open and close, the Monday
 report, roster sync, retention — belongs to a later epic. Beat keeps its
 schedule file on a named volume, so the last-run times survive a restart and a
 job that has already fired is not fired again when one of those entries lands.
+
+## The AI provider
+
+Three variables configure it, and `.env.example` documents all three:
+`AI_PROVIDER_BASE_URL` is any OpenAI-compatible endpoint, `AI_MODEL_NAME` is the
+model to ask for, and `AI_PROVIDER_API_KEY` is the credential — a secret, so a
+real one belongs in your `.env` or in the deployment's secret store and nowhere
+else.
+
+**You can run without a key.** Leave `AI_PROVIDER_API_KEY` empty and the request
+carries an inert placeholder bearer token instead of a real one, which a local
+server such as vLLM or Ollama ignores:
+
+```sh
+# in your own .env
+AI_PROVIDER_BASE_URL=http://localhost:11434/v1
+AI_MODEL_NAME=llama3.1
+AI_PROVIDER_API_KEY=
+```
+
+Set a real key and the base URL becomes a TLS matter: it must be `https` unless
+it names this machine, and startup refuses anything else rather than putting the
+key and a student's comment on the wire in the clear.
+
+The test suite never reaches a real endpoint whatever those hold: it points the
+base URL at a stub on `127.0.0.1` and asserts, with a guard under the call, that
+nothing connects off this machine.
+
+Everything a model produces enters through `backend/app/ai/`: `gateway.py` is the
+only module that talks to a provider, `tasks.py` holds one function per SPEC §7.4
+task, and `prompts/` holds the versioned prompt files. Today one task is wired —
+comment validity — and it stores what it decided in `classification`, with the
+prompt version and the model ID that produced it.
+
+**When the endpoint does not answer, a comment is judged by its length.** SPEC
+§3.3 accepts the submission rather than blocking a student on somebody else's
+outage, and the row it stores says so: its prompt version reads `character-floor`
+and its model ID reads `no-model`, so a verdict a model produced and a verdict a
+character count produced are never confused for one another.
 
 ## The mock LMS
 
@@ -226,6 +266,193 @@ of E1 and E3 needs a token first is where that belongs.
 All of that is per-process and in memory: restart the container and the line
 items and the posted scores are gone
 ([ADR 0049](docs/adr/0049-the-mock-gradebook-is-per-application-state-in-memory.md)).
+
+## The mock IdP
+
+Pulse has two entry doors (SPEC §2). Instructors and students arrive by LTI
+launch, which is what the mock LMS above stands in for. Everybody else —
+leadership, Care and Admin — logs in over OpenID Connect, because an LTI launch
+requires being enrolled in some course and they are not. Nobody has a spare Entra
+ID tenant either, so the stack brings its own provider: `mock-idp`, a small
+FastAPI application in [`mock-idp/`](mock-idp/) serving discovery, an
+authorization endpoint, a token endpoint and a JWKS (SPEC §9.2). It is
+development and test only, and nothing in Pulse trusts it unless Pulse's own
+configuration says so.
+
+`make up` starts it with everything else. Open <http://localhost:8081> to see the
+registered client and the seeded identities; the same values are JSON at
+<http://localhost:8081/mock/registration>, which is what E1's login work and the
+end-to-end specs read
+([ADR 0058](docs/adr/0058-the-mock-provider-publishes-its-registration-and-its-seed.md)).
+
+A login **starts at the client**, not on that page: send an authorization request
+to `/oidc/authorize` with a PKCE challenge, pick an identity on the form that
+comes back, and redeem the code at `/oidc/token` with the verifier. Until E1
+builds the tool's side, the redirect at the end lands on a 404 — the honest state
+of a provider whose client does not exist yet.
+
+Four things about it are worth knowing before debugging anything:
+
+- **It has no passwords.** The form offers the seeded people and signs in
+  whichever one is posted. Which people it offers is not a list: a person may use
+  this door when they hold an assignment whose role is not instructor or student,
+  which is SPEC §2's rule computed rather than copied
+  ([ADR 0060](docs/adr/0060-the-mock-provider-authenticates-a-seeded-subject.md)).
+- **It is strict where a real provider is strict, and a little stricter.** PKCE is
+  required and S256 only; `state` and `nonce` are required; an authorization code
+  is good once, for sixty seconds, and a failed exchange spends it too; a
+  `redirect_uri` that is not the registered one is refused with a page rather than
+  a redirect; a parameter sent twice — in the query, in the body, or once in each
+  — is refused rather than resolved last-wins; a scope it does not serve is
+  refused rather than quietly dropped, and one whose tokens are separated by
+  anything but a single space is refused rather than split into tokens the client
+  never sent. A mock that shrugged at any of those would teach the tool side to
+  shrug too.
+- **Nothing a client sends is trimmed, and that is load-bearing.** Values are
+  checked exactly as they arrived and refused, never repaired: a `code_verifier`
+  wrapped in whitespace — which is what `base64.encodebytes()` produces — is
+  `invalid_grant` here as it is at Keycloak, Okta and Auth0, and `state` and
+  `nonce` come back byte for byte, because a client compares both against what it
+  sent.
+- **A session carries what the granted scopes cover.** `openid` alone gets the
+  subject, the audience, the nonce and the Pulse roles claim, and **not** `email`
+  or `preferred_username`: ask for `email` and `profile` if you want those, as you
+  would at Azure AD, Okta or Google. The token response echoes the grant, so what
+  it declares and what the ID token carries cannot disagree. The roles claim is
+  not gated on any scope — it is namespaced rather than one of the registered
+  claims OIDC Core §5.4's table governs, which is how Azure AD, Auth0 and Okta
+  release role claims too.
+- **Its signing key is generated per process, and never written down.** Restart
+  the container and it is a different provider with a different key set, so
+  anything that cached the old keys stops verifying. No private key is committed
+  anywhere in this repository — a test sweeps the tree to make sure.
+- **It has no reload.** Like the mock LMS, the development override mounts your
+  checkout into the three application containers and not into this one, so
+  editing `mock-idp/` means `docker compose up -d --build mock-idp`.
+
+### Who it can sign in
+
+Eight people, one per web-login role plus the person who holds two assignments.
+Nobody has a name — Pulse owns person records (§2.1), so a fake IdP inventing one
+would be inventing the half Pulse is responsible for — and every address is at a
+domain RFC 2606 reserves.
+
+| Sign in as | Roles the session states | Also holds |
+|---|---|---|
+| `mock-idp-user-vpaa` | `VP_ACADEMICS` | — |
+| `mock-idp-user-dean` | `DEAN` | — |
+| `mock-idp-user-assistant-dean` | `ASSISTANT_DEAN` | — |
+| `mock-idp-user-chair` | `CHAIR` | — |
+| `mock-idp-user-lead-faculty` | `LEAD_FACULTY` | — |
+| `mock-idp-user-admin` | `ADMIN` | — |
+| `mock-idp-user-care` | `CARE` | — |
+| `mock-idp-user-care-who-teaches` | `CARE` | an `INSTRUCTOR` assignment, which uses the other door |
+
+The last row is the one worth understanding. She really does teach a section, and
+she really does work in the Office of Community Standards; she logs in here for
+the second and launches from the mock LMS as `mock-lms-user-instructor` for the
+first. Her session here states `CARE` and nothing else — not because anything
+filters her teaching out, but because entry doors belong to the assignment rather
+than to the person (SPEC §2), and an instructor assignment does not open this one.
+
+A session carries who she is and which roles she may act under, and **no purview
+of any kind** — no college, no department, no course, no supervision edge.
+Purview is computed by Pulse from its own supervision graph (§2.1), so the roles
+arrive in one namespaced claim and everything about what she can see is worked
+out on this side of the door
+([ADR 0061](docs/adr/0061-a-session-states-roles-in-a-namespaced-claim.md)).
+
+## The demo institution
+
+An empty Pulse is hard to develop against, so
+[`scripts/seed.py`](scripts/seed.py) builds one to work in.
+
+```sh
+make up             # the database has to be running
+make migrate        # and at head
+make seed           # load the demo institution
+```
+
+`make seed` runs on your machine, not in a container, so it needs the same two
+things `make migrate` needs — a database this machine can reach, and a
+`DATABASE_URL` naming `localhost` rather than the Compose service `db` (the
+section below says where to change it) — plus one of its own: **it refuses to run
+unless `ENVIRONMENT` is `development`**
+([ADR 0063](docs/adr/0063-the-demo-seed-runs-only-in-a-development-environment.md)).
+It reads `.env` itself, so nothing has to be exported.
+
+**Running it again is safe.** Every row is matched on the natural key the schema
+already enforces — an institution's name, a course's prefix and number, a
+section's code within its course and term — and re-used where it is found, so a
+second run over a database only the seed has written to changes nothing, and a
+run interrupted half way is finished by the next one
+([ADR 0064](docs/adr/0064-the-demo-seed-is-idempotent-by-natural-key.md)).
+
+**It will not share a database with a real institution, and says so rather than
+guessing.** Course prefixes are unique across the whole table rather than per
+institution ([ADR 0017](docs/adr/0017-prefix-codes-are-unique-across-the-deployment.md)),
+so a database that already holds a real `MATH` cannot also hold the demo's — and
+seeding it anyway would take the real one over rather than add one. The seed
+refuses, naming the prefix and the department that holds it. Give the demo a
+database of its own.
+
+### What it contains, and why it is shaped that way
+
+It is small, and every awkward part of it is deliberate — a tidy institution lets
+whole classes of bug look like correct answers.
+
+- **Two colleges**, five departments. With one college a dean's purview and the
+  VP's are the same rows, and every scoping bug in the leadership roll-up looks
+  right.
+- **A department that groups three prefixes.** Mathematics holds `MATH`, `STAT`
+  and `MIS`, which is SPEC §2.1's own example. Where every department holds
+  exactly one prefix, a roll-up that aggregates by prefix and one that aggregates
+  by department agree on every row, and the first is wrong.
+- **Fifteen courses across all five level bands.** §5.1 compares a section only
+  against others of the same length *and* level, so a level with no course is a
+  comparison set nobody can build a fixture for.
+- **Fall 2026, with §2.2's whole start-letter map** — twenty start positions,
+  six of them digits — and eighteen sections spanning sixteen of them, seven
+  different lengths and both modalities. Aggregate pages plot one line per start
+  cohort, and a term with one cohort leaves that screen with nothing to select
+  between.
+- **An assistant dean between chairs and a dean.** Scoped to the same college
+  node as the dean, with two chairs reporting through them, a third reporting
+  straight to the dean, and a course of their own in the one department they do
+  *not* supervise. That last detail is what makes §2.1's sentence true of these
+  rows — "own led courses ∪ every supervised chair's department, a set no single
+  containment node holds" — and without it a roll-up that just walked containment
+  would produce the right numbers and be wrong.
+- **A person wearing two hats.** The chair of Mathematics also leads a course,
+  and that lead assignment reports to their own chair assignment. §2.1 calls it
+  "legal and expected", and it is only expressible because a reporting edge joins
+  *assignments* rather than people.
+- **Three leads inside one prefix**, with courses that do not overlap, so §4.1
+  invariant 2 — a lead never sees a sibling lead's course — is visible on screen
+  and not only in a test.
+- **Eight courses with no lead-faculty mapping**, so the path §2.1 describes as
+  "a course with no mapping falls to its department chair" has something to
+  exercise.
+
+**Nobody here has a name.** Every seeded person is called what they do — `Demo
+Chair of Mathematics`, `Demo Assistant Dean of Arts and Sciences` — and every
+address is at an RFC 2606 `.invalid` domain that cannot receive mail. A demo seed
+gets copied into staging environments by people in a hurry
+([ADR 0066](docs/adr/0066-seeded-people-are-named-for-what-they-do.md)).
+
+**The course numbers disagree with `design/`, on purpose.** SPEC §8 bands a
+course level by its number — three digits in `000`–`799`, four digits in
+`8000`–`9999` — and every course number drawn in the prototype is four digits
+below `8000`, which is the gap between the two bands. None of them can be stored:
+`course.level` is generated from the number and is `NOT NULL`, so a number in no
+band is refused at write time. The seed picks its numbers against the spec.
+
+**It seeds no survey data**, and no registration for the mock LMS. Responses,
+comments and classifications arrive in E2 and E4; the platform question is
+[ADR 0065](docs/adr/0065-the-demo-institution-registers-a-fictional-platform.md),
+and the short version is that the demo's people belong to an invented platform at
+an address that resolves nowhere, so that nothing in this repository trusts
+`mock-lms` to sign a launch.
 
 ## Working on the backend without containers
 

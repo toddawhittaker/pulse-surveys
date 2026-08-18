@@ -102,3 +102,17 @@ services:
   mock-lms:
     ports:
       - '127.0.0.1:8080:8000'
+
+  # The mock OIDC provider's pages, so a developer can read the seeded identities
+  # and the registration in a browser. 8081 on the host because 8000 is `api` and
+  # 8080 is `mock-lms`; inside the container it is 8000 like every other Python
+  # service here.
+  #
+  # No source mount and no reload flag, for the same reason as `mock-lms` above:
+  # the development anchor sets PYTHONPATH to `/app/backend`, which is the
+  # backend's import root and not this service's. Editing the mock means
+  # `docker compose up -d --build mock-idp`, and README.md says so where it tells
+  # you how to reach it.
+  mock-idp:
+    ports:
+      - '127.0.0.1:8081:8000'

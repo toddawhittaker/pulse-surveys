@@ -34,8 +34,8 @@ changed file, add its reviewer:
 
 | Reviewer | Fires when a changed path matches |
 |---|---|
-| `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/models/identity`, `backend/app/models/org`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
-| `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/` |
+| `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/models/identity`, `backend/app/models/org`, `scripts/db-init/`, `scripts/seed.py`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
+| `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `scripts/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/` |
 | `architecture` | a new directory under `backend/app/`, `backend/app/services/`, `backend/app/ai/gateway`, `backend/app/agents/`, `backend/app/mcp/` |
 | `data-model` | `backend/migrations/`, `backend/app/models/`, `backend/app/views_sql/` |
 | `lti-oidc` | `backend/app/lti/`, `mock-lms/`, `mock-idp/`, session or auth code |

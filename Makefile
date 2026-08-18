@@ -87,17 +87,20 @@ lint: ## ruff check + ruff format --check, eslint
 		$(call skip,no frontend/package.json yet); \
 	fi
 
-# mypy runs twice, and it has to: `mock-lms/app` and `backend/app` are both
-# packages called `app` (SPEC §13 names both), and one run over the two stops
-# with "Duplicate module named app" having checked neither. Measured, not
-# assumed. `.github/workflows/ci.yml` runs the same pair in the same order. See
+# mypy runs three times, and it has to: `backend/app`, `mock-lms/app` and
+# `mock-idp/app` are all packages called `app` (SPEC §13 names all three), and
+# one run over two of them stops with "Duplicate module named app" having
+# checked neither. Measured, not assumed. `.github/workflows/ci.yml` runs the
+# same three in the same order. See
 # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
 .PHONY: typecheck
-typecheck: ## mypy over backend/ and mock-lms/ + tsc --noEmit
+typecheck: ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit
 	$(call banner,mypy)
 	@mypy
 	$(call banner,mypy mock-lms/app)
 	@mypy mock-lms/app
+	$(call banner,mypy mock-idp/app)
+	@mypy mock-idp/app
 	$(call banner,tsc --noEmit)
 	@if [ -f frontend/package.json ]; then \
 		cd frontend && npx tsc --noEmit; \
@@ -164,9 +167,12 @@ evals: ## AI eval runner with per-task precision/recall floors
 
 # The checks after the health wait are E0-02's and E0-03's acceptance criteria,
 # in the same order as the `docker` job in .github/workflows/ci.yml, plus the
-# base-file-only pass that job ends with. Three services are named and five are
-# covered: `api` waits on a healthy `db` and a healthy `redis`, while `worker`
-# and `beat` have nothing waiting on them and so have to be named here.
+# base-file-only pass that job ends with. Five services are named and seven are
+# covered: `api` waits on a healthy `db` and a healthy `redis`, while `worker`,
+# `beat`, `mock-lms` and `mock-idp` have nothing waiting on them and so have to
+# be named here. The two mocks joined this list in E0-16; the workflow has named
+# `mock-lms` since E0-14 and this file had not caught up, which is the drift
+# CLAUDE.md means when it says the workflow is right and this file is the bug.
 #
 # The base-file-only pass is the one that runs the application as installed in
 # the image; every other line here runs your checkout through the override's
@@ -181,7 +187,7 @@ docker-build: ## Build the images and check the stack against E0-02's and E0-03'
 	@set -e; \
 	trap '$(COMPOSE) down -v >/dev/null 2>&1 || true' EXIT; \
 	$(COMPOSE) up -d; \
-	./scripts/ci/wait_for_health.sh api worker beat; \
+	./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp; \
 	code=$$(curl --silent --show-error --max-time 10 --output /dev/null \
 		--write-out '%{http_code}' http://localhost:8000/healthz); \
 	echo "    GET /healthz -> $$code"; \
@@ -193,12 +199,12 @@ docker-build: ## Build the images and check the stack against E0-02's and E0-03'
 	echo "    base file alone (no override: no mounts, no host ports)"; \
 	$(COMPOSE) -f docker-compose.yml down -v >/dev/null; \
 	$(COMPOSE) -f docker-compose.yml up -d >/dev/null; \
-	./scripts/ci/wait_for_health.sh api worker beat >/dev/null; \
+	./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp >/dev/null; \
 	for attempt in 1 2; do \
 		echo "    down -v && up -d (attempt $$attempt)"; \
 		$(COMPOSE) down -v >/dev/null; \
 		$(COMPOSE) up -d >/dev/null; \
-		./scripts/ci/wait_for_health.sh api worker beat >/dev/null; \
+		./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp >/dev/null; \
 	done
 
 .PHONY: frontend-build
@@ -301,10 +307,19 @@ logs: ## Follow stack logs
 migrate: ## Apply migrations to the running database
 	@cd backend && alembic upgrade head
 
+# Same two conditions as `migrate` above — a database to talk to, and a
+# DATABASE_URL that resolves from here — plus one of its own: the script refuses
+# to run unless ENVIRONMENT is `development` (docs/adr/0063). It reads `.env`
+# itself, as `backend/migrations/env.py` does, so nothing has to be exported.
+#
+# E0-17 removed this target's tolerance for an absent `scripts/seed.py`, which is
+# the move every gate in the epic README's "How CI tightens" table makes when the
+# thing it guards arrives (ADR 0002). While that guard was here, deleting the seed
+# script left `make seed` printing "skipped" and exiting zero, so the demo
+# institution every later epic develops against could go missing with nothing red.
 .PHONY: seed
 seed: ## Load the demo institution, hierarchy, term, and sections
-	@if [ -f scripts/seed.py ]; then $(PYTHON) scripts/seed.py; \
-	else $(call skip,no scripts/seed.py yet); fi
+	@$(PYTHON) scripts/seed.py
 
 .PHONY: clean
 clean: ## Remove build and report artifacts

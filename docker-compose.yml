@@ -380,6 +380,71 @@ services:
       retries: 6
       start_period: 15s
 
+  # The in-repo OIDC provider to log in through (§7.2 lists it, §9.2 says what it
+  # is for: the *other* entry door, so that both doors in §2 are exercised in
+  # every run). Development and test only, in this file rather than behind a
+  # profile for the reasons ADR 0038 gives about the platform — §7.2 puts it
+  # here, and a profile would take it out of CI's base-file-only pass, the one
+  # pass that runs what actually ships. What keeps it out of a deployment is not
+  # this file: this service holds nothing, reaches nothing, publishes no port,
+  # and is trusted only where Pulse's own configuration names it.
+  #
+  # **No `env_file:`, deliberately**, for the same reason `mock-lms` declares
+  # none: `env_file:` is all-or-nothing, and it would hand a fake identity
+  # provider the database credentials that ADR 0009 spends two rules keeping out
+  # of containers with no use for them.
+  mock-idp:
+    build:
+      context: .
+      dockerfile: mock-idp/Dockerfile
+    # Literals, not `${...}`. Each is an address on this network with one correct
+    # value, so there is nothing for an operator to set per deployment — and the
+    # epic README's rule is that an `.env.example` entry is earned by a `Settings`
+    # field or a Compose interpolation, so interpolating here would add three
+    # entries to the application's documented configuration surface for a service
+    # that is not the application. ADR 0037 settled this for the platform and
+    # asked E0-16 to reach the same answer or say why not; ADR 0058 is E0-16
+    # reaching it.
+    #
+    # `mock-idp/app/config.py` defaults to these same values, so the provider
+    # starts with no configuration at all. They agree; if they ever disagree,
+    # what a deployment runs is this file.
+    environment:
+      MOCK_IDP_ISSUER: http://mock-idp:8000
+      # The one registered client: Pulse. A provider with no registered client
+      # can answer no authorization request at all.
+      MOCK_IDP_CLIENT_ID: mock-idp-client
+      # Where a session is delivered to that client — the tool's OIDC callback.
+      # E1 builds it; until then the redirect lands on a 404, which is the honest
+      # state of a provider whose client does not exist yet. A browser on the
+      # host reaches `api` at `localhost:8000` rather than at `api:8000`, so
+      # E0-18 may need this pointed at the published address instead; that is one
+      # line here rather than an edit to the image.
+      MOCK_IDP_TOOL_REDIRECT_URI: http://api:8000/auth/oidc/callback
+    # Documentation, not publishing: reachable from `api` on this network, and
+    # from nothing on the host. The development override publishes it.
+    expose:
+      - '8000'
+    healthcheck:
+      # Declared here rather than as a HEALTHCHECK in the image, exactly as
+      # `mock-lms` above. One copy either way; this is the one
+      # `wait_for_health.sh` needs and the one `tests/unit/test_mock_idp_service.py`
+      # reads, and a second copy in the Dockerfile would be a thing to keep in
+      # step.
+      #
+      # urllib is in the standard library, so this adds nothing to the image and
+      # needs no shell; `urlopen` raises on any non-2xx, which is the failure the
+      # check has to report.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
 volumes:
   # Named, so `docker compose down -v` is the only thing that discards the
   # database and an ordinary `down` never does.
