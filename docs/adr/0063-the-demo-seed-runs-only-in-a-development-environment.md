@@ -34,8 +34,8 @@ deployment runbook because it was in the development one.
 
 ## Decision
 
-`scripts/seed.py` refuses to run unless `ENVIRONMENT` is exactly `development`,
-and it checks that **before it builds a database URL**, so a refused run opens no
+`scripts/seed.py` refuses to run unless `ENVIRONMENT` is `development`, and it
+checks that **before it builds a database URL**, so a refused run opens no
 connection at all.
 
 The check is an equality, not a deny-list. The set of names a deployment might
@@ -46,11 +46,43 @@ through. The one name that is safe is the one this script exists for.
 An empty `ENVIRONMENT` is refused for the same reason: a value somebody set to
 nothing is not the one name that is safe.
 
+### What the comparison actually is
+
+An earlier version of this record said "exactly `development`", which was true of
+one half of the comparison and false of the other. The check is
+`(raw or "").strip() == "development"`:
+
+- **Surrounding whitespace is stripped, and this is a decision.** ` development `,
+  `development ` and `\tdevelopment\n` are all admitted. `.env` is a hand-edited
+  file, a trailing space in it is invisible in most editors, and a refusal quoting
+  `'development '` is indistinguishable on screen from one quoting
+  `'development'` — which would be the single most confusing failure this guard
+  could produce. The widening is contained and was measured: `.strip()` admits
+  exactly the whitespace-padded spellings of the one safe name and nothing else,
+  so `devel opment`, `development1` and `adevelopment` are all refused and no
+  deployment name can reach it.
+- **Case is not folded, and this was inherited rather than chosen.** `==` is
+  case-sensitive by default and nobody weighed it at the time; it is recorded as
+  inherited because saying otherwise would dress up an accident as a judgment.
+  **It stands on review**, for the reason that runs opposite to the strip:
+  folding would make a fail-closed guard wider, and a refusal quoting
+  `'Development'` is legible — the reader can see what is wrong with it. So the
+  rule is *forgive what the reader cannot see, refuse what they can*, and the two
+  halves are consistent rather than arbitrary.
+
+Both halves are pinned by cases in the guard suite, and they fail in opposite
+directions: dropping the `.strip()` breaks only the whitespace case, adding a
+`.casefold()` breaks only the case one. Neither can change silently now.
+
+**This subsection is about the comparison and nothing else.** Which sources
+supply the value being compared was decided separately, below, and is not
+reopened here.
+
 **The guard reads *resolved* configuration — the process environment with `.env`
 filling in only what it does not set — and not the process environment alone.**
-That was disputed, arbitrated and decided by Todd. The subsection below is the
-decision; the table immediately under this paragraph is only what the decision
-looks like case by case, and is not itself the decision.
+That was disputed, arbitrated and decided by Todd. "How the second row was
+decided" below is that decision; the table immediately under this paragraph is
+only what it looks like case by case, and is not itself the decision.
 
 `scripts/seed.py` builds that resolution once, in `resolved_configuration`, with
 the precedence every other reader in this repository uses (ADR 0008, ADR 0012),
@@ -61,7 +93,7 @@ meanings here and they are answered differently:
 |---|---|---|
 | absent | absent, or carrying no `ENVIRONMENT` | **refused** |
 | absent | supplying `development` | **admitted** |
-| set to anything but `development`, empty and whitespace included | either | **refused** |
+| set to anything that is not `development` once surrounding whitespace is stripped — the empty string, whitespace alone, and `Development` included | either | **refused** |
 
 Every row is measured, in-process and as a subprocess, and the refusal names
 which of the three ways it was wrong — an earlier version reported the first and

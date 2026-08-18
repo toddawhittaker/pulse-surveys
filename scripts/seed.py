@@ -729,6 +729,14 @@ def check_environment_is_development(configuration: Mapping[str, str]) -> None:
     would let every name nobody thought of through. The one name that is safe is
     the one this script is for.
 
+    **Surrounding whitespace is stripped; case is not folded.** So ` development `
+    runs and `Development` does not, which is deliberate in the first half and
+    inherited in the second — a trailing space in a hand-edited `.env` is
+    invisible on screen and a refusal quoting it would be unreadable, while a
+    miscased name is something the reader can see is wrong. ADR 0063 carries the
+    reasoning and the containment argument: the strip admits the padded spellings
+    of this one name and nothing else, so no deployment name reaches it.
+
     **Takes the resolved configuration rather than reading `os.environ`.** Which
     absence this sees — no value anywhere, or a value `.env` supplied — is the
     question E0-17-01 was disputed over and Todd settled, and a guard that reached
