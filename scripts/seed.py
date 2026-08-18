@@ -62,9 +62,17 @@ an equality rather than a deny-list.
 
 Every row is matched on the natural key the schema already gives it — an
 institution's name, a course's `(prefix, number)`, an assignment's `(person, role,
-scope node)` — and re-used where it is found. So a second run writes nothing, and
-a run interrupted half way finishes on the next one. ADR 0064 records why
-matching rather than reloading.
+scope node)` — and re-used where it is found. So a second run over a database only
+this seed has written to changes nothing, and a run interrupted half way finishes
+on the next one. ADR 0064 records why matching rather than reloading.
+
+**It will not share a database with a real institution.** Every key above is
+either scoped to a row this seed created or is a value this file invented, with
+one exception the schema forces: `prefix.code` is unique across the whole table
+rather than per institution (ADR 0017), and `MATH` is a name a real institution
+uses too. Matching there would adopt a real prefix rather than create one, and
+carry every course under it along — so `seed_containment` refuses instead, naming
+the code and the department that holds it. ADR 0064 carries the measurement.
 """
 
 import os
@@ -617,7 +625,7 @@ ASSIGNMENTS: tuple[DemoAssignment, ...] = (
 # where an editor keeping them in step gets built, so the demo seeds them
 # agreeing.
 #
-# **Nine of the fifteen courses are deliberately absent**, so the fall-to-chair
+# **Eight of the fifteen courses are deliberately absent**, so the fall-to-chair
 # path has something to exercise: with every course mapped, an implementation that
 # never implements the fallback passes every screen in development.
 LEAD_FACULTY_MAPPINGS: tuple[tuple[str, str], ...] = (
@@ -880,15 +888,48 @@ def seed_containment(session: Session) -> dict[tuple[str, str], UUID]:
             )
             nodes["department", department] = department_row.id
 
+    # **The one natural key in this file that is not scoped to a row the seed
+    # created**, and the reason this loop is not a call to `upsert`. `prefix.code`
+    # is `UNIQUE` across the whole table rather than per institution (ADR 0017),
+    # so a database that already holds a real institution's `MATH` would have that
+    # row *adopted* — re-pointed at Pulse Demo University's Mathematics department
+    # — and every real course under it reached by `(prefix_id, lms_number)`, with
+    # its title overwritten and its lead-faculty mapping replaced by a demo
+    # person. Measured before this guard existed: the run exited 0 and printed its
+    # success line. The yield is an authorization change, because purview is
+    # computed from the containment tree and from `lead_faculty_mapping`, so demo
+    # leadership gains purview over real courses and the real lead loses theirs.
+    #
+    # So the seed refuses rather than adopts, the way `seed_calendar` refuses a
+    # term whose weeks it cannot reconcile. A prefix already pointing at the
+    # department this file wants is this seed's own row from an earlier run and is
+    # reused, which is what keeps the second run idempotent.
+    prefixes: dict[str, UUID] = {}
     for prefix in PREFIXES:
-        upsert(
-            session,
-            Prefix,
-            {"code": prefix.code},
-            department_id=nodes["department", prefix.department],
-        )
+        wanted = nodes["department", prefix.department]
+        found = session.scalars(select(Prefix).where(Prefix.code == prefix.code)).one_or_none()
+        if found is not None and found.department_id != wanted:
+            holder = session.get(Department, found.department_id)
+            holder_college = session.get(College, holder.college_id) if holder else None
+            raise SeedError(
+                f"The prefix {prefix.code!r} already exists and belongs to the department "
+                f"{(holder.name if holder else '(unknown)')!r}"
+                f"{f' in {holder_college.name!r}' if holder_college else ''}, which this seed "
+                "did not create.\n"
+                f"`prefix.code` is unique across the whole table rather than per institution "
+                f"(docs/adr/0017), so seeding {prefix.code!r} here would not add a prefix — it "
+                "would take that one over, re-point it at Pulse Demo University, and carry every "
+                "course under it along: a course whose number matches a seeded one is reached by "
+                "`(prefix_id, lms_number)`, its title overwritten and its lead-faculty mapping "
+                "replaced by a demo person. Purview is computed from containment and from that "
+                "mapping, so the result is an authorization change nobody asked for.\n"
+                "The demo institution and a real one cannot share a prefix code in one database. "
+                "Use a database of your own for the demo, or drop the demo institution first."
+            )
+        prefixes[prefix.code] = upsert(
+            session, Prefix, {"code": prefix.code}, department_id=wanted
+        ).id
 
-    prefixes = {row.code: row.id for row in session.scalars(select(Prefix)).all()}
     for course in COURSES:
         course_row = upsert(
             session,
