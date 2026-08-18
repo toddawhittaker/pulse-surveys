@@ -8,11 +8,27 @@ Everything below asserts what the provider produces.
 **What is deliberately not here.** Tool-side login, session handling and the
 unified session model that merges both doors are E1's, and E0-16's out-of-scope
 list says so. So there is no test of what Pulse does when it receives one of
-these sessions. The negative cases that *are* here are of two kinds and both are
+these sessions. The negative cases that *are* here are of three kinds and each is
 labelled: the acceptance criteria that are themselves refusals — a code redeemed
-twice, a mismatched verifier — and one control on this module's own verifier,
-without which "the signature verifies" would be satisfied by a function that
-answers yes to everything (`docs/MISTAKES.md` entry 3).
+twice, a mismatched verifier — one control on this module's own verifier, without
+which "the signature verifies" would be satisfied by a function that answers yes
+to everything (`docs/MISTAKES.md` entry 3), and the two malformed-PKCE tests
+added after the fact.
+
+**Those two came from the implementer rather than from a criterion**, and they
+are the reason `refusal` below now requires a 4xx. Two 500s, fixed one after the
+other: a `code_verifier` outside ASCII raised when the token endpoint hashed it,
+and a `code_challenge` outside ASCII — a value the *authorization* endpoint had
+already accepted and stored — raised when the same redemption compared it. So the
+two malformed values enter at different endpoints and **both crashes land at the
+same one**, which is why the second test below walks the flow to its end rather
+than judging the authorization response: a check that stopped where the value was
+submitted would have watched the provider accept it and called that a pass.
+
+Nothing in this suite could reach either. Every PKCE value it sends comes from
+`secrets.token_urlsafe`, which cannot produce a byte those guards were breaking
+on — a driver that only emits well-formed input makes the invalid half of every
+guard unreachable, and the suite reads as covering a path no test can enter.
 
 **Where the seeded client comes from.** An authorization request names a
 `client_id` and a redirect URI, and E0-16 spells neither. `MockIdentityProvider.
@@ -40,6 +56,8 @@ library.
 import time
 from typing import Any
 from urllib.parse import urlsplit
+
+import pytest
 
 # `mock_idp`, `mock_idps` and `web_login` come from `tests/conftest.py`, and
 # everything this module needs from the provider is reached through them rather
@@ -120,14 +138,61 @@ UNREGISTERED_REDIRECT_URI = "http://attacker.invalid/collect"
 # choice**, and generous: both clocks are the same clock.
 CLOCK_TOLERANCE_SECONDS = 60
 
+# A PKCE value carrying one character outside ASCII, and **43 characters long**.
+# The length is the whole reason this constant is written out rather than typed
+# at the call site: 43 is the minimum RFC 7636 §4.1 allows a verifier and the
+# exact length the base64url of a SHA-256 digest has, so a length check cannot be
+# what refuses it. A shorter non-ASCII value would be turned away before anything
+# looked at its characters, and the tests below would pass without reaching the
+# handling they are named for — `docs/MISTAKES.md` entry 3, in the form where the
+# test and the guard that answers it are one rule apart.
+NON_ASCII_PKCE_VALUE = "é" + "a" * 42
+
+# The two other shapes RFC 7636 §4.1 rules out by length: nothing at all, and one
+# character past the 128 it permits. Neighbours of the measured case rather than
+# measured cases themselves, and included because they are the shapes an
+# unchecked slice or an unguarded index fails on, which is the same class of
+# failure as the one that was found.
+EMPTY_PKCE_VALUE = ""
+OVERLONG_PKCE_VERIFIER = "a" * 129
+
+# What is submitted to the *authorization* endpoint as `code_challenge`, with
+# `code_challenge_method=S256` alongside it — so neither of these can be read as
+# "this client is not using PKCE". The empty one is malformed rather than absent,
+# and that difference is the whole of why it belongs here.
+MALFORMED_CHALLENGES = {
+    "a challenge carrying a character outside ASCII": NON_ASCII_PKCE_VALUE,
+    "an empty challenge": EMPTY_PKCE_VALUE,
+}
+
+# What is submitted to the *token* endpoint as `code_verifier`. The same value
+# appears in both mappings on purpose: it is legal at 43 characters for a
+# verifier and legal at 43 characters for an S256 challenge, so one constant
+# reaches both entry points without either being able to refuse it for its size.
+MALFORMED_VERIFIERS = {
+    "a verifier carrying a character outside ASCII": NON_ASCII_PKCE_VALUE,
+    "an empty verifier": EMPTY_PKCE_VALUE,
+    "a verifier past the 128-character maximum": OVERLONG_PKCE_VERIFIER,
+}
+
 
 def refusal(provider: Any, response: Any, subject: str) -> None:
     """Require `response` to be a refusal, and to be a refusal about `subject`.
 
-    Three assertions rather than one, because "the exchange failed" is satisfied
+    Four assertions rather than one, because "the exchange failed" is satisfied
     by several things that are not the rule under test:
 
       - A 2xx would be the defect itself, so the status is checked first.
+      - **A 5xx is not a refusal.** A provider that raises on the input answers no
+        token either, so a check for "not 2xx" passes against a crash — and a
+        crash is a different defect with a different fix, reached by input the
+        provider failed to parse rather than by a decision it made. This is not
+        hypothetical: two malformed PKCE values produced a 500 here, and the
+        version of this helper that said only "not 2xx" would have called both
+        refusals. The range is the whole 4xx rather than the 400 RFC 6749 §5.2
+        fixes, because 400-against-401 is a conformance question and this helper
+        is about the difference between deciding and falling over; the shape
+        question is raised in the pull request instead of pinned here.
       - A body carrying an `id_token` or an `access_token` is a session issued
         alongside an error status, which is the failure that matters and which a
         status check alone would miss.
@@ -143,6 +208,13 @@ def refusal(provider: Any, response: Any, subject: str) -> None:
         f"The token endpoint accepted {subject}: it answered {response.status_code}. "
         f"Body begins {response.text[:200]!r}."
     )
+    assert 400 <= response.status_code < 500, (
+        f"The token endpoint answered {response.status_code} for {subject}, which is not a "
+        "refusal — it is the provider failing to handle the request. RFC 6749 §5.2 makes a "
+        "rejected grant a 4xx carrying an `error`; a 5xx says the input reached something that "
+        "raised on it, which is what a malformed PKCE value did here before it was fixed. "
+        f"Body begins {response.text[:300]!r}."
+    )
     issued = sorted(name for name in ("id_token", "access_token") if body.get(name))
     assert not issued, (
         f"The token endpoint refused {subject} with status {response.status_code} and handed back "
@@ -155,6 +227,44 @@ def refusal(provider: Any, response: Any, subject: str) -> None:
         "what tells a client the difference between a rejected grant and a provider that fell "
         "over."
     )
+
+
+def outcome_of(provider: Any, attempt: Any) -> tuple[str, Any]:
+    """Drive `attempt` as far as the provider will take it, and say where it stopped.
+
+    A request the provider should not honour may be turned away at any of three
+    points, and **which one is not something E0-16 settles**: at the
+    authorization endpoint, at the login form, or at the token endpoint when the
+    code it issued is redeemed. All three are legal places to enforce PKCE — RFC
+    7636 §4.4 recommends the first and requires the last — so a test that
+    insisted on one would fail a provider for choosing another.
+
+    So the walk goes as far as it can and hands back the stage it reached with
+    the response that ended it, and the assertions are made about *that*: no
+    crash anywhere along it, and no session at the end of it. The redemption uses
+    the attempt's own verifier, which is the strongest case for the provider —
+    if a session comes back for a verifier that genuinely matches nothing the
+    provider could have stored, PKCE has been skipped rather than enforced.
+    """
+    if attempt.form is None:
+        return "authorization endpoint", attempt.response
+    submitted = provider.submit_login(attempt, provider.offered_identities(attempt)[0])
+    if submitted.code is None:
+        return "login form", submitted.response
+    return "token endpoint", provider.redeem(submitted.code, attempt.verifier)
+
+
+def session_issued(provider: Any, stage: str, response: Any) -> bool:
+    """Whether `response` handed back something a client could sign in with.
+
+    An `id_token` at the token endpoint, or an authorization code anywhere
+    earlier — a code is a session one exchange later, so treating only the token
+    as "issued" would report the flow as refused at the moment it stopped being
+    refused.
+    """
+    if stage == "token endpoint":
+        return bool(provider.body_of(response).get("id_token"))
+    return provider.read_authorization_response(response)[1] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +885,120 @@ def test_a_code_redemption_with_no_pkce_verifier_is_rejected(mock_idp: Any) -> N
 
     without = mock_idp.redeem(submitted.code, None)
     refusal(mock_idp, without, "a code exchange carrying no PKCE verifier at all")
+
+
+@pytest.mark.parametrize("case", sorted(MALFORMED_VERIFIERS))
+def test_a_code_redemption_carrying_a_malformed_pkce_verifier_is_refused_rather_than_crashing(
+    mock_idp: Any, case: str
+) -> None:
+    """The token endpoint's half of a measured defect: malformed input, not a wrong answer.
+
+    A `code_verifier` carrying a character outside ASCII raised inside the
+    provider and produced a 500. That is a different failure from the mismatch
+    two tests above, and no test in this module could reach it: `pkce_pair` in
+    `tests/conftest.py` builds every verifier this suite sends out of
+    `secrets.token_urlsafe`, which cannot emit a byte outside the unreserved set
+    — so the suite was structurally incapable of producing the input that broke
+    it. The values are written out at the top of this file for that reason.
+
+    **Why a 500 matters when the client sees no token either way.** A crash is
+    reached by input the provider failed to parse rather than by a decision it
+    made, so nothing about the request has been judged: an endpoint that raises
+    on one malformed shape usually raises on others, it says so in a stack trace
+    rather than in an `error` member, and E1 would be writing a client against a
+    provider that answers a 500 where every real IdP answers a 400. `refusal`
+    above requires the 4xx; the assertion here names the crash directly, so the
+    failure reads as what it is.
+
+    The non-ASCII case is the measured one. The empty and over-long verifiers are
+    its neighbours: both are refused by the digest comparison in any
+    implementation, so neither depends on an alphabet or length check existing,
+    and both are the shapes an unguarded slice fails on.
+
+    The control is a whole flow redeemed with its matching verifier, on the same
+    provider, in the same test — without it a token endpoint that refused
+    everything would pass.
+    """
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A flow redeemed with its matching verifier produced no `id_token`, so the refusal below "
+        "would be indistinguishable from a token endpoint that refuses every exchange."
+    )
+
+    attempt = mock_idp.begin()
+    identity = mock_idp.offered_identities(attempt)[0]
+    submitted = mock_idp.submit_login(attempt, identity)
+    assert submitted.code, (
+        f"Signing in as {identity} produced no authorization code (status "
+        f"{submitted.response.status_code}), so there is nothing to redeem."
+    )
+
+    response = mock_idp.redeem(submitted.code, MALFORMED_VERIFIERS[case])
+
+    assert response.status_code < 500, (
+        f"Redeeming a code with {case} answered {response.status_code}. The provider raised on "
+        "the value rather than deciding about it — the request never got as far as being "
+        f"rejected. Body begins {response.text[:300]!r}."
+    )
+    refusal(mock_idp, response, f"a code exchange carrying {case}")
+
+
+@pytest.mark.parametrize("case", sorted(MALFORMED_CHALLENGES))
+def test_an_authorization_request_with_a_malformed_pkce_challenge_does_not_crash_or_grant(
+    mock_idp: Any, case: str
+) -> None:
+    """The other entry point for the same defect, and it is a separate half.
+
+    A `code_challenge` outside ASCII was **accepted** by the authorization
+    endpoint and raised later, when the redemption compared it. The two were
+    fixed one after the other and the first fix did not close the second, which
+    is `docs/MISTAKES.md` entry 13 exactly: one hazard faced at two entry points,
+    worked around at one. So this is its own test rather than a second assertion
+    in the one above, and either half can regress without the other going red.
+
+    **This is why the flow is walked to its end.** The malformed value enters
+    here and the crash lands at the token endpoint, so a test that judged the
+    authorization response and stopped would have watched the provider accept the
+    value and reported a pass — the defect intact, one step further on.
+    `outcome_of` above therefore goes as far as the provider allows and reports
+    the stage it stopped at, which also means neither assertion below decides
+    *where* PKCE is enforced.
+
+    **Two assertions, and neither can substitute for the other.** The provider
+    must not raise, and no session may come out of the flow. The second is not
+    implied by the first — a provider that accepted the malformed challenge,
+    showed the form and issued a spendable code has crashed nowhere — and the
+    first is not implied by the second, because a 500 also produces no session
+    and would read as a refusal.
+
+    **What is deliberately not asserted: the shape of the refusal.** E0-16 does
+    not say what a malformed authorization request should answer, and the
+    implementer deferred error redirects entirely — refusals here are pages, not
+    `?error=invalid_request` back to the client, which is what RFC 6749 §4.1.2.1
+    describes and what E1 will meet. Pinning a status or a body would be this
+    file settling that; it is named in the pull request instead.
+    """
+    control = mock_idp.login()
+    assert control.tokens.get("id_token"), (
+        "A well-formed flow produced no session on this provider, so 'a malformed challenge "
+        "produces none' would be a fact about the provider being broken for everyone."
+    )
+
+    attempt = mock_idp.begin(code_challenge=MALFORMED_CHALLENGES[case])
+    stage, response = outcome_of(mock_idp, attempt)
+
+    assert response.status_code < 500, (
+        f"An authorization request carrying {case} reached the {stage} and answered "
+        f"{response.status_code}. The provider raised on the value rather than deciding about "
+        f"it. Body begins {response.text[:300]!r}."
+    )
+    assert not session_issued(mock_idp, stage, response), (
+        f"An authorization request carrying {case} was honoured: the {stage} handed back a "
+        "session. RFC 7636 §4.4 has the server reject a challenge it cannot use, and a challenge "
+        "no verifier can ever match is PKCE removed rather than PKCE applied — the code becomes "
+        "spendable by whoever holds it, which is the whole of what the challenge exists to "
+        "prevent."
+    )
 
 
 def test_an_authorization_request_naming_an_unregistered_redirect_uri_is_refused(
