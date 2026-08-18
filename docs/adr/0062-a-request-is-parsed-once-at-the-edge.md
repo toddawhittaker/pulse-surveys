@@ -109,9 +109,37 @@ it — and the answer there is not obviously this one. What does carry over is t
 rule about echo semantics: a value the protocol requires back unchanged is
 untouchable in both directions.
 
-**Two things this does not cover, stated so they are not read as covered.** The
+**One thing this does not cover, stated so it is not read as covered.** The
 provider still answers refusals with a page rather than RFC 6749 §4.1.2.1's
 redirect carrying an `error` — deferred, and Todd's call — and this record does
-not decide it. And nothing here is enforced by a gate: it is a convention with a
-docstring on `submitted()` and this record behind it, so a future `.strip()` in a
-new endpoint is caught by review or by nothing.
+not decide it.
+
+**A gate enforces the first rule, and its limits are part of what it enforces.**
+`tests/unit/test_the_provider_judges_the_value_that_arrived.py` sweeps every call
+to `strip`, `lower`, `upper`, `casefold`, `split` or `unquote` under
+`mock-idp/app/` by parsing the source, and requires each to match one of four
+permitted **shapes**: a configuration read in `config.py`, a presence test whose
+result is discarded (`if not value.strip():` and only that — `if value.strip() ==
+expected:` is the defect wearing the same clothes), a `split` with an explicit
+delimiter, or a media type normalised off a request header. Shapes rather than
+line numbers or counts, so a fifth presence check added next month passes by
+having the property rather than by anybody re-counting.
+
+Three limits travel with it, and an ADR claiming a gate covers more than it does
+is worse than one admitting it covers nothing:
+
+- **The swept set is six names, and it is six because six were measured against
+  this tree.** `rstrip`, `lstrip`, `replace` and every other way to change a
+  value are not swept. Widening the set without measuring it would make the gate
+  fail on ground nobody has looked at, and a gate that fails for an unmeasured
+  reason teaches people to add exclusions.
+- **It is syntactic, not dataflow.** It sees the shape of a call, never where the
+  value came from. A normalisation of request data written in one of the four
+  shapes passes — which is the point for three of them, and for the
+  configuration shape rests on `config.py` staying a configuration module.
+- **It reads the source rather than the running application**, so a
+  normalisation reached through `getattr` or inside a library call is invisible
+  to it.
+
+So the rule is enforced against the mechanism that produced all five defects, and
+a sixth arriving by another route is still caught by review or by nothing.

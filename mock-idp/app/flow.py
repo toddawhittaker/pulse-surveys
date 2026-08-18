@@ -332,6 +332,19 @@ def submitted(parameters: Mapping[str, Any], name: str) -> str:
     `base64.encodebytes()` appends exactly that newline — so a client minting its
     verifier that way passes here and fails at the first real provider, with an
     error naming the verifier rather than the encoder.
+
+    **This is a gated rule, not only a convention.** A unit test parses every
+    module under `mock-idp/app/` and requires each call to `strip`, `lower`,
+    `upper`, `casefold`, `split` or `unquote` to match one of four permitted
+    shapes — a configuration read in `config.py`, a presence test whose result is
+    discarded, a `split` carrying an explicit delimiter, or a media type
+    normalised off a request header. So `if not value.strip():` below passes and
+    `if value.strip() == expected:` does not, wherever either is written. What the
+    gate cannot see, and
+    [ADR 0062](../../docs/adr/0062-a-request-is-parsed-once-at-the-edge.md)
+    states: it sweeps six names rather than every way to change a value, it reads
+    the shape of a call rather than where the value came from, and it reads this
+    source rather than the running application.
     """
     value = parameters.get(name)
     return "" if value is None else str(value)
