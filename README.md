@@ -249,8 +249,17 @@ It reads `.env` itself, so nothing has to be exported.
 **Running it again is safe.** Every row is matched on the natural key the schema
 already enforces — an institution's name, a course's prefix and number, a
 section's code within its course and term — and re-used where it is found, so a
-second run writes nothing and a run interrupted half way is finished by the next
-one ([ADR 0064](docs/adr/0064-the-demo-seed-is-idempotent-by-natural-key.md)).
+second run over a database only the seed has written to changes nothing, and a
+run interrupted half way is finished by the next one
+([ADR 0064](docs/adr/0064-the-demo-seed-is-idempotent-by-natural-key.md)).
+
+**It will not share a database with a real institution, and says so rather than
+guessing.** Course prefixes are unique across the whole table rather than per
+institution ([ADR 0017](docs/adr/0017-prefix-codes-are-unique-across-the-deployment.md)),
+so a database that already holds a real `MATH` cannot also hold the demo's — and
+seeding it anyway would take the real one over rather than add one. The seed
+refuses, naming the prefix and the department that holds it. Give the demo a
+database of its own.
 
 ### What it contains, and why it is shaped that way
 
@@ -286,8 +295,8 @@ whole classes of bug look like correct answers.
 - **Three leads inside one prefix**, with courses that do not overlap, so §4.1
   invariant 2 — a lead never sees a sibling lead's course — is visible on screen
   and not only in a test.
-- **Nine courses with no lead-faculty mapping**, so the path §2.1 describes as "a
-  course with no mapping falls to its department chair" has something to
+- **Eight courses with no lead-faculty mapping**, so the path §2.1 describes as
+  "a course with no mapping falls to its department chair" has something to
   exercise.
 
 **Nobody here has a name.** Every seeded person is called what they do — `Demo

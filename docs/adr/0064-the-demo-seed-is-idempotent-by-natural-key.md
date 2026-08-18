@@ -30,7 +30,7 @@ does it for every table:
 | `institution` | `name` |
 | `college` | `(institution_id, name)` |
 | `department` | `(college_id, name)` |
-| `prefix` | `code` |
+| `prefix` | `code` — **not scoped to anything; see below** |
 | `course` | `(prefix_id, lms_number)` |
 | `term` | `(institution_id, name)` |
 | `start_letter_map` | `(term_id, letter)` |
@@ -47,8 +47,50 @@ does it for every table:
 `role_assignment` carries no uniqueness rule at all — E0-09 declined to invent
 one, because two chairs of one department is a policy question §6.3's People
 editor owns — so the key in that row is a property of *this seed's own data*
-rather than of the table. That difference is the one thing about this decision a
-reader has to hold, and the consequences below say what it costs.
+rather than of the table.
+
+### What a natural key here has to be, and the one that was not
+
+An earlier version of this record listed the keys and stopped there, which hid
+the distinction that matters. Matching on a natural key is only safe if the key
+cannot match a row somebody else created. Every key above is one of two things:
+
+- **Scoped to a row this seed created** — `(college_id, name)`, `(term_id,
+  letter)`, `(course_id, term_id, lms_section_code)`, `user_id`, and so on. The
+  parent was matched first, so the child can only be one of ours.
+- **A root, matched by a value this file invents** — `institution.name` is
+  `Pulse Demo University`, `lti_platform` is `(https://lms.pulse-demo.invalid,
+  pulse-demo-tool)`. Nothing sits above these to scope them, so the safety comes
+  from the value being one nobody else would choose.
+
+**`prefix.code` was neither, and that is a defect this record shipped with.**
+`prefix` is `UNIQUE (code)` across the whole table rather than per institution
+([ADR 0017](0017-prefix-codes-are-unique-across-the-deployment.md)), and `MATH`
+is a name a real institution uses too. So the match was not "find my prefix" but
+"find *the* prefix", and the update that follows re-pointed a real one at Pulse
+Demo University.
+
+Measured against a database holding a real institution before the guard existed:
+`MATH` moved from `Real Mathematics` to the demo's `Mathematics`, the real
+`MATH 210` was reached by `(prefix_id, lms_number)` and its title overwritten
+with `Calculus I`, and the run **exited 0 and printed its success line**. The
+yield is an authorization change rather than a cosmetic one, because purview is
+computed from the containment tree and from `lead_faculty_mapping`: demo
+leadership gains purview over real courses, and the real lead loses the mapping
+that granted theirs.
+
+**The seed now refuses instead of adopting.** Where a prefix with a seeded code
+exists and does not already belong to the department this file wants, it raises,
+naming the code and the department that holds it — the same shape
+`seed_calendar` uses for a term whose weeks it cannot reconcile. A prefix
+already pointing at the wanted department is this seed's own row from an earlier
+run and is reused, so the second run stays idempotent. Re-measured after the
+guard: exit 2, the real rows untouched, and no partial demo institution left
+behind, because the whole load is one transaction.
+
+**The rule for anyone adding a table to this loader:** the key must be scoped to
+a row the seed created, or be a value the seed invented. If it is neither,
+refuse rather than match.
 
 Two consequences of that choice are deliberate:
 
