@@ -71,6 +71,15 @@ path cannot obtain a `pulse_care` session even when the acting person also holds
 a `CARE` assignment — needs the session factory's symbol, which E0-10 does not
 spell. The structural half of it is in the unit test named above; the runtime
 half waits on the interface.
+
+**The last section is E0-33's**, and it is a different question from every rule
+above: not "is this rule stated" but "was anything *else* stated". Asserting a
+refusal proves the refusal and proves nothing about what a later migration
+granted beside it, and `alembic check` reads no ACL, no `pg_roles` row and no
+`pg_proc` entry in either direction. Its sibling for generated columns, check
+constraints and exclusion constraints is
+`test_objects_the_drift_gate_cannot_compare.py`, and the view set is in
+`test_identity_separated_views.py`.
 """
 
 import re
@@ -2175,4 +2184,463 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
         "A single guard is tidier to read and this is what it costs — the roles that exist keep "
         "everything this revision granted them, on a database that no longer has the objects that "
         "justified any of it, and the downgrade reports success."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E0-33 item 3 — the grant set as a *set*, and the roles that can reach it.
+# ---------------------------------------------------------------------------
+#
+# Everything above asserts a rule this scheme states. These three assert that
+# nothing else was stated: "asserting a refusal proves the refusal; it does not
+# prove that nothing else was granted" (E0-33 item 3). `alembic check` reads
+# `pg_roles`, ACLs, `pg_class` entries for views and `pg_proc` not at all, in
+# either direction, so a grant added beside the line that needed it reaches `main`
+# with the drift gate green — measured on the pinned Alembic 1.19 in E0-20 item 3b
+# and repeated in ADR 0043.
+#
+# **Two of the three properties E0-20 item 3b called unasserted are now asserted,
+# and this section does not duplicate them.** E0-10's own review round landed
+# `test_no_security_definer_function_is_owned_by_a_superuser` and
+# `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
+# above, and ADR 0043's last paragraph records that. E0-33's scope was written
+# from E0-20's text and still says both are missing; they are not, and adding a
+# second copy of either under a similar name would silently shadow the first —
+# a redefined function at module scope is not a duplicate test, it is a deleted
+# one (`docs/MISTAKES.md` entries 1 and 2). What is genuinely unasserted is the
+# *set*: nothing enumerates who else has been granted something, what the two
+# connection roles hold beyond the views, or which roles they can become.
+#
+# **Not `invariant`-marked**, on the line `test_application_role_privileges.py`
+# draws and for the reason it gives: §4.1 is about what a reader of a running
+# system can see, and these are about what a role may do. The refusals they stand
+# behind are marked, three of them in this file.
+
+# Every base table in `public`. Separate from `PUBLIC_TABLES` above, which is
+# `relkind = 'r'` and feeds `row_counts` — a partitioned parent would be counted
+# twice there and must not be missed here, and a sweep that covered every kind of
+# table but one is the shape `docs/MISTAKES.md` entry 14 records. Views are
+# deliberately absent: reading them is what the application role is *for*.
+PUBLIC_BASE_TABLES = """
+    SELECT c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+    ORDER BY 1
+"""
+
+# Who is named in the ACL of every relation in `public`, and by what. `aclexplode`
+# rather than a text match on the `aclitem` for the reason `SCHEMA_GRANTEES` gives
+# above: the rendered form carries the grantor's name, which is `.env`'s choice.
+# Grantee oid 0 is `PUBLIC` — the pseudo-role every other role is a member of —
+# and it has no `pg_roles` row, so it is named here rather than dropped by the
+# join. That entry is the whole reason this sweep is not just about roles: one
+# `GRANT SELECT ON public.user_identity TO PUBLIC` hands a name to every
+# connection in the cluster without mentioning a role at all.
+RELATION_GRANTEES = """
+    SELECT c.relname AS relation,
+           pg_get_userbyid(c.relowner) AS owner,
+           coalesce(r.rolname, 'PUBLIC') AS grantee,
+           a.privilege_type AS privilege
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN LATERAL aclexplode(c.relacl) AS a
+    LEFT JOIN pg_roles r ON r.oid = a.grantee
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm')
+    ORDER BY 1, 3, 4
+"""
+
+# Every role `:role` can *become*, whether or not it inherits that role's
+# privileges. Deliberately not `REACHABLE_ROLES` above, which asks the same
+# question with `'USAGE'`: that mode answers "are this role's privileges available
+# without a `SET ROLE`", so a membership granted `WITH INHERIT FALSE` is absent
+# from it — and from `has_table_privilege`, which is the other half of every grant
+# assertion in this file. `'MEMBER'` is the mode that reports a membership the
+# holder has to `SET ROLE` into, which is one statement away from the same
+# privilege.
+MEMBER_OF_ROLES = """
+    SELECT r.rolname
+    FROM pg_roles r
+    WHERE pg_has_role(:role, r.oid, 'MEMBER') AND r.rolname <> :role
+    ORDER BY 1
+"""
+
+# What either *connection* role holds on a base table, and the whole of it. Every
+# entry carries the sentence it comes from, because an exact set is worth only as
+# much as its derivation and because the next person to add one has to be able to
+# tell what makes an entry legitimate.
+#
+#   - `pulse_care` reads `role_assignment`. ADR 0043 enumerates the privileges
+#     this scheme writes that outlive its downgrade and must be revoked by hand —
+#     "the definer's two table grants and its schema `USAGE`, `pulse_care`'s grant
+#     on `role_assignment` and its schema `USAGE`, and `pulse_app`'s schema
+#     `USAGE`". The reveal verifies the actor's live `CARE` assignment, and Care's
+#     own queue path resolves the same assignments.
+#   - `pulse_app` reads and inserts `classification`, **and holds nothing else on
+#     it, which is the point of the entry.** SPEC §8: "`classification` is
+#     append-only (re-runs create new rows) with prompt/model versioning."
+#     `SELECT, INSERT` with `UPDATE`, `DELETE` and `TRUNCATE` withheld is what
+#     makes append-only a property of the database rather than a rule every future
+#     writer has to know. So the equality below is not only a ceiling on what the
+#     application may reach — it is the only thing in this suite asserting that a
+#     classification verdict cannot be rewritten or erased on the connection the
+#     application runs on.
+#
+# **Hand-written and derived from the record, not read out of the grant files**
+# (`docs/MISTAKES.md` entry 19), which is the same decision
+# `REVEAL_DEFINER_PRIVILEGES` at the top of this file makes and for the same
+# reason: a constant assembled from `backend/app/views_sql/*.sql` at run time can
+# be checked only against the SQL it is supposed to police. Every grant would then
+# justify itself — the file says grant it, the catalog says granted, the test says
+# fine — and a later ticket's convenience grant, which is the shape E0-33 item 3
+# names, is exactly a line added to one of those files. Reading them would make
+# this test blind to its own subject while looking stronger.
+#
+# The cost is honest and is the point: a ticket that legitimately grants something
+# turns this red, and the pull request that adds the grant adds the entry and says
+# why. That is a loud failure on a legitimate change, and the alternative is a
+# silent pass on a widening.
+#
+# The definer is not here: it is not a connection role, and
+# `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
+# pins its three grants as an equality already.
+RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
+    {
+        (CARE_ROLE, "role_assignment", "SELECT"),
+        (APPLICATION_ROLE, "classification", "SELECT"),
+        (APPLICATION_ROLE, "classification", "INSERT"),
+    }
+)
+
+
+def base_tables(session: Any) -> list[str]:
+    """Every base and partitioned table in `public`, by name."""
+    return [row[0] for row in session.execute(text(PUBLIC_BASE_TABLES))]
+
+
+def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: Any) -> None:
+    """Criterion: the grant set is *exactly* what the migrations wrote, on the grantee axis.
+
+    Every other grant assertion in this file names a role and asks what it holds.
+    That shape cannot see a role nobody thought to ask about, and neither can any
+    gate in this build: `alembic check` reads no ACL in either direction, so
+    `CREATE ROLE pulse_reporting; GRANT SELECT ON public.user_identity TO
+    pulse_reporting` is two statements that hand out every name in the system
+    while the drift job, the test suite and the invariant pass all stay green.
+
+    So this asks the question from the other end — who is named in an ACL
+    anywhere in `public` — and requires the answer to be the three roles this
+    scheme has plus each relation's own owner. The definer is discovered from the
+    catalog rather than spelled, because E10 replaces the function it owns and a
+    rule written with its name would retire with it.
+
+    **`PUBLIC` is in the sweep and is the sharpest case.** Postgres grants nothing
+    on a table to `PUBLIC` by default, so an entry for it is always deliberate,
+    and one `GRANT … TO PUBLIC` reaches both connection roles at once without
+    naming either.
+
+    **The control is that the sweep found anything at all.** A relation with no
+    explicit grant has a null `relacl` and contributes no row, so a database where
+    nothing was ever granted produces an empty sweep — which satisfies "no
+    unexpected grantee" perfectly (`docs/MISTAKES.md` entry 3). E0-10 grants
+    `SELECT` on its read views, and the first `GRANT` on a relation materialises
+    its whole ACL including the owner's own entries, so a non-empty result is a
+    fact about this schema rather than an accident.
+
+    **The mutation it exists to survive**: `CREATE ROLE pulse_reporting; GRANT
+    SELECT ON public.user_identity TO pulse_reporting` — a reporting role added by
+    a later ticket, which no other test in this suite would mention.
+    **The near miss it tolerates**: another grant to one of the three roles this
+    scheme already names. That is the privilege axis, and
+    `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
+    is where it is caught — a rule that went red on any new grant at all would
+    fail on the third read view.
+    """
+    definer = the_reveal_function(db_session)["owner"]
+    expected = {APPLICATION_ROLE, CARE_ROLE, definer}
+    granted = db_session.execute(text(RELATION_GRANTEES)).mappings().all()
+
+    assert granted, (
+        "No relation in `public` carries an access control list at all, so this sweep read "
+        "nothing and would report success against any grant in the database. E0-10 grants "
+        "`SELECT` on its two read views, and the first `GRANT` on a relation materialises that "
+        "relation's whole ACL — so an empty sweep means the grants are missing, the views are "
+        "missing, or this query is reading the wrong schema."
+    )
+
+    unexpected = sorted(
+        f"{row['grantee']} holds {row['privilege']} on public.{row['relation']}"
+        for row in granted
+        if row["grantee"] not in expected and row["grantee"] != row["owner"]
+    )
+    assert not unexpected, (
+        f"{unexpected}. The roles this scheme names are {sorted(expected)} — the two connection "
+        "roles of ADR 0001 and the reveal function's own owner from ADR 0043 — plus whoever owns "
+        "each relation, which is the migration identity ADR 0009 sanctions. Anything else holds a "
+        "privilege that no ticket in this epic granted and that nothing in this repository will "
+        "ever revoke.\n\n"
+        "`PUBLIC` appearing here is the worst case and reads like the mildest: Postgres grants no "
+        "table privilege to `PUBLIC` by default, so the entry is deliberate, and every role in the "
+        "cluster is a member — including `pulse_app`, which is refused `user_identity` by name one "
+        "test above and would then reach it anyway.\n\n"
+        "None of this is visible to any gate: `alembic check` compares `Base.metadata` against the "
+        "database, and `Base.metadata` holds tables and columns (E0-20 item 3b, measured on the "
+        "pinned Alembic 1.19)."
+    )
+
+
+def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own(
+    db_session: Any,
+) -> None:
+    """Criterion: exactly what the migrations wrote, not a superset — on the privilege axis.
+
+    `test_neither_runtime_role_holds_any_privilege_on_user_identity` above pins one
+    table. This pins the rest of them: over every base table in `public`, the two
+    connection roles hold exactly the three privileges
+    `RUNTIME_BASE_TABLE_PRIVILEGES` names, and that constant at the head of this
+    section carries the sentence each one comes from.
+
+    **What the equality buys beyond a ceiling.** Two of the three are `pulse_app`
+    on `classification`, and the interesting half of that entry is what is *not*
+    in it. SPEC §8 requires `classification` to be append-only; `SELECT, INSERT`
+    granted with `UPDATE`, `DELETE` and `TRUNCATE` withheld is what makes
+    append-only a property of the database rather than a rule the next writer has
+    to remember. Nothing else in this suite asserts that, and an equality is the
+    only shape that can: `>=` would be satisfied by a connection that can rewrite
+    a moderation verdict.
+
+    **What `pulse_app` reading `classification` means for §4.1: nothing, and the
+    reason is worth one paragraph so it is not re-derived.** A classification row
+    is a model verdict about comment text (§5.2's clear / harmful / privacy /
+    nonsense) with prompt and model versioning; it carries no name, and the
+    connection it is read on cannot reach `user_identity` by any statement, which
+    is what the three `invariant`-marked refusals above assert. So there is no
+    join from a verdict to a person on this connection. What *would* have a §4.1
+    consequence is a **view** that joins `classification` to an identity-marked
+    column, and that is
+    `test_identity_column_marker.py`'s
+    `test_no_view_reads_a_column_the_identity_marker_names`, which is
+    `invariant`-marked because a view is read with its owner's privileges rather
+    than its reader's.
+
+    **One adjacent rule that this grant does not enforce and must not be read as
+    enforcing.** §5.2 hides flagged comments from the instructor entirely below the
+    n-threshold, and routes threat and self-harm classifications to Care where they
+    are "never shown to the instructor". Those are `classification` rows, and this
+    connection can read them — as it must, since it is the connection every screen
+    runs on. Those rules live in the read path, in `services/`, and a table grant
+    neither implements them nor breaks them. Nobody should conclude from this
+    entry that a row `pulse_app` can read is a row an instructor may see.
+
+    **Views are outside this on purpose**, and that is what keeps it from being a
+    tripwire. Reading a view is what `pulse_app` exists to do, and a third read
+    view granted to it by a later ticket is ordinary work; what is not ordinary is
+    a grant on the table *behind* a view, which is SPEC §8's separation undone —
+    "enforced in the database, not just the application" means the connection
+    cannot reach the base table, not that the query politely does not. The
+    control on what a view may expose is the identity-marker sweep in
+    `test_identity_column_marker.py`, which is `invariant`-marked.
+
+    **Two controls, and neither is ceremony.** `pulse_app` must hold `SELECT` on
+    at least one view, or "holds nothing on a base table" is equally true of a
+    role that holds nothing anywhere and every assertion here is about a database
+    with no grants in it. And there must be base tables to sweep, or the cross
+    product is empty.
+
+    **Asked through `has_table_privilege`** rather than by reading `relacl`, so a
+    privilege reaching a role by membership in another role counts:
+    `GRANT pulse_reveal_definer TO pulse_app` writes no ACL entry anywhere and
+    hands over `SELECT` on `user_identity`.
+
+    **The mutation it exists to survive**: `GRANT SELECT ON public.enrollment TO
+    pulse_app` — the convenience grant E0-33 names, added to make one query work,
+    invisible to `alembic check` and to every other test here. Also `GRANT UPDATE
+    ON public.classification TO pulse_app`, which is a widening *within* a table
+    the role already reads and which no `>=` comparison could see.
+    **The near miss it tolerates**: `GRANT SELECT ON <a new read view> TO
+    pulse_app`, which stays green.
+
+    **When this goes red for a good reason**, which will happen and has already
+    happened once: E0-13's `classification` grant was legitimate, deliberate, and
+    absent from the first version of this constant. E2 will do it again when the
+    first student write path needs a grant on `response`. That is what this test
+    is for — a widening of the confidentiality surface recorded deliberately, in
+    the pull request that makes it, rather than arriving unnoticed. The failure
+    message below carries how to tell one from a defect.
+
+    **What this shape does not catch** (`docs/MISTAKES.md` entry 14):
+
+      - **A grant written into `views_sql/` and never applied.** The comparison is
+        against a hand-written record, so the file-to-database direction holds
+        only for the three entries listed. A grants file that a revision stops
+        executing shows up here only if it names one of them.
+      - **Whether a listed grant is *right*.** The constant records what the
+        record sanctions; a bad grant written into both the SQL and this file is
+        wrong in both. Line-by-line review of `views_sql/` is the control ADR 0043
+        names for that, and E0-34 is the ticket.
+      - **A widening to a view**, deliberately — see above.
+      - **Privileges on anything that is not a base table**: functions, schemas,
+        the database itself. The first belongs to the two definer tests above, the
+        second and third to the downgrade tests below.
+    """
+    tables = base_tables(db_session)
+    views = read_views(db_session)
+    assert tables, (
+        "There is no base table in `public`, so this test swept nothing. Every table SPEC §8 lists "
+        "should be here after `alembic upgrade head`."
+    )
+    assert views, (
+        "There is no view in `public`, so the control below has nothing to find and this test "
+        "cannot tell a role that reads through views from a role that holds nothing at all. "
+        "`test_identity_separated_views.py` diagnoses that."
+    )
+
+    for role in RUNTIME_ROLES:
+        require_role(db_session, role)
+    readable_views = {
+        view
+        for view in views
+        if db_session.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {"role": APPLICATION_ROLE, "relation": f"public.{view}", "privilege": "SELECT"},
+        ).scalar_one()
+    }
+    assert readable_views, (
+        f"`{APPLICATION_ROLE}` may read none of {views}. Then it holds nothing anywhere, the "
+        "assertion below is true of a database with no grants in it, and the read paths for every "
+        "screen in the product are shut. "
+        "`test_the_application_role_is_refused_a_select_on_user_identity` reads the same fact from "
+        "the other side."
+    )
+
+    held = privileges_held(db_session, RUNTIME_ROLES, tables)
+    beyond = sorted(
+        f"{role} holds {privilege} on public.{relation}"
+        for role, relation, privilege in held - RUNTIME_BASE_TABLE_PRIVILEGES
+    )
+    missing = sorted(
+        f"{role} should hold {privilege} on public.{relation}"
+        for role, relation, privilege in RUNTIME_BASE_TABLE_PRIVILEGES - held
+    )
+    assert not beyond and not missing, (
+        f"Beyond what this scheme grants: {beyond}. Missing from it: {missing}. The connection "
+        f"roles could read the views {sorted(readable_views)} throughout, so this is about base "
+        "tables and not about a role that holds nothing.\n\n"
+        "The first list is the one to read first. SPEC §8 puts the instructor and leadership read "
+        "paths through views that 'structurally cannot join to `user` identity columns — enforced "
+        "in the database, not just the application', and a connection holding a privilege on the "
+        "base table behind a view is that enforcement removed while every view, every revoke and "
+        "every refusal test stays exactly as it was. Nothing else notices: `alembic check` reads "
+        "no ACL at all (E0-20 item 3b), and asserting a refusal on `user_identity` proves the "
+        "refusal without proving that nothing else was granted (E0-33 item 3).\n\n"
+        "The second list means this scheme has lost a grant it needs: without `SELECT` on "
+        "`role_assignment` the Care path cannot resolve the actor whose assignment it is about, "
+        "and without `INSERT` on `classification` the moderation classifier cannot record a "
+        "verdict. Each entry in `RUNTIME_BASE_TABLE_PRIVILEGES` carries the sentence it comes "
+        "from.\n\n"
+        "**How to tell a legitimate new grant from a widening**, because this test cannot and the "
+        "reader has to. Four questions, in order:\n"
+        "  1. Does anything in the tree issue it? If no `.sql` file under `backend/app/views_sql/` "
+        "and no revision grants it, nothing will reproduce it on a fresh database — it was run by "
+        "hand against this one, and that is drift rather than a decision.\n"
+        "  2. Does a record say why the role needs it — a ticket criterion, a SPEC section, an "
+        "ADR? `pulse_app` on `classification` has SPEC §8's append-only sentence behind it. A "
+        "grant whose only justification is that a query failed without it is the convenience grant "
+        "this test exists for.\n"
+        "  3. Is it the narrowest privilege that does the job? `SELECT, INSERT` rather than `ALL`. "
+        "The verbs *withheld* are usually the assertion — on an append-only table they are what "
+        "makes it append-only.\n"
+        "  4. Does the table carry, or join to, an identity-marked column "
+        "(`test_identity_column_marker.py`)? Then it is not a convenience grant at all, it is "
+        "§4.1's wall, and the answer is no rather than a new entry here.\n\n"
+        "If the grant survives all four, `RUNTIME_BASE_TABLE_PRIVILEGES` at the head of this "
+        "section is the one place it is recorded — with its sentence, not just its name — and the "
+        "pull request that adds it says which table and why. That is the cost of an exact set, and "
+        "it is deliberate: the alternative is deriving this from the grant files themselves, where "
+        "every grant justifies itself and a widening is green (`docs/MISTAKES.md` entry 19)."
+    )
+
+
+def test_neither_runtime_role_can_become_a_role_that_may_read_identity(db_session: Any) -> None:
+    """The grant that writes no grant: membership into the role the reveal is owned by.
+
+    `test_a_runtime_role_cannot_become_a_role_that_owns_a_table` above asks
+    `pg_has_role(role, other, 'USAGE')`, which answers "are that role's privileges
+    available to this one *without* a `SET ROLE`". A membership granted `WITH
+    INHERIT FALSE` is absent from that answer, and it is absent from
+    `has_table_privilege` too — so `GRANT pulse_reveal_definer TO pulse_care WITH
+    INHERIT FALSE` leaves every grant assertion in this file green while putting
+    `SELECT` on `user_identity` one `SET ROLE` away from the Care connection. The
+    definer is the role that makes this expensive: it exists precisely to hold the
+    three privileges the wall has a door for, and it owns no table and is no
+    superuser, so the two membership rules already here both pass it.
+
+    `'MEMBER'` is the mode that reports a membership whether or not it inherits.
+    Every role either connection role can become is required to hold nothing at
+    all on the identity table.
+
+    **Two controls, because every assertion here is that a set is empty.** The
+    same sweep run for the bootstrap identity has to come back non-empty — a
+    superuser is a member of every role, so a query that finds nothing for it is
+    broken. And `has_table_privilege` has to report the definer *holding* `SELECT`
+    on `user_identity`: without that, "no reachable role can read identity" is
+    equally true of a probe that reports false for everything.
+
+    **The mutation it exists to survive**: `GRANT pulse_reveal_definer TO
+    pulse_care WITH INHERIT FALSE` (or the same grant to a role created
+    `NOINHERIT`), which is the single statement that reopens ADR 0001's wall
+    without touching one ACL entry.
+    **The near miss it tolerates**: a membership in a role that holds nothing on
+    `user_identity` — `GRANT pulse_app TO some_operational_role` — which is not
+    this rule's subject and stays green.
+    """
+    definer = the_reveal_function(db_session)["owner"]
+    connected_as = db_session.execute(text(CURRENT_ROLE)).scalar_one()
+
+    assert db_session.execute(text(MEMBER_OF_ROLES), {"role": connected_as}).all(), (
+        f"`pg_has_role` reports that `{connected_as}` — the bootstrap superuser these tests "
+        "connect as — is a member of no other role, which cannot be true of a superuser. The "
+        "query is broken, and the assertion below would pass against any membership at all."
+    )
+    assert db_session.execute(
+        text(HAS_TABLE_PRIVILEGE),
+        {"role": definer, "relation": f"public.{IDENTITY_TABLE}", "privilege": "SELECT"},
+    ).scalar_one(), (
+        f"`has_table_privilege` reports that `{definer}` — the owner of the reveal function, which "
+        f"reads `{IDENTITY_TABLE}` with that role's privileges — cannot read that table. Either "
+        "the reveal cannot work (which "
+        "`test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs` diagnoses) "
+        "or this probe cannot see a privilege on that table, in which case the sweep below finds "
+        "nothing whatever anybody is a member of."
+    )
+
+    dangerous: list[str] = []
+    for role in RUNTIME_ROLES:
+        require_role(db_session, role)
+        for (reachable,) in db_session.execute(text(MEMBER_OF_ROLES), {"role": role}):
+            for privilege in TABLE_PRIVILEGES:
+                if db_session.execute(
+                    text(HAS_TABLE_PRIVILEGE),
+                    {
+                        "role": reachable,
+                        "relation": f"public.{IDENTITY_TABLE}",
+                        "privilege": privilege,
+                    },
+                ).scalar_one():
+                    dangerous.append(f"{role} can become {reachable}, which holds {privilege}")
+
+    assert not dangerous, (
+        f"{dangerous}. A membership is a privilege the holder reaches with one `SET ROLE`, and "
+        "when it is granted `WITH INHERIT FALSE` it is a privilege that appears in no ACL entry, "
+        "in `has_table_privilege`, or in "
+        "`test_a_runtime_role_cannot_become_a_role_that_owns_a_table` — which asks the same "
+        "question in `'USAGE'` mode, where a non-inheriting membership does not appear. So every "
+        "other assertion in this file stays green while a connection role reaches the identity "
+        f"table: ADR 0001's 'no grant of any kind on `{IDENTITY_TABLE}`' is a statement about "
+        "grants, and this is not one.\n\n"
+        "The reveal function's owner is the role that makes this concrete. It holds `SELECT` on "
+        f"`{IDENTITY_TABLE}` because the audited door spends exactly that (ADR 0043), it owns no "
+        "table and it is not a superuser — so it passes both membership rules already in this "
+        "file, and a membership in it is the cheapest way there is to obtain a name without "
+        "leaving a record."
     )

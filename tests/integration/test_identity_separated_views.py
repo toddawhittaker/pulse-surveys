@@ -15,6 +15,14 @@ view that reads a marked column are in `test_identity_column_marker.py`, beside
 the marker convention they are built on, so that widening the convention widens
 both (`docs/MISTAKES.md` entry 13).
 
+**One test here is E0-33's** —
+`test_every_view_created_under_views_sql_exists_in_the_migrated_database`, the
+direction this file did not have. It is here rather than in
+`test_objects_the_drift_gate_cannot_compare.py` with the rest of that ticket for
+the same entry-13 reason: it needs the `CREATE VIEW` sweep below, whose word
+boundary took an incident to get right, and a second copy of that regex is worth
+more trouble than the file boundary is.
+
 **Nothing here names a view.** E0-10's scope asks for "a section-roster view and
 an enrollment-count view" and spells neither, so every view in `public` is
 discovered out of the catalog and the rules below are asserted over all of them.
@@ -158,14 +166,52 @@ VIEW_CREATE_MUST_ALLOW = (
     f"CREATE VIEW public.{CANARY_VIEW}_totals AS SELECT 1",
 )
 
+# And the same for the drop sweep, which is what keeps
+# `test_every_view_created_under_views_sql_exists_in_the_migrated_database` from
+# being a tripwire on a view that was deliberately retired. The must-allow samples
+# carry the weight again: `DROP TABLE` and a differently-named view both have to
+# fail, or a retired view would excuse a missing one that shares a prefix with it.
+VIEW_DROP_MUST_CATCH = (
+    f"DROP VIEW public.{CANARY_VIEW}",
+    f"drop materialized view if exists {CANARY_VIEW}",
+    f'DROP VIEW IF EXISTS public."{CANARY_VIEW}"',
+    f"DROP\n    VIEW\n    public.{CANARY_VIEW}",
+)
+
+VIEW_DROP_MUST_ALLOW = (
+    f"CREATE VIEW public.{CANARY_VIEW} AS SELECT 1",
+    f"DROP VIEW public.{CANARY_VIEW}_totals",
+    f"DROP TABLE IF EXISTS public.{CANARY_VIEW}",
+    f"-- drop view public.{CANARY_VIEW} when §5.5 replaces it",
+    f"REVOKE ALL ON public.{CANARY_VIEW} FROM PUBLIC",
+)
+
 
 def read_views(connection: Any) -> list[str]:
     """Every view and materialised view in `public`, by name."""
     return [row[0] for row in connection.execute(text(READ_VIEWS))]
 
 
-def creates_view(sql: str, view: str) -> bool:
-    """Does `sql` contain a statement that *creates* the view called `view`?
+# The view a `CREATE` or a `DROP` names, with an optional schema and optional
+# double quotes on either part. The name is captured greedily as a whole word, so
+# `canary_view_totals` reads as itself rather than as a match for `canary_view` —
+# the boundary the name-anchored first version of this sweep needed a `\b` for.
+VIEW_NAME = r'(?:"?(?P<schema>\w+)"?\s*\.\s*)?"?(?P<view>\w+)"?'
+
+CREATES_A_VIEW = re.compile(
+    r"\bcreate\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+"
+    r"(?:if\s+not\s+exists\s+)?" + VIEW_NAME,
+    re.IGNORECASE,
+)
+
+DROPS_A_VIEW = re.compile(
+    r"\bdrop\s+(?:materialized\s+)?view\s+(?:if\s+exists\s+)?" + VIEW_NAME,
+    re.IGNORECASE,
+)
+
+
+def views_created_in(sql: str) -> set[str]:
+    """Every view `sql` contains a statement to *create*, by name.
 
     A mention is not a creation, and the difference is the whole of what this
     helper exists for. The first version of the test that uses it searched for the
@@ -175,15 +221,36 @@ def creates_view(sql: str, view: str) -> bool:
     every view in order to `GRANT SELECT` on it. So `GRANT`, `DROP`, `COMMENT ON`
     and a name in a comment all have to fail here, and each is a sample in
     `VIEW_CREATE_MUST_ALLOW` below.
+
+    Extracting the names rather than answering about one is what lets the two
+    tests that consume this ask their questions in opposite directions off one
+    pattern — every view in the catalog is created by a file, and every view a
+    file creates is in the catalog. Two copies of a regex this fiddly is
+    `docs/MISTAKES.md` entry 13.
     """
-    pattern = re.compile(
-        r"\bcreate\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+"
-        r"(?:if\s+not\s+exists\s+)?"
-        r'(?:"?\w+"?\s*\.\s*)?'
-        rf'(?:"{re.escape(view)}"|{re.escape(view)}\b)',
-        re.IGNORECASE,
-    )
-    return pattern.search(without_comments(sql)) is not None
+    return {match.group("view") for match in CREATES_A_VIEW.finditer(without_comments(sql))}
+
+
+def views_dropped_in(sql: str) -> set[str]:
+    """Every view `sql` contains a statement to *drop*, by name.
+
+    The counterpart to `views_created_in`, and it exists so that the direction
+    which reads from the files outwards is not a tripwire on the directory: a view
+    genuinely retired — renamed, replaced by one with a different shape — leaves
+    its `CREATE` in the file that first shipped it, and requiring that view to
+    still exist in the database would make retiring one impossible.
+
+    **What it does not catch** (`docs/MISTAKES.md` entry 14): a `DROP VIEW a, b`
+    naming several views in one statement, of which it sees only the first. One
+    statement per view is what every file here writes, and the failure direction
+    is safe — an unseen drop leaves a red naming the view, not a silent green.
+    """
+    return {match.group("view") for match in DROPS_A_VIEW.finditer(without_comments(sql))}
+
+
+def creates_view(sql: str, view: str) -> bool:
+    """Does `sql` contain a statement that creates the view called `view`?"""
+    return view in views_created_in(sql)
 
 
 def public_relation_names(connection: Any) -> list[str]:
@@ -360,6 +427,82 @@ def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     )
 
 
+def test_every_view_created_under_views_sql_exists_in_the_migrated_database(
+    migrated_engine: Any,
+) -> None:
+    """E0-33 item 3, the view set: the other direction of the test above.
+
+    The test above walks from the catalog outwards — every view in the database
+    was created by a file. That direction cannot see a view that is *missing*: a
+    database with one view, or with none, satisfies it perfectly. This one walks
+    from the files outwards, and together they are a set equality with no view
+    named anywhere in this module.
+
+    **The gap it closes is measured rather than supposed.** E0-20 item 3b dropped
+    `public.section_roster` from a freshly upgraded container and `alembic check`
+    reported clean — it compares `Base.metadata` against the database and
+    `Base.metadata` holds tables and columns, so a `pg_class` entry for a view is
+    outside it in both directions. What stands in the way today is
+    `test_alembic_upgrade_head_creates_the_identity_separated_read_views`, which
+    requires two views: it catches that drop now and stops catching one the day a
+    third view lands, because two out of three is still two.
+
+    **Retired views are subtracted, and that is what keeps this from being a
+    tripwire on the directory.** A view replaced by one of another name leaves its
+    `CREATE` in the file that shipped it; `views_dropped_in` is what lets that be
+    true without this test going red. Both sweeps are checked against samples of
+    what they must catch and must allow in
+    `test_the_text_sweeps_in_this_file_catch_what_they_claim_to`. It does mean a
+    retirement has to be written under `views_sql/` rather than inline in a
+    revision — the rule SPEC §13 already sets for a view's creation, applied to
+    the other end of its life.
+
+    **The mutation it exists to survive**: `DROP VIEW public.section_roster`
+    against the migrated database — E0-20 item 3b's fifth row — or a revision that
+    stops executing one of the files under `views_sql/`.
+    **The near miss it tolerates**: a third view added, in a file and in the
+    database together; and a view renamed, with the drop and the create both under
+    `views_sql/`.
+
+    **The canary is the set of expected names itself.** A sweep that found nothing
+    to expect would compare an empty set against the catalog and report success,
+    which is `docs/MISTAKES.md` entry 3's shape exactly.
+    """
+    files = view_sql_files()
+    assert files, (
+        f"{VIEWS_SQL_DIR} holds no `.sql` file, so this test has nothing to expect and would "
+        "report success against a database with no view in it at all. "
+        "`test_every_read_view_is_created_from_a_sql_file_under_views_sql` diagnoses that."
+    )
+
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
+    expected = views_created_in(combined) - views_dropped_in(combined)
+    assert expected, (
+        f"No `.sql` file under {VIEWS_SQL_DIR} contains a `CREATE VIEW` that is not also dropped "
+        f"there — the files are {[path.name for path in files]}. Either the views have moved out "
+        "of the directory SPEC §13 puts them in, or this sweep has gone blind; either way the "
+        "comparison below is between an empty set and whatever the database holds, and passes."
+    )
+
+    with migrated_engine.connect() as connection:
+        present = set(read_views(connection))
+
+    absent = sorted(expected - present)
+    assert not absent, (
+        f"{absent} are created by a file under {VIEWS_SQL_DIR} and are not views in the migrated "
+        f"database, which holds {sorted(present)}.\n\n"
+        "A view is invisible to the drift gate in both directions: `alembic check` compares "
+        "`Base.metadata` against the database, and a view has no entry there — E0-20 item 3b "
+        "dropped one from a freshly upgraded container and the check reported clean, with a "
+        "dropped column in the same run detected as the canary. So both ways this happens reach "
+        "`main` green: a `DROP VIEW` run against a database, and a revision that stops executing "
+        "the file that creates it.\n\n"
+        "If the view was retired on purpose, the `DROP VIEW` belongs under "
+        f"{VIEWS_SQL_DIR} beside the `CREATE` it retires — which is where this test looks for it, "
+        "and where the next reader will look for what happened to it."
+    )
+
+
 def test_no_read_view_is_also_declared_as_an_orm_table(
     migrated_engine: Any, metadata_tables: dict[str, Any]
 ) -> None:
@@ -406,7 +549,7 @@ def test_no_read_view_is_also_declared_as_an_orm_table(
 
 
 def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
-    """Both sweeps are run against a sample of each shape before anything trusts them.
+    """All three sweeps are run against a sample of each shape before anything trusts them.
 
     A pattern searched against text is a test that can go blind and report
     success — `docs/MISTAKES.md` entry 3 records one that matched nothing because
@@ -459,6 +602,22 @@ def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
             "name begins the same way — and accepting one is exactly the defect this sweep was "
             "repaired for: with a `GRANT` counted as a definition, a view can be moved out of "
             "`views_sql/` entirely with the suite green."
+        )
+
+    for sample in VIEW_DROP_MUST_CATCH:
+        assert CANARY_VIEW in views_dropped_in(sample), (
+            f"`views_dropped_in` does not read {sample!r} as dropping `{CANARY_VIEW}`, which is a "
+            "shape it exists to catch. A view retired in `views_sql/` would then still be expected "
+            "in the database, and "
+            "`test_every_view_created_under_views_sql_exists_in_the_migrated_database` would be "
+            "red at the next view anybody replaces."
+        )
+
+    for sample in VIEW_DROP_MUST_ALLOW:
+        assert CANARY_VIEW not in views_dropped_in(sample), (
+            f"`views_dropped_in` reads {sample!r} as dropping `{CANARY_VIEW}`. It drops something "
+            "else, drops nothing, or is a comment — and reading it as a drop excuses the view's "
+            "absence from the database, which is the one thing that test exists to notice."
         )
 
 
