@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Thirty-one tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Thirty-two tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -49,6 +49,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 29 | [Review debt from E0-13](E0-29-review-debt-from-e0-13.md) | 13 | Two decisions that are Todd's — cleartext to an off-machine endpoint with no credential, and whether 429 and 500 belong in the fail-open set — plus three taxonomy rows no loopback stub can reach, a superseded resolution in MISTAKES entry 26, and the supply-chain tail `pydantic-ai-slim[openai]` drags in. |
 | 30 | [Review debt from E0-16](E0-30-review-debt-from-e0-16.md) | 16 | RFC 6749 §4.1.2.1 error redirects, which E1's callback error branch and E0-18's Playwright path both need and neither can reach; the three limits of ADR 0062's new gate; a Compose redirect URI E0-18 must repoint; and a strictness choice to affirm. |
 | 31 | [Review debt from E0-17](E0-31-review-debt-from-e0-17.md) | 17 | The `lti_platform` row E0-18 needs and E0-17 deliberately did not create, which cannot be added carelessly without falsifying ADR 0038; the `design/` course numbers that all fail §8; a literal spelled in two files; and an unreachable adoption path worth naming. |
+| 32 | [Three gate gaps the reviewer self-test found](E0-32-gate-gaps-the-selftest-found.md) | 10 | Three gates that report green while the thing they detect is happening, found by reviewers on the way to something else: the invariant gate cannot see a test that asserts nothing, the identity-column guard only sees views a migration executed, and the sweep that does fire invites a repair that leaves the leak. |
 
 ## Dependency graph
 
@@ -75,6 +76,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 13 ── 29            (independent; two items are Todd's decisions)
 16 ── 30            (independent; item 1 is on E1's path and wants settling first)
 17 ── 31            (independent; item 1 blocks E0-18's launch)
+10 ── 32            (independent; three gates blind to what they check)
 ```
 
 Strictly sequential through 04. After that, three chains run independently and

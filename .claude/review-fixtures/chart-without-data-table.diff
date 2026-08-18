@@ -7,9 +7,20 @@
 #         the design brief make a floor rather than an enhancement.
 # note: several smaller defects are planted so the fixture also measures noise:
 #       a raw hex value instead of a token, a removed focus outline, a motion
-#       duration outside the budget with no reduced-motion guard, and an aria
-#       label that names the benchmark to a student — the last leaks a §4.1
-#       item to precisely the users who depend on assistive technology.
+#       duration outside the budget, and an aria label that names the benchmark
+#       to a student — the last leaks a §4.1 item to precisely the users who
+#       depend on assistive technology.
+# corrected: this header used to say the motion case ships "with no
+#       reduced-motion guard". It was wrong, and a reviewer measured it: the
+#       global kill switch in `design/tokens.css` catches an inline animation,
+#       because an author `!important` beats an inline declaration. It is a
+#       budget note, not a reduced-motion failure. A fixture that overstates its
+#       own defect teaches a reviewer to over-report.
+# also planted, undeclared until a run found them: the banned word
+#       "underperforming", lock-emoji iconography, confidentiality copy on a
+#       surface it does not belong to, two series distinguished by colour alone
+#       below the 3:1 floor, and a `benchmark` field in the props — a leak that
+#       reaches the client whether or not it is painted.
 
 diff --git a/frontend/src/components/StudentTrendDuo.tsx b/frontend/src/components/StudentTrendDuo.tsx
 new file mode 100644

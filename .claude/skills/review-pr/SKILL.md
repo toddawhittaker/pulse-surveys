@@ -57,6 +57,20 @@ you need their structured text back.
 Give each: the PR number, the diff, the ticket the PR names, and the list of
 changed files.
 
+**Tell each reviewer that a `Nothing found.` must show what it checked.** A bare
+negative is not a reviewable result — it is indistinguishable from a reviewer
+that did not look, and you cannot tell which one you got. Where the brief names
+specific things to judge, the answer has to address them: a reviewer given four
+questions and returning two words has not declined to find problems, it has
+declined to answer.
+
+**Do not tell a reviewer not to manufacture findings.** It reads as a warning
+against finding things, and paired with a licence for a bare negative it is close
+to instructing a shrug. The measured evidence is that this roster does not have
+an over-reporting problem: across seven self-test fixtures every reviewer found
+more than was planted, with zero false positives. Ask for evidence instead, and
+let a wrong finding be wrong on its merits.
+
 ## 4. Assemble one comment
 
 Each reviewer returns a `### <name>` block containing either `Nothing found.` or
@@ -133,6 +147,9 @@ findings and post them yourself, or let the user do it.
 - Do not soften a HIGH finding because the diff is otherwise good.
 - Do not drop a reviewer's `Nothing found.` line to make the comment shorter.
   An explicit nothing is a result, and its absence would read as an omission.
+- Do not pass a bare `Nothing found.` through to the user as if it were a clean
+  bill. Say that it came back unevidenced, and consider re-running it — that is a
+  reviewer that has not answered, not a diff that is clean.
 
 ## Calibration
 

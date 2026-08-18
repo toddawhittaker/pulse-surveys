@@ -1,0 +1,71 @@
+# fixture: check-constraint-drifted-from-model
+# reviewer: data-model
+# ticket: E0-13 (AIGateway shell and one working round-trip)
+# expect: HIGH — the model's check constraint and the migration's hand-written
+#         one no longer agree. The model permits a fourth verdict the migration's
+#         constraint refuses, so every insert of that verdict fails at runtime
+#         against a schema `alembic check` calls clean: the drift gate compares
+#         neither check-constraint expressions nor the SQL a migration writes by
+#         hand (E0-20 item 3a). Nothing in CI can see this.
+# secondary: the migration's downgrade drops the constraint and does not
+#         recreate the original, so a downgrade-then-upgrade leaves a table that
+#         accepts anything. A reviewer that reports the drift and not the
+#         irreversibility has checked agreement and not the migration.
+# also planted, discovered by a run rather than by design: the replacement
+#         constraint is unconditional `verdict IN (...)`, where the original was
+#         `task <> 'COMMENT_VALIDITY' OR verdict IN (...)` — scoped to one task
+#         because §7.4's tasks have overlapping vocabularies (ADR 0055). So this
+#         migration also constrains every future task's verdict to this list, and
+#         E2's `harmful` fails against a constraint written to leave it alone.
+#         Left in place deliberately: it is the accident a real edit makes.
+# note: the model side is the plausible edit — a verdict added to an enum where
+#       the vocabulary lives — and the migration is the file nobody reopens. The
+#       constraint names match, which is what makes it read as consistent.
+
+diff --git a/backend/app/models/ai.py b/backend/app/models/ai.py
+--- a/backend/app/models/ai.py
++++ b/backend/app/models/ai.py
+@@ -41,6 +41,7 @@ class ValidityVerdict(StrEnum):
+     SUBSTANTIVE = "substantive"
+     INSUFFICIENT = "insufficient"
+     NONSENSE = "nonsense"
++    UNREADABLE = "unreadable"
+ 
+ 
+ class Classification(Base):
+diff --git a/backend/migrations/versions/20260819_a1b2c3d4e5f6_widen_verdicts.py b/backend/migrations/versions/20260819_a1b2c3d4e5f6_widen_verdicts.py
+new file mode 100644
+--- /dev/null
++++ b/backend/migrations/versions/20260819_a1b2c3d4e5f6_widen_verdicts.py
+@@ -0,0 +1,30 @@
++"""Widen the validity verdict vocabulary.
++
++Revision ID: a1b2c3d4e5f6
++Revises: 7b41d2c9e6af
++"""
++
++from alembic import op
++
++revision: str = "a1b2c3d4e5f6"
++down_revision: str | None = "7b41d2c9e6af"
++
++
++def upgrade() -> None:
++    op.drop_constraint(
++        op.f("ck_classification_verdict_is_in_its_tasks_vocabulary"),
++        "classification",
++        type_="check",
++    )
++    op.create_check_constraint(
++        op.f("ck_classification_verdict_is_in_its_tasks_vocabulary"),
++        "classification",
++        "verdict IN ('substantive', 'insufficient', 'nonsense')",
++    )
++
++
++def downgrade() -> None:
++    op.drop_constraint(
++        op.f("ck_classification_verdict_is_in_its_tasks_vocabulary"),
++        "classification",
++        type_="check",
++    )

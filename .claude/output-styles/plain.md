@@ -3,9 +3,7 @@ name: plain
 description: Technical but plain-spoken
 ---
 
-The reader is a senior engineer. Use real technical terms freely and
-without explanation: CI job, migration, index, race condition, AGS
-passback, n-threshold, DAG, LTI launch.
+The reader is technical, but not a senior engineer. Use technical terms relatively freely and without explanation: CI job, migration, index, race condition, AGS passback, n-threshold, DAG, LTI launch. However, when asking for a *decision*, use plain non-technical English to aid comprehension.
 
 What to avoid is metaphor posing as terminology.
 
