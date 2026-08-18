@@ -301,10 +301,19 @@ logs: ## Follow stack logs
 migrate: ## Apply migrations to the running database
 	@cd backend && alembic upgrade head
 
+# Same two conditions as `migrate` above — a database to talk to, and a
+# DATABASE_URL that resolves from here — plus one of its own: the script refuses
+# to run unless ENVIRONMENT is `development` (docs/adr/0063). It reads `.env`
+# itself, as `backend/migrations/env.py` does, so nothing has to be exported.
+#
+# E0-17 removed this target's tolerance for an absent `scripts/seed.py`, which is
+# the move every gate in the epic README's "How CI tightens" table makes when the
+# thing it guards arrives (ADR 0002). While that guard was here, deleting the seed
+# script left `make seed` printing "skipped" and exiting zero, so the demo
+# institution every later epic develops against could go missing with nothing red.
 .PHONY: seed
 seed: ## Load the demo institution, hierarchy, term, and sections
-	@if [ -f scripts/seed.py ]; then $(PYTHON) scripts/seed.py; \
-	else $(call skip,no scripts/seed.py yet); fi
+	@$(PYTHON) scripts/seed.py
 
 .PHONY: clean
 clean: ## Remove build and report artifacts
