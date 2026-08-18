@@ -35,7 +35,22 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 32**
+**Caught: 33**
+
+*(The thirty-third, in E0-16's review round, and the subject is a *reproduction*
+rather than a test. A review reported that a PKCE verifier wrapped in whitespace
+redeemed successfully; the script written to reproduce it before fixing anything
+answered `400`, in the direction that says "already refused". Both the reviewer
+and the script were right and they were exercising different flows: the script
+computed the challenge over the padded verifier, where the trimming cancels on
+both sides, and the reviewer had bound the challenge over the clean value and
+sent the padded one — which is the case where trimming widens what PKCE binds
+from one string to every string that trims to it. Reported as "cannot reproduce",
+that finding closes as invalid and the 200 stays in the tree. **When a repro
+disagrees with a review, the repro is the suspect**: rebuild it from the
+reviewer's exact pairing before drawing any conclusion, and say which pairing was
+measured. The corrected script answers 200 before the fix and `invalid_grant`
+after, on the same instance.)*
 
 *(The thirty-second, in E0-16's fix round, and it decided three things about five
 tests written *after* the code they cover — which is the position this entry is
@@ -2005,3 +2020,61 @@ And when a fixture's own docstring says a future ticket "will need a way to send
 deliberately wrong X", that is this entry firing — treat it as a missing fixture
 now rather than a note for later, because the ticket that inherits it will build
 against a driver that is still polite.
+
+---
+
+## 29. A value was repaired before the check that should have refused it
+
+**Caught: 0**
+
+**What happened.** The mock OIDC provider read every request parameter through one
+helper, and that helper ended in `.strip()`. One habit, three specification
+breaks, in a file that had already been through two of the implementer's own
+review passes *and* a fix round about this exact class of input handling:
+
+- **PKCE stopped binding one string.** The shape check ran on the trimmed value,
+  so for a challenge registered over some verifier `v`, every string that trimmed
+  to `v` was accepted. A challenge bound over `"a" * 43` redeemed with
+  `" " + "a" * 43 + "\n"` answered **200 with an `id_token`**. Keycloak, Okta and
+  Auth0 all answer `invalid_grant`, and `base64.encodebytes()` appends exactly
+  that newline — so a client minting a verifier that way passes every test here
+  and fails at the first real provider, with an error naming the verifier rather
+  than the encoder.
+- **`state` came back trimmed**, where RFC 6749 §4.1.2 requires "the exact value
+  received from the client".
+- **`nonce` was issued trimmed**, so OIDC Core §3.1.3.7 step 11 fails in the
+  client.
+
+All three were found by an external reviewer, running a live instance.
+
+**Root cause.** The normalisation sat between the wire and the guard, so the
+guard was checking a value no client had sent. Two things make it hard to see.
+First, `.strip()` reads as hygiene rather than as a decision — it looks
+*defensive*, which is the opposite of what it was doing. Second, it is invisible
+at the point that matters: `pkce_shape_problem(verifier)` at the call site looks
+exactly right, and the argument had already been made well-formed one frame
+earlier.
+
+It is entry 23's family — a validation creating the appearance of a behaviour —
+with the sharpest possible instance of it. The round *before* this one hardened
+the same guard twice, adding an alphabet check and a length check to a parameter
+that arrived pre-trimmed. Strengthening a check downstream of a repair produces a
+guard that is more convincing and no more able to fire.
+
+**Consequence.** A weakened PKCE binding in the service whose stated job is to
+teach E1's client what a strict provider does, plus two echo semantics broken in
+the direction a client reads as its own CSRF or replay check failing. Every one
+of them was reachable by any client and none was reachable by any test.
+
+**Rule.** **Validate what arrived, and only reject — never repair.** For every
+check, ask what happened to the value between the socket and the check: a guard
+whose input passed through `.strip()`, `.lower()`, `.replace()`, a
+`urlsplit`-and-rebuild or a type coercion upstream is a guard checking a value
+that never existed on the wire.
+
+Where a presence test genuinely wants trimming — "three spaces is not a `state`"
+— trim *for that test only* and hand the raw value onward. And treat any
+parameter with **echo semantics** as untouchable: a value the protocol requires
+back byte for byte, or that a signature or a digest is computed over, must reach
+the comparison exactly as it arrived, because there the repair is not leniency —
+it is a different value returned under the client's name.

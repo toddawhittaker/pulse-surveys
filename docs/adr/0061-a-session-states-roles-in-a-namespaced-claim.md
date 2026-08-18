@@ -28,7 +28,19 @@ met a bare string once would have to handle both shapes forever.
 
 The claim name is published in the discovery document's `claims_supported` and in
 the registration document as `roles_claim`, so a client learns it rather than
-hardcoding it.
+hardcoding it. Only the second of those actually identifies it — `claims_supported`
+is an unordered list of names with nothing marking which one carries roles — which
+is why
+[ADR 0058](0058-the-mock-provider-publishes-its-registration-and-its-seed.md)
+names `roles_claim` among the members a later ticket may depend on.
+
+**The roles claim is bound to `openid` and is not gated behind a scope**, unlike
+the OIDC standard claims beside it: a review found the provider handing over
+`email` and `preferred_username` on an `openid`-only grant, which no real IdP
+does, and those are now gated on `email` and `profile` (OIDC Core 1.0 §5.4). The
+roles claim deliberately stays outside that scheme. It is the reason a client asks
+this provider anything, and a client that had to know to request it would discover
+that it did not at role-resolution time, which is the worst place to find out.
 
 **Nothing else about authorization is in the token.** No org node, no assignment
 scope, no purview, no supervision edge. The seeded assignments carry the node

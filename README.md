@@ -263,8 +263,20 @@ Four things about it are worth knowing before debugging anything:
   required and S256 only; `state` and `nonce` are required; an authorization code
   is good once, for sixty seconds, and a failed exchange spends it too; a
   `redirect_uri` that is not the registered one is refused with a page rather than
-  a redirect. A mock that shrugged at any of those would teach the tool side to
-  shrug too.
+  a redirect; a parameter sent twice is refused rather than resolved last-wins; a
+  scope it does not serve is refused rather than quietly dropped. A mock that
+  shrugged at any of those would teach the tool side to shrug too.
+- **Nothing a client sends is trimmed, and that is load-bearing.** Values are
+  checked exactly as they arrived and refused, never repaired: a `code_verifier`
+  wrapped in whitespace — which is what `base64.encodebytes()` produces — is
+  `invalid_grant` here as it is at Keycloak, Okta and Auth0, and `state` and
+  `nonce` come back byte for byte, because a client compares both against what it
+  sent.
+- **A session carries what the granted scopes cover.** `openid` alone gets the
+  subject, the audience, the nonce and the Pulse roles claim, and **not** `email`
+  or `preferred_username`: ask for `email` and `profile` if you want those, as you
+  would at Azure AD, Okta or Google. The token response echoes the grant, so what
+  it declares and what the ID token carries cannot disagree.
 - **Its signing key is generated per process, and never written down.** Restart
   the container and it is a different provider with a different key set, so
   anything that cached the old keys stops verifying. No private key is committed
@@ -298,10 +310,11 @@ first. Her session here states `CARE` and nothing else — not because anything
 filters her teaching out, but because entry doors belong to the assignment rather
 than to the person (SPEC §2), and an instructor assignment does not open this one.
 
-A session carries who she is and which roles she may act under, and **no scope of
-any kind**. Purview is computed by Pulse from its own supervision graph (§2.1),
-so the roles arrive in one namespaced claim and everything about what she can see
-is worked out on this side of the door
+A session carries who she is and which roles she may act under, and **no purview
+of any kind** — no college, no department, no course, no supervision edge.
+Purview is computed by Pulse from its own supervision graph (§2.1), so the roles
+arrive in one namespaced claim and everything about what she can see is worked
+out on this side of the door
 ([ADR 0061](docs/adr/0061-a-session-states-roles-in-a-namespaced-claim.md)).
 
 ## Working on the backend without containers

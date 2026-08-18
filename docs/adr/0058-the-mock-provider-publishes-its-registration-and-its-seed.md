@@ -54,15 +54,28 @@ The path sits under `/mock/`, the prefix
 for a route no real service serves. The index page renders the same values from
 the same functions, so a human and a script cannot be told different things.
 
-**Six of those members are a contract, and the rest are prose.** A later ticket
-may depend on `client_id`, `redirect_uri`, and on each entry of `users` carrying
-`sub`, `roles`, `launch_only_roles` and `lms_user_id` — those six are what E1's
-login work and E0-18's browser paths were given this document for, and changing
-the name, the type or the meaning of any of them is a breaking change that has to
-move its callers in the same pull request. Everything else here — `label`,
-`email`, `assignments` with their scope strings, and the endpoint URLs a client
-should be reading out of the discovery document instead — is documentation for a
-human, and may be reworded or dropped without ceremony.
+**Seven of those members are a contract, and the rest are prose.** A later ticket
+may depend on `client_id`, `redirect_uri`, `roles_claim`, and on each entry of
+`users` carrying `sub`, `roles`, `launch_only_roles` and `lms_user_id` — those
+seven are what E1's login work and E0-18's browser paths were given this document
+for, and changing the name, the type or the meaning of any of them is a breaking
+change that has to move its callers in the same pull request. Everything else
+here — `label`, `email`, `assignments` with their scope strings, and the endpoint
+URLs a client should be reading out of the discovery document instead — is
+documentation for a human, and may be reworded or dropped without ceremony.
+
+`roles_claim` is in that set for a reason the others are not, and it was nearly
+missed. The claim name it publishes,
+`https://pulse.example/claims/roles`, appears in the discovery document **only as
+one unlabelled entry of `claims_supported`**, so a client fetching the metadata
+can see that the claim exists and cannot tell which entry states roles. E1's role
+resolution therefore reads it here or hard-codes the URI, which makes this
+document the single published interface for the one claim
+[ADR 0061](0061-a-session-states-roles-in-a-namespaced-claim.md) exists to
+define — the same argument that puts `launch_only_roles` in the set. If a later
+ticket wants it discoverable without this mock-only route, the answer is a
+namespaced metadata member in the discovery document, which OIDC Discovery 1.0 §3
+permits; that is E1's call and not this ticket's.
 
 The line is drawn here rather than left to whoever depends on it first, for the
 reason `docs/MISTAKES.md` entry 2 gives: E0-18 is about to build on
