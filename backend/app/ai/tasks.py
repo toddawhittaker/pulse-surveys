@@ -15,7 +15,7 @@ E0-13's sixth criterion).
 §3.3: "Classifier latency budget: p95 < 2s; on provider timeout, the heuristic
 floor applies and the submission is accepted, then classified async (fail open,
 never block a student on an outage)." So `classify_comment_validity` catches the
-one error that means "the endpoint did not answer *in time*", applies the floor,
+one error that means "the endpoint was reached and did not classify", applies it,
 and returns the contract — and the row it writes says a floor decided it, under a
 prompt version and a model ID that name no prompt and no model
 ([ADR 0054](../../../docs/adr/0054-a-floored-classification-names-the-floor-in-its-audit-pair.md)).
@@ -41,7 +41,7 @@ from importlib.resources import files
 from sqlalchemy.orm import Session
 
 from app.ai.contracts import CommentValidityOutput, ValidityVerdict
-from app.ai.gateway import AIGateway, AIProviderTimeoutError
+from app.ai.gateway import NOT_A_MODEL, AIGateway, AIProviderUnavailableError
 from app.models.ai import Classification, ClassificationTask
 
 # The prompt this task renders, named as ADR 0031 spells a `prompt_version`: the
@@ -82,8 +82,18 @@ HEURISTIC_MINIMUM_CHARACTERS = 25
 # a specific comment" — so a floor result carrying a real pair would be a record
 # asserting that a model produced a verdict it was never asked for, and E2's
 # async re-classification would have nothing to find.
+#
+# **The model marker is the gateway's constant, imported rather than spelled
+# again**, because the gateway is what makes it mean something: it refuses to
+# record that value from a provider that claims it, so a row carrying it can only
+# have come from here. The prompt marker needs no such guarantee — a provider
+# never supplies a prompt version at all.
+#
+# The two are load-bearing in a way a rename would break quietly: E2's
+# re-classification finds floored rows by them, and §6.1's drift panel groups on
+# them.
 FLOOR_PROMPT_VERSION = "character-floor"
-FLOOR_MODEL_ID = "no-model"
+FLOOR_MODEL_ID = NOT_A_MODEL
 
 # The gateway this process uses, built on first classification and kept.
 _GATEWAY_LOCK = threading.Lock()
@@ -226,11 +236,13 @@ def classify_comment_validity(
     student's face at submit time with coaching copy — so what this returns
     decides both what a student is told and what a section's validity rate says.
 
-    On an endpoint that does not answer *in time*, the character floor decides
-    and the submission goes through: "fail open, never block a student on an
-    outage" (§3.3). Every other gateway failure propagates — including a
-    connection that never arrived, which is a refused connection or a failed TLS
-    handshake and is not what §3.3 sanctions the floor for (ADR 0056). E2's
+    On an endpoint that was reached and could not classify — it did not answer
+    in time, or it answered to say it is temporarily unavailable — the character
+    floor decides and the submission goes through: "fail open, never block a
+    student on an outage" (§3.3). Every other gateway failure propagates,
+    including a request that never arrived: a refused connection, a connect
+    timeout against a route that drops packets, a failed TLS handshake. None of
+    those is what §3.3 sanctions the floor for, and ADR 0056 has the table. E2's
     submit path is where a caller decides what to do with one.
 
     The gateway is a parameter so that a caller holding one can pass it; a
@@ -246,7 +258,7 @@ def classify_comment_validity(
             output_model=CommentValidityOutput,
             timeout=VALIDITY_TIMEOUT_SECONDS,
         )
-    except AIProviderTimeoutError:
+    except AIProviderUnavailableError:
         output = character_floor(comment)
 
     record_classification(session, ClassificationTask.COMMENT_VALIDITY, output)

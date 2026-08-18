@@ -75,7 +75,9 @@ holds the loop, the client and the agents together for exactly that reason.
 """
 
 import asyncio
+import json
 import threading
+from collections.abc import Iterator
 from functools import cache
 from typing import Any, TypeVar
 
@@ -130,6 +132,42 @@ UNDECLARED_LOCATION = "<undeclared>"
 # nobody reads.
 _PROBLEM_LIMIT = 5
 
+# The statuses that mean "this endpoint cannot serve you right now, through no
+# fault of your request". §3.3's fail-open is written for an outage, and the
+# ordinary shape of a hosted outage is a load balancer answering while the model
+# behind it is down — not a socket that hangs. `408` is a timeout the server
+# reports rather than one the client observes, and belongs with them.
+#
+# Deliberately excluded, and each for a reason: `429` is a rate limit, which is a
+# capacity decision an operator has to see rather than absorb; `500` says our
+# request hit a bug, which is permanent until somebody changes something; `401`
+# and `404` are configuration. Flooring on any of those would hide a condition
+# that never resolves on its own, one comment at a time. ADR 0056 carries the
+# whole table.
+OUTAGE_STATUSES = frozenset({408, 502, 503, 504})
+
+# The recorded `model_id` that means "no model produced this" — `app.ai.tasks`
+# stamps it on a fail-open floor result (ADR 0054), and a reader asking which
+# verdicts the floor decided selects on it.
+#
+# **It lives here because this is the module that has to make it unforgeable.**
+# A provider reports its own model name in the response, and E0-13's review
+# measured that name being stored verbatim: an endpoint answering
+# `"model": "no-model"` produced rows indistinguishable from the floor's own.
+# `_reported_model` refuses it.
+NOT_A_MODEL = "no-model"
+
+# Values a provider may not claim to be, whatever it reports. One today; a second
+# marker added by a later ticket belongs here in the same change.
+_RESERVED_MODEL_IDS = frozenset({NOT_A_MODEL})
+
+# How long a provider's model identifier may be. Real ones are short —
+# `gpt-4o-2024-11-20` is 17 characters and the longest in common use is under 60
+# — and the review measured a 200,000-character name stored in full. Anything
+# past this is not a model identifier, and the configured name is recorded
+# instead.
+MODEL_ID_LIMIT = 120
+
 
 class AIGatewayError(Exception):
     """A model call did not produce a validated object, and said so on purpose.
@@ -141,33 +179,45 @@ class AIGatewayError(Exception):
     """
 
 
-class AIProviderTimeoutError(AIGatewayError):
-    """The endpoint accepted the request and did not answer in time.
+class AIProviderUnavailableError(AIGatewayError):
+    """The request reached the endpoint, and no verdict came back in time.
 
-    **This is the only failure §3.3's fail-open covers**, and the name says so:
-    "Classifier latency budget: p95 < 2s; on provider timeout, the heuristic floor
-    applies and the submission is accepted, then classified async (fail open,
-    never block a student on an outage)."
+    **This is the only class §3.3's fail-open covers**, and it holds exactly two
+    things: a read or write timeout — the connection was made, the request went
+    out, and the answer did not arrive — and one of `OUTAGE_STATUSES`, where the
+    endpoint answered to say it cannot serve the request now. §3.3: "on provider
+    timeout, the heuristic floor applies and the submission is accepted, then
+    classified async (fail open, never block a student on an outage)."
+
+    Both members satisfy the same sentence: the provider was there and did not
+    classify. Everything else is either a request that never arrived
+    (`AIProviderUnreachableError`) or an answer about *our* request
+    (`AIProviderRefusedError`), and neither is an outage.
+    [ADR 0056](../../../docs/adr/0056-only-a-timeout-fails-open.md) carries the
+    whole table and the reasoning for each row.
 
     Deciding what to do about it is not this module's job. Comment validity falls
     open onto §3.3's character floor; moderation (§6.2) has no fail-open at all,
     because the verdict that routes a self-harm disclosure to the Care queue is
-    not something to guess at. A gateway that absorbed the timeout itself would
+    not something to guess at. A gateway that absorbed the outage itself would
     have to hold both rules.
     """
 
 
 class AIProviderUnreachableError(AIGatewayError):
-    """The request never reached an endpoint: the connection failed.
+    """The request never reached the endpoint.
 
     A refused connection, a name that does not resolve, a TLS handshake that does
-    not complete. **Deliberately not the same class as a timeout**, and
-    [ADR 0056](../../../docs/adr/0056-only-a-timeout-fails-open.md) is why: §3.3
-    sanctions the floor for a provider *timeout*, and a certificate failure is
-    what an active network attacker looks like. Failing open on it would let
-    anybody who can interrupt the connection decide that no classification
-    happens — which is tolerable for a participation gate only until E2 puts
-    moderation through the same code.
+    not complete, a connect timeout against a route that drops packets, or a pool
+    timeout inside this process. **Deliberately not the same class as an outage**,
+    and ADR 0056 is why: §3.3 sanctions the floor for a provider that does not
+    answer *in time*, and nothing here got as far as an endpoint that could have.
+
+    A connect timeout belongs here rather than with the timeouts above, and that
+    boundary is the point of this class: dropping packets is the cheapest thing an
+    attacker on the path can do, and if it floored, anyone able to do it could
+    decide that no classification happens. That is tolerable for a participation
+    gate only until E2 puts moderation through the same taxonomy.
     """
 
 
@@ -379,11 +429,13 @@ class AIGateway:
         that made its mistake deterministically will make it again, so this buys
         less than a feedback retry would. ADR 0053 records the trade.
 
-        Raises `AIProviderTimeoutError` if the endpoint did not answer in time,
-        `AIProviderUnreachableError` if the connection never got there,
-        `AIProviderRefusedError` if it answered with an error status, and
-        `AIResponseInvalidError` if it kept answering with something that is not
-        the contract.
+        Raises `AIProviderUnavailableError` if the endpoint was reached and could
+        not classify — a read or write timeout, or one of `OUTAGE_STATUSES` —
+        which is the one failure §3.3's floor covers;
+        `AIProviderUnreachableError` if the request never got there;
+        `AIProviderRefusedError` if the answer was a status about this request;
+        and `AIResponseInvalidError` if it kept answering with something that is
+        not the contract. ADR 0056 has the table.
         """
         problem = ""
         for _ in range(SHAPE_VIOLATION_ATTEMPTS):
@@ -453,73 +505,160 @@ class AIGateway:
                 f"The answer did not validate as {output_model.__name__}: "
                 f"{_describe(violation, output_model)}."
             )
-        except ModelHTTPError as refused:
+        except json.JSONDecodeError:
+            # An answer that is not JSON at all, which the client raises rather
+            # than wrapping: HTTP 200 with a captive portal's HTML behind it, or a
+            # proxy's error page. The endpoint answered and the answer is not the
+            # contract, so it is the same class as any other shape violation and
+            # gets the same retry. Nothing of the body is repeated — the position
+            # this exception reports is a column number, and even that is left
+            # out.
+            failure = AIResponseInvalidError
+            message = "The answer was not JSON."
+        except ModelHTTPError as answered:
             # The status code and nothing else. `ModelHTTPError` renders the
             # endpoint's response body into its own message, and that body is text
             # the endpoint wrote.
-            failure = AIProviderRefusedError
-            message = f"The model endpoint answered HTTP {refused.status_code}."
-        except ModelAPIError as unanswered:
-            # The library's wrapper for a request that never got an answer, and it
-            # covers two different things (`ModelHTTPError` is a third and is
-            # caught above). Only one of them is §3.3's fail-open case, so they
-            # are separated here rather than reported as one — ADR 0056.
-            if _timed_out(unanswered):
-                failure = AIProviderTimeoutError
-                message = "The model endpoint did not answer within the task's timeout."
-            else:
-                failure = AIProviderUnreachableError
+            #
+            # Two outcomes, split by what the status is *about* (ADR 0056). A
+            # status in `OUTAGE_STATUSES` is about the endpoint — it was reached,
+            # and it says it cannot serve the request now, which is §3.3's outage
+            # in the shape a hosted provider usually produces. Everything else is
+            # about this request or this account, and absorbing it would hide a
+            # condition that does not resolve on its own.
+            if answered.status_code in OUTAGE_STATUSES:
+                failure = AIProviderUnavailableError
                 message = (
-                    "The model endpoint could not be reached: the connection was refused, "
-                    "the name did not resolve, or the TLS handshake failed."
+                    f"The model endpoint answered HTTP {answered.status_code}, which reports it "
+                    "as temporarily unable to serve the request."
                 )
+            else:
+                failure = AIProviderRefusedError
+                message = f"The model endpoint answered HTTP {answered.status_code}."
+        except ModelAPIError as unanswered:
+            # The library's wrapper for a request that got no answer at all, and
+            # it covers everything from "the response was late" to "the name does
+            # not resolve". Only some of that is §3.3's fail-open case.
+            failure, message = _unanswered_outcome(unanswered)
         else:
-            return result.output, self._model_of(result)
+            return result.output, self._reported_model(result)
 
         raise failure(message)
 
-    def _model_of(self, result: Any) -> str:
-        """The model that produced this answer, as the endpoint spells it.
+    def _reported_model(self, result: Any) -> str:
+        """The model that produced this answer, as the endpoint spells it — within limits.
 
         Read off the response rather than off the configuration, because ADR 0031
         wants "the provider's own identifier for the model, as the provider spells
-        it" — a hosted provider asked for `gpt-4o` answers as a dated build of it,
+        it": a hosted provider asked for `gpt-4o` answers as a dated build of it,
         and §9.3's eval floors compare runs of different models. The configured
-        name is the fallback for an endpoint that reports none.
+        name is the fallback.
+
+        **It is the provider's channel, so it is checked like one.** ADR 0031
+        makes the gateway supply the audit pair precisely because "a model's own
+        account of which prompt version and which weights produced an answer is
+        not an audit record", and `_payload_model` enforces that against the JSON
+        body — while this value arrives from the same party through the envelope.
+        E0-13's second review pass measured what that allowed: an endpoint
+        answering `"model": "no-model"` produced rows carrying ADR 0054's
+        fail-open marker, so the query "which verdicts did the character floor
+        decide" — the one E2's re-classification needs — selected rows a model had
+        answered. A 200,000-character name was stored in full, and a name holding
+        a NUL byte would have failed the insert instead.
+
+        So a reported name is used when it is plausibly one: non-empty once
+        stripped, no longer than `MODEL_ID_LIMIT`, printable throughout, and not a
+        value this project reserves. Anything else records the configured name,
+        which is the same fallback an endpoint that reports nothing already gets —
+        an honest "this is what we asked for" rather than a value the provider
+        chose. What is *not* done is raising: a wrong model name is not a wrong
+        verdict, and refusing the classification over it would fail the student
+        for the provider's misbehaviour.
         """
         for message in reversed(result.all_messages()):
             reported = getattr(message, "model_name", None)
-            if isinstance(reported, str) and reported:
-                return reported
+            if isinstance(reported, str) and _is_plausible_model_id(reported):
+                return reported.strip()
         return self.model_name
 
 
-def _timed_out(failure: BaseException) -> bool:
-    """Whether this failure is the endpoint not answering in time.
-
-    Decided on the exception chain rather than on a message, because the layers
-    above flatten both cases into one class with a sentence in it — "Request timed
-    out." against "Connection error." — and a rule that reads either sentence is a
-    rule that breaks when the library rewords it. `httpx.TimeoutException` is the
-    common parent of a connect timeout and a read timeout, and it is the deepest
-    layer this project declares a dependency on.
-
-    Measured, on the pinned versions: a stub that holds the request produces
-    `ModelAPIError <- APITimeoutError <- httpx.ReadTimeout`; a refused connection
-    and a failed TLS handshake both produce `ModelAPIError <- APIConnectionError
-    <- httpx.ConnectError`, with no `TimeoutException` anywhere in either.
-
-    A chain this cannot read falls to `False`, which is the safe direction: an
-    unrecognised failure is surfaced rather than absorbed by §3.3's floor.
-    """
+def _chain(failure: BaseException) -> Iterator[BaseException]:
+    """`failure` and everything it was raised from, `__cause__` and `__context__` alike."""
     seen: list[BaseException] = []
     current: BaseException | None = failure
     while current is not None and not any(link is current for link in seen):
         seen.append(current)
-        if isinstance(current, httpx.TimeoutException):
-            return True
+        yield current
         current = current.__cause__ or current.__context__
-    return False
+
+
+def _unanswered_outcome(failure: ModelAPIError) -> tuple[type[AIGatewayError], str]:
+    """Which class a request that got no answer belongs to, and what to say about it.
+
+    Decided on the exception chain rather than on a message, because the layers
+    above flatten every one of these into one class carrying a sentence —
+    "Request timed out." against "Connection error." — and a rule that reads
+    either sentence breaks when the library rewords it. The types below are
+    `httpx`'s, which this project depends on directly and pins.
+
+    **The line is whether the request reached an endpoint that could have
+    answered.** A read or write timeout means the connection was open and the
+    request was on it, which is §3.3's "did not answer in time". A *connect*
+    timeout means nothing arrived — the packets went into a hole — and a pool
+    timeout means the request never left this process. Both of those are
+    `httpx.TimeoutException` subclasses, which is why this looks for the two
+    specific ones rather than for the parent: E0-13's second review pass measured
+    a blackholed route flooring the classifier with zero requests reaching any
+    server, under a rule that matched the parent.
+
+    Measured on the pinned versions: a held request gives `ModelAPIError <-
+    APITimeoutError <- httpx.ReadTimeout`; a refused connection, a name that does
+    not resolve and a failed TLS handshake all give `... <- APIConnectionError <-
+    httpx.ConnectError`; a blackholed route gives `... <- httpx.ConnectTimeout`.
+
+    A chain this cannot read is treated as unreachable, which is the safe
+    direction: an unrecognised failure surfaces rather than being absorbed by
+    §3.3's floor.
+    """
+    for link in _chain(failure):
+        if isinstance(link, httpx.ReadTimeout | httpx.WriteTimeout):
+            return (
+                AIProviderUnavailableError,
+                "The model endpoint accepted the request and did not answer within the task's "
+                "timeout.",
+            )
+        if isinstance(link, httpx.TimeoutException):
+            return (
+                AIProviderUnreachableError,
+                "The model endpoint could not be reached: the connection did not complete "
+                "within the task's timeout.",
+            )
+    return (
+        AIProviderUnreachableError,
+        "The model endpoint could not be reached: the connection was refused, the name did not "
+        "resolve, the TLS handshake failed, or the connection dropped before an answer.",
+    )
+
+
+def _is_plausible_model_id(reported: str) -> bool:
+    """Whether a provider-reported model name is one this project will record.
+
+    Four conditions, and each closes something the review measured: a name that is
+    only whitespace, one longer than any real identifier, one carrying control
+    characters — a newline forges a second log line, and a NUL byte fails the
+    insert rather than being stored — and one claiming a value this project
+    reserves for "no model produced this" (ADR 0054).
+
+    `str.isprintable()` answers `False` for every control character including the
+    NUL, and `True` for non-ASCII letters, which a provider is entitled to use.
+    """
+    candidate = reported.strip()
+    return (
+        bool(candidate)
+        and len(candidate) <= MODEL_ID_LIMIT
+        and candidate.isprintable()
+        and candidate not in _RESERVED_MODEL_IDS
+    )
 
 
 def _describe(violation: UnexpectedModelBehavior, contract: type[AiTaskOutput]) -> str:

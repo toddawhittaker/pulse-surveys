@@ -291,9 +291,11 @@ class Settings(BaseSettings):
     # --- deployment wiring, no credential: required, no default ---------------
     ai_provider_base_url: str = Field(
         description=(
-            "OpenAI-compatible API base URL (§7.4). Must be https when AI_PROVIDER_API_KEY is "
-            "set, unless it names this machine: plain http off this machine would put the "
-            "credential and the comment being classified on the wire in the clear (§10)."
+            "OpenAI-compatible API base URL (§7.4). It carries no credential of its own — no "
+            "user:password@ prefix; the key belongs in AI_PROVIDER_API_KEY. And it must be "
+            "https when that key is set, unless it names this machine: plain http off this "
+            "machine would put the credential and the comment being classified on the wire in "
+            "the clear (§10)."
         )
     )
     ai_model_name: str = Field(description="Model identifier passed to that provider.")
@@ -363,6 +365,39 @@ class Settings(BaseSettings):
 
     @field_validator("ai_provider_base_url")
     @classmethod
+    def the_provider_url_carries_no_credential(cls, value: str) -> str:
+        """Refuse `https://user:password@host/...`. The key has its own variable.
+
+        A URL may carry userinfo, and an HTTP client turns it into a real
+        `Authorization: Basic ...` header — measured on this stack. Two things go
+        wrong at once when it does. This field is a plain `str`, not a
+        `SecretStr`, so a password inside it appears in `repr(settings)`, in
+        `model_dump()`, and in §6.3's admin configuration view, which is specified
+        to show "AI provider (base URL, model, masked key)" and would render the
+        password beside the masked key. And the rule below, which asks whether a
+        credential is configured, would answer "no" while a credential was sitting
+        in this string.
+
+        Refusing it is what keeps both of those true by construction rather than
+        by a second mechanism: the base URL stays a plain, displayable string
+        because it cannot hold a secret, and "no `AI_PROVIDER_API_KEY`" really
+        does mean "no credential". A proxy that wants Basic authentication is
+        reached with `AI_PROVIDER_API_KEY`, or through one that does not.
+
+        No value is quoted, as in every validator here: this message reaches the
+        startup log, and the thing being refused is the credential itself.
+        """
+        parsed = urlsplit(value)
+        if parsed.username or parsed.password:
+            raise ValueError(
+                "carries a credential in the URL itself, where it is neither masked in this "
+                "application's own configuration view nor covered by the transport rule below; "
+                "put the credential in AI_PROVIDER_API_KEY and remove the user:password@ prefix"
+            )
+        return value
+
+    @field_validator("ai_provider_base_url")
+    @classmethod
     def a_credentialled_endpoint_is_encrypted(cls, value: str, info: ValidationInfo) -> str:
         """Refuse to carry the provider key, or a student's comment, in cleartext.
 
@@ -372,18 +407,23 @@ class Settings(BaseSettings):
         the wire in the clear, and nothing else in the system would object.
 
         The rule is narrow on purpose. An endpoint **on this machine** may be
-        plain `http`, because nothing leaves the host — that is how a local
-        vLLM or Ollama is reached, which `.env.example` and `README.md` both
-        document. Anything else, with a credential configured, must be `https`.
+        plain `http`, because nothing leaves the host — that is how a local vLLM
+        or Ollama is reached, which `.env.example` and `README.md` both document.
+        Anything else, with a credential configured, must be `https`.
+
+        Reading `ai_provider_api_key` out of `info.data` is sound because the
+        field is declared above this one and pydantic validates in declaration
+        order; a key that failed its own validation is absent here, and the
+        failure it caused is reported beside this one. The validator above is what
+        makes "no key configured" mean "no credential at all".
 
         **What this deliberately does not refuse**: cleartext to an off-machine
         endpoint with *no* credential, which is a service inside a private
-        network — a vLLM pod reached over `http://` in the same cluster. That
-        case still puts comment text on a network, and whether it is acceptable
-        is the operator's call rather than this file's (ADR 0056).
+        network — a vLLM pod reached over `http://` in the same cluster. That case
+        still puts comment text on a network, and whether it is acceptable is the
+        operator's call rather than this file's (ADR 0056).
 
-        No value is quoted, as in every validator here: this message reaches the
-        startup log.
+        No value is quoted, as in every validator here.
         """
         if info.data.get("ai_provider_api_key") is None:
             return value
