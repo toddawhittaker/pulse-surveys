@@ -6,27 +6,24 @@
 
 ## Status — what is left here
 
-**Both questions were answered on 2026-08-18, and both spec edits are still
-owed.** The answers are in the README's *Decided* table; the spec change itself
-is Todd's and has not been made.
+**Both questions were answered on 2026-08-18 and both spec edits have landed.**
+What is left here is **code**, and it is now a build ticket rather than a
+question.
 
-**Question 1 — every comparison-set figure**, not only a drawn line. The minimum
-applies to any number computed from a comparison set, it lands in **§4.1 as an
-invariant with a test asserting it**, and §5.1's paragraph points at it rather
-than restating it. §4.1's preamble is what obliges the automated assertion, and
-a confidentiality rule stated where nothing obliges a test is a rule that ships
-unenforced.
+| Half | State |
+|---|---|
+| q1 — the rule | **Landed** as SPEC §4.1 item 7, with §5.1 rewritten to point at it |
+| q1 — the test | **Owed, and it is E4's.** §4.1 item 7 is marked *asserted from E4*, because the reports carrying these figures do not exist yet |
+| q2 — the rule | **Landed** in SPEC §8, and ADR 0017 is amended to say the assumption became a rule |
+| q2 — the constraint | **Owed, and it is this ticket's.** Nothing yet stops a second `institution` row |
 
-**Question 2 — one institution per deployment, enforced.** A constraint
-permitting at most one `institution` row, which makes global and
-institution-scoped uniqueness the same rule and turns a confusing constraint
-violation into an error at the row that is actually wrong. ADR 0017 is amended
-to say the assumption became a rule.
+**§4.1's preamble now names the two items that carry no assertion** — item 1
+(E2's) and item 7 (E4's) — rather than claiming all seven are asserted. Adding
+item 7 is what made that necessary: an invariant listed with nothing asserting
+it is exactly the rule this ticket exists to stop shipping unenforced.
 
-Nothing here batches with anything. Question 1's test belongs in the same suite
-[E0-33](E0-33-catalog-drift-assertions.md) and
-[E0-34](E0-34-view-file-identity-guards.md) extend, and **E4 builds the reports
-it governs**, so it is the one with a deadline.
+The remaining work does not batch with anything: it is one migration adding one
+constraint, plus the test that a second `institution` row is refused.
 
 
 ## Context
@@ -107,15 +104,23 @@ change is larger than a schema edit.
 
 ## Acceptance criteria
 
-- [ ] SPEC says which scope the benchmark minimum has, in one place rather than
-      two, and if the answer is "every comparison-set figure" it is a §4.1
-      invariant with a test asserting it.
-- [ ] SPEC says whether a deployment serves exactly one institution. If it does,
-      a constraint enforces it and ADR 0017 is amended to say the assumption
-      became a rule.
-- [ ] Neither answer is recorded only in an ADR. Both are spec questions, and
+- [x] SPEC says which scope the benchmark minimum has, in one place rather than
+      two. **Done 2026-08-18:** it is §4.1 item 7, and §5.1 points at it instead
+      of restating it.
+- [ ] §4.1 item 7 has a test asserting it. **Not done, and it is E4's** — the
+      reports carrying comparison-set figures do not exist yet. §4.1's preamble
+      names item 7 and item 1 as the two invariants that carry no assertion, so
+      the gap is stated rather than implied.
+- [x] SPEC says whether a deployment serves exactly one institution, and ADR 0017
+      is amended to say the assumption became a rule. **Done 2026-08-18**, in §8.
+- [ ] **A constraint enforces it.** Not done, and it is this ticket's remaining
+      scope: nothing yet stops a second `institution` row, so §8 currently states
+      a rule the database does not hold. One migration, plus a test that the
+      second row is refused, verified by mutation.
+- [x] Neither answer is recorded only in an ADR. Both are spec questions, and
       `CLAUDE.md` is explicit that an ADR is not the instrument for something the
-      spec should decide.
+      spec should decide. **Both landed in SPEC**; ADR 0017's amendment points at
+      §8 rather than carrying the decision.
 
 ## Definition of done
 

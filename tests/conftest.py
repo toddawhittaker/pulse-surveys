@@ -3145,7 +3145,9 @@ class SupervisionGraph:
 
     **What it decides and what it refuses to.** The ticket spells four columns on
     `role_assignment` — `person_id`, `role`, `scope_node_id`, `reports_to` — and
-    two table names, and that is all it spells. So the role column, the person
+    two table names, and that is all it spells. (SPEC §8 has since been corrected
+    to describe the five per-level columns that were actually built; the ticket
+    text this fixture was written against is quoted as written.) So the role column, the person
     link and the parent edge are each found here by following a foreign key or by
     a candidate list at the top of this file, and a role's spelling is matched
     against whatever the column enumerates rather than asserted to be a
@@ -3316,7 +3318,8 @@ class SupervisionGraph:
             f"assignment is scoped to. Its columns are "
             f"{[column.name for column in self.assignments.columns]}, and it references "
             f"{sorted({key.column.table.name for key in self.assignments.foreign_keys})}. E0-09 "
-            "and SPEC §8 both write `scope_node_id` in the singular, but E0-05 built the "
+            "wrote `scope_node_id` in the singular — SPEC §8 did too until it was corrected on "
+            "2026-08-18 to describe the five per-level columns — but E0-05 built the "
             "containment hierarchy as six separate tables and no ticket says what a single "
             "`scope_node_id` points at. Three shapes are supported — one nullable foreign key per "
             "containment level, a kind column beside an untyped id, or the id alone with the kind "

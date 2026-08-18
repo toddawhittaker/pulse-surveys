@@ -6,9 +6,10 @@
 
 ## Status — what is left here
 
-**Answered 2026-08-18; the spec edit is still owed.** PR #20 created this file
-and deliberately answered nothing. The answer now exists and the spec change
-that carries it does not — that change is Todd's.
+**Answered 2026-08-18, and the spec edit has landed. This ticket is closed.**
+PR #20 created this file and deliberately answered nothing; SPEC §7.3 now
+carries the answer under *What triggers the first pull*, and §2.1's LMS-owned
+bullet points at it.
 
 **Any instructor or leadership launch triggers a roster pull, and the roster
 service address is stored from that launch. A student launch does not.** Every
@@ -24,13 +25,10 @@ the trigger to staff launches does not make that state impossible, because a
 platform can withhold the claim from a staff launch too; it makes it rare and
 it keeps student traffic from causing outbound calls.
 
-**What the spec edit has to say**, beyond the trigger: that the service address
-is stored, and what an operator sees when a section has never had a roster. The
-column that stores it, its migration and its tests are **E1's**, built with the
-sync that reads it.
-
-It blocks nothing in E0 and E1's roster sync cannot be built without it. It does
-not batch with anything.
+**What is left is E1's**, and it is code rather than a decision: the column that
+stores the service address, its migration, and its tests, built with the sync
+that reads it. §7.3 also commits to a never-synced state being visible in the
+admin console, distinct from a section with no enrollments — that is E1's too.
 
 
 ## Context
@@ -127,15 +125,22 @@ next person does not re-derive it.
 
 ## Acceptance criteria
 
-- [ ] SPEC §7.3 says which launches trigger a roster pull. If the test is a stored
-      service URL rather than the launcher's role, it says that in those terms.
-- [ ] SPEC says how the scheduled sync addresses a course it did not just receive
-      a launch from, which in practice means saying that the service URL is
-      stored.
-- [ ] SPEC says what an operator sees when a section has no roster and has never
-      had one, and in which surface.
-- [ ] If any part of the answer is per-platform, it is named as belonging in the
-      §7.3 adapter rather than left to be discovered in domain logic.
+All four are done as of 2026-08-18. This ticket is closed; what follows from it
+is E1's.
+
+- [x] SPEC §7.3 says which launches trigger a roster pull — an instructor or any
+      leadership launch, never a student one — and says the trigger is the
+      launcher's role while the *request* is made with the tool's own
+      credentials, so the two are not confused.
+- [x] SPEC says how the scheduled sync addresses a course it did not just receive
+      a launch from: the service address is **stored** from the launch that
+      triggered the first pull, which is the discovery the scheduled job lacks.
+- [x] SPEC says what an operator sees when a section has never had a roster —
+      never-synced in the admin console (§6.1, §6.3), stated as distinct from a
+      section with no enrollments, because only one of the two is a fault.
+- [x] Nothing in the answer is per-platform. What *is* per-platform — whether a
+      given platform sends the address on a staff launch at all — is handled by
+      §7.3 naming the never-synced state rather than by a rule in domain logic.
 
 ## Definition of done
 

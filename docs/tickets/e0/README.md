@@ -39,10 +39,10 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | **Batch G.** Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. Already one coherent batch; nothing moved. |
 | 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | **Redistributed — not built as written.** Its measurements stay here and its items are now 33, 36 and 37. Read it for the mutation tables, not for the work. |
 | 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | **Redistributed — not built as written.** Item 1 is now 35, item 2 is now 37. Keeps the record of Todd's `course.lms_title` decision and its three-part cost. |
-| 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | **Both decided 2026-08-18, both spec edits still owed.** The benchmark minimum covers every comparison-set figure and becomes a §4.1 invariant; a deployment serves exactly one institution and a constraint enforces it. |
-| 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | **Decided 2026-08-18, spec edit still owed.** Any instructor or leadership launch triggers a pull and stores the service address; a student launch does not. |
+| 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | **Both decided and both spec edits landed 2026-08-18.** Now a small build ticket: the constraint enforcing one institution per deployment. §4.1 item 7's test is E4's. |
+| 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | **Closed 2026-08-18.** SPEC §7.3 carries the answer. The column that stores the service address is E1's, built with the sync that reads it. |
 | 24 | [Review debt from E0-07 and E0-08](E0-24-review-debt-from-e0-07-and-e0-08.md) | 07, 08 | Item 2 is now 35. Item 4 is Todd's. Items 1 and 3 leave the epic — see the carried-out table. |
-| 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Item 1 is now 36; items 2 and 3 are now 37; item 4 is **closed**. Item 6 is Todd's, item 5 leaves the epic. Keeps the complete index of what the three reviews produced. |
+| 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Item 1 is now 36; items 2 and 3 are now 37; items 4 and 6 are **closed**. Item 5 leaves the epic. Keeps the complete index of what the three reviews produced. |
 | 26 | [Review debt from E0-10](E0-26-review-debt-from-e0-10.md) | 10 | **Nothing moved — nothing here batches.** Item 1 is a live gap in SPEC §4's logging guarantee; the mechanism was decided on 2026-08-18 — the reveal returns nothing until a separately committed record exists — and it must land before **E10** opens the Care queue. Items 2 to 4 leave the epic with E10. |
 | 27 | [Review debt from E0-11](E0-27-review-debt-from-e0-11.md) | 11 | **Redistributed — not built as written.** Item 1 is now 35, item 2 is now 34, item 3 is **closed**. Keeps the record of E0-11's round, including the invented-statements note. |
 | 28 | [Review debt from E0-15](E0-28-review-debt-from-e0-15.md) | 15 | **Batch E.** Eight items in `mock-lms/app/`, each with a reproduction in PR #31. Item 6 is Todd's and changes what the batch costs; item 8 is **closed**. |
@@ -173,35 +173,40 @@ up.
 
 ## Decided
 
-All thirteen open questions were answered by Todd on **2026-08-18**. Nothing
-below is an implementer's call and nothing below is still open. Where an answer
-needs a spec edit, that edit is Todd's and has not been made yet — the **Spec
-edit owed** column says which.
+All thirteen open questions were answered by Todd on **2026-08-18**, and the four
+spec edits they required **have landed** in the same day's work. Nothing below is
+an implementer's call and nothing below is still open. The **Spec edit** column
+says which answers needed one and where it went.
 
-| # | Question | Decision | Spec edit owed |
+| # | Question | Decision | Spec edit |
 |---|---|---|---|
 | E0-31 item 1 | How is the mock LMS registration kept out of a deployed environment? | **Reuse the seed script's development-environment guard.** Register the mock behind the same guard `scripts/seed.py` already uses, and amend ADR 0038 to name that guard as what enforces its argument. | no |
 | E0-35 | Sweep the source, or hook the session? | **Sweep the source.** A test that reads our own modules and fails when one writes `course`, `section`, `enrollment` or an `INSTRUCTOR` `role_assignment` without naming `guard_write`. Record what a syntactic sweep cannot see, the way ADR 0062 does for the mock-idp gate. | no |
 | E0-30 item 1 | Does the mock identity provider learn RFC 6749 §4.1.2.1 error redirects? | **Yes, implement them.** About 40 lines plus tests, at the split point that already exists in `begin()` after `redirect_uri` validates. A refusal must arrive as a redirect carrying `error` and the `state` that was sent, and a test must fail if it reverts to a page. | no |
 | E0-28 item 6 | Does the mock LMS learn to authenticate now? | **Not now.** Its four moving parts go into E1's ticket so whoever builds the roster sync meets them before writing the client rather than after. E0-28's other eight items proceed without it. | no |
-| E0-22 q1 | Benchmark minimum — every figure, or only drawn lines? | **Every figure computed from a comparison set**, not only a drawn line. It becomes a §4.1 invariant with a test asserting it, and §5.1's paragraph points at it. | **yes** — §4.1 and §5.1 |
-| E0-22 q2 | Does one deployment serve exactly one institution? | **Yes, and enforce it.** A constraint permitting at most one `institution` row, which makes global and institution-scoped uniqueness the same rule. ADR 0017 is amended to say the assumption became a rule. | **yes** |
-| E0-23 | What triggers the first roster pull? | **Any instructor or leadership launch**, and the roster service address is stored from that launch. A student launch does not trigger one. Every later scheduled sync works from the stored address, and an operator sees "no roster yet" on a section that has never had one. | **yes** — §7.3 and §2.1 |
+| E0-22 q1 | Benchmark minimum — every figure, or only drawn lines? | **Every figure computed from a comparison set**, not only a drawn line. | **landed** — §4.1 item 7, §5.1 rewritten to point at it. Its *test* is E4's. |
+| E0-22 q2 | Does one deployment serve exactly one institution? | **Yes, and enforce it.** A constraint permitting at most one `institution` row, which makes global and institution-scoped uniqueness the same rule. | **landed** — §8, with ADR 0017 amended. The *constraint* is E0-22's own remaining work. |
+| E0-23 | What triggers the first roster pull? | **Any instructor or leadership launch**, and the roster service address is stored from that launch. A student launch does not trigger one. Every later scheduled sync works from the stored address, and a never-synced section is visible as such. | **landed** — §7.3, §2.1 points at it. The column and its sync are E1's. |
 | E0-26 item 1 | Which mechanism closes the rollback that keeps a name and leaves no audit row? | **Restructure the reveal so it returns nothing until a separately committed record exists.** Not `dblink`, not a loopback `postgres_fdw` — both put a database credential inside a `SECURITY DEFINER` function, which is a new privilege surface. Its ADR says what the chosen shape costs. | no |
 | E0-29 item 1a | Is cleartext to an off-machine model endpoint acceptable? | **No — refuse it.** Require an encrypted transport whenever the model is on another host, with or without a credential. A cluster deployment terminates TLS at the model or runs it alongside the app. `README.md` and `.env.example` change wherever they document the current allowance. | no |
 | E0-29 item 1b | Do HTTP 429 and 500 belong in the fail-open set? | **No — affirmed as built.** A rate limit is a capacity decision an operator must see and a 500 means our request is the problem; flooring either hides a condition that never resolves. The reasoning goes into ADR 0056 so it stops being an open row. | no |
 | E0-31 item 2 | `design/`'s 27 course numbers versus SPEC §8's bands. | **The design corpus is illustration.** It is not a source of seedable data and says so, so nobody reconciles it against §8 or seeds from it. No renumbering. | no |
 | E0-24 item 4 | Does the spec grow a real summer start-letter map? | **No.** The invented constants stay, marked as the test suite's own choice. **The gap at position 6 survives any edit** — a contiguous map is satisfiable by a range computed from the term's length, which is the wrong implementation those tests exist to refuse. | no |
-| E0-25 item 6 | Two spec lines describe things that no longer exist. | **Correct both.** §8's `scope_node_id` becomes the five nullable foreign keys E0-09 shipped (ADR 0025), and `user_identity` joins §8's core-table list with §13's `identity.py` comment corrected to match. | **yes** — §8 and §13 |
+| E0-25 item 6 | Two spec lines describe things that no longer exist. | **Correct both.** | **landed** — §8's scope columns and core-table list, plus three §13 module comments that were wrong the same way. |
 
-**Four spec edits are owed and none has been made.** They are E0-22's two
-answers, E0-23's, and E0-25 item 6's. `CLAUDE.md` is explicit that an ADR is not
-the instrument for something the spec should decide, so these do not land as
-ADRs — the spec changes, and that change is Todd's.
+**All four spec edits have landed**, so no answer here is waiting on a document.
+What two of them left behind is *code*, and it is owned:
 
-Three answers also want an existing record amended in the pull request that
-implements them: ADR 0038 for E0-31 item 1, ADR 0017 for E0-22 q2, and ADR 0056
-for E0-29 item 1b.
+- **The single-institution constraint is E0-22's**, and it is that ticket's whole
+  remaining scope. §8 states the rule; nothing yet enforces it.
+- **§4.1 item 7's test is E4's**, because the reports carrying comparison-set
+  figures do not exist yet. §4.1's preamble now names item 7 and item 1 as the
+  two invariants that carry no assertion, rather than claiming all seven do.
+- **E0-23's stored service address is E1's**, built with the sync that reads it.
+
+Two answers still want an existing record amended in the pull request that
+implements them: **ADR 0038** for E0-31 item 1, and **ADR 0056** for E0-29 items
+1a and 1b. ADR 0017 was amended with E0-22's spec edit and needs nothing further.
 
 ## What the built tickets settled
 
