@@ -57,6 +57,7 @@ inherits that view's text into its own plan.
 """
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -186,6 +187,38 @@ VIEW_DROP_MUST_ALLOW = (
     f"REVOKE ALL ON public.{CANARY_VIEW} FROM PUBLIC",
 )
 
+# What a *sequence* of statements leaves standing, which is a different question
+# from either sweep above and the one an independent security review found this
+# file getting wrong. Each sample is the files in execution order and whether the
+# canary view has to exist at the end of them.
+#
+# **The first pair is the finding.** A view whose column list changes cannot be
+# altered with `CREATE OR REPLACE VIEW`, so ADR 0041's `…_v002.sql` drops it and
+# creates it again — and a set of creates minus a set of drops subtracts a view
+# that was created twice. The consequence was not theoretical: `section_roster`
+# would have dropped out of the expected set permanently, taking with it the
+# mutation the test that uses this was written for (E0-20 item 3b, row five).
+VIEW_HISTORY_SAMPLES: tuple[tuple[tuple[str, ...], bool], ...] = (
+    ((f"DROP VIEW public.{CANARY_VIEW};\nCREATE VIEW public.{CANARY_VIEW} AS SELECT 1;",), True),
+    ((f"CREATE VIEW public.{CANARY_VIEW} AS SELECT 1;\nDROP VIEW public.{CANARY_VIEW};",), False),
+    ((f"CREATE VIEW public.{CANARY_VIEW} AS SELECT 1;",), True),
+    ((f"DROP VIEW public.{CANARY_VIEW};",), False),
+    (
+        (
+            f"CREATE VIEW public.{CANARY_VIEW} AS SELECT 1;",
+            f"DROP VIEW public.{CANARY_VIEW};",
+        ),
+        False,
+    ),
+    (
+        (
+            f"CREATE VIEW public.{CANARY_VIEW} AS SELECT 1;",
+            f"DROP VIEW public.{CANARY_VIEW};\nCREATE VIEW public.{CANARY_VIEW} AS SELECT 2;",
+        ),
+        True,
+    ),
+)
+
 
 def read_views(connection: Any) -> list[str]:
     """Every view and materialised view in `public`, by name."""
@@ -210,47 +243,72 @@ DROPS_A_VIEW = re.compile(
 )
 
 
-def views_created_in(sql: str) -> set[str]:
-    """Every view `sql` contains a statement to *create*, by name.
+def view_history(sql: str) -> tuple[tuple[str, bool], ...]:
+    """Every statement in `sql` that creates or drops a view, **in source order**.
 
-    A mention is not a creation, and the difference is the whole of what this
-    helper exists for. The first version of the test that uses it searched for the
+    Each entry is the view's name and whether that statement created it. Order is
+    the whole point and was the defect: the first version of this file answered
+    "which views are created" and "which are dropped" as two independent sets and
+    subtracted one from the other, which cannot see a `DROP` *followed by* a
+    `CREATE`. Under ADR 0041's versioned-file rule that is the ordinary shape of a
+    view whose column list changes — `CREATE OR REPLACE VIEW` cannot alter a
+    column list, so `section_roster_v002.sql` reads `DROP VIEW …;` then
+    `CREATE VIEW …;` — and the subtraction would have quietly stopped expecting
+    the schema's most identity-sensitive view to exist at all.
+
+    A mention is not a creation, and the difference is the other half of what this
+    helper is for. The first version of the test that consumes it searched for the
     view's name anywhere under `views_sql/`, and the mutation the test's own
     docstring named — delete `section_roster_v001.sql` and inline its
     `CREATE VIEW` into the revision — kept it green, because the grants file names
     every view in order to `GRANT SELECT` on it. So `GRANT`, `DROP`, `COMMENT ON`
-    and a name in a comment all have to fail here, and each is a sample in
-    `VIEW_CREATE_MUST_ALLOW` below.
+    and a name in a comment all have to fail as *creations*, and each is a sample
+    in `VIEW_CREATE_MUST_ALLOW` above.
 
-    Extracting the names rather than answering about one is what lets the two
-    tests that consume this ask their questions in opposite directions off one
-    pattern — every view in the catalog is created by a file, and every view a
-    file creates is in the catalog. Two copies of a regex this fiddly is
-    `docs/MISTAKES.md` entry 13.
-    """
-    return {match.group("view") for match in CREATES_A_VIEW.finditer(without_comments(sql))}
-
-
-def views_dropped_in(sql: str) -> set[str]:
-    """Every view `sql` contains a statement to *drop*, by name.
-
-    The counterpart to `views_created_in`, and it exists so that the direction
-    which reads from the files outwards is not a tripwire on the directory: a view
-    genuinely retired — renamed, replaced by one with a different shape — leaves
-    its `CREATE` in the file that first shipped it, and requiring that view to
-    still exist in the database would make retiring one impossible.
+    One function rather than three off these two patterns, because a regex whose
+    word boundary took an incident to establish is the last thing to copy
+    (`docs/MISTAKES.md` entry 13).
 
     **What it does not catch** (`docs/MISTAKES.md` entry 14): a `DROP VIEW a, b`
     naming several views in one statement, of which it sees only the first. One
-    statement per view is what every file here writes, and the failure direction
-    is safe — an unseen drop leaves a red naming the view, not a silent green.
+    statement per view is what every file here writes, and the failure direction is
+    safe — an unseen drop leaves a red naming the view, not a silent green.
+
+    `without_comments` replaces each comment with a single space, which shifts
+    offsets but never reorders what is left, so sorting on them is sound.
     """
-    return {match.group("view") for match in DROPS_A_VIEW.finditer(without_comments(sql))}
+    code = without_comments(sql)
+    events = [(match.start(), match.group("view"), True) for match in CREATES_A_VIEW.finditer(code)]
+    events += [(match.start(), match.group("view"), False) for match in DROPS_A_VIEW.finditer(code)]
+    return tuple((view, created) for _, view, created in sorted(events))
+
+
+def views_standing_after(sources: Iterable[str]) -> set[str]:
+    """Which views `sources`, executed in the order given, leave standing.
+
+    The last statement naming a view decides, which is what makes a drop-then-
+    recreate a view that still has to exist and a create-then-drop a view that
+    does not. Across files, the order is the order the caller passes them in;
+    within a file it is source order.
+
+    **The cross-file order is the file name's**, and that is a limit worth
+    stating. It is exact for the only case where cross-file order can matter —
+    two files naming the *same* view, which under ADR 0041 are `…_v001.sql` and
+    `…_v002.sql` and sort the way they run. Two different views are independent
+    keys, so nothing about their order matters. A pair of files that share a view
+    name and do not sort in execution order would fold wrongly, and the fix is the
+    naming convention rather than this function.
+    """
+    standing: dict[str, bool] = {}
+    for sql in sources:
+        for view, created in view_history(sql):
+            standing[view] = created
+    return {view for view, created in standing.items() if created}
 
 
 def creates_view(sql: str, view: str) -> bool:
     """Does `sql` contain a statement that creates the view called `view`?"""
-    return view in views_created_in(sql)
+    return (view, True) in view_history(sql)
 
 
 def public_relation_names(connection: Any) -> list[str]:
@@ -447,22 +505,32 @@ def test_every_view_created_under_views_sql_exists_in_the_migrated_database(
     requires two views: it catches that drop now and stops catching one the day a
     third view lands, because two out of three is still two.
 
-    **Retired views are subtracted, and that is what keeps this from being a
-    tripwire on the directory.** A view replaced by one of another name leaves its
-    `CREATE` in the file that shipped it; `views_dropped_in` is what lets that be
-    true without this test going red. Both sweeps are checked against samples of
-    what they must catch and must allow in
-    `test_the_text_sweeps_in_this_file_catch_what_they_claim_to`. It does mean a
-    retirement has to be written under `views_sql/` rather than inline in a
-    revision — the rule SPEC §13 already sets for a view's creation, applied to
-    the other end of its life.
+    **Retired views drop out, and that is what keeps this from being a tripwire on
+    the directory.** A view replaced by one of another name leaves its `CREATE` in
+    the file that shipped it, and `views_standing_after` is what lets that be true
+    without this test going red. It does mean a retirement has to be written under
+    `views_sql/` rather than inline in a revision — the rule SPEC §13 already sets
+    for a view's creation, applied to the other end of its life.
+
+    **The expectation is a fold in execution order, not a subtraction**, and the
+    difference is a MEDIUM an independent security review found here. Sets of
+    creates minus sets of drops is order-blind, so a `…_v002.sql` that changes a
+    view's column list — which cannot use `CREATE OR REPLACE VIEW` and therefore
+    reads `DROP VIEW public.section_roster;` then `CREATE VIEW
+    public.section_roster …;` — subtracted that view despite it being created
+    twice. The test would then have stopped requiring the schema's most
+    identity-sensitive view to exist, permanently and silently, including against
+    the very mutation below. `views_standing_after` lets the last statement naming
+    a view decide, and `VIEW_HISTORY_SAMPLES` carries the drop-then-recreate pair
+    so that nobody regresses it back to a subtraction.
 
     **The mutation it exists to survive**: `DROP VIEW public.section_roster`
     against the migrated database — E0-20 item 3b's fifth row — or a revision that
     stops executing one of the files under `views_sql/`.
     **The near miss it tolerates**: a third view added, in a file and in the
-    database together; and a view renamed, with the drop and the create both under
-    `views_sql/`.
+    database together; a view renamed, with the drop and the create both under
+    `views_sql/`; and a view dropped and recreated in one file, which stays
+    expected because it stands at the end.
 
     **The canary is the set of expected names itself.** A sweep that found nothing
     to expect would compare an empty set against the catalog and report success,
@@ -475,13 +543,13 @@ def test_every_view_created_under_views_sql_exists_in_the_migrated_database(
         "`test_every_read_view_is_created_from_a_sql_file_under_views_sql` diagnoses that."
     )
 
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
-    expected = views_created_in(combined) - views_dropped_in(combined)
+    expected = views_standing_after(path.read_text(encoding="utf-8") for path in files)
     assert expected, (
-        f"No `.sql` file under {VIEWS_SQL_DIR} contains a `CREATE VIEW` that is not also dropped "
-        f"there — the files are {[path.name for path in files]}. Either the views have moved out "
-        "of the directory SPEC §13 puts them in, or this sweep has gone blind; either way the "
-        "comparison below is between an empty set and whatever the database holds, and passes."
+        f"No `.sql` file under {VIEWS_SQL_DIR} leaves a view standing at the end of it — the files "
+        f"are {[path.name for path in files]}. Either the views have moved out of the directory "
+        "SPEC §13 puts them in, every one of them is dropped again by a later file, or this sweep "
+        "has gone blind; in all three the comparison below is between an empty set and whatever "
+        "the database holds, and passes."
     )
 
     with migrated_engine.connect() as connection:
@@ -549,7 +617,7 @@ def test_no_read_view_is_also_declared_as_an_orm_table(
 
 
 def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
-    """All three sweeps are run against a sample of each shape before anything trusts them.
+    """Every sweep, and the fold over one of them, is run against a sample of each shape.
 
     A pattern searched against text is a test that can go blind and report
     success — `docs/MISTAKES.md` entry 3 records one that matched nothing because
@@ -569,6 +637,14 @@ def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
     names every view in order to grant on it. That mutation was named in the
     test's own docstring and not run; entry 3's sixth incident is that a mutation
     a test names is a claim until someone runs it.
+
+    A third sample of that kind arrived from an independent security review, and
+    it is the reason `VIEW_HISTORY_SAMPLES` exists at all: `DROP VIEW …;` followed
+    by `CREATE VIEW …;` in one file. Both sweeps are individually correct about
+    it — there *is* a create and there *is* a drop — and the fold that subtracted
+    one set from the other read it as a retirement. Every sample of the pair shape
+    is here rather than in the test that consumes the fold, because a sweep that
+    has gone blind should be reported once, under the name of the sweep.
     """
     names = [CANARY]
 
@@ -605,8 +681,8 @@ def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
         )
 
     for sample in VIEW_DROP_MUST_CATCH:
-        assert CANARY_VIEW in views_dropped_in(sample), (
-            f"`views_dropped_in` does not read {sample!r} as dropping `{CANARY_VIEW}`, which is a "
+        assert (CANARY_VIEW, False) in view_history(sample), (
+            f"`view_history` does not read {sample!r} as dropping `{CANARY_VIEW}`, which is a "
             "shape it exists to catch. A view retired in `views_sql/` would then still be expected "
             "in the database, and "
             "`test_every_view_created_under_views_sql_exists_in_the_migrated_database` would be "
@@ -614,10 +690,22 @@ def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
         )
 
     for sample in VIEW_DROP_MUST_ALLOW:
-        assert CANARY_VIEW not in views_dropped_in(sample), (
-            f"`views_dropped_in` reads {sample!r} as dropping `{CANARY_VIEW}`. It drops something "
+        assert (CANARY_VIEW, False) not in view_history(sample), (
+            f"`view_history` reads {sample!r} as dropping `{CANARY_VIEW}`. It drops something "
             "else, drops nothing, or is a comment — and reading it as a drop excuses the view's "
             "absence from the database, which is the one thing that test exists to notice."
+        )
+
+    for sources, standing in VIEW_HISTORY_SAMPLES:
+        assert (CANARY_VIEW in views_standing_after(sources)) is standing, (
+            f"Executed in order, {sources!r} should leave `{CANARY_VIEW}` "
+            f"{'standing' if standing else 'retired'}, and `views_standing_after` says otherwise. "
+            "Order is the whole of what this fold adds over the two sweeps above: a set of "
+            "creates minus a set of drops cannot tell a view that was dropped and recreated — "
+            "which is what a `…_v002.sql` changing a column list has to write, because "
+            "`CREATE OR REPLACE VIEW` cannot alter one — from a view that was retired. Getting "
+            "that backwards drops the most identity-sensitive view in the schema out of the "
+            "expected set for good, and the test below then passes with it missing."
         )
 
 

@@ -2250,6 +2250,43 @@ RELATION_GRANTEES = """
     ORDER BY 1, 3, 4
 """
 
+# Who is named in the ACL of every `SECURITY DEFINER` function in `public`.
+# `pg_proc.proacl`, and it is here because it was swept nowhere in either
+# direction: an independent security review found the membership test below blind
+# to the `EXECUTE` door, and the same door was open in the grantee sweep. `CREATE
+# ROLE pulse_reporting; GRANT EXECUTE ON FUNCTION public.<the reveal> TO
+# pulse_reporting` writes no `relacl` entry, so the relation sweep above does not
+# see it, and the role is not `pulse_app`, so the `invariant`-marked refusal
+# earlier in this file does not either — while the grantee may call the one
+# function whose job is to return a name.
+#
+# **`SECURITY DEFINER` only, deliberately.** An ordinary function runs with the
+# *caller's* privileges and can therefore hand out nothing the caller lacks, and
+# Postgres grants `EXECUTE` on every new function to `PUBLIC` by default — so
+# sweeping them all would flag that default as a finding and teach the next reader
+# to add an exclusion. A definer function is the opposite case: every grantee on
+# one is a deliberate decision, and `PUBLIC` on one is a hole.
+SECURITY_DEFINER_GRANTEES = """
+    SELECT p.oid::regprocedure::text AS routine,
+           pg_get_userbyid(p.proowner) AS owner,
+           coalesce(r.rolname, 'PUBLIC') AS grantee,
+           a.privilege_type AS privilege
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    CROSS JOIN LATERAL aclexplode(p.proacl) AS a
+    LEFT JOIN pg_roles r ON r.oid = a.grantee
+    WHERE n.nspname = 'public'
+      AND p.prosecdef
+      AND p.prokind IN ('f', 'p')
+      AND NOT EXISTS (
+          SELECT 1 FROM pg_depend d
+          WHERE d.objid = p.oid
+            AND d.classid = 'pg_proc'::regclass
+            AND d.deptype = 'e'
+      )
+    ORDER BY 1, 3, 4
+"""
+
 # Every role `:role` can *become*, whether or not it inherits that role's
 # privileges. Deliberately not `REACHABLE_ROLES` above, which asks the same
 # question with `'USAGE'`: that mode answers "are this role's privileges available
@@ -2318,6 +2355,102 @@ def base_tables(session: Any) -> list[str]:
     return [row[0] for row in session.execute(text(PUBLIC_BASE_TABLES))]
 
 
+# The two mechanisms by which a role may obtain a name in this schema, named so
+# that a control can require each one to be *found* rather than merely not found.
+IDENTITY_BY_GRANT = "grant"
+IDENTITY_BY_EXECUTE = "execute"
+
+
+def identity_by_grant(session: Any, role: str) -> list[str]:
+    """Where `role` may read the identity table directly, by any privilege.
+
+    `has_table_privilege` answers for three situations at once, which is why this
+    file needs no separate check for any of them: a role that was **granted** the
+    privilege, a role that **owns** the table, and a **superuser**. The last two
+    hold it without any ACL entry existing anywhere.
+    """
+    return [
+        f"holds {privilege} on public.{IDENTITY_TABLE}"
+        for privilege in TABLE_PRIVILEGES
+        if session.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {"role": role, "relation": f"public.{IDENTITY_TABLE}", "privilege": privilege},
+        ).scalar_one()
+    ]
+
+
+def identity_by_execute(session: Any, role: str) -> list[str]:
+    """Where `role` may call a function that reads the identity table for it.
+
+    A `SECURITY DEFINER` function runs as its **owner**, and this schema's owner
+    holds `SELECT` on the identity table by construction (ADR 0043) — so `EXECUTE`
+    on one is a privilege on identity held in a different currency. That is the
+    mechanism the first version of this sweep missed, and it missed it in the worst
+    possible place: `pulse_care` holds no table privilege on `user_identity` at all,
+    deliberately, so the role designed to reach identity was invisible to a rule
+    phrased over table privileges.
+    """
+    return [
+        f"may EXECUTE {function['signature']}"
+        for function in security_definer_functions(session, role)
+        if function["executable"]
+    ]
+
+
+# The probes `ways_to_reach_identity` runs, as a table rather than as two blocks
+# inside it. Two reasons, and neither is decoration.
+#
+# The controls below name these mechanisms when they require each one to be
+# *found*, so a control cites the same constant the sweep is built from and the
+# two cannot drift apart.
+#
+# And it gives a mutation run **one syntactically valid line** to delete for
+# disabling a probe: remove either row and the module still parses, the sweep
+# still runs, and the control for that mechanism is what goes red. Deleting a
+# probe expression by hand leaves the file unparseable, which reports a collection
+# error rather than a failed control — and an error is not a red, it is a run that
+# proved nothing (`docs/MISTAKES.md` entry 16, a harness reporting kills it had not
+# made).
+IDENTITY_PROBES: tuple[tuple[str, Any], ...] = (
+    (IDENTITY_BY_GRANT, identity_by_grant),
+    (IDENTITY_BY_EXECUTE, identity_by_execute),
+)
+
+
+def ways_to_reach_identity(session: Any, role: str) -> list[tuple[str, str]]:
+    """Every route by which `role` may obtain a name, as `(mechanism, description)`.
+
+    **Why this set is closed at two rather than widened again.** Identity is
+    reachable in exactly three ways here, and the third is subsumed:
+
+      - **a table privilege on the identity table**, whether granted, held by
+        ownership, or held because the role is a superuser — `has_table_privilege`
+        answers for all three, so `rolsuper` needs no separate test here and a role
+        that *owns* `user_identity` is caught by the same call;
+      - **`EXECUTE` on a `SECURITY DEFINER` function in `public`**, which runs as
+        its owner. The function's own owner is caught by the same call, since an
+        owner may always execute what it owns;
+      - **reading a view that selects an identity column**, which is shut elsewhere
+        and shut harder:
+        `test_identity_column_marker.py::test_no_view_reads_a_column_the_identity_marker_names`
+        is `invariant`-marked precisely because a view is read with its owner's
+        privileges rather than its reader's, so no arrangement of grants would make
+        such a view safe and no probe here could stand in for that rule.
+
+    **What it is scoped to** (`docs/MISTAKES.md` entry 14): `IDENTITY_TABLE`, the
+    constant this whole module is written around, rather than every relation the
+    identity marker names. Today they are the same one table. A second
+    identity-bearing table is a change to this module's central constant and to
+    every test in it, not a gap in this helper — and the marker convention lives in
+    another module, so reading it from here would be a second copy of it (entry 13).
+    """
+    return [
+        (mechanism, description)
+        for mechanism, probe in IDENTITY_PROBES
+        for description in probe(session, role)
+    ]
+
+
 def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: Any) -> None:
     """Criterion: the grant set is *exactly* what the migrations wrote, on the grantee axis.
 
@@ -2329,36 +2462,58 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     while the drift job, the test suite and the invariant pass all stay green.
 
     So this asks the question from the other end — who is named in an ACL
-    anywhere in `public` — and requires the answer to be the three roles this
-    scheme has plus each relation's own owner. The definer is discovered from the
+    anywhere in `public` — and requires the answer to be the roles this scheme
+    names, plus each object's own owner. The definer is discovered from the
     catalog rather than spelled, because E10 replaces the function it owns and a
     rule written with its name would retire with it.
 
-    **`PUBLIC` is in the sweep and is the sharpest case.** Postgres grants nothing
-    on a table to `PUBLIC` by default, so an entry for it is always deliberate,
-    and one `GRANT … TO PUBLIC` reaches both connection roles at once without
-    naming either.
+    **Two ACLs, because an object's privileges are not all in `relacl`.** The
+    relation sweep reads `pg_class.relacl`; the function sweep reads
+    `pg_proc.proacl` for `SECURITY DEFINER` functions only, and it is here because
+    an independent security review found the membership test below blind to the
+    `EXECUTE` door and the same door was open here. `CREATE ROLE pulse_reporting;
+    GRANT EXECUTE ON FUNCTION public.<the reveal> TO pulse_reporting` writes
+    nothing to any `relacl`, and the role is not `pulse_app`, so neither this sweep
+    as first written nor the `invariant`-marked refusal above would mention it —
+    while the grantee may call the one function whose job is to return a name. The
+    allowed grantee on a definer function is `pulse_care` and nothing else, which
+    is E0-10's own sentence: `pulse_care` "gets `EXECUTE` on a **single**
+    `SECURITY DEFINER` function".
 
-    **The control is that the sweep found anything at all.** A relation with no
-    explicit grant has a null `relacl` and contributes no row, so a database where
-    nothing was ever granted produces an empty sweep — which satisfies "no
-    unexpected grantee" perfectly (`docs/MISTAKES.md` entry 3). E0-10 grants
-    `SELECT` on its read views, and the first `GRANT` on a relation materialises
-    its whole ACL including the owner's own entries, so a non-empty result is a
-    fact about this schema rather than an accident.
+    **`PUBLIC` is in both sweeps and is the sharpest case, and it means different
+    things on the two.** On a relation Postgres grants nothing to `PUBLIC` by
+    default, so an entry is always deliberate. On a function it grants `EXECUTE` to
+    `PUBLIC` by default, so an entry there is what a migration reaches by *not*
+    saying anything. Either way, one line reaches every role in the cluster without
+    naming one.
+
+    **Two controls, one per sweep, because an ACL that was never materialised
+    contributes no row** — and a database where nothing was granted satisfies "no
+    unexpected grantee" perfectly (`docs/MISTAKES.md` entry 3). The relation sweep
+    must find something: E0-10 grants `SELECT` on its read views, and the first
+    `GRANT` on a relation materialises its whole ACL including the owner's own
+    entries. The function sweep must find `pulse_care` holding `EXECUTE`, which is
+    the one function grant this scheme certainly makes; requiring that exact entry
+    rather than merely a non-empty result is what tells a working sweep from one
+    reading the wrong catalog.
 
     **The mutation it exists to survive**: `CREATE ROLE pulse_reporting; GRANT
-    SELECT ON public.user_identity TO pulse_reporting` — a reporting role added by
-    a later ticket, which no other test in this suite would mention.
-    **The near miss it tolerates**: another grant to one of the three roles this
-    scheme already names. That is the privilege axis, and
+    SELECT ON public.user_identity TO pulse_reporting`, and its function-shaped
+    twin `GRANT EXECUTE ON FUNCTION public.<the reveal> TO pulse_reporting` — a
+    reporting role added by a later ticket, which no other test in this suite would
+    mention. Also `GRANT EXECUTE ON FUNCTION public.<the reveal> TO PUBLIC`, which
+    should turn this red *and* the `invariant`-marked refusal above.
+    **The near miss it tolerates**: another grant to one of the roles this scheme
+    already names — `pulse_care` on a function, any of the three on a relation.
+    That is the privilege axis, and
     `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
-    is where it is caught — a rule that went red on any new grant at all would
-    fail on the third read view.
+    is where it is caught; a rule that went red on any new grant at all would fail
+    on the third read view.
     """
     definer = the_reveal_function(db_session)["owner"]
     expected = {APPLICATION_ROLE, CARE_ROLE, definer}
     granted = db_session.execute(text(RELATION_GRANTEES)).mappings().all()
+    executable = db_session.execute(text(SECURITY_DEFINER_GRANTEES)).mappings().all()
 
     assert granted, (
         "No relation in `public` carries an access control list at all, so this sweep read "
@@ -2367,25 +2522,46 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
         "relation's whole ACL — so an empty sweep means the grants are missing, the views are "
         "missing, or this query is reading the wrong schema."
     )
+    care_grants = [row for row in executable if row["grantee"] == CARE_ROLE]
+    assert any(row["privilege"] == "EXECUTE" for row in care_grants), (
+        f"No `SECURITY DEFINER` function in `public` names `{CARE_ROLE}` as holding `EXECUTE` in "
+        f"its ACL: the sweep found {[dict(row) for row in executable]}. That grant is E0-10's "
+        "central criterion — the Care role may call a single such function — so its absence means "
+        "either the Care door is shut, which "
+        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` diagnoses, "
+        "or this sweep is not reading `pg_proc.proacl` at all. In the second case the assertion "
+        "below is satisfied by any function grant to anybody."
+    )
 
-    unexpected = sorted(
+    beyond_on_relations = [
         f"{row['grantee']} holds {row['privilege']} on public.{row['relation']}"
         for row in granted
         if row["grantee"] not in expected and row["grantee"] != row["owner"]
-    )
+    ]
+    beyond_on_functions = [
+        f"{row['grantee']} holds {row['privilege']} on {row['routine']}"
+        for row in executable
+        if row["grantee"] != CARE_ROLE and row["grantee"] != row["owner"]
+    ]
+    unexpected = sorted(beyond_on_relations + beyond_on_functions)
     assert not unexpected, (
-        f"{unexpected}. The roles this scheme names are {sorted(expected)} — the two connection "
-        "roles of ADR 0001 and the reveal function's own owner from ADR 0043 — plus whoever owns "
-        "each relation, which is the migration identity ADR 0009 sanctions. Anything else holds a "
-        "privilege that no ticket in this epic granted and that nothing in this repository will "
-        "ever revoke.\n\n"
-        "`PUBLIC` appearing here is the worst case and reads like the mildest: Postgres grants no "
-        "table privilege to `PUBLIC` by default, so the entry is deliberate, and every role in the "
-        "cluster is a member — including `pulse_app`, which is refused `user_identity` by name one "
-        "test above and would then reach it anyway.\n\n"
+        f"{unexpected}. On a relation, the roles this scheme names are {sorted(expected)} — the "
+        "two connection roles of ADR 0001 and the reveal function's own owner from ADR 0043 — plus "
+        "whoever owns it, which is the migration identity ADR 0009 sanctions. On a `SECURITY "
+        f"DEFINER` function it is `{CARE_ROLE}` and the owner, and nothing else: E0-10 gives the "
+        "Care role `EXECUTE` on a single one, and `pulse_app` is refused it by name in an "
+        "`invariant`-marked test above. Anything else holds a privilege that no ticket in this "
+        "epic granted and that nothing in this repository will ever revoke.\n\n"
+        "`PUBLIC` appearing here is the worst case and reads like the mildest, and it reads "
+        "differently on the two kinds. On a relation it is always deliberate, because Postgres "
+        "grants no table privilege to `PUBLIC` by default. On a function it is what a migration "
+        "reaches by *not* revoking, because `EXECUTE` on a new function goes to `PUBLIC` — and "
+        "every role in the cluster is a member, including `pulse_app`, which is refused "
+        "`user_identity` by name one test above and would reach a name through the door "
+        "anyway.\n\n"
         "None of this is visible to any gate: `alembic check` compares `Base.metadata` against the "
-        "database, and `Base.metadata` holds tables and columns (E0-20 item 3b, measured on the "
-        "pinned Alembic 1.19)."
+        "database, and `Base.metadata` holds tables and columns — no `pg_roles` row, no `relacl`, "
+        "no `proacl` (E0-20 item 3b, measured on the pinned Alembic 1.19)."
     )
 
 
@@ -2562,37 +2738,76 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
 
 
 def test_neither_runtime_role_can_become_a_role_that_may_read_identity(db_session: Any) -> None:
-    """The grant that writes no grant: membership into the role the reveal is owned by.
+    """The grant that writes no grant: a membership into a role that can reach a name.
 
     `test_a_runtime_role_cannot_become_a_role_that_owns_a_table` above asks
     `pg_has_role(role, other, 'USAGE')`, which answers "are that role's privileges
     available to this one *without* a `SET ROLE`". A membership granted `WITH
     INHERIT FALSE` is absent from that answer, and it is absent from
-    `has_table_privilege` too — so `GRANT pulse_reveal_definer TO pulse_care WITH
-    INHERIT FALSE` leaves every grant assertion in this file green while putting
-    `SELECT` on `user_identity` one `SET ROLE` away from the Care connection. The
-    definer is the role that makes this expensive: it exists precisely to hold the
-    three privileges the wall has a door for, and it owns no table and is no
-    superuser, so the two membership rules already here both pass it.
-
+    `has_table_privilege` too — so the grant appears in no ACL entry, in no
+    privilege probe, and in no test in this file written before this one.
     `'MEMBER'` is the mode that reports a membership whether or not it inherits.
-    Every role either connection role can become is required to hold nothing at
-    all on the identity table.
 
-    **Two controls, because every assertion here is that a set is empty.** The
-    same sweep run for the bootstrap identity has to come back non-empty — a
-    superuser is a member of every role, so a query that finds nothing for it is
-    broken. And `has_table_privilege` has to report the definer *holding* `SELECT`
-    on `user_identity`: without that, "no reachable role can read identity" is
-    equally true of a probe that reports false for everything.
+    **What counts as reaching identity is two mechanisms, not one, and the second
+    is the one that matters most.** `ways_to_reach_identity` above carries the
+    argument for the pair being closed. The short form: `pulse_care` holds **no**
+    table privilege on `user_identity` — that is the entire design — so a rule
+    phrased over table privileges alone waves through a membership into the one
+    role that is *designed* to reach identity. What it holds is `EXECUTE` on the
+    `SECURITY DEFINER` function whose job is to return a name.
 
-    **The mutation it exists to survive**: `GRANT pulse_reveal_definer TO
-    pulse_care WITH INHERIT FALSE` (or the same grant to a role created
-    `NOINHERIT`), which is the single statement that reopens ADR 0001's wall
-    without touching one ACL entry.
-    **The near miss it tolerates**: a membership in a role that holds nothing on
-    `user_identity` — `GRANT pulse_app TO some_operational_role` — which is not
-    this rule's subject and stays green.
+    **Measured, on this stack, with the grant applied and revoked around it.** As
+    `pulse_app`, after `GRANT pulse_care TO pulse_app WITH INHERIT FALSE`:
+    `has_table_privilege(user_identity, 'SELECT')` false, `pg_has_role('pulse_care',
+    'USAGE')` false — the mode the older test uses — `pg_has_role('pulse_care',
+    'MEMBER')` **true**, and `has_function_privilege(reveal, 'EXECUTE')` false.
+    Then, one statement later, after `SET ROLE pulse_care`: `EXECUTE` on the reveal
+    **true**, `SELECT` on `role_assignment` **true**, and a direct read of
+    `user_identity` still refused. The whole suite passed throughout. So the
+    connection every instructor and leadership screen runs on becomes Care in one
+    statement and calls the door; `role_assignment` is readable from there, which
+    is where a `person_id` holding a live `CARE` assignment comes from; and the
+    reveal verifies the actor it is *handed*, so the audit row that door writes
+    names an innocent person. That last part is why this is more than an
+    escalation — it is an escalation that launders itself through §4's audit trail.
+
+    **Three controls, because every assertion here is that a set is empty**, and a
+    sweep that finds nothing looks exactly like a sweep that cannot see
+    (`docs/MISTAKES.md` entry 3):
+
+      - the membership query run for the bootstrap identity must come back
+        non-empty. A superuser is a member of every role, so a query that finds
+        nothing for it is broken;
+      - the predicate must **fire** on the reveal function's owner, by the grant
+        mechanism. That role holds `SELECT` on `user_identity` by construction;
+      - the predicate must **fire** on `pulse_care`, by the execute mechanism. That
+        role may call exactly one `SECURITY DEFINER` function, which is E0-10's
+        central criterion and is asserted by `the_reveal_function`.
+
+    The last two are the repair for what a security review found: had the second
+    mechanism been probed for and required to be found, its absence from the
+    predicate would have shown up as a failing control rather than as a green
+    sweep. Neither role is in any reachable set today — they are controls on the
+    probe, not on the schema.
+
+    **The mutation it exists to survive**: `GRANT pulse_care TO pulse_app WITH
+    INHERIT FALSE`, which was applied out of band and left all 42 tests passing.
+    Also `GRANT pulse_reveal_definer TO pulse_care WITH INHERIT FALSE`, the same
+    statement aimed at the grant mechanism rather than the execute one, and
+    `GRANT <the migration identity> TO pulse_app WITH INHERIT FALSE` — a superuser
+    and the owner of `user_identity`, which `has_table_privilege` reports as
+    holding everything on it without any ACL entry existing.
+    **The near miss it tolerates**: a membership in a role that can reach neither —
+    a future `pulse_metrics` holding `SELECT` on a read view and nothing else —
+    which stays green.
+
+    **What it does not cover** (`docs/MISTAKES.md` entry 14): a reachable role that
+    owns some table *other* than the identity one. That is a different escalation —
+    an owner may grant itself more on what it owns — and it belongs to
+    `test_a_runtime_role_cannot_become_a_role_that_owns_a_table`, which asks in
+    `'USAGE'` mode and therefore has the non-inheriting hole this test closes for
+    identity only. Changing that test's mode changes the meaning of an E0-10
+    assertion, and is raised rather than done here.
     """
     definer = the_reveal_function(db_session)["owner"]
     connected_as = db_session.execute(text(CURRENT_ROLE)).scalar_one()
@@ -2602,45 +2817,50 @@ def test_neither_runtime_role_can_become_a_role_that_may_read_identity(db_sessio
         "connect as — is a member of no other role, which cannot be true of a superuser. The "
         "query is broken, and the assertion below would pass against any membership at all."
     )
-    assert db_session.execute(
-        text(HAS_TABLE_PRIVILEGE),
-        {"role": definer, "relation": f"public.{IDENTITY_TABLE}", "privilege": "SELECT"},
-    ).scalar_one(), (
-        f"`has_table_privilege` reports that `{definer}` — the owner of the reveal function, which "
-        f"reads `{IDENTITY_TABLE}` with that role's privileges — cannot read that table. Either "
-        "the reveal cannot work (which "
-        "`test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs` diagnoses) "
-        "or this probe cannot see a privilege on that table, in which case the sweep below finds "
-        "nothing whatever anybody is a member of."
+    definer_routes = ways_to_reach_identity(db_session, definer)
+    assert any(mechanism == IDENTITY_BY_GRANT for mechanism, _ in definer_routes), (
+        f"The identity probe finds no *grant* route for `{definer}` — the owner of the reveal "
+        f"function, which reads `{IDENTITY_TABLE}` with that role's privileges. It found "
+        f"{definer_routes}. Either the reveal cannot work, which "
+        "`test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs` diagnoses, "
+        "or this probe cannot see a table privilege on that table at all — in which case the "
+        "sweep below reports nothing dangerous whatever anybody is a member of."
+    )
+
+    care_routes = ways_to_reach_identity(db_session, CARE_ROLE)
+    assert any(mechanism == IDENTITY_BY_EXECUTE for mechanism, _ in care_routes), (
+        f"The identity probe finds no *execute* route for `{CARE_ROLE}`, which may call exactly "
+        f"one `SECURITY DEFINER` function by E0-10's central criterion. It found {care_routes}. "
+        "This control is the repair for the defect that made it necessary: the first version of "
+        "this test asked only about table privileges, and `pulse_care` deliberately holds none — "
+        "so the role designed to reach identity was the one role the sweep waved through, and a "
+        "membership into it passed. If this control ever goes quiet again, the sweep below is "
+        "blind in exactly that way."
     )
 
     dangerous: list[str] = []
     for role in RUNTIME_ROLES:
         require_role(db_session, role)
         for (reachable,) in db_session.execute(text(MEMBER_OF_ROLES), {"role": role}):
-            for privilege in TABLE_PRIVILEGES:
-                if db_session.execute(
-                    text(HAS_TABLE_PRIVILEGE),
-                    {
-                        "role": reachable,
-                        "relation": f"public.{IDENTITY_TABLE}",
-                        "privilege": privilege,
-                    },
-                ).scalar_one():
-                    dangerous.append(f"{role} can become {reachable}, which holds {privilege}")
+            dangerous += [
+                f"{role} can become {reachable}, which {description}"
+                for _, description in ways_to_reach_identity(db_session, reachable)
+            ]
 
     assert not dangerous, (
         f"{dangerous}. A membership is a privilege the holder reaches with one `SET ROLE`, and "
-        "when it is granted `WITH INHERIT FALSE` it is a privilege that appears in no ACL entry, "
-        "in `has_table_privilege`, or in "
-        "`test_a_runtime_role_cannot_become_a_role_that_owns_a_table` — which asks the same "
-        "question in `'USAGE'` mode, where a non-inheriting membership does not appear. So every "
-        "other assertion in this file stays green while a connection role reaches the identity "
-        f"table: ADR 0001's 'no grant of any kind on `{IDENTITY_TABLE}`' is a statement about "
-        "grants, and this is not one.\n\n"
-        "The reveal function's owner is the role that makes this concrete. It holds `SELECT` on "
-        f"`{IDENTITY_TABLE}` because the audited door spends exactly that (ADR 0043), it owns no "
-        "table and it is not a superuser — so it passes both membership rules already in this "
-        "file, and a membership in it is the cheapest way there is to obtain a name without "
-        "leaving a record."
+        "granted `WITH INHERIT FALSE` it is a privilege that appears in no ACL entry, in no "
+        "`has_table_privilege` answer, in no `has_function_privilege` answer, and in "
+        "`test_a_runtime_role_cannot_become_a_role_that_owns_a_table` — which asks in `'USAGE'` "
+        "mode, where a non-inheriting membership does not appear. So every other assertion in "
+        f"this file stays green: ADR 0001's 'no grant of any kind on `{IDENTITY_TABLE}`' is a "
+        "statement about grants, and a membership is not one.\n\n"
+        "**Read the mechanism in the message.** A *grant* route means the reachable role can read "
+        f"`{IDENTITY_TABLE}` directly — by grant, by owning it, or by being a superuser, all three "
+        "of which `has_table_privilege` reports. An *execute* route means it can call a "
+        "`SECURITY DEFINER` function, which runs as its owner and therefore spends that owner's "
+        f"`SELECT` on `{IDENTITY_TABLE}` on behalf of whoever called it. The second is the worse "
+        "of the two and reads as the milder: the caller obtains a name **and** the function writes "
+        "an audit row naming the actor it was handed, so §4's 'every identity access is "
+        "automatically audit-logged with actor, timestamp, and case' records somebody else."
     )
