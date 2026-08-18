@@ -35,7 +35,30 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 30**
+**Caught: 31**
+
+*(The thirty-first, in E0-16, and it decided work on both sides of the test wall.
+Writing the tests: both scanners this ticket needed — one for a role stated
+anywhere in a session, one for a purview claim — are run against the values they
+are claimed to catch **and** the values they are claimed to let past, because
+every assertion in that module about a role being *absent* is satisfied by a
+scanner that finds nothing; each absence assertion carries a live control in the
+same run, a session from the same provider that does state a reporting role; each
+of the two refusal criteria redeems a matching code first, in the same test, so
+"the second exchange failed" cannot be a token endpoint that fails everything;
+and `invalid_client` is named as a gap wherever it appears rather than counted as
+a refusal, since a provider requiring a client secret this suite does not send
+would pass both refusal criteria while asserting nothing about either. Building
+the implementation: the suite went green on the first run, which is the moment
+this entry is for, so eleven mutations of the finished provider were run against
+the test that names each. Nine were caught. One survived because two guards cover
+it — deleting the emptiness check on the PKCE verifier leaves the length check
+refusing the same request — and one survived for a reason worth keeping: making
+the signing key a module-level constant is invisible, because the fixture
+re-imports the package for each provider it starts, so "two starts, two keys"
+cannot tell per-application from per-import. The code is the stricter shape
+anyway; what changed is that nobody now believes that test proves more than it
+does.)*
 
 *(The thirtieth, in E0-15's review round, and three tests at once — each asserting a
 strictly weaker property than its own name. Two of the three were found by reviewers
@@ -246,7 +269,25 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 28**
+**Caught: 29**
+
+*(The twenty-ninth, in E0-16, and the sweep started from a list rather than from
+a file. Adding a service to the health gate's `REQUIRED_SERVICES` is one line;
+what it made false was in six other places, all of which read correctly until you
+knew a third service existed. The workflow's own step names and the two comments
+above them counted "four services named, six covered". The `Makefile` said "Three
+services are named and five are covered" and had been wrong since **E0-14** —
+`mock-lms` was never added to its health waits, so the local gate and the workflow
+had disagreed for a ticket and a half, which is the drift `CLAUDE.md` means when
+it says the workflow is right and that file is the bug. `.dockerignore`'s header
+described "the two images this repository builds". ADR 0037 said E0-16 "faces the
+same choice and should reach the same answer — or say why not", and ADR 0039 said
+"a third `app` package would need a third run", both of which stop being true the
+moment the ticket lands and both of which send a reader looking for work that is
+finished. The epic README's "How CI tightens" table listed a Compose-health row
+per mock and was missing one. And `README.md` introduced the stack as running
+"the mock LMS described below" while §9.2 requires two doors. None of the six
+fails anything.)*
 
 *(The twenty-eighth, in E0-15's implementation, one round after the twenty-seventh
 below found the same file's header. The sweep outward from "the mock now holds an
@@ -715,7 +756,23 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 14**
+**Caught: 15**
+
+*(The fifteenth, in E0-16, and it is the same hazard reaching a second mock. Two
+services in this repository now ship a package called `app` beside the backend's,
+and the test suite has to resolve the right one: E0-14 wrote a meta-path finder
+for `mock-lms/` and E0-16 made it take the directory as an argument rather than
+copying it, so the collision is described once and a third mock inherits the
+description. The same round made two other choices under this heading, in
+opposite directions. The login form's identities and the login handler's refusal
+are one predicate — `may_use_web_login`, computed from a person's assignments —
+because two lists of who may use this door could disagree, and the disagreement
+that matters is a door that refuses to offer an identity it will sign in anyway.
+And the RSA signer is deliberately **not** shared: the import machinery cannot
+reach a fourth package from two images and a test process, so it is a copy, and
+[ADR 0059](adr/0059-each-mock-ships-its-own-copy-of-the-standard-library-signer.md)
+states the cost — `diff` is the only guarantee the two stay in step — rather than
+leaving a reader to discover the duplication and assume it was an oversight.)*
 
 *(The fourteenth, in E0-15's review round, and it is one repository disagreeing with
 itself about what RFC 3339 means. ADR 0048 holds an enrollment window's `start` to an
@@ -1788,3 +1845,41 @@ not the validator. One hit means the value goes in and stops there. And **a roun
 that adds validation to a field is the round to ask this**, because adding a
 check to a field nothing consumes makes the gap less visible rather than more —
 the next reader inherits a field that looks settled.
+
+---
+
+## 27. A guard that reads a command as text refused a command that was only reading
+
+**Caught: 0**
+
+**What happened.** Three times in one E0-16 session.
+`.claude/hooks/deny-test-edits.sh` stops the implementer writing under the test
+directory, which is correct and is the whole point of the loop. It decides by
+matching the **text of the command**, so it also refused
+`git show <commit> -- <a test path> > /tmp/.../conftest.diff`, which writes to a
+scratch directory and reads a test; a `cat > script.py <<'PY'` heredoc whose body
+merely *mentioned* test paths; and — best of all — the heredoc carrying the first
+draft of this entry, whose subject is the hook itself. None of the three could
+have modified a test.
+
+**Root cause.** A textual guard has no way to tell a path being written from a
+path being read or quoted, so it fails safe by refusing both. That is the right
+direction for the guard — the alternative is parsing shell, whose blind spots are
+the same shape — and it means the refusal carries less information than it looks
+like it does.
+
+**Consequence.** Three round trips, which is nothing. The expensive version is
+the conclusion an agent can draw from it: that the tests cannot be read at all,
+and therefore that the implementation should be built from the ticket and a
+summary of the tests. `CLAUDE.md` says not to work from a summary of the thing
+that governs, and for an implementer the committed tests are exactly that. A
+refusal read as "this material is off limits" instead of "this command shape is
+off limits" turns a guard against editing into a reason to guess.
+
+**Rule.** When a hook refuses a command, work out which part of the *command* it
+matched before concluding anything about what you may know. Read files with the
+`Read` tool, which the hook does not gate; keep test paths out of `Bash` command
+text by redirecting to a file whose name does not carry the word, or by writing
+the script with `Write` and running it by name. And when a guard's refusal seems
+to forbid *reading*, say so and check, rather than proceeding on a narrower
+picture of the ticket than the loop intended you to have.

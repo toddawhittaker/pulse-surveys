@@ -238,6 +238,7 @@ that ticket includes removing its tolerance:
 | Docker build and Compose health (`api`) | 02 |
 | Compose health (`api`, `worker`, `beat`) | 03 |
 | Compose health (`mock-lms`) | 14 |
+| Compose health (`mock-idp`) | 16 |
 | migration drift | 04 |
 | §4.1 invariant suite — no skips permitted | 10 |
 | Playwright e2e | 18 |
