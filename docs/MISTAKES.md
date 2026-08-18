@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 31**
+**Caught: 33**
 
 *(The thirty-first, on both sides of E0-17, and it did different work on each.
 Writing the tests, it put a control in front of nearly every assertion: a mapped
@@ -54,6 +54,78 @@ assistant dean, and `upsert` made never to find an existing row — and one, two
 and one tests failed, each of them the one that owns the property.
 `docs/tickets/e0/.attempts/E0-17.md` has the table. **The green run was real; the
 belief in it was not, until then.**)*
+
+*(The thirty-third, in E0-16's review round, and the subject is a *reproduction*
+rather than a test. A review reported that a PKCE verifier wrapped in whitespace
+redeemed successfully; the script written to reproduce it before fixing anything
+answered `400`, in the direction that says "already refused". Both the reviewer
+and the script were right and they were exercising different flows: the script
+computed the challenge over the padded verifier, where the trimming cancels on
+both sides, and the reviewer had bound the challenge over the clean value and
+sent the padded one — which is the case where trimming widens what PKCE binds
+from one string to every string that trims to it. Reported as "cannot reproduce",
+that finding closes as invalid and the 200 stays in the tree. **When a repro
+disagrees with a review, the repro is the suspect**: rebuild it from the
+reviewer's exact pairing before drawing any conclusion, and say which pairing was
+measured. The corrected script answers 200 before the fix and `invalid_grant`
+after, on the same instance.)*
+
+*(The thirty-second, in E0-16's fix round, and it decided three things about five
+tests written *after* the code they cover — which is the position this entry is
+hardest to hold, because such a test passes on its first run and proves nothing.
+First, the malformed value is 43 characters long, the minimum RFC 7636 allows,
+because at any shorter length the provider's length check answers first and the
+alphabet check is never reached: the test would pass, name the handling it never
+touched, and the mutation run would have shown it too — the implementer's own
+pass had already found these two guards masking each other. Second, and sharpest,
+the module's shared `refusal` helper said "not 2xx", so a **500 counted as a
+refusal** — meaning the replay, mismatch and missing-verifier tests, three
+acceptance criteria, would each have passed against the exact crash the round was
+about. It now requires a 4xx. Third, the malformed-challenge test walks the whole
+flow rather than judging the authorization response, because the value enters at
+one endpoint and the crash lands at another: a test that stopped where the value
+was submitted would have watched the provider accept it and reported a pass, with
+the defect intact one step further on.)*
+
+*(The thirty-first, in E0-16, and it decided work on both sides of the test wall.
+Writing the tests: both scanners this ticket needed — one for a role stated
+anywhere in a session, one for a purview claim — are run against the values they
+are claimed to catch **and** the values they are claimed to let past, because
+every assertion in that module about a role being *absent* is satisfied by a
+scanner that finds nothing; each absence assertion carries a live control in the
+same run, a session from the same provider that does state a reporting role; each
+of the two refusal criteria redeems a matching code first, in the same test, so
+"the second exchange failed" cannot be a token endpoint that fails everything;
+and `invalid_client` is named as a gap wherever it appears rather than counted as
+a refusal, since a provider requiring a client secret this suite does not send
+would pass both refusal criteria while asserting nothing about either. Building
+the implementation: the suite went green on the first run, which is the moment
+this entry is for, so eleven mutations of the finished provider were run against
+the test that names each. Nine were caught. One survived because two guards cover
+it — deleting the emptiness check on the PKCE verifier leaves the length check
+refusing the same request — and one survived for a reason worth keeping: making
+the signing key a module-level constant is invisible, because the fixture
+re-imports the package for each provider it starts, so "two starts, two keys"
+cannot tell per-application from per-import. The code is the stricter shape
+anyway; what changed is that nobody now believes that test proves more than it
+does.)*
+
+*(The thirty-first, writing E0-13's tests for the AI gateway, and it is nine
+non-vacuity controls in one round rather than one defect. Every criterion in that
+ticket is asserted against something absent — a retry that did not happen, a call that
+did not leave the machine, a key that did not leak, a library nothing imports — and
+each of those reads exactly like a suite that never ran. So each carries its opposite:
+the retry assertion is paired with
+`test_a_well_formed_first_answer_is_not_followed_by_a_second_call`, because "more than
+one request" is satisfied by a gateway that always sends two; the loopback guard is run
+against an address it must refuse *and* one it must permit; the credential-leak test
+asserts the stub actually **received** the key before asserting the error does not carry
+it, since an error cannot leak a value that was never sent; the "exactly one module
+imports a provider library" sweep first requires that some module imports one, because
+an empty set satisfies "exactly one does" the way it satisfies anything; and the
+`.env.example` searches fail when they find no entry rather than reporting a clean tree.
+The one worth carrying forward is the third: **a leak test with no send is a guarantee
+that was never tested**, and it is entry 23 approached from the other side.)*
 
 *(The thirtieth, in E0-15's review round, and three tests at once — each asserting a
 strictly weaker property than its own name. Two of the three were found by reviewers
@@ -264,7 +336,7 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 29**
+**Caught: 30**
 
 *(The twenty-ninth, twice in E0-17 and both times about a sentence counting
 something. Writing the tests, it corrected a claim in `tests/conftest.py`'s own
@@ -278,6 +350,37 @@ person consults when deciding whether a new variable can be documented there.
 ADR 0008's amendment line and its index row carry the same count and were changed
 in the same commit. **A number in a prose sentence is a record with a scheduled
 expiry, and the expiry is whenever somebody adds the fourth of anything.**)*
+
+*(The thirtieth, in E0-16, and the record was **written in the same commit as the
+code it describes** — which is the version of this entry that no sweep catches,
+because there is no earlier record to go looking for. `README.md` gained "a
+parameter sent twice is refused rather than resolved last-wins" beside the fix
+that refused a duplicate within one collection; the reviewer measured a parameter
+sent once in the query and once in the body being accepted, so the sentence was
+false on the day it was written. The code now does what the line says and the
+line says which cases it covers. The lesson is about tense rather than staleness:
+a record written from the *intent* of a change asserts the property the author
+meant to build, and the gap between that and the property they built is exactly
+what a reviewer measures. Write the sentence from what you have run, not from
+what you have just fixed.)*
+
+*(The twenty-ninth, in E0-16, and the sweep started from a list rather than from
+a file. Adding a service to the health gate's `REQUIRED_SERVICES` is one line;
+what it made false was in six other places, all of which read correctly until you
+knew a third service existed. The workflow's own step names and the two comments
+above them counted "four services named, six covered". The `Makefile` said "Three
+services are named and five are covered" and had been wrong since **E0-14** —
+`mock-lms` was never added to its health waits, so the local gate and the workflow
+had disagreed for a ticket and a half, which is the drift `CLAUDE.md` means when
+it says the workflow is right and that file is the bug. `.dockerignore`'s header
+described "the two images this repository builds". ADR 0037 said E0-16 "faces the
+same choice and should reach the same answer — or say why not", and ADR 0039 said
+"a third `app` package would need a third run", both of which stop being true the
+moment the ticket lands and both of which send a reader looking for work that is
+finished. The epic README's "How CI tightens" table listed a Compose-health row
+per mock and was missing one. And `README.md` introduced the stack as running
+"the mock LMS described below" while §9.2 requires two doors. None of the six
+fails anything.)*
 
 *(The twenty-eighth, in E0-15's implementation, one round after the twenty-seventh
 below found the same file's header. The sweep outward from "the mock now holds an
@@ -516,6 +619,36 @@ asked. So: an entry that turns "shipped unasserted" into "shipped unasserted, in
 writing, with an owner" is worth its counter even when it cannot stop the ship,
 because the sentence in the record is what got the tests written and the tests
 are what found the defect.)*
+
+*(The twenty-seventh, in E0-16, and it is the twenty-fifth's shape one ticket
+later: a gap declared by the agent that could not close it. Two malformed-PKCE
+500s were found by the implementer reading its own finished code, and both fixes
+shipped with nothing asserting them — every PKCE value the suite sends comes from
+`secrets.token_urlsafe`, so no test could produce the byte either guard broke on.
+Saying "no test covers this" would have been enough to be honest and not enough
+to be acted on. What made it actionable was naming the *reason* nothing covered
+it, in the commit message, the attempt log and the report alike: the sentence
+about `secrets.token_urlsafe` tells a test author what to build, where "this is
+untested" tells them only that something is missing. Both tests exist now, one
+per entry point, and the coordinator mutated each to prove they fail
+independently — which matters here because the second defect was the first one's
+mirror image and a single test covering "malformed PKCE" would have gone green
+with either half regressed.)*
+
+*(The twenty-seventh, writing E0-13's tests, and the rule it caught was one nobody
+had ever broken. `CLAUDE.md` says "Never add a secret reference to a workflow
+without asking first", and E0-13 is the first ticket with a reason to want one —
+`ci.yml` already carries a notice saying the eval suite "needs a provider API key
+as a repository secret and a `secrets.*` reference in this workflow", marked
+proposed and not wired. A rule stated in a document and asserted by nothing is a
+convention, and the next person to add one does so with every gate green. So
+`test_no_workflow_references_a_repository_secret_beyond_the_permitted_set` now
+sweeps the workflows against a permitted set of one — `GITHUB_TOKEN`, which
+Actions supplies rather than anyone configuring — and it passes today, which is
+the point of it: **a guard for a rule with no incident behind it yet is still a
+guard, and it is cheapest to write in the round that first wanted to break it.**
+Its own pattern is tested against a reference it must catch, an unspaced variant,
+and the prose in `ci.yml` it must *not* catch, per entry 3.)*
 
 *(The twenty-sixth, in E0-15's review round, and it is four survivors of one
 mutation run rather than one defect. Nineteen mutations against the new AGS rules:
@@ -776,7 +909,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 15**
+**Caught: 17**
 
 *(The fifteenth, on both sides of E0-17, and both catches are about a second copy
 that was nearly written. Writing the tests, the module needed to know how an
@@ -792,6 +925,65 @@ crosses a module boundary this ticket does not otherwise touch — but it is nam
 at the new site, in ADR 0063, and in the pull request, instead of being left for
 somebody to find when the two disagree. **Naming a duplicate you decline to remove
 is not the same as removing it, and it is much better than not noticing.**)*
+
+*(The seventeenth, in E0-16's second review pass, and the hazard is a duplicated
+request parameter. RFC 6749 §3.1 forbids one, the provider refused one, and the
+rule ran over **one collection at a time**: `form_body` read the body and never
+looked at the query string, so a name sent once in each was two singletons rather
+than one duplicate. Measured: a token request with a valid body and
+`?code=bogus&grant_type=bogus` on the URL answered 200 with an `id_token`, and a
+login with `?sub=<one person>` and `sub=<another>` in the body issued a code. The
+rule now runs over the query and the body together, and values still come from
+the body alone, because honouring a query parameter would add the second place
+rather than close it. The same hazard was open at a third place, in the opposite
+direction and found in the same pass: the registered redirect URI was not checked
+for a query already carrying `code` or `state`, so a provider that refuses
+duplicates inbound would have **emitted** one — `?state=preset&code=…&state=…` —
+and a client comparing the first `state` would compare against a value it never
+generated. Refusing a shape on the way in says nothing about producing it on the
+way out, and that is the direction this entry is easiest to miss in.)*
+
+*(The sixteenth, in E0-16, an hour after the fifteenth and found because of it.
+A review pass over the finished provider found that a `code_verifier` carrying a
+character outside ASCII crashed the comparison rather than being refused by it —
+RFC 7636 computes the challenge over ASCII octets, so `.encode("ascii")` raises
+and the container answers 500. The fix was one check. This entry is why the next
+question was "what else faces the same hazard", and the answer was the
+`code_challenge`, which is the *other* half of the same comparison and was
+crashing `secrets.compare_digest` at the token endpoint from a value the
+authorization endpoint had accepted an hour earlier. Both were reproduced before
+and after. The repair is one function, `pkce_shape_problem`, called at both ends,
+because RFC 7636 gives the two parameters one ABNF production and two copies of
+it could disagree about the one thing they exist to be compared against.)*
+
+*(The fifteenth, in E0-16, and it is the same hazard reaching a second mock. Two
+services in this repository now ship a package called `app` beside the backend's,
+and the test suite has to resolve the right one: E0-14 wrote a meta-path finder
+for `mock-lms/` and E0-16 made it take the directory as an argument rather than
+copying it, so the collision is described once and a third mock inherits the
+description. The same round made two other choices under this heading, in
+opposite directions. The login form's identities and the login handler's refusal
+are one predicate — `may_use_web_login`, computed from a person's assignments —
+because two lists of who may use this door could disagree, and the disagreement
+that matters is a door that refuses to offer an identity it will sign in anyway.
+And the RSA signer is deliberately **not** shared: the import machinery cannot
+reach a fourth package from two images and a test process, so it is a copy, and
+[ADR 0059](adr/0059-each-mock-ships-its-own-copy-of-the-standard-library-signer.md)
+states the cost — `diff` is the only guarantee the two stay in step — rather than
+leaving a reader to discover the duplication and assume it was an oversight.)*
+
+*(The fifteenth, writing E0-13's tests, and it decided two things about the shape
+of the suite. The gateway's tests are *integration* tests rather than the unit
+tests the ticket's definition of done asks for, because the validity task persists
+a row and may therefore take a session — a module that offered none would die
+inside its own call binder for every implementation that takes one, which is this
+entry's hazard met at one call site and not the other. Offering it costs an
+implementation that does not want one nothing: the binder simply does not pass it.
+The second is the environment. Four test modules now need `.env.example`'s whole
+surface with the container's database variables over the top, and rather than a
+fourth copy of that assembly the AI fixture depends on `care_service_environment`
+in `tests/conftest.py` **for what it does rather than for what it is named** — and
+says so, because a fixture used away from its name is the next thing to drift.)*
 
 *(The fourteenth, in E0-15's review round, and it is one repository disagreeing with
 itself about what RFC 3339 means. ADR 0048 holds an enrollment window's `start` to an
@@ -1243,6 +1435,12 @@ than trusting a wide range to wander into it. Where a bound stays, say in the
 docstring what it does not reach; a stated bound is a scope, and an unstated one
 is a false claim of totality.
 
+**Entry 28 is this entry's sibling and not a duplicate of it.** Here a claim
+exists and the generator narrowed under it, so the two can be read against each
+other in one file. There no claim exists at all: a shared driver that speaks a
+protocol correctly makes the malformed half of every guard unreachable, and there
+is nothing to compare it with.
+
 ---
 
 ## 14. An enumeration was reported as an impossibility
@@ -1622,7 +1820,22 @@ result about the mutation until you have shown otherwise.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 2**
+**Caught: 3**
+
+*(The third, writing E0-13's tests, over §7.4's three validity verdicts. The suite
+needs the tokens twice — to write a well-formed answer for the stub to give back,
+and to say which verdict the character floor must reach — and reading them off
+`ValidityVerdict`, the enum under test, would make both uses a comparison of the
+code against itself: a rename in `app/ai/contracts.py` would move the payload and
+the expectation together and stay green. So `substantive` and `insufficient` are
+transcribed from §7.4's table into
+`tests/integration/test_ai_gateway_validity_roundtrip.py` and marked as the one
+constant there that is not free to move, with `tests/unit/test_ai_contracts.py`
+holding the derived comparison that keeps the enum and the table in step. The
+≥25-character floor is transcribed for the same reason and from the same place —
+§3.3 — and the boundary fixture asserts **its own length** before asserting
+anything about the code, so a typo in the fixture fails as a fixture problem
+rather than as a failed criterion.)*
 
 *(The second, in E0-15's tests, over SPEC §8's course-number bands. The mock's seeded
 numbers are checked against a transcription of the table, because §8 states the rule
@@ -1826,7 +2039,20 @@ Where a test's subject is a particular revision, **name the revision**; `-1` and
 
 ## 23. A validation created the appearance of a behaviour
 
-**Caught: 0**
+**Caught: 1**
+
+*(The first, writing E0-13's tests, and it is this entry's rule applied to a
+credential before the credential existed. The ticket asks for "a masked key", and
+a key can be masked by deleting the field: `Settings` would then hold nothing, no
+serialisation would leak anything, every masking assertion would pass, and every
+hosted endpoint would be unreachable. So the suite asserts both halves —
+`test_the_provider_key_is_still_readable_by_the_application` for the value the
+application can read, and, in the integration module, that the stub actually
+**received** the key in a header before anything is asserted about the error not
+carrying it. That is this entry's question asked of a configuration field: name
+the code that reads it, and if the answer is "nothing", it is decorative. The
+answer here is `app/ai/gateway.py`, and the test that names it is the one that
+fails if a later refactor stops sending it.)*
 
 **What happened.** In E0-15's mock platform, the AGS Result fold ignored
 `gradingProgress` entirely. A score posted `NotReady` — the value that says the
@@ -1990,3 +2216,482 @@ The design half, which is cheaper than the test half and catches it earlier:
 loader invented.** Walk the list and classify each one. A key that is neither —
 a globally unique column holding a name the outside world also uses — is an
 adoption waiting to happen, and it does not look like one in a table of keys.
+
+## 27. A guard that reads a command as text refused a command that was only reading
+
+**Caught: 0**
+
+**What happened.** Three times in one E0-16 session.
+`.claude/hooks/deny-test-edits.sh` stops the implementer writing under the test
+directory, which is correct and is the whole point of the loop. It decides by
+matching the **text of the command**, so it also refused
+`git show <commit> -- <a test path> > /tmp/.../conftest.diff`, which writes to a
+scratch directory and reads a test; a `cat > script.py <<'PY'` heredoc whose body
+merely *mentioned* test paths; and — best of all — the heredoc carrying the first
+draft of this entry, whose subject is the hook itself. None of the three could
+have modified a test.
+
+**Root cause.** A textual guard has no way to tell a path being written from a
+path being read or quoted, so it fails safe by refusing both. That is the right
+direction for the guard — the alternative is parsing shell, whose blind spots are
+the same shape — and it means the refusal carries less information than it looks
+like it does.
+
+**Consequence.** Three round trips, which is nothing. The expensive version is
+the conclusion an agent can draw from it: that the tests cannot be read at all,
+and therefore that the implementation should be built from the ticket and a
+summary of the tests. `CLAUDE.md` says not to work from a summary of the thing
+that governs, and for an implementer the committed tests are exactly that. A
+refusal read as "this material is off limits" instead of "this command shape is
+off limits" turns a guard against editing into a reason to guess.
+
+**Rule.** When a hook refuses a command, work out which part of the *command* it
+matched before concluding anything about what you may know. Read files with the
+`Read` tool, which the hook does not gate; keep test paths out of `Bash` command
+text by redirecting to a file whose name does not carry the word, or by writing
+the script with `Write` and running it by name. And when a guard's refusal seems
+to forbid *reading*, say so and check, rather than proceeding on a narrower
+picture of the ticket than the loop intended you to have.
+
+---
+
+## 28. A driver that could only speak correctly made the invalid half of every guard unreachable
+
+**Caught: 0**
+
+**What happened.** E0-16's mock OIDC provider answered a 500 to two malformed PKCE
+values: a `code_verifier` outside ASCII raised when the token endpoint hashed it,
+because RFC 7636 computes the challenge over ASCII octets, and a `code_challenge`
+outside ASCII — accepted and stored by the authorization endpoint an hour of
+protocol earlier — raised when the same redemption compared it with
+`secrets.compare_digest`, which refuses two strings it cannot treat as ASCII.
+
+Both were found by the implementer reading its own finished code. **Nothing in the
+suite could have found either**, and the reason is structural rather than an
+oversight: every PKCE value the suite sends is built by `pkce_pair` in
+`tests/conftest.py` out of `secrets.token_urlsafe`, whose alphabet is exactly the
+unreserved set both guards accept. Seven refusal tests across the two provider
+modules — a replayed code, a mismatched verifier, an absent verifier, an
+unregistered redirect URI, two launch-only identities, a launch-only role — all
+sending values that were well formed by construction. The suite read as covering
+the refusal path thoroughly, and could not enter the half of it that was broken.
+
+**Root cause.** A driver that impersonates a correct client is, by construction,
+incapable of misbehaving. It is written to make the working path work — build the
+challenge, echo the state, sign the launch — and every test that reaches the
+system through it inherits that competence, including the tests whose whole
+subject is what happens when a client gets something wrong. Nothing marks the
+gap: there is no narrowed bound to notice and no claim to read a strategy
+against, because no test names the malformed case at all. The absence is in the
+fixture, and it is invisible from every file that uses it.
+
+**This is entry 15's family and a different mechanism, which is why it is its own
+heading.** There, a property test *stated* the case its generator could not
+produce, and the two could be read against each other inside one file. Here there
+is no such pair — the tell is not a bound that looks too small but a fixture that
+looks correct. The blast radius differs too: a narrowed strategy weakens one
+property, while a driver's competence weakens every refusal in every module it
+serves, all in the same direction. Entry 15 split from entry 3 on exactly this
+reasoning about mechanism.
+
+**It had already been written down once, and nothing acted on it.** E0-14's own
+`tests/integration/test_mock_lms_launch.py` docstring says "what E1 will
+additionally need is a way to mint a deliberately wrong launch", which is this
+rule stated as a future need — and the launch driver still cannot mint one, so
+the platform side of the repository is in the same position today. A hazard named
+in a docstring is a note; nothing turns it into coverage.
+
+**Consequence.** Two crashes reachable by any client, in the service whose stated
+job is to teach E1's client what a strict provider does. E0-16's definition of
+done says "an identity provider that is lenient in the wrong place teaches the
+tool-side code bad habits"; a provider that raises where it should refuse teaches
+E1 to expect a 500 from a shape every real IdP answers with a 400, and the
+crashes were reachable from the outside by a client sending one wrong character.
+
+**Rule.** **When a fixture speaks a protocol, ask what it cannot say.** Enumerate
+the values the driver builds for the system under test, and for each one ask
+whether any test could send a malformed version — not a *wrong* version, which
+drivers usually do allow, but one that violates the shape. A refusal criterion is
+only asserted over the inputs the driver can express, so where it cannot express
+the malformed shape, either give it a way to send one or write the constant out
+by hand in the test module and say why.
+
+The cheap version is a search with a reliable signal: **every value a driver draws
+from `secrets`, `uuid4`, a formatter or a specification-conformant builder is a
+value no test can malform.** Those are the parameters to write bad constants for.
+And when a fixture's own docstring says a future ticket "will need a way to send a
+deliberately wrong X", that is this entry firing — treat it as a missing fixture
+now rather than a note for later, because the ticket that inherits it will build
+against a driver that is still polite.
+
+---
+
+## 29. A value was repaired before the check that should have refused it
+
+**Caught: 1**
+
+*(The first, one review pass after the entry was written, and it is the same
+class with a different tool — which is the sharpening worth keeping: **the repair
+need not look like a repair.** The scope string was split with a bare
+`str.split()`, which treats a tab, a newline and U+00A0 as separators, where RFC
+6749 Appendix A.4 separates scope tokens by one space and by nothing else. So
+`openid<TAB>email` — a single unknown token to any conformant server — arrived at
+the checks as two well-known ones and was granted, with the token response
+echoing "openid email" and the session releasing the `email` claims. The
+unknown-scope refusal that had been added *the round before*, three lines below,
+could not fire: the value it was written to catch had already been turned into
+two values it was written to accept. A standard-library parser named after a
+concept is not a check against that concept's grammar, and `split()`, `int()`,
+`urlsplit()` and `fromisoformat()` are all repairs in this sense — each accepts a
+wider language than the specification it is standing in for. Fixed by writing the
+grammar out where it is used and carrying the result as a tuple that nothing
+re-splits;
+[ADR 0062](adr/0062-a-request-is-parsed-once-at-the-edge.md) is the rule
+generalised, since this was the fifth instance of the shape in three rounds.)*
+
+**What happened.** The mock OIDC provider read every request parameter through one
+helper, and that helper ended in `.strip()`. One habit, three specification
+breaks, in a file that had already been through two of the implementer's own
+review passes *and* a fix round about this exact class of input handling:
+
+- **PKCE stopped binding one string.** The shape check ran on the trimmed value,
+  so for a challenge registered over some verifier `v`, every string that trimmed
+  to `v` was accepted. A challenge bound over `"a" * 43` redeemed with
+  `" " + "a" * 43 + "\n"` answered **200 with an `id_token`**. Keycloak, Okta and
+  Auth0 all answer `invalid_grant`, and `base64.encodebytes()` appends exactly
+  that newline — so a client minting a verifier that way passes every test here
+  and fails at the first real provider, with an error naming the verifier rather
+  than the encoder.
+- **`state` came back trimmed**, where RFC 6749 §4.1.2 requires "the exact value
+  received from the client".
+- **`nonce` was issued trimmed**, so OIDC Core §3.1.3.7 step 11 fails in the
+  client.
+
+All three were found by an external reviewer, running a live instance.
+
+**Root cause.** The normalisation sat between the wire and the guard, so the
+guard was checking a value no client had sent. Two things make it hard to see.
+First, `.strip()` reads as hygiene rather than as a decision — it looks
+*defensive*, which is the opposite of what it was doing. Second, it is invisible
+at the point that matters: `pkce_shape_problem(verifier)` at the call site looks
+exactly right, and the argument had already been made well-formed one frame
+earlier.
+
+It is entry 23's family — a validation creating the appearance of a behaviour —
+with the sharpest possible instance of it. The round *before* this one hardened
+the same guard twice, adding an alphabet check and a length check to a parameter
+that arrived pre-trimmed. Strengthening a check downstream of a repair produces a
+guard that is more convincing and no more able to fire.
+
+**Consequence.** A weakened PKCE binding in the service whose stated job is to
+teach E1's client what a strict provider does, plus two echo semantics broken in
+the direction a client reads as its own CSRF or replay check failing. Every one
+of them was reachable by any client and none was reachable by any test.
+
+**Rule.** **Validate what arrived, and only reject — never repair.** For every
+check, ask what happened to the value between the socket and the check: a guard
+whose input passed through `.strip()`, `.lower()`, `.replace()`, a
+`urlsplit`-and-rebuild or a type coercion upstream is a guard checking a value
+that never existed on the wire.
+
+Where a presence test genuinely wants trimming — "three spaces is not a `state`"
+— trim *for that test only* and hand the raw value onward. And treat any
+parameter with **echo semantics** as untouchable: a value the protocol requires
+back byte for byte, or that a signature or a digest is computed over, must reach
+the comparison exactly as it arrived, because there the repair is not leniency —
+it is a different value returned under the client's name.
+
+## 24. A test asserted a property no implementation could satisfy
+
+**Caught: 0**
+
+**What happened.** E0-13's leak detector searched every rendering of `Settings`
+for any eight-character run of the fake credential
+`fake-ai-provider-Qv7ZmXt4Ld9RbNsW`. One of those runs is the word `provider`,
+and `Settings` has carried a field called `ai_provider_base_url` since E0-01 —
+field names appear in `repr()`, in `model_dump()` and in every other
+serialisation by construction. So the assertion was false before the ticket
+started, and stayed false with the key correctly masked as `SecretStr`. Seven
+parametrised tests, red for every possible implementation, printing "The AI
+provider key leaked into repr(settings): ['-provide', 'provider']" — a report
+about the word "provider" appearing inside the word "ai_provider_base_url".
+
+The fixture's own comment states the property it needed and did not have: "Long
+and unlikely-looking so a fragment appearing in a rendering is unambiguously a
+leak rather than a coincidence." The random tail has that property. The four
+English words in front of it do not, and one of them names the subsystem being
+configured.
+
+**Root cause.** A substring search for a secret, over text that legitimately
+contains words *about* the secret. The prefix was added to make the fixture
+readable to a person, which is the right instinct for a fixture and the wrong one
+for a needle — the needle's only job is to be findable and unmistakable.
+
+**Consequence.** A dispute round ([E0-13-01](disputes/E0-13-01.md)), because the
+implementer cannot edit a test and the only fixes available on the implementation
+side were worse than the defect: renaming an E0-01 settings field in an E0-13 pull
+request, or editing the `.env.example` placeholder URL, either of which is
+removing a substring from a rendering to satisfy a search rather than satisfying
+the property the search stands for.
+
+**Ruled on**, outcome 1 — the test is wrong — and the needle is now random
+throughout (`ae7518d`). The ruling found one thing this entry did not, and it is
+the expensive half: the *same* needle is used in
+`tests/integration/test_ai_gateway_validity_roundtrip.py` as a **positive**
+detector, to prove the key was really sent before anything is asserted about it
+not leaking. There a collision does not go red at all — it satisfies the
+non-vacuity guard against a request that never carried the key, and every leak
+assertion beneath it then reports a guarantee that was never tested. A search term
+shared between a must-find rule and a must-not-find rule fails in both directions
+at once, and only one of those directions announces itself.
+
+*(This entry was written and committed in `6771d56`, before the arbitrator ran,
+stating an outcome that had not been reached. The rule was right and the ruling
+confirms it, which is luck rather than method: writing the record ahead of the
+ruling is the thing the dispute loop exists to prevent, and a record that had gone
+the other way would have had to be retracted rather than amended. Write the
+objection, then wait.)*
+
+**Rule.** **A fixture that will be searched for must share no substring with
+anything the assertion legitimately renders.** In practice: make it random-only,
+with no word in it. Put the human-readable label in the *constant's name*, where
+it helps a reader, not in its value, where it is a needle.
+
+The general form is worth stating because it is entry 3's mirror — and **the two
+do not cost the same**, which the objection first argued and the arbitrator
+declined to accept. It was right to decline. A permanently red test is loud and
+can never ship a false guarantee; a wrongly green one ships one silently, and
+nobody is looking. The red one is the cheaper failure, and saying otherwise
+weakens a good objection by resting it on what is convenient to implement.
+
+What settled the dispute was narrower and sufficient: **the test reported a leak
+against text containing no part of the secret.** That is demonstrable in one line,
+with no appeal to cost, to effort, or to what the implementation would prefer. Use
+that shape of argument — the assertion is false about the text it was given —
+rather than the balance-of-inconvenience one.
+
+So: when a test goes red, the first question is still "what exactly is it
+measuring", and the answer "a word in a field name" means the test is the thing to
+fix. When the same term also drives a must-find assertion somewhere, check that
+one too, because it will have gone green rather than red.
+
+## 25. Two lockfiles resolved the same package to two versions
+
+**Caught: 0**
+
+**What happened.** E0-13 added one dependency. `make lock` compiles
+`requirements.txt` and `requirements-dev.txt` from `pyproject.toml` in two
+separate runs, and the new library brought `requests` — and under it
+`charset-normalizer` — into both closures for the first time. The runtime run
+pinned `charset-normalizer==3.5.1` and the dev run pinned `3.5.0`, from the same
+index, minutes apart, with nothing in either file constraining it and neither
+version yanked or restricted. Re-running the dev compile reproduced `3.5.0`, so it
+was not a transient.
+
+Nothing that reads one file at a time noticed. `pytest` passed on 654 tests,
+`ruff`, `mypy` and the checker self-test were clean, and `pip install
+--require-hashes -r requirements-dev.txt` installed happily. **`make audit` is the
+only thing in the build that reads both files at once**, and it failed with
+`ResolutionImpossible` — a message naming neither the package nor the lockfile,
+in a ticket whose change had nothing to do with either.
+
+**Root cause.** Two independent resolutions of overlapping requirement sets. The
+dev lock is not compiled against the runtime lock as a constraint, so a package
+that both closures pull in transitively is resolved twice, and pip-compile does
+not promise the same answer to two different questions.
+
+**Consequence.** A red supply-chain gate whose message points nowhere near the
+cause. It was found by running `pip-audit` locally with the same two arguments the
+Makefile passes, before opening a pull request; had that not been run, CI would
+have reported it against a diff whose only dependency line was for a different
+package entirely.
+
+**Rule.** **After `make lock`, check that the two lockfiles agree on every package
+they share.** One command, and it costs nothing:
+
+```sh
+diff <(grep -oE '^[A-Za-z0-9._-]+==\S+' requirements.txt | sort) \
+     <(grep -oE '^[A-Za-z0-9._-]+==\S+' requirements-dev.txt | sort) | grep '^<'
+```
+
+Anything it prints that is not simply absent from the dev file is a version skew,
+and `--upgrade-package <name>` on the dev compile is the immediate repair. The
+durable fix is to compile the dev lock with the runtime lock as a constraint file,
+which is a change to `make lock`'s recipe — proposed in E0-13's pull request
+rather than made inside it, because the recipe has to keep matching what CI does.
+
+**And run `make audit`'s two arguments together before pushing**, rather than
+`pip-audit -r requirements.txt` alone. A gate that reads two files is the only one
+that can see a disagreement between them, and reading one file at a time is how
+this survived a full green suite.
+
+## 26. A fallback path swallowed the defect that triggered it
+
+**Caught: 0**
+
+**What happened.** E0-13's gateway held one HTTP client, and drove it from an
+event loop per thread. A pooled connection belongs to the loop it was opened on,
+so the second thread to reuse one got `RuntimeError: ... is bound to a different
+event loop` — which the provider library turned into "connection error", which
+the gateway turned into `AIProviderUnavailableError`, which the validity task
+caught, and answered with SPEC §3.3's character floor.
+
+**With a healthy provider and one shared gateway, every second submission was
+classified by counting characters.** Measured in review and reproduced here:
+submissions 0, 2 and 4 came back with the model's verdict; 1, 3 and 5 came back
+`insufficient` / `character-floor` / `no-model`. The request was sent every time
+and the answer discarded, so the comment reached the third party and the model's
+verdict was thrown away. The same comment was counted or refused depending on
+which threadpool thread served it, which makes §3.3's participation gate a coin
+flip.
+
+**Root cause.** A `try/except` around a failure class broad enough to include a
+programming error. The defect and the sanctioned failure arrived as the same
+exception type, and the handler could not tell them apart — so the code that
+exists to keep a student unblocked during somebody else's outage quietly absorbed
+a bug in the code above it.
+
+**Consequence.** 654 tests passed. Every one of them drives the gateway from a
+single thread, so no test could see it; the reviewer found it by running the
+deployment shape the record says E2 will use. Had it shipped, the effect would
+have been a participation grade that changed with thread scheduling and no error
+anywhere — the failure mode a fail-open is *for* is an outage you can see in a
+dashboard, and this was invisible by construction.
+
+**Rule.** **A fail-open handler must catch the narrowest failure the spec
+sanctions, and everything else must be loud.** Ask of every `except` on a
+fallback path: what is the *widest* thing this class can carry, and is a bug in
+my own code one of them? If it is, split the class until it is not.
+
+The narrowing this produced is
+[ADR 0056](adr/0056-only-a-timeout-fails-open.md): a timeout is its own class and
+is the only one the validity task falls open on, decided on the exception chain
+rather than on a message, and an unrecognised failure answers "not a timeout" so
+it surfaces.
+
+Two further rules fall out of the same incident, and they are cheaper than the
+first:
+
+**A single-threaded test suite proves nothing about a shared client.** Anything
+holding a connection pool, a session, or an event loop needs one exercise from
+more than one thread — and the assertion is that the *answers* are right, not
+that nothing raised, because this defect never raised anywhere a test could see.
+
+**When a fallback fires, the record has to say which failure caused it.** The
+floor's own audit pair (`character-floor` / `no-model`,
+[ADR 0054](adr/0054-a-floored-classification-names-the-floor-in-its-audit-pair.md))
+is what made this diagnosable at all: the rows said a floor decided, so the
+question became *why*, rather than "why is the model answering `insufficient` so
+often".
+
+**The narrowing this entry prescribes was made and did not hold.** Entry 33 below
+is what happened next, and anyone acting on the rule above should read it first:
+"split the class until it is not" was done against the provider library's own
+exception tree, and the tree put a case on the wrong side of the split.
+
+## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
+
+**Caught: 0**
+
+**What happened.** Entry 26's rule was applied. E0-13's fail-open was narrowed to
+one class — `httpx.TimeoutException`, decided on the exception chain rather than
+on a message, deliberately, because a rule that reads a library's sentence breaks
+when the library rewords it. The docstring said the class meant "the request
+reached an endpoint and the endpoint did not answer in time".
+
+`httpx.ConnectTimeout` subclasses `httpx.TimeoutException`. So a connect that
+never completed — no handshake, nothing sent — was inside the narrowed class and
+still fell open. Measured against a blackholed route, **with zero requests
+reaching any server**: the comment was classified by counting characters, and the
+record said a floor decided, exactly as it had before the narrowing.
+
+The record was worse than the code. [ADR 0056](adr/0056-only-a-timeout-fails-open.md)
+justified the whole change with an availability argument — an attacker who can
+force a handshake failure can force no classification indefinitely — and dropping
+packets is cheaper than forcing a handshake failure and has the same effect. The
+ADR argued for a property the code it described did not have.
+
+**Root cause.** Matching on a base class to express a decision about the world.
+The question the fail-open turns on is *did the request reach an endpoint that
+could have answered, and was the answer about the endpoint or about the request* —
+and that is not what any single node of `httpx`'s tree means. A base class is a
+set the library defines and may extend; naming one in an `except` or an
+`isinstance` is a decision about every member of it, including the members added
+in a minor release after the line was written. Reading the sentence was correctly
+rejected as coupling to the library's wording. Reading the type is the same
+coupling to the library's taxonomy, and it looks principled rather than fragile,
+which is why it was not questioned.
+
+**Consequence.** The narrowing shipped, the ADR claimed the property, and the
+suite was green — the tests written for it exercised a refused connection, which
+is on the correct side of the line by accident of `httpx` raising `ConnectError`
+rather than `ConnectTimeout` for it. One review pass and one measurement apart
+from an availability guarantee that did not exist.
+
+**Rule.** **When a check expresses a decision about the world, do not encode it as
+a check against a library's class tree.** Write down the question first — here,
+"did the request reach an endpoint that could have answered?" — enumerate the
+conditions on each side of it, and map each condition to a class explicitly. The
+repair was exactly that: four classes of the project's own, one per answer, with
+the library's types as inputs to the mapping rather than as the mapping.
+
+**And when you must name a base class, enumerate its subclasses at the moment you
+name it, and say in the code which ones you mean.** `ConnectTimeout`,
+`ReadTimeout`, `WriteTimeout` and `PoolTimeout` are all `TimeoutException`, and
+only two of them mean the thing the docstring claimed. If the list is long enough
+that enumerating it is tedious, that is the signal that the base class is not the
+line you want.
+
+**A docstring that names a distinction the code does not make is the expensive
+half.** The line was reviewed twice with the sentence "the request was accepted"
+sitting above a match that included the case where nothing arrived, and the
+sentence is what both readings trusted. That is entry 1 arriving through a
+comment: the code was wrong and the record explained it away.
+
+## 34. A pipeline discarded a non-zero exit and printed a line that read as success
+
+**Caught: 0**
+
+**What happened.** The orchestrating session ran
+
+```bash
+ruff check . 2>&1 | tail -2 && echo "LINT OK"
+```
+
+over `e0/ai-gateway-roundtrip`, saw `LINT OK`, and reported the branch clean. In
+a pipeline the shell takes the exit status of the *last* command, so `tail`'s
+zero replaced ruff's one, `&&` fired, and the line printed. `ruff check .`
+exited 1 the whole time, on two `B017` violations in a test module.
+
+The cost was a round. The test author had inferred that `B017` applied only to
+`unittest`'s `assertRaises`, removed four `# noqa: B017` directives on that
+inference, and — correctly — asked for the inference to be confirmed on a real
+run, because it has no shell. The confirmation it got back was a green line from
+a pipe. It was told its reasoning held when the measurement said the opposite,
+so four directives that were doing their job stayed removed and CI lint stayed
+red until the next full run.
+
+**Why the existing warning did not prevent it.** `CLAUDE.md` says "never pipe
+`make ci`" and gives this exact reason. The rule was read as being about `make
+ci`, which is the command whose failure is expensive, rather than about pipes,
+which is the mechanism. Every gate in this project is a command with an exit
+status: `ruff`, `mypy`, `pytest`, `pip-audit`, `alembic check`, the CI checker
+self-test. Piping any of them into `head`, `tail`, `grep` or `wc` throws the
+verdict away and keeps the output, which is the half that looks like evidence.
+
+**The shape, and why it is not entry 9.** Entry 9 is citing a guard without
+executing it. Here the guard *ran* and returned the right answer; the plumbing
+between the guard and the reader discarded it. That failure survives every
+discipline aimed at "did you actually run it", because the honest answer is yes.
+
+**What to do instead.** Redirect and echo the status:
+
+```bash
+ruff check . > /tmp/lint.log 2>&1; echo "exit=$?"
+```
+
+Read the file afterwards if the output is long. When a command's exit status is
+the thing being reported to somebody who cannot run it themselves, the status has
+to be captured from the command rather than inferred from what it printed — and
+an agent with no shell is exactly that somebody, which is what made this
+expensive rather than merely wrong.

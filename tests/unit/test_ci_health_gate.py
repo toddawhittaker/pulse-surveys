@@ -1,4 +1,4 @@
-"""The CI health gate: which services it names, and where it names them — E0-03, E0-14.
+"""The CI health gate: which services it names, and where it names them — E0-03, E0-14, E0-16.
 
 E0-03's acceptance criterion 5: "The CI `docker` job waits on all three services
 and passes." The passing half is the job's own business and cannot be asserted
@@ -14,8 +14,10 @@ criterion is then asserted nowhere at all.
 **The list grows with the stack, and this module is where it grows.** E0-14 adds
 `mock-lms`, whose own first criterion — "`docker compose up -d` brings `mock-lms`
 to healthy alongside the existing services" — is checked by exactly the same
-mechanism and by nothing else. A ticket that adds a service with a health check
-and does not add it here has shipped a service the gate never looks at.
+mechanism and by nothing else. E0-16 adds `mock-idp` and its first criterion is
+the same sentence about the other entry door, so it joins the list for the same
+reason. A ticket that adds a service with a health check and does not add it here
+has shipped a service the gate never looks at.
 
 E0-02 reached `db` and `redis` through `api`'s `depends_on` conditions rather
 than by naming them, and `test_compose_stack.py` holds those conditions for that
@@ -69,12 +71,12 @@ from typing import Any
 DOCKER_JOB = "docker"
 
 # Every service a first acceptance criterion requires to reach healthy: `api`,
-# `worker` and `beat` from E0-03, and `mock-lms` from E0-14. Listed rather than
-# derived from the Compose file, and the difference matters — a rule of "wait on
-# whatever the file declares" would silently accept a service that lost its
-# health check, because `wait_for_health.sh` would stop being given it at the
-# same moment it stopped being able to answer.
-REQUIRED_SERVICES = ("api", "worker", "beat", "mock-lms")
+# `worker` and `beat` from E0-03, `mock-lms` from E0-14, and `mock-idp` from
+# E0-16. Listed rather than derived from the Compose file, and the difference
+# matters — a rule of "wait on whatever the file declares" would silently accept
+# a service that lost its health check, because `wait_for_health.sh` would stop
+# being given it at the same moment it stopped being able to answer.
+REQUIRED_SERVICES = ("api", "worker", "beat", "mock-lms", "mock-idp")
 
 WAIT_SCRIPT = "scripts/ci/wait_for_health.sh"
 
@@ -317,10 +319,10 @@ def test_the_docker_job_waits_on_every_service_a_criterion_names(
             "service the stack brings up:",
             *reported,
             "",
-            "E0-03 criterion 1 and E0-14 criterion 1 are both that `docker compose up -d` "
-            "reaches healthy, and this argument list is the only thing that checks either: a "
-            "service nobody names is a service the gate never looks at, and the job goes "
-            "green with it crash-looping. Restore the full list — "
+            "E0-03, E0-14 and E0-16 each have a first criterion that `docker compose up -d` "
+            "reaches healthy, and this argument list is the only thing that checks any of "
+            "them: a service nobody names is a service the gate never looks at, and the job "
+            "goes green with it crash-looping. Restore the full list — "
             f"`{WAIT_SCRIPT} {' '.join(REQUIRED_SERVICES)}` — at every wait in the job, the "
             "one after the restart loop included.",
         ]

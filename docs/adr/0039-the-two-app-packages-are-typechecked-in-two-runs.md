@@ -63,11 +63,13 @@ keep in step with the first, for a difference that is one path argument.
 workflow — which is the same obligation E0-03 already carries for the health
 gate, and `CLAUDE.md` already says which wins when they disagree: the workflow.
 
-**They share one `.mypy_cache`.** Running them alternately four times was checked
+**They share one `.mypy_cache`.** Running the first two alternately four times was checked
 for cache confusion between two module trees with the same module names; the
 results were stable and correct in both directions. If that ever changes, the fix
 is `--cache-dir` on the second run, not one run.
 
-**A third `app` package would need a third run.** `mock-idp/` (E0-16) is exactly
-that, and it should add its line here rather than inventing a different
-arrangement.
+**A third `app` package needed a third run, and E0-16 added it.** `mock-idp/`
+is that package, and `mypy mock-idp/app` follows the other two in
+`.github/workflows/ci.yml` and in `make typecheck`. The rule generalises as
+written: an `n`th package called `app` is an `n`th invocation, in both files, in
+the same order.
