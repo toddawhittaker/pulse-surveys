@@ -3986,7 +3986,7 @@ class DemoSeed:
         self.database = database
         self.environment = seed_environment(database)
 
-    def run(self, **overrides: str) -> SeedRun:
+    def run(self, **overrides: str | None) -> SeedRun:
         """Run `scripts/seed.py` against this database and report what happened.
 
         `overrides` go into the child's environment last, which is how a test asks
@@ -3995,6 +3995,14 @@ class DemoSeed:
         `make seed`, and then overwritten: `.env` in the repository root is read by
         the process with `override=False` everywhere else in this project, so the
         values here win over a developer's local file.
+
+        **An override of `None` removes the variable** rather than setting it to
+        an empty string, and the two are different questions to ask of a guard:
+        `ENVIRONMENT=` is a value somebody configured to nothing, and no
+        `ENVIRONMENT` at all is a context nobody configured. ADR 0063 refuses both
+        and gives different reasons, so a test has to be able to produce both. It
+        is removed from the assembled environment, so the parent's own copy and
+        the `.env.example` layer go with it.
         """
         argv = (sys.executable, str(SEED_SCRIPT_PATH))
         if not SEED_SCRIPT_PATH.is_file():
@@ -4018,7 +4026,12 @@ class DemoSeed:
         # Named for the child rather than `environment`, which is the context
         # manager further up this file — one of them setting `os.environ` and the
         # other building a child's is exactly the pair worth not confusing.
-        child_environment = {**os.environ, **self.environment, **overrides}
+        child_environment = {**os.environ, **self.environment}
+        for name, value in overrides.items():
+            if value is None:
+                child_environment.pop(name, None)
+            else:
+                child_environment[name] = value
         try:
             # S603: the command is this interpreter and a path built from the
             # repository root. Nothing in it comes from input.

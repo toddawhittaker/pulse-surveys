@@ -24,10 +24,19 @@ its own connection sees none of that and is seen by none of it, so rows it left 
 the session database would surface as somebody else's failed non-vacuity guard
 three tickets from now.
 
+**Not every criterion here is about the database.** The last section but one
+asserts the guard ADR 0063 put in front of the script — it refuses to run unless
+`ENVIRONMENT` is `development` — and it asserts it the same way, by running the
+process and reading what it did. That guard shipped with nothing executing it and
+said so in its own consequences; this is what closes that.
+
 **Order in this file is deliberate.** Everything above the idempotency section
 measures the state *one* run produces, which is the state every criterion
 describes. The second run happens last, so a script that duplicates rows produces
-one failure naming duplication rather than six failures about shapes.
+one failure naming duplication rather than six failures about shapes. The guard
+section runs the script again, and is harmless to what is around it: its refused
+runs open no connection, and the one run it makes that is admitted is a run of an
+idempotent seed against the database that already holds it.
 
 **What this file does not decide.** The role spellings, the parent edge and what a
 scope node is made of are read off the schema through `SupervisionGraph`, which
@@ -159,17 +168,36 @@ UNROUTABLE_EMAIL_DOMAINS = (
 # `lti_platform` are all plausible and the sweep should reach whichever it is.
 EMAIL_COLUMN_FRAGMENTS = ("email", "mail")
 
-# **This file's choice**, and the one pair of names here that a construction
-# decision could displace. E0-17's second criterion says a registration of the
-# mock platform must be "unreachable from a deployed environment" and leaves the
-# mechanism to the implementation and to an amendment of ADR 0038. `.env.example`
-# documents `ENVIRONMENT` as the deployment name and names `development`,
-# `staging` and `production` as its conventions, so that is what this file asks
-# the script about. If the guard is spelled some other way — an explicit opt-in
-# flag, a separate variable — say so in the pull request and these two constants
-# are what change.
+# **Settled by the implementation, and no longer this file's guess.** These two
+# were written here as a choice — E0-17 leaves the mechanism open, and
+# `.env.example` documents `ENVIRONMENT` as the deployment name — and
+# `docs/adr/0063-the-demo-seed-runs-only-in-a-development-environment.md` is what
+# made them the mechanism: the seed "refuses to run unless `ENVIRONMENT` is
+# exactly `development`", checked "before it builds a database URL, so a refused
+# run opens no connection at all".
 DEPLOYED_ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 DEPLOYED_ENVIRONMENT_VALUE = "production"
+
+# The one value the guard admits. ADR 0063's check is an equality against this
+# string and deliberately not a deny-list, "because the set of names a deployment
+# might use is open".
+DEVELOPMENT_ENVIRONMENT = "development"
+
+# An address nothing can connect to, used to prove *when* the guard runs rather
+# than only that it does. Not a credential and not copied from one: port 1 is
+# reserved, nothing listens on it, and a connection there is refused at once
+# rather than waiting on a name lookup. A run that prints the guard's refusal
+# while pointed here cannot have opened a connection first, which is ADR 0063's
+# ordering claim; a run that gets past the guard fails on this address instead.
+UNREACHABLE_DATABASE_URL = "postgresql+psycopg://nobody:nothing@127.0.0.1:1/nowhere"
+
+# Every variable `seed_environment` in tests/conftest.py sets to a database URL,
+# so that unreachability can be said in all of them at once. E0-17 does not say
+# which one a seed reads — supplying every spelling is that fixture's whole
+# design — so pointing only one at the address above would let a script that
+# prefers another quietly reach the real database, and the refusals below would
+# then be evidence of nothing.
+DATABASE_URL_VARIABLES = ("DATABASE_URL", "ALEMBIC_DATABASE_URL", "CARE_DATABASE_URL")
 
 # How deep a row label follows foreign keys before it stops. Bounded so that a
 # seed which stored a loop produces a failed assertion in the test that asked
@@ -857,9 +885,12 @@ def test_the_seed_registers_no_mock_platform_unless_a_deployed_run_is_refused(
     that actually matters." A seed that writes the row on a path a deployment also
     runs closes that boundary in the wrong direction.
 
-    `ENVIRONMENT=production` is **this file's choice** of how to say "a deployed
-    environment" — see the constants at the top, and say so in the pull request if
-    the guard is spelled another way.
+    **This test's `ENVIRONMENT=production` branch does not run, and must not be
+    read as covering the guard.** The seed registers a fictional platform rather
+    than the mock (ADR 0065), so the condition above is false and the run below
+    never happens — which is exactly how a guard ships with nothing asserting it.
+    The guard itself is asserted unconditionally in the section further down;
+    ADR 0063's own consequences named this gap before there was a test for it.
     """
     seeded(seeded_demo)
     addresses = mock_platform_addresses(base_compose, mock_lms_service)
@@ -1616,6 +1647,240 @@ def test_no_seeded_person_carries_a_routable_email_address(
         f"{list(UNROUTABLE_EMAIL_DOMAINS)} — RFC 2606 and RFC 6761 reserve them for exactly this "
         "— because a demo seed is copied into staging environments, and the address that gets "
         "mail is a real person who never heard of this project."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The environment guard — E0-17's security review item, as ADR 0063 implements it:
+# "confirm the seed script cannot run against a non-development environment".
+#
+# **Why this section exists at all.** The implementer shipped the guard and then
+# said in ADR 0063's own consequences that nothing in the suite executed it: the
+# only run this module made with a deployment name sat behind the mock-platform
+# condition, which is false, so the guard was a convention rather than a
+# guarantee (`docs/MISTAKES.md` entry 9). What follows is the part the process can
+# be asked directly.
+#
+# **The tests here are one argument and are worth reading in order.** A guard
+# that refuses everything passes every refusal case below and is useless, so the
+# control that a `development` run is admitted comes first. A guard that runs
+# *after* opening a connection would satisfy "the run failed" just as well, so
+# every refusal is asked with the database URLs pointed at an address nothing
+# answers on: a run that prints the guard's refusal from there cannot have
+# connected first, and the second control is what proves this file can tell the
+# two failures apart rather than being blind to both.
+# ---------------------------------------------------------------------------
+
+# What a failure to reach a database looks like in this project's output,
+# whichever shape it takes: an uncaught exception, which is what exit 1 out of a
+# Python process means, or a message that names the host it could not reach.
+# Asserted absent for every refusal and asserted **present** by
+# `test_a_development_run_gets_past_the_guard_and_fails_on_the_address` — because
+# a list of fragments that matches nothing would report every run as "no
+# connection attempted", including the runs where one was (`docs/MISTAKES.md`
+# entry 3, third case).
+CONNECTION_FAILURE_FRAGMENTS = ("psycopg", "operationalerror", "traceback", "127.0.0.1")
+
+# The values a deployment might carry, and the two ways it might carry nothing.
+# ADR 0063 chose an equality against `development` rather than a deny-list, so
+# what this list is for is the names nobody would have thought to enumerate: the
+# first two are `.env.example`'s own conventions, the third is a spelling no
+# record in this repository mentions, and the fourth contains the safe name
+# without being it — which is the case a guard written as a substring test lets
+# through. `None` removes the variable; see `DemoSeed.run` in tests/conftest.py.
+REFUSED_ENVIRONMENTS = (
+    pytest.param(DEPLOYED_ENVIRONMENT_VALUE, id="production"),
+    pytest.param("staging", id="staging"),
+    pytest.param("prod", id="a-name-no-record-here-enumerates"),
+    pytest.param(f"staging-{DEVELOPMENT_ENVIRONMENT}", id="a-name-containing-the-safe-one"),
+    pytest.param("", id="set-to-nothing"),
+    pytest.param(None, id="not-set-at-all"),
+)
+
+
+def unreachable_overrides(environment_value: str | None) -> dict[str, str | None]:
+    """One `ENVIRONMENT` value, and every database URL pointed at nothing."""
+    overrides: dict[str, str | None] = dict.fromkeys(
+        DATABASE_URL_VARIABLES, UNREACHABLE_DATABASE_URL
+    )
+    overrides[DEPLOYED_ENVIRONMENT_VARIABLE] = environment_value
+    return overrides
+
+
+def said_by(run: Any) -> str:
+    """Both of a run's streams together, since which one carries a refusal is free."""
+    return f"{run.stdout}\n{run.stderr}"
+
+
+def test_a_development_environment_is_admitted(demo_database: Any) -> None:
+    """The control the refusals below are worth nothing without.
+
+    ADR 0063's check is "an equality, not a deny-list", and the failure that
+    distinction is about cuts both ways: a guard that enumerated names to refuse
+    lets through every name nobody thought of, and a guard that refused *every*
+    name would pass all six cases below while making `make seed` impossible.
+
+    So this is the same script, run against the same reachable database as the
+    rest of this module, with `ENVIRONMENT` set explicitly rather than inherited —
+    and it has to complete. It overlaps
+    `test_seeding_a_freshly_migrated_database_completes_without_error` on purpose:
+    that test's subject is criterion 3, and the coupling belongs where the
+    refusals are, because they are the thing it makes meaningful.
+
+    `seeded_demo` is deliberately not requested. The guard is independent of
+    whether an earlier run seeded anything, and a test of the guard should not go
+    red because the seed did — though the database it runs against has been seeded
+    by the time this executes, so a run that fails here on a *constraint* is the
+    idempotency criterion failing rather than the guard, and the message says so.
+    """
+    admitted = demo_database.run(**{DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT})
+
+    assert admitted.succeeded, (
+        f"The seed was refused, or failed, with "
+        f"`{DEPLOYED_ENVIRONMENT_VARIABLE}={DEVELOPMENT_ENVIRONMENT}` set explicitly.\n"
+        f"{admitted.report()}\n"
+        "Read the output above before reading this sentence, because there are two failures it "
+        "could be. If the script refused, ADR 0063's guard refuses the one value it admits — 'the "
+        "one name that is safe is the one this script exists for' — which passes every case in "
+        "`test_the_seed_is_refused_wherever_the_environment_is_not_development` while leaving "
+        "nobody able to seed a demo institution at all. If it failed on a constraint instead, "
+        "this database was already seeded when the run started, so that is the idempotency "
+        "criterion and `test_running_the_seed_a_second_time_leaves_the_same_rows` is where it is "
+        "asserted."
+    )
+
+
+def test_a_development_run_gets_past_the_guard_and_fails_on_the_address(
+    demo_database: Any,
+) -> None:
+    """The second control: this file can tell a refusal from a connection failure.
+
+    Every refusal below is asked with the database URLs pointed at
+    `UNREACHABLE_DATABASE_URL`, and each one asserts that the output carries no
+    sign of a connection attempt. That assertion is an absence, and an absence is
+    satisfied by a fragment list that matches nothing at all — so this runs the
+    one case where a connection attempt certainly happens and requires the list to
+    fire on it.
+
+    It is also, in the same breath, ADR 0063's ordering claim from the other side:
+    "it checks that **before** it builds a database URL, so a refused run opens no
+    connection at all". A `development` run pointed at an address nothing answers
+    on has to get past the guard and die on the address; that is the shape a
+    refused run must *not* have.
+    """
+    reached = demo_database.run(**unreachable_overrides(DEVELOPMENT_ENVIRONMENT))
+    said = said_by(reached).lower()
+
+    assert not reached.succeeded, (
+        f"The seed reported success while every database URL it was given pointed at "
+        f"{UNREACHABLE_DATABASE_URL}, where nothing listens.\n{reached.report()}\n"
+        "Either it reached a database by some route this test did not redirect — in which case "
+        "`DATABASE_URL_VARIABLES` at the top of this file is short of a name and the refusals "
+        "below are being asked of a script that can still connect — or it wrote nothing and said "
+        "it had."
+    )
+    found = [fragment for fragment in CONNECTION_FAILURE_FRAGMENTS if fragment in said]
+    assert found, (
+        f"A `{DEVELOPMENT_ENVIRONMENT}` run against an address nothing answers on failed without "
+        f"any of {list(CONNECTION_FAILURE_FRAGMENTS)} appearing in its output.\n"
+        f"{reached.report()}\n"
+        "That list is what every refusal below uses to say 'no connection was attempted', so a "
+        "list matching nothing would make all six of those assertions vacuous. Either the script "
+        "now reports a connection failure in words none of these fragments reach — in which case "
+        "add one — or it failed before connecting, which would mean the guard refuses "
+        f"`{DEVELOPMENT_ENVIRONMENT}` too and the control above should already have said so."
+    )
+
+
+@pytest.mark.parametrize("environment_value", REFUSED_ENVIRONMENTS)
+def test_the_seed_is_refused_wherever_the_environment_is_not_development(
+    demo_database: Any, environment_value: str | None
+) -> None:
+    """E0-17's security review item: the seed cannot run against a non-development environment.
+
+    One case per value, because the values are what the criterion is about. ADR
+    0063: "The check is an equality, not a deny-list. The set of names a
+    deployment might use is open — `prod`, `production`, `live`, a customer's own
+    word, a typo — so a check that enumerated names to refuse would let every name
+    nobody thought of through." A test that tried `production` alone would pass
+    against exactly the deny-list that record rejects; `staging` and a name no
+    record here mentions are what separate the two designs, and a name that
+    *contains* `development` separates an equality from a substring test.
+
+    Set to nothing and not set at all are both here because ADR 0063 refuses both
+    and gives a reason for it: "a context where it is absent is a context nobody
+    configured, and that is not one to write people into."
+
+    **The refusal is the first assertion and the weakest one; what follows is
+    what makes it mean something.** The run has to fail. The message has to name
+    the variable, the value it found and the value it wants, because a refusal an
+    operator cannot act on sends them to the source instead. And no connection may
+    have been attempted, which is asked from an address nothing answers on — a
+    refusal printed from there happened before the connection, which is ADR 0063's
+    ordering claim and the reason the guard is worth anything against a production
+    database.
+
+    The exit *status* is deliberately not asserted beyond being non-zero. Nothing
+    in the ticket or in ADR 0063 fixes a number, and pinning one here would make
+    this file the record of a decision nobody wrote down.
+    """
+    refused = demo_database.run(**unreachable_overrides(environment_value))
+    said = said_by(refused)
+
+    assert not refused.succeeded, (
+        f"The seed ran to completion with `{DEPLOYED_ENVIRONMENT_VARIABLE}` "
+        f"{'unset' if environment_value is None else repr(environment_value)}.\n"
+        f"{refused.report()}\n"
+        "E0-17's definition of done asks the security review to 'confirm the seed script cannot "
+        "run against a non-development environment', and ADR 0063 is how it does: the script "
+        "writes an invented institution, an invented term and invented people into whatever "
+        "database `DATABASE_URL` names, connecting as the bootstrap superuser, which bypasses "
+        "every grant "
+        "ADR 0001 puts between a read path and a student's name. The failure this guard is about "
+        "is not malice — it is `make seed` typed in a terminal whose `.env` points at staging."
+    )
+
+    assert DEPLOYED_ENVIRONMENT_VARIABLE in said, (
+        f"The seed refused, and its output does not name `{DEPLOYED_ENVIRONMENT_VARIABLE}`.\n"
+        f"{refused.report()}\n"
+        "ADR 0063: 'The message names the variable, the value it found and the value it wants.' A "
+        "refusal that says none of those is indistinguishable from the script being broken, and "
+        "the person meeting it is a developer whose `.env` is one word wrong."
+    )
+
+    if environment_value:
+        assert environment_value in said, (
+            f"The refusal does not quote the value it found, {environment_value!r}.\n"
+            f"{refused.report()}\n"
+            "The wording is free and this is not a test of anybody's prose; what the value being "
+            "absent costs is the one thing the reader needs, since the whole failure is that "
+            f"`{DEPLOYED_ENVIRONMENT_VARIABLE}` says something other than they think it does."
+        )
+
+    # Skipped for the one value that contains the safe name: there, the message
+    # naming `development` is satisfied by it quoting the offending value back,
+    # so the assertion would pass without saying anything (`docs/MISTAKES.md`
+    # entry 3). Every other case distinguishes the two.
+    if DEVELOPMENT_ENVIRONMENT not in (environment_value or "").lower():
+        assert DEVELOPMENT_ENVIRONMENT in said.lower(), (
+            f"The refusal does not name `{DEVELOPMENT_ENVIRONMENT}`, the value it wants.\n"
+            f"{refused.report()}\n"
+            "ADR 0063 makes this an equality against one name, and a refusal that withholds the "
+            "name leaves an operator guessing at a value that is not in any error message."
+        )
+
+    connected = [fragment for fragment in CONNECTION_FAILURE_FRAGMENTS if fragment in said.lower()]
+    assert not connected, (
+        f"The refused run's output carries {connected}, so it reached the database layer before "
+        f"stopping — it was pointed at {UNREACHABLE_DATABASE_URL}, where nothing listens.\n"
+        f"{refused.report()}\n"
+        "ADR 0063 puts the check 'before it builds a database URL, so a refused run opens no "
+        "connection at all', and that ordering is the guarantee rather than a detail: a guard "
+        "that runs after connecting has already opened a superuser session against a production "
+        "database, and whether it then writes is a question about the next few lines of the "
+        "script rather than about a boundary. `test_a_development_run_gets_past_the_guard_and_"
+        "fails_on_the_address` is what proves these fragments are visible when a connection is "
+        "genuinely attempted."
     )
 
 
