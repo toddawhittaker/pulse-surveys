@@ -187,9 +187,9 @@ DEPLOYED_ENVIRONMENT_VALUE = "production"
 
 # The one value the guard admits. ADR 0063's check is an equality against this
 # string and deliberately not a deny-list, "because the set of names a deployment
-# might use is open" — an equality **after stripping surrounding whitespace**,
-# which the record does not yet say and which two of the cases further down are
-# what state. Case is not folded.
+# might use is open" — an equality after stripping surrounding whitespace, and
+# case-sensitive. Its "What the comparison actually is" subsection states the
+# whole shape; the cases further down are what would catch it changing.
 DEVELOPMENT_ENVIRONMENT = "development"
 
 # An address nothing can connect to, used to prove *when* the guard runs rather
@@ -1955,28 +1955,51 @@ CHECK_ENVIRONMENT = "check_environment_is_development"
 # can hold the file constant while only the process changes.
 SILENT_DOTENV = {"DATABASE_URL": UNREACHABLE_DATABASE_URL}
 
-# **Two values whose verdict is measured rather than written down.** The guard
-# compares `(raw or "").strip()` against `development`, so it strips surrounding
-# whitespace and does not fold case: `development` with a space either side of it
-# is admitted, and `Development` is refused. ADR 0063 says the check is against
-# "exactly `development`", which is true of the case half and not of the
-# whitespace half — the record is being corrected in the same round as this
-# comment, and until it is, the two rows below are the only place the behaviour
-# is stated.
+# **Four values the record states, and the rows below are what would catch a
+# change to any of them.** ADR 0063's "What the comparison actually is" says the
+# guard compares `(raw or "").strip()` against `development`: surrounding
+# whitespace of any kind is stripped, internal whitespace is not, there is no
+# substring matching, and case is not folded. The padded spellings of the one safe
+# name are admitted and nothing else is, which is what makes that a containment
+# claim rather than only an admission — and a containment claim with no test under
+# it is what `docs/MISTAKES.md` entry 2 is about.
 #
-# They are worth keeping because they break in opposite directions under the same
-# tidying. Replacing `.strip() ==` with a plain `==` makes the guard match the
-# record and fails `the-safe-name-with-surrounding-whitespace` alone; adding a
-# `.casefold()` beside the strip fails `the-safe-name-in-the-wrong-case` alone.
-# The first of those is the one to notice: the strip makes this guard *more*
-# permissive than the equality the record describes, and nothing else says so.
+# Each row survives a different edit, which is what keeps them from being padding:
+# a row that cannot name the change it catches does not earn a place here.
+#
+#   - a plain `==`, the strip dropped while tidying, fails
+#     `the-safe-name-with-surrounding-whitespace` alone;
+#   - `.strip(" ")`, the strip narrowed to spaces, fails
+#     `the-safe-name-padded-with-a-tab-and-a-newline` alone — and a `.env` line
+#     hand-edited into a trailing tab is exactly the case the strip exists for;
+#   - `.startswith(...)` in place of the equality fails
+#     `the-safe-name-with-something-appended` alone. The other direction —
+#     `.endswith(...)`, or a bare `in` — is caught by
+#     `a-name-containing-the-safe-one` in the subprocess section above, and the
+#     two are separate rows because neither implies the other;
+#   - a `.casefold()` added beside the strip fails
+#     `the-safe-name-in-the-wrong-case` alone.
+#
+# **The two halves point in opposite directions on purpose, and only one of them
+# is a decision.** ADR 0063 records the strip as deliberate — a trailing space is
+# invisible in most editors, and a refusal quoting a padded name reads on screen
+# exactly like a refusal quoting the right one, which is the most confusing
+# failure this guard could emit — and records case-sensitivity as *inherited*,
+# since `==` is case-sensitive and nobody weighed it. It stands on review because
+# folding would widen a fail-closed guard, and because a miscased name is
+# something a reader can see is wrong. The rule reconciling the two is the
+# record's: forgive what the reader cannot see, refuse what they can. If folding
+# is ever adopted deliberately, the miscased row changes — and that is a decision
+# to record in the ADR rather than a test to repair.
 SPACED_DEVELOPMENT = f" {DEVELOPMENT_ENVIRONMENT} "
+ODDLY_PADDED_DEVELOPMENT = f"\t{DEVELOPMENT_ENVIRONMENT}\n"
 MISCASED_DEVELOPMENT = DEVELOPMENT_ENVIRONMENT.capitalize()
+SUFFIXED_DEVELOPMENT = f"{DEVELOPMENT_ENVIRONMENT}1"
 
-# The rows of ADR 0063's own table, as `(process environment, .env contents)`,
-# plus the two measured above. `None` for the file means there is no file at all,
-# which is what a deployment looks like; a mapping means this suite writes one in
-# `tmp_path`.
+# The rows of ADR 0063's resolution table, as `(process environment, .env
+# contents)`, plus the comparison rows above. `None` for the file means there is
+# no file at all, which is what a deployment looks like; a mapping means this
+# suite writes one in `tmp_path`.
 REFUSED_CONFIGURATIONS = (
     pytest.param({}, None, id="nothing-sets-it-and-there-is-no-file"),
     pytest.param({}, SILENT_DOTENV, id="the-file-exists-and-sets-no-environment"),
@@ -2005,6 +2028,11 @@ REFUSED_CONFIGURATIONS = (
         SILENT_DOTENV,
         id="the-safe-name-in-the-wrong-case",
     ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: SUFFIXED_DEVELOPMENT},
+        SILENT_DOTENV,
+        id="the-safe-name-with-something-appended",
+    ),
 )
 
 ADMITTED_CONFIGURATIONS = (
@@ -2017,6 +2045,11 @@ ADMITTED_CONFIGURATIONS = (
         {DEPLOYED_ENVIRONMENT_VARIABLE: DEVELOPMENT_ENVIRONMENT},
         {DEPLOYED_ENVIRONMENT_VARIABLE: DEPLOYED_ENVIRONMENT_VALUE},
         id="the-process-says-development-over-a-deployment-file",
+    ),
+    pytest.param(
+        {DEPLOYED_ENVIRONMENT_VARIABLE: ODDLY_PADDED_DEVELOPMENT},
+        SILENT_DOTENV,
+        id="the-safe-name-padded-with-a-tab-and-a-newline",
     ),
     pytest.param(
         {DEPLOYED_ENVIRONMENT_VARIABLE: SPACED_DEVELOPMENT},
@@ -2112,10 +2145,12 @@ def test_the_guard_refuses_these_resolved_configurations(
     and whitespace included" — and because it is the value a line holding nothing
     but a space produces.
 
-    `the-safe-name-in-the-wrong-case` is measured behaviour rather than a written
-    rule: the guard does not fold case, so `Development` is refused. See the
-    comment on `MISCASED_DEVELOPMENT` above for why it and its opposite number in
-    the admitted cases are both kept.
+    `the-safe-name-in-the-wrong-case` and `the-safe-name-with-something-appended`
+    are the refusing half of ADR 0063's "What the comparison actually is": the
+    guard folds no case and matches no substring, so `Development` and
+    `development1` are both refused. The comment on `MISCASED_DEVELOPMENT` above
+    says which edit each of those rows survives and why the containment claim
+    needs the appended one as well as the two in the subprocess section.
     """
     configuration = resolve(seed_module, environ, dotenv_at(tmp_path / ".env", dotenv))
     found = configuration.get(DEPLOYED_ENVIRONMENT_VARIABLE)
@@ -2166,11 +2201,13 @@ def test_the_guard_admits_these_resolved_configurations(
     decides", which would refuse a developer who did exactly what an operator is
     told to do.
 
-    `the-safe-name-with-surrounding-whitespace` is measured behaviour rather than
-    a written rule, and it is the one row here that asserts the guard is *wider*
-    than its own record: `(raw or "").strip()` admits ` development `, which
-    "exactly `development`" does not describe. See the comment on
-    `SPACED_DEVELOPMENT` above.
+    The two padded rows are the admitting half of ADR 0063's "What the comparison
+    actually is": `(raw or "").strip()` admits the one safe name with whitespace
+    of any kind around it, which is deliberate — a trailing space is invisible in
+    an editor, and a refusal quoting a padded name looks on screen exactly like a
+    refusal quoting the right one. One row pads with spaces and one with a tab and
+    a newline, because a strip narrowed to spaces would satisfy the first and not
+    the second. The comment on `SPACED_DEVELOPMENT` above has the rest.
     """
     configuration = resolve(seed_module, environ, dotenv_at(tmp_path / ".env", dotenv))
     refused, said = guard_refusal(seed_module, configuration, capsys)
