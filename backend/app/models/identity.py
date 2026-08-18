@@ -327,8 +327,13 @@ class AssignmentRole(StrEnum):
 
 
 # SPEC §2.1's "Scope attachment" column, as the one expression that holds it, and
-# the reason `role_assignment` carries five nullable scope references rather than
-# the single `scope_node_id` SPEC §8 writes in the singular (ADR 0025).
+# the reason `role_assignment` carries five nullable scope references (ADR 0025).
+#
+# §8 wrote a single `scope_node_id` when this was built, and it no longer does:
+# the spec was corrected on 2026-08-18 to describe the five columns, because
+# containment is six tables and a single column would be an untyped identifier
+# with no referential integrity. So this is now what the spec says rather than a
+# departure from it.
 #
 # Two clauses, and both are load-bearing.
 #

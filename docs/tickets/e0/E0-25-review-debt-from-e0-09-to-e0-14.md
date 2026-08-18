@@ -16,7 +16,7 @@ decision for Todd, and one is carried to E1.
 | 3 — `fresh_scope`'s docstring overclaims | [E0-37](E0-37-small-corrections.md) item 5 |
 | 4 — `MISTAKES` entry 16 wants its database-shaped variant | **Closed** |
 | 5 — the mock LMS cannot mint a deliberately wrong launch | **Carried to E1** |
-| 6 — two spec lines describe things that no longer exist | **Decided 2026-08-18: correct both.** Spec edits, still owed — see the README's Decided table. |
+| 6 — two spec lines describe things that no longer exist | **Closed 2026-08-18.** Both corrected in SPEC, along with three §13 module comments that were wrong the same way. |
 
 On item 4: `docs/mistakes/16-a-mutation-harness-reported-kills-it-had-not-made.md`
 now carries the clause — a mutation that lives in the database is read from the
@@ -102,10 +102,17 @@ amendment; it is not work for this ticket.
 
 ### 6. Two spec lines describe things that no longer exist
 
-**Decided 2026-08-18: correct both.** Both changes were deliberate and both are
-already explained in an ADR, so this is transcription rather than a decision —
-but it is a spec edit, so it is Todd's to make. It is tracked in the README's
-*Decided* table until it lands.
+**Closed 2026-08-18.** §8 now describes the scope as one nullable foreign key
+per containment level — `institution_id`, `college_id`, `department_id`,
+`course_id`, `section_id`, exactly one non-null — says why there is no unified
+`scope_node_id`, and says why there is deliberately no `prefix_id`.
+`user_identity` is in §8's core-table list and in §13's `identity.py` comment.
+
+**Three §13 module comments were wrong the same way and were corrected with
+them**, found while making this edit rather than reported by a review: `org.py`
+named a `course_set` table that does not exist and omitted `college` and
+`prefix`; `term.py` omitted `start_letter_map`; `identity.py` omitted `person`
+and `lead_faculty_mapping` as well as `user_identity`.
 
 Both raised by implementers who declined to edit the spec themselves, correctly:
 

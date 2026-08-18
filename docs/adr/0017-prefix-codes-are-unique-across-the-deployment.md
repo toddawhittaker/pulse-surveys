@@ -1,8 +1,17 @@
 # 0017 — Prefix codes are unique across the deployment, not per institution
 
-**Status:** Accepted
+**Status:** Accepted — amended 2026-08-18
 **Date:** 2026-08-14
-**Tickets:** E0-05
+**Tickets:** E0-05, E0-22
+
+> **Amendment, 2026-08-18.** The assumption this record rests on became a
+> rule. SPEC §8 now states that a deployment serves exactly one institution
+> and requires a constraint permitting at most one `institution` row. The
+> decision below is unchanged and its reasoning still holds — what changes
+> is that the alternative rejected as "wider than E0-05" was the right one
+> and has now been taken at the level that could take it. The constraint
+> itself is not built yet; [E0-22](../tickets/e0/E0-22-spec-questions-from-e0-05.md)
+> owns it.
 
 ## Context
 
@@ -45,12 +54,16 @@ constraint permitting at most one `institution` row, at which point global
 uniqueness and institution-scoped uniqueness are the same rule and the
 incoherence below disappears. This is the cheapest of the three and it was not
 considered when the decision was first written, which is the gap this paragraph
-exists to close. It is not taken here because it decides something wider than
-E0-05: whether the product is single-tenant by construction is a statement about
-what Pulse *is*, the spec does not make it, and a schema ticket should not make
-it by side effect. It is the right answer if the spec ever says so, and it would
-turn a confusing `uq_prefix_code` violation into an error at the row that is
-actually wrong.
+exists to close. It was not taken **here** because it decides something wider
+than E0-05: whether the product is single-tenant by construction is a statement
+about what Pulse *is*, the spec did not make it, and a schema ticket should not
+make it by side effect.
+
+**It has since been taken.** SPEC §8 says a deployment serves exactly one
+institution and requires the constraint, decided 2026-08-18. So this is no
+longer an alternative rejected — it is the answer, arrived at from the document
+that governs rather than from a schema ticket, which is the process working
+rather than the record being wrong.
 
 **Scope to the institution — `UniqueConstraint("institution_id", "code")`.**
 The literal reading of the original docstring, and the correct rule if a
@@ -63,14 +76,19 @@ a case no deployment has would buy a hypothetical at the cost of the invariant.
 
 ## Consequences
 
-**A second institution row breaks prefix insertion, and does so unhelpfully.**
-The schema permits more than one `institution` — `college` is unique per
-`institution_id` — so nothing stops a second one being seeded. Its `BIOL` is
-then refused by `uq_prefix_code` with an error naming a constraint and no
-institution. This is the accepted cost, and it is recorded here rather than
-discovered: multi-institution is not a supported configuration, and the day it
-becomes one, this constraint and `INSTITUTION_TIMEZONE` both have to move, which
-is the honest signal that the change is larger than a schema edit.
+**A second institution row breaks prefix insertion, and does so unhelpfully —
+until the constraint lands.** The schema permits more than one `institution`
+today, so nothing stops a second one being seeded, and its `BIOL` is refused by
+`uq_prefix_code` with an error naming a constraint and no institution. That was
+the accepted cost of leaving the assumption latent. **The amendment above ends
+the acceptance**: once E0-22's constraint lands, the second `institution` row is
+refused at the row that is actually wrong and this consequence is retired. Until
+it lands, the consequence stands exactly as written.
+
+Multi-institution remains an unsupported configuration, and the day it becomes
+one, this constraint, the new single-row constraint and `INSTITUTION_TIMEZONE`
+all have to move — which is the honest signal that the change is larger than a
+schema edit.
 
 **The asymmetry with `college.name` and `department.name` is deliberate.** A
 reader who notices it and "fixes" it by scoping to the department reintroduces
