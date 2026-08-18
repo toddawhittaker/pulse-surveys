@@ -54,6 +54,7 @@ from app.flow import (
     TokenRequestError,
     authorization_response,
     discovery_document,
+    repeated_parameters,
 )
 from app.pages import index_page, login_page, refusal_page, registration_document
 from app.seed import seeded_directory
@@ -95,6 +96,10 @@ async def form_body(request: Request, subject: str) -> dict[str, str]:
     string rather than vanishing — "sent blank" and "not sent" are different
     mistakes, and the refusals in `app.flow` can only tell them apart if the
     parser does.
+
+    A repeated parameter is refused here rather than in the mapping, because a
+    mapping is where the repetition disappears: `dict()` keeps the last pair and
+    nothing after it can tell there were two (RFC 6749 §3.1).
     """
     media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if media_type != FORM_MEDIA_TYPE:
@@ -102,7 +107,14 @@ async def form_body(request: Request, subject: str) -> dict[str, str]:
             f"The {subject} arrived as {media_type!r}. It is {FORM_MEDIA_TYPE!r} (RFC 6749 §4.1)."
         )
     body = (await request.body()).decode("utf-8", errors="replace")
-    return dict(parse_qsl(body, keep_blank_values=True))
+    pairs = parse_qsl(body, keep_blank_values=True)
+    repeated = repeated_parameters(pairs)
+    if repeated:
+        raise ValueError(
+            f"The {subject} carries {repeated} more than once. RFC 6749 §3.1: a request "
+            "parameter MUST NOT be included more than once."
+        )
+    return dict(pairs)
 
 
 def create_app() -> FastAPI:
@@ -176,8 +188,18 @@ def create_app() -> FastAPI:
         `app.flow.Flows.begin` gives at length: the parameter most likely to be
         wrong is the one naming where to send the browser.
         """
+        pairs = list(request.query_params.multi_items())
+        repeated = repeated_parameters(pairs)
+        if repeated:
+            return HTMLResponse(
+                refusal_page(
+                    f"The authorization request carries {repeated} more than once. RFC 6749 "
+                    "§3.1: a request parameter MUST NOT be included more than once."
+                ),
+                status_code=REFUSED,
+            )
         try:
-            pending = flows.begin(dict(request.query_params), settings)
+            pending = flows.begin(dict(pairs), settings)
         except AuthorizationRequestError as refusal:
             return HTMLResponse(refusal_page(str(refusal)), status_code=REFUSED)
         return HTMLResponse(login_page(settings, pending, directory))

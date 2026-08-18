@@ -50,7 +50,7 @@ import hashlib
 import re
 import secrets
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -69,11 +69,24 @@ GRANT_TYPE = "authorization_code"
 # provider has nothing to offer it.
 OPENID_SCOPE = "openid"
 
-# The two other scopes a client may ask for, and what they add: the claims a
-# session already carries. They are accepted rather than required, because a
-# conformant client asks for what it needs and this provider's whole population
-# is eight invented people.
-SUPPORTED_SCOPES = (OPENID_SCOPE, "profile", "email")
+# The two other scopes a client may ask for, and **what each one buys**: OIDC
+# Core 1.0 §5.4 binds `preferred_username` to `profile` and `email` plus
+# `email_verified` to `email`, so asking for neither means a session carrying
+# neither. Azure AD, Okta and Google all behave that way, and a mock that handed
+# the claims over regardless would teach E1 that `email` always arrives — which
+# it does, right up until Pulse is pointed at a real provider.
+PROFILE_SCOPE = "profile"
+EMAIL_SCOPE = "email"
+SUPPORTED_SCOPES = (OPENID_SCOPE, PROFILE_SCOPE, EMAIL_SCOPE)
+
+# Which claims each scope grants. The roles claim is deliberately not in here: it
+# is bound to `openid` because it is the whole reason this provider exists to be
+# asked, and a client that had to know to ask for it would be a client that finds
+# out it did not at resolution time.
+CLAIMS_BY_SCOPE = {
+    PROFILE_SCOPE: ("preferred_username",),
+    EMAIL_SCOPE: ("email", "email_verified"),
+}
 
 # The PKCE transformation this provider accepts. RFC 7636 §4.2 requires S256 of
 # any server supporting PKCE; `plain` is permitted by the specification and is
@@ -195,6 +208,7 @@ class AuthorizationCode:
     redirect_uri: str
     nonce: str
     subject: str
+    scope: str
     code_challenge: str
     expires_at: float
 
@@ -248,10 +262,76 @@ def pkce_shape_problem(value: str) -> str | None:
     return None
 
 
+def repeated_parameters(pairs: Sequence[tuple[str, str]]) -> list[str]:
+    """The parameter names `pairs` carries more than once, sorted.
+
+    RFC 6749 §3.1: request parameters "MUST NOT be included more than once".
+    Both of this service's entry points build a mapping out of pairs — a query
+    string at the authorization endpoint, a form body at the login and token
+    endpoints — and a mapping is exactly where a duplicate stops being visible:
+    `dict()` keeps the last one and nothing downstream can tell that there were
+    two. So the question is asked of the pairs, once, before anything sees the
+    mapping.
+
+    A list rather than an exception, for the same reason `pkce_shape_problem`
+    returns a reason: an authorization request is refused with a page and a token
+    request with RFC 6749 §5.2's `error` object, and the rule should not have to
+    know which it is talking to.
+
+    Not exploitable on this provider as it stands — a code is bound to the
+    redirect URI the server stored, so `?client_id=evil&client_id=<real>` cannot
+    send a session anywhere new — and it is leniency in the direction E0-16's
+    definition of done names: a tool built against a provider that shrugs at a
+    duplicated parameter learns a habit its next platform will not tolerate.
+    """
+    seen: dict[str, int] = {}
+    for name, _ in pairs:
+        seen[name] = seen.get(name, 0) + 1
+    return sorted(name for name, count in seen.items() if count > 1)
+
+
+def submitted(parameters: Mapping[str, Any], name: str) -> str:
+    """One parameter exactly as it arrived, or the empty string if it did not.
+
+    **Nothing here trims anything, and that is the whole point of the function.**
+    A provider that strips a value before looking at it has decided what the
+    client meant instead of checking what it sent, and three of this service's
+    obligations are broken by exactly that: RFC 7636 §4.1 gives the PKCE
+    parameters an ABNF that whitespace violates, so trimming makes the shape
+    check structurally unable to refuse the shapes it exists to refuse; RFC 6749
+    §4.1.2 requires `state` back as "the exact value received from the client";
+    and OIDC Core §3.1.3.7 step 11 has the client compare the `nonce` it sent
+    with the one in the token. A stripped value passes through all three looking
+    correct and comes back as something the client did not send.
+
+    **What the trimming actually cost is worse than a shape check that could not
+    fire, and it is worth stating exactly.** For a stored challenge over some
+    verifier `v`, the provider accepted every string that trimmed to `v` — so the
+    value PKCE binds was widened from one string to an unbounded set of them, and
+    a `code_verifier` that is not the string the challenge was computed over was
+    a successful redemption. Measured both ways round on a running instance: a
+    challenge registered over `"a" * 43` and redeemed with `" " + "a" * 43 + "\n"`
+    answered **200 with an `id_token`** before this function existed and
+    `invalid_grant` after. Keycloak, Okta and Auth0 all refuse it, and
+    `base64.encodebytes()` appends exactly that newline — so a client minting its
+    verifier that way passes here and fails at the first real provider, with an
+    error naming the verifier rather than the encoder.
+    """
+    value = parameters.get(name)
+    return "" if value is None else str(value)
+
+
 def required(parameters: Mapping[str, Any], name: str, subject: str) -> str:
-    """One parameter that must be present and non-empty, or a refusal naming it."""
-    value = str(parameters.get(name) or "").strip()
-    if not value:
+    """One parameter that must be present, returned unaltered, or a refusal naming it.
+
+    Presence is judged on the *trimmed* value and the *untrimmed* one is handed
+    back. That split is deliberate: a parameter sent as three spaces carries
+    nothing a client could have meant, so saying "it carries no `state`" is more
+    use than "your `state` is malformed" — but every check downstream of this
+    has to see what actually arrived, so nothing is repaired on the way past.
+    """
+    value = submitted(parameters, name)
+    if not value.strip():
         raise AuthorizationRequestError(
             f"The {subject} carries no `{name}`. It carries {sorted(parameters)}."
         )
@@ -315,12 +395,30 @@ class Flows:
             )
 
         scope = required(parameters, "scope", subject)
-        if OPENID_SCOPE not in scope.split():
+        asked = scope.split()
+        if OPENID_SCOPE not in asked:
             raise AuthorizationRequestError(
                 f"The authorization request asks for scope {scope!r}, which does not include "
                 f"{OPENID_SCOPE!r}. Without it this is a plain OAuth 2.0 request and there is no "
                 "`id_token` to issue (OIDC Core 1.0 §3.1.2.1)."
             )
+        # RFC 6749 §3.3 lets a server either refuse an unknown scope or ignore it
+        # and say so in the response. **Refusing is the honest half here**, and it
+        # is what Okta and Azure AD do: this provider serves exactly three scopes
+        # and issues no refresh token, so granting `offline_access` — or anything
+        # else a client hopefully asked for — would be a promise it cannot keep.
+        # The set is in the discovery document as `scopes_supported`, so a client
+        # can see it before it sends anything.
+        unknown = sorted(set(asked) - set(SUPPORTED_SCOPES))
+        if unknown:
+            raise AuthorizationRequestError(
+                f"The authorization request asks for {unknown}, which this provider does not "
+                f"serve. It serves {list(SUPPORTED_SCOPES)}, and its discovery document says so "
+                "in `scopes_supported` (RFC 6749 §3.3, §4.1.2.1 `invalid_scope`)."
+            )
+        # Deduplicated, in the order asked, so what comes back in the token
+        # response is a grant a client can compare with its own request.
+        granted = " ".join(dict.fromkeys(asked))
 
         state = required(parameters, "state", subject)
         nonce = required(parameters, "nonce", subject)
@@ -333,7 +431,7 @@ class Flows:
                 "produce a code no exchange could ever redeem."
             )
 
-        method = str(parameters.get("code_challenge_method") or "").strip()
+        method = submitted(parameters, "code_challenge_method")
         if method != CODE_CHALLENGE_METHOD:
             raise AuthorizationRequestError(
                 f"The authorization request offers `code_challenge_method` {method!r}. This "
@@ -347,7 +445,7 @@ class Flows:
             redirect_uri=redirect_uri,
             state=state,
             nonce=nonce,
-            scope=scope,
+            scope=granted,
             code_challenge=code_challenge,
             expires_at=now() + PENDING_REQUEST_LIFETIME_SECONDS,
         )
@@ -379,7 +477,7 @@ class Flows:
         launch-only person it has never heard of from anybody else it has never
         heard of, and both answers are the same one.
         """
-        pending = self._spend_pending(str(parameters.get("request") or "").strip())
+        pending = self._spend_pending(submitted(parameters, "request"))
 
         subject = required(parameters, "sub", "login")
         person = directory.person(subject)
@@ -403,6 +501,7 @@ class Flows:
             redirect_uri=pending.redirect_uri,
             nonce=pending.nonce,
             subject=person.subject,
+            scope=pending.scope,
             code_challenge=pending.code_challenge,
             expires_at=now() + AUTHORIZATION_CODE_LIFETIME_SECONDS,
         )
@@ -428,7 +527,7 @@ class Flows:
         refusals from this endpoint, and a provider that refused for an unsent
         secret would satisfy both while asserting nothing about either.
         """
-        grant_type = str(parameters.get("grant_type") or "").strip()
+        grant_type = submitted(parameters, "grant_type")
         if grant_type != GRANT_TYPE:
             raise TokenRequestError(
                 error="unsupported_grant_type",
@@ -438,8 +537,8 @@ class Flows:
                 ),
             )
 
-        code = str(parameters.get("code") or "").strip()
-        if not code:
+        code = submitted(parameters, "code")
+        if not code.strip():
             raise TokenRequestError(
                 error="invalid_request",
                 description="The token request carries no `code` (RFC 6749 §4.1.3).",
@@ -460,7 +559,7 @@ class Flows:
                 ),
             )
 
-        client_id = str(parameters.get("client_id") or "").strip()
+        client_id = submitted(parameters, "client_id")
         if client_id != issued.client_id or client_id != settings.client_id:
             raise TokenRequestError(
                 error="invalid_grant",
@@ -470,7 +569,7 @@ class Flows:
                 ),
             )
 
-        redirect_uri = str(parameters.get("redirect_uri") or "").strip()
+        redirect_uri = submitted(parameters, "redirect_uri")
         if redirect_uri != issued.redirect_uri:
             raise TokenRequestError(
                 error="invalid_grant",
@@ -516,8 +615,8 @@ class Flows:
         string comparison against a credential is the habit E0-16's definition of
         done exists to stop E1 inheriting.
         """
-        verifier = str(parameters.get("code_verifier") or "").strip()
-        if not verifier:
+        verifier = submitted(parameters, "code_verifier")
+        if not verifier.strip():
             raise TokenRequestError(
                 error="invalid_grant",
                 description=(
@@ -562,6 +661,12 @@ class Flows:
         a mock with an authorization model, which is E1's and E9's work.
         """
         issued_at = int(now())
+        granted = issued.scope.split()
+        available = {
+            "preferred_username": person.subject,
+            "email": person.email,
+            "email_verified": True,
+        }
         claims: dict[str, Any] = {
             "iss": settings.issuer,
             "sub": person.subject,
@@ -570,16 +675,26 @@ class Flows:
             "auth_time": issued_at,
             "exp": issued_at + ID_TOKEN_LIFETIME_SECONDS,
             "nonce": issued.nonce,
-            "email": person.email,
-            "email_verified": True,
-            "preferred_username": person.subject,
             ROLES_CLAIM: [role.value for role in person.web_login_roles],
         }
+        # Only the claims the granted scopes cover. A response that declared
+        # `openid` and carried `email` would contradict itself, and a client
+        # reading `id_token["email"]` here would be reading a claim no real
+        # provider sends on an `openid`-only grant (OIDC Core 1.0 §5.4).
+        for scope in granted:
+            for claim in CLAIMS_BY_SCOPE.get(scope, ()):
+                claims[claim] = available[claim]
+
         return {
             "access_token": secrets.token_urlsafe(OPAQUE_VALUE_BYTES),
             "token_type": BEARER,
             "expires_in": ID_TOKEN_LIFETIME_SECONDS,
-            "scope": OPENID_SCOPE,
+            # The grant, not the request and not a constant. RFC 6749 §5.1 makes
+            # this member required whenever the two differ, and this provider
+            # refuses the scopes it does not serve rather than narrowing them
+            # silently — so what a client reads here is what it asked for, and
+            # the claims above are exactly what it covers.
+            "scope": issued.scope,
             "id_token": key.compact_jws(claims),
         }
 

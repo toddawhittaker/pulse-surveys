@@ -173,6 +173,22 @@ class ProviderSettings:
                 "(RFC 6749 §3.1.2)."
             )
 
+        # RFC 6749 §3.1.2 forbids a fragment in a redirection URI, in the same
+        # sentence that requires it to be absolute. The reason it is checked
+        # rather than tolerated: the authorization response appends `code` and
+        # `state` to this URI as a query, and a browser given
+        # `…/cb#frag?code=…` keeps everything after the `#` client-side, so the
+        # code never reaches the tool and the failure reads as a provider that
+        # issued nothing. E0-18 is expected to repoint this variable at a
+        # published host address, which is exactly when a hand-edited value picks
+        # a fragment up.
+        if urlsplit(self.redirect_uri).fragment:
+            raise ConfigurationError(
+                f"{REDIRECT_URI_VARIABLE} is {self.redirect_uri!r}, which carries a fragment. "
+                "RFC 6749 §3.1.2: a redirection endpoint URI MUST NOT include a fragment "
+                "component."
+            )
+
     def absolute(self, path: str) -> str:
         """One of this provider's own paths, as a client would call it."""
         return f"{self.issuer}{path}"
