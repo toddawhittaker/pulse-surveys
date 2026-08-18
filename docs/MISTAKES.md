@@ -35,7 +35,24 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 30**
+**Caught: 31**
+
+*(The thirty-first, writing E0-13's tests for the AI gateway, and it is nine
+non-vacuity controls in one round rather than one defect. Every criterion in that
+ticket is asserted against something absent — a retry that did not happen, a call that
+did not leave the machine, a key that did not leak, a library nothing imports — and
+each of those reads exactly like a suite that never ran. So each carries its opposite:
+the retry assertion is paired with
+`test_a_well_formed_first_answer_is_not_followed_by_a_second_call`, because "more than
+one request" is satisfied by a gateway that always sends two; the loopback guard is run
+against an address it must refuse *and* one it must permit; the credential-leak test
+asserts the stub actually **received** the key before asserting the error does not carry
+it, since an error cannot leak a value that was never sent; the "exactly one module
+imports a provider library" sweep first requires that some module imports one, because
+an empty set satisfies "exactly one does" the way it satisfies anything; and the
+`.env.example` searches fail when they find no entry rather than reporting a clean tree.
+The one worth carrying forward is the third: **a leak test with no send is a guarantee
+that was never tested**, and it is entry 23 approached from the other side.)*
 
 *(The thirtieth, in E0-15's review round, and three tests at once — each asserting a
 strictly weaker property than its own name. Two of the three were found by reviewers
@@ -469,7 +486,22 @@ say in the commit that you did.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 26**
+**Caught: 27**
+
+*(The twenty-seventh, writing E0-13's tests, and the rule it caught was one nobody
+had ever broken. `CLAUDE.md` says "Never add a secret reference to a workflow
+without asking first", and E0-13 is the first ticket with a reason to want one —
+`ci.yml` already carries a notice saying the eval suite "needs a provider API key
+as a repository secret and a `secrets.*` reference in this workflow", marked
+proposed and not wired. A rule stated in a document and asserted by nothing is a
+convention, and the next person to add one does so with every gate green. So
+`test_no_workflow_references_a_repository_secret_beyond_the_permitted_set` now
+sweeps the workflows against a permitted set of one — `GITHUB_TOKEN`, which
+Actions supplies rather than anyone configuring — and it passes today, which is
+the point of it: **a guard for a rule with no incident behind it yet is still a
+guard, and it is cheapest to write in the round that first wanted to break it.**
+Its own pattern is tested against a reference it must catch, an unspaced variant,
+and the prose in `ci.yml` it must *not* catch, per entry 3.)*
 
 *(The twenty-sixth, in E0-15's review round, and it is four survivors of one
 mutation run rather than one defect. Nineteen mutations against the new AGS rules:
@@ -715,7 +747,20 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 14**
+**Caught: 15**
+
+*(The fifteenth, writing E0-13's tests, and it decided two things about the shape
+of the suite. The gateway's tests are *integration* tests rather than the unit
+tests the ticket's definition of done asks for, because the validity task persists
+a row and may therefore take a session — a module that offered none would die
+inside its own call binder for every implementation that takes one, which is this
+entry's hazard met at one call site and not the other. Offering it costs an
+implementation that does not want one nothing: the binder simply does not pass it.
+The second is the environment. Four test modules now need `.env.example`'s whole
+surface with the container's database variables over the top, and rather than a
+fourth copy of that assembly the AI fixture depends on `care_service_environment`
+in `tests/conftest.py` **for what it does rather than for what it is named** — and
+says so, because a fixture used away from its name is the next thing to drift.)*
 
 *(The fourteenth, in E0-15's review round, and it is one repository disagreeing with
 itself about what RFC 3339 means. ADR 0048 holds an enrollment window's `start` to an
@@ -1534,7 +1579,22 @@ result about the mutation until you have shown otherwise.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 2**
+**Caught: 3**
+
+*(The third, writing E0-13's tests, over §7.4's three validity verdicts. The suite
+needs the tokens twice — to write a well-formed answer for the stub to give back,
+and to say which verdict the character floor must reach — and reading them off
+`ValidityVerdict`, the enum under test, would make both uses a comparison of the
+code against itself: a rename in `app/ai/contracts.py` would move the payload and
+the expectation together and stay green. So `substantive` and `insufficient` are
+transcribed from §7.4's table into
+`tests/integration/test_ai_gateway_validity_roundtrip.py` and marked as the one
+constant there that is not free to move, with `tests/unit/test_ai_contracts.py`
+holding the derived comparison that keeps the enum and the table in step. The
+≥25-character floor is transcribed for the same reason and from the same place —
+§3.3 — and the boundary fixture asserts **its own length** before asserting
+anything about the code, so a typo in the fixture fails as a fixture problem
+rather than as a failed criterion.)*
 
 *(The second, in E0-15's tests, over SPEC §8's course-number bands. The mock's seeded
 numbers are checked against a transcription of the table, because §8 states the rule
@@ -1738,7 +1798,20 @@ Where a test's subject is a particular revision, **name the revision**; `-1` and
 
 ## 23. A validation created the appearance of a behaviour
 
-**Caught: 0**
+**Caught: 1**
+
+*(The first, writing E0-13's tests, and it is this entry's rule applied to a
+credential before the credential existed. The ticket asks for "a masked key", and
+a key can be masked by deleting the field: `Settings` would then hold nothing, no
+serialisation would leak anything, every masking assertion would pass, and every
+hosted endpoint would be unreachable. So the suite asserts both halves —
+`test_the_provider_key_is_still_readable_by_the_application` for the value the
+application can read, and, in the integration module, that the stub actually
+**received** the key in a header before anything is asserted about the error not
+carrying it. That is this entry's question asked of a configuration field: name
+the code that reads it, and if the answer is "nothing", it is decorative. The
+answer here is `app/ai/gateway.py`, and the test that names it is the one that
+fails if a later refactor stops sending it.)*
 
 **What happened.** In E0-15's mock platform, the AGS Result fold ignored
 `gradingProgress` entirely. A score posted `NotReady` — the value that says the
@@ -1788,3 +1861,49 @@ not the validator. One hit means the value goes in and stops there. And **a roun
 that adds validation to a field is the round to ask this**, because adding a
 check to a field nothing consumes makes the gap less visible rather than more —
 the next reader inherits a field that looks settled.
+
+## 24. A test asserted a property no implementation could satisfy
+
+**Caught: 0**
+
+**What happened.** E0-13's leak detector searched every rendering of `Settings`
+for any eight-character run of the fake credential
+`fake-ai-provider-Qv7ZmXt4Ld9RbNsW`. One of those runs is the word `provider`,
+and `Settings` has carried a field called `ai_provider_base_url` since E0-01 —
+field names appear in `repr()`, in `model_dump()` and in every other
+serialisation by construction. So the assertion was false before the ticket
+started, and stayed false with the key correctly masked as `SecretStr`. Seven
+parametrised tests, red for every possible implementation, printing "The AI
+provider key leaked into repr(settings): ['-provide', 'provider']" — a report
+about the word "provider" appearing inside the word "ai_provider_base_url".
+
+The fixture's own comment states the property it needed and did not have: "Long
+and unlikely-looking so a fragment appearing in a rendering is unambiguously a
+leak rather than a coincidence." The random tail has that property. The four
+English words in front of it do not, and one of them names the subsystem being
+configured.
+
+**Root cause.** A substring search for a secret, over text that legitimately
+contains words *about* the secret. The prefix was added to make the fixture
+readable to a person, which is the right instinct for a fixture and the wrong one
+for a needle — the needle's only job is to be findable and unmistakable.
+
+**Consequence.** A dispute round ([E0-13-01](disputes/E0-13-01.md)), because the
+implementer cannot edit a test and the only fixes available on the implementation
+side were worse than the defect: renaming an E0-01 settings field in an E0-13 pull
+request, or editing the `.env.example` placeholder URL, either of which is
+removing a substring from a rendering to satisfy a search rather than satisfying
+the property the search stands for.
+
+**Rule.** **A fixture that will be searched for must share no substring with
+anything the assertion legitimately renders.** In practice: make it random-only,
+with no word in it. Put the human-readable label in the *constant's name*, where
+it helps a reader, not in its value, where it is a needle.
+
+The general form is worth stating because it is entry 3's mirror and costs the
+same. Entry 3 is a test that passes for a reason unrelated to what it asserts.
+This is a test that **fails** for a reason unrelated to what it asserts — and both
+end the same way, because a red assertion nobody can make green is one somebody
+eventually deletes. So: when a test goes red, the first question is still "what
+exactly is it measuring", and the answer "a word in a field name" means the test
+is the thing to fix.

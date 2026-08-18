@@ -112,6 +112,41 @@ report, roster sync, retention — belongs to a later epic. Beat keeps its
 schedule file on a named volume, so the last-run times survive a restart and a
 job that has already fired is not fired again when one of those entries lands.
 
+## The AI provider
+
+Three variables configure it, and `.env.example` documents all three:
+`AI_PROVIDER_BASE_URL` is any OpenAI-compatible endpoint, `AI_MODEL_NAME` is the
+model to ask for, and `AI_PROVIDER_API_KEY` is the credential — a secret, so a
+real one belongs in your `.env` or in the deployment's secret store and nowhere
+else.
+
+**You can run without a key.** Leave `AI_PROVIDER_API_KEY` empty and no
+`Authorization` header is sent at all, which is what a local server such as vLLM
+or Ollama wants:
+
+```sh
+# in your own .env
+AI_PROVIDER_BASE_URL=http://localhost:11434/v1
+AI_MODEL_NAME=llama3.1
+AI_PROVIDER_API_KEY=
+```
+
+The test suite never reaches a real endpoint whatever those hold: it points the
+base URL at a stub on `127.0.0.1` and asserts, with a guard under the call, that
+nothing connects off this machine.
+
+Everything a model produces enters through `backend/app/ai/`: `gateway.py` is the
+only module that talks to a provider, `tasks.py` holds one function per SPEC §7.4
+task, and `prompts/` holds the versioned prompt files. Today one task is wired —
+comment validity — and it stores what it decided in `classification`, with the
+prompt version and the model ID that produced it.
+
+**When the endpoint does not answer, a comment is judged by its length.** SPEC
+§3.3 accepts the submission rather than blocking a student on somebody else's
+outage, and the row it stores says so: its prompt version reads `character-floor`
+and its model ID reads `no-model`, so a verdict a model produced and a verdict a
+character count produced are never confused for one another.
+
 ## The mock LMS
 
 Pulse is launched from a learning management system over LTI 1.3, and nobody has
