@@ -58,18 +58,20 @@ dependencies = [
     # and `tests/unit/test_provider_library_is_confined_to_the_gateway.py` holds
     # it to one importer so that replacing the library stays a day's work.
     #
-    # §7.4 names `pydantic-ai` as the intended implementation, and this is not
-    # it. docs/adr/0053 records the decision and the measurement behind it: that
-    # metapackage resolves to 100 packages — `anthropic`, `google-genai`, `mcp`,
-    # `logfire`, `keyring` and a D-Bus client among them — against 16 here, in
-    # the image of the process that ships student comment text to a third party.
-    # The spec sentence it contradicts is raised in the pull request rather than
-    # edited on the way past.
+    # `pydantic-ai-slim[openai]` rather than `pydantic-ai`: the same library SPEC
+    # §7.4 names, importing under the same `pydantic_ai` root, without the eight
+    # other extras the metapackage turns on. Measured against PyPI rather than
+    # estimated — 30 packages against 100, and the seventy include `anthropic`,
+    # `google-genai`, `mcp`, `logfire`, `keyring` and a D-Bus client, in the image
+    # of the process that ships student comment text to a third party. Todd's
+    # decision; docs/adr/0053 records it and what was measured.
     #
-    # The 2.x line rather than 3.x: openai 3 depends on `httpx2`, and this
-    # project already pins `httpx` above. Two HTTP client stacks in one image buy
-    # nothing.
-    "openai==2.54.0",
+    # The `openai` extra is what supplies the OpenAI-compatible client underneath.
+    # It is deliberately *not* declared here as well: nothing this project writes
+    # imports `openai`, and a direct dependency would say something imports it.
+    # `make lock` resolves the extra into explicit, hashed lines in both
+    # lockfiles, so what ships is still named and pinned.
+    "pydantic-ai-slim[openai]==2.31.0",
     # The IANA database as a package, so `zoneinfo` resolves
     # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
     # container that ships no system tzdata (§3.1 — windows are timezone-bound).

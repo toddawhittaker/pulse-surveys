@@ -8,23 +8,27 @@ of that contract. It loads no prompt, opens no database connection, and decides
 nothing about any particular task.
 
 **This is the only module in `backend/app/` that imports a provider library**,
-which is E0-13's sixth acceptance criterion and
-`tests/unit/test_provider_library_is_confined_to_the_gateway.py` is what keeps it
-true. §7.4's reason: the library "is young and fast-moving, so pin it and keep the
-gateway interface thin enough that replacing it is a day's work". A second
-importer — a task building its own client, a batch job, a helper — is another
-file that replacement has to touch, and each one looks harmless in its own diff.
-Which library, and why it is not the one §7.4 names, is
-[ADR 0053](../../../docs/adr/0053-the-gateway-speaks-openai-through-the-openai-sdk.md).
+which is E0-13's sixth acceptance criterion; the confinement sweep under
+`tests/unit/` is what keeps it true. §7.4's reason: the library "is young and
+fast-moving, so pin it and keep the gateway interface thin enough that replacing
+it is a day's work". A second importer — a task building its own client, a batch
+job, a helper — is another file that replacement has to touch, and each one looks
+harmless in its own diff. The library is `pydantic-ai-slim[openai]`, which is
+§7.4's `pydantic-ai` without the eight other extras the metapackage turns on;
+[ADR 0053](../../../docs/adr/0053-the-gateway-speaks-openai-through-pydantic-ai.md)
+records the decision and what was measured. **Nothing here imports `openai`**,
+although that extra installs it: the SDK is what `pydantic-ai` talks to, not what
+this project writes against, and a direct import would be the second importer the
+criterion is about.
 
 **Single-shot, and the retry does not soften it.** §7.4: "Every task in the table
 above is one call in, one validated object out — no tool use, no planning loop,
-no iterative retrieval." So the request declares no tools, sends one message and
-reads one answer. The one thing that produces a second request is a *shape
-violation* — the same prompt asked again, never a conversation about what went
-wrong — because §7.4 has the gateway "retry on shape violations, and surface
-persistent failures as errors rather than letting a malformed classification
-propagate."
+no iterative retrieval." So the output mode is `NativeOutput`, which asks the
+endpoint for a JSON object against the payload's schema: no tool is declared, and
+the request carries `response_format` rather than `tools`. A shape violation
+produces one more request, and that request is the *same prompt asked again*
+rather than a conversation about what went wrong — see `run_task` for why the
+library's own feedback retry is turned off.
 
 **The audit pair is the gateway's to fill in, and a model that supplies it is
 refused.** [ADR 0031](../../../docs/adr/0031-every-task-contract-carries-the-prompt-version-and-model-id.md):
@@ -32,9 +36,12 @@ refused.** [ADR 0031](../../../docs/adr/0031-every-task-contract-carries-the-pro
 merging anything into it, and treat that as the shape violation §7.4 has it retry
 on. Not overwrite quietly: a model returning an audit field is a model doing
 something it was told not to do, and on the moderation path the value it invented
-would otherwise land in a §6.2 audit record." `_AUDIT_FIELDS` below is read off
-`AiTaskOutput` rather than spelled again, so a third audit field would be covered
-by the rule the day it is added.
+would otherwise land in a §6.2 audit record." The model is therefore never asked
+for the contract itself. `_payload_model` derives the task's own output — the
+contract minus the two audit fields, under the same `extra="forbid"` posture — and
+that is what the endpoint answers against, so an answer carrying either key fails
+validation before anything is merged. The field names are read off `AiTaskOutput`,
+so a third audit value is covered the day it is added.
 
 **Nothing raised here carries the credential, the prompt or the answer.** Three
 separate reasons, and they land on the same rule:
@@ -43,7 +50,10 @@ separate reasons, and they land on the same rule:
   container log with its whole traceback;
 * the prompt ends with a student's comment (`app/ai/prompts/README.md`), and a
   comment in a log is confidential text outside the read paths §4 defines;
-* the answer is model output that may quote the comment back.
+* the answer is model output that may quote the comment back — and the library's
+  own exceptions carry it: a validation failure arrives with the offending value
+  in `input`, and an HTTP failure with the endpoint's response body in its
+  message.
 
 So a failure here is built from static text, the contract's name, and pydantic's
 error-type codes — the same ingredients, for the same reason, as
@@ -53,14 +63,19 @@ from None` suppresses the display and leaves `__context__` set for anything that
 inspects the chain.
 """
 
-import json
-from typing import TypeVar
+import asyncio
+import threading
+from functools import cache
+from typing import Any, TypeVar
 
-from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, OpenAIError
-from openai.types.chat import ChatCompletion
-from pydantic import ValidationError
+from pydantic import BaseModel, create_model
+from pydantic_ai import Agent, NativeOutput
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ModelSettings
 
-from app.ai.contracts import AiTaskOutput
+from app.ai.contracts import AiTaskOutput, ContractModel
 from app.config import Settings
 
 OutputT = TypeVar("OutputT", bound=AiTaskOutput)
@@ -90,6 +105,43 @@ _AUDIT_FIELDS = frozenset(AiTaskOutput.model_fields)
 # name in order to be diagnosable, and it is text a comment could have talked the
 # model into producing.
 _KEY_EXCERPT = 40
+
+# One event loop per thread that makes a model call, held for the life of the
+# thread.
+_LOOPS = threading.local()
+
+
+def _model_call_loop() -> asyncio.AbstractEventLoop:
+    """The loop this thread runs model calls on, created on first use.
+
+    The gateway is synchronous — ADR 0013 makes the session synchronous, handlers
+    are `def` and run in FastAPI's threadpool, and Celery tasks are synchronous
+    too — while the library underneath it is not. Something has to drive a loop,
+    and the two obvious ways are both wrong here:
+
+    * `Agent.run_sync` calls `asyncio.get_event_loop()`, which emits a
+      `DeprecationWarning` when the thread has no loop set. `pyproject.toml` turns
+      a `DeprecationWarning` into an error on purpose — "a deprecated call our own
+      code makes is a defect" — so under the test suite every model call fails,
+      and in production it is a warning today and a `RuntimeError` in Python 3.14.
+    * `asyncio.run` per call builds and closes a loop each time. The HTTP client
+      is built once and its connection pool binds to the loop that first used it,
+      so the second call would reach into a closed loop — and rebuilding the
+      client per comment is a TLS handshake per comment, inside §3.3's p95 budget.
+
+    So the loop is owned here, one per thread, and reused. The count is bounded by
+    the size of the threadpool rather than by the number of comments, and a
+    `AIGateway` can be shared across threads because each one drives its own.
+
+    Calling this from a thread that already has a *running* loop raises — which is
+    correct and deliberate: an async caller must not block its own loop on a model
+    call, and there is no shape of this function that fixes that for it.
+    """
+    loop: asyncio.AbstractEventLoop | None = getattr(_LOOPS, "loop", None)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _LOOPS.loop = loop
+    return loop
 
 
 class AIGatewayError(Exception):
@@ -129,14 +181,46 @@ class AIResponseInvalidError(AIGatewayError):
 
 
 class AIProviderRefusedError(AIGatewayError):
-    """The endpoint answered with an error status — a rejected credential, a
-    rate limit, a model that does not exist.
+    """The endpoint answered with an error status — a rejected credential, a rate
+    limit, a model that does not exist, a schema it will not accept.
 
     Not an outage and not a shape violation: the request itself was wrong, or the
     account behind it is. §3.3's fail-open does not cover this, and a caller that
     treated it as one would turn a permanently misconfigured credential into
     every comment being classified by the character floor with nothing saying so.
     """
+
+
+@cache
+def _payload_model(contract: type[AiTaskOutput]) -> type[BaseModel]:
+    """`contract` without the two values the gateway supplies (ADR 0031).
+
+    This is the shape the model is actually asked for, and it is derived rather
+    than declared per task for two reasons. It cannot drift from the contract — a
+    field added to `CommentValidityOutput` is a field the endpoint is asked for in
+    the same commit — and it is not a second model anybody can reach: §7.4 makes
+    the contract "the runtime contract, the API response schema, and the eval
+    fixtures", and E0-12 forbids forking it for any of the three. Nothing outside
+    this module ever sees one of these.
+
+    It carries the contract's own validation posture, `extra="forbid"` included,
+    which is what refuses a payload supplying `prompt_version` or `model_id`:
+    neither is declared here, so both arrive as extra keys and the answer is a
+    shape violation before any merge happens.
+
+    Cached because it is the same object every call, and because the derived class
+    is what `pydantic-ai` builds a JSON schema from.
+    """
+    fields: dict[str, Any] = {
+        name: (field.annotation, field)
+        for name, field in contract.model_fields.items()
+        if name not in _AUDIT_FIELDS
+    }
+    return create_model(
+        f"{contract.__name__}Payload",
+        __config__=ContractModel.model_config,
+        **fields,
+    )
 
 
 class AIGateway:
@@ -147,6 +231,11 @@ class AIGateway:
     constructed with the instance rather than at import time: a module that built
     one on import would need `AI_PROVIDER_BASE_URL` set to be importable at all,
     and CI's `migration-drift` job supplies the database variables alone.
+
+    An instance is reusable and worth reusing — one connection pool, one client —
+    and `_model_call_loop` is what makes that true across calls: the pool binds to
+    the loop it was first used on, and that loop belongs to the thread rather than
+    to the call.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -154,21 +243,32 @@ class AIGateway:
 
         The credential is passed explicitly, always — including the inert
         placeholder when none is configured. The client would otherwise read
-        `OPENAI_API_KEY` out of the ambient environment, and a process that
-        picked up somebody else's key would send this institution's student
-        comments to an endpoint on that account.
+        `OPENAI_API_KEY` out of the ambient environment, and a process that picked
+        up somebody else's key would send this institution's student comments to
+        an endpoint on that account.
         """
         self._settings = settings or Settings()
         key = self._settings.ai_provider_api_key
-        self._client = OpenAI(
+        provider = OpenAIProvider(
             base_url=self._settings.ai_provider_base_url,
             api_key=key.get_secret_value() if key is not None else UNAUTHENTICATED,
-            # The client's own retry is off, so that the request count is the
-            # gateway's decision and nothing else's. Left on, it would retry a
-            # timeout twice more inside one attempt — three times the wait §3.3
-            # budgets, arrived at by default rather than by choice.
-            max_retries=0,
         )
+        # **The underlying client's own retry is turned off**, so that the number
+        # of requests one task makes is this gateway's decision and nothing
+        # else's. Left at its default of two, a timeout is retried twice *inside*
+        # one call: measured against a stub that never answers, a four-second
+        # per-task timeout took 13.3 seconds to fail open, in three requests.
+        # §3.3 budgets the whole check at a p95 under two seconds, so that is a
+        # student waiting through three timeouts to be told a character count
+        # decided.
+        #
+        # Set on the client rather than passed to it, because the provider is what
+        # builds it and takes no retry argument. The alternative is constructing
+        # the client here, which means importing `openai` in this file — the
+        # second provider-library importer E0-13's sixth criterion is about.
+        provider.client.max_retries = 0
+        self._model = OpenAIChatModel(self._settings.ai_model_name, provider=provider)
+        self._agents: dict[type[AiTaskOutput], Agent[None, Any]] = {}
 
     @property
     def model_name(self) -> str:
@@ -192,26 +292,41 @@ class AIGateway:
         for the same reason.
 
         `prompt_version` is the stem of the prompt file the caller rendered, and
-        is recorded on the returned object (ADR 0031, ADR 0032). It is not sent
-        to the model.
+        is recorded on the returned object (ADR 0031, ADR 0032). It is not sent to
+        the model.
+
+        **A retry re-asks; it does not argue.** `pydantic-ai` can send a failed
+        answer back to the model with the validation error attached, and that is
+        turned off (`retries=0` on the agent, this loop instead). The reason is
+        the prompt layout rather than taste: that retry appends a message *after*
+        the one ending in the student's comment, and `prompts/README.md` rests the
+        whole injection boundary on there being nothing after it — "'To the end of
+        the message' cannot be forged, and it means the gateway must append
+        nothing after the comment." The cost is real and worth stating: a model
+        that made its mistake deterministically will make it again, so this buys
+        less than a feedback retry would. ADR 0053 records the trade.
 
         Raises `AIProviderUnavailableError` if the endpoint did not answer,
         `AIProviderRefusedError` if it answered with an error status, and
-        `AIResponseInvalidError` if it kept answering with something that is not the
-        contract.
+        `AIResponseInvalidError` if it kept answering with something that is not
+        the contract.
         """
         problem = ""
         for _ in range(SHAPE_VIOLATION_ATTEMPTS):
-            answer, model_id = self._ask(prompt=prompt, timeout=timeout)
             try:
-                return self._validated(
-                    answer,
-                    output_model=output_model,
-                    prompt_version=prompt_version,
-                    model_id=model_id,
+                payload, model_id = self._ask(
+                    prompt=prompt, output_model=output_model, timeout=timeout
                 )
             except AIResponseInvalidError as invalid:
                 problem = str(invalid)
+                continue
+            return output_model.model_validate(
+                {
+                    **payload.model_dump(),
+                    "prompt_version": prompt_version,
+                    "model_id": model_id,
+                }
+            )
 
         raise AIResponseInvalidError(
             f"The model did not answer with a valid {output_model.__name__} in "
@@ -220,126 +335,113 @@ class AIGateway:
 
     # -- the wire ----------------------------------------------------------
 
-    def _ask(self, *, prompt: str, timeout: float) -> tuple[str, str]:
-        """Send one request and return what the model said and which model said it.
+    def _ask(
+        self, *, prompt: str, output_model: type[OutputT], timeout: float
+    ) -> tuple[BaseModel, str]:
+        """Send one request; return the task's own output and which model produced it.
 
-        The model ID comes off the *response* where the endpoint reports one,
-        because ADR 0031 wants "the provider's own identifier for the model, as
-        the provider spells it" — a hosted provider asked for `gpt-4o` answers as
-        a dated build of it, and §9.3's eval floors compare runs of different
-        models. The configured name is the fallback for an endpoint that reports
-        nothing.
+        Every branch names the failure and its class, and the raise happens
+        *after* the `except` block rather than inside it. Inside, Python would
+        attach the library's own exception as `__context__`, and a chained
+        exception's message is printed in the traceback too — so the response
+        body, or the value that failed validation, would reach the container log
+        by the back door. `raise ... from None` is not enough: it suppresses the
+        display and leaves `__context__` set for anything that walks the chain.
+        `app.config.Settings.__init__` takes the same shape for the same reason.
         """
-        # Each branch names the failure and its class, and the raise happens
-        # *after* the `except` block rather than inside it. Inside, Python would
-        # attach the client's own exception as `__context__`, and a chained
-        # exception's message is printed in the traceback too — so whatever that
-        # one holds would reach the container log by the back door. `raise ...
-        # from None` is not enough: it suppresses the display and leaves
-        # `__context__` set for anything that walks the chain.
-        # `app.config.Settings.__init__` takes the same shape for the same reason.
+        agent = self._agent_for(output_model)
         try:
-            completion = self._client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                timeout=timeout,
+            result = _model_call_loop().run_until_complete(
+                agent.run(prompt, model_settings=ModelSettings(timeout=timeout))
             )
-        except APITimeoutError:
-            failure: type[AIGatewayError] = AIProviderUnavailableError
-            message = "The model endpoint did not answer within the task's timeout."
-        except APIConnectionError:
-            failure = AIProviderUnavailableError
-            message = "The model endpoint could not be reached."
-        except APIStatusError as status:
-            # The status code and nothing else. The body of an endpoint's error
-            # is text it wrote, and an HTTP client's own exception renders the
-            # request that caused it — headers included, which is where the
-            # credential is.
-            failure = AIProviderRefusedError
-            message = f"The model endpoint answered HTTP {status.status_code}."
-        except OpenAIError:
-            # Everything else the client raises: a base URL it will not accept, a
-            # configuration it refuses. Its message may quote what it was given,
-            # so none of it is repeated here.
-            failure = AIProviderRefusedError
+        except UnexpectedModelBehavior as violation:
+            # What the library raises when an answer will not validate and the
+            # retry budget it holds is spent — which is immediately, since this
+            # gateway spends its own.
+            failure: type[AIGatewayError] = AIResponseInvalidError
             message = (
-                "The model client refused the request before it was sent. "
-                "Check AI_PROVIDER_BASE_URL and AI_MODEL_NAME."
+                f"The answer did not validate as {output_model.__name__}: {_describe(violation)}."
             )
+        except ModelHTTPError as refused:
+            # The status code and nothing else. `ModelHTTPError` renders the
+            # endpoint's response body into its own message, and that body is text
+            # the endpoint wrote.
+            failure = AIProviderRefusedError
+            message = f"The model endpoint answered HTTP {refused.status_code}."
+        except ModelAPIError:
+            # The library's wrapper for a request that never got an answer: a
+            # timeout or a connection failure. `ModelHTTPError` is a subclass of
+            # it and is caught above.
+            failure = AIProviderUnavailableError
+            message = "The model endpoint did not answer within the task's timeout."
         else:
-            return self._answer_of(completion)
+            return result.output, self._model_of(result)
 
         raise failure(message)
 
-    def _answer_of(self, completion: ChatCompletion) -> tuple[str, str]:
-        """The assistant's text and the model that produced it, or a shape violation.
+    def _agent_for(self, output_model: type[OutputT]) -> Agent[None, Any]:
+        """The agent that asks for one task's output, built once per contract.
 
-        An answer with no choices, or a choice carrying no content, is a shape
-        violation rather than an outage: the endpoint answered, and what it said
-        was not usable. That distinction is what keeps §3.3's fail-open pointed at
-        an outage.
+        `NativeOutput` rather than the library's default tool output, and §7.4 is
+        the reason: "one call in, one validated object out — **no tool use**, no
+        planning loop, no iterative retrieval". Native output asks for a JSON
+        object against the payload's schema, so the request carries
+        `response_format` and declares no tool at all. It also keeps the wire
+        agreeing with the prompt, which tells the model to "return only this JSON
+        object".
+
+        `retries=0` because `run_task` owns the retry; see its docstring.
         """
-        content = completion.choices[0].message.content if completion.choices else None
-        if not isinstance(content, str) or not content.strip():
-            raise AIResponseInvalidError("The answer carried no assistant message text.")
-        return content, completion.model or self.model_name
-
-    # -- the contract ------------------------------------------------------
-
-    def _validated(
-        self,
-        answer: str,
-        *,
-        output_model: type[OutputT],
-        prompt_version: str,
-        model_id: str,
-    ) -> OutputT:
-        """Turn one answer into one contract instance, or say why it is not one."""
-        try:
-            payload = json.loads(answer)
-        except ValueError:
-            raise AIResponseInvalidError("The answer was not JSON.") from None
-
-        if not isinstance(payload, dict):
-            raise AIResponseInvalidError(
-                f"The answer was JSON but not an object; it was a {type(payload).__name__}."
+        agent = self._agents.get(output_model)
+        if agent is None:
+            agent = Agent(
+                self._model,
+                output_type=NativeOutput(_payload_model(output_model)),
+                retries=0,
             )
+            self._agents[output_model] = agent
+        return agent
 
-        usurped = sorted(_AUDIT_FIELDS & payload.keys())
-        if usurped:
-            # ADR 0031. Refused rather than overwritten: which value survived a
-            # merge would then depend on an order nothing constrains, and on the
-            # moderation path the value the model invented would land in a §6.2
-            # audit record. The field names here are the contract's own, not the
-            # model's, so naming them leaks nothing.
-            raise AIResponseInvalidError(
-                f"The answer supplied {usurped}, which the gateway fills in and a model may "
-                "never report (ADR 0031)."
-            )
+    def _model_of(self, result: Any) -> str:
+        """The model that produced this answer, as the endpoint spells it.
 
-        try:
-            return output_model.model_validate(
-                {**payload, "prompt_version": prompt_version, "model_id": model_id}
-            )
-        except ValidationError as invalid:
-            problems = _describe(invalid)
-        raise AIResponseInvalidError(
-            f"The answer did not validate as {output_model.__name__}: {problems}."
-        )
+        Read off the response rather than off the configuration, because ADR 0031
+        wants "the provider's own identifier for the model, as the provider spells
+        it" — a hosted provider asked for `gpt-4o` answers as a dated build of it,
+        and §9.3's eval floors compare runs of different models. The configured
+        name is the fallback for an endpoint that reports none.
+        """
+        for message in reversed(result.all_messages()):
+            reported = getattr(message, "model_name", None)
+            if isinstance(reported, str) and reported:
+                return reported
+        return self.model_name
 
 
-def _describe(invalid: ValidationError) -> str:
-    """A validation failure as field paths and pydantic error codes, and no values.
+def _describe(violation: UnexpectedModelBehavior) -> str:
+    """A refused answer as field paths and pydantic error codes, and no values.
 
-    Neither the message nor the input is read. Pydantic's `msg` is built from the
-    value that failed for several error types, and the `input` is the value
-    itself — which here is text a model wrote after reading a student's comment.
-    The code is a static string from the library, and the location is a field
-    name: the contract's, or a key the model invented, which is truncated.
+    The library hands the detail over as the retry prompt it would otherwise have
+    sent: a list of pydantic error dicts on the `tool_retry` part of the chained
+    `ToolRetryError`. Neither the message nor the input is read out of it.
+    Pydantic's `msg` is built from the value that failed for several error types,
+    and `input` is the value itself — which here is text a model wrote after
+    reading a student's comment. The code is a static string from the library, and
+    the location is a field name: the contract's, or a key the model invented,
+    which is truncated.
+
+    Reached by attribute rather than by importing the exception type, so a library
+    that stops carrying it degrades to the general sentence below rather than
+    raising something else while reporting a shape violation.
     """
+    details = getattr(getattr(violation.__cause__, "tool_retry", None), "content", None)
+    if not isinstance(details, list):
+        return "the answer could not be read as the task's output"
+
     problems = sorted(
         f"{'.'.join(str(part) for part in detail.get('loc', ()))[:_KEY_EXCERPT]}: "
         f"{detail.get('type', 'invalid')}"
-        for detail in invalid.errors()
+        for detail in details
+        if isinstance(detail, dict)
     )
-    return "; ".join(problems)
+    return "; ".join(problems) or "the answer could not be read as the task's output"
