@@ -57,7 +57,7 @@ Ticket branch names come from the *Ticket breakdown* line under each epic in
 §14.3. Where an epic has been decomposed into numbered tickets under
 `docs/tickets/`, those ticket branch names win over the list in the spec —
 [`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is the build order for
-E0 and names all twenty-five of its branches.
+E0 and names a branch for each of its thirty-seven tickets.
 
 ⚠ marks epics that additionally require line-by-line human review of the
 security-relevant diff.
