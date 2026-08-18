@@ -69,13 +69,14 @@ matching rather than reloading.
 
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, TypeVar
 from uuid import UUID
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
@@ -99,6 +100,12 @@ from app.services.section_codes import apply_section_code
 # script that reads a different `.env` depending on where it was invoked from is
 # the kind of thing nobody notices until two databases disagree.
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# The developer's local configuration file, and the fourth reader of it (ADR 0008
+# as amended). A default rather than a constant everything reaches for: every
+# function below is handed the mapping it reads, so this name is used exactly
+# once, by `main`.
+DOTENV_PATH = REPO_ROOT / ".env"
 
 # The environment name this script will run under, and the only one. Free-form by
 # §6.3, so this is a comparison against a convention rather than against an
@@ -638,16 +645,54 @@ _DAYS_PER_WEEK = 7
 # ---------------------------------------------------------------------------
 
 
-def seed_url() -> URL:
+def resolved_configuration(environ: Mapping[str, str], dotenv_path: Path) -> dict[str, str]:
+    """`environ`, with `dotenv_path` filling in only the names it does not set.
+
+    The precedence every other reader in this repository uses — the process
+    environment beats the file (ADR 0008, ADR 0012) — expressed as a value rather
+    than as a mutation of `os.environ`. Reading `.env` at all is what lets
+    `make seed` work on a stock checkout, which is the whole reason the seed is a
+    reader of that file.
+
+    **This function is the subject of `docs/disputes/E0-17-01.md`,** which asked
+    whether a name the file supplies and the process does not should be enough to
+    let a destructive script run. Todd settled it: yes — the guard reads *resolved*
+    configuration, so a developer who has copied `.env.example` can seed and a
+    context with no file and no exported name is refused. The consequence Todd
+    accepted knowingly is that the address and the environment name can then come
+    from different sources; ADR 0063 records it as an open gap rather than a
+    closed one.
+
+    Returning a new mapping instead of mutating a global is what makes that
+    question askable in one call, with any file and any environment, rather than
+    only by starting a process in a directory with a particular `.env` in it. A
+    missing file contributes nothing, which is the case a deployment is in.
+
+    `dotenv_values` interpolates `${...}` exactly as `load_dotenv` does — measured
+    against this project's own `.env`, including a reference to a name the file
+    does not define and the process does — so the two resolve `DATABASE_URL`
+    identically and this is a change of shape rather than of behaviour.
+    """
+    from_file = {
+        name: value for name, value in dotenv_values(dotenv_path).items() if value is not None
+    }
+    return {**from_file, **environ}
+
+
+def seed_url(configuration: Mapping[str, str]) -> URL:
     """The database `DATABASE_URL` names, addressed as the bootstrap identity.
+
+    Reads the resolved configuration it is handed rather than `os.environ`, so
+    that what this function does is a question about a mapping — see
+    `resolved_configuration` above for why that matters.
 
     No value is quoted in the failure, for the reason `app.config` and
     `backend/migrations/env.py` both give at length: this message goes to a
     terminal and to whatever captured it, and two of the three variables carry
     credentials. Naming them is enough to act on and is all that is safe to print.
     """
-    address = os.environ.get(ADDRESS_VARIABLE, "").strip()
-    identity = {name: os.environ.get(name, "").strip() for name in IDENTITY_VARIABLES}
+    address = configuration.get(ADDRESS_VARIABLE, "").strip()
+    identity = {name: configuration.get(name, "").strip() for name in IDENTITY_VARIABLES}
 
     missing = ([ADDRESS_VARIABLE] if not address else []) + [
         name for name, value in identity.items() if not value
@@ -669,16 +714,23 @@ def seed_url() -> URL:
     )
 
 
-def check_environment_is_development() -> None:
+def check_environment_is_development(configuration: Mapping[str, str]) -> None:
     """Refuse to run anywhere but a development environment (ADR 0063).
 
-    An equality and not a deny-list. `ENVIRONMENT` is free-form by §6.3, so the
-    set of names a deployment might use is open — `prod`, `production`, `live`,
-    a customer's own word — and a check that enumerated the ones to refuse would
-    let every name nobody thought of through. The one name that is safe is the one
-    this script is for.
+    An equality and not a deny-list. `ENVIRONMENT` is free-form — `.env.example`
+    documents it and names `development`, `staging` and `production` as
+    conventions, and nothing enforces the vocabulary — so the set of names a
+    deployment might use is open, and a check that enumerated the ones to refuse
+    would let every name nobody thought of through. The one name that is safe is
+    the one this script is for.
+
+    **Takes the resolved configuration rather than reading `os.environ`.** Which
+    absence this sees — no value anywhere, or a value `.env` supplied — is the
+    question E0-17-01 was disputed over and Todd settled, and a guard that reached
+    for a global could only be asked it by starting a process with a particular
+    file on disk. Here it is one call with one mapping.
     """
-    environment = os.environ.get(ENVIRONMENT_VARIABLE, "").strip()
+    environment = configuration.get(ENVIRONMENT_VARIABLE, "").strip()
     if environment == DEVELOPMENT_ENVIRONMENT:
         return
     raise SeedError(
@@ -1023,23 +1075,25 @@ def seed(session: Session) -> None:
     seed_lead_faculty_mappings(session, people, nodes)
 
 
-def main() -> int:
+def main(environ: Mapping[str, str] | None = None, dotenv_path: Path | None = None) -> int:
     """Run the seed against the database `DATABASE_URL` names.
 
     One transaction. A seed that failed half way through would leave a partial
     institution behind — a college with no departments, an assignment with no
     supervisor — and the next run would match those rows and build on them.
+
+    Both arguments default to the real thing and exist so that the guard's answer
+    can be asked without starting a process in a directory with a particular
+    `.env` in it. `make seed` passes neither.
     """
-    # `override=False`: anything already exported wins, so a test fixture's
-    # container coordinates and a CI job's variables are not replaced by a
-    # developer's local file. Same precedence, same reason and the same named
-    # path as `backend/migrations/env.py`, which ADR 0008 records as `.env`'s
-    # third reader; this is its fourth.
-    load_dotenv(REPO_ROOT / ".env", override=False)
+    configuration = resolved_configuration(
+        os.environ if environ is None else environ,
+        DOTENV_PATH if dotenv_path is None else dotenv_path,
+    )
 
     try:
-        check_environment_is_development()
-        url = seed_url()
+        check_environment_is_development(configuration)
+        url = seed_url(configuration)
     except SeedError as refused:
         print(refused, file=sys.stderr)
         return 2
