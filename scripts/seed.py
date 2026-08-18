@@ -730,12 +730,26 @@ def check_environment_is_development(configuration: Mapping[str, str]) -> None:
     for a global could only be asked it by starting a process with a particular
     file on disk. Here it is one call with one mapping.
     """
-    environment = configuration.get(ENVIRONMENT_VARIABLE, "").strip()
-    if environment == DEVELOPMENT_ENVIRONMENT:
+    raw = configuration.get(ENVIRONMENT_VARIABLE)
+    if (raw or "").strip() == DEVELOPMENT_ENVIRONMENT:
         return
+
+    # Three ways to be wrong and three different things to do about it, so the
+    # message says which. An earlier version reported an absent variable and one
+    # set to the empty string identically, as `'(not set)'` — and those two are
+    # exactly the pair that cost this ticket a dispute, an arbitration and a
+    # decision escalated to Todd, because a hand measurement asked one of them
+    # and recorded the answer against the other (`docs/MISTAKES.md` entry 9).
+    # Whoever meets this message should not have to repeat that.
+    if raw is None:
+        found = "(not set — nothing in the process environment, and none from `.env`)"
+    elif not raw.strip():
+        found = f"{raw!r} (set, but empty)"
+    else:
+        found = repr(raw)
+
     raise SeedError(
-        f"The demo seed refuses to run with {ENVIRONMENT_VARIABLE}="
-        f"{environment or '(not set)'!r}.\n"
+        f"The demo seed refuses to run with {ENVIRONMENT_VARIABLE}={found}.\n"
         f"It runs only where {ENVIRONMENT_VARIABLE} is {DEVELOPMENT_ENVIRONMENT!r}. This script "
         "writes an invented institution, an invented term and eighteen invented people into "
         "whatever database it is pointed at, as the bootstrap superuser (docs/adr/0009), and "
