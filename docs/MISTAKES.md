@@ -35,7 +35,7 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 33**
+**Caught: 35**
 
 *(The thirty-first, on both sides of E0-17, and it did different work on each.
 Writing the tests, it put a control in front of nearly every assertion: a mapped
@@ -336,7 +336,7 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 30**
+**Caught: 31**
 
 *(The twenty-ninth, twice in E0-17 and both times about a sentence counting
 something. Writing the tests, it corrected a claim in `tests/conftest.py`'s own
@@ -603,7 +603,7 @@ say in the commit that you did.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 27**
+**Caught: 29**
 
 *(The twenty-seventh, in E0-17, and the interesting part is the delay. The
 `ENVIRONMENT` guard on `scripts/seed.py` shipped with nothing in the suite
@@ -909,7 +909,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 17**
+**Caught: 19**
 
 *(The fifteenth, on both sides of E0-17, and both catches are about a second copy
 that was nearly written. Writing the tests, the module needed to know how an
