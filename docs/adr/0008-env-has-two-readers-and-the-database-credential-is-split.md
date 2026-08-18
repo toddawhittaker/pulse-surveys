@@ -10,6 +10,20 @@ the *count* only. `.env` has three readers from E0-04:
 ordering requirement, and a reader being found rather than named — is unchanged,
 and `env.py` reads only variables that already had readers.
 
+**Amended again by E0-17** — the count only, a second time. `.env` has **four**
+readers from E0-17: `scripts/seed.py` reads it the same way, through
+`python-dotenv` with `override=False`, from the same named path rather than by
+searching upward. `make seed` runs on the host, so without it a stock checkout
+answers "DATABASE_URL — not set" while the value sits in the file every other
+part of the system reads — the complaint [ADR 0012](0012-the-migration-environment-builds-its-own-superuser-connection.md)
+makes for `alembic`, word for word. It introduces no name of its own: it reads
+`DATABASE_URL`, `DB_SUPERUSER` and `DB_SUPERUSER_PASSWORD`, the three `env.py`
+already reads, plus `ENVIRONMENT`, which `app.config.Settings` already requires
+([ADR 0063](0063-the-demo-seed-runs-only-in-a-development-environment.md)).
+Everything this record decides is unchanged, including the rule that a reader is
+*found* rather than named — a script still cannot earn an entry in
+`.env.example`, and `scripts/seed.py` deliberately needs none.
+
 ## Context
 
 E0-02 brings up Postgres. The official image is configured by `POSTGRES_USER`,

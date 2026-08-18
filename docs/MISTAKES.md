@@ -35,7 +35,25 @@ them at a different incident.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 30**
+**Caught: 31**
+
+*(The thirty-first, on both sides of E0-17, and it did different work on each.
+Writing the tests, it put a control in front of nearly every assertion: a mapped
+course before "some course is unmapped", because a seed with no mappings at all
+makes every course unmapped; both leads' course sets asserted non-empty before
+disjointness, because an empty set is disjoint from anything; a row count
+asserted non-zero before "the same rows afterwards", because two empty databases
+have the same rows; and the edge count before acyclicity, because a graph with no
+edges passes every cycle check ever written. Building against them, it stopped a
+green run being believed: twenty-one tests passed in 3.6 seconds, which looked
+too fast to have started a container, migrated a database and run two
+subprocesses. Three mutations were applied and reverted rather than reasoned
+about — the assistant dean moved to lead a course inside a department they
+supervise, the one chair who reports straight to the dean re-pointed at the
+assistant dean, and `upsert` made never to find an existing row — and one, two
+and one tests failed, each of them the one that owns the property.
+`docs/tickets/e0/.attempts/E0-17.md` has the table. **The green run was real; the
+belief in it was not, until then.**)*
 
 *(The thirtieth, in E0-15's review round, and three tests at once — each asserting a
 strictly weaker property than its own name. Two of the three were found by reviewers
@@ -246,7 +264,20 @@ cannot see whether it exists.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 28**
+**Caught: 29**
+
+*(The twenty-ninth, twice in E0-17 and both times about a sentence counting
+something. Writing the tests, it corrected a claim in `tests/conftest.py`'s own
+header that had gone stale — the file said E0-11 added its fixtures "at the very
+bottom", which stopped being true the moment E0-17 added two below them.
+Implementing, the sweep outward from "`scripts/seed.py` now reads `.env`" reached
+`.env.example`'s opening paragraph, which told every reader the file "has three
+readers, not one" and named them. It had four from the moment the seed landed, and
+nothing would have failed: no test counts readers, and the sentence is the one a
+person consults when deciding whether a new variable can be documented there.
+ADR 0008's amendment line and its index row carry the same count and were changed
+in the same commit. **A number in a prose sentence is a record with a scheduled
+expiry, and the expiry is whenever somebody adds the fourth of anything.**)*
 
 *(The twenty-eighth, in E0-15's implementation, one round after the twenty-seventh
 below found the same file's header. The sweep outward from "the mock now holds an
@@ -715,7 +746,22 @@ you have removed the only signal that would have told you it did not work.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 14**
+**Caught: 15**
+
+*(The fifteenth, on both sides of E0-17, and both catches are about a second copy
+that was nearly written. Writing the tests, the module needed to know how an
+assignment's scope is spelled and which column carries the reporting edge —
+questions `tests/conftest.py`'s `SupervisionGraph` already answers off
+`Base.metadata` — so it requested that fixture **as a reader only**, over a
+session belonging to a different database, rather than becoming the fourth copy of
+the scope-shape logic. Implementing, the same entry caught the string
+`"development"`: `app/db.py` compares against it before it lets the engine echo
+SQL, and `scripts/seed.py` now compares against it before it will run at all. Two
+places facing one convention. The copy is still there, because consolidating it
+crosses a module boundary this ticket does not otherwise touch — but it is named
+at the new site, in ADR 0063, and in the pull request, instead of being left for
+somebody to find when the two disagree. **Naming a duplicate you decline to remove
+is not the same as removing it, and it is much better than not noticing.**)*
 
 *(The fourteenth, in E0-15's review round, and it is one repository disagreeing with
 itself about what RFC 3339 means. ADR 0048 holds an enrollment window's `start` to an

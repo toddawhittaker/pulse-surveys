@@ -227,6 +227,89 @@ All of that is per-process and in memory: restart the container and the line
 items and the posted scores are gone
 ([ADR 0049](docs/adr/0049-the-mock-gradebook-is-per-application-state-in-memory.md)).
 
+## The demo institution
+
+An empty Pulse is hard to develop against, so
+[`scripts/seed.py`](scripts/seed.py) builds one to work in.
+
+```sh
+make up             # the database has to be running
+make migrate        # and at head
+make seed           # load the demo institution
+```
+
+`make seed` runs on your machine, not in a container, so it needs the same two
+things `make migrate` needs — a database this machine can reach, and a
+`DATABASE_URL` naming `localhost` rather than the Compose service `db` (the
+section below says where to change it) — plus one of its own: **it refuses to run
+unless `ENVIRONMENT` is `development`**
+([ADR 0063](docs/adr/0063-the-demo-seed-runs-only-in-a-development-environment.md)).
+It reads `.env` itself, so nothing has to be exported.
+
+**Running it again is safe.** Every row is matched on the natural key the schema
+already enforces — an institution's name, a course's prefix and number, a
+section's code within its course and term — and re-used where it is found, so a
+second run writes nothing and a run interrupted half way is finished by the next
+one ([ADR 0064](docs/adr/0064-the-demo-seed-is-idempotent-by-natural-key.md)).
+
+### What it contains, and why it is shaped that way
+
+It is small, and every awkward part of it is deliberate — a tidy institution lets
+whole classes of bug look like correct answers.
+
+- **Two colleges**, five departments. With one college a dean's purview and the
+  VP's are the same rows, and every scoping bug in the leadership roll-up looks
+  right.
+- **A department that groups three prefixes.** Mathematics holds `MATH`, `STAT`
+  and `MIS`, which is SPEC §2.1's own example. Where every department holds
+  exactly one prefix, a roll-up that aggregates by prefix and one that aggregates
+  by department agree on every row, and the first is wrong.
+- **Fifteen courses across all five level bands.** §5.1 compares a section only
+  against others of the same length *and* level, so a level with no course is a
+  comparison set nobody can build a fixture for.
+- **Fall 2026, with §2.2's whole start-letter map** — twenty start positions,
+  six of them digits — and eighteen sections spanning sixteen of them, seven
+  different lengths and both modalities. Aggregate pages plot one line per start
+  cohort, and a term with one cohort leaves that screen with nothing to select
+  between.
+- **An assistant dean between chairs and a dean.** Scoped to the same college
+  node as the dean, with two chairs reporting through them, a third reporting
+  straight to the dean, and a course of their own in the one department they do
+  *not* supervise. That last detail is what makes §2.1's sentence true of these
+  rows — "own led courses ∪ every supervised chair's department, a set no single
+  containment node holds" — and without it a roll-up that just walked containment
+  would produce the right numbers and be wrong.
+- **A person wearing two hats.** The chair of Mathematics also leads a course,
+  and that lead assignment reports to their own chair assignment. §2.1 calls it
+  "legal and expected", and it is only expressible because a reporting edge joins
+  *assignments* rather than people.
+- **Three leads inside one prefix**, with courses that do not overlap, so §4.1
+  invariant 2 — a lead never sees a sibling lead's course — is visible on screen
+  and not only in a test.
+- **Nine courses with no lead-faculty mapping**, so the path §2.1 describes as "a
+  course with no mapping falls to its department chair" has something to
+  exercise.
+
+**Nobody here has a name.** Every seeded person is called what they do — `Demo
+Chair of Mathematics`, `Demo Assistant Dean of Arts and Sciences` — and every
+address is at an RFC 2606 `.invalid` domain that cannot receive mail. A demo seed
+gets copied into staging environments by people in a hurry
+([ADR 0066](docs/adr/0066-seeded-people-are-named-for-what-they-do.md)).
+
+**The course numbers disagree with `design/`, on purpose.** SPEC §8 bands a
+course level by its number — three digits in `000`–`799`, four digits in
+`8000`–`9999` — and every course number drawn in the prototype is four digits
+below `8000`, which is the gap between the two bands. None of them can be stored:
+`course.level` is generated from the number and is `NOT NULL`, so a number in no
+band is refused at write time. The seed picks its numbers against the spec.
+
+**It seeds no survey data**, and no registration for the mock LMS. Responses,
+comments and classifications arrive in E2 and E4; the platform question is
+[ADR 0065](docs/adr/0065-the-demo-institution-registers-a-fictional-platform.md),
+and the short version is that the demo's people belong to an invented platform at
+an address that resolves nowhere, so that nothing in this repository trusts
+`mock-lms` to sign a launch.
+
 ## Working on the backend without containers
 
 Python 3.13 or newer (SPEC §7.1), and a virtual environment of your own making.
