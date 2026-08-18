@@ -1,0 +1,36 @@
+# fixture: repair-before-the-check
+# reviewer: lti-oidc
+# ticket: E0-16 (mock OIDC identity provider)
+# expect: HIGH — `scope.split()` splits on any whitespace, so a scope string a
+#         conformant server reads as one unknown token arrives at the refusal
+#         below as two well-known ones. The refusal added in the same diff can
+#         never fire on the value it was written for. RFC 6749 Appendix A.4
+#         fixes `scope = scope-token *( SP scope-token )`.
+# secondary: `state` is returned through the same `.strip()`, so the value the
+#         client gets back is not the value it sent (RFC 6749 §4.1.2, "the exact
+#         value received from the client"). A reviewer that reports the scope
+#         grammar and not the echo has found the bug and not its class.
+# note: from a real miss. This shape shipped in E0-16 and survived one review
+#       round: the refusal was added, the test for it passed, and the repair
+#       upstream meant neither ever saw a malformed value. The lesson is in
+#       `docs/mistakes/29-*.md` — ask what runs between the wire and the check.
+
+diff --git a/mock-idp/app/flow.py b/mock-idp/app/flow.py
+--- a/mock-idp/app/flow.py
++++ b/mock-idp/app/flow.py
+@@ -318,10 +318,18 @@ class Flows:
+     def begin(self, parameters: Mapping[str, Any]) -> str:
+         client_id = required(parameters, "client_id", "authorization request")
+-        state = required(parameters, "state", "authorization request")
++        state = required(parameters, "state", "authorization request").strip()
+ 
+-        asked = scope.split(SCOPE_DELIMITER)
++        asked = scope.split()
++        unknown = [token for token in asked if token not in SUPPORTED_SCOPES]
++        if unknown:
++            raise AuthorizationRequestError(
++                f"The authorization request asks for {unknown!r}, which this "
++                f"provider does not serve. It serves {sorted(SUPPORTED_SCOPES)}. "
++                "RFC 6749 §4.1.2.1 calls this `invalid_scope`."
++            )
+         granted = " ".join(dict.fromkeys(asked))

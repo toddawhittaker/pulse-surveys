@@ -1,0 +1,34 @@
+# fixture: fixture-supplies-the-value-under-test
+# reviewer: spec-conformance
+# ticket: E0-17 (demo seed script)
+# expect: HIGH — the idempotency test seeds twice into a database only the seed
+#         has written to, so "the rows I find" and "the rows I wrote" are the
+#         same set by construction and the test cannot fail. Idempotency is a
+#         claim about the second run's interaction with what is already there;
+#         an empty fixture tests the loader against itself.
+# secondary: `test_a_second_run_is_refused_if_it_would_adopt` never reaches its
+#         assertion — the `if` it sits under is false for every database this
+#         fixture can build, so it passes having executed nothing. A reviewer
+#         that reports the empty-database problem and not the unreachable branch
+#         has read the fixture and not the test beneath it.
+# note: from a real miss. This shape shipped in E0-17 and hid a defect where the
+#       seed adopted and re-pointed org rows it had not created, an authorization
+#       change that exited 0. `docs/mistakes/31-*.md` carries it.
+
+diff --git a/tests/integration/test_demo_seed_script.py b/tests/integration/test_demo_seed_script.py
+--- a/tests/integration/test_demo_seed_script.py
++++ b/tests/integration/test_demo_seed_script.py
+@@ -1440,6 +1440,28 @@ def test_running_the_seed_a_second_time_leaves_the_same_rows(
+     assert first == second, "the second run changed the database"
++
++
++def test_a_second_run_is_refused_if_it_would_adopt(
++    demo_database: DemoSeed,
++) -> None:
++    """A prefix another department already holds must stop the run."""
++    first = demo_database.run()
++    assert first.succeeded
++
++    second = demo_database.run()
++    if not second.succeeded:
++        assert "already exists and belongs to" in second.stderr
