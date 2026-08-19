@@ -48,7 +48,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 28 | [Review debt from E0-15](E0-28-review-debt-from-e0-15.md) | 15 | **Batch E.** Eight items in `mock-lms/app/`, each with a reproduction in PR #31. Item 6 is Todd's and changes what the batch costs; item 8 is **closed**. |
 | 29 | [Review debt from E0-13](E0-29-review-debt-from-e0-13.md) | 13 | Items 1a and 1b are Todd's; 4b and 4c are now 36; item 3 is **closed**. Item 4a stays as a recorded decision; items 2 and 5 leave the epic. |
 | 30 | [Review debt from E0-16](E0-30-review-debt-from-e0-16.md) | 16 | **Batch F.** RFC 6749 §4.1.2.1 error redirects, which E1's callback error branch and E0-18's Playwright path both need and neither can reach, plus ADR 0062's three limits, the Compose redirect URI E0-18 settles, and a strictness choice to affirm. |
-| 31 | [Review debt from E0-17](E0-31-review-debt-from-e0-17.md) | 17 | **Item 1 blocks 18** — the `lti_platform` row for the mock LMS, which cannot be added carelessly without falsifying ADR 0038. Item 2 is Todd's; items 3 and 4 are now 37; item 5 is **closed**. |
+| 31 | [Review debt from E0-17](E0-31-review-debt-from-e0-17.md) | 17 | **Item 1 built 2026-08-19 — 18 is unblocked.** The `lti_platform` row for the mock LMS, written by the seed behind its development-environment guard, with ADR 0038 amended rather than falsified and ADR 0068 recording the cost. Item 2 is Todd's; items 3 and 4 are now 37; item 5 is **closed**. Nothing is left here. |
 | 32 | [Three gate gaps the reviewer self-test found](E0-32-gate-gaps-the-selftest-found.md) | 10 | **Redistributed — not built as written.** Item 1 is now 36; items 2 and 3 are now 34. |
 | 33 | [Assert the database objects `alembic check` never looks at](E0-33-catalog-drift-assertions.md) | 08, 10 | **Batch A.** One mechanism — read the object out of the catalog and compare — covering generated-column expressions, check-constraint expressions, exclusion constraints, roles, grants, views and function owners. Carries E0-20 items 3, 3a and 3b. |
 | 34 | [A view file that reads identity must fail on that ground](E0-34-view-file-identity-guards.md) | 10, 11 | **Batch B.** A `views_sql/*.sql` file joining `user_identity` passes the identity invariant vacuously and is caught only by a sweep whose message points at `public.` prefixes. Carries E0-32 items 2 and 3 and E0-27 item 2. |
@@ -70,7 +70,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 02 ── 16 ───────────────────────────────────────── ┤
 07, 09, 15 ── 17 ───────────────────────────────── ┘
 
-                     31 item 1 ─────────────────── ┘   (the only blocker on 18)
+                     31 item 1 ─────────────────── ┘   (was the only blocker on 18; built)
 
 08, 10 ── 33        Batch A — catalog comparison
 10, 11 ── 34        Batch B — view files that read identity
@@ -122,19 +122,27 @@ objects that implement it — they are both cheap, and B is the smaller half of 
 hole A does not reach. Then **31 item 1 and then 18**, which is the only path to
 the epic actually exiting. Everything after that can land in any order.
 
+**A, B and 31 item 1 are done as of 2026-08-19.** The next thing on the exit
+path is **18**; C, D→38, E, F, G and H can land in any order around it.
+
 **A and B are the two batches where the thing being protected is the
 confidentiality model rather than a convenience.** Two of A's mutations —
 `GRANT SELECT ON public.user_identity TO pulse_app` and `ALTER ROLE pulse_care
 SUPERUSER` — are each one statement that voids the whole scheme with `alembic
 check` reporting clean.
 
-### One blocker
+### The blocker, cleared
 
-**E0-31 item 1 is the only item in 19 to 37 that blocks the E0 exit.** E0-18
-drives a real launch from the mock LMS and no `lti_platform` row trusts it,
-because E0-17 deliberately registered a fictional platform instead so that ADR
-0038's argument would survive. Adding that row carelessly is what makes ADR 0038
-wrong, so it has to be done by somebody who has read why it does not exist.
+**E0-31 item 1 was the only item in 19 to 37 that blocked the E0 exit, and it is
+built (2026-08-19).** `scripts/seed.py` registers the mock platform in
+`seed_mock_platform`, behind the development-environment guard; ADR 0068 records
+the decision and its cost, ADR 0038's fourth property is amended to name the
+guard, and ADR 0065 is superseded in part. **E0-18 is unblocked.**
+
+One thing it deliberately left for E0-18: the mock registration carries no
+`user` rows, so a launch now reaches the code and still resolves to no seeded
+person. Provisioning the person a launch names is E1's by SPEC §14.3, and what
+E0-18's Playwright path lands on is E0-18's to decide.
 
 ### Deadlines that are not blockers
 
@@ -173,6 +181,7 @@ up.
 | E0-29 item 5 — `run_task` from inside a running event loop | **E2** | E2 owns whether ADR 0013's `def` handler convention stays a convention |
 | SPEC §4.1 item 1 — no student-visible path exposes another section | **E2** | the first epic with a student-visible path, and the scoping that gives "another section" its meaning |
 | Database TLS on both engines | **E13** | the operator guide owns it; it matters before a managed or remote Postgres |
+| The demo seed reads the environment name and the database address from independent sources | **E13** | E0-17-01 accepted this by decision rather than closing it, and E0-31 made it worth more: an operator exporting a production `DATABASE_URL` over a development checkout now seeds a registration that makes Pulse trust a platform which signs a launch as any user. Closing it constrains the address and the environment name together, which redesigns a control that was disputed, arbitrated and settled once — that wants the deployment picture E13 owns. **Done when** `scripts/seed.py` refuses a run whose database address is not one a development environment could legitimately name, or ADR 0063 records why it does not, with the enlarged blast radius named |
 
 ## Decided
 
@@ -183,7 +192,7 @@ says which answers needed one and where it went.
 
 | # | Question | Decision | Spec edit |
 |---|---|---|---|
-| E0-31 item 1 | How is the mock LMS registration kept out of a deployed environment? | **Reuse the seed script's development-environment guard.** Register the mock behind the same guard `scripts/seed.py` already uses, and amend ADR 0038 to name that guard as what enforces its argument. | no |
+| E0-31 item 1 | How is the mock LMS registration kept out of a deployed environment? | **Reuse the seed script's development-environment guard.** Register the mock behind the same guard `scripts/seed.py` already uses, and amend ADR 0038 to name that guard as what enforces its argument. **Built 2026-08-19**, ADR 0068. | no |
 | E0-35 | Sweep the source, or hook the session? | **Sweep the source.** A test that reads our own modules and fails when one writes `course`, `section`, `enrollment` or an `INSTRUCTOR` `role_assignment` without naming `guard_write`. Record what a syntactic sweep cannot see, the way ADR 0062 does for the mock-idp gate. | no |
 | E0-30 item 1 | Does the mock identity provider learn RFC 6749 §4.1.2.1 error redirects? | **Yes, implement them.** About 40 lines plus tests, at the split point that already exists in `begin()` after `redirect_uri` validates. A refusal must arrive as a redirect carrying `error` and the `state` that was sent, and a test must fail if it reverts to a page. | no |
 | E0-28 item 6 | Does the mock LMS learn to authenticate now? | **Not now.** Its four moving parts go into E1's ticket so whoever builds the roster sync meets them before writing the client rather than after. E0-28's other eight items proceed without it. | no |
@@ -207,9 +216,10 @@ What two of them left behind is *code*, and it is owned:
   two invariants that carry no assertion, rather than claiming all seven do.
 - **E0-23's stored service address is E1's**, built with the sync that reads it.
 
-Two answers still want an existing record amended in the pull request that
-implements them: **ADR 0038** for E0-31 item 1, and **ADR 0056** for E0-29 items
-1a and 1b. ADR 0017 was amended with E0-22's spec edit and needs nothing further.
+One answer still wants an existing record amended in the pull request that
+implements it: **ADR 0056**, for E0-29 items 1a and 1b. ADR 0038 was amended with
+E0-31 item 1 on 2026-08-19, and ADR 0017 was amended with E0-22's spec edit;
+neither needs anything further.
 
 ## What the built tickets settled
 

@@ -65,6 +65,19 @@ the column and is the only code positioned to say what a legitimate value looks
 like. What this ticket owes is that the finding survives until then. If E1 lands
 without it, it belongs to whoever adds the admin console that writes the column.
 
+**One committed value any rule here must admit (added by E0-31, 2026-08-19).**
+The demo seed now registers the mock platform with
+`jwks_url = http://mock-lms:8000/.well-known/jwks.json` — plaintext, and a
+container name that resolves only on the Compose network. It is same-origin with
+its issuer, so that half of the constraint above accepts it; **a rule requiring
+`https` would reject it and break E0-18.** So E1 designs the scheme rule knowing
+a legitimate `http://` row exists rather than discovering it when the e2e suite
+goes red, and whatever carve-out it needs is written deliberately — a carve-out
+added under pressure to get a gate green is where the defect lands. The exposure
+itself does not grow: nothing reads the column yet, and on the Compose network an
+attacker able to intercept that fetch could reach `mock-lms` directly and have it
+sign anything. See [ADR 0068](../../adr/0068-the-demo-seed-registers-the-mock-platform-behind-its-guard.md).
+
 ### 2. Nothing asserts there is no *second* writer of the derived section columns
 
 E0-07's scope requires `length_weeks`, `start_date`, `end_date` and `modality` be

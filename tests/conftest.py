@@ -2658,6 +2658,31 @@ def mock_lms_service() -> str:
 
 
 @pytest.fixture
+def mock_lms_config() -> Iterator[Any]:
+    """The mock platform's `app.config` module, with `mock-lms/`'s `app` resolving.
+
+    The twin of `mock_idp_settings` further down, and it exists for the same kind
+    of reason: some of the platform's identity is **not** in the Compose file, so
+    a test comparing the seeded registration against Compose literals has nothing
+    to hold that part against. `JWKS_PATH` is the one that matters — the platform
+    composes its key-set URL from its own issuer, so `docker-compose.yml` never
+    carries it and a drift guard whose inventory is that file structurally cannot
+    see it.
+
+    The resolution is held open for the body rather than just for the import, the
+    way `mock_package_resolved` explains.
+    """
+    if not MOCK_LMS_DIR.is_dir():
+        pytest.fail(
+            f"{MOCK_LMS_DIR} does not exist, so there is no configuration module to import. "
+            "SPEC §13 puts the in-repo LTI 1.3 platform at `mock-lms/`, and E0-14 is the ticket "
+            "that writes it."
+        )
+    with mock_package_resolved(MOCK_LMS_DIR):
+        yield importlib.import_module(f"{MOCK_PACKAGE}.config")
+
+
+@pytest.fixture
 def mock_platforms() -> Iterator[Callable[..., MockPlatform]]:
     """Start one or more independent mock platforms, and shut them all down after.
 

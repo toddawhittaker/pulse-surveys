@@ -75,7 +75,10 @@ graph it just wrote is still acyclic and still Care-clean, because nothing else
 will have looked. ADR 0027 names this ticket.
 
 **2. Seeding an `lti_platform` row for the mock LMS is what would make ADR 0038
-wrong.** E0-14 argues the mock is safe in the base Compose file because it holds
+wrong.** *(E0-17 took the other branch and registered a fictional platform,
+ADR 0065. E0-31 item 1 reversed that on 2026-08-19: the mock is registered too,
+behind the environment guard, and ADR 0038 is amended rather than falsified —
+ADR 0068. What follows is the hazard as E0-17 was given it.)* E0-14 argues the mock is safe in the base Compose file because it holds
 nothing, reaches nothing, publishes no port outside the development override,
 and **is trusted only by a row in `lti_platform`** — and no such row exists
 anywhere in the repository today. A seed that inserts one into a path a
