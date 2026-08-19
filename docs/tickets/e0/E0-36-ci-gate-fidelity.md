@@ -100,10 +100,21 @@ without extra code, and refusing it would mean writing code to detect a shape
 nothing in this repository uses. Nothing in the tree depends on the answer either
 way — see the measurement below.
 
-Measured before the rule was chosen: all 20 `invariant`-marked tests in the tree
-carry an `assert` in their own body, none inside a nested function, and every one
-that uses `pytest.raises` also asserts directly. So the rule is green on the whole
-suite today and no existing test moves to satisfy it.
+Measured before the rule was chosen: all **24** `invariant`-marked tests in the
+tree carry an `assert` in their own body, none inside a nested function, and every
+one that uses `pytest.raises` also asserts directly. So the rule is green on the
+whole suite today and no existing test moves to satisfy it.
+
+**That number was 20 when this section was first written, and the correction is
+the item's own subject.** The measurement behind it read decorators only, so it
+missed the four tests marked by a module-level `pytestmark = pytest.mark.invariant`
+— three in `tests/unit/test_no_service_reads_an_identity_table_directly.py` and one
+in `tests/unit/test_care_is_not_reachable_from_a_claim.py`. A checker built to that
+measurement would have reported a clean scan over four real §4.1 invariants it
+never looked at, which is exactly what this ticket is about. The number to trust is
+`pytest -m invariant --collect-only`, which collects 24 functions and 42
+parametrized cases; the checker agrees with it, and that agreement is worth
+re-checking rather than assuming.
 
 **Where it lives, and why the test wall holds.** The checker is
 `scripts/ci/check_invariant_assertions.py`, invoked in the same gate step as
