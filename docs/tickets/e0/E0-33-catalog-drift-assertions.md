@@ -140,7 +140,7 @@ closed by pointing at a migration.
 - [ ] A model whose *check-constraint expression* changed without a migration
       fails something, and a *removed exclusion constraint* fails something.
 - [ ] A database whose roles, grants, view set or function set drift from what
-      the migrations wrote fails something — including each of the four
+      the migrations wrote fails something — including each of the five
       genuinely-unasserted properties item 3 lists. (This criterion used to say
       "the two properties named in item 3 that have no assertion today"; both of
       those were already asserted. See item 3's correction note.)

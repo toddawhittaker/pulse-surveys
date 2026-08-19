@@ -1,10 +1,11 @@
 # Entry 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 1**
+**Caught: 0**
 
-*1 instance recorded.*
+*1 occurrence recorded, and it is not a catch.*
 
-*(In E0-33, by the orchestrating session, against this entry's own
+*(An occurrence, not a prevention: the counter stays at 0 because this
+entry did **not** stop the mistake. In E0-33, by the orchestrating session, against this entry's own
 command. `make ci 2>&1 | tail -45` printed the tail of a run in which `lint` had
 died on `ruff: command not found`, and the harness reported the *pipeline's*
 exit code of zero. The failing line `make: *** [Makefile:82: lint] Error 127`

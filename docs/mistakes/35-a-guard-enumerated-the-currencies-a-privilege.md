@@ -1,13 +1,15 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 3**
+**Caught: 0**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*3 instances recorded.*
+*3 occurrences recorded, and none of them is a catch.*
 
 *(Twice more on the same pull request, after this entry was
-written. **A column grant** is recorded in `pg_attribute.attacl`, which neither
+written. **Both were found by review or by mutation, so neither is a catch** —
+this file's own rule is that a detection does not earn a bump, and the counter
+stays at 0 until this entry stops somebody in advance. **A column grant** is recorded in `pg_attribute.attacl`, which neither
 `has_table_privilege` nor `pg_class.relacl` reads — a fourth currency, found by a
 reviewer one round after the entry naming the third. And when the probe for it
 was added, nothing asked it about the roles that hold the grant: the sweep
