@@ -278,11 +278,28 @@ install: ## Install the locked dependencies and the backend, editable
 # leaves floating because pip itself depends on them — setuptools here. Pinning
 # them is the stricter behaviour, and it is what lets the build backend be
 # hash-verified. pip-tools' own documentation says it will become the default.
+#
+# **The order of these two is load-bearing, and so is `-c requirements.txt`.**
+# The runtime compile runs first and the dev compile is then resolved *under* its
+# result rather than beside it. Without the constraint they are two independent
+# solves over overlapping requirement sets, free to pick different versions of
+# the same package — and they did: `charset-normalizer` skewed to two versions
+# during E0-13, every test passed, and only `pip-audit` saw it
+# (docs/MISTAKES.md entry 25). The suite installs the dev closure and the image
+# ships the runtime one, so a skew means every test in this repository is green
+# against a version of a package that no deployment has.
+#
+# There is no `pip-compile` in .github/workflows/ci.yml to keep this in step
+# with. Locking is a developer's step; CI only ever installs what was committed.
+# What has to stay true across the two is that every lockfile CI installs from is
+# a file this target writes, which
+# `tests/unit/test_the_lockfiles_resolve_together.py` asserts in that direction.
 .PHONY: lock
 lock: ## Recompile requirements.txt and requirements-dev.txt from pyproject.toml
 	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe \
 		--output-file=requirements.txt pyproject.toml
-	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe --extra dev \
+	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe \
+		-c requirements.txt --extra dev \
 		--output-file=requirements-dev.txt pyproject.toml
 
 .PHONY: fmt
