@@ -76,7 +76,8 @@ LMS-owned column arriving in a later ticket leaves no trace in the metadata that
 distinguishes it from a Pulse-owned one. Until something closes that, the suite
 carries a trap-line of unprefixed spellings that must not appear beside the
 marked ones, which catches the regression and does not pretend to catch the
-omission.
+omission. **E0-35 closes that direction on the tables SPEC §2.1 names, and
+nowhere else — see the second amendment below.**
 
 **Amended by E0-05's review: the enforcing check may not be column-grained at
 all, and if it is not, this marker becomes documentation.** An earlier version of
@@ -96,5 +97,51 @@ writes the query, not only whoever wrote the definition. The decision still
 stands on that, and this ADR is not superseded — but a reader arriving here to
 learn how ownership is enforced should go to E0-11 for the grain rather than
 assume it was settled here. E0-11 is required to choose and to say what the
-chosen grain does not catch;
-[E0-21](../tickets/e0/E0-21-review-debt.md) carries the residue.
+chosen grain does not catch. E0-11 chose table grain, in
+[ADR 0045](0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md).
+
+**Amended by E0-35, 2026-08-19: the marker is now documentation, and the reason
+above is void.** `tests/unit/test_no_lms_owned_table_carries_an_unmarked_column.py`
+asks the question at table grain rather than per column: on a table SPEC §2.1
+puts on the LMS's side of the ownership sentence, every column must be one of
+four things — **marked** with the `lms_` prefix, **structural** (a primary key or
+a column carrying a foreign key), **unwritable** (a stored generated column, of
+which `course.level` is the worked example, [ADR 0015](0015-course-level-is-a-stored-generated-column.md)),
+or **recorded** in that module's `PULSE_OWNED_COLUMNS` with the record that says
+why Pulse owns a value on a table the LMS owns. Anything else fails.
+`course.canvas_id` is none of the four, so the column this record said leaves no
+trace now turns something red.
+
+So the direction that could not be asserted is asserted, and **the marker is no
+longer what enforces anything.** "The chokepoint must be able to read the marker"
+is one of the two reasons given above for a name prefix over an `info={}` dict,
+and it is now void: the chokepoint reads a table name (ADR 0045) and the sweep
+reads a table's whole column list, and neither needs the prefix to be accurate.
+The decision still stands on the remaining reason alone — the name is in front of
+whoever writes the query, not only in front of whoever wrote the definition — and
+this ADR is still not superseded. An `info={}` dict would now be a defensible
+choice for a *new* schema; renaming these columns to adopt one would not be,
+because a rename is a migration per column bought with no enforcement gain.
+
+**What it cost, and how far it reaches.** Three things, and none of them should
+be read as smaller than it is:
+
+- **It closes the direction on LMS-owned tables only.** An LMS-owned column
+  landing on a table outside the guarded set — a column on `person`, a new
+  relation from E1's sync — is invisible to this sweep and to ADR 0045's
+  chokepoint alike, for the same reason this record gave in the first place:
+  ownership is a fact about where data comes from, and no walk of
+  `Base.metadata` recovers it once the marker is missing. What table grain buys
+  is that on the tables §2.1 *does* name, the marker's accuracy stops mattering.
+- **A Pulse-owned column on one of those tables now costs an entry.** It must be
+  recorded in `PULSE_OWNED_COLUMNS` with a reason, and that entry is a claim
+  nobody re-checks: the entries are required to name real columns, so an
+  exception cannot outlive its column, but nothing can check that the reason is
+  still true.
+- **It reads `Base.metadata`, not the database.** A column that exists only in a
+  migration is invisible to it. That is the right side to read for a marker the
+  authz layer resolves through the ORM, as this record argues above, and it is
+  still a limit.
+
+[ADR 0069](0069-three-rules-held-by-a-docstring-are-swept-out-of-the-source.md)
+records why the mechanism is a sweep rather than a session-level hook.

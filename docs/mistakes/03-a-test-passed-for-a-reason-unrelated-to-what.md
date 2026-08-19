@@ -1,27 +1,10 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 37**
+**Caught: 38**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*16 instances recorded; the 3 most recent are below. The earlier 13 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-16's fix round, and it decided three things about five
-tests written *after* the code they cover — which is the position this entry is
-hardest to hold, because such a test passes on its first run and proves nothing.
-First, the malformed value is 43 characters long, the minimum RFC 7636 allows,
-because at any shorter length the provider's length check answers first and the
-alphabet check is never reached: the test would pass, name the handling it never
-touched, and the mutation run would have shown it too — the implementer's own
-pass had already found these two guards masking each other. Second, and sharpest,
-the module's shared `refusal` helper said "not 2xx", so a **500 counted as a
-refusal** — meaning the replay, mismatch and missing-verifier tests, three
-acceptance criteria, would each have passed against the exact crash the round was
-about. It now requires a 4xx. Third, the malformed-challenge test walks the whole
-flow rather than judging the authorization response, because the value enters at
-one endpoint and the crash lands at another: a test that stopped where the value
-was submitted would have watched the provider accept it and reported a pass, with
-the defect intact one step further on.)*
+*17 instances recorded; the 3 most recent are below. The earlier 14 are in this file's git history and in the pull requests they cite.*
 
 *(Writing E0-33's tests, where it changed the *direction* of a
 comparison. The natural shape for "the model's constraints are the database's" is
@@ -57,6 +40,23 @@ the sibling assertion asks that the *qualification* failure does **not** name th
 column, and a substring check answers that wrongly for a column called `name`,
 since that message contains the phrase "every relation a view or function
 names".)*
+
+*(Writing E0-35's tests, on three sweeps whose subject set is empty today. E0
+ships no application write path — the ticket records that as correct — so the
+sweep asking which modules write `course` without calling `guard_write` walks the
+whole application, finds nothing, and passes; it would pass identically on the
+day E1's roster sync lands unrouted in a shape the matcher cannot see. Emptiness
+was not the only way the three could have gone green. The marker sweep asserts
+that no column on an LMS-owned table is unaccounted for, which is most thoroughly
+satisfied by a metadata walk that found no tables; the derived-calendar sweep
+asserts that only one module assigns four columns, which is satisfied by a
+matcher that recognises no assignment anywhere. So each of the three now carries
+both halves of this entry's rule — the samples it must catch and the near-miss it
+must allow, one property apart — and a non-vacuity assertion in front of the
+emptiness: the marker sweep requires the `lms_` prefix to exist somewhere before
+its absence elsewhere is allowed to mean anything, and the calendar sweep
+requires the sanctioned writer to be visible to it before its silence about every
+other module counts.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

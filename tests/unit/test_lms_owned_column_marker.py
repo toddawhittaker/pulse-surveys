@@ -40,19 +40,39 @@ which is the second source of truth the `lms_` prefix was chosen over. What this
 module can do is make the named cases fail loudly and stop the obvious
 regression, an unprefixed twin appearing beside a prefixed column.
 
-**Where the enforcing check belongs is an open question, not E0-11 by default.**
-An earlier draft of this docstring said E0-11's chokepoint closes it. That rests
-on the chokepoint knowing LMS ownership only from the prefix, and SPEC §2.1 does
-not work that way: its ownership list is *courses, sections, section codes,
-enrollments, teaching instructors*, four of which live on `course`, `section` or
-`enrollment`. A chokepoint that refuses writes to those **tables** answers most
-of §2.1 without reading a column name at all, and would catch the unprefixed
-`external_id` this module cannot. Table grain has its own failures — it breaks
-when a Pulse-owned writable column lands on one of those tables, and the fifth
-item, the teaching-instructor link, may live on `role_assignment` rather than on
-any of them — so E0-11 has a real choice to make rather than an inherited limit.
+**Where the enforcing check belongs was settled in two steps, and neither of them
+is in this module.** An earlier draft of this docstring said E0-11's chokepoint
+closes it. That rests on the chokepoint knowing LMS ownership only from the
+prefix, and SPEC §2.1 does not work that way: its ownership list is *courses,
+sections, section codes, enrollments, teaching instructors*, four of which live
+on `course`, `section` or `enrollment`. A chokepoint that refuses writes to those
+**tables** answers most of §2.1 without reading a column name at all, and catches
+the unprefixed `external_id` this module cannot. Table grain has its own failures
+— it breaks when a Pulse-owned writable column lands on one of those tables, and
+the fifth item, the teaching-instructor link, lives on `role_assignment` rather
+than on any of them — so E0-11 had a real choice to make rather than an inherited
+limit. It chose table grain plus that one row
+([ADR 0045](../../docs/adr/0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md)),
+and on 2026-08-19
 [E0-35](../../docs/tickets/e0/E0-35-the-writer-and-the-marker-nobody-routed.md)
-carries it, batched with the two other rules held by a docstring alone.
+built the missing direction on the same grain rather than carrying it further
+([ADR 0069](../../docs/adr/0069-three-rules-held-by-a-docstring-are-swept-out-of-the-source.md)).
+`tests/unit/test_no_lms_owned_table_carries_an_unmarked_column.py` asks, of every
+column on a table in that guarded set, whether it is marked, structural, or
+recorded as Pulse-owned with the record that says why — so `course.canvas_id`
+fails there, having failed nothing anywhere before.
+
+**What that changes here is narrower than it sounds, and everything above still
+holds.** The closure reaches the tables in the guarded set and stops. An
+LMS-owned column landing on any other table is outside it entirely, exactly as it
+is outside ADR 0045's chokepoint, and for the reason this docstring already gives:
+once the prefix is missing, `Base.metadata` records no fact that tells such a
+column from one Pulse owns outright. So "it stops there, deliberately" above is
+still an accurate account of what walking the metadata can do, and the trap-line
+of unprefixed spellings below is still what catches the regression on the two
+tables it names. The new sweep is a tripwire on the obvious way to write the wrong
+thing rather than a proof — ADR 0069 says so in its own consequences, and the
+proof-shaped instrument over a write path is a grant, which is E1's.
 
 **Why the metadata and not the migration.** The criterion says `Base.metadata`,
 and it is the right side to read: the authz layer will resolve a column through

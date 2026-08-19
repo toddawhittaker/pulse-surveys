@@ -52,7 +52,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 32 | [Three gate gaps the reviewer self-test found](E0-32-gate-gaps-the-selftest-found.md) | 10 | **Redistributed — not built as written.** Item 1 is now 36; items 2 and 3 are now 34. |
 | 33 | [Assert the database objects `alembic check` never looks at](E0-33-catalog-drift-assertions.md) | 08, 10 | **Batch A.** One mechanism — read the object out of the catalog and compare — covering generated-column expressions, check-constraint expressions, exclusion constraints, roles, grants, views and function owners. Carries E0-20 items 3, 3a and 3b. |
 | 34 | [A view file that reads identity must fail on that ground](E0-34-view-file-identity-guards.md) | 10, 11 | **Batch B.** A `views_sql/*.sql` file joining `user_identity` passes the identity invariant vacuously and is caught only by a sweep whose message points at `public.` prefixes. Carries E0-32 items 2 and 3 and E0-27 item 2. |
-| 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C.** Three rules held by a docstring with nothing to notice a new violation. Carries E0-21 item 1, E0-24 item 2 and E0-27 item 1, and makes the sweep-versus-hook choice all three declined. |
+| 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C — built 2026-08-19.** Three rules held by a docstring, now three sweeps: an unmarked column on an LMS-owned table, a second assignment site for a section's derived calendar, and a module that writes an LMS-owned relation without naming `guard_write`. Closes E0-21 item 1, E0-24 item 2 and E0-27 item 1. ADR 0069 records the sweep-over-hook choice all three declined, ADR 0014 and ADR 0021 are amended, and one question is left open by decision: how a *sanctioned* writer satisfies the guard rule is E1's. |
 | 36 | [Gates that report green over something they did not look at](E0-36-ci-gate-fidelity.md) | 04 | **Batch D.** Five items in `ci.yml`, `scripts/ci/` and the `Makefile`, including the aggregate `CI` check that prints "All gates green" over a real `migration-drift` failure. Carries E0-20 items 1 and 2, E0-32 item 1, E0-25 item 1 and E0-29 items 4b and 4c. Produces two pull requests. |
 | 37 | [Seven small corrections](E0-37-small-corrections.md) | 05, 13, 17 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, and E0-31 items 3 and 4. Item 1 is the only one with a confidentiality consequence. |
 | 38 | [A documentation-only change should not run the whole pipeline](E0-38-docs-only-runs-skip-the-heavy-gates.md) | 36 | **Batch D's sequel.** A Markdown-only pull request runs pytest, both image builds, Playwright, the evals and the supply-chain audit — about fifteen minutes of runner time to establish that no Python changed. Two traps: `test_ai_contracts.py` parses `docs/SPEC.md` at test time, and a path filter manufactures a second meaning for `skipped` that E0-36 item 1 must settle first. |
@@ -74,7 +74,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 
 08, 10 ── 33        Batch A — catalog comparison
 10, 11 ── 34        Batch B — view files that read identity
-07, 11 ── 35        Batch C — the writer and the marker sweeps
+07, 11 ── 35        Batch C — the writer and the marker sweeps (built)
 04 ── 36            Batch D — the pipeline itself
 02, 03 ── 19        Batch G — Compose credential surface
 15 ── 28            Batch E — mock LMS conformance
@@ -108,7 +108,7 @@ here.
 |---|---|---|---|
 | A | 33 | a new integration module reading `pg_catalog` | medium |
 | B | 34 | `views_sql/` and the identity-marker sweep | small |
-| C | 35 | a sweep in the shape of the read-side one | medium |
+| C | 35 | a sweep in the shape of the read-side one | medium — **built 2026-08-19** |
 | D | 36 | `ci.yml`, `scripts/ci/`, the `Makefile` | medium |
 | E | 28 | `mock-lms/app/` | medium |
 | F | 30 | `mock-idp/app/` | medium |
@@ -122,8 +122,8 @@ objects that implement it — they are both cheap, and B is the smaller half of 
 hole A does not reach. Then **31 item 1 and then 18**, which is the only path to
 the epic actually exiting. Everything after that can land in any order.
 
-**A, B and 31 item 1 are done as of 2026-08-19.** The next thing on the exit
-path is **18**; C, D→38, E, F, G and H can land in any order around it.
+**A, B, C and 31 item 1 are done as of 2026-08-19.** The next thing on the exit
+path is **18**; D→38, E, F, G and H can land in any order around it.
 
 **A and B are the two batches where the thing being protected is the
 confidentiality model rather than a convenience.** Two of A's mutations —
@@ -153,7 +153,13 @@ E0-18's Playwright path lands on is E0-18's to decide.
 - **E0-35 and E0-28 item 1** both land on E1's roster sync from opposite sides.
   That sync is the first code to write all four relations the E0-11 chokepoint
   refuses, and it is also the code that reads the enrollment windows E0-15 puts
-  on every seeded member — windows no real platform supplies.
+  on every seeded member — windows no real platform supplies. **E0-35 was built
+  2026-08-19**, so the sync now lands on a sweep that fails if it writes those
+  relations without naming `guard_write`. What it inherits instead is the
+  question that sweep leaves open by decision: `guard_write(table="course")`
+  refuses unconditionally, so nothing records how a *sanctioned* writer satisfies
+  the rule, and ADR 0069 hands the mechanism to E1 with a "done when". E0-28
+  item 1 is unchanged.
 - **E0-22 question 1** is a confidentiality rule that is currently unenforced,
   and E4 builds the reports it governs.
 - **E0-26 item 1** is a measured gap in SPEC §4's logging guarantee rather than
@@ -193,7 +199,7 @@ says which answers needed one and where it went.
 | # | Question | Decision | Spec edit |
 |---|---|---|---|
 | E0-31 item 1 | How is the mock LMS registration kept out of a deployed environment? | **Reuse the seed script's development-environment guard.** Register the mock behind the same guard `scripts/seed.py` already uses, and amend ADR 0038 to name that guard as what enforces its argument. **Built 2026-08-19**, ADR 0068. | no |
-| E0-35 | Sweep the source, or hook the session? | **Sweep the source.** A test that reads our own modules and fails when one writes `course`, `section`, `enrollment` or an `INSTRUCTOR` `role_assignment` without naming `guard_write`. Record what a syntactic sweep cannot see, the way ADR 0062 does for the mock-idp gate. | no |
+| E0-35 | Sweep the source, or hook the session? | **Sweep the source.** A test that reads our own modules and fails when one writes `course`, `section`, `enrollment` or an `INSTRUCTOR` `role_assignment` without naming `guard_write`. Record what a syntactic sweep cannot see, the way ADR 0062 does for the mock-idp gate. **Built 2026-08-19**, ADR 0069, applied to all three of the ticket's rules. It carries one open question, also Todd's: how a *sanctioned* writer satisfies the rule is left to E1, which arrives with a real writer to design against. | no |
 | E0-30 item 1 | Does the mock identity provider learn RFC 6749 §4.1.2.1 error redirects? | **Yes, implement them.** About 40 lines plus tests, at the split point that already exists in `begin()` after `redirect_uri` validates. A refusal must arrive as a redirect carrying `error` and the `state` that was sent, and a test must fail if it reverts to a page. | no |
 | E0-28 item 6 | Does the mock LMS learn to authenticate now? | **Not now.** Its four moving parts go into E1's ticket so whoever builds the roster sync meets them before writing the client rather than after. E0-28's other eight items proceed without it. | no |
 | E0-22 q1 | Benchmark minimum — every figure, or only drawn lines? | **Every figure computed from a comparison set**, not only a drawn line. | **landed** — §4.1 item 7, §5.1 rewritten to point at it. Its *test* is E4's. |

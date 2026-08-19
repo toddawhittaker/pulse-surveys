@@ -1,28 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 33**
+**Caught: 34**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*16 instances recorded; the 3 most recent are below. The earlier 13 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-16, and the sweep started from a list rather than from
-a file. Adding a service to the health gate's `REQUIRED_SERVICES` is one line;
-what it made false was in six other places, all of which read correctly until you
-knew a third service existed. The workflow's own step names and the two comments
-above them counted "four services named, six covered". The `Makefile` said "Three
-services are named and five are covered" and had been wrong since **E0-14** —
-`mock-lms` was never added to its health waits, so the local gate and the workflow
-had disagreed for a ticket and a half, which is the drift `CLAUDE.md` means when
-it says the workflow is right and that file is the bug. `.dockerignore`'s header
-described "the two images this repository builds". ADR 0037 said E0-16 "faces the
-same choice and should reach the same answer — or say why not", and ADR 0039 said
-"a third `app` package would need a third run", both of which stop being true the
-moment the ticket lands and both of which send a reader looking for work that is
-finished. The epic README's "How CI tightens" table listed a Compose-health row
-per mock and was missing one. And `README.md` introduced the stack as running
-"the mock LMS described below" while §9.2 requires two doors. None of the six
-fails anything.)*
+*17 instances recorded; the 3 most recent are below. The earlier 14 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-33, where the stale record was the **ticket**. Its item 3
 names two properties that "have no assertion anywhere today" — that no
@@ -55,6 +37,16 @@ fix does**, because the records that argued the old way are the ones written
 most carefully. The one part to leave standing is the superseded record's
 rejected-alternative section: its reasoning is the cost the new decision
 accepts, not an argument that turned out to be wrong.)*
+
+*(In E0-35, a documentation-only pass over three new sweeps. The brief named
+five records to correct and the entry found four more by asking the question
+rather than working the list: ADR 0014's own "Until something closes that"
+sentence, which the record had written about itself and could not know was now
+answered; three index rows in `docs/adr/README.md`, which is the highest-risk
+shape this entry names — written once, never re-read; and a signpost in E0-22,
+a live ticket, sending a reader to E0-21 for a residue that had moved twice.
+None of the four was in the brief, and the branch would have shipped with a
+green suite and four records pointing at the wrong owner.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`

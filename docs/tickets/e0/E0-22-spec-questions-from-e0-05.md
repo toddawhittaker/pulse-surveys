@@ -99,8 +99,10 @@ change is larger than a schema edit.
 ## Out of scope
 
 - Anything about the level bands themselves. Those are settled in SPEC §8.
-- The `lms_` marker grain. That is [E0-11](E0-11-authz-skeleton.md)'s decision
-  with [E0-21](E0-21-review-debt.md) carrying the residue.
+- The `lms_` marker grain. That is [E0-11](E0-11-authz-skeleton.md)'s decision.
+  The residue moved from [E0-21](E0-21-review-debt.md) to
+  [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md), which closed it at
+  table grain on 2026-08-19.
 
 ## Acceptance criteria
 

@@ -11,8 +11,20 @@ because the batch tickets link to it.
 
 | Item | Now |
 |---|---|
-| 1 — detect an LMS-owned column that was never marked | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) |
+| 1 — detect an LMS-owned column that was never marked | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) — **built 2026-08-19** |
 | 2 — assert that a prefix belongs to a department | [E0-37](E0-37-small-corrections.md) item 3 |
+
+**On item 1, as built.** E0-35 took the table-grain option below and not the
+write seam. A column on a table SPEC §2.1 puts on the LMS's side must be one of
+four things — marked with the `lms_` prefix, structural, unwritable, or recorded
+with the record that says why Pulse owns it — so `course.canvas_id` now turns
+something red. [ADR 0014](../../adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)
+carries the consequence this ticket's definition of done asked for: the marker
+stops being the enforcement mechanism, and one of the two reasons for a name
+prefix over an `info={}` dict is void.
+[ADR 0069](../../adr/0069-three-rules-held-by-a-docstring-are-swept-out-of-the-source.md)
+records why the mechanism is a sweep. The closure reaches the guarded tables and
+nowhere else, which is the residue that remains.
 
 The section below headed *Considered and deliberately not carried* is a record of
 Todd's decision on `course.lms_title` and its three-part cost. It moves nowhere

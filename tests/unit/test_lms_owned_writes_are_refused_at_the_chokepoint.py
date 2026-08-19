@@ -20,11 +20,30 @@ is refused along with everything else on that table — `course.level` is alread
 non-LMS column there, saved today only by being unwritable
 ([ADR 0015](../../docs/adr/0015-course-level-is-a-stored-generated-column.md)).
 Nothing in this module asserts that ownership is *fully* enforced, and nothing in
-it should be cited as if it did;
+it should be cited as if it did.
 [ADR 0014](../../docs/adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)'s
-open half stays open, and
-[E0-35](../../docs/tickets/e0/E0-35-the-writer-and-the-marker-nobody-routed.md)
-carries the residue.
+open half — an unprefixed LMS-owned column, invisible to a marker that is a name —
+was closed on 2026-08-19 by
+[E0-35](../../docs/tickets/e0/E0-35-the-writer-and-the-marker-nobody-routed.md),
+which built the residue rather than carrying it further: on the tables in the
+guarded set, `tests/unit/test_no_lms_owned_table_carries_an_unmarked_column.py`
+requires every column to be marked, structural, or recorded as Pulse-owned. That
+reaches those tables and no further, so a column on any other table is outside it
+as it is outside this grain.
+
+**And the other half of that ticket is the one this module cannot supply.** The
+behavioural tests here call `guard_write` directly, so they assert it answers
+correctly when asked; nothing here can notice a write path that never asks, which
+is the objection the consequences of
+[ADR 0045](../../docs/adr/0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md)
+state outright: "a caller can bypass it by not calling it".
+`tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py` is what
+notices, by sweeping the source for a module that writes one of these relations
+without calling the guard. It is a tripwire on the obvious way to write the wrong
+thing and not a proof
+([ADR 0069](../../docs/adr/0069-three-rules-held-by-a-docstring-are-swept-out-of-the-source.md)):
+the proof-shaped instrument is a grant refusing the application role `INSERT` and
+`UPDATE` on these tables, which ADR 0045 records as unavailable until E1.
 
 **"Per column rather than once" is the last sweep below**, and it is the one that
 keeps working after today: every `lms_`-prefixed column on `Base.metadata` is

@@ -1,10 +1,27 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 1**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*5 occurrences recorded; one of them is a catch.*
+*6 occurrences recorded; two of them are catches.*
+
+*(**A catch**, writing E0-35's tests — three static sweeps over writes to
+LMS-owned data. All three have an empty subject set today, because E0 ships no
+application write path, so the shape about to be written was a sweep plus a set
+of samples it must *refuse*: over a tree containing nothing, that is a file that
+reports green having demonstrated nothing about what it can see. This entry is
+why each sweep is now required to **find** every mechanism it claims, on a sample
+carried in the module — an ORM `add`, a Core `insert().values()`, textual
+`INSERT`, `UPDATE` and `DELETE`, and an `INSTRUCTOR` role assignment written both
+as the string `"INSTRUCTOR"` and as `AssignmentRole.INSTRUCTOR`, since a detector
+that saw one spelling would miss whichever E1's roster sync happens to use. The
+corollary about the design's own currency is what put the second spelling there:
+the enum member is how the codebase actually holds a role, and the string is the
+one a guard's author reaches for. The inventory follows the same rule — the ORM
+half resolves every guarded table to a mapped class off `Base.registry` and fails
+if any of them resolves to none, rather than trusting a class name typed into a
+test file.)*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two

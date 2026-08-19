@@ -10,12 +10,33 @@
 
 | Item | Now |
 |---|---|
-| 1 — nothing requires a write path to call `guard_write` | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) |
-| 2 — a view revision can widen identity access with no grant consulted | [E0-34](E0-34-view-file-identity-guards.md) |
+| 1 — nothing requires a write path to call `guard_write` | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) — **built 2026-08-19** |
+| 2 — a view revision can widen identity access with no grant consulted | [E0-34](E0-34-view-file-identity-guards.md) — **built 2026-08-18** |
 | 3 — `docs/MISTAKES.md` is out of order | **Closed** in PR #36 |
 
 On item 3: the file is now sorted by `Caught:` descending with every entry
 keeping its number, and the tier is re-derived from the same numbers.
+
+**On item 1, as built.** This ticket named the choice and declined to make it;
+Todd made it on 2026-08-18 and
+[ADR 0069](../../adr/0069-three-rules-held-by-a-docstring-are-swept-out-of-the-source.md)
+records it. **The sweep won, the session-level hook was rejected** — on cost, on
+matching the read-side sweep already in the tree, and because the hook's failure
+mode when it is wrong is a refused legitimate write in production rather than a
+red test. The hook's real advantage, catching the indirect writes a syntactic
+sweep cannot see, is stated in the record rather than argued away.
+
+As built, a module under `backend/app/` that writes `course`, `section`,
+`enrollment`, `user`, or a `role_assignment` row whose role is `INSTRUCTOR`, has
+to call `guard_write` somewhere in the same module. Two things it does not do,
+both in ADR 0069 and in the sweep's own docstring: its grain is the module and
+not the path, so it never shows that the guard ran before the write; and it does
+not close the seam, which needs the grant
+[ADR 0045](../../adr/0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md)
+defers to E1. **One question is left open on purpose** — how a *sanctioned*
+writer satisfies "calls `guard_write`" when `guard_write(table="course")` refuses
+unconditionally. Todd's decision, 2026-08-19: write it down and leave the
+mechanism to E1, which arrives with a real writer to design against.
 
 The section below headed *What E0-11 closed* is the record of that round,
 including the note on the invented statements committed to this branch's history.
