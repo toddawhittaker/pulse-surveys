@@ -116,12 +116,31 @@ jobs:
           # empty one (docs/MISTAKES.md entry 34). NUL-delimited because `design/`
           # holds file names with spaces in them, and word-splitting would hand
           # the classifier two paths it has never heard of in place of one it has.
-          if ! git diff --name-only -z "${base}" HEAD > /tmp/changed-paths.z; then
+          #
+          # **`--no-renames`, and it is load-bearing.** Git detects renames by
+          # default and reports a rename as the destination alone, so
+          # `git mv backend/app/services/authz.py docs/whatever.md` arrives here
+          # as one inert path and the classifier — correctly, about the list it
+          # was handed — answers inert. pytest would not run on a change that
+          # deleted a service module. The hole is in the path list, not in the
+          # classifier. Without rename detection the delete and the add arrive as
+          # two paths, the source is outside the inert set, and everything runs.
+          # A rename *inside* `docs/mistakes/` still reports two inert paths and
+          # stays inert, which is what trimming that directory looks like.
+          if ! git diff --no-renames --name-only -z "${base}" HEAD > /tmp/changed-paths.z; then
             echo "::notice::could not diff against ${base}; every gate runs."
             emit inert false
             exit 0
           fi
-          mapfile -t -d '' changed < /tmp/changed-paths.z
+          # Also in an `if`, for the reason the classifier invocation below is:
+          # a bare command that fails ends the step under `-e`, and the failure
+          # mode of this step ending is every gate reporting `skipped` and the
+          # required check going red. No bare command is left in it.
+          if ! mapfile -t -d '' changed < /tmp/changed-paths.z; then
+            echo "::notice::could not read the changed-path list; every gate runs."
+            emit inert false
+            exit 0
+          fi
 
           echo "  changed paths (${#changed[@]}):"
           if [ "${#changed[@]}" -gt 0 ]; then
@@ -138,8 +157,22 @@ jobs:
           # An empty list reaches the classifier as no arguments and it answers
           # not-inert. Deliberate: an empty diff is far more often a broken
           # comparison than an empty change.
-          python3 scripts/ci/classify_changed_paths.py "${changed[@]}"
-          status=$?
+          # **In an `if`, not bare.** GitHub runs a `run:` block that declares
+          # no `shell:` as `bash -e {0}`, and `set -uo pipefail` above adds two
+          # options without clearing the inherited `-e` — only `set +e` would do
+          # that, and turning `-e` off wholesale to fix one line is the larger
+          # change. Under `-e` a bare command that exits non-zero ends the
+          # script, and **exit 1 is this classifier's "not inert" answer**: the
+          # ordinary answer for every pull request that touches code. Written
+          # bare, this step died before the `case` below could read the status,
+          # the job failed, every job needing it reported `skipped`, and E0-36
+          # made the aggregate treat `skipped` as failure — so every
+          # code-touching pull request failed CI. Measured under `bash -e`.
+          if python3 scripts/ci/classify_changed_paths.py "${changed[@]}"; then
+            status=0
+          else
+            status=$?
+          fi
 
           # Its contract is exit 0 for inert and exit 1 for not. Anything else is
           # the classifier failing rather than answering, and that is worth a line
