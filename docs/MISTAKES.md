@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 37** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 38** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -153,7 +153,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
