@@ -23,7 +23,17 @@ documents from the suite: it must find the document in a module shaped like
 `test_ai_contracts.py`, find nothing in a module that only cites documents in
 prose, and still find `docs/SPEC.md` in the real tree — because a reader that has
 gone blind reports that the suite parses no documents at all, which satisfies
-"every document a test reads is outside the inert set" perfectly.)*
+"every document a test reads is outside the inert set" perfectly.
+
+**A second application in the same ticket, counted once.** The test that holds
+the `python3`-not-`python` fix runs the workflow step on a planted PATH holding
+`git` and `python3` and no `python`. The whole battery is satisfied by a PATH on
+which `python` is still resolvable — under it the mutation runs perfectly and
+every case passes — and whether it is resolvable depends on the machine the suite
+happens to be on, not on anything the test controls. So the absence is proved by
+running `command -v python` under the planted PATH and requiring it to fail,
+before any case is believed. An environment a test builds is as capable of being
+wrong as one it finds.)*
 
 *(Writing E0-36's tests, twice over. The sweep asking whether a failing gate
 reaches the required `CI` check runs the aggregate job's own verdict script under

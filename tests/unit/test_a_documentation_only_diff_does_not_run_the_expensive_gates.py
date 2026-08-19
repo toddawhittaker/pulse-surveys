@@ -43,6 +43,29 @@ branch. That division is stated rather than papered over: this module is what
 notices a gate that gained no guard at all, which is the failure the ticket would
 otherwise ship, and the push is what notices a guard that reads backwards.
 
+**A third half, added after the implementation: the step in between.** The
+classifier being right and the gates being wired to it are worth nothing if the
+step that joins them cannot run. It hit that once already — the first version
+invoked `python`, which is not on a runner's PATH in a job that declares no
+`actions/setup-python`, so it exited 127 and the branch below it emitted
+`inert=false` forever. The filter would never once have fired, on any pull
+request, and nothing in a green pipeline would have said so. That was fixed while
+building and nothing asserted the fix: reverting `python3` to `python` left all
+348 tests and 100 self-test checks green, which is `docs/MISTAKES.md` entry 2
+exactly. So the step is now executed here, over planted repositories, with
+`python3` resolving and `python` answering 127 — the status a shell gives a
+command that is not there — proved by running all three rather than by trusting
+whatever the machine this suite happens to be on has installed.
+
+**That half is executed rather than read, and it is the shape of test that pays
+for itself twice.** Running the step end to end also asks what happens on every
+route out of it: no base commit, a base the clone does not hold, a diff that
+errors, a classifier that answers neither of its two answers. Each must emit a
+classification that runs everything, and each must leave the step itself
+succeeding — a step that *fails* takes the `changed` job down with it, and every
+gate that needs it then reports `skipped`, which the aggregate check reads as
+failure.
+
 **The sweep, and what it can see.** `docs/SPEC.md` is the only document any test
 reads today, and a hand-maintained exclusion beside it goes stale the first time
 somebody teaches another test to read another document. So the requirement is
@@ -74,7 +97,9 @@ facing it. Rename `CLASSIFIER` and both halves follow.
 """
 
 import ast
+import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -1119,5 +1144,889 @@ def test_the_fast_gates_run_whatever_the_diff_touched(
             "The self-test is the one to think about twice. It is the job that checks the CI "
             "checkers, and this ticket adds one — so the run where the classification is wrong is "
             "the run where skipping it hides the mistake.",
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# The step in between: the `changed` job, executed on a runner-shaped PATH.
+# ---------------------------------------------------------------------------
+CHANGED_JOB = "changed"
+
+# The step that produces the job's answer is found through the job's own
+# `outputs:` block rather than by position, so a job that grows a second step is
+# still read correctly and a renamed output fails loudly instead of quietly.
+STEP_OUTPUT_REFERENCE = re.compile(
+    r"\$\{\{\s*steps\.(?P<step>[A-Za-z0-9_-]+)\.outputs\.(?P<name>[A-Za-z0-9_-]+)\s*\}\}"
+)
+
+# A `name=value` line as the step writes it into `$GITHUB_OUTPUT`.
+EMITTED = re.compile(r"^(?P<name>[A-Za-z0-9_-]+)=(?P<value>.*)$")
+
+# `python` is not on a GitHub runner's PATH in a job that declares no
+# `actions/setup-python`:
+#
+#   $ env -i PATH=/usr/bin:/bin sh -c 'command -v python; command -v python3'
+#   python: NOT FOUND
+#   /usr/bin/python3
+#
+# The step is run with a directory of this module's own at the front of PATH,
+# holding a `python` that does what a shell does for a command that is not there:
+# a line on stderr and exit 127. **Simulated rather than removed**, and the choice
+# is between two fragilities. A PATH rebuilt from nothing but symlinked `git` and
+# `python3` is true absence, and it also changes how those two find their own
+# helpers — so a failure under it would be as likely to be this module's as the
+# workflow's, on a machine nobody can inspect from here. What the defect is
+# observable as is an exit status, and this reproduces that exactly while leaving
+# everything else the machine has where it was.
+#
+# It has to be planted rather than relied upon either way: a developer's machine
+# may well have a working `python`, and a test that only fails on machines without
+# one reports the health of the machine.
+MISSING_COMMAND_STATUS = 127
+ABSENT_ON_THE_RUNNER = "python"
+PYTHON_SHIM = (
+    f'#!/bin/sh\necho "{ABSENT_ON_THE_RUNNER}: command not found" >&2\n'
+    f"exit {MISSING_COMMAND_STATUS}\n"
+)
+
+# What the job does have, and what every control below proves it still has. A PATH
+# on which `python` worked would let the interpreter mutation run perfectly and
+# pass every case in this section (`docs/MISTAKES.md` entry 3); a PATH on which
+# `git` or `python3` had stopped resolving would fail every case for a reason that
+# has nothing to do with the workflow.
+RUNNER_MUST_RESOLVE = ("git", "python3")
+
+PATH_DESCRIPTION = (
+    "this machine's PATH, behind a planted directory in which `python` exits 127 "
+    "exactly as a runner without `actions/setup-python` makes it"
+)
+
+# GitHub runs a `run:` block that declares no `shell:` as `bash -e {0}`. The `-e`
+# is not a detail here: the step captures a deliberate non-zero exit from the
+# classifier, and a script run without `-e` behaves differently from one run with
+# it at exactly that line. Faithful to the runner, and the same invocation
+# `test_the_detect_probes_see_the_files_their_jobs_run.py` already uses.
+STEP_SHELL_FLAGS = ("-e",)
+
+STEP_TIMEOUT_SECONDS = 120
+
+# Enough of a repository for `git diff` to have something to say. The seed file is
+# committed and never touched again, so a case that changes nothing still has a
+# tree to diff.
+SEED_FILE = "seed.txt"
+
+# A diff of only inert documentation, and one that touches code. Real paths in a
+# planted tree, so the classifier under them is answering the question this whole
+# module is about rather than one invented for this test.
+INERT_CHANGE = "docs/MISTAKES.md"
+CODE_CHANGE = "backend/app/services/authz.py"
+
+# A stand-in for the classifier that answers neither of its two answers, for the
+# one case the real one cannot produce on demand. Everything else below runs the
+# real script.
+CLASSIFIER_THAT_ANSWERS_NEITHER = "import sys\n\nsys.exit(3)\n"
+
+# A base that looks like a commit and is not in the clone. Forty hex digits, so
+# the emptiness checks above it pass it through to `git cat-file`.
+ABSENT_BASE_SHA = "b" * 40
+
+# `git`'s own environment for the commits this module makes. The two
+# `GIT_CONFIG_*` variables keep a developer's global configuration out of it —
+# a global `commit.gpgsign` would otherwise fail the commit and this test with it.
+GIT_ENVIRONMENT = {
+    "GIT_AUTHOR_NAME": "E0-38 test",
+    "GIT_AUTHOR_EMAIL": "e0-38@example.invalid",
+    "GIT_COMMITTER_NAME": "E0-38 test",
+    "GIT_COMMITTER_EMAIL": "e0-38@example.invalid",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
+
+def git(root: Path, *arguments: str) -> str:
+    """Run one git command in `root`, or fail saying what it said."""
+    executable = shutil.which("git")
+    if executable is None:
+        pytest.fail(
+            "git is not on PATH, so no repository can be planted and the `changed` job's step "
+            "cannot be given a diff to classify. This fails rather than skipping: a skip here is "
+            "indistinguishable from a step that classified correctly."
+        )
+    # S603: the executable is a resolved absolute path and the arguments are
+    # literals from this module.
+    completed = subprocess.run(  # noqa: S603
+        [executable, *arguments],
+        cwd=root,
+        env=os.environ | GIT_ENVIRONMENT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        pytest.fail(
+            f"`git {' '.join(arguments)}` exited {completed.returncode} in the planted repository "
+            f"at {root}.\n  {completed.stderr.strip()}\n"
+            "\nThis is the test's own fixture failing rather than the workflow "
+            "(`docs/MISTAKES.md` entry 13)."
+        )
+    return completed.stdout.strip()
+
+
+def planted_repository(root: Path, touched: Sequence[str]) -> str:
+    """A repository with two commits, the second touching `touched`. Answers the base SHA.
+
+    The files exist in both commits, so what the diff reports is a modification —
+    the ordinary shape of a pull request, rather than the additions a fresh tree
+    would produce.
+    """
+    root.mkdir(parents=True)
+    git(root, "init", "--quiet")
+
+    for relative in [SEED_FILE, *touched]:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("planted by E0-38's tests\n", encoding="utf-8")
+    git(root, "add", SEED_FILE, *touched)
+    git(root, "commit", "--quiet", "-m", "base")
+
+    for relative in touched:
+        (root / relative).write_text("planted by E0-38's tests, edited\n", encoding="utf-8")
+    if touched:
+        git(root, "add", *touched)
+        git(root, "commit", "--quiet", "--allow-empty", "-m", "the change under test")
+    else:
+        git(root, "commit", "--quiet", "--allow-empty", "-m", "nothing at all")
+
+    return git(root, "rev-parse", "HEAD~1")
+
+
+def install_real_classifier(root: Path) -> None:
+    """Point the planted repository at this repository's own scripts and tests.
+
+    Symlinked rather than copied, and the whole directories rather than the one
+    file, so that whatever the classifier reads — a sibling module, the suite it
+    derives the parsed documents from — it reads the real thing. A copy of one
+    file into an empty tree would test the classifier against a repository that
+    does not exist.
+
+    Neither symlink is committed, so neither appears in the diff the step
+    computes.
+    """
+    (root / "scripts").symlink_to(REPO_ROOT / "scripts", target_is_directory=True)
+    (root / "tests").symlink_to(TEST_TREE, target_is_directory=True)
+
+
+def install_classifier_source(root: Path, source: str) -> None:
+    """Put a stand-in classifier where the step will look for it."""
+    directory = root / CLASSIFIER.parent.relative_to(REPO_ROOT)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / CLASSIFIER.name).write_text(source, encoding="utf-8")
+
+
+def runner_shaped_path(root: Path) -> str:
+    """A PATH on which `python` behaves as it does on a runner with no setup-python.
+
+    Every claim it makes is executed before it is returned: `python` must exit
+    127, and `git` and `python3` must still resolve. A guard that has never been
+    run is a comment (`docs/MISTAKES.md` entry 9), and this one is load-bearing in
+    both directions — the whole section is vacuous if `python` still works, and
+    every case in it fails for the wrong reason if the other two stop resolving.
+    """
+    shell = shutil.which("bash")
+    if shell is None:
+        pytest.fail(
+            "bash is not on PATH, so the step cannot be executed as GitHub executes it. This "
+            "fails rather than skipping: a skip is indistinguishable from a step that ran and "
+            "classified correctly."
+        )
+
+    bin_directory = root / "runner-bin"
+    bin_directory.mkdir(parents=True)
+    shim = bin_directory / ABSENT_ON_THE_RUNNER
+    shim.write_text(PYTHON_SHIM, encoding="utf-8")
+    shim.chmod(0o755)
+
+    path = f"{bin_directory}{os.pathsep}{os.environ.get('PATH', '')}"
+
+    def probe(command: str) -> subprocess.CompletedProcess[str]:
+        # S603: a resolved absolute path, and a command built from this module's
+        # own literals.
+        return subprocess.run(  # noqa: S603
+            [shell, "-c", command],
+            env={"PATH": path},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    invoked = probe(f"{ABSENT_ON_THE_RUNNER} --version")
+    if invoked.returncode != MISSING_COMMAND_STATUS:
+        pytest.fail(
+            f"Running `{ABSENT_ON_THE_RUNNER}` under the PATH this module plants exited "
+            f"{invoked.returncode}, and a runner with no `actions/setup-python` answers "
+            f"{MISSING_COMMAND_STATUS}.\n"
+            f"  planted: {shim}\n"
+            f"  said:    {(invoked.stdout + invoked.stderr).strip()[:400] or '(nothing)'}\n"
+            "\n"
+            "Every case in this section is written to catch a step that invokes an interpreter "
+            "the runner does not have. With `python` working here they would all pass against "
+            "exactly that defect."
+        )
+
+    for name in RUNNER_MUST_RESOLVE:
+        if probe(f"command -v {name}").returncode != 0:
+            pytest.fail(
+                f"`{name}` does not resolve under the PATH this module plants, so the step under "
+                "test cannot run for a reason that has nothing to do with the workflow. Every "
+                "case in this section would fail, and each one would look like a defect in "
+                "`ci.yml`."
+            )
+
+    return path
+
+
+def classification_step(
+    workflow: dict[str, Any], workflow_path: Path
+) -> tuple[str, dict[str, Any]]:
+    """The output name the `changed` job publishes, and the step that produces it."""
+    jobs = jobs_of(workflow, workflow_path)
+    job = jobs.get(CHANGED_JOB)
+    if not job:
+        pytest.fail(
+            f"{workflow_path} declares no `{CHANGED_JOB}` job (it declares {sorted(jobs)}). That "
+            "job is where E0-38's classification runs; if it has been renamed, rename it here too "
+            "rather than leaving this module looking for something that is gone."
+        )
+
+    published = [
+        (name, match)
+        for name, value in (job.get("outputs") or {}).items()
+        if (match := STEP_OUTPUT_REFERENCE.search(str(value)))
+    ]
+    if len(published) != 1:
+        pytest.fail(
+            f"The `{CHANGED_JOB}` job publishes {len(published)} step outputs and this module "
+            "expects exactly one — the classification every expensive gate reads.\n"
+            f"  outputs: {dict(job.get('outputs') or {})}\n"
+            "\n"
+            "If the job now publishes several, this module has to be told which one is the "
+            "verdict rather than guessing at it."
+        )
+
+    output_name, match = published[0]
+    step_id = match.group("step")
+    for step in steps_of(job):
+        if step.get("id") == step_id:
+            return output_name, step
+
+    pytest.fail(
+        f"The `{CHANGED_JOB}` job publishes `{output_name}` from a step with id `{step_id}`, and "
+        "no step in that job has that id. Nothing writes the output every expensive gate reads, "
+        "so it would arrive empty — and an empty output is not `'true'`, which means every gate "
+        "runs and the filter has silently never fired."
+    )
+
+
+def run_classification_step(
+    step: dict[str, Any],
+    repository: Path,
+    workspace: Path,
+    event: dict[str, str],
+) -> tuple[int, dict[str, str], str]:
+    """Execute the step over a planted repository. Answers its status, outputs and log.
+
+    Run the way GitHub runs it — `bash -e`, the context values arriving through
+    the environment the step's own `env:` block puts them in — and with `python`
+    answering 127, which is what the job's empty `uses:` list leaves on a runner.
+    """
+    shell = shutil.which("bash")
+    if shell is None:
+        pytest.fail("bash is not on PATH, so the step cannot be executed as GitHub executes it.")
+
+    declared_shell = step.get("shell")
+    if declared_shell is not None and str(declared_shell).split()[0] != "bash":
+        pytest.fail(
+            f"The step declares `shell: {declared_shell}`, which this module cannot run. It "
+            "executes the block with bash and `-e`, as GitHub does by default on Linux; a step "
+            "that has moved to another shell has to teach this module the new form before its "
+            "answer means anything."
+        )
+
+    script = step.get("run")
+    if not isinstance(script, str) or not script.strip():
+        pytest.fail(
+            "The classification step runs no script, so it emits nothing. Every gate conditioned "
+            "on its output then reads an empty string, which is not `'true'` — so every gate runs, "
+            "the filter has silently never fired, and E0-38 has shipped as a comment."
+        )
+
+    path = runner_shaped_path(workspace)
+    output_file = workspace / "github-output"
+    output_file.write_text("", encoding="utf-8")
+    home = workspace / "home"
+    home.mkdir()
+    script_file = workspace / "classification-step.sh"
+    script_file.write_text(script, encoding="utf-8")
+
+    environment = {
+        "PATH": path,
+        "HOME": str(home),
+        "TMPDIR": str(workspace),
+        "GITHUB_OUTPUT": str(output_file),
+        "LC_ALL": "C",
+        **GIT_ENVIRONMENT,
+        **event,
+    }
+
+    try:
+        # S603: a resolved absolute path, and a script this test just wrote out of
+        # the repository's own workflow file.
+        completed = subprocess.run(  # noqa: S603
+            [shell, *STEP_SHELL_FLAGS, str(script_file)],
+            cwd=repository,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=STEP_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"The classification step ran for more than {STEP_TIMEOUT_SECONDS}s over a planted "
+            "repository. E0-38 asks for a cheap step whose whole point is being cheaper than the "
+            "gates it switches off."
+        )
+
+    emitted: dict[str, str] = {}
+    for line in output_file.read_text(encoding="utf-8").splitlines():
+        match = EMITTED.match(line.strip())
+        if match:
+            emitted[match.group("name")] = match.group("value")
+
+    log = (completed.stdout + completed.stderr).strip()
+    return completed.returncode, emitted, log
+
+
+def described(status: int, emitted: dict[str, str], log: str) -> str:
+    """One block of diagnosis, for a reader who is looking at this in the dark."""
+    return "\n".join(
+        [
+            f"    step exit status: {status}",
+            f"    emitted:          {emitted or 'nothing at all'}",
+            f"    ran with:         {PATH_DESCRIPTION}",
+            f"    log:              {log[:800] or '(nothing)'}",
+        ]
+    )
+
+
+def test_the_changed_job_classifies_the_diff_on_a_runner_that_has_only_python3(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any], tmp_path: Path
+) -> None:
+    """The step reaches the classifier and reports its answer, on the PATH a runner has.
+
+    The `changed` job deliberately declares no `actions/setup-python` — the
+    classifier is standard library only and does not need one, and that is the
+    property worth keeping, since the job's whole value is being cheaper than what
+    it switches off. The cost of that choice is that **`python` does not exist on
+    the runner**:
+
+        $ env -i PATH=/usr/bin:/bin sh -c 'command -v python; command -v python3'
+        python: NOT FOUND
+        /usr/bin/python3
+
+    The step's first version invoked `python`. It exits 127, which is neither of
+    the classifier's two answers, so the branch below emitted `inert=false` — and
+    would have gone on emitting it on every pull request forever. Every gate would
+    have run every time, exactly as before the ticket, with `CI` green and the job
+    reporting success. That was found and fixed while building, and reverting
+    `python3` to `python` afterwards left all 348 tests and 100 self-test checks
+    green. A fix with nothing asserting it is `docs/MISTAKES.md` entry 2, and the
+    behaviour it would let back in is this ticket's own subject: a gate that never
+    runs, indistinguishable in a green checkmark from one that passed.
+
+    **Three cases, and they need each other.** The documentation-only diffs are
+    what the interpreter mutation breaks — under it they emit `false` and this goes
+    red. The code diff is what stops the whole thing being satisfied by a step that
+    emits `true` unconditionally, which would skip every gate on every pull request
+    and is the worse failure of the two. And the two events are separate cases
+    because the step reads a different context value for each: a step that took
+    `github.event.before` on a pull request would emit `false` on every pull
+    request, which is the same silent never-fires shape reached by a different
+    route.
+
+    **Executed, not read.** The step is pulled out of the parsed workflow and run
+    under `bash -e` — GitHub's default for a block that declares no `shell:` —
+    against a real git repository with a real diff, with the classifier reached
+    through a symlink to this repository's own `scripts/`. A test that read the
+    line and objected to the word `python` would be asserting the spelling; what
+    is asserted here is that whatever it invokes exists in the environment the job
+    actually has.
+
+    **The mutation this survives:** change `python3` back to `python` in the
+    `changed` job. **The near miss that must stay green:** any other way of naming
+    an interpreter the job has — an absolute path, `"${{ env.PYTHON }}"` resolved
+    to something present, or adding `actions/setup-python` and going back to
+    `python`, which would be a slower job and not a broken one.
+    """
+    output_name, step = classification_step(ci_workflow, ci_workflow_path)
+
+    cases: tuple[tuple[str, str, tuple[str, ...], str], ...] = (
+        (
+            "a documentation-only pull request, the shape this epic produced six times",
+            "pull_request",
+            (INERT_CHANGE,),
+            "true",
+        ),
+        (
+            "a documentation-only push to an epic branch",
+            "push",
+            (INERT_CHANGE,),
+            "true",
+        ),
+        (
+            "a pull request that touches Python",
+            "pull_request",
+            (CODE_CHANGE,),
+            "false",
+        ),
+    )
+
+    wrong: list[str] = []
+    for index, (case, event_name, touched, expected) in enumerate(cases):
+        workspace = tmp_path / f"case-{index}"
+        workspace.mkdir()
+        repository = workspace / "repo"
+        base = planted_repository(repository, touched)
+        install_real_classifier(repository)
+
+        event = {
+            "EVENT_NAME": event_name,
+            "PR_BASE_SHA": base if event_name == "pull_request" else "",
+            "PUSH_BEFORE": base if event_name != "pull_request" else "",
+        }
+        status, emitted, log = run_classification_step(step, repository, workspace, event)
+
+        if emitted.get(output_name) != expected:
+            wrong.append(
+                f"  {case}\n"
+                f"    changed:          {list(touched)}\n"
+                f"    expected:         {output_name} = {expected}\n"
+                + described(status, emitted, log)
+            )
+
+    assert not wrong, "\n".join(
+        [
+            "The classification step did not answer for these diffs, run on a PATH shaped like "
+            "the runner's:",
+            *wrong,
+            "",
+            "These ran with `python` answering 127, which is what a GitHub runner does with it in "
+            "a job that declares no `actions/setup-python`:",
+            "",
+            "    $ env -i PATH=/usr/bin:/bin sh -c 'command -v python; command -v python3'",
+            "    python: NOT FOUND",
+            "    /usr/bin/python3",
+            "",
+            "`git` and `python3` resolve normally, and both were proved to before any case ran.",
+            "",
+            "An exit status of 127 in the log means the step invoked an interpreter the runner "
+            "does not have. It is not a crash anybody sees: the branch below it emits a "
+            "classification that runs every gate, so the pipeline stays green and the filter "
+            "never fires once. That is the defect this test exists for, and it was live in the "
+            "first version of this step.",
+            "",
+            "A non-zero step status with nothing emitted means something else: the step died "
+            "before writing its output. `bash -e` is what GitHub runs a `run:` block with, and "
+            "under `-e` a bare command that exits non-zero ends the script — so a classifier "
+            "answering 1 for 'not inert' would abort the step unless its status is captured in a "
+            "tested position. The step would then fail, the `changed` job with it, every gate "
+            "that needs it reports `skipped`, and the aggregate `ci` check reads that as failure.",
+        ]
+    )
+
+
+def test_every_way_the_diff_can_fail_still_emits_a_classification_that_runs_everything(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any], tmp_path: Path
+) -> None:
+    """Every route out of the step ends in a classification, and none of them ends in a failure.
+
+    The step has four ways not to know what changed — no base commit, a base the
+    clone does not hold, a diff that errors, and a classifier that answers neither
+    of its two answers — and the only safe reading of all four is the full
+    pipeline. Each must therefore emit the classification that runs everything.
+
+    **And each must leave the step succeeding, which is the half worth saying out
+    loud.** The tempting alternative is to let the step fail: it is honest, it is
+    loud. It is also a red pipeline on a green repository — the `changed` job
+    fails, every gate that needs it reports `skipped`, and E0-36 made the aggregate
+    check read `skipped` as failure. So an unreachable base commit would block
+    every merge rather than costing fifteen minutes of runner time. The workflow
+    chose to run everything and say so in a notice; this holds it to both halves.
+
+    **The emptiest case is the one that pays.** A step that emitted nothing at all
+    — because it died, because the output name changed — leaves every gate reading
+    an empty string, which is not `'true'`, so every gate runs and the pipeline
+    looks exactly like a working filter over a busy repository. That is why these
+    assert the *value* rather than merely that nothing was `true`.
+
+    **The mutation this survives:** drop the `emit` from any one of the early exits
+    in the `changed` job, or turn one of them into a non-zero exit. **The near miss
+    that must stay green:** changing the notice text, or reordering the checks, or
+    replacing the `case` with an `if` — nothing here reads how the step decides.
+    """
+    output_name, step = classification_step(ci_workflow, ci_workflow_path)
+
+    # `(case, event, touched, base, classifier source or None for the real one)`.
+    cases: tuple[tuple[str, str, tuple[str, ...], str, str | None], ...] = (
+        (
+            "a pull request whose base sha did not arrive",
+            "pull_request",
+            (INERT_CHANGE,),
+            "",
+            None,
+        ),
+        (
+            "a first push to a new branch, whose `before` is all zeroes",
+            "push",
+            (INERT_CHANGE,),
+            "0" * 40,
+            None,
+        ),
+        (
+            "a base commit this clone does not hold, as a shallow fetch would leave it",
+            "pull_request",
+            (INERT_CHANGE,),
+            ABSENT_BASE_SHA,
+            None,
+        ),
+        (
+            "a classifier that answers neither of its two answers",
+            "pull_request",
+            (INERT_CHANGE,),
+            "",
+            CLASSIFIER_THAT_ANSWERS_NEITHER,
+        ),
+    )
+
+    wrong: list[str] = []
+    for index, (case, event_name, touched, base, source) in enumerate(cases):
+        workspace = tmp_path / f"case-{index}"
+        workspace.mkdir()
+        repository = workspace / "repo"
+        planted_base = planted_repository(repository, touched)
+        if source is None:
+            install_real_classifier(repository)
+        else:
+            install_classifier_source(repository, source)
+
+        # An empty `base` in the table means "this case is about the base being
+        # missing"; the stub case wants a real one, so that what it exercises is
+        # the exit status and not the base check three branches above it.
+        given = base if source is None else planted_base
+        event = {
+            "EVENT_NAME": event_name,
+            "PR_BASE_SHA": given if event_name == "pull_request" else "",
+            "PUSH_BEFORE": given if event_name != "pull_request" else "",
+        }
+        status, emitted, log = run_classification_step(step, repository, workspace, event)
+
+        if status != 0 or emitted.get(output_name) != "false":
+            wrong.append(
+                f"  {case}\n"
+                f"    expected:         exit 0, {output_name} = false\n"
+                + described(status, emitted, log)
+            )
+
+    assert not wrong, "\n".join(
+        [
+            "These routes out of the classification step do not end in a classification that "
+            "runs every gate:",
+            *wrong,
+            "",
+            "Each of them means 'we do not know what changed', and the only safe reading of that "
+            "is the full pipeline. A route that emits nothing is not equivalent: an unset output "
+            "reaches every gate as an empty string, which is not `'true'`, so the gates do run — "
+            "and the pipeline is then indistinguishable from a working filter over a repository "
+            "where every pull request happens to touch code.",
+            "",
+            "A non-zero exit status is not equivalent either, and it is the more attractive "
+            "mistake. A step that fails takes the `changed` job with it; every gate that needs "
+            "that job then reports `skipped`; and E0-36 item 1 made the aggregate `ci` check read "
+            "`skipped` as failure. So a base commit missing from a shallow clone would block the "
+            "merge instead of costing runner time.",
+        ]
+    )
+
+
+def test_the_classifier_imports_nothing_the_changed_job_installs(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any]
+) -> None:
+    """The job installs nothing, so the classifier may import only the standard library.
+
+    The `changed` job runs no `actions/setup-python` and no `pip install`, which
+    is what makes it cheap enough to sit in front of everything. The bill for that
+    is that whatever it runs has to work on the interpreter the runner already
+    has, with nothing on `sys.path` but the standard library and the script's own
+    directory.
+
+    **An import that fails is not a crash anybody sees.** A Python script that
+    raises `ModuleNotFoundError` exits 1, and 1 is one of the classifier's two
+    meaningful answers — it is 'not inert, run everything'. So a third-party
+    import here does not break the pipeline, it silently converts the filter into
+    a step that answers 'run everything' on every pull request, forever, with the
+    job reporting success. Identical in the checks interface to the `python`
+    defect, arriving by a different door.
+
+    This is asserted statically as well as by execution because the two say
+    different things. The executed cases above run the classifier with no
+    `PYTHONPATH` and no virtualenv, so a missing dependency shows up there as a
+    documentation-only diff emitting `false` — true, and it does not say why. This
+    one names the import and the line.
+
+    **The mutation this survives:** add `import yaml` to the classifier. **The
+    near miss that must stay green:** importing a module that sits beside it in
+    `scripts/ci/`, which the runner resolves through the script's own directory
+    and which this allows for that reason.
+    """
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+    job = jobs.get(CHANGED_JOB)
+    assert job, (
+        f"{ci_workflow_path} declares no `{CHANGED_JOB}` job (it declares {sorted(jobs)}). The "
+        "rule below is about what that job installs; without the job there is nothing to hold the "
+        "classifier to."
+    )
+
+    installs = sorted(
+        str(step.get("uses"))
+        for step in steps_of(job)
+        if "setup-python" in str(step.get("uses") or "")
+    )
+    assert not installs, "\n".join(
+        [
+            f"The `{CHANGED_JOB}` job now uses {installs}.",
+            "",
+            "That makes the rule below unnecessary and this test wrong rather than red — but it "
+            "also spends the runner-setup time the job exists to avoid, on every pull request, in "
+            "front of every other gate. If that is a deliberate trade, say so in the workflow and "
+            "delete this test with the reason attached.",
+        ]
+    )
+
+    assert CLASSIFIER.is_file(), (
+        f"{CLASSIFIER.relative_to(REPO_ROOT)} does not exist, so there is nothing here to read. "
+        "`classify()` at the top of this module says what to change if it has moved."
+    )
+
+    tree = ast.parse(CLASSIFIER.read_text(encoding="utf-8"))
+    beside_it = {path.stem for path in CLASSIFIER.parent.glob("*.py")}
+
+    outside: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module] if node.module and not node.level else []
+        else:
+            continue
+        for name in names:
+            root = name.split(".")[0]
+            if root in sys.stdlib_module_names or root in beside_it:
+                continue
+            outside.append(f"  line {node.lineno}: {name}")
+
+    assert not outside, "\n".join(
+        [
+            f"{CLASSIFIER.relative_to(REPO_ROOT)} imports modules the `{CHANGED_JOB}` job does "
+            "not install:",
+            *outside,
+            "",
+            "That job runs no `actions/setup-python` and no `pip install`, deliberately — it "
+            "sits in front of every other gate and its value is being cheap. An import it cannot "
+            "satisfy raises `ModuleNotFoundError`, which exits 1, and 1 is one of this "
+            "classifier's two real answers: 'not inert, run everything'.",
+            "",
+            "So this does not fail the build. It turns the filter into a step that answers 'run "
+            "everything' on every pull request, permanently, with the job green — the same shape "
+            "as invoking `python` on a runner that has only `python3`, reached through a "
+            "different door.",
+            "",
+            f"Modules sitting beside it in {CLASSIFIER.parent.relative_to(REPO_ROOT)} are allowed: "
+            "the runner puts the script's own directory on `sys.path`.",
+        ]
+    )
+
+
+def test_the_changed_job_fetches_enough_history_to_find_the_base_commit(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any]
+) -> None:
+    """The clone has to hold the commit the diff is taken against, or the filter never fires again.
+
+    `actions/checkout` clones one commit deep by default. The step diffs against
+    the base, checks first whether the clone holds it, and emits the classification
+    that runs everything when it does not — the safe direction, and a silent one:
+    every gate runs on every pull request, every job reports success, `CI` is
+    green, and the only symptom is that the pipeline is as slow as it was before
+    this ticket. Nobody opens a green run to find out why it was green.
+
+    So the one line that keeps the filter working at all is `fetch-depth: 0`, and
+    nothing else in this suite can see it. The executed cases above plant a
+    complete repository, which is exactly the condition under which a shallow-clone
+    regression is invisible.
+
+    **Zero rather than a number.** A depth of 50 works until somebody opens a pull
+    request against a base 51 commits back, and then the filter stops firing for
+    that pull request only — which is the same silence, arriving intermittently.
+
+    **This passes today.** It is a regression guard for a line whose loss has no
+    other symptom, not a red.
+
+    **The mutation this survives:** delete the `with: fetch-depth: 0` from the
+    `changed` job's checkout. **The near miss that must stay green:** the other
+    jobs' checkouts, which do not diff against anything and are left alone.
+    """
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+    job = jobs.get(CHANGED_JOB)
+    assert job, (
+        f"{ci_workflow_path} declares no `{CHANGED_JOB}` job (it declares {sorted(jobs)}). If it "
+        "has been renamed, rename it here too rather than leaving this module looking for "
+        "something that is gone."
+    )
+
+    checkouts = [
+        step for step in steps_of(job) if "actions/checkout" in str(step.get("uses") or "")
+    ]
+    assert checkouts, (
+        f"The `{CHANGED_JOB}` job checks nothing out, so there is no working tree to diff and no "
+        "`fetch-depth` to hold. Either the job no longer computes the diff here, or this module "
+        "is looking at the wrong job — and the assertion below would pass over both."
+    )
+
+    shallow = [
+        f"  {step.get('uses')} with {dict(step.get('with') or {})}"
+        for step in checkouts
+        if str((step.get("with") or {}).get("fetch-depth", "")) != "0"
+    ]
+
+    assert not shallow, "\n".join(
+        [
+            f"The `{CHANGED_JOB}` job's checkout does not fetch the full history:",
+            *shallow,
+            "",
+            "`actions/checkout` clones one commit deep by default, so the base commit the step "
+            "diffs against is not in the clone. The step notices, says so in a notice, and emits "
+            "the classification that runs every gate — which is the safe direction and a "
+            "completely silent one. Every job reports success, `CI` is green, and the filter has "
+            "stopped firing permanently with nothing anywhere saying so.",
+            "",
+            "A finite depth is not a smaller version of this. It works until a pull request is "
+            "opened against a base further back than the number, and then the filter stops firing "
+            "for that pull request alone, which is the same silence arriving intermittently.",
+        ]
+    )
+
+
+def test_a_rename_out_of_a_code_directory_is_not_read_as_a_documentation_change(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any], tmp_path: Path
+) -> None:
+    """A path the diff does not report is a path nothing classifies.
+
+    The step asks git for the changed paths and hands them to the classifier, so
+    everything downstream can only be as complete as that list. Git detects
+    renames by default — `diff.renames` has been on since 2.9 — and a rename is one
+    change entry rather than two. If `--name-only` reports only where the file
+    landed, then moving `backend/app/services/authz.py` to `docs/` produces a diff
+    that reads as documentation, the classification is inert, and **pytest does not
+    run on a change that deleted a service module**.
+
+    That is this ticket's own failure mode reached through the diff rather than
+    through the allowlist: the classifier is not wrong, it is answering about a
+    path list with a hole in it. `--no-renames` closes it by reporting the delete
+    and the add as two entries, which is one word and costs nothing — a rename
+    inside `docs/` still reports two inert paths and stays inert.
+
+    **Not a hypothetical shape, even if this particular move is unusual.** Any
+    rename whose source is outside the inert set and whose destination is inside it
+    has this property, and E0-38's own rule is that anything not known to be inert
+    runs everything. A path that never reaches the classifier is not known to be
+    anything.
+
+    **This test does not assume the answer.** If git reports both sides of a
+    rename here, it passes and is a regression guard against somebody turning that
+    off. If it reports only the destination, it is red against a real hole.
+
+    **The mutation this survives:** whatever closes it — removing `--no-renames`,
+    or setting `diff.renames` back on. **The near miss that must stay green:** a
+    rename entirely inside `docs/`, which is asserted below and must stay inert:
+    trimming `docs/mistakes/` moves files about and is exactly the shape this
+    ticket exists to skip.
+    """
+    output_name, step = classification_step(ci_workflow, ci_workflow_path)
+
+    renames: tuple[tuple[str, str, str, str], ...] = (
+        (
+            "a service module renamed into the documentation tree",
+            CODE_CHANGE,
+            "docs/moved-out-of-the-code-tree.md",
+            "false",
+        ),
+        (
+            "a record renamed within the documentation tree, which must stay inert",
+            "docs/mistakes/40-a-record-this-test-invented.md",
+            "docs/mistakes/41-a-record-this-test-invented.md",
+            "true",
+        ),
+    )
+
+    wrong: list[str] = []
+    for index, (case, source, destination, expected) in enumerate(renames):
+        workspace = tmp_path / f"rename-{index}"
+        workspace.mkdir()
+        repository = workspace / "repo"
+        repository.mkdir(parents=True)
+
+        git(repository, "init", "--quiet")
+        for relative in (SEED_FILE, source):
+            path = repository / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "planted by E0-38's tests, and long enough to be\n" * 8, encoding="utf-8"
+            )
+        git(repository, "add", SEED_FILE, source)
+        git(repository, "commit", "--quiet", "-m", "base")
+
+        (repository / destination).parent.mkdir(parents=True, exist_ok=True)
+        git(repository, "mv", source, destination)
+        git(repository, "commit", "--quiet", "-m", "the rename under test")
+        base = git(repository, "rev-parse", "HEAD~1")
+
+        install_real_classifier(repository)
+        event = {"EVENT_NAME": "pull_request", "PR_BASE_SHA": base, "PUSH_BEFORE": ""}
+        status, emitted, log = run_classification_step(step, repository, workspace, event)
+
+        if emitted.get(output_name) != expected:
+            wrong.append(
+                f"  {case}\n"
+                f"    renamed:          {source} -> {destination}\n"
+                f"    expected:         {output_name} = {expected}\n"
+                + described(status, emitted, log)
+            )
+
+    assert not wrong, "\n".join(
+        [
+            "The classification does not see both sides of a rename:",
+            *wrong,
+            "",
+            "Git detects renames by default and reports one entry for them. If that entry is the "
+            "destination alone, a file moved out of the code tree into `docs/` produces a diff "
+            "that reads as pure documentation — so the classification is inert, and pytest does "
+            "not run on a change that deleted a service module. The classifier is not wrong "
+            "there; it is answering about a path list with a hole in it.",
+            "",
+            "`--no-renames` on the `git diff` closes it: the delete and the add arrive as two "
+            "paths, the source is outside the inert set, and everything runs. The second case "
+            "above is what it must not cost — a rename inside `docs/` reports two inert paths and "
+            "stays inert, which is what trimming `docs/mistakes/` looks like.",
         ]
     )
