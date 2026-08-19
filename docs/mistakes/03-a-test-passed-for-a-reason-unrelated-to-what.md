@@ -1,10 +1,29 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 41**
+**Caught: 42**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*20 instances recorded; the 3 most recent are below. The earlier 17 are in this file's git history and in the pull requests they cite.*
+*21 instances recorded; the 3 most recent are below. The earlier 18 are in this file's git history and in the pull requests they cite.*
+
+*(Writing E0-38's tests, and it is the variant where **the safe reading and the
+asserting reading are the same exit code**. The classification E0-38 adds must
+fail toward running everything, so the pipeline has to read any non-zero exit —
+a crash, a bad argument, a missing file — as "not inert, run the full pipeline".
+The obvious `classify()` helper copies that: exit 0 is inert, anything else is
+not inert. Six of the seven behaviour cases in the module assert **not inert**,
+and no classifier existed yet, so `sys.executable` on a script that is not there
+exits 2 and all six would have passed on the day the ticket opened — a red-green
+ticket whose tests were green before anybody started, and which would have stayed
+green over a classifier that crashed on every input. `classify()` now fails
+loudly on a missing file and on any exit outside the two the contract names, so a
+not-inert verdict can only come from a classifier that ran and decided. The same
+reading put two controls and a canary on the sweep that derives the parsed
+documents from the suite: it must find the document in a module shaped like
+`test_ai_contracts.py`, find nothing in a module that only cites documents in
+prose, and still find `docs/SPEC.md` in the real tree — because a reader that has
+gone blind reports that the suite parses no documents at all, which satisfies
+"every document a test reads is outside the inert set" perfectly.)*
 
 *(Writing E0-36's tests, twice over. The sweep asking whether a failing gate
 reaches the required `CI` check runs the aggregate job's own verdict script under
@@ -49,33 +68,6 @@ a marked test can produce. **When a gate's failure exit has more than one cause,
 `== 1` is not an assertion about which one**, and adding a non-emptiness guard
 inside the checker is what created the ambiguity in the first place — the guard
 against a vacuous pass became a second route to the same exit code.)*
-
-*(Building E0-29 item 4b, twice, and the second time is the one that matters.
-**First**, on a verdict that was right for the wrong reason: a licence body was
-scanned against the rule table in list order, and a GPL body and an AGPL body
-both deny whichever way you order the `Affero` and `General Public License`
-rules, so the verdict cannot see the ordering the design rests on. Every body
-case was given a **reason** assertion as well as a verdict for that.
-
-**Second**, on the fixtures those assertions ran against, which is where the
-lesson is. They were hand-written bodies plus a GPL-3 excerpt I had *trimmed* to
-avoid a mention of the AGPL that produced a confusing reason. The suite was
-green and the change had moved the real GPL-2 from `deny` to `review` — a
-build failure to an advisory that exits 0 — because the GPL-2 preamble says
-other FSF software "is covered by the GNU Lesser General Public License
-instead", eighteen lines in, and the LGPL rule sits above the GPL rule. **The
-trimming was the signal and I did not read it**: I had already met the
-mention-versus-declaration problem, solved it inside one fixture by cutting the
-text, and not asked whether it was general. A fixture edited to avoid an awkward
-result is a defect you have already found and declined to name. The battery now
-uses the smallest excerpt of each *real* text that carries both the declaring
-line and the phrase that used to trap it, each verified to produce the same
-verdict and reason as the full file, and `classify_body` takes the rule matching
-earliest in the text rather than the first rule that matches anywhere.
-
-**When a check's safety comes from which rule fires rather than from the answer,
-assert which rule fired** — and when a fixture has to be trimmed to make a test
-comfortable, the trimming is the finding.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
