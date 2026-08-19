@@ -347,7 +347,7 @@ that ticket includes removing its tolerance:
 | Compose health (`mock-lms`) | 14 |
 | Compose health (`mock-idp`) | 16 |
 | migration drift | 04 |
-| §4.1 invariant suite — no skips permitted | 10 |
+| §4.1 invariant suite — no skips permitted, and no marked test that asserts nothing | 10 (skips), 36 (assertions) |
 | Playwright e2e | 18 |
 | AI eval floors | E2, not E0 — the last tolerance to survive this epic |
 

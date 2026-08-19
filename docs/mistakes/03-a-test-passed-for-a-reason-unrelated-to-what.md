@@ -1,29 +1,10 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 39**
+**Caught: 40**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*18 instances recorded; the 3 most recent are below. The earlier 15 are in this file's git history and in the pull requests they cite.*
-
-*(Writing E0-34's tests, on a test whose whole subject is a
-*failure*. Two of them plant a `.sql` file that reads an identity column and then
-assert the guard rejects it, and the natural spelling is
-`with pytest.raises(AssertionError):` around the call. That passes for at least
-three reasons that are not the one it claims: the guard's own non-vacuity
-assertions fire when the planted directory is empty, when the marker convention
-has stopped marking anything, or when the redirection of `VIEWS_SQL_DIR` has not
-taken effect and the guard is reading the real directory — in each case the
-planted file was never swept, and the test reports the guard working. Both now
-pin *which* assertion fired by requiring the message to name the identity column
-as a whole word, which is the acceptance criterion anyway; the redirection is
-asserted before anything is called; and the message that would otherwise be a
-puzzle says out loud that a different failure inside the guard is one of the
-things being distinguished. The word boundary is the same rule applied once more:
-the sibling assertion asks that the *qualification* failure does **not** name the
-column, and a substring check answers that wrongly for a column called `name`,
-since that message contains the phrase "every relation a view or function
-names".)*
+*19 instances recorded; the 3 most recent are below. The earlier 16 are in this file's git history and in the pull requests they cite.*
 
 *(Writing E0-35's tests, on three sweeps whose subject set is empty today. E0
 ships no application write path — the ticket records that as correct — so the
@@ -65,6 +46,26 @@ recipe and leaving the prose would have kept that test green over a `make ci` th
 had stopped checking the invariant run. The helper now cuts comments before a line
 counts as a command, which is the same rule the two CI-workflow modules already
 applied one layer up.)*
+
+*(Building E0-36 item 3, in the checker's own self-test, and it is the variant
+where **the exit code means more than one thing**. `check_invariant_assertions.py`
+exits 1 for three different reasons: the rule refused a marked test, it found no
+marked test at all, and it could not parse a file. Every refusal check in
+`scripts/ci/test_ci_scripts.py` was written as `== 1`, which a checker that never
+saw the marker satisfies perfectly — it reports an empty scan, and that is 1 too.
+This was not reasoned out; the mutation battery found it. Two samples had been
+added *specifically* to kill a mutation reading only the first decorator, they
+went green under that mutation, and the second survivor — dropping the descent
+into test classes — went green for the same reason. So the samples added to close
+a hole were themselves satisfied by the hole. The repair is the one the test
+author had already used on the other side of the wall: a refusal is checked as
+the pair `(1, the offending test was named)`, which only a checker that read the
+body and applied the rule can produce, and the two "is this shape seen at all"
+samples now carry an assertion and expect **0**, which only a checker that found
+a marked test can produce. **When a gate's failure exit has more than one cause,
+`== 1` is not an assertion about which one**, and adding a non-emptiness guard
+inside the checker is what created the ambiguity in the first place — the guard
+against a vacuous pass became a second route to the same exit code.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

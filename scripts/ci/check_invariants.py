@@ -7,6 +7,12 @@ a deleted invariant test looks exactly like a suite that never had it. This
 checker closes that gap: for the invariant suite, a skip is a failure, an xfail
 is a failure, and collecting nothing at all is a failure.
 
+**This is one half of the gate, and it cannot see the other half's subject.** It
+reads the JUnit XML a run produced, which carries no assertion count, so a marked
+test that ran and asserted nothing is counted toward the "N invariant test(s)
+ran" printed below. `check_invariant_assertions.py` reads the sources and refuses
+exactly that (E0-36 item 3). Both callers run both, in that order.
+
 Usage:
     check_invariants.py reports/invariants.xml
     check_invariants.py reports/invariants.xml --allow-empty   # nothing passes this
