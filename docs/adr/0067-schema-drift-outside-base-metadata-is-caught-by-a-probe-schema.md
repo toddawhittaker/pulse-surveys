@@ -135,8 +135,8 @@ A generated-column expression, a check-constraint expression, an exclusion
 constraint, a fourth ACL grantee on a relation or on a definer function, a
 runtime role's privilege on a base table, a non-inheriting role membership, a
 dropped view and a re-owned `SECURITY DEFINER` function each now fail a named
-test. Thirty-six distinct mutations were run against these assertions across
-four rounds, including eight near-misses that must stay green; the table is in
+test. Thirty-eight distinct mutations were run against these assertions across
+five rounds, including nine near-misses that must stay green; the table is in
 E0-33's pull request.
 
 **An earlier version of this paragraph claimed that "a non-inheriting role
