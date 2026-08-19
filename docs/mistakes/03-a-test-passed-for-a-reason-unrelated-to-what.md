@@ -1,27 +1,10 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 40**
+**Caught: 41**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*19 instances recorded; the 3 most recent are below. The earlier 16 are in this file's git history and in the pull requests they cite.*
-
-*(Writing E0-35's tests, on three sweeps whose subject set is empty today. E0
-ships no application write path — the ticket records that as correct — so the
-sweep asking which modules write `course` without calling `guard_write` walks the
-whole application, finds nothing, and passes; it would pass identically on the
-day E1's roster sync lands unrouted in a shape the matcher cannot see. Emptiness
-was not the only way the three could have gone green. The marker sweep asserts
-that no column on an LMS-owned table is unaccounted for, which is most thoroughly
-satisfied by a metadata walk that found no tables; the derived-calendar sweep
-asserts that only one module assigns four columns, which is satisfied by a
-matcher that recognises no assignment anywhere. So each of the three now carries
-both halves of this entry's rule — the samples it must catch and the near-miss it
-must allow, one property apart — and a non-vacuity assertion in front of the
-emptiness: the marker sweep requires the `lms_` prefix to exist somewhere before
-its absence elsewhere is allowed to mean anything, and the calendar sweep
-requires the sanctioned writer to be visible to it before its silence about every
-other module counts.)*
+*20 instances recorded; the 3 most recent are below. The earlier 17 are in this file's git history and in the pull requests they cite.*
 
 *(Writing E0-36's tests, twice over. The sweep asking whether a failing gate
 reaches the required `CI` check runs the aggregate job's own verdict script under
@@ -66,6 +49,21 @@ a marked test can produce. **When a gate's failure exit has more than one cause,
 `== 1` is not an assertion about which one**, and adding a non-emptiness guard
 inside the checker is what created the ambiguity in the first place — the guard
 against a vacuous pass became a second route to the same exit code.)*
+
+*(Building E0-29 item 4b, on a **verdict that was right for the wrong reason**.
+The licence checker now scans a whole licence body against its rule table
+instead of splitting it on connectors, and what keeps that from being a hole is
+that every deny and review rule sits above every allow rule, so a body reaches a
+deny before it can reach a permissive word occurring in its prose. The obvious
+test is that a GPL body denies and an AGPL body denies. Both do — and both go on
+denying if you move the `Affero` rule *below* the `General Public License` rule,
+which destroys exactly the ordering guarantee the design rests on, because an
+AGPL body denies either way. The verdict cannot see the property. So every body
+case asserts the **reason** as well as the verdict, and the reason is what the
+`affero-below-gpl` mutation trips; nothing else in the battery notices it.
+**When a check's safety comes from which rule fires rather than from the answer,
+assert which rule fired** — otherwise the guarantee is a convention and the
+suite agrees with it right up until it stops being true.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
