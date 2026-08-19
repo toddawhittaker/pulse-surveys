@@ -122,11 +122,25 @@ into a relation that cannot take one.
 `pg_class` for views nor `pg_proc`, so dropping a view, changing one by hand in a
 database, or deleting the `CREATE FUNCTION` from a file leaves the check green.
 The tests are the only reader: `test_identity_separated_views.py` asserts the
-views exist in a migrated database, that each is named in a file here, and that
-every relation in every file is schema-qualified. Any later change to these
+views exist in a migrated database, that each is named in a file here, that every
+relation in every file is schema-qualified, and — since E0-34 — that no view
+these files create reads an identity column. Any later change to these
 objects needs a test run, not a drift check — the same consequence
 [ADR 0027](0027-supervision-edges-are-policed-by-one-row-level-trigger.md)
 records for its trigger, for the same reason.
+
+**This record is no longer the only thing standing between a view file and an
+identity column, and E0-34 is what changed that.** Until then, a `.sql` file in
+this directory that joined `user_identity` and selected a name was caught by
+review and by nothing else: the rule above puts it in a diff somebody reads, and
+the `pg_depend` invariant in `test_identity_column_marker.py` cannot see it,
+because it reads the migrated database and no revision has named the file yet.
+`test_no_view_created_under_views_sql_names_an_identity_column` in
+`test_identity_separated_views.py` now reads these files as text and fails on
+that ground, naming the column, whether or not a revision executes the file — so
+the immutable versioned name remains the reason the change is *legible* in a
+diff, and is no longer the reason it is *caught*. The rule in this record is
+unchanged; what has gone is its being alone.
 
 **A revision imports application code, which no other revision here does.** That
 is the exception this record buys, and it has a cost: `backend/migrations/env.py`

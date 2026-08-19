@@ -1,10 +1,28 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*3 occurrences recorded, and none of them is a catch.*
+*4 occurrences recorded; one of them is a catch.*
+
+*(**The catch**, writing E0-34's tests — the guard that reads
+`backend/app/views_sql/*.sql` looking for an identity column. It enumerates two
+mechanisms, a column named as a word and a `SELECT *` over a table that carries
+identity, and the shape it was about to ship was one predicate returning "found
+something / found nothing" with a handful of samples asserted through it. That
+version passes with either mechanism deleted: the natural sample —
+`SELECT * FROM public.user_identity ui WHERE ui.identity_name IS NOT NULL` — is
+caught by both, so the aggregate stays non-empty whichever probe is removed, and
+the star mechanism could have been dropped in a later tidy with every test green
+and `SELECT *` over the identity table unguarded. What this entry changed:
+findings carry the label of the mechanism that produced them, the control asserts
+that label rather than non-emptiness, and each sample is written so **only its
+own mechanism** can catch it — the column samples name a relation that is not an
+identity table, the star samples name no identity column. The corollary about
+running the whole path came from E0-33's own repair and is applied too: the
+control calls `identity_findings`, which walks the table, and never
+`mechanism.find`.)*
 
 *(Twice more on the same pull request, after this entry was
 written. **Both were found by review or by mutation, so neither is a catch** —
