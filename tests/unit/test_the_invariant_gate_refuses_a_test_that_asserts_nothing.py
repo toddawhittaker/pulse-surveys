@@ -24,9 +24,23 @@ allows it, and that checker would also allow the planted fixture the item came
 from if a helper happened to sit above it.
 
 The rule was chosen for what it permits next, not to accommodate anything already
-here. All 20 `invariant`-marked tests in the tree carry an `assert` in their own
-body, none inside a nested function, and every one that uses `pytest.raises` also
-asserts directly — measured before the rule was picked, so no existing test moves.
+here. All **24** `invariant`-marked tests in the tree carry an `assert` in their
+own body, none inside a nested function, and every one that uses `pytest.raises`
+also asserts directly — so the rule is green on the suite as it stands and no
+existing test moves to satisfy it.
+
+**Trust `pytest -m invariant --collect-only` for that count, and nothing that
+reads decorators.** It collects 24 functions and 42 parametrized cases, and the
+checker agrees with it. The first measurement taken for this ticket said 20,
+because it walked `decorator_list` — which misses a test marked by a module-level
+`pytestmark = pytest.mark.invariant`, and four are: three in
+`tests/unit/test_no_service_reads_an_identity_table_directly.py` and one in
+`tests/unit/test_care_is_not_reachable_from_a_claim.py`. **There are two ways to
+mark a test and a decorator is one of them**, which is why no sample below stands
+for "the marked set" and why the count above is quoted from the collector rather
+than from a walk. The mutation that disables the checker's `pytestmark` path makes
+it report exactly 20 — a clean scan over four real §4.1 invariants it never looked
+at, which is this item's own subject one level up.
 
 **The interface this test assumes, said out loud because the ticket names the
 checker and not its arguments.** `scripts/ci/check_invariant_assertions.py` takes
@@ -35,6 +49,28 @@ rule. That is the shape of every other checker in `scripts/ci/` — a path in, a
 exit status out — and the directory grain is the one the gate itself uses, since
 both callers will point it at the test tree. A red on the *allowed* half is
 therefore a message about the contract rather than about the rule, and it says so.
+
+**Both marking forms are planted, and it takes two samples rather than one.** The
+criterion is about an `invariant`-marked test, and a `pytestmark`-marked test is
+one: covering the decorator alone would be a partial criterion rather than a
+smaller one, and the four tests in the tree that use the module-level form live in
+modules that are wholly §4.1. So the module-level form appears twice below, once
+refused and once allowed, and neither is redundant.
+
+- **The refusal alone is not enough.** A checker that refused every
+  `pytestmark`-marked module whatever its body would pass it, and would be red
+  against those four invariants on the day it landed. The allowance is what makes
+  the refusal mean "this body has no assertion" rather than "this file has a
+  `pytestmark` in it".
+- **The allowance alone is not enough**, for the ordinary reason the catch half
+  always exists: a checker blind to the form scans nothing and objects to nothing.
+
+Between them they close the regression under either policy the checker might have
+for an empty scan. If an empty scan exits 0, the refused sample is *allowed* and
+goes red; if it exits non-zero, the refused sample cannot name the test it refused
+and goes red on the attribution assertion, and the allowed sample is *refused* and
+goes red too. That is why refusals here are checked as a pair — a non-zero exit
+**and** the offending test named — rather than by exit status alone.
 
 **On the duplication with `scripts/ci/test_ci_scripts.py`.** That file holds the
 checker's own behavioural self-test, written by whoever writes the checker, and it
@@ -58,7 +94,7 @@ CHECKER = REPO_ROOT / "scripts" / "ci" / "check_invariant_assertions.py"
 # thing that was planted rather than to the checker having fallen over.
 PLANTED_TEST = re.compile(r"^def (?P<name>test_\w+)", re.MULTILINE)
 
-# Every sample the rule permits. Four of the five are shapes that exist in the
+# Every sample the rule permits. Four of the six are shapes that exist in the
 # invariant suite today — an assert inside a `with` and a `for` is how
 # `tests/integration/test_identity_grants.py` writes every one of its refusals —
 # and a checker that reads only the top level of a body would refuse them. The
@@ -68,6 +104,15 @@ PLANTED_TEST = re.compile(r"^def (?P<name>test_\w+)", re.MULTILINE)
 # carries a compliant marked test beside the unmarked one on purpose, so that a
 # checker which — by analogy with `check_invariants.py` — treats a scan finding no
 # marked test at all as a failure is not read here as having applied the rule.
+#
+# The sixth is the second way a test can be marked, and it is here for the reason
+# the allow half always exists: without it, a checker that refused every
+# `pytestmark`-marked module whatever its body would pass the refusal below and be
+# red against the four §4.1 invariants in the tree that are marked that way. Both
+# `pytestmark` samples use the single-mark form. The list form,
+# `pytestmark = [pytest.mark.invariant, …]`, appears nowhere in this repository and
+# is not covered here — named rather than left implied, because an enumeration
+# that does not say what it omits reads as complete (`docs/MISTAKES.md` entry 35).
 ALLOWED = {
     "an assert in the body": """
 import pytest
@@ -118,6 +163,15 @@ def test_a_student_never_sees_a_sibling_section(reporting, student):
 def test_the_seed_script_is_safe_to_run_twice(seed):
     seed.load()
 """,
+    "a module-level pytestmark on a test that asserts": """
+import pytest
+
+pytestmark = pytest.mark.invariant
+
+
+def test_no_module_that_reads_a_claim_names_the_care_role(sources):
+    assert care_role_mentions(sources) == []
+""",
 }
 
 # Every sample the rule refuses. The first is the shape the item came from. The
@@ -127,6 +181,16 @@ def test_the_seed_script_is_safe_to_run_twice(seed):
 # uses — `tests/integration/test_role_assignment_graph.py` stacks `invariant` above
 # `parametrize` — so a checker that reads only the first decorator would not even
 # see this as a marked test.
+#
+# The fourth is the other way a checker can fail to recognise a marking, and it is
+# the one that actually happened: a module-level `pytestmark`, which four §4.1
+# invariants in this repository use and which a walk over `decorator_list` cannot
+# see. **Its refusal has to be attributed, not merely counted.** A checker whose
+# `pytestmark` path has regressed finds no marked test in this sample at all, and
+# an empty scan may exit non-zero for its own reasons — which satisfies a bare
+# "expect non-zero" while leaving the hole exactly where it was. The assertion
+# below requires the refusal to name the planted test, which a checker that never
+# saw it cannot do.
 REFUSED = {
     "a body that ends after a call": """
 import pytest
@@ -156,6 +220,15 @@ import pytest
 @pytest.mark.parametrize("wrong_kind", ["prefix", "department"])
 def test_an_assignment_scoped_above_its_course_is_refused(graph, wrong_kind):
     graph.assign("LEAD_FACULTY", scope_kind=wrong_kind)
+""",
+    "a module-level pytestmark whose test body ends after a call": """
+import pytest
+
+pytestmark = pytest.mark.invariant
+
+
+def test_no_service_module_names_an_identity_table_in_a_statement_it_runs(services):
+    services.statements_naming("user_identity")
 """,
 }
 
@@ -219,6 +292,16 @@ def test_the_assertion_checker_refuses_the_shapes_the_rule_names_and_allows_thei
     green:** widening the checker to recognise an assertion nested inside a `with`
     block, a `for` loop or an `if` — the rule says the body must *contain* one, and
     the invariant suite writes them that way today.
+
+    **The mutation the two `pytestmark` samples survive:** in the same checker,
+    collect markers from `decorator_list` alone. That is the measurement that was
+    actually made for this ticket, it answers 20 where pytest collects 24, and it
+    is why the refusal is checked as a pair — the regressed checker finds no marked
+    test in that sample, and an empty scan can exit non-zero for reasons of its own
+    that a bare "expect non-zero" would read as the rule being applied. **The near
+    miss that must stay green:** recognising the module-level form and then
+    applying the same body rule to it, which is what the allowed one is there to
+    hold.
     """
     assert CHECKER.is_file(), (
         f"{CHECKER.relative_to(REPO_ROOT)} does not exist. E0-36 §3 puts the rule there: an "
@@ -261,14 +344,22 @@ def test_the_assertion_checker_refuses_the_shapes_the_rule_names_and_allows_thei
             "a `with pytest.raises(...)` block, or a `pytest.fail(...)` call, and a body whose "
             "only statements are calls is refused.",
             "",
-            "The two shapes worth reading twice. **A helper-delegated body is refused** — the "
+            "The three shapes worth reading twice. **A helper-delegated body is refused** — the "
             "helper asserts and the test does not, and the ticket accepts that cost rather than "
             "choosing how many levels of call to chase; a checker that searches the module rather "
             "than the body allows it, and allows the planted fixture this item came from whenever "
             "a helper happens to sit above it. **An assertion nested inside a `with`, a `for` or "
             "an `if` is allowed** — `tests/integration/test_identity_grants.py` writes every "
             "refusal that way, so a checker reading only the top level of a body is red against "
-            "the suite it guards.",
+            "the suite it guards. **A module-level `pytestmark` marks a test as surely as a "
+            "decorator does** — four §4.1 invariants in this repository are marked that way, in "
+            "modules where every test is one, so a checker that reads `decorator_list` alone "
+            "scans none of them and reports a clean run over the files that are wholly "
+            "confidential.",
+            "",
+            "Both `pytestmark` samples failing together means the form is not recognised at all. "
+            "Only the allowed one failing means it is recognised and then refused whatever its "
+            "body says.",
             "",
             "If the failures above are all on the allowed half, suspect this test's assumption "
             "about the checker's arguments before suspecting the rule: it passes a directory and "
@@ -285,5 +376,11 @@ def test_the_assertion_checker_refuses_the_shapes_the_rule_names_and_allows_thei
             "`skipped: <name>` per offender for the same reason — and it is also how a checker "
             "that fell over on its arguments looks from here. The assertions above read a "
             "non-zero exit as the rule being applied; this is what makes that reading safe.",
+            "",
+            "On the `pytestmark` sample there is a third reading and it is the likely one: a "
+            "checker that collects markers from `decorator_list` alone finds no marked test in "
+            "that file, scans nothing, and exits non-zero because the scan was empty. That is a "
+            "marker path that has regressed, not a rule that was applied, and this assertion is "
+            "the only thing here that can tell the two apart.",
         ]
     )
