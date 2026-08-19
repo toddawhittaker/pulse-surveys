@@ -182,6 +182,10 @@ class Institution(Base):
         Uuid, primary_key=True, server_default=text("gen_random_uuid()")
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    # DELIBERATE DRIFT — E0-36 acceptance criterion 1. A model column with no
+    # migration, so `alembic check` exits non-zero and `migration-drift` fails.
+    # This branch is a throwaway proof and must never merge.
+    scratch_drift_proof: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
 
 class College(Base):
