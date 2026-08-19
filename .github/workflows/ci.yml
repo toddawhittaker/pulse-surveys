@@ -303,11 +303,19 @@ jobs:
       # repository was a green pipeline; without it, an empty collection is a
       # build failure. `scripts/ci/check_invariants.py` keeps the flag as an
       # option and nothing passes it.
-      - name: Invariant suite (§4.1) — no skips permitted
+      # The gate has two halves and they see different things. The first reads
+      # the JUnit XML the run above produced, so it catches a skip, an xfail and
+      # an empty collection. It cannot see a marked test that ran and asserted
+      # nothing — the XML carries no assertion count, so such a test is counted
+      # toward the "N invariant test(s) ran" the first one prints. The second
+      # reads the sources and refuses exactly that (E0-36 item 3). The Makefile's
+      # `invariants` target runs both, in this order.
+      - name: Invariant suite (§4.1) — no skips, and no test that asserts nothing
         run: |
           mkdir -p reports
           pytest -m invariant --junitxml=reports/invariants.xml || true
           python scripts/ci/check_invariants.py reports/invariants.xml
+          python scripts/ci/check_invariant_assertions.py tests
 
       - name: Unit + integration with coverage
         env:

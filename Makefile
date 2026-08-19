@@ -130,12 +130,22 @@ migration-check: ## Fail if the models have drifted from the migrations
 # not grown them yet. The workflow dropped the flag in the same change, and the
 # two move together. `scripts/ci/check_invariants.py` keeps the flag as an
 # option; what has gone is passing it.
+#
+# Two checkers, one gate, and they see different things. The first reads the
+# JUnit XML the run produced, so it catches a skip, an xfail and an empty
+# collection. It cannot see a marked test that ran and asserted nothing — the XML
+# carries no assertion count, so that test is counted toward the "N invariant
+# test(s) ran" the first one prints. The second reads the sources and refuses
+# exactly that (E0-36 item 3). The workflow's invariant step runs both, in this
+# order, and a caller that dropped either half would be greener than one that
+# ran it tolerantly.
 .PHONY: invariants
-invariants: ## Run the §4.1 invariant suite alone; a skip and an empty run are both failures
+invariants: ## Run the §4.1 invariant suite alone; a skip, an empty run and a test that asserts nothing are all failures
 	$(call banner,invariant suite (SPEC §4.1))
 	@mkdir -p reports
 	@pytest -m invariant --junitxml=reports/invariants.xml || true
 	@$(PYTHON) scripts/ci/check_invariants.py reports/invariants.xml
+	@$(PYTHON) scripts/ci/check_invariant_assertions.py tests
 
 # The integration tests start their own Postgres through testcontainers, so this
 # needs a running Docker daemon but not the Compose stack.
