@@ -40,7 +40,7 @@ already uses on the read side, pointed at three subjects:
 
 | Rule | Sweep | The question it asks |
 |---|---|---|
-| 1 | `test_no_lms_owned_table_carries_an_unmarked_column.py` | on a table SPEC §2.1 puts on the LMS's side, is every column marked, structural, unwritable, or recorded? |
+| 1 | `test_no_lms_owned_table_carries_an_unmarked_column.py` | on a table in the guarded set, is every column marked, structural, unwritable, or recorded? |
 | 2 | `test_a_sections_derived_calendar_has_one_assignment_site.py` | is every assignment of the four derived columns inside `backend/app/services/section_codes.py`? |
 | 3 | `test_every_writer_of_an_lms_owned_relation_names_the_guard.py` | does a module that writes an LMS-owned relation call `guard_write` somewhere in the same module? |
 
@@ -48,12 +48,35 @@ Three properties of that mechanism are part of the decision rather than of the
 implementation.
 
 **The guarded set is discovered and floored, not listed.** Rules 1 and 3 take
-`authz.LMS_OWNED_TABLES` unioned with `course`, `section` and `enrollment`
-written out of SPEC §2.1. Reading the guard's own set means the sweep grows when
-the guard grows, which is how `user` is in scope without anyone hand-copying it
-— and E0-35's own criterion, written by hand, names three tables and was already
-one short. Reading the spec's three as a floor means the sweep cannot be shrunk
-by an edit to the module it guards, which is `docs/MISTAKES.md` entry 35.
+`authz.LMS_OWNED_TABLES` unioned with a floor of `course`, `section`,
+`enrollment` and `user`. Reading the guard's own set means the sweep grows when
+the guard grows — and E0-35's own criterion, written by hand, names three tables
+and was already one short. Reading the floor means the sweep cannot be shrunk by
+an edit to the module it guards, which is `docs/MISTAKES.md` entry 35.
+
+**The floor has two authorities and they are not the same one.** `course`,
+`section` and `enrollment` come from SPEC §2.1's ownership sentence. `user`
+comes from **ADR 0045**, which put it in the guard's set because
+`user.lms_user_id` is the `sub` claim verbatim and §4 keys every response to it;
+§2.1 does not name it. The constant is `GUARDED_TABLE_FLOOR` rather than
+`SPEC_…` for exactly that reason — a name claiming the spec's authority over a
+table the spec does not name is the false record this project keeps catching.
+
+**The floor alone was not enough, and the first version of this record said it
+was.** An earlier draft of this paragraph claimed the floor stopped the guarded
+set being shrunk by an edit to the module under guard. That was true of the
+spec's three and was stated as though it covered all four: `user` was in the
+swept set *only* through `authz.LMS_OWNED_TABLES`, so deleting it there left the
+union answering three tables and both sweeps quietly narrowed. The claim was
+never executed against the case it described, which is `docs/MISTAKES.md` entry
+9, and an independent security review measured it on PR #44. What holds it up
+now is a direct assertion —
+`test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below` —
+that `LMS_OWNED_TABLES` is a superset of the floor, so a removed table fails
+loudly and names itself instead of shrinking the sweep. The guard may still
+**grow** freely; only shrinking below the floor is refused. Editing the floor to
+match a narrowed guard turns the assertion back into what it replaced, and the
+failure message says so.
 
 **The subject is the syntax tree, not the file text.** A correct module is very
 likely to *say* "this never inserts into `course`" in a docstring, and a text
