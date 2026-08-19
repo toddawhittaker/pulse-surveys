@@ -10,7 +10,12 @@
 # while debugging: untracked, invisible in review, and sitting on the machine
 # that runs the build.
 #
-# **Deleting any of those four lines leaves every other gate green.** That is
+# `backend/**/*.pem` and `backend/**/*.key` reach that directory the same way and
+# are covered here too. They are not a fifth and sixth suffix of the same kind:
+# they are the two lines whose deletion ships a private key rather than a stray
+# note, and they had nothing watching them until E0-36's review measured it.
+#
+# **Deleting any of those six lines leaves every other gate green.** That is
 # what this exists for. It is not a test of `.dockerignore`'s text, and E0-36
 # says why: a text assertion passes against a typo'd pattern, which carries the
 # file just as surely. So this plants one file per pattern, builds the image, and
@@ -47,15 +52,26 @@ PROMPTS_SOURCE_DIRECTORY="backend/app/ai/prompts"
 # wrong place and its silence about the planted files means nothing.
 CONTROL_FILE="validity.v1.md"
 
-# One file per re-exclusion in `.dockerignore`, so that a deleted line names
-# itself in the failure rather than being one of four candidates. The stem says
-# what they are and where they came from, because a build that dies between the
-# plant and the cleanup leaves them in somebody's working tree.
+# One file per re-exclusion this covers, so that a deleted line names itself in
+# the failure rather than being one of six candidates. The stem says what they
+# are and where they came from, because a build that dies between the plant and
+# the cleanup leaves them in somebody's working tree.
+#
+# The last two are the point of the whole check and were the two it missed. They
+# are in this list on a measurement rather than on symmetry: planting a `.pem`
+# and a `.key` in the prompts directory and listing the installed directory
+# inside a built image showed both excluded — by the two lines below, reached
+# through the same `pyproject.toml` package-data glob that carries the other
+# four. So those are the only two lines in `.dockerignore` whose deletion ships
+# a private key into the runtime image, and until E0-36's review nothing watched
+# them.
 PLANTED_FILES=(
   "e0-36-image-content-check.md~"    # backend/**/*~
   "e0-36-image-content-check.orig"   # backend/**/*.orig
   "e0-36-image-content-check.rej"    # backend/**/*.rej
   "e0-36-image-content-check.bak"    # backend/**/*.bak
+  "e0-36-image-content-check.pem"    # backend/**/*.pem
+  "e0-36-image-content-check.key"    # backend/**/*.key
 )
 
 # Its own tag, so a build that does carry a planted file cannot be left behind as
@@ -71,13 +87,25 @@ fail() {
 
 listing_file="$(mktemp)"
 
+# The files this run actually wrote, appended one at a time as each `printf`
+# succeeds. **Not `PLANTED_FILES`**, and the difference is a file somebody
+# loses: the plant loop below refuses rather than overwrites a name that is
+# already there, and a cleanup iterating the full list then deleted exactly the
+# file the refusal existed to protect — the run exited 1 telling the developer
+# to delete their file, having already deleted it. Found by E0-36's independent
+# security review and reproduced.
+#
+# So this array is the record of what is ours to remove. It stays empty until
+# something is written, which makes the refusal path remove nothing at all.
+written_files=()
+
 # Everything this planted, and the image it built, whichever way the script
 # leaves. A check that leaves a `.bak` in the prompts directory has planted
 # exactly the file it exists to prevent.
 cleanup() {
   local status=$?
   local name
-  for name in "${PLANTED_FILES[@]}"; do
+  for name in "${written_files[@]}"; do
     rm -f "${repo_root}/${PROMPTS_SOURCE_DIRECTORY}/${name}"
   done
   rm -f "${listing_file}"
@@ -107,9 +135,17 @@ for name in "${PLANTED_FILES[@]}"; do
       so it will not write over one that is already there. Delete it if it is
       debris from an interrupted run."
   fi
-  printf 'planted by scripts/ci/check_image_contents.sh — E0-36 item 4\n' > "${planted}"
+  # A comment saying what the file is, and nothing that resembles the thing two
+  # of these suffixes stand for. These markers are read by name, never by
+  # content, so there is no reason for one to hold anything key-shaped.
+  printf '%s\n%s\n' \
+    '# planted by scripts/ci/check_image_contents.sh (E0-36 item 4), and removed by it.' \
+    '# A marker read by name. It holds no key material and never has.' > "${planted}"
   [ -f "${planted}" ] || fail "could not create ${planted}, so the check below would look for a file
       that was never planted and pass having found nothing."
+  # Recorded only now, after the write succeeded, so cleanup can never remove a
+  # file this run did not create.
+  written_files+=("${name}")
   echo "  ${planted}"
 done
 endgroup

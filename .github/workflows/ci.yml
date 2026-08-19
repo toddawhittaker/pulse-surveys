@@ -57,10 +57,34 @@ jobs:
           set -euo pipefail
           emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
 
+          # Each probe names, as exactly as it can, the thing its job actually
+          # runs. A probe that answers false over a tree that has the thing does
+          # not skip its gate: the real steps switch themselves off by their own
+          # `if:`, the `::notice::` step runs in their place, and **the job
+          # reports success**. So a wrong answer here is invisible to the
+          # aggregate `ci` check, which sees green rather than skipped.
+          #
+          # Both of the globs that used to be here were wrong in that direction.
+          # `tests/e2e/*.spec.ts` does not descend, so a spec at
+          # `tests/e2e/lms/launch.spec.ts` read as no e2e suite at all. And
+          # `tests/evals/**/*.py` needs `shopt -s globstar`, which was never set
+          # — measured, `globstar` is off in a non-interactive bash — so `**`
+          # degraded to a single `*` and the pattern only matched one directory
+          # *below* `tests/evals`. `tests/evals/runner.py`, the file
+          # `python -m tests.evals.runner` needs, was the one file it could not
+          # see, and SPEC §9.3's threat and self-harm recall floor is what the
+          # job runs.
           echo "Probing repository layout (SPEC §13):"
           if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
-          if compgen -G "tests/e2e/*.spec.ts" > /dev/null 2>&1; then emit e2e true; else emit e2e false; fi
-          if [ -d tests/evals ] && compgen -G "tests/evals/**/*.py" > /dev/null 2>&1; then emit evals true; else emit evals false; fi
+          # `find` rather than a glob: it descends without a shell option, so it
+          # cannot degrade quietly the way `**` did. There is no fixed filename
+          # to name here — a spec may be called anything.
+          if [ -n "$(find tests/e2e -name '*.spec.ts' -print -quit 2>/dev/null)" ]; then emit e2e true; else emit e2e false; fi
+          # The exact module the job imports, in the shape the `frontend` probe
+          # already uses. Stricter than "some Python exists under tests/evals",
+          # and deliberately: a tree with `__init__.py` and no runner would make
+          # that glob answer true and the job then fails on the import.
+          if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
 
   # ==========================================================================
   # FAST GATES — everything else waits on these.

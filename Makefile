@@ -157,7 +157,7 @@ test: invariants ## pytest unit + integration with coverage
 .PHONY: e2e
 e2e: ## Playwright against the Compose stack
 	$(call banner,Playwright e2e)
-	@if compgen -G "tests/e2e/*.spec.ts" > /dev/null 2>&1; then \
+	@if [ -n "$$(find tests/e2e -name '*.spec.ts' -print -quit 2>/dev/null)" ]; then \
 		npx playwright test; \
 	else \
 		$(call skip,no tests/e2e specs yet); \
@@ -166,7 +166,7 @@ e2e: ## Playwright against the Compose stack
 .PHONY: evals
 evals: ## AI eval runner with per-task precision/recall floors
 	$(call banner,AI evals)
-	@if [ -d tests/evals ] && compgen -G "tests/evals/**/*.py" > /dev/null 2>&1; then \
+	@if [ -f tests/evals/runner.py ]; then \
 		$(PYTHON) -m tests.evals.runner --enforce-floors; \
 	else \
 		$(call skip,no tests/evals runner yet); \
