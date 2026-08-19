@@ -55,7 +55,20 @@ RULES: list[tuple[str, str, str]] = [
     (r"\bBSD\b|\bBSD-[0234]", "allow", "permissive"),
     (r"\bApache\b", "allow", "permissive"),
     (r"\bISC\b", "allow", "permissive"),
-    (r"Python Software Foundation|\bPSF\b", "allow", "permissive"),
+    # `\bCNRI\b` is here for `regex`, which declares `Apache-2.0 AND
+    # CNRI-Python`. That is a well-formed SPDX expression and the split handled
+    # it correctly; the failure was that no rule knew the second term, so a
+    # conjunction of two permissive licences resolved to unknown. CNRI-Python is
+    # the Python 1.6 licence from the same chain as the PSF one — permissive,
+    # with attribution and a Virginia choice-of-law clause. That clause is why
+    # it is called GPL-incompatible, which is a different question from whether
+    # we may ship it under MIT (SPEC §10), and the answer to this one is yes.
+    #
+    # Deliberately not reached for `CNRI-Python-GPL-Compatible`: the deny rule
+    # for `\bGPL` sits above this and matches it first. That is the conservative
+    # answer for a licence this project has never depended on, and widening it
+    # is not this change's business.
+    (r"Python Software Foundation|\bPSF\b|\bCNRI\b", "allow", "permissive"),
     (r"\bMPL[- ]?2|Mozilla Public License 2", "allow", "file-level copyleft"),
     (r"\bEPL[- ]?2|Eclipse Public License 2", "allow", "file-level copyleft"),
     (r"\bUnlicense\b|\bCC0\b|Public Domain|\bWTFPL\b", "allow", "public domain"),
@@ -79,14 +92,59 @@ def classify_single(text: str) -> tuple[str, str]:
 def classify(license_text: str) -> tuple[str, str]:
     """Return (verdict, reason) where verdict is allow | deny | review | unknown.
 
-    Compound expressions are resolved by their connector. "MIT OR GPL-3.0" is
-    a choice, so we take the branch most favorable to us and call it allowed.
+    Two shapes of input, told apart by whether the text contains a newline.
+
+    An **expression** is resolved by its connector. "MIT OR GPL-3.0" is a
+    choice, so we take the branch most favorable to us and call it allowed.
     "MIT AND GPL-3.0" is a conjunction — both sets of terms bind — so the worst
     branch decides.
+
+    A **body** — the full licence text, which some packages put in the `License`
+    field instead of an identifier — is scanned whole against RULES in order,
+    with no splitting. See the comment below for why that is safe and why the
+    test is a newline.
+
+    One imprecision worth knowing when reading a report: scanning a body whole
+    attributes the verdict to the first rule that matches anywhere in it, and a
+    licence text may *mention* another licence. The full GPL-3 body denies with
+    the Affero rule's reason, because its section 13 is headed "Use with the GNU
+    Affero General Public License". The verdict is right and conservative; only
+    the reason names the wrong family. Narrowing that would mean deciding which
+    mention is the declaration, which is a larger change than this one and buys
+    a better message rather than a better answer.
     """
     text = (license_text or "").strip()
     if not text:
         return "unknown", "no license metadata"
+
+    # A licence *body* rather than an expression, and it is scanned whole.
+    #
+    # `tiktoken` has no `License-Expression`; its `License` field is the full
+    # 1078-character MIT text, copyright notice and all. Splitting that on its
+    # connectors is meaningless — the word "and" appears in the prose, so the
+    # text broke into six fragments, only the first of which named a licence,
+    # and the conjunction rule then took the worst of them and answered unknown
+    # about a plainly MIT package.
+    #
+    # **What makes the unsplit scan safe is the order of RULES**, not this
+    # condition: every deny and review rule sits above every allow rule, and
+    # `classify_single` is first-match-wins, so scanning a whole body reaches a
+    # deny before it can reach a permissive word that happens to appear in the
+    # prose. A full GPL body hits "General Public License" and denies; a full
+    # AGPL body hits "Affero" first and denies for that reason. Reordering RULES
+    # to put an allow rule above a deny rule turns this line into a hole, which
+    # is why the ordering comment above RULES says what it says.
+    #
+    # A newline is the whole test, and there is deliberately no length
+    # threshold. An SPDX expression is a single-line grammar, so no valid
+    # expression contains a newline, and a threshold would be a tuning knob with
+    # no correct value. Measured over the 99 packages installed here: exactly one
+    # field contains a newline (tiktoken, 1078 characters) and the other 98 are
+    # at most 36. A body flattened onto one line would still be split — and
+    # still answer unknown, which is what it answers today, so that boundary
+    # gives up nothing that currently works.
+    if "\n" in text:
+        return classify_single(text)
 
     if re.search(r"\bAND\b", text, re.IGNORECASE):
         parts = re.split(r"\bAND\b", text, flags=re.IGNORECASE)

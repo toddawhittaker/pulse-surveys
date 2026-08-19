@@ -79,6 +79,14 @@ LICENSE_CASES = [
     ("MIT OR GPL-2.0", "allow"),  # a choice — we take MIT
     ("MIT AND GPL-3.0", "deny"),  # a conjunction — both sets of terms bind
     ("(MIT OR CC0-1.0)", "allow"),
+    # E0-29 item 4b. `regex` declares this, and it is a well-formed expression
+    # the split always handled correctly — what was missing was any rule for the
+    # second term, so a conjunction of two permissive licences came out unknown.
+    ("Apache-2.0 AND CNRI-Python", "allow"),
+    ("CNRI-Python", "allow"),
+    # Still denied, and it is the near miss for the rule above: the `\bGPL` deny
+    # rule sits higher than the permissive one that now knows CNRI.
+    ("CNRI-Python-GPL-Compatible", "deny"),
     # No usable metadata.
     ("UNKNOWN", "unknown"),
     ("", "unknown"),
@@ -87,6 +95,154 @@ LICENSE_CASES = [
 
 for text, want in LICENSE_CASES:
     check(f"classify({text!r})", classify(text)[0], want)
+
+# ---------------------------------------------------------------------------
+# check_licenses.py — licence *bodies* rather than expressions (E0-29 item 4b)
+# ---------------------------------------------------------------------------
+# Some packages put the whole licence text in the `License` metadata field
+# instead of an identifier. `classify()` used to split every input on its
+# connectors, and the word "and" occurs in licence prose, so a body broke into
+# fragments that named nothing and the conjunction rule answered `unknown` about
+# a plainly permissive package. Bodies are now told apart by containing a
+# newline and scanned whole.
+#
+# **Every case below asserts the reason as well as the verdict**, and that is
+# the point rather than thoroughness: a whole-body scan is only safe because
+# RULES is ordered deny-and-review before allow, so `deny` reached by the wrong
+# rule would be the right answer for the wrong reason and would not notice the
+# ordering being broken (`docs/MISTAKES.md` entry 3).
+#
+# The first three bodies are real text, not written for the test. The last two
+# are constructed, and say so.
+
+# tiktoken's `License` field exactly as its installed metadata carries it: the
+# full MIT licence, 1078 characters. Pasted rather than read from the installed
+# package, because a fixture read at run time is absent on a machine where the
+# package is not installed and the case then passes having checked nothing.
+TIKTOKEN_LICENSE_BODY = (
+    "MIT License\n"
+    "\n"
+    "Copyright (c) 2022 OpenAI, Shantanu Jain\n"
+    "\n"
+    "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+    'of this software and associated documentation files (the "Software"), to deal\n'
+    "in the Software without restriction, including without limitation the rights\n"
+    "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+    "copies of the Software, and to permit persons to whom the Software is\n"
+    "furnished to do so, subject to the following conditions:\n"
+    "\n"
+    "The above copyright notice and this permission notice shall be included in all\n"
+    "copies or substantial portions of the Software.\n"
+    "\n"
+    'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n'
+    "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n"
+    "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n"
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n"
+    "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
+    "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n"
+    "SOFTWARE.\n"
+    ""
+)
+
+# The opening of the real GPL-3, verbatim from /usr/share/common-licenses/GPL-3.
+# Cut before section 13 on purpose: that section is headed "Use with the GNU
+# Affero General Public License", so the *full* text denies by the Affero rule
+# rather than the GPL one. The verdict is the same and this excerpt pins which
+# rule produced it.
+GPL3_LICENSE_BODY = (
+    "                    GNU GENERAL PUBLIC LICENSE\n"
+    "                       Version 3, 29 June 2007\n"
+    "\n"
+    " Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>\n"
+    " Everyone is permitted to copy and distribute verbatim copies\n"
+    " of this license document, but changing it is not allowed.\n"
+    "\n"
+    "                            Preamble\n"
+    "\n"
+    "  The GNU General Public License is a free, copyleft license for\n"
+    "software and other kinds of works.\n"
+    "\n"
+    "  The licenses for most software and other practical works are designed\n"
+    "to take away your freedom to share and change the works.  By contrast,\n"
+    "the GNU General Public License is intended to guarantee your freedom to\n"
+    "share and change all versions of a program--to make sure it remains free\n"
+    "software for all its users.  We, the Free Software Foundation, use the\n"
+    "GNU General Public License for most of our software; it applies also to"
+)
+
+# The real AGPL-3 preamble, from Debian's libgs-common copyright file, which
+# encodes a blank line as a lone "." — removing that is decoding, not editing.
+# It names the GPL as well as Affero, which is what makes it the discriminating
+# case: `Affero` sits above `General Public License` in RULES and must win.
+AGPL3_LICENSE_BODY = (
+    "GNU AFFERO GENERAL PUBLIC LICENSE\n"
+    "Version 3, 19 November 2007\n"
+    "\n"
+    "Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>\n"
+    "Everyone is permitted to copy and distribute\n"
+    "verbatim copies of this license document,\n"
+    "but changing it is not allowed.\n"
+    "\n"
+    "Preamble\n"
+    "\n"
+    "The GNU Affero General Public License is a free, copyleft license\n"
+    "for software and other kinds of works,\n"
+    "specifically designed to ensure cooperation with the community\n"
+    "in the case of network server software.\n"
+    "\n"
+    "The licenses for most software and other practical works\n"
+    "are designed to take away your freedom to share and change the works.\n"
+    "By contrast, our General Public Licenses are intended\n"
+    "to guarantee your freedom to share\n"
+    "and change all versions of a program--\n"
+    "to make sure it remains free software for all its users.\n"
+    ""
+)
+
+# Constructed, not a real licence: a body naming no licence at all. The
+# widening must leave `unknown` alone rather than turning it into `allow`.
+BODY_NAMING_NOTHING = (
+    "Terms of use for this package\n"
+    "\n"
+    "You may use this software and its documentation, and you may\n"
+    "redistribute it, provided you keep this notice intact.\n"
+    ""
+)
+
+# Constructed, not a real licence: an MIT body that *mentions* the GPL. It
+# denies, and that is the conservative direction — scanning a body whole cannot
+# tell a declaration from a mention, so it takes the worst thing it finds and a
+# human looks. Asserted so the trade is recorded rather than discovered.
+MIT_BODY_MENTIONING_GPL = (
+    "MIT License\n"
+    "\n"
+    "Copyright (c) 2026 Example\n"
+    "\n"
+    "Permission is hereby granted, free of charge, to any person obtaining a\n"
+    "copy of this software to deal in the Software without restriction.\n"
+    "\n"
+    "Note: this package links against a library distributed under the GNU\n"
+    "General Public License. That library is not vendored here.\n"
+    ""
+)
+
+BODY_CASES = [
+    ("tiktoken's real 1078-character MIT text", TIKTOKEN_LICENSE_BODY, "allow", "permissive"),
+    ("the real GPL-3 opening", GPL3_LICENSE_BODY, "deny", "strong copyleft"),
+    (
+        "the real AGPL-3 preamble, which also names the GPL",
+        AGPL3_LICENSE_BODY,
+        "deny",
+        "network copyleft",
+    ),
+    ("a body naming no licence at all", BODY_NAMING_NOTHING, "unknown", "unrecognized"),
+    ("an MIT body that mentions the GPL", MIT_BODY_MENTIONING_GPL, "deny", "strong copyleft"),
+]
+
+for label, body, want_verdict, want_reason in BODY_CASES:
+    verdict, reason = classify(body)
+    check(f"licenses: body — {label} (verdict)", verdict, want_verdict)
+    check(f"licenses: body — {label} (reason)", want_reason in reason, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     d = Path(tmp)
@@ -438,7 +594,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 # ---------------------------------------------------------------------------
-total = len(LICENSE_CASES) + 15 + 16
+total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + 15 + 16
 if failures:
     print(f"FAIL: {len(failures)} of {total} checks failed:", file=sys.stderr)
     for line in failures:
