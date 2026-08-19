@@ -15,21 +15,34 @@ holding it — and this module is the sweep E0-35 builds for it.
 `INSTRUCTOR`, has to call `guard_write` somewhere in the same module.
 
 **Where the guarded set comes from, and why it is not a list.** It is
-`authz.LMS_OWNED_TABLES` unioned with the three tables SPEC §2.1 puts on the LMS's
-side of the ownership sentence — courses, sections, enrollments. Both halves are
+`authz.LMS_OWNED_TABLES` unioned with a floor of four tables, and both halves are
 load-bearing. Reading the guard's own set means the sweep grows when the guard
-does, which is how `user` is in scope here: ADR 0045 put it in the set because
-`user.lms_user_id` is the `sub` claim verbatim, and E0-35's own criterion, written
-by hand, names only three tables and is already one short. Reading the spec's
-three as a floor means the sweep cannot be shrunk by an edit to the module it is
-guarding — an inventory the guarded structure can shrink is not a control
-(`docs/MISTAKES.md` entry 35). That `LMS_OWNED_TABLES` covers the spec's three is
-asserted next door, in
-`test_the_refusal_set_names_the_tables_the_spec_puts_on_the_lms_side`, and is not
-restated here; that assertion is what makes the floor and the discovered set agree
-rather than diverge quietly. A name in `LMS_OWNED_TABLES` that is not a real table
-is diagnosed there too, and costs nothing here: the matchers simply never fire on
-it.
+does — E0-35's own criterion, written by hand, names three tables and is already
+one short. Reading the floor means the sweep does not narrow when the guard does,
+because an inventory the guarded structure can shrink is not a control
+(`docs/MISTAKES.md` entry 35).
+
+**The floor's four entries do not all come from the same record, and the
+difference matters.** Three are SPEC §2.1's ownership sentence — courses,
+sections, enrollments. The fourth, `user`, is **ADR 0045's and not the spec's**:
+§2.1's list is courses, sections, section codes, enrollments and teaching
+instructors, and it names no user record; ADR 0045 puts `user` in the guarded set
+because `user.lms_user_id` is the `sub` claim verbatim and SPEC §4 keys every
+response to it.
+
+**The union alone would only make the narrowing quiet, so the narrowing is
+asserted directly.** Measured in E0-35's review: deleting `"user"` from
+`LMS_OWNED_TABLES` left the union answering three tables, both sweeps covering
+less, and the only red came from
+`test_every_column_marked_lms_owned_sits_on_a_table_the_chokepoint_refuses`, which
+noticed only because `user` happens to carry an `lms_`-prefixed column — a guarded
+table without one would have had no backstop at all.
+`test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below`
+below is the direct assertion, and it is this module's, not next door's: the
+chokepoint suite's `test_the_refusal_set_names_the_tables_the_spec_puts_on_the_lms_side`
+covers the spec's three and cannot cover `user`, which the spec does not name. A
+name in `LMS_OWNED_TABLES` that is not a real table is diagnosed there, and costs
+nothing here: the matchers simply never fire on it.
 
 **Read out of the syntax tree, not out of the file text**, for the reason
 `tests/unit/test_no_service_reads_an_identity_table_directly.py` gives at length: a
@@ -92,11 +105,14 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = REPO_ROOT / "backend" / "app"
 
-# SPEC §2.1's ownership sentence, as the tables it lands on. **Read out of the
-# spec, not out of the module under test** (`docs/MISTAKES.md` entry 19): this is
-# the floor the guarded set cannot fall below, so taking it from `LMS_OWNED_TABLES`
-# would make it a copy of the thing it is holding up.
-SPEC_LMS_OWNED_TABLES = ("course", "section", "enrollment")
+# The floor the guarded set may not fall below. **Read out of the records, not out
+# of the module under test** (`docs/MISTAKES.md` entry 19): taking it from
+# `LMS_OWNED_TABLES` would make it a copy of the thing it is holding up. Three
+# entries are SPEC §2.1's ownership sentence; `user` is ADR 0045's, on the ground
+# that `user.lms_user_id` is the `sub` claim verbatim and SPEC §4 keys every
+# response to it. See the module docstring for why the two authorities are kept
+# apart rather than blurred into "the spec's tables".
+GUARDED_TABLE_FLOOR = ("course", "section", "enrollment", "user")
 
 # §2.1's fifth owned item. It is a row rather than a table — the teaching
 # instructor is an `INSTRUCTOR` assignment, and every other role on that table is
@@ -362,14 +378,16 @@ def mapped_classes_by_table(import_app_module: Any) -> dict[str, tuple[str, ...]
 
 
 def guarded_tables(authz: Any) -> tuple[str, ...]:
-    """The LMS-owned tables, from the guard's own set and from the spec's floor.
+    """The LMS-owned tables, from the guard's own set and from the floor.
 
-    The union is the point. The guard's set is what makes this grow when ADR 0045's
-    grain grows — `user` is here because of it — and the spec's three are what stop
-    it shrinking, since an inventory the guarded module can edit downwards would
-    let a sweep cover less while staying green.
+    The union is what makes this grow when ADR 0045's grain grows, and what stops
+    the *sweep* narrowing when the guard does. It does not stop the *guard*
+    narrowing, and reading it as though it did is the error E0-35's review found:
+    the union is silent about a table deleted from `LMS_OWNED_TABLES`, which is
+    what `test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below`
+    is for.
     """
-    return tuple(sorted(set(SPEC_LMS_OWNED_TABLES) | set(authz.LMS_OWNED_TABLES)))
+    return tuple(sorted(set(GUARDED_TABLE_FLOOR) | set(authz.LMS_OWNED_TABLES)))
 
 
 def guarded_models(
@@ -514,6 +532,50 @@ def test_the_verdict_passes_a_routed_write_and_fails_an_unrouted_one() -> None:
     )
 
 
+def test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below(
+    authz: Any,
+) -> None:
+    """A table deleted from `LMS_OWNED_TABLES` fails here, and fails saying so.
+
+    `guarded_tables` unions the guard's set with the floor, so a deleted table is
+    still swept — and that is the whole trouble. The union makes the sweep's
+    coverage survive the deletion and says nothing about the *guard*, which has
+    just stopped refusing writes to a relation the LMS owns. Two different
+    statements: the union keeps this file honest, and this assertion is the one
+    that keeps the guard honest.
+
+    **Measured in E0-35's review**, deleting `"user"` from `LMS_OWNED_TABLES`:
+    `guarded_tables` answered `('course', 'enrollment', 'section')`, both sweeps
+    quietly covered less, and the only red anywhere was
+    `test_every_column_marked_lms_owned_sits_on_a_table_the_chokepoint_refuses` —
+    which noticed by accident, because `user` carries `lms_user_id`. A guarded
+    table with no `lms_`-prefixed column on it would have had no backstop at all.
+
+    **The guard may grow and may not shrink.** A table *added* to
+    `LMS_OWNED_TABLES` passes here and is picked up by both sweeps through the same
+    union, which is how `user` arrived in the first place. Only removal fails.
+    """
+    named = frozenset(authz.LMS_OWNED_TABLES)
+    missing = sorted(set(GUARDED_TABLE_FLOOR) - named)
+
+    assert not missing, (
+        f"`LMS_OWNED_TABLES` is {sorted(named)} and no longer names {missing}. Three of this "
+        "floor's four entries are SPEC §2.1's ownership sentence — 'courses, sections, section "
+        "codes, enrollments, teaching instructors' — and §8 restates it as a constraint: "
+        "'LMS-owned data is never hand-edited in Pulse.' The fourth, `user`, is ADR 0045's: "
+        "`user.lms_user_id` is the `sub` claim verbatim and SPEC §4 keys every response to it.\n"
+        "\n"
+        "A name removed from that set is a write the chokepoint has stopped refusing. The sweeps "
+        "in this module and in "
+        "`tests/unit/test_no_lms_owned_table_carries_an_unmarked_column.py` go on covering the "
+        "table because they union this floor in, so nothing else here would have gone red.\n"
+        "\n"
+        "If the guard's grain genuinely changed, that is a change to ADR 0045 and this floor moves "
+        "with it, in the same pull request. Editing the floor to match a narrowed guard is the "
+        "one thing that turns this assertion back into the thing it replaced."
+    )
+
+
 def test_every_guarded_relation_resolves_to_a_mapped_class_the_sweep_can_recognise(
     authz: Any, import_app_module: Any
 ) -> None:
@@ -532,12 +594,6 @@ def test_every_guarded_relation_resolves_to_a_mapped_class_the_sweep_can_recogni
     every relation named here.
     """
     tables = guarded_tables(authz)
-    assert set(SPEC_LMS_OWNED_TABLES).issubset(tables), (
-        f"The guarded set is {tables} and does not cover SPEC §2.1's three tables "
-        f"{SPEC_LMS_OWNED_TABLES}. The union in `guarded_tables` exists so this cannot happen; "
-        "if it has, the floor in this file has been edited rather than the guard."
-    )
-
     discovered = mapped_classes_by_table(import_app_module)
     assert discovered, (
         "No mapped class was discovered on `Base.registry` at all, so the ORM half of this sweep "

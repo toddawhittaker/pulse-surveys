@@ -9,8 +9,9 @@ and rules out the obvious repair: asserting that the *prefixed* set matches a li
 does not work, because adding `course.canvas_id` leaves the prefixed set unchanged.
 
 **So this module asks the question from the other end, at table grain.** SPEC §2.1
-names the tables whose contents the LMS owns. On those tables, a column is
-acceptable only if it is one of four things:
+names the tables whose contents the LMS owns, and ADR 0045 adds `user` to them for
+a reason of its own. On the tables in that guarded set, a column is acceptable
+only if it is one of four things:
 
 1. **Marked** — it carries the `lms_` prefix, and ADR 0014's convention is met.
 2. **Structural** — a primary key, or a column carrying a foreign key. Those are
@@ -24,6 +25,16 @@ acceptable only if it is one of four things:
    a write that this column already makes impossible.
 4. **Recorded** — named in `PULSE_OWNED_COLUMNS` below with the record that says
    why Pulse owns a value on a table the LMS owns.
+
+**There is no fifth category, and a timestamp does not get one.** An earlier draft
+of this module exempted `created_at`, `updated_at` and `deleted_at` by name, on
+the ground that Pulse writes row bookkeeping whatever the row is about. It excused
+nothing — no table in the guarded set carries any of the three — and it opened the
+hole this sweep exists to close: an `updated_at` added to `course` to mirror the
+platform's last-modified stamp is LMS-supplied, unmarked, unrecorded, and would
+have passed. Whether a timestamp is Pulse's or the LMS's is exactly the fact
+`Base.metadata` cannot recover, so it costs a `PULSE_OWNED_COLUMNS` entry like
+anything else. Found in E0-35's review.
 
 Anything else fails. `course.canvas_id` is none of the four, which is the whole
 point: the direction ADR 0014 could not assert is reachable once the question is
@@ -39,8 +50,8 @@ which retires one of the two reasons ADR 0014 gives for a name prefix over an
     column on `person` — is outside it entirely, and outside ADR 0045's chokepoint
     for the same reason. Ownership is a fact about where data comes from, and no
     walk of `Base.metadata` will ever recover it once the marker is missing; what
-    table grain buys is that on the tables §2.1 does name, the marker's accuracy
-    stops mattering.
+    table grain buys is that on the tables in that set, the marker's accuracy stops
+    mattering.
   - **A recorded exception is a claim nobody re-checks.** Every entry in
     `PULSE_OWNED_COLUMNS` is a statement that Pulse owns that value, taken from
     the record cited beside it. If one of them is wrong, this file is where the
@@ -60,20 +71,23 @@ from sqlalchemy import Column, Computed, ForeignKey, Integer, MetaData, String, 
 
 LMS_PREFIX = "lms_"
 
-# SPEC §2.1's ownership sentence, as the tables it lands on. **Read out of the
-# spec, not out of the module under test** (`docs/MISTAKES.md` entry 19). It is a
-# floor rather than the whole set: the swept set is this unioned with the guard's
-# own `LMS_OWNED_TABLES`, so the sweep grows when ADR 0045's grain grows and cannot
-# be shrunk by an edit to the module it is holding up.
-# `tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py` takes
-# its inventory the same way, for the same reason.
-SPEC_LMS_OWNED_TABLES = ("course", "section", "enrollment")
-
-# Names Pulse writes on every row it stores, whatever the row is about. A property
-# rather than a list of today's columns: a table that grows a `deleted_at` next
-# year needs no edit here, and none of these three has ever been a fact the LMS
-# supplies.
-ROW_BOOKKEEPING = frozenset({"created_at", "updated_at", "deleted_at"})
+# The floor the swept set may not fall below. **Read out of the records, not out
+# of the module under test** (`docs/MISTAKES.md` entry 19), and the four entries do
+# not all come from the same one. Three are SPEC §2.1's ownership sentence:
+# courses, sections, section codes, enrollments, teaching instructors. The fourth
+# is **ADR 0045's and not the spec's** — §2.1 names no user record, and ADR 0045
+# puts `user` in the guarded set because `user.lms_user_id` is the `sub` claim
+# verbatim and SPEC §4 keys every response to it.
+#
+# It is a floor rather than the whole set: the swept set is this unioned with the
+# guard's own `LMS_OWNED_TABLES`, so the sweep grows when ADR 0045's grain grows
+# and cannot be shrunk by an edit to the module it is holding up. A table
+# *removed* from `LMS_OWNED_TABLES` fails
+# `test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below` in
+# `tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py`, which
+# is where a shrinking guard is diagnosed; the union here is only what stops this
+# sweep going quiet about it.
+GUARDED_TABLE_FLOOR = ("course", "section", "enrollment", "user")
 
 # Unprefixed columns on an LMS-owned table that Pulse genuinely owns, each with the
 # record that says so. Adding to this dict is a decision about ownership and
@@ -110,11 +124,12 @@ PULSE_OWNED_COLUMNS: dict[str, dict[str, str]] = {
 def swept_tables(authz: Any) -> tuple[str, ...]:
     """The tables whose columns this module judges.
 
-    The union of the spec's three and the guard's own set, which is how `user` is
-    in scope: ADR 0045 put it in `LMS_OWNED_TABLES` because `user.lms_user_id` is
-    the `sub` claim verbatim and §4 keys every response to it.
+    The union of the floor above and the guard's own set. The union is what makes
+    this grow when ADR 0045's grain grows; the floor is what stops it narrowing
+    when the guard does, and the assertion that the guard has not narrowed lives in
+    the sibling sweep named beside the floor.
     """
-    return tuple(sorted(set(SPEC_LMS_OWNED_TABLES) | set(authz.LMS_OWNED_TABLES)))
+    return tuple(sorted(set(GUARDED_TABLE_FLOOR) | set(authz.LMS_OWNED_TABLES)))
 
 
 def declarative_metadata(import_app_module: Any) -> Any:
@@ -156,8 +171,6 @@ def accounted_for(column: Any, recorded: dict[str, str]) -> str | None:
         return "a foreign key"
     if getattr(column, "computed", None) is not None:
         return "a generated column, which nothing can write"
-    if column.name in ROW_BOOKKEEPING:
-        return "row bookkeeping"
     if column.name in recorded:
         return "recorded as Pulse-owned"
     return None
@@ -176,9 +189,13 @@ def synthetic_lms_table(*, marker: str) -> Table:
     Built here rather than taken from `Base.metadata` so the control asserts what
     the *rule* does rather than what today's schema happens to contain. `marker` is
     the name of the column under test: `canvas_id` is E0-35's own example of the
-    thing that must fail, and `lms_canvas_id` is the nearest thing to it that must
-    pass — one prefix apart, so a rule that fired on both, or on neither, is caught
-    here rather than by nobody.
+    thing that must fail, `lms_canvas_id` is the nearest thing to it that must pass
+    — one prefix apart, so a rule that fired on both, or on neither, is caught here
+    rather than by nobody — and `updated_at` is the shape E0-35's review found
+    passing through a fifth category that no longer exists.
+
+    The three columns beside it are one of each thing the rule accounts for: a
+    primary key, a foreign key, and a stored generated column.
     """
     metadata = MetaData()
     Table("prefix", metadata, Column("id", Integer, primary_key=True))
@@ -189,7 +206,6 @@ def synthetic_lms_table(*, marker: str) -> Table:
         Column("prefix_id", Integer, ForeignKey("prefix.id")),
         Column("lms_number", String(16)),
         Column("level", String(8), Computed("'UG'")),
-        Column("created_at", String(32)),
         Column(marker, String(64)),
     )
 
@@ -203,17 +219,32 @@ def test_the_rule_refuses_an_unmarked_lms_column_and_allows_its_nearest_neighbou
     whether the new column wears the marker.
 
     The allowed half is what stops the rule being a prohibition on columns. A
-    primary key, a foreign key, a generated column and a `created_at` are all
-    unprefixed and all correct, and a rule that failed on them would be red against
-    the schema E0-05 already shipped — which is the state that gets a rule deleted
-    rather than met.
+    primary key, a foreign key and a generated column are all unprefixed and all
+    correct, and a rule that failed on them would be red against the schema E0-05
+    already shipped — which is the state that gets a rule deleted rather than met.
+
+    **A timestamp is not one of them, and the case is here because it once was.**
+    E0-35's review found a fifth branch exempting `created_at`, `updated_at` and
+    `deleted_at` by name: it excused nothing on today's schema and would have let
+    an LMS-supplied last-modified stamp onto `course` unmarked. The branch is gone
+    and this is the case that stops it coming back quietly.
     """
     caught = unaccounted_columns(synthetic_lms_table(marker="canvas_id"), recorded={})
     assert caught == ["canvas_id"], (
         f"The rule reports {caught} for a `course` table carrying an unprefixed `canvas_id`. It "
         "has to be exactly that one column: anything less and E0-35's own example passes, "
-        "anything more and the rule is red against a primary key, a foreign key, a generated "
-        "column or a `created_at` — all of which E0-05's schema already has."
+        "anything more and the rule is red against a primary key, a foreign key or a generated "
+        "column — all of which E0-05's schema already has."
+    )
+
+    timestamped = unaccounted_columns(synthetic_lms_table(marker="updated_at"), recorded={})
+    assert timestamped == ["updated_at"], (
+        f"The rule reports {timestamped} for a `course` table carrying an unprefixed "
+        "`updated_at`. A timestamp on a table the LMS owns is not exempt for being a timestamp: "
+        "it is as likely to be the platform's last-modified stamp as Pulse's own row "
+        "bookkeeping, and which one it is, is exactly the fact `Base.metadata` cannot recover. "
+        "If a Pulse-owned timestamp genuinely lands on one of these tables, it costs a "
+        "`PULSE_OWNED_COLUMNS` entry like any other column, not a category of its own."
     )
 
     allowed = unaccounted_columns(synthetic_lms_table(marker="lms_canvas_id"), recorded={})
