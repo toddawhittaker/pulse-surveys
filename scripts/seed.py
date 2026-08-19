@@ -41,14 +41,21 @@ then owes a check afterwards that the graph it wrote is still acyclic and still
 free of edges touching a `CARE` assignment, because with the trigger off nothing
 else in the system will ever look.
 
-**It registers no LTI platform that the mock LMS could sign for.** ADR 0038's
-argument that `mock-lms` is safe in the base Compose file rests on a tool trusting
-it only if a row in `lti_platform` says so, and on no such row existing anywhere
-in this repository. The demo institution needs *a* registration — its people are
-`user` rows, and a `user` belongs to a platform — so it registers a fictional one
-at an RFC 2606 `.invalid` address that resolves nowhere and that nobody holds a
-signing key for. ADR 0065 records the choice; ADR 0038 is untouched and stays
-correct.
+**It registers the mock LMS, and that row is the one thing written here that a
+deployment must never receive.** ADR 0038 argues that `mock-lms` is safe in the
+base Compose file because a tool trusts it only if a row in `lti_platform` says
+so. Until E0-31 that argument rested on no such row existing anywhere in this
+repository. It now rests on the `ENVIRONMENT` guard described below, which ADR
+0038 has been amended to name and ADR 0068 records; `seed_mock_platform`
+evaluates that guard at the write itself, so the row cannot be reached by a
+caller who arrived some other way than through `main`.
+
+**The demo institution's own people belong to a different platform**, a fictional
+one at an RFC 2606 `.invalid` address that resolves nowhere and that nobody holds
+a signing key for (ADR 0065). Nobody launches as them. The mock registration
+carries no `user` rows at all: it exists so that E0-18 can drive a real launch
+past the registration boundary, and provisioning the user a launch resolves to is
+E1's (SPEC §14.3, "automatic section/enrollment provisioning from launch").
 
 ## Where it will run, and where it refuses to
 
@@ -57,6 +64,11 @@ seed "cannot run against a non-development environment", and this is a script th
 writes people, an institution and a term into whatever database it is pointed at,
 as a superuser. ADR 0063 records why the check is on that variable and why it is
 an equality rather than a deny-list.
+
+Since E0-31 that guard carries a second load. It is now the only thing standing
+between a deployment and a registration that would make it trust the mock
+platform, so it is checked twice: once in `main` before a connection is opened,
+and once inside `seed_mock_platform` at the row itself.
 
 ## Running it twice
 
@@ -223,6 +235,26 @@ DEMO_PLATFORM_ISSUER = "https://lms.pulse-demo.invalid"
 DEMO_PLATFORM_CLIENT_ID = "pulse-demo-tool"
 DEMO_PLATFORM_JWKS_URL = "https://lms.pulse-demo.invalid/.well-known/jwks.json"
 DEMO_PLATFORM_DEPLOYMENT_ID = "pulse-demo-deployment-1"
+
+# The in-repo mock platform, registered so that E0-18 can drive a real launch
+# (E0-31 item 1). **Nothing about this one is fictional**: these are the literal
+# values `docker-compose.yml` gives the `mock-lms` service, the host is a name
+# that resolves on the Compose network, and the key set behind the JWKS URL is
+# the one that signs the launches it offers. Writing this row is what makes a
+# Pulse trust that platform, so `seed_mock_platform` below checks the environment
+# guard before it does.
+#
+# Copied from the Compose file rather than read out of it, because this script
+# runs where that file may not be, and asserted equal to it by
+# `test_the_seeded_mock_registration_is_the_registration_compose_configures` —
+# which is the "or a test asserts the two copies agree" half of the rule
+# `docs/MISTAKES.md` entry 13 carries. The JWKS path is `mock-lms/app/config.py`'s
+# `JWKS_PATH`, which is not in the Compose environment because the platform
+# composes it from its own issuer.
+MOCK_PLATFORM_ISSUER = "http://mock-lms:8000"
+MOCK_PLATFORM_CLIENT_ID = "mock-lms-client"
+MOCK_PLATFORM_DEPLOYMENT_ID = "mock-lms-deployment-1"
+MOCK_PLATFORM_JWKS_URL = f"{MOCK_PLATFORM_ISSUER}/.well-known/jwks.json"
 
 # Where a demo person's address points: nowhere. RFC 2606 reserves `.invalid` for
 # exactly this, and a demo seed is a thing that gets copied into a staging
@@ -1018,6 +1050,49 @@ def seed_sections(
     return nodes
 
 
+def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> LtiPlatform:
+    """Register the in-repo mock platform, and refuse anywhere but a development box.
+
+    E0-31 item 1. E0-18 drives a real launch from `mock-lms`, and a tool with no
+    row naming that issuer rejects every launch it signs — which is ADR 0038's
+    fourth property working exactly as designed, and is why this row could not
+    simply be added. ADR 0068 is where the decision to add it is recorded and
+    where the cost is stated.
+
+    **The guard is checked here rather than only in `main`.** `main` checks it
+    before it opens a connection, which is what actually stops a deployed run, and
+    that check would be enough if `main` were the only way in. Checking it again
+    at the row makes the dependency structural: there is no ordering of calls in
+    this file, and no future caller of `seed`, that writes this registration
+    without the environment having been read and found to say `development`.
+    `test_the_seed_refuses_to_register_the_mock_outside_a_development_environment`
+    is what holds that, by calling `seed` directly with a configuration `main`
+    would never have let past.
+
+    **No `user` rows hang off this platform**, unlike the fictional registration
+    `seed_people` writes. A launch from the mock arrives as one of *its* two
+    invented subjects (`mock-lms/app/seed.py`), not as one of the eighteen demo
+    people, and turning such a subject into a Pulse person is launch-time
+    provisioning — E1's, by SPEC §14.3. What this row does is make that launch
+    reach the code at all.
+    """
+    check_environment_is_development(configuration)
+
+    platform = upsert(
+        session,
+        LtiPlatform,
+        {"issuer": MOCK_PLATFORM_ISSUER, "client_id": MOCK_PLATFORM_CLIENT_ID},
+        jwks_url=MOCK_PLATFORM_JWKS_URL,
+        jwks_fetched_at=None,
+    )
+    upsert(
+        session,
+        LtiDeployment,
+        {"lti_platform_id": platform.id, "deployment_id": MOCK_PLATFORM_DEPLOYMENT_ID},
+    )
+    return platform
+
+
 def seed_people(session: Session) -> dict[str, Person]:
     """Every demo person, with the `user` and `user_identity` rows behind them.
 
@@ -1132,9 +1207,16 @@ def seed_lead_faculty_mappings(
         )
 
 
-def seed(session: Session) -> None:
-    """Load the whole demo institution into `session`. The caller commits."""
+def seed(session: Session, configuration: Mapping[str, str]) -> None:
+    """Load the whole demo institution into `session`. The caller commits.
+
+    `configuration` is the resolved mapping `main` has already checked, and it is
+    threaded here for one row: `seed_mock_platform` re-reads the environment guard
+    at the registration that would let a Pulse trust the mock platform. It runs
+    first so that a refusal costs no writes at all.
+    """
     check_calendar_fits()
+    seed_mock_platform(session, configuration)
     nodes = seed_containment(session)
     term = seed_calendar(session, nodes["institution", INSTITUTION_NAME])
     seed_sections(session, term, nodes)
@@ -1170,7 +1252,7 @@ def main(environ: Mapping[str, str] | None = None, dotenv_path: Path | None = No
     try:
         with Session(bind=engine) as session:
             try:
-                seed(session)
+                seed(session, configuration)
             except SeedError as refused:
                 session.rollback()
                 print(refused, file=sys.stderr)
@@ -1185,7 +1267,9 @@ def main(environ: Mapping[str, str] | None = None, dotenv_path: Path | None = No
         f"{len(PREFIXES)} prefixes, {len(COURSES)} courses, {len(SECTIONS)} sections, "
         f"{TERM_NAME} with {len(START_LETTER_MAP)} start positions, "
         f"{len(PEOPLE)} people, {len(ASSIGNMENTS)} assignments, "
-        f"{len(LEAD_FACULTY_MAPPINGS)} lead-faculty mappings."
+        f"{len(LEAD_FACULTY_MAPPINGS)} lead-faculty mappings, and two platform "
+        f"registrations — the fictional one its people belong to, and {MOCK_PLATFORM_ISSUER} "
+        "for the mock LMS."
     )
     return 0
 
