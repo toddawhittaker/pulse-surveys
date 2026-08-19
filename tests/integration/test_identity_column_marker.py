@@ -53,10 +53,21 @@ computes is what E0-10's views and the CI invariant pass are both built on.
 **One test here is `invariant`-marked**, and it is the last one:
 `test_no_view_reads_a_column_the_identity_marker_names`. A view is read with its
 owner's privileges, so it is the one route to identity that E0-10's grants do not
-close, and this file holds the only guard on it. Its docstring carries the
-reasoning; `scripts/ci/check_invariants.py` is what makes the mark mean
-something, by treating a skip, an xfail or an empty collection in that pass as a
-failure.
+close, and this file holds the guard on it as the *database* reports it. Its
+docstring carries the reasoning; `scripts/ci/check_invariants.py` is what makes
+the mark mean something, by treating a skip, an xfail or an empty collection in
+that pass as a failure.
+
+**It is no longer the only guard on that door, and the other half is E0-34's.**
+This one reads `pg_depend`, so it sees only views a migration has executed — a
+`.sql` file under `backend/app/views_sql/` that joins `user_identity` and selects
+a name passes it *vacuously* until a revision names that file.
+`test_no_view_created_under_views_sql_names_an_identity_column` in
+`test_identity_separated_views.py` reads those files as text and is the guard on
+that state; it borrows this module's vocabulary rather than restating it, so
+widening the convention here widens it there too. Neither subsumes the other:
+this one sees through an alias and through a `WHERE` clause because Postgres
+recorded the column dependency, and that one sees a file nothing has run.
 
 **That the fix lives in a test module is the decision, not an accident**, and
 dispute E0-10-01 is where it was settled: the discovery rule is a judgement about
@@ -649,7 +660,12 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
     added later that leaks one has to fail CI without anybody remembering to
     check.
 
-    **Marked `invariant`, because it is the only guard on this door.** A view is
+    **Marked `invariant`, because it is the guard on this door as the database
+    reports it** — E0-34 adds the file-side twin,
+    `test_no_view_created_under_views_sql_names_an_identity_column`, which reads
+    the `views_sql/` sources as text and so catches the same join in a file no
+    revision names yet. That one cannot see an alias or a chain of views; this one
+    cannot see a file nothing has executed. A view is
     read with its *owner's* privileges rather than its reader's, so a later
     `CREATE VIEW … SELECT ui.identity_name … JOIN public.user_identity ui`
     followed by `GRANT SELECT ON that view TO pulse_app` puts a name on an
@@ -673,7 +689,10 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
     **The mutation it exists to survive** is that view: add an identity column to
     `section_roster_v001.sql`'s select list, or a join to `user_identity` used
     only in a `WHERE` clause, and this goes red naming the view, the table and
-    the column while nothing else in the tree does.
+    the column. Since E0-34 the file-side twin goes red on the same edit, which
+    is the point of having both — but only this one sees it when the column
+    reaches the view under an alias, and only that one sees it before any
+    revision has run the file.
 
     **It reads the dependency, not the output columns.** Postgres records which
     *columns* of which tables a view's rewrite rule uses, so a view selecting
