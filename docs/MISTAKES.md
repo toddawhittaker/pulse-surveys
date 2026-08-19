@@ -86,7 +86,11 @@ fail. Where a test can be satisfied by emptiness, assert non-emptiness first, an
 say in the message why that guard is not ceremony. A pattern searched against a
 file is a case of this and looks like none: run it against the text you claim it
 catches *and* against the text you claim it allows, and give it a canary — a
-string certainly present — so a search that has gone blind says so.
+string certainly present — so a search that has gone blind says so. **Build that
+canary sample by copying whole lines, the line the sentence starts on included.**
+A sentence retyped from where you think it begins is the thing the sample exists
+to disprove, and a comment wrap is exactly what puts the boundary somewhere you
+did not expect.
 
 ## 1. A record went on asserting something the change had made false
 

@@ -94,12 +94,27 @@ SHELL_COMMENT = re.compile(r"#.*$")
 # inside a unit test, which is a broken test rather than a slow one.
 REFUSAL_TIMEOUT_SECONDS = 60
 
-# The claim in `.dockerignore` that finding 3 falsifies, quoted as it stands with
-# its wrap, and the searches run against it before they are run against the file
-# (`docs/MISTAKES.md` entry 3, third incident: a pattern that matched nothing
-# across a comment wrap and reported success against the exact comment it existed
-# to find).
+# The claim in `.dockerignore` that finding 3 falsifies, quoted verbatim from
+# `ad37955` — the commit that wrote it — wrap included, and the searches are run
+# against it before they are run against the file (`docs/MISTAKES.md` entry 3,
+# third incident: a pattern that matched nothing across a comment wrap and
+# reported success against the exact comment it existed to find).
+#
+# **The first line below is here because of that same wrap**, and it was missing.
+# The sentence begins with `Nothing` at the end of the previous line, and the
+# first version of this constant started at `# yet guards`, so
+# `NOTHING_ELSE_GUARDED_CLAIM` could not match its own sample: the canary failed
+# against every possible state of the repository, including the state the test
+# was written to catch and the state that provoked it. Found by the implementer,
+# measured by running the module's own helpers over its own literal, and recorded
+# in `docs/disputes/E0-36-01.md`. The guard caught its own sample being
+# mis-quoted, which is the guard doing its job on the author of the guard.
+#
+# It stays quoted as `ad37955` wrote it rather than tracking what `.dockerignore`
+# says now. The canary asks "can these searches find the claim they exist to
+# find", and the only text that answers it is the text that carried the claim.
 FALSE_EXCLUSIVITY_NOTE = (
+    "# that went. Before that, deleting any of them left every gate green. Nothing\n"
     "# yet guards the patterns above this block the same way; the four here were\n"
     "# singled out because the package-data glob in `pyproject.toml` makes this one\n"
     "# directory a path into the image that the others do not have."
@@ -397,6 +412,19 @@ def test_the_dockerignore_no_longer_calls_the_prompts_directory_a_path_the_other
     **The near miss that must stay green:** a comment saying that nothing yet
     guards the `.env` patterns or the `mock-lms` and `mock-idp` blocks, which is
     still true and worth keeping.
+
+    **The near miss that matters most is the corrected file itself, and the margin
+    is one paraphrase wide.** `.dockerignore` now *records* the false claim in
+    order to say it was false — "An earlier version of this note said … **That was
+    false**" — which is what `docs/MISTAKES.md` entry 1 asks for, and it
+    paraphrases while doing it: "a path into the image the other patterns do not
+    have" rather than "…that the others do not have", and "This says nothing about
+    suffixes no line here matches" rather than "nothing yet guards the patterns
+    above this block". Neither search fires on either. But a search for a sentence
+    cannot tell a claim being *made* from a claim being *quoted as wrong*, so an
+    edit that records the correction verbatim turns this test red against a file
+    that is correct. The repair then is to paraphrase the record or to narrow the
+    search — never to delete the record, which is the half worth keeping.
     """
     assert DOCKERIGNORE.is_file(), (
         f"{DOCKERIGNORE} does not exist. Without it the build context is everything in the tree, "
