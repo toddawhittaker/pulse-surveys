@@ -55,7 +55,16 @@ test, where "the two callers run the same checks" is most perfectly satisfied by
 a job that has been renamed and a recipe that was never found; and it made the
 `-c requirements.txt` search run against the two spellings it claims to catch and
 against the `--output-file=requirements.txt` it must not match, before its
-silence about the Makefile is believed.)*
+silence about the Makefile is believed. Item 3's round then found the same shape
+already merged and green: `test_invariant_gate_is_strict.py` guards its absence
+assertion with "the Makefile still invokes the checker at all", and that guard
+read the file line by line without cutting shell comments — so the two comment
+lines above the `invariants` target, which name `check_invariants.py` while
+explaining it, satisfied the guard on their own. Deleting the invocation from the
+recipe and leaving the prose would have kept that test green over a `make ci` that
+had stopped checking the invariant run. The helper now cuts comments before a line
+counts as a command, which is the same rule the two CI-workflow modules already
+applied one layer up.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
