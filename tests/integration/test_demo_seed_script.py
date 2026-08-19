@@ -98,6 +98,7 @@ ASSIGNMENTS = "role_assignment"
 MAPPINGS = "lead_faculty_mapping"
 PLATFORMS = "lti_platform"
 DEPLOYMENTS = "lti_deployment"
+USERS = "user"
 
 # SPEC §2.1's containment hierarchy, outermost first. A copy of the tuple in
 # `tests/conftest.py`; see the module docstring on copies.
@@ -992,14 +993,95 @@ def test_the_seed_registers_the_mock_platform_so_a_launch_from_it_can_be_trusted
     )
 
 
-def test_the_seeded_mock_registration_is_the_registration_compose_configures(
+def test_no_seeded_user_belongs_to_the_mock_platform(
     seeded_demo: Any,
     demo_database: Any,
     metadata_tables: dict[str, Any],
     base_compose: dict[str, Any],
     mock_lms_service: str,
 ) -> None:
-    """The seed's copy of the mock's identity and the Compose file's agree, value by value.
+    """The mock's registration carries no people, which is what stops it being a login oracle.
+
+    **This is the property that makes registering the mock survivable, and until
+    the E0-31 security review it was stated in five files and asserted in none.**
+    `mock-lms` authenticates nobody: it signs a launch as whatever subject the
+    caller picks (ADR 0038). Registering it makes `http://mock-lms:8000` a trusted
+    issuer. The single thing standing between that and a working login as a real
+    demo person is that **no `user` row points at the mock's platform row**, so a
+    launch from it can never reach a `person`, and therefore never reaches
+    `authz.resolve_scope`.
+
+    **The concrete failure it stops.** E0-18 is the next ticket, it needs its
+    Playwright launch to land somewhere, and the cheapest way to get there is one
+    `User` upsert with `lti_platform_id` set to the mock's id and a `person` link
+    beside it. Add those two rows and anyone who can reach the container on a
+    development box holds a seeded person's purview — with every other test in
+    this repository still green. That is `docs/MISTAKES.md` entry 2's exact shape,
+    and the sibling property in the same pull request, the environment guard, got
+    a reaching test and a named mutation while this one got prose.
+
+    Whoever wants to make the demo institution launchable is not blocked by this
+    test — they are asked to change it deliberately, and to say in the pull
+    request what a launch from a platform that authenticates nobody now reaches.
+
+    **The control is the fictional platform's own users.** A demo with no `user`
+    rows at all would satisfy "none belongs to the mock" while asserting nothing,
+    so the eighteen that belong to ADR 0065's registration are counted first.
+    """
+    seeded(seeded_demo)
+    addresses = mock_platform_addresses(base_compose, mock_lms_service)
+    require_table(metadata_tables, USERS)
+
+    with reading(demo_database, metadata_tables) as rows:
+        read_the_table = USERS in rows
+        registrations = rows_of(rows, PLATFORMS)
+        users = rows_of(rows, USERS)
+
+    assert read_the_table, (
+        f"`{USERS}` is declared on `Base.metadata` and this test read no rows from it at all, so "
+        "'no user belongs to the mock' would be a statement about a query that never ran."
+    )
+
+    mock_ids = {
+        row["id"]
+        for row in registrations
+        if names_the_mock_platform(row.get("issuer"), addresses, mock_lms_service)
+    }
+    assert mock_ids, (
+        f"No seeded `{PLATFORMS}` row names the mock platform, so this test has no id to look "
+        "for and would pass over any set of users at all. The registration test above owns that "
+        "failure."
+    )
+
+    on_other_platforms = [row for row in users if row.get("lti_platform_id") not in mock_ids]
+    assert on_other_platforms, (
+        f"The seed wrote no `{USERS}` rows outside the mock's registration, so 'none belongs to "
+        "the mock' is being asserted over an empty or wholly-mock table. ADR 0065 gives the demo "
+        "institution's eighteen people a fictional platform of their own; if they are gone, this "
+        "assertion is measuring their absence rather than the mock's emptiness."
+    )
+
+    on_the_mock = [row.get("id") for row in users if row.get("lti_platform_id") in mock_ids]
+    assert not on_the_mock, (
+        f"{len(on_the_mock)} seeded `{USERS}` row(s) belong to the mock platform's registration: "
+        f"{sorted(str(user_id) for user_id in on_the_mock)}. The mock signs a launch as any "
+        f"subject for whoever can reach the container, so a `{USERS}` row on that platform is a "
+        "path from 'can reach the container' to a real person's purview — and on a development "
+        "box that container is published on the host. If this is deliberate, say in the pull "
+        "request what a launch from a platform that authenticates nobody now reaches, and change "
+        "this test rather than removing it."
+    )
+
+
+def test_the_seeded_mock_registration_is_the_registration_compose_configures(
+    seeded_demo: Any,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+    base_compose: dict[str, Any],
+    mock_lms_service: str,
+    mock_lms_config: Any,
+) -> None:
+    """The seed's copy of the mock's identity and the platform's own agree, value by value.
 
     `scripts/seed.py` carries the issuer, client ID and deployment ID as literals
     rather than reading `docker-compose.yml`, because the script runs where that
@@ -1007,6 +1089,16 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
     in two files with nothing comparing them is the shape `docs/MISTAKES.md` entry
     13 is about — and the shape E0-31 item 3 raises against a different literal in
     this same script. This is the comparison.
+
+    **Two authorities, not one, and the second is the point.** Three of the four
+    values are Compose literals (ADR 0037). The fourth, the key-set URL, is not in
+    `docker-compose.yml` at all: the platform composes it from its own issuer and
+    `mock-lms/app/config.py`'s `JWKS_PATH`. A guard whose whole inventory was the
+    Compose `environment:` block would report clean over that value forever,
+    because it cannot see the currency it is denominated in — which is the defect
+    `docs/MISTAKES.md` entry 35 is about, found here by the E0-31 security review.
+    So the fixture imports the mock's own configuration module and the path is
+    compared against the constant that defines it.
 
     **What breaks without it is not cosmetic.** If somebody changes the mock's
     `MOCK_LMS_CLIENT_ID` in the Compose file, the seeded registration goes on
@@ -1025,9 +1117,19 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
         "file as literals."
     )
 
+    jwks_path = getattr(mock_lms_config, "JWKS_PATH", None)
+    assert isinstance(jwks_path, str) and jwks_path.startswith("/"), (
+        f"`mock-lms/app/config.py` defines no absolute `JWKS_PATH` (found {jwks_path!r}), so the "
+        "seeded key-set URL has nothing to be checked against and this half of the comparison "
+        "would pass over an absence. That module declares the platform's routes and builds the "
+        "URLs its discovery document advertises."
+    )
+
+    issuer = environment.get("MOCK_LMS_ISSUER")
     expected = {
-        "issuer": environment.get("MOCK_LMS_ISSUER"),
+        "issuer": issuer,
         "client_id": environment.get("MOCK_LMS_CLIENT_ID"),
+        "jwks_url": None if not issuer else f"{issuer}{jwks_path}",
     }
     missing = [name for name, value in expected.items() if not value]
     assert not missing, (
@@ -1059,11 +1161,14 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
         if str(seeded_row.get(column)) != str(value)
     }
     assert not disagreements, (
-        f"The seeded mock registration and `docker-compose.yml` disagree: {disagreements} "
-        "(seeded, configured). `scripts/seed.py`'s MOCK_PLATFORM_* constants are a copy of that "
-        "file's literals and this is what keeps them a copy rather than a divergence. A launch "
-        "signed by the running mock is checked against the seeded row, so a disagreement here is "
-        "a launch that fails in E0-18 with nothing naming the two files that drifted."
+        f"The seeded mock registration and the platform's own configuration disagree: "
+        f"{disagreements} (seeded, configured). `scripts/seed.py`'s MOCK_PLATFORM_* constants are "
+        "a copy — of `docker-compose.yml`'s literals for the issuer and client ID, and of "
+        "`mock-lms/app/config.py`'s `JWKS_PATH` for the key-set URL — and this is what keeps them "
+        "copies rather than a divergence. A launch signed by the running mock is checked against "
+        "the seeded row, and its signature is verified against the key set that URL fetches, so a "
+        "disagreement here is a launch that fails in E0-18 with nothing naming the files that "
+        "drifted."
     )
 
     expected_deployment = environment.get("MOCK_LMS_DEPLOYMENT_ID")
@@ -1124,10 +1229,34 @@ def test_the_seed_refuses_to_register_the_mock_outside_a_development_environment
         "DB_SUPERUSER_PASSWORD": "unused — the guard refuses before a row is written",
     }
 
+    platforms = require_table(metadata_tables, PLATFORMS)
     with demo_session(demo) as session:
         with pytest.raises(seed_module.SeedError) as refusal:
             seed_module.seed(session, deployed)
+        # Read inside the failed transaction, before the rollback, because a
+        # rollback hides the difference this asserts. `upsert` flushes, so a
+        # guard moved below the two writes would leave both rows visible here
+        # and invisible to any assertion made afterwards. ADR 0068 says the
+        # guard is checked before the row and the seed docstring says a refusal
+        # costs no writes at all; without this, nothing held either sentence.
+        # The E0-31 security review measured it: the whole suite stayed green
+        # with the check moved after both `upsert` calls.
+        written_before_the_refusal = session.execute(select(platforms)).mappings().all()
         session.rollback()
+
+    reached_the_database = {
+        f"{column}={value!r}"
+        for row in written_before_the_refusal
+        for column, value in dict(row).items()
+        if names_the_mock_platform(value, addresses, mock_lms_service)
+    }
+    assert not reached_the_database, (
+        f"The refusal came after the write: {sorted(reached_the_database)} was already in the "
+        "transaction when `seed` raised. Nothing persists — one transaction, and both `main` and "
+        "this test roll back — so this is not a hole. It is the ordering ADR 0068 and "
+        "`seed`'s own docstring both claim, and a guard that runs after the row it guards is one "
+        "refactor away from a guard that does not run at all."
+    )
 
     said = str(refusal.value)
     assert seed_module.ENVIRONMENT_VARIABLE in said, (

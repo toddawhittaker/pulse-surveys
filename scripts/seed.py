@@ -244,13 +244,26 @@ DEMO_PLATFORM_DEPLOYMENT_ID = "pulse-demo-deployment-1"
 # Pulse trust that platform, so `seed_mock_platform` below checks the environment
 # guard before it does.
 #
-# Copied from the Compose file rather than read out of it, because this script
-# runs where that file may not be, and asserted equal to it by
+# Copied rather than read at runtime, because this script runs where the files
+# these come from may not be, and asserted equal to them by
 # `test_the_seeded_mock_registration_is_the_registration_compose_configures` —
 # which is the "or a test asserts the two copies agree" half of the rule
-# `docs/MISTAKES.md` entry 13 carries. The JWKS path is `mock-lms/app/config.py`'s
-# `JWKS_PATH`, which is not in the Compose environment because the platform
-# composes it from its own issuer.
+# `docs/MISTAKES.md` entry 13 carries.
+#
+# **Two sources, not one.** The issuer and the client ID are Compose literals
+# (ADR 0037). The JWKS path is `mock-lms/app/config.py`'s `JWKS_PATH`, which is
+# not in the Compose environment at all because the platform composes that URL
+# from its own issuer — so a drift guard whose whole inventory was the Compose
+# `environment:` block would report clean over it forever. The test imports the
+# mock's configuration module for exactly that value. `docs/MISTAKES.md` entry 35
+# is the entry about a guard that cannot see the currency a value is held in, and
+# the E0-31 security review found this instance of it.
+#
+# The scheme is `http`, deliberately and unavoidably: this is a container talking
+# to a container on the Compose network with no certificate anywhere. Nothing
+# reads the column yet. E0-24 item 1 has E1 constrain what a legitimate
+# `jwks_url` looks like, and this row is the one committed value any such rule
+# has to admit — see that ticket.
 MOCK_PLATFORM_ISSUER = "http://mock-lms:8000"
 MOCK_PLATFORM_CLIENT_ID = "mock-lms-client"
 MOCK_PLATFORM_DEPLOYMENT_ID = "mock-lms-deployment-1"

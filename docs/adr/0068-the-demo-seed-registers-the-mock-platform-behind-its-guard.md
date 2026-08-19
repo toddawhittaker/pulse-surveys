@@ -72,9 +72,16 @@ Three things make that a control a reviewer can check rather than a claim:
   database immediately afterwards so that an empty table cannot pass for a
   refusal. It is the only test in the suite that goes red if the guard at the
   row is deleted, because a subprocess can only ever observe `main` refusing.
-- **A test compares the seeded values against the Compose literals**, so the two
-  copies of the mock's identity cannot drift into a launch that fails its
-  audience check with nothing naming the files that disagree.
+- **A test compares the seeded values against the platform's own configuration**,
+  so the two copies of the mock's identity cannot drift into a launch that fails
+  its audience check with nothing naming the files that disagree. Two sources,
+  because the key-set URL is not a Compose literal — the platform composes it
+  from its own issuer and `mock-lms/app/config.py`'s `JWKS_PATH` — and a guard
+  whose whole inventory was the Compose `environment:` block could never see it.
+- **A test asserts that no `user` row belongs to the mock's registration.** That
+  property is what stops a trusted issuer which authenticates nobody from being a
+  login oracle for a real purview, and it is the one thing here that a later
+  ticket could undo in two lines while every other test stayed green.
 
 **ADR 0065's fictional registration stays.** The demo institution's eighteen
 people go on belonging to `https://lms.pulse-demo.invalid`, and the mock
@@ -121,7 +128,20 @@ the address independently. That was accepted by decision rather than closed, and
 what such a run now writes includes a registration for a platform that
 authenticates nobody and will sign a launch as any user for whoever can reach
 it. Closing it means constraining the address and the environment name together,
-which is a change to ADR 0063 and not to this record.
+which is a change to ADR 0063 and not to this record. **It is owned rather than
+merely disclosed**: the epic README's "Carried out of E0" table has a row for it,
+with E13 as the owner and a done-when, because that table exists precisely
+because a deferral recorded only where it was deferred is one nobody picks up.
+
+**The `jwks_url` this writes is plaintext, and that is a forward cost rather
+than an exposure.** `http://mock-lms:8000/.well-known/jwks.json` is a container
+name on the Compose network with no certificate anywhere. Nothing reads the
+column yet, and an attacker positioned to intercept that fetch could reach the
+mock directly and have it sign anything, so the plaintext buys them nothing. What
+it does do is constrain E1: E0-24 item 1 has E1 decide what a legitimate
+`jwks_url` looks like, and a rule requiring `https` would reject this row and
+break E0-18. E0-24 item 1 now says so, so that E1 designs the carve-out rather
+than adding one under pressure to get a gate green.
 
 **E0-18 gets past the registration boundary and no further.** A launch from the
 mock arrives as one of *its* two invented subjects, not as one of the eighteen

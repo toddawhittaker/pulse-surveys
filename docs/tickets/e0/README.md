@@ -181,6 +181,7 @@ up.
 | E0-29 item 5 — `run_task` from inside a running event loop | **E2** | E2 owns whether ADR 0013's `def` handler convention stays a convention |
 | SPEC §4.1 item 1 — no student-visible path exposes another section | **E2** | the first epic with a student-visible path, and the scoping that gives "another section" its meaning |
 | Database TLS on both engines | **E13** | the operator guide owns it; it matters before a managed or remote Postgres |
+| The demo seed reads the environment name and the database address from independent sources | **E13** | E0-17-01 accepted this by decision rather than closing it, and E0-31 made it worth more: an operator exporting a production `DATABASE_URL` over a development checkout now seeds a registration that makes Pulse trust a platform which signs a launch as any user. Closing it constrains the address and the environment name together, which redesigns a control that was disputed, arbitrated and settled once — that wants the deployment picture E13 owns. **Done when** `scripts/seed.py` refuses a run whose database address is not one a development environment could legitimately name, or ADR 0063 records why it does not, with the enlarged blast radius named |
 
 ## Decided
 
