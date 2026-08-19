@@ -122,11 +122,25 @@ into a relation that cannot take one.
 `pg_class` for views nor `pg_proc`, so dropping a view, changing one by hand in a
 database, or deleting the `CREATE FUNCTION` from a file leaves the check green.
 The tests are the only reader: `test_identity_separated_views.py` asserts the
-views exist in a migrated database, that each is named in a file here, and that
-every relation in every file is schema-qualified. Any later change to these
+views exist in a migrated database, that each is named in a file here, that every
+relation in every file is schema-qualified, and — since E0-34 — that no view
+these files create reads an identity column. Any later change to these
 objects needs a test run, not a drift check — the same consequence
 [ADR 0027](0027-supervision-edges-are-policed-by-one-row-level-trigger.md)
 records for its trigger, for the same reason.
+
+**This record is no longer the only thing standing between a view file and an
+identity column, and E0-34 is what changed that.** Until then, a `.sql` file in
+this directory that joined `user_identity` and selected a name was caught by
+review and by nothing else: the rule above puts it in a diff somebody reads, and
+the `pg_depend` invariant in `test_identity_column_marker.py` cannot see it,
+because it reads the migrated database and no revision has named the file yet.
+`test_no_view_created_under_views_sql_names_an_identity_column` in
+`test_identity_separated_views.py` now reads these files as text and fails on
+that ground, naming the column, whether or not a revision executes the file — so
+the immutable versioned name remains the reason the change is *legible* in a
+diff, and is no longer the reason it is *caught*. The rule in this record is
+unchanged; what has gone is its being alone.
 
 **A revision imports application code, which no other revision here does.** That
 is the exception this record buys, and it has a cost: `backend/migrations/env.py`
@@ -143,13 +157,31 @@ content hash recorded in the revision would close it, and was left out as more
 machinery than the risk carries today — the same trade ADR 0032 made for prompts,
 where the file-naming scheme is enforced and the no-edit rule is not.
 
-**The name-mention sweep is weaker than it reads.**
+**What the E0-34 guard does not cover, and what stands there instead.** The rule
+it enforces is scoped to statements that *create a view*, not to files, because
+this directory also ships the `SECURITY DEFINER` reveal function, which reads
+identity by [ADR 0001](0001-identity-separation-by-database-role.md)'s design — a
+file-grained rule would be red on landing, and an exemption list keyed on a
+filename is worse than a property. The consequence is that **a second
+identity-reading function shipped into this directory has nothing behind it but
+the grant model**, and `identity_grants_v001.sql` says in as many words that the
+grant model does not protect the view files themselves. What stands there is this
+record's review rule, plus `test_identity_grants.py`'s sweep asserting that
+`pulse_app` may execute no `SECURITY DEFINER` function in `public`, which fires
+on the day such a file joins a `SCRIPTS` tuple. `CREATE TABLE … AS SELECT` in one
+of these files is outside the guard for the same reason and has its own followup.
+
+**The name-mention sweep was weaker than it read, and E0-33 closed it.**
 `test_every_read_view_is_created_from_a_sql_file_under_views_sql` looks for the
 view's *name* anywhere in the combined text of these files, so a view whose
 `CREATE VIEW` moved into a revision string still passes as long as some file
 mentions it — and `identity_grants_v001.sql` mentions both views, because it
 grants on them. Measured, not reasoned: with `section_roster_v001.sql` deleted
 and its `CREATE VIEW` inlined into the revision, all seven tests in that module
-stayed green. So the file-based layout is a decision this record holds, not one
-the suite enforces; tightening the sweep to require a `CREATE` of the object is
+stayed green. So the file-based layout was a decision this record held rather than
+one the suite enforced. **E0-33 tightened it**: `creates_view` now requires a
+`CREATE` of the object, and E0-34 widened that to every spelling Postgres
+accepts, including `RECURSIVE` and `TEMP`. The paragraph below described the
+older, weaker state and is kept for the measurement it records; tightening the
+sweep to require a `CREATE` of the object was
 noted for whoever owns that test.

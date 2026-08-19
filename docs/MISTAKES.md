@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 36** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 37** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -150,6 +150,15 @@ you have removed the only signal that would have told you it did not work.
 ## 14. An enumeration was reported as an impossibility
 
 **Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/14-an-enumeration-was-reported-as-an-impossibility.md)
+
+## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+
+**Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
+subject that certainly has it, as a control. A guard that only ever reports
+absence cannot tell you which mechanisms it can see — and the role a scheme is
+built around is the one least likely to hold its privileges the ordinary way.
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -242,12 +251,3 @@ you have removed the only signal that would have told you it did not work.
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
 file and check the status, or run the gate bare.
-
-## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
-
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
-
-**Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
-subject that certainly has it, as a control. A guard that only ever reports
-absence cannot tell you which mechanisms it can see — and the role a scheme is
-built around is the one least likely to hold its privileges the ordinary way.

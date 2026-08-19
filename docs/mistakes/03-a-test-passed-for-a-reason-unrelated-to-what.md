@@ -1,25 +1,10 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 36**
+**Caught: 37**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*15 instances recorded; the 3 most recent are below. The earlier 12 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-16's review round, and the subject is a *reproduction*
-rather than a test. A review reported that a PKCE verifier wrapped in whitespace
-redeemed successfully; the script written to reproduce it before fixing anything
-answered `400`, in the direction that says "already refused". Both the reviewer
-and the script were right and they were exercising different flows: the script
-computed the challenge over the padded verifier, where the trimming cancels on
-both sides, and the reviewer had bound the challenge over the clean value and
-sent the padded one — which is the case where trimming widens what PKCE binds
-from one string to every string that trims to it. Reported as "cannot reproduce",
-that finding closes as invalid and the 200 stays in the tree. **When a repro
-disagrees with a review, the repro is the suspect**: rebuild it from the
-reviewer's exact pairing before drawing any conclusion, and say which pairing was
-measured. The corrected script answers 200 before the fix and `invalid_grant`
-after, on the same instance.)*
+*16 instances recorded; the 3 most recent are below. The earlier 13 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-16's fix round, and it decided three things about five
 tests written *after* the code they cover — which is the position this entry is
@@ -53,6 +38,25 @@ asserted — and, in the grant half, the control that `has_table_privilege` repo
 the reveal function's owner **holding** `SELECT` on `user_identity`: without it,
 "no role a runtime role can become may read identity" is equally true of a probe
 that answers false to everything.)*
+
+*(Writing E0-34's tests, on a test whose whole subject is a
+*failure*. Two of them plant a `.sql` file that reads an identity column and then
+assert the guard rejects it, and the natural spelling is
+`with pytest.raises(AssertionError):` around the call. That passes for at least
+three reasons that are not the one it claims: the guard's own non-vacuity
+assertions fire when the planted directory is empty, when the marker convention
+has stopped marking anything, or when the redirection of `VIEWS_SQL_DIR` has not
+taken effect and the guard is reading the real directory — in each case the
+planted file was never swept, and the test reports the guard working. Both now
+pin *which* assertion fired by requiring the message to name the identity column
+as a whole word, which is the acceptance criterion anyway; the redirection is
+asserted before anything is called; and the message that would otherwise be a
+puzzle says out loud that a different failure inside the guard is one of the
+things being distinguished. The word boundary is the same rule applied once more:
+the sibling assertion asks that the *qualification* failure does **not** name the
+column, and a substring check answers that wrongly for a column called `name`,
+since that message contains the phrase "every relation a view or function
+names".)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
