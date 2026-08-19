@@ -60,16 +60,65 @@ twenty positions in the spec's own seed map with every gate green.
 
 ### 3. Roles, grants, views and functions — E0-20 item 3b
 
-The widest of the three. Two properties have no assertion anywhere today, and
-they are the two this item owes:
+The widest of the three.
 
-- **The owner of every `SECURITY DEFINER` function in `public` is not a
-  superuser.** E0-10 routed one; nothing re-reads it. Setting the reveal
-  function's owner back to the migration superuser re-opens the escalation ADR
-  0043 closes, and `alembic check` calls it clean.
-- **The grant set is *exactly* what the migrations wrote, not a superset.** That
-  is the shape a later ticket's convenience grant takes. Asserting a refusal
-  proves the refusal; it does not prove that nothing else was granted.
+**Corrected 2026-08-18, while building.** This item used to name two properties
+as having "no assertion anywhere today" — that no `SECURITY DEFINER` function in
+`public` is owned by a superuser, and that the definer's grants are exactly what
+its job needs. **Both are asserted**, in the file this item says to extend:
+`test_no_security_definer_function_is_owned_by_a_superuser` and
+`test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`, and
+ADR 0043's closing paragraph records them landing. The claim was written from
+E0-20 item 3b's text, which predates E0-10's later review round; E0-20 is
+corrected in the same pull request.
+
+This matters more than a stale sentence usually does. Both tests sit at module
+scope, so a second `def` under a similar name **replaces** the first silently:
+writing the two tests as this item asked would have deleted a live assertion
+while reporting that it had added one. `docs/MISTAKES.md` entry 1 carries it as
+an instance — before writing a test a ticket asks for, check what already
+asserts it.
+
+What is genuinely unasserted, and what this item therefore owes:
+
+- **Who else is named in an ACL on anything in `public`.** The existing tests ask
+  what the three roles in the scheme hold. None asks whether a *fourth* grantee
+  exists, and a grant to a new role, or to `PUBLIC`, is invisible to all of them.
+- **What the connection roles hold on a base table.** Exactness is asserted for
+  the definer role and for `user_identity`; the runtime roles' privileges on
+  every other base table are not, and that is the shape a later ticket's
+  convenience grant takes. It has to be an equality rather than a lower bound,
+  because a withheld verb is often the assertion — `SELECT, INSERT` on
+  `classification` with `UPDATE` withheld is what makes SPEC §8's append-only
+  rule a property of the database.
+- **A role membership granted `WITH INHERIT FALSE`.** `has_table_privilege` and
+  `pg_has_role(…, 'USAGE')` both follow the inheritance rule, so a non-inheriting
+  membership in the definer role writes no ACL entry, appears in neither, and
+  leaves `SELECT` on `user_identity` one `SET ROLE` away from the Care
+  connection. Asked in `'MEMBER'` mode, it is visible.
+- **The view set and the function set**, which no test compares against the files
+  that create them in the file-to-catalog direction. Both are built, and both are
+  held to the same rule.
+
+  **This paragraph said the opposite until 2026-08-18 and was wrong.** It read
+  that where a function's SQL belongs is "unsettled" because SPEC §13 names
+  `views_sql/` for views and says nothing about functions, and on that ground the
+  function half tolerated an empty expectation. [ADR 0041](../../adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)
+  settles it in as many words — the SQL lives in
+  `backend/app/views_sql/<object>_v<NNN>.sql`, and the five files it names
+  include the `SECURITY DEFINER` reveal function — and its Consequences describe
+  this very test's job. The spec being silent is not the same as the record being
+  silent, and nobody grepped. Measured: with the exemption in place, moving the
+  reveal's `CREATE FUNCTION` inline into its revision left the database identical
+  and the test passing over an empty comparison; the same change to a view failed
+  loudly.
+- **A privilege held on a column rather than on a table.** Added 2026-08-18 from
+  PR #40's review, and it is the sharpest entry here: a column grant is recorded
+  in `pg_attribute.attacl`, which neither `has_table_privilege` nor
+  `pg_class.relacl` reads, so `GRANT SELECT (identity_name) ON
+  public.user_identity TO pulse_app` left `SELECT *` refused — every behavioural
+  refusal green — while the connection behind every instructor screen read every
+  student's name.
 
 The rest of E0-10's grant model is genuinely asserted by
 `tests/integration/test_identity_grants.py`, three of whose tests are
@@ -101,8 +150,10 @@ closed by pointing at a migration.
 - [ ] A model whose *check-constraint expression* changed without a migration
       fails something, and a *removed exclusion constraint* fails something.
 - [ ] A database whose roles, grants, view set or function set drift from what
-      the migrations wrote fails something — including the two properties named
-      in item 3 that have no assertion today.
+      the migrations wrote fails something — including each of the five
+      genuinely-unasserted properties item 3 lists. (This criterion used to say
+      "the two properties named in item 3 that have no assertion today"; both of
+      those were already asserted. See item 3's correction note.)
 - [ ] Every one verified by mutation: reintroduce the defect, watch the named
       test fail, restore. Say in the pull request which mutation was run for
       each, and confirm the mutation landed before believing the red — a string

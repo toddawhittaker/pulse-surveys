@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 35** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 36** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -90,7 +90,7 @@ string certainly present — so a search that has gone blind says so.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 31** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 32** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
@@ -109,7 +109,7 @@ second case arrives.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 19** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
+**Caught: 20** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
 
 **Rule.** When you work around a quirk of a type, a parser or an API, grep for
 every place that asks the same question and route them through one helper, in the
@@ -143,13 +143,13 @@ you have removed the only signal that would have told you it did not work.
 
 **Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/15-a-property-tests-generator-excluded-the-case-its-own.md)
 
+## 19. A test held its expectation in a copy of the thing it was checking
+
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
+
 ## 14. An enumeration was reported as an impossibility
 
 **Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/14-an-enumeration-was-reported-as-an-impossibility.md)
-
-## 19. A test held its expectation in a copy of the thing it was checking
-
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -238,3 +238,16 @@ you have removed the only signal that would have told you it did not work.
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+
+**Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
+exit status of `tail`, so a failing gate prints a passing line. Redirect to a
+file and check the status, or run the gate bare.
+
+## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+
+**Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
+subject that certainly has it, as a control. A guard that only ever reports
+absence cannot tell you which mechanisms it can see — and the role a scheme is
+built around is the one least likely to hold its privileges the ordinary way.

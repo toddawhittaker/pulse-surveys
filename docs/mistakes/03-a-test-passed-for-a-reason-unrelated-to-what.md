@@ -1,28 +1,10 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 35**
+**Caught: 36**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*14 instances recorded; the 3 most recent are below. The earlier 11 are in this file's git history and in the pull requests they cite.*
-
-*(On both sides of E0-17, and it did different work on each.
-Writing the tests, it put a control in front of nearly every assertion: a mapped
-course before "some course is unmapped", because a seed with no mappings at all
-makes every course unmapped; both leads' course sets asserted non-empty before
-disjointness, because an empty set is disjoint from anything; a row count
-asserted non-zero before "the same rows afterwards", because two empty databases
-have the same rows; and the edge count before acyclicity, because a graph with no
-edges passes every cycle check ever written. Building against them, it stopped a
-green run being believed: twenty-one tests passed in 3.6 seconds, which looked
-too fast to have started a container, migrated a database and run two
-subprocesses. Three mutations were applied and reverted rather than reasoned
-about — the assistant dean moved to lead a course inside a department they
-supervise, the one chair who reports straight to the dean re-pointed at the
-assistant dean, and `upsert` made never to find an existing row — and one, two
-and one tests failed, each of them the one that owns the property.
-`docs/tickets/e0/.attempts/E0-17.md` has the table. **The green run was real; the
-belief in it was not, until then.**)*
+*15 instances recorded; the 3 most recent are below. The earlier 12 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-16's review round, and the subject is a *reproduction*
 rather than a test. A review reported that a PKCE verifier wrapped in whitespace
@@ -55,6 +37,22 @@ flow rather than judging the authorization response, because the value enters at
 one endpoint and the crash lands at another: a test that stopped where the value
 was submitted would have watched the provider accept it and reported a pass, with
 the defect intact one step further on.)*
+
+*(Writing E0-33's tests, where it changed the *direction* of a
+comparison. The natural shape for "the model's constraints are the database's" is
+one subset test — every rule the model declares, the database is carrying — and
+that test is satisfied by a model that declares nothing. Which is exactly E0-20
+item 3a's first row: the "exclusion constraint removed" measurement was taken by
+removing it **from the model**, so the obvious test is green against the named
+mutation. The module carries both directions as two tests plus a per-kind guard
+that the model declares at least one. The same reading produced the module's two
+self-tests — a comparison of two deparsed expressions is worth what the deparser
+is worth, so `upper(value)` against `UPPER ( ( value ) )` has to compare *equal*
+and against `lower(value)` has to compare *different*, executed rather than
+asserted — and, in the grant half, the control that `has_table_privilege` reports
+the reveal function's owner **holding** `SELECT` on `user_identity`: without it,
+"no role a runtime role can become may read identity" is equally true of a probe
+that answers false to everything.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
