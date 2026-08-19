@@ -1108,10 +1108,12 @@ def test_the_seed_refuses_to_register_the_mock_outside_a_development_environment
     `check_environment_is_development` call in `seed_mock_platform` and this test
     goes red; nothing else in the suite does.
 
-    **The control is the test above**, which reads the same registration out of a
-    database the script seeded under `ENVIRONMENT=development`. Without it this
-    one would be satisfied by a `seed` that never wrote the row at all
-    (`docs/MISTAKES.md` entry 3).
+    **The control is at the bottom of this test, on the same database.** A
+    refusal leaves an empty table, and an empty table is what an unmigrated
+    database, a broken read or a `seed` that never writes this row also look like
+    (`docs/MISTAKES.md` entry 3). So the same registration is then written through
+    the same call with the same session machinery, and the only thing that
+    differs between the two halves is the environment.
     """
     demo = demo_databases()
     addresses = mock_platform_addresses(base_compose, mock_lms_service)
@@ -1149,6 +1151,31 @@ def test_the_seed_refuses_to_register_the_mock_outside_a_development_environment
         "the whole of what makes a Pulse trust a platform which authenticates nobody and will "
         "sign a launch as any user for whoever can reach it (ADR 0038). The guard in "
         "`seed_mock_platform` is what stops it, and it has stopped stopping it."
+    )
+
+    # The control. Everything above is satisfied by an empty table, and this is
+    # what says the table was empty because the guard refused rather than because
+    # nothing here can write or read a row.
+    development = {**deployed, "ENVIRONMENT": "development"}
+    with demo_session(demo) as session:
+        seed_module.seed_mock_platform(session, development)
+        session.commit()
+
+    with reading(demo, metadata_tables) as rows:
+        after = rows_of(rows, PLATFORMS)
+
+    control = {
+        f"{column}={value!r}"
+        for row in after
+        for column, value in row.items()
+        if names_the_mock_platform(value, addresses, mock_lms_service)
+    }
+    assert control, (
+        "The same call, on the same database, under "
+        f"{seed_module.ENVIRONMENT_VARIABLE}='development', wrote no row naming the mock either. "
+        f"So the refusal above proved nothing: rows found afterwards: {after}. Either this "
+        "database was never migrated, or `seed_mock_platform` does not write the registration, "
+        "and in both cases the assertion this test exists for was passing over an absence."
     )
 
 
