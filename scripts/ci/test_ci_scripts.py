@@ -79,6 +79,22 @@ LICENSE_CASES = [
     ("MIT OR GPL-2.0", "allow"),  # a choice — we take MIT
     ("MIT AND GPL-3.0", "deny"),  # a conjunction — both sets of terms bind
     ("(MIT OR CC0-1.0)", "allow"),
+    # E0-29 item 4b. `regex` declares this, and it is a well-formed expression
+    # the split always handled correctly — what was missing was any rule for the
+    # second term, so a conjunction of two permissive licences came out unknown.
+    ("Apache-2.0 AND CNRI-Python", "allow"),
+    ("CNRI-Python", "allow"),
+    # The word boundary in the `\bMIT\b` rule, asserted rather than assumed. It
+    # exists to catch the widening E0-29 item 4b was told not to make: a blanket
+    # `MIT` rule with no boundary, which allows anything containing those three
+    # letters. "Transmittal" is the cheapest string that tells the two apart, and
+    # `classify_body` does not cover this — under earliest-match a blanket rule
+    # only bites when the substring precedes the declaring line, which in a real
+    # licence text it does not.
+    ("Transmittal License", "unknown"),
+    # Still denied, and it is the near miss for the rule above: the `\bGPL` deny
+    # rule sits higher than the permissive one that now knows CNRI.
+    ("CNRI-Python-GPL-Compatible", "deny"),
     # No usable metadata.
     ("UNKNOWN", "unknown"),
     ("", "unknown"),
@@ -87,6 +103,224 @@ LICENSE_CASES = [
 
 for text, want in LICENSE_CASES:
     check(f"classify({text!r})", classify(text)[0], want)
+
+# ---------------------------------------------------------------------------
+# check_licenses.py — licence *bodies* rather than expressions (E0-29 item 4b)
+# ---------------------------------------------------------------------------
+# Some packages put the whole licence text in the `License` metadata field
+# instead of an identifier. `classify()` used to split every input on its
+# connectors, and the word "and" occurs in licence prose, so a body broke into
+# fragments that named nothing and the conjunction rule answered `unknown` about
+# a plainly permissive package. Bodies are told apart by containing a newline and
+# handed to `classify_body`.
+#
+# **Every case asserts the reason as well as the verdict**, and on this function
+# that is the whole point rather than thoroughness. `classify_body` takes the
+# rule matching *earliest in the text* rather than the first rule in RULES that
+# matches anywhere, and several bodies below deny either way — so a verdict alone
+# cannot see the ordering it depends on. The first version of this section
+# asserted verdicts over hand-written fixtures and missed that the real GPL-2
+# classified `review`.
+#
+# **The bodies are real text, cut to the smallest excerpt that carries both the
+# declaring line and the phrase that used to trap it.** Each was verified to
+# produce the same verdict *and* reason as the full file it came from before
+# being pasted here. They are pasted rather than read from
+# /usr/share/common-licenses at run time, because a fixture reading a path
+# outside the repository passes vacuously everywhere that path is absent, which
+# is every CI runner. The two constructed ones say so.
+
+# tiktoken's `License` field exactly as its installed metadata carries it: the
+# full MIT licence, 1078 characters, and the reason this item exists.
+TIKTOKEN_LICENSE_BODY = (
+    "MIT License\n"
+    "\n"
+    "Copyright (c) 2022 OpenAI, Shantanu Jain\n"
+    "\n"
+    "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+    'of this software and associated documentation files (the "Software"), to deal\n'
+    "in the Software without restriction, including without limitation the rights\n"
+    "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+    "copies of the Software, and to permit persons to whom the Software is\n"
+    "furnished to do so, subject to the following conditions:\n"
+    "\n"
+    "The above copyright notice and this permission notice shall be included in all\n"
+    "copies or substantial portions of the Software.\n"
+    "\n"
+    'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n'
+    "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n"
+    "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n"
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n"
+    "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
+    "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n"
+    "SOFTWARE.\n"
+    ""
+)
+
+# The real GPL-2, /usr/share/common-licenses/GPL-2: its title line, and line 18
+# of its preamble. **This is the regression case.** That line says other FSF
+# software "is covered by the GNU Lesser General Public License instead", and
+# because the LGPL rule sits above the GPL rule in RULES, a scan that took the
+# first matching rule classified the whole 18,092-character text as `review` —
+# which prints a note and exits 0. A package shipping the GPL-2 passed the build.
+GPL2_LICENSE_BODY = (
+    "GNU GENERAL PUBLIC LICENSE\n"
+    "the GNU Lesser General Public License instead.)  You can apply it to\n"
+    ""
+)
+
+# The real GPL-3: its title line, and the heading of section 13, 552 lines in.
+# Catches the same defect in the other direction — the verdict was right and the
+# *reason* named Affero, because that rule sits above the GPL rule too.
+GPL3_LICENSE_BODY = (
+    "GNU GENERAL PUBLIC LICENSE\n" "13. Use with the GNU Affero General Public License.\n" ""
+)
+
+# The real LGPL-3 title line, which contains both "LESSER GENERAL PUBLIC" and,
+# four words later, "GENERAL PUBLIC LICENSE". Earliest-match must not turn into
+# "whichever rule matches at the lowest offset regardless of specificity": both
+# match inside this one line and LGPL starts first, so it stays `review`.
+LGPL3_LICENSE_BODY = "GNU LESSER GENERAL PUBLIC LICENSE\n" ""
+
+# The real Apache-2.0: its title line, and the limitation-of-liability clause
+# 163 lines in that says "other commercial damages or losses". The
+# `\bCommercial\b` deny rule matches that phrase, so under rule order the whole
+# Apache-2.0 text denied — a false deny on one of the most common permissive
+# licences, and it predates this change.
+APACHE2_LICENSE_BODY = (
+    "Apache License\n" "other commercial damages or losses), even if such Contributor\n" ""
+)
+
+# The real AGPL-3 preamble, from Debian's libgs-common copyright file, which
+# encodes a blank line as a lone "." — removing that is decoding, not editing.
+# `Affero` matches at offset 4 of the title and `General Public License` at
+# offset 11, so this pins position ordering working *within a single line* — not
+# a tie-break, which no pair of these patterns can produce.
+AGPL3_LICENSE_BODY = (
+    "GNU AFFERO GENERAL PUBLIC LICENSE\n"
+    "Version 3, 19 November 2007\n"
+    "\n"
+    "Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>\n"
+    "Everyone is permitted to copy and distribute\n"
+    "verbatim copies of this license document,\n"
+    "but changing it is not allowed.\n"
+    "\n"
+    "Preamble\n"
+    "\n"
+    "The GNU Affero General Public License is a free, copyleft license\n"
+    "for software and other kinds of works,\n"
+    "specifically designed to ensure cooperation with the community\n"
+    "in the case of network server software.\n"
+    "\n"
+    "The licenses for most software and other practical works\n"
+    "are designed to take away your freedom to share and change the works.\n"
+    "By contrast, our General Public Licenses are intended\n"
+    "to guarantee your freedom to share\n"
+    "and change all versions of a program--\n"
+    "to make sure it remains free software for all its users.\n"
+    ""
+)
+
+# **Recorded, not endorsed.** The real BSD text denies, on the "All rights
+# reserved" in its copyright line, which is in every BSD-family text by
+# convention — and its first line names no licence at all. The real MPL-2.0
+# denies because the allow rule spells the version "License 2" while the text
+# says "License Version 2.0", so the earliest thing that does match is its
+# reference to the GNU GPL. Both are wrong, both predate this change and are
+# unchanged by it, and correcting them means widening the gate further than
+# E0-29 item 4b is allowed to. They are asserted so that the body path's real
+# behaviour is written down where somebody will see it, and so neither can drift
+# without a test saying so.
+BSD_LICENSE_BODY = (
+    "Copyright (c) The Regents of the University of California.\n" "All rights reserved.\n" ""
+)
+
+MPL2_LICENSE_BODY = (
+    "Mozilla Public License Version 2.0\n"
+    "means either the GNU General Public License, Version 2.0, the GNU\n"
+    ""
+)
+
+# Constructed, not a real licence: a body naming no licence at all. The widening
+# must leave `unknown` alone rather than turning it into `allow`.
+BODY_NAMING_NOTHING = (
+    "Terms of use for this package\n"
+    "\n"
+    "You may use this software and its documentation, and you may\n"
+    "redistribute it, provided you keep this notice intact.\n"
+    ""
+)
+
+# Constructed, not a real licence: a body that *declares* MIT and *mentions* the
+# GPL. It classifies allow, and that is the right answer about the package — it
+# is MIT-licensed. It would be the wrong answer to "does anything here mention
+# copyleft", which is not the question this checker asks. Pinned because the
+# distinction is the whole basis of `classify_body`.
+MIT_BODY_MENTIONING_GPL = (
+    "MIT License\n"
+    "\n"
+    "Copyright (c) 2026 Example\n"
+    "\n"
+    "Permission is hereby granted, free of charge, to any person obtaining a\n"
+    "copy of this software to deal in the Software without restriction.\n"
+    "\n"
+    "Note: this package links against a library distributed under the GNU\n"
+    "General Public License. That library is not vendored here.\n"
+    ""
+)
+
+BODY_CASES = [
+    ("tiktoken's real 1078-character MIT text", TIKTOKEN_LICENSE_BODY, "allow", "permissive"),
+    (
+        "the real GPL-2, which names the LGPL in its preamble",
+        GPL2_LICENSE_BODY,
+        "deny",
+        "strong copyleft",
+    ),
+    (
+        "the real GPL-3, which names the AGPL in section 13",
+        GPL3_LICENSE_BODY,
+        "deny",
+        "strong copyleft",
+    ),
+    (
+        "the real LGPL-3 title, which contains the GPL rule's phrase too",
+        LGPL3_LICENSE_BODY,
+        "review",
+        "weak copyleft",
+    ),
+    (
+        "the real Apache-2.0, which says 'commercial' in its liability clause",
+        APACHE2_LICENSE_BODY,
+        "allow",
+        "permissive",
+    ),
+    (
+        "the real AGPL-3 preamble, where Affero must win inside the title",
+        AGPL3_LICENSE_BODY,
+        "deny",
+        "network copyleft",
+    ),
+    (
+        "the real BSD text — known wrong, recorded not endorsed",
+        BSD_LICENSE_BODY,
+        "deny",
+        "not redistributable",
+    ),
+    (
+        "the real MPL-2.0 text — known wrong, recorded not endorsed",
+        MPL2_LICENSE_BODY,
+        "deny",
+        "strong copyleft",
+    ),
+    ("a body naming no licence at all", BODY_NAMING_NOTHING, "unknown", "unrecognized"),
+    ("a body declaring MIT that mentions the GPL", MIT_BODY_MENTIONING_GPL, "allow", "permissive"),
+]
+
+for label, body, want_verdict, want_reason in BODY_CASES:
+    verdict, reason = classify(body)
+    check(f"licenses: body — {label} (verdict)", verdict, want_verdict)
+    check(f"licenses: body — {label} (reason)", want_reason in reason, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     d = Path(tmp)
@@ -438,7 +672,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 # ---------------------------------------------------------------------------
-total = len(LICENSE_CASES) + 15 + 16
+total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + 15 + 16
 if failures:
     print(f"FAIL: {len(failures)} of {total} checks failed:", file=sys.stderr)
     for line in failures:

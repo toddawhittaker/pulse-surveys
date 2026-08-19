@@ -117,13 +117,33 @@ discover.
 
 **Nineteen new runtime packages**, against four for the `openai` SDK alone and
 about eighty-five for the metapackage. `pip-audit` reports no known vulnerability
-in the closure. The license gate passes and reports two new `unknown`
+in the closure. ~~The license gate passes and reports two new `unknown`
 classifications, neither of which fails it: `regex` declares `Apache-2.0 AND
 CNRI-Python`, whose second half no rule names, and `tiktoken` ships the full MIT
 licence *text*, whose all-caps disclaimer contains the word "AND" — so the
 checker reads it as a conjunction and cannot classify every part. Both are
 permissive in fact. Widening `scripts/ci/check_licenses.py` to say so is a change
-to a gate, and is not made here.
+to a gate, and is not made here.~~
+
+**Amended 2026-08-19 — the widening was made, as E0-29 item 4b.** The gate now
+classifies both as `allow` and reports no `unknown` at all across the 99-package
+closure, so the sentence above describes a state this project left. What made it
+worth recording rather than deleting is that it named the right packages and the
+wrong mechanism, and the wrong mechanism is the interesting half.
+
+They are two different defects. `regex`'s expression is well formed and was split
+correctly; the failure was that no rule knew `CNRI-Python`, so a conjunction of
+two permissive licences took the worst of `allow` and `unknown`. `tiktoken` is
+not an expression at all — it has no `License-Expression`, and its `License`
+field is the full 1078-character MIT text — so splitting it on connectors was
+meaningless from the start.
+
+And the split is not driven by the all-caps disclaimer. The connector match is
+case-insensitive, so all five `AND` occurrences count, and four of them are the
+lowercase "and" of ordinary prose — the first at offset 149, in "of this software
+and associated documentation files". A reader who fixed the disclaimer would have
+changed nothing. A licence body is now told from an expression by containing a
+newline and scanned whole, which is where the fix belongs.
 
 **`Agent.run_sync` is unusable in this project, and the gateway drives a loop
 itself.** It calls `asyncio.get_event_loop()`, which emits a `DeprecationWarning`

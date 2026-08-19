@@ -1,27 +1,10 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 40**
+**Caught: 41**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*19 instances recorded; the 3 most recent are below. The earlier 16 are in this file's git history and in the pull requests they cite.*
-
-*(Writing E0-35's tests, on three sweeps whose subject set is empty today. E0
-ships no application write path — the ticket records that as correct — so the
-sweep asking which modules write `course` without calling `guard_write` walks the
-whole application, finds nothing, and passes; it would pass identically on the
-day E1's roster sync lands unrouted in a shape the matcher cannot see. Emptiness
-was not the only way the three could have gone green. The marker sweep asserts
-that no column on an LMS-owned table is unaccounted for, which is most thoroughly
-satisfied by a metadata walk that found no tables; the derived-calendar sweep
-asserts that only one module assigns four columns, which is satisfied by a
-matcher that recognises no assignment anywhere. So each of the three now carries
-both halves of this entry's rule — the samples it must catch and the near-miss it
-must allow, one property apart — and a non-vacuity assertion in front of the
-emptiness: the marker sweep requires the `lms_` prefix to exist somewhere before
-its absence elsewhere is allowed to mean anything, and the calendar sweep
-requires the sanctioned writer to be visible to it before its silence about every
-other module counts.)*
+*20 instances recorded; the 3 most recent are below. The earlier 17 are in this file's git history and in the pull requests they cite.*
 
 *(Writing E0-36's tests, twice over. The sweep asking whether a failing gate
 reaches the required `CI` check runs the aggregate job's own verdict script under
@@ -66,6 +49,33 @@ a marked test can produce. **When a gate's failure exit has more than one cause,
 `== 1` is not an assertion about which one**, and adding a non-emptiness guard
 inside the checker is what created the ambiguity in the first place — the guard
 against a vacuous pass became a second route to the same exit code.)*
+
+*(Building E0-29 item 4b, twice, and the second time is the one that matters.
+**First**, on a verdict that was right for the wrong reason: a licence body was
+scanned against the rule table in list order, and a GPL body and an AGPL body
+both deny whichever way you order the `Affero` and `General Public License`
+rules, so the verdict cannot see the ordering the design rests on. Every body
+case was given a **reason** assertion as well as a verdict for that.
+
+**Second**, on the fixtures those assertions ran against, which is where the
+lesson is. They were hand-written bodies plus a GPL-3 excerpt I had *trimmed* to
+avoid a mention of the AGPL that produced a confusing reason. The suite was
+green and the change had moved the real GPL-2 from `deny` to `review` — a
+build failure to an advisory that exits 0 — because the GPL-2 preamble says
+other FSF software "is covered by the GNU Lesser General Public License
+instead", eighteen lines in, and the LGPL rule sits above the GPL rule. **The
+trimming was the signal and I did not read it**: I had already met the
+mention-versus-declaration problem, solved it inside one fixture by cutting the
+text, and not asked whether it was general. A fixture edited to avoid an awkward
+result is a defect you have already found and declined to name. The battery now
+uses the smallest excerpt of each *real* text that carries both the declaring
+line and the phrase that used to trap it, each verified to produce the same
+verdict and reason as the full file, and `classify_body` takes the rule matching
+earliest in the text rather than the first rule that matches anywhere.
+
+**When a check's safety comes from which rule fires rather than from the answer,
+assert which rule fired** — and when a fixture has to be trimmed to make a test
+comfortable, the trimming is the finding.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
