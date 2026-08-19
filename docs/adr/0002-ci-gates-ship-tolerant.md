@@ -86,6 +86,31 @@ cannot lie about what exists.
   `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails and
   says so if one appears.
 
+  **A second amendment, 2026-08-19, to the paragraph above rather than to the
+  decision.** That paragraph is true and was read as more reassuring than it is,
+  including by the session that wrote it. Step-level tolerance keeps the *skip*
+  analysis simple, and it is also the mechanism by which a tolerant job reports
+  **success** over work it did not do — the real steps switch themselves off,
+  the notice step runs, and the job is green. So "the aggregate now sees a
+  failing gate" is true of failures and skips, and says nothing about a gate
+  that was quietly turned off.
+
+  What decides that is the `detect` probe, and E0-36's independent security
+  review found two of the three answering false over trees that held the thing:
+  `tests/evals/**/*.py` needs `shopt -s globstar`, which was never set, and
+  `tests/e2e/*.spec.ts` does not descend. Either one silently disables its gate
+  with `CI` green, and the `evals` case takes SPEC §9.3's threat and self-harm
+  recall floor with it — the floor `CLAUDE.md` calls a hard gate whose lowering
+  is a safety decision. Both are fixed, and
+  `tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py` runs each
+  probe over planted trees and judges what it emits.
+
+  **This is the real cost of the decision, and it compounds the first
+  consequence rather than the aggregate's.** A tolerant gate is only as honest as
+  the probe that decides whether it runs, so every probe added under this pattern
+  needs a case that plants what its job needs and a case that plants nothing.
+  Neither the aggregate check nor a reviewer reading the YAML can supply that.
+
   The decision above is unaffected — gates still ship tolerant and still name the
   ticket that enforces them. What was wrong was the claim that the aggregate
   needed no edits as they flipped.

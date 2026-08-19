@@ -677,6 +677,24 @@ jobs:
   # would break that, which is why nothing here has one and why
   # `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails
   # loudly the moment one appears.
+  #
+  # **Read the sentence above as narrowly as it is written.** It says a skip
+  # among these needs means an upstream failure. It does not say this check sees
+  # every way a gate can fail to run, and it must not be read that way, because
+  # step-level tolerance is exactly the mechanism by which a job reports
+  # *success* over work it did not do: the real steps switch themselves off by
+  # their own `if:`, the notice step runs, and the job is green. Nothing is
+  # skipped and nothing is red, so this verdict cannot see it and was never going
+  # to.
+  #
+  # That is not hypothetical. E0-36's security review found both `detect` probes
+  # answering false over trees that held the thing — `tests/evals/**/*.py`
+  # without `globstar`, and a flat-only `tests/e2e/*.spec.ts` — which would have
+  # turned off SPEC §9.3's threat and self-harm recall floor with `CI` green.
+  # Those two are fixed and `tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py`
+  # holds them, but the shape belongs to the tolerance design rather than to
+  # those two globs: what keeps a tolerant job honest is the probe being right,
+  # and that is asserted over planted trees, not here.
   # --------------------------------------------------------------------------
   ci:
     name: CI

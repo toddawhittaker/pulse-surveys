@@ -87,14 +87,28 @@ mock-idp/**/*.py[cod]
 # it is here rather than in the glob because narrowing the glob costs a silent
 # production failure while missing a suffix costs a stray file.
 #
-# These four are the only lines in this file with a gate behind them.
-# `scripts/ci/check_image_contents.sh` (E0-36 item 4) plants one file per
-# pattern, builds the runtime image and looks inside it, so deleting a line here
-# now fails the Docker gate in both CI and `make docker-build` and names the line
-# that went. Before that, deleting any of them left every gate green. Nothing
-# yet guards the patterns above this block the same way; the four here were
-# singled out because the package-data glob in `pyproject.toml` makes this one
-# directory a path into the image that the others do not have.
+# These four have a gate behind them, and so do `backend/**/*.pem` and
+# `backend/**/*.key` above. `scripts/ci/check_image_contents.sh` (E0-36 item 4)
+# plants one file per covered pattern, builds the runtime image and looks inside
+# it, so deleting one of those six lines fails the Docker gate in both CI and
+# `make docker-build`, and names the line that went. Before that, deleting any of
+# them left every gate green.
+#
+# An earlier version of this note said the four here were singled out because the
+# package-data glob makes this directory a path into the image the other patterns
+# do not have. **That was false**, and the `.pem` and `.key` lines are the
+# counterexample: same directory, same glob, and measured as excluded by exactly
+# those two lines. Believing it is what left them ungated for a ticket, so it is
+# recorded rather than quietly replaced.
+#
+# What is true, and is the reason the `.env` patterns are a different case:
+# setuptools' package-data glob skips dotfiles, so `backend/**/.env` does not
+# reach the runtime stage by this route at all. It reaches the *builder* stage
+# through the build context, which is what those lines are for.
+#
+# This says nothing about suffixes no line here matches. That is a question about
+# what the patterns cover rather than about whether the gate works, and it is not
+# answered in this file.
 backend/**/*~
 backend/**/*.orig
 backend/**/*.rej
