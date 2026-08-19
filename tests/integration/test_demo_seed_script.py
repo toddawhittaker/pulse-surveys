@@ -97,6 +97,7 @@ pytestmark = pytest.mark.integration
 ASSIGNMENTS = "role_assignment"
 MAPPINGS = "lead_faculty_mapping"
 PLATFORMS = "lti_platform"
+DEPLOYMENTS = "lti_deployment"
 
 # SPEC §2.1's containment hierarchy, outermost first. A copy of the tuple in
 # `tests/conftest.py`; see the module docstring on copies.
@@ -906,77 +907,248 @@ def test_the_mock_platform_matcher_catches_the_compose_issuer_and_allows_a_real_
     )
 
 
-def test_no_seeded_lti_platform_row_names_the_mock_platform(
+def test_the_seed_registers_the_mock_platform_so_a_launch_from_it_can_be_trusted(
     seeded_demo: Any,
     demo_database: Any,
     metadata_tables: dict[str, Any],
     base_compose: dict[str, Any],
     mock_lms_service: str,
 ) -> None:
-    """Criterion 2, at the branch ADR 0065 took: the seed registers a fictional platform.
+    """Criterion 2, at the branch E0-31 took: the seed registers the mock platform.
 
-    E0-17 permits two answers — register the mock and make the registration
-    unreachable from a deployment, or register nothing that names it — and ADR
-    0065 takes the second: `https://lms.pulse-demo.invalid`, a host that resolves
-    nowhere and that no process holds a key for.
+    **This assertion is the reverse of the one it replaces, and the reversal is a
+    decision rather than a correction.** E0-17 permitted two answers — register
+    the mock and make the registration unreachable from a deployment, or register
+    nothing that names it — and ADR 0065 took the second so that ADR 0038 could
+    stand unamended. E0-31 item 1 is that choice coming due: E0-18 drives a real
+    launch from `mock-lms`, a tool with no row naming that issuer rejects every
+    launch it signs, and Todd settled the mechanism on 2026-08-18. ADR 0068
+    records the reversal, ADR 0038 is amended to name the guard, and ADR 0065
+    keeps its fictional registration for the demo institution's own people.
 
-    That keeps ADR 0038 standing **unamended**, which is the whole reason it was
-    worth doing. ADR 0038's fourth property is the one carrying the weight: "A
-    tool only trusts it if a registration says so… A production Pulse with no such
-    row rejects every launch it signs, and that is the boundary that actually
-    matters" — true because no such row exists anywhere in this repository. ADR
-    0065 declined to move that boundary from "a fact about the repository" to "a
-    fact about a script's control flow", and this is the assertion that the fact
-    still holds of what the script writes.
+    So there are two registrations now and they do different jobs. This asserts
+    the mock one exists, carries a deployment, and did not replace the other.
 
-    **An earlier version of this test asserted the disjunction rather than the
-    branch, and could not fail.** It ran an `ENVIRONMENT=production` run only when
-    a seeded row named the mock, which none does, so registering the mock tomorrow
-    would have kept it green. This one is unconditional: seed the mock's issuer
-    and it goes red on the next run.
-
-    It is the database half of the check ADR 0065 asks a reviewer to make. The
-    other half is a grep for the mock's address across the repository, which
-    catches the paths this test cannot see, and that record is where it lives.
+    What keeps the row out of a deployment is the `ENVIRONMENT` guard, and
+    `test_the_seed_refuses_to_register_the_mock_outside_a_development_environment`
+    below is the assertion that holds it. The two are a pair: this one would go
+    green on a script that wrote the row unconditionally.
     """
     seeded(seeded_demo)
     addresses = mock_platform_addresses(base_compose, mock_lms_service)
     platforms = require_table(metadata_tables, PLATFORMS)
+    require_table(metadata_tables, DEPLOYMENTS)
 
     with reading(demo_database, metadata_tables) as rows:
         read_the_table = PLATFORMS in rows
         registrations = rows_of(rows, PLATFORMS)
+        deployments = rows_of(rows, DEPLOYMENTS)
 
     assert read_the_table, (
         f"`{PLATFORMS}` is declared on `Base.metadata` and this test read no rows from it at all, "
-        "so 'no seeded row names the mock' would be a statement about a query that never ran. "
-        "Every table here is read by its single uuid primary key (ADR 0016); a table without one "
-        "is skipped, which is the only way to get here."
+        "so every statement below would be about a query that never ran. Every table here is read "
+        "by its single uuid primary key (ADR 0016); a table without one is skipped, which is the "
+        "only way to get here."
     )
-    assert registrations, (
-        f"The seed wrote no `{PLATFORMS}` rows, so this assertion is about an empty table. ADR "
-        "0065: the seed cannot avoid the table — its people are `person` rows, a `person` is "
-        "linked to a `user`, and `user.lti_platform_id` is `NOT NULL` — so it registers one "
-        "invented platform. A seed that registers nothing has taken the identity split out of "
-        "the demo institution, which is what E9, E10 and E0-18 develop the separation against."
+
+    naming_the_mock = [
+        row
+        for row in registrations
+        for column, value in row.items()
+        if column in platforms.c and names_the_mock_platform(value, addresses, mock_lms_service)
+    ]
+    assert naming_the_mock, (
+        f"No seeded `{PLATFORMS}` row names the in-repo mock platform. E0-31 item 1: E0-18 drives "
+        f"a real launch from `{mock_lms_service}`, and a tool holding no registration for that "
+        "issuer rejects it — which is ADR 0038's fourth property doing its job, and is why this "
+        f"row is the ticket. `scripts/seed.py` writes it in `seed_mock_platform`. Registrations "
+        f"found: {sorted(row.get('issuer') for row in registrations)}."
     )
+
+    mock_ids = {row["id"] for row in naming_the_mock}
+    assert len(mock_ids) == 1, (
+        f"{len(mock_ids)} seeded `{PLATFORMS}` rows name the mock platform, and the seed writes "
+        "one. More than one means a second run inserted rather than matched, which is ADR 0064's "
+        "idempotency claim failing on this table: issuers "
+        f"{sorted(row.get('issuer') for row in naming_the_mock)}."
+    )
+
+    others = [row for row in registrations if row["id"] not in mock_ids]
+    assert others, (
+        f"The mock is the only `{PLATFORMS}` row the seed wrote, so it has replaced the fictional "
+        "registration rather than joined it. ADR 0065 keeps that one: the demo institution's "
+        "eighteen people belong to a platform at an RFC 2606 `.invalid` address that resolves "
+        "nowhere, and nobody launches as them. The mock registration carries no `user` rows at "
+        "all — provisioning the person a launch resolves to is E1's (SPEC §14.3)."
+    )
+
+    for_the_mock = [row for row in deployments if row.get("lti_platform_id") in mock_ids]
+    assert for_the_mock, (
+        f"The mock platform is registered and no `{DEPLOYMENTS}` row belongs to it. A launch "
+        "carries the deployment it came from, so a registration without one is a registration "
+        "half a launch can be checked against. `docker-compose.yml` configures the mock with "
+        f"`MOCK_LMS_DEPLOYMENT_ID`, and `scripts/seed.py` writes it beside the platform. "
+        f"Deployments found: {sorted(str(row.get('deployment_id')) for row in deployments)}."
+    )
+
+
+def test_the_seeded_mock_registration_is_the_registration_compose_configures(
+    seeded_demo: Any,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+    base_compose: dict[str, Any],
+    mock_lms_service: str,
+) -> None:
+    """The seed's copy of the mock's identity and the Compose file's agree, value by value.
+
+    `scripts/seed.py` carries the issuer, client ID and deployment ID as literals
+    rather than reading `docker-compose.yml`, because the script runs where that
+    file may not be. That makes two copies of one registration, and two constants
+    in two files with nothing comparing them is the shape `docs/MISTAKES.md` entry
+    13 is about — and the shape E0-31 item 3 raises against a different literal in
+    this same script. This is the comparison.
+
+    **What breaks without it is not cosmetic.** If somebody changes the mock's
+    `MOCK_LMS_CLIENT_ID` in the Compose file, the seeded registration goes on
+    naming the old one, every launch the mock signs fails its audience check, and
+    the failure surfaces in E0-18's Playwright run as a rejected launch with
+    nothing pointing at the two files that disagree.
+    """
+    seeded(seeded_demo)
+    services = base_compose.get("services") or {}
+    service = services.get(mock_lms_service) or {}
+    environment = service.get("environment") if isinstance(service, dict) else None
+    assert isinstance(environment, dict) and environment, (
+        f"`docker-compose.yml` gives the `{mock_lms_service}` service no mapping-shaped "
+        "`environment:` block, so there is nothing here to compare the seeded registration "
+        "against and this test would pass over an absence. ADR 0037 puts those values in that "
+        "file as literals."
+    )
+
+    expected = {
+        "issuer": environment.get("MOCK_LMS_ISSUER"),
+        "client_id": environment.get("MOCK_LMS_CLIENT_ID"),
+    }
+    missing = [name for name, value in expected.items() if not value]
+    assert not missing, (
+        f"`docker-compose.yml` configures the `{mock_lms_service}` service without "
+        f"{missing}, so the seeded registration cannot be checked against it. ADR 0037: the "
+        "mock platform is configured by Compose literals."
+    )
+
+    addresses = mock_platform_addresses(base_compose, mock_lms_service)
+    with reading(demo_database, metadata_tables) as rows:
+        registrations = rows_of(rows, PLATFORMS)
+        deployments = rows_of(rows, DEPLOYMENTS)
+
+    naming_the_mock = [
+        row
+        for row in registrations
+        if names_the_mock_platform(row.get("issuer"), addresses, mock_lms_service)
+    ]
+    assert len(naming_the_mock) == 1, (
+        f"Expected exactly one seeded `{PLATFORMS}` row whose issuer names the mock and found "
+        f"{len(naming_the_mock)}. The test above owns that failure; this one cannot say anything "
+        "until it is fixed."
+    )
+    seeded_row = naming_the_mock[0]
+
+    disagreements = {
+        column: (seeded_row.get(column), value)
+        for column, value in expected.items()
+        if str(seeded_row.get(column)) != str(value)
+    }
+    assert not disagreements, (
+        f"The seeded mock registration and `docker-compose.yml` disagree: {disagreements} "
+        "(seeded, configured). `scripts/seed.py`'s MOCK_PLATFORM_* constants are a copy of that "
+        "file's literals and this is what keeps them a copy rather than a divergence. A launch "
+        "signed by the running mock is checked against the seeded row, so a disagreement here is "
+        "a launch that fails in E0-18 with nothing naming the two files that drifted."
+    )
+
+    expected_deployment = environment.get("MOCK_LMS_DEPLOYMENT_ID")
+    assert expected_deployment, (
+        f"`docker-compose.yml` configures the `{mock_lms_service}` service with no "
+        "`MOCK_LMS_DEPLOYMENT_ID`, so the seeded deployment has nothing to agree with."
+    )
+    seeded_deployments = {
+        str(row.get("deployment_id"))
+        for row in deployments
+        if row.get("lti_platform_id") == seeded_row["id"]
+    }
+    assert seeded_deployments == {str(expected_deployment)}, (
+        f"The mock platform's seeded deployments are {sorted(seeded_deployments)} and "
+        f"`docker-compose.yml` configures {expected_deployment!r}. A launch carries the "
+        "deployment it came from, so the tool has to hold the one the platform will send."
+    )
+
+
+def test_the_seed_refuses_to_register_the_mock_outside_a_development_environment(
+    seed_module: Any,
+    demo_databases: Any,
+    metadata_tables: dict[str, Any],
+    base_compose: dict[str, Any],
+    mock_lms_service: str,
+) -> None:
+    """The registration that would make a Pulse trust the mock is refused by the guard.
+
+    This is the assertion the whole of E0-31 item 1 rests on, and it is the one
+    ADR 0065 said would be needed if this branch was ever taken: the boundary
+    keeping the mock out of a deployment moved from "no such row exists anywhere
+    in this repository" to "no run permitted to write it can start". ADR 0038 is
+    amended to name the guard, and this is what makes the guard a guarantee rather
+    than a comment (`docs/MISTAKES.md` entry 9).
+
+    **It calls `seed` directly rather than running the script.** `main` checks the
+    environment before it opens a connection, so a subprocess test can only ever
+    observe the script exiting 2 — and would go on observing that if the guard at
+    the registration itself were deleted, because the outer check would still
+    refuse. Reaching past `main` is the only way to ask whether the row is bound
+    to the guard or merely downstream of it. Delete the
+    `check_environment_is_development` call in `seed_mock_platform` and this test
+    goes red; nothing else in the suite does.
+
+    **The control is the test above**, which reads the same registration out of a
+    database the script seeded under `ENVIRONMENT=development`. Without it this
+    one would be satisfied by a `seed` that never wrote the row at all
+    (`docs/MISTAKES.md` entry 3).
+    """
+    demo = demo_databases()
+    addresses = mock_platform_addresses(base_compose, mock_lms_service)
+    deployed = {
+        "ENVIRONMENT": "production",
+        "DATABASE_URL": demo.database.superuser_url,
+        "DB_SUPERUSER": "unused — the guard refuses before a row is written",
+        "DB_SUPERUSER_PASSWORD": "unused — the guard refuses before a row is written",
+    }
+
+    with demo_session(demo) as session:
+        with pytest.raises(seed_module.SeedError) as refusal:
+            seed_module.seed(session, deployed)
+        session.rollback()
+
+    said = str(refusal.value)
+    assert seed_module.ENVIRONMENT_VARIABLE in said, (
+        f"`seed` refused, and not over the environment: {said!r}. A refusal for another reason "
+        "would pass this test while leaving the registration unguarded, which is exactly the "
+        "shape of a test that passes for a reason unrelated to what it asserts."
+    )
+
+    with reading(demo, metadata_tables) as rows:
+        registrations = rows_of(rows, PLATFORMS)
 
     naming_the_mock = {
         f"{column}={value!r}"
         for row in registrations
         for column, value in row.items()
-        if column in platforms.c and names_the_mock_platform(value, addresses, mock_lms_service)
+        if names_the_mock_platform(value, addresses, mock_lms_service)
     }
     assert not naming_the_mock, (
-        f"A seeded `{PLATFORMS}` row names the in-repo mock platform: {sorted(naming_the_mock)}. "
-        "E0-17: 'Seeding an `lti_platform` row for the mock LMS is what would make ADR 0038 "
-        "wrong.' That record argues the mock is safe in the base Compose file because it holds "
-        "nothing, reaches nothing, publishes no port outside the development override, and is "
-        "trusted only by a row in `lti_platform` — and because no such row exists anywhere in "
-        "this repository. The mock authenticates nobody: it signs a launch as either seeded user "
-        "for whoever can reach the container. If this script is to write that row, ADR 0038 has "
-        "to be amended to say what keeps it out of a deployment, and ADR 0065's argument for the "
-        "fictional issuer has to be reopened rather than worked around here."
+        f"`seed` wrote a registration naming the mock platform under "
+        f"{seed_module.ENVIRONMENT_VARIABLE}='production': {sorted(naming_the_mock)}. That row is "
+        "the whole of what makes a Pulse trust a platform which authenticates nobody and will "
+        "sign a launch as any user for whoever can reach it (ADR 0038). The guard in "
+        "`seed_mock_platform` is what stops it, and it has stopped stopping it."
     )
 
 
