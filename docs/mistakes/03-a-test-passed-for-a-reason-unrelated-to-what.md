@@ -1,26 +1,10 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 38**
+**Caught: 39**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*17 instances recorded; the 3 most recent are below. The earlier 14 are in this file's git history and in the pull requests they cite.*
-
-*(Writing E0-33's tests, where it changed the *direction* of a
-comparison. The natural shape for "the model's constraints are the database's" is
-one subset test — every rule the model declares, the database is carrying — and
-that test is satisfied by a model that declares nothing. Which is exactly E0-20
-item 3a's first row: the "exclusion constraint removed" measurement was taken by
-removing it **from the model**, so the obvious test is green against the named
-mutation. The module carries both directions as two tests plus a per-kind guard
-that the model declares at least one. The same reading produced the module's two
-self-tests — a comparison of two deparsed expressions is worth what the deparser
-is worth, so `upper(value)` against `UPPER ( ( value ) )` has to compare *equal*
-and against `lower(value)` has to compare *different*, executed rather than
-asserted — and, in the grant half, the control that `has_table_privilege` reports
-the reveal function's owner **holding** `SELECT` on `user_identity`: without it,
-"no role a runtime role can become may read identity" is equally true of a probe
-that answers false to everything.)*
+*18 instances recorded; the 3 most recent are below. The earlier 15 are in this file's git history and in the pull requests they cite.*
 
 *(Writing E0-34's tests, on a test whose whole subject is a
 *failure*. Two of them plant a `.sql` file that reads an identity column and then
@@ -57,6 +41,21 @@ emptiness: the marker sweep requires the `lms_` prefix to exist somewhere before
 its absence elsewhere is allowed to mean anything, and the calendar sweep
 requires the sanctioned writer to be visible to it before its silence about every
 other module counts.)*
+
+*(Writing E0-36's tests, twice over. The sweep asking whether a failing gate
+reaches the required `CI` check runs the aggregate job's own verdict script under
+`bash` and reads a non-zero exit as "the failure was seen" — so a verdict that
+exits non-zero for any reason at all, an expression this module substituted
+wrongly or a script `bash` could not parse, would report every job as caught and
+go on doing so forever. The all-success vector is now executed first and required
+to exit 0 before any of the non-zeros count, and an expression the substituter
+does not understand fails loudly rather than rendering to an empty string. The
+same reading put a non-emptiness guard on both sides of the Docker-gate parity
+test, where "the two callers run the same checks" is most perfectly satisfied by
+a job that has been renamed and a recipe that was never found; and it made the
+`-c requirements.txt` search run against the two spellings it claims to catch and
+against the `--output-file=requirements.txt` it must not match, before its
+silence about the Makefile is believed.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

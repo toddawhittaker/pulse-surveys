@@ -1,10 +1,24 @@
 # Entry 2. Behaviour shipped with nothing asserting it
 
-**Caught: 29**
+**Caught: 30**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*10 instances recorded; the 3 most recent are below. The earlier 7 are in this file's git history and in the pull requests they cite.*
+*11 instances recorded; the 3 most recent are below. The earlier 8 are in this file's git history and in the pull requests they cite.*
+
+*(Writing E0-36's tests, on the migration-drift job's two-role shape. The
+criterion is that repointing that job's `DATABASE_URL` at the superuser fails
+something, and the natural assertion is the permitted state: the connection names
+the role the job provisioned, read out of the job's own `DB_APP_USER` so that
+renaming the CI role stays a one-place edit. That assertion is defeated by a
+two-line mutation — set `DB_APP_USER: postgres` and point the URL at it — which is
+the repointing this criterion names, wearing the value the test compares against.
+This entry's second sentence is the one that applies, so the **forbidden** state
+is asserted beside the permitted one, out of `DB_SUPERUSER` and the Postgres
+service's own `POSTGRES_USER`, and each message says which mutation its half
+exists for. The same reading is why the provisioning assertion checks the order
+as well as the presence: a role created after `alembic upgrade head` is a role the
+migration never used, and the step is still sitting there for a reviewer to see.)*
 
 *(In E0-17, and the interesting part is the delay. The
 `ENVIRONMENT` guard on `scripts/seed.py` shipped with nothing in the suite
@@ -35,21 +49,6 @@ per entry point, and the coordinator mutated each to prove they fail
 independently — which matters here because the second defect was the first one's
 mirror image and a single test covering "malformed PKCE" would have gone green
 with either half regressed.)*
-
-*(Writing E0-13's tests, and the rule it caught was one nobody
-had ever broken. `CLAUDE.md` says "Never add a secret reference to a workflow
-without asking first", and E0-13 is the first ticket with a reason to want one —
-`ci.yml` already carries a notice saying the eval suite "needs a provider API key
-as a repository secret and a `secrets.*` reference in this workflow", marked
-proposed and not wired. A rule stated in a document and asserted by nothing is a
-convention, and the next person to add one does so with every gate green. So
-`test_no_workflow_references_a_repository_secret_beyond_the_permitted_set` now
-sweeps the workflows against a permitted set of one — `GITHUB_TOKEN`, which
-Actions supplies rather than anyone configuring — and it passes today, which is
-the point of it: **a guard for a rule with no incident behind it yet is still a
-guard, and it is cheapest to write in the round that first wanted to break it.**
-Its own pattern is tested against a reference it must catch, an unspaced variant,
-and the prose in `ci.yml` it must *not* catch, per entry 3.)*
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`
