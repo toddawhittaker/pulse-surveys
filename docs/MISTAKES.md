@@ -90,7 +90,7 @@ string certainly present — so a search that has gone blind says so.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 33** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 34** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
