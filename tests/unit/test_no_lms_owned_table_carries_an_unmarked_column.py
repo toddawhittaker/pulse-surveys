@@ -81,12 +81,14 @@ LMS_PREFIX = "lms_"
 #
 # It is a floor rather than the whole set: the swept set is this unioned with the
 # guard's own `LMS_OWNED_TABLES`, so the sweep grows when ADR 0045's grain grows
-# and cannot be shrunk by an edit to the module it is holding up. A table
-# *removed* from `LMS_OWNED_TABLES` fails
+# and cannot be shrunk below these four by an edit to the module it is holding up.
+# Removing one of the four from `LMS_OWNED_TABLES` fails
 # `test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below` in
 # `tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py`, which
 # is where a shrinking guard is diagnosed; the union here is only what stops this
-# sweep going quiet about it.
+# sweep going quiet about it. Removing a table the guard holds *above* the floor
+# fails nothing anywhere — that test states the gap, and ADR 0069 carries it with
+# a "done when".
 GUARDED_TABLE_FLOOR = ("course", "section", "enrollment", "user")
 
 # Unprefixed columns on an LMS-owned table that Pulse genuinely owns, each with the
@@ -126,8 +128,10 @@ def swept_tables(authz: Any) -> tuple[str, ...]:
 
     The union of the floor above and the guard's own set. The union is what makes
     this grow when ADR 0045's grain grows; the floor is what stops it narrowing
-    when the guard does, and the assertion that the guard has not narrowed lives in
-    the sibling sweep named beside the floor.
+    below those four when the guard does, and the assertion that the guard still
+    names them lives in the sibling sweep cited beside the floor. Above the floor
+    the guard may narrow with nothing noticing, which that sweep states as its own
+    limit.
     """
     return tuple(sorted(set(GUARDED_TABLE_FLOOR) | set(authz.LMS_OWNED_TABLES)))
 

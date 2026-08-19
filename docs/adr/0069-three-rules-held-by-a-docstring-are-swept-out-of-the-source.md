@@ -78,6 +78,19 @@ loudly and names itself instead of shrinking the sweep. The guard may still
 match a narrowed guard turns the assertion back into what it replaced, and the
 failure message says so.
 
+**The floor protects the tables it names, and nothing above them.** A table
+added to `LMS_OWNED_TABLES` later does not enter the floor, so it can be removed
+again with nothing failing — both sweeps would narrow in silence, which is the
+failure this paragraph is otherwise about. ADR 0045 records `user_identity` as a
+deliberate exclusion from the guard's set that E1 may revisit, so this is a real
+path rather than a hypothetical one. It is left open on purpose: closing it means
+asserting the floor and the guard are *equal*, which reverses this record's own
+decision that the sweep grows automatically when the guard grows, and that is a
+change to make deliberately rather than as a side effect of a repair. **Done
+when** a table is next added to `LMS_OWNED_TABLES`: it is added to
+`GUARDED_TABLE_FLOOR` in the same pull request, or that pull request records why
+the table does not need the floor's protection.
+
 **The subject is the syntax tree, not the file text.** A correct module is very
 likely to *say* "this never inserts into `course`" in a docstring, and a text
 search would turn that sentence into a failure and teach the next person to

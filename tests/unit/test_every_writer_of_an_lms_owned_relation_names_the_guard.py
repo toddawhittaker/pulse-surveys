@@ -18,9 +18,11 @@ holding it — and this module is the sweep E0-35 builds for it.
 `authz.LMS_OWNED_TABLES` unioned with a floor of four tables, and both halves are
 load-bearing. Reading the guard's own set means the sweep grows when the guard
 does — E0-35's own criterion, written by hand, names three tables and is already
-one short. Reading the floor means the sweep does not narrow when the guard does,
-because an inventory the guarded structure can shrink is not a control
-(`docs/MISTAKES.md` entry 35).
+one short. Reading the floor means the sweep cannot narrow below those four when
+the guard does, because an inventory the guarded structure can shrink is not a
+control (`docs/MISTAKES.md` entry 35). Below those four, and no further: a table
+the guard holds above the floor can leave it again with nothing here noticing,
+which the floor test below states as its own limit.
 
 **The floor's four entries do not all come from the same record, and the
 difference matters.** Three are SPEC §2.1's ownership sentence — courses,
@@ -30,8 +32,8 @@ instructors, and it names no user record; ADR 0045 puts `user` in the guarded se
 because `user.lms_user_id` is the `sub` claim verbatim and SPEC §4 keys every
 response to it.
 
-**The union alone would only make the narrowing quiet, so the narrowing is
-asserted directly.** Measured in E0-35's review: deleting `"user"` from
+**The union alone would only make a narrowing quiet, so a narrowing below the
+floor is asserted directly.** Measured in E0-35's review: deleting `"user"` from
 `LMS_OWNED_TABLES` left the union answering three tables, both sweeps covering
 less, and the only red came from
 `test_every_column_marked_lms_owned_sits_on_a_table_the_chokepoint_refuses`, which
@@ -380,12 +382,14 @@ def mapped_classes_by_table(import_app_module: Any) -> dict[str, tuple[str, ...]
 def guarded_tables(authz: Any) -> tuple[str, ...]:
     """The LMS-owned tables, from the guard's own set and from the floor.
 
-    The union is what makes this grow when ADR 0045's grain grows, and what stops
-    the *sweep* narrowing when the guard does. It does not stop the *guard*
-    narrowing, and reading it as though it did is the error E0-35's review found:
-    the union is silent about a table deleted from `LMS_OWNED_TABLES`, which is
-    what `test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below`
-    is for.
+    The union is what makes this grow when ADR 0045's grain grows, and what keeps
+    the *sweep* covering the floor when the guard stops. It does not stop the
+    *guard* narrowing, and reading it as though it did is the error E0-35's review
+    found: the union is silent about a table deleted from `LMS_OWNED_TABLES`, which
+    is what
+    `test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below`
+    is for — for the four the floor names, and, as that test says of itself, for no
+    table the guard holds above them.
     """
     return tuple(sorted(set(GUARDED_TABLE_FLOOR) | set(authz.LMS_OWNED_TABLES)))
 
@@ -535,7 +539,7 @@ def test_the_verdict_passes_a_routed_write_and_fails_an_unrouted_one() -> None:
 def test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below(
     authz: Any,
 ) -> None:
-    """A table deleted from `LMS_OWNED_TABLES` fails here, and fails saying so.
+    """A table *named in the floor* cannot leave `LMS_OWNED_TABLES` without failing here.
 
     `guarded_tables` unions the guard's set with the floor, so a deleted table is
     still swept — and that is the whole trouble. The union makes the sweep's
@@ -551,9 +555,24 @@ def test_the_guard_names_every_table_in_the_floor_this_sweep_may_not_fall_below(
     which noticed by accident, because `user` carries `lms_user_id`. A guarded
     table with no `lms_`-prefixed column on it would have had no backstop at all.
 
-    **The guard may grow and may not shrink.** A table *added* to
-    `LMS_OWNED_TABLES` passes here and is picked up by both sweeps through the same
-    union, which is how `user` arrived in the first place. Only removal fails.
+    **What this does not cover, and it is the finding above one table over.** The
+    assertion is a floor and not an equality. It refuses a shrink below the four
+    tables `GUARDED_TABLE_FLOOR` names, and it says nothing whatever about a table
+    the guard holds above them. The concrete path: E1 adds `user_identity` to
+    `LMS_OWNED_TABLES` — ADR 0045 records that exclusion as deliberate and as
+    E1's to revisit — and nothing requires the floor to grow with it, so a later
+    edit takes it out again, `missing` is empty, this test is green, and both
+    sweeps narrow in silence. What closes it is a habit rather than an assertion:
+    a table added to the guard for a reason worth keeping is added to this floor
+    in the same pull request, citing the record that put it there. ADR 0069
+    carries the gap and its "done when".
+
+    **Growth passes, and that is decided rather than incidental.** A table added
+    to `LMS_OWNED_TABLES` is picked up by both sweeps through the same union,
+    which is how `user` arrived here at all, and ADR 0069 chose that automatic
+    growth on purpose. Making this an equality would close the gap above and
+    reverse that choice in the same movement, so it is a deliberate change with
+    its own record and not a line to tighten here.
     """
     named = frozenset(authz.LMS_OWNED_TABLES)
     missing = sorted(set(GUARDED_TABLE_FLOOR) - named)
