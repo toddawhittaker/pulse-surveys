@@ -57,10 +57,34 @@ jobs:
           set -euo pipefail
           emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
 
+          # Each probe names, as exactly as it can, the thing its job actually
+          # runs. A probe that answers false over a tree that has the thing does
+          # not skip its gate: the real steps switch themselves off by their own
+          # `if:`, the `::notice::` step runs in their place, and **the job
+          # reports success**. So a wrong answer here is invisible to the
+          # aggregate `ci` check, which sees green rather than skipped.
+          #
+          # Both of the globs that used to be here were wrong in that direction.
+          # `tests/e2e/*.spec.ts` does not descend, so a spec at
+          # `tests/e2e/lms/launch.spec.ts` read as no e2e suite at all. And
+          # `tests/evals/**/*.py` needs `shopt -s globstar`, which was never set
+          # — measured, `globstar` is off in a non-interactive bash — so `**`
+          # degraded to a single `*` and the pattern only matched one directory
+          # *below* `tests/evals`. `tests/evals/runner.py`, the file
+          # `python -m tests.evals.runner` needs, was the one file it could not
+          # see, and SPEC §9.3's threat and self-harm recall floor is what the
+          # job runs.
           echo "Probing repository layout (SPEC §13):"
           if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
-          if compgen -G "tests/e2e/*.spec.ts" > /dev/null 2>&1; then emit e2e true; else emit e2e false; fi
-          if [ -d tests/evals ] && compgen -G "tests/evals/**/*.py" > /dev/null 2>&1; then emit evals true; else emit evals false; fi
+          # `find` rather than a glob: it descends without a shell option, so it
+          # cannot degrade quietly the way `**` did. There is no fixed filename
+          # to name here — a spec may be called anything.
+          if [ -n "$(find tests/e2e -name '*.spec.ts' -print -quit 2>/dev/null)" ]; then emit e2e true; else emit e2e false; fi
+          # The exact module the job imports, in the shape the `frontend` probe
+          # already uses. Stricter than "some Python exists under tests/evals",
+          # and deliberately: a tree with `__init__.py` and no runner would make
+          # that glob answer true and the job then fails on the import.
+          if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
 
   # ==========================================================================
   # FAST GATES — everything else waits on these.
@@ -248,10 +272,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Self-test the CI checkers
         run: python scripts/ci/test_ci_scripts.py
+      # Every shared shell script under scripts/ci/, and the list has to grow with
+      # them: a syntax error in one of these is a gate that dies on its first
+      # line, and the job that would have found it is this one. `check_job_runtime.sh`
+      # and `check_image_contents.sh` both run only inside the `docker` job,
+      # which is minutes downstream of here.
       - name: Shell scripts parse
         run: |
           bash -n scripts/ci/wait_for_health.sh
           bash -n scripts/ci/check_job_runtime.sh
+          bash -n scripts/ci/check_image_contents.sh
 
   fast-gate:
     name: Fast gates passed
@@ -297,11 +327,19 @@ jobs:
       # repository was a green pipeline; without it, an empty collection is a
       # build failure. `scripts/ci/check_invariants.py` keeps the flag as an
       # option and nothing passes it.
-      - name: Invariant suite (§4.1) — no skips permitted
+      # The gate has two halves and they see different things. The first reads
+      # the JUnit XML the run above produced, so it catches a skip, an xfail and
+      # an empty collection. It cannot see a marked test that ran and asserted
+      # nothing — the XML carries no assertion count, so such a test is counted
+      # toward the "N invariant test(s) ran" the first one prints. The second
+      # reads the sources and refuses exactly that (E0-36 item 3). The Makefile's
+      # `invariants` target runs both, in this order.
+      - name: Invariant suite (§4.1) — no skips, and no test that asserts nothing
         run: |
           mkdir -p reports
           pytest -m invariant --junitxml=reports/invariants.xml || true
           python scripts/ci/check_invariants.py reports/invariants.xml
+          python scripts/ci/check_invariant_assertions.py tests
 
       - name: Unit + integration with coverage
         env:
@@ -421,6 +459,15 @@ jobs:
         run: |
           cp .env.example .env
           docker compose build
+
+      # E0-36 item 4, and it builds an image of its own rather than inspecting
+      # the one above — the files it plants have to be in the tree before the
+      # build reads the context. In the passing case that build is a cache hit
+      # off the one this step follows, because `.dockerignore` excluding the
+      # planted files is exactly the condition under which the context has not
+      # changed.
+      - name: Nothing .dockerignore re-excludes reaches the runtime image
+        run: ./scripts/ci/check_image_contents.sh
 
       # Five services named, seven covered. `api` declares `depends_on` on a
       # healthy `db` and a healthy `redis`, so reaching healthy here means those
@@ -610,9 +657,44 @@ jobs:
           python scripts/ci/check_licenses.py $ARGS
 
   # --------------------------------------------------------------------------
-  # One required check to point branch protection at. Fails if any gate failed
-  # or was cancelled; tolerant jobs report success, so this stays honest as the
-  # tree fills in.
+  # One required check to point branch protection at. Fails if any gate failed,
+  # was cancelled, or did not run.
+  #
+  # `skipped` is in that list, and it is the whole of E0-36 item 1. A job whose
+  # dependency failed is reported `skipped` rather than `failure`, so a failure
+  # anywhere above `fast-gate` — `migration-drift`, `lint-python`,
+  # `lint-frontend`, `ci-selftest`, or `detect` — used to arrive here as a row of
+  # skips that `grep -qE 'failure|cancelled'` matched none of. This check then
+  # printed "All gates green" and exited 0 over a migration that had drifted from
+  # its models, on the one check branch protection points at.
+  #
+  # The comment this replaces said `skipped` was left out because tolerant jobs
+  # report success and so the verdict stayed honest as the tree filled in. The
+  # first half is still true and the second no longer follows: every tolerance in
+  # this file is at the *step* level, with a `::notice::` step in place of the
+  # real work, so no job named below is ever legitimately skipped and a skip here
+  # always means something upstream failed. A job-level `if:` on any of them
+  # would break that, which is why nothing here has one and why
+  # `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails
+  # loudly the moment one appears.
+  #
+  # **Read the sentence above as narrowly as it is written.** It says a skip
+  # among these needs means an upstream failure. It does not say this check sees
+  # every way a gate can fail to run, and it must not be read that way, because
+  # step-level tolerance is exactly the mechanism by which a job reports
+  # *success* over work it did not do: the real steps switch themselves off by
+  # their own `if:`, the notice step runs, and the job is green. Nothing is
+  # skipped and nothing is red, so this verdict cannot see it and was never going
+  # to.
+  #
+  # That is not hypothetical. E0-36's security review found both `detect` probes
+  # answering false over trees that held the thing — `tests/evals/**/*.py`
+  # without `globstar`, and a flat-only `tests/e2e/*.spec.ts` — which would have
+  # turned off SPEC §9.3's threat and self-harm recall floor with `CI` green.
+  # Those two are fixed and `tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py`
+  # holds them, but the shape belongs to the tolerance design rather than to
+  # those two globs: what keeps a tolerant job honest is the probe being right,
+  # and that is asserted over planted trees, not here.
   # --------------------------------------------------------------------------
   ci:
     name: CI
@@ -623,8 +705,11 @@ jobs:
       - name: Verdict
         run: |
           echo "Results: ${{ join(needs.*.result, ', ') }}"
-          if echo "${{ join(needs.*.result, ',') }}" | grep -qE 'failure|cancelled'; then
-            echo "::error::One or more gates failed."
+          if echo "${{ join(needs.*.result, ',') }}" | grep -qE 'failure|cancelled|skipped'; then
+            echo "::error::One or more gates failed, was cancelled, or did not run."
+            echo "A gate reports 'skipped' when a job it needed did not succeed, so a"
+            echo "skip above is an upstream failure — open the job list and find the"
+            echo "red one. It will be upstream of the gates listed here."
             exit 1
           fi
           echo "All gates green."

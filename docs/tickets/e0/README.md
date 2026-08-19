@@ -54,7 +54,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 34 | [A view file that reads identity must fail on that ground](E0-34-view-file-identity-guards.md) | 10, 11 | **Batch B.** A `views_sql/*.sql` file joining `user_identity` passes the identity invariant vacuously and is caught only by a sweep whose message points at `public.` prefixes. Carries E0-32 items 2 and 3 and E0-27 item 2. |
 | 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C — built 2026-08-19.** Three rules held by a docstring, now three sweeps: an unmarked column on an LMS-owned table, a second assignment site for a section's derived calendar, and a module that writes an LMS-owned relation without naming `guard_write`. Closes E0-21 item 1, E0-24 item 2 and E0-27 item 1. ADR 0069 records the sweep-over-hook choice all three declined, ADR 0014 and ADR 0021 are amended, and one question is left open by decision: how a *sanctioned* writer satisfies the guard rule is E1's. |
 | 36 | [Gates that report green over something they did not look at](E0-36-ci-gate-fidelity.md) | 04 | **Batch D.** Five items in `ci.yml`, `scripts/ci/` and the `Makefile`, including the aggregate `CI` check that prints "All gates green" over a real `migration-drift` failure. Carries E0-20 items 1 and 2, E0-32 item 1, E0-25 item 1 and E0-29 items 4b and 4c. Produces two pull requests. |
-| 37 | [Seven small corrections](E0-37-small-corrections.md) | 05, 13, 17 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, and E0-31 items 3 and 4. Item 1 is the only one with a confidentiality consequence. |
+| 37 | [Nine small corrections](E0-37-small-corrections.md) | 05, 13, 17, 36 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, E0-31 items 3 and 4, and E0-36's security review as item 9. Items 1 and 9 are the ones with a confidentiality consequence; item 9 is true of the image on disk today, which is why it now depends on 36. |
 | 38 | [A documentation-only change should not run the whole pipeline](E0-38-docs-only-runs-skip-the-heavy-gates.md) | 36 | **Batch D's sequel.** A Markdown-only pull request runs pytest, both image builds, Playwright, the evals and the supply-chain audit — about fifteen minutes of runner time to establish that no Python changed. Two traps: `test_ai_contracts.py` parses `docs/SPEC.md` at test time, and a path filter manufactures a second meaning for `skipped` that E0-36 item 1 must settle first. |
 
 ## Dependency graph
@@ -79,7 +79,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 02, 03 ── 19        Batch G — Compose credential surface
 15 ── 28            Batch E — mock LMS conformance
 16 ── 30            Batch F — mock IdP error redirects
-05, 13, 17 ── 37    Batch H — seven small corrections
+05, 13, 17, 36 ─ 37  Batch H — nine small corrections
 36 ── 38            after Batch D, and the dependency is real rather than tidy
 
 20, 21, 27, 32      redistributed; read for their measurements, do not build
@@ -347,7 +347,7 @@ that ticket includes removing its tolerance:
 | Compose health (`mock-lms`) | 14 |
 | Compose health (`mock-idp`) | 16 |
 | migration drift | 04 |
-| §4.1 invariant suite — no skips permitted | 10 |
+| §4.1 invariant suite — no skips permitted, and no marked test that asserts nothing | 10 (skips), 36 (assertions) |
 | Playwright e2e | 18 |
 | AI eval floors | E2, not E0 — the last tolerance to survive this epic |
 

@@ -1,23 +1,32 @@
-# E0-37 — Seven small corrections, none of which is worth a ticket alone
+# E0-37 — Nine small corrections, none of which is worth a ticket alone
 
 **ID:** E0-37
 **Branch:** `e0/small-corrections`
-**Depends on:** E0-05, E0-13, E0-17
+**Depends on:** E0-05, E0-13, E0-17, E0-36
 
 ## Context
 
-Seven items from four tickets, each between one line and about twenty, batched
+Nine items from five tickets, each between one line and about twenty, batched
 because tracking them separately costs more than fixing them. They were
 [E0-20](E0-20-gate-fidelity.md) item 4 and its two "also worth doing" entries,
 [E0-21](E0-21-review-debt.md) item 2, [E0-25](E0-25-review-debt-from-e0-09-to-e0-14.md)
-items 2 and 3, and [E0-31](E0-31-review-debt-from-e0-17.md) items 3 and 4.
+items 2 and 3, [E0-31](E0-31-review-debt-from-e0-17.md) items 3 and 4, and
+[E0-36](E0-36-ci-gate-fidelity.md)'s security review.
+
+**The count said "seven" until 2026-08-19 and item 8 was already here**, added
+without it. That is `docs/MISTAKES.md` entry 1 in the file whose own subject is
+small corrections, so it is worth saying rather than quietly renumbering: a count
+in a heading is a record, and this one had been false for as long as item 8 had
+existed.
 
 They are not one subject and this file does not pretend they are. What they share
 is size and the fact that each is a trap already sprung once somewhere in this
 repository. Two of them land in the same two files.
 
-**One item is not cosmetic and should be read before the rest** — item 1 is the
-only thing here with a confidentiality consequence.
+**Two items are not cosmetic and should be read before the rest** — items 1 and 9
+are the ones with a confidentiality consequence, and item 9 is the sharper of the
+two. Item 1 needs somebody to configure a logger by name before it bites. Item 9
+is true of the image on disk today.
 
 Read first: `docs/MISTAKES.md` entries 1, 2 and 3.
 
@@ -151,6 +160,48 @@ ticket, which is circular; the other reason stands on its own.
 support.** This item corrects the argument, not the decision — if the correction
 turns out to change the decision, that is a separate ticket and a new ADR.
 
+### 9. A `.pfx` beside a prompt reaches the runtime image, and no line stops it
+
+Found by the independent security review of [E0-36](E0-36-ci-gate-fidelity.md)
+(PR #45) and measured twice — once by the reviewer, once by the coordinator
+reproducing it before acting.
+
+`pyproject.toml` ships `prompts/**/*` as `app.ai` package data, so any non-hidden
+file left in `backend/app/ai/prompts/` is packaged into the wheel and installed
+into the runtime image. `.dockerignore` guards that directory with a **denylist of
+suffixes**, and the file's own header admits what that costs: "a suffix nobody
+thought of is in the context until someone remembers to add it."
+
+The measurement, taken by planting four files and listing the installed prompts
+directory from inside a built image:
+
+| planted | reached the image |
+|---|---|
+| `probe.pem` | no — `backend/**/*.pem` holds |
+| `probe.key` | no — `backend/**/*.key` holds |
+| `probe.pfx` | **yes** |
+| `probe.secret` | **yes** |
+
+So a `signing.pfx` parked beside a prompt while debugging is in the image today,
+untracked, invisible in review, with no line to delete and no gate that would
+notice. E0-36 closed the *fidelity* half of this — `scripts/ci/check_image_contents.sh`
+now plants a file per guarded suffix and fails if any arrives — and deliberately
+did not touch the *coverage* half, because adding patterns changes what is
+guarded rather than whether the guard works. This is that half.
+
+**The fix is two lines in `.dockerignore` and two entries in `PLANTED_FILES`**, so
+it belongs here by size. What it is not is a decision about the denylist itself:
+an allowlist for that directory — permit `*.md` and nothing else — is the
+structurally correct answer and is **out of scope here**, because ADR 0032 traded
+exactly that away and reversing it needs the ADR, not a batch item. If the two
+lines turn out to want that argument, this item comes out of the ticket per the
+out-of-scope rule below.
+
+The same measurement applies to `mock-lms/` and `mock-idp/`, which carry the same
+`*.pem` and `*.key` re-exclusions and hold the signing keys — but neither ships
+package data, so nothing there is a path into an image. Named so it is not
+rediscovered.
+
 ## Out of scope
 
 - **Database TLS.** Neither engine sets `sslmode`, so psycopg's default `prefer`
@@ -176,6 +227,11 @@ turns out to change the decision, that is a separate ticket and a new ADR.
 - [ ] The `ALEMBIC_DATABASE_URL` hedge is gone, in its own commit.
 - [ ] ADR 0013's argument no longer cites ADR 0010 as precedent and no longer
       rests on a circular reason. The decision is unchanged.
+- [ ] A file named `*.pfx` or `*.secret` left in `backend/app/ai/prompts/` does
+      not reach the runtime image, **verified by building the image and listing
+      the installed directory** rather than by reading `.dockerignore`.
+- [ ] `scripts/ci/check_image_contents.sh` plants one file per newly guarded
+      suffix, so deleting either new line turns the Docker gate red.
 - [ ] Items 1, 2, 3 and 4 verified by mutation.
 
 ## Definition of done

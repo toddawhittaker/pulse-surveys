@@ -79,18 +79,22 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 38** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 40** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
 say in the message why that guard is not ceremony. A pattern searched against a
 file is a case of this and looks like none: run it against the text you claim it
 catches *and* against the text you claim it allows, and give it a canary — a
-string certainly present — so a search that has gone blind says so.
+string certainly present — so a search that has gone blind says so. **Build that
+canary sample by copying whole lines, the line the sentence starts on included.**
+A sentence retyped from where you think it begins is the thing the sample exists
+to disprove, and a comment wrap is exactly what puts the boundary somewhere you
+did not expect.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 34** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 35** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
@@ -100,7 +104,7 @@ never written and the one that drifted out from under you.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 29** · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
+**Caught: 30** · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
 
 **Rule.** After fixing something, try to reintroduce it. If the suite stays
 green, you have written a convention, not a guarantee. Prefer asserting the
@@ -163,6 +167,14 @@ built around is the one least likely to hold its privileges the ordinary way.
 ## 17. An unqualified table name let the caller choose which table a guard read
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/17-an-unqualified-table-name-let-the-caller-choose-which.md)
+
+## 34. A pipeline discarded a non-zero exit and printed a line that read as success
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+
+**Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
+exit status of `tail`, so a failing gate prints a passing line. Redirect to a
+file and check the status, or run the gate bare.
 
 ## 6. Shell expansion inside a commit message
 
@@ -240,14 +252,15 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/26-a-fallback-path-swallowed-the-defect-that-triggered-it.md)
 
+## 36. A probe deciding whether a gate runs answered false over a tree that had the thing
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/36-a-probe-deciding-whether-a-gate-runs-answered.md)
+
+**Rule.** A probe that decides whether a gate runs is itself a gate. Plant what
+the job actually runs and require a yes; plant nothing and require a no; assert
+the whole set of outputs rather than the one you have in mind. `**` in a shell
+glob is a single `*` unless `globstar` is set.
+
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
-
-## 34. A pipeline discarded a non-zero exit and printed a line that read as success
-
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
-
-**Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
-exit status of `tail`, so a failing gate prints a passing line. Redirect to a
-file and check the status, or run the gate bare.

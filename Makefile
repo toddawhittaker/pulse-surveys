@@ -65,6 +65,7 @@ selftest: ## Self-test the CI checker scripts
 	@$(PYTHON) scripts/ci/test_ci_scripts.py
 	@bash -n scripts/ci/wait_for_health.sh && echo "    wait_for_health.sh parses"
 	@bash -n scripts/ci/check_job_runtime.sh && echo "    check_job_runtime.sh parses"
+	@bash -n scripts/ci/check_image_contents.sh && echo "    check_image_contents.sh parses"
 
 .PHONY: test-gates
 test-gates: test e2e evals ## Test gates: pytest, Playwright, AI evals
@@ -129,12 +130,22 @@ migration-check: ## Fail if the models have drifted from the migrations
 # not grown them yet. The workflow dropped the flag in the same change, and the
 # two move together. `scripts/ci/check_invariants.py` keeps the flag as an
 # option; what has gone is passing it.
+#
+# Two checkers, one gate, and they see different things. The first reads the
+# JUnit XML the run produced, so it catches a skip, an xfail and an empty
+# collection. It cannot see a marked test that ran and asserted nothing — the XML
+# carries no assertion count, so that test is counted toward the "N invariant
+# test(s) ran" the first one prints. The second reads the sources and refuses
+# exactly that (E0-36 item 3). The workflow's invariant step runs both, in this
+# order, and a caller that dropped either half would be greener than one that
+# ran it tolerantly.
 .PHONY: invariants
-invariants: ## Run the §4.1 invariant suite alone; a skip and an empty run are both failures
+invariants: ## Run the §4.1 invariant suite alone; a skip, an empty run and a test that asserts nothing are all failures
 	$(call banner,invariant suite (SPEC §4.1))
 	@mkdir -p reports
 	@pytest -m invariant --junitxml=reports/invariants.xml || true
 	@$(PYTHON) scripts/ci/check_invariants.py reports/invariants.xml
+	@$(PYTHON) scripts/ci/check_invariant_assertions.py tests
 
 # The integration tests start their own Postgres through testcontainers, so this
 # needs a running Docker daemon but not the Compose stack.
@@ -146,7 +157,7 @@ test: invariants ## pytest unit + integration with coverage
 .PHONY: e2e
 e2e: ## Playwright against the Compose stack
 	$(call banner,Playwright e2e)
-	@if compgen -G "tests/e2e/*.spec.ts" > /dev/null 2>&1; then \
+	@if [ -n "$$(find tests/e2e -name '*.spec.ts' -print -quit 2>/dev/null)" ]; then \
 		npx playwright test; \
 	else \
 		$(call skip,no tests/e2e specs yet); \
@@ -155,7 +166,7 @@ e2e: ## Playwright against the Compose stack
 .PHONY: evals
 evals: ## AI eval runner with per-task precision/recall floors
 	$(call banner,AI evals)
-	@if [ -d tests/evals ] && compgen -G "tests/evals/**/*.py" > /dev/null 2>&1; then \
+	@if [ -f tests/evals/runner.py ]; then \
 		$(PYTHON) -m tests.evals.runner --enforce-floors; \
 	else \
 		$(call skip,no tests/evals runner yet); \
@@ -178,11 +189,21 @@ evals: ## AI eval runner with per-task precision/recall floors
 # the image; every other line here runs your checkout through the override's
 # bind mount. Why that pass exists is docs/adr/0011; this recipe exists to match
 # the workflow, and when the two disagree the workflow is right.
+#
+# One check runs before the stack comes up at all, and it is neither E0-02's nor
+# E0-03's: `check_image_contents.sh` plants a file matching each of
+# `.dockerignore`'s prompt-directory re-exclusions, builds, and looks inside the
+# image for them (E0-36 item 4). It sits here rather than with the others because
+# it is about what the build carried, not about what the stack does once it is
+# running, and because it needs the plant to happen before anything reads the
+# build context.
 .PHONY: docker-build
 docker-build: ## Build the images and check the stack against E0-02's and E0-03's criteria
 	$(call banner,docker compose build)
 	@test -f .env || { echo "    .env is missing — run: cp .env.example .env"; exit 1; }
 	@$(COMPOSE) build
+	$(call banner,image contents)
+	@./scripts/ci/check_image_contents.sh
 	$(call banner,compose stack health)
 	@set -e; \
 	trap '$(COMPOSE) down -v >/dev/null 2>&1 || true' EXIT; \
@@ -278,11 +299,28 @@ install: ## Install the locked dependencies and the backend, editable
 # leaves floating because pip itself depends on them — setuptools here. Pinning
 # them is the stricter behaviour, and it is what lets the build backend be
 # hash-verified. pip-tools' own documentation says it will become the default.
+#
+# **The order of these two is load-bearing, and so is `-c requirements.txt`.**
+# The runtime compile runs first and the dev compile is then resolved *under* its
+# result rather than beside it. Without the constraint they are two independent
+# solves over overlapping requirement sets, free to pick different versions of
+# the same package — and they did: `charset-normalizer` skewed to two versions
+# during E0-13, every test passed, and only `pip-audit` saw it
+# (docs/MISTAKES.md entry 25). The suite installs the dev closure and the image
+# ships the runtime one, so a skew means every test in this repository is green
+# against a version of a package that no deployment has.
+#
+# There is no `pip-compile` in .github/workflows/ci.yml to keep this in step
+# with. Locking is a developer's step; CI only ever installs what was committed.
+# What has to stay true across the two is that every lockfile CI installs from is
+# a file this target writes, which
+# `tests/unit/test_the_lockfiles_resolve_together.py` asserts in that direction.
 .PHONY: lock
 lock: ## Recompile requirements.txt and requirements-dev.txt from pyproject.toml
 	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe \
 		--output-file=requirements.txt pyproject.toml
-	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe --extra dev \
+	pip-compile --quiet --generate-hashes --strip-extras --allow-unsafe \
+		-c requirements.txt --extra dev \
 		--output-file=requirements-dev.txt pyproject.toml
 
 .PHONY: fmt

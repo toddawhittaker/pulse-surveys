@@ -73,6 +73,60 @@ failed" the checker prints.
 Found by `spec-conformance` against a planted fixture whose `invariant`-marked
 test body ends after a call.
 
+**The rule, decided 2026-08-19 because the item as written named none.** An
+`invariant`-marked test's own body must contain at least one of: an `assert`
+statement, a `with pytest.raises(...)` block, or a `pytest.fail(...)` call. A
+body whose only statements are calls is refused.
+
+Two things that rule deliberately does not do, and the cost of each:
+
+- **It does not follow a call into a helper.** A test that delegates its whole
+  control to a module-level helper which asserts is correct and this rule refuses
+  it. That is the accepted cost: chasing calls means choosing how many levels
+  deep and whether an imported helper counts, and every answer to that is
+  arbitrary. The refusal is loud and the fix is one line in the test.
+- **It reads the body statically and does not know whether the assertion
+  executed.** An `assert` inside a branch nothing takes satisfies it. This item
+  closes the gap between "no assertion is written" and "an assertion passed"; it
+  does not close the gap between "an assertion is written" and "it ran".
+
+A shape the rule's two halves point opposite ways on, decided 2026-08-19 so that
+the round building the checker is not deciding it: a test whose only assertion
+sits inside a nested function it defines and then calls is **allowed**. The
+assertion is lexically inside the test, where a reader of the test can see it,
+and "helpers are not chased" is about a call leaving the function for something
+defined elsewhere. Allowing it is also what an ordinary AST walk of the body does
+without extra code, and refusing it would mean writing code to detect a shape
+nothing in this repository uses. Nothing in the tree depends on the answer either
+way — see the measurement below.
+
+Measured before the rule was chosen: all **24** `invariant`-marked tests in the
+tree carry an `assert` in their own body, none inside a nested function, and every
+one that uses `pytest.raises` also asserts directly. So the rule is green on the
+whole suite today and no existing test moves to satisfy it.
+
+**That number was 20 when this section was first written, and the correction is
+the item's own subject.** The measurement behind it read decorators only, so it
+missed the four tests marked by a module-level `pytestmark = pytest.mark.invariant`
+— three in `tests/unit/test_no_service_reads_an_identity_table_directly.py` and one
+in `tests/unit/test_care_is_not_reachable_from_a_claim.py`. A checker built to that
+measurement would have reported a clean scan over four real §4.1 invariants it
+never looked at, which is exactly what this ticket is about. The number to trust is
+`pytest -m invariant --collect-only`, which collects 24 functions and 42
+parametrized cases; the checker agrees with it, and that agreement is worth
+re-checking rather than assuming.
+
+**Where it lives, and why the test wall holds.** The checker is
+`scripts/ci/check_invariant_assertions.py`, invoked in the same gate step as
+`check_invariants.py` in both `.github/workflows/ci.yml` and the `Makefile`. Its
+behavioural self-test — a body ending after a call is refused, a `raises` body is
+allowed, a `fail` body is allowed, a helper-delegated body is refused — goes in
+`scripts/ci/test_ci_scripts.py`, which is outside `tests/**` and is already the
+established home for "this checker exits 1 on that input". Under `tests/**` sit
+the two tests the checker cannot write about itself: that both callers invoke it,
+with the canary that both still invoke `check_invariants.py`; and an end-to-end
+run over planted sample files.
+
 ### 4. Nothing asserts `.dockerignore`'s contents
 
 E0-12 added four re-exclusions (`backend/**/*~`, `*.orig`, `*.rej`, `*.bak`)

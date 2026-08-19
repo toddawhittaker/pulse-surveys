@@ -1,25 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 34**
+**Caught: 35**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*17 instances recorded; the 3 most recent are below. The earlier 14 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-33, where the stale record was the **ticket**. Its item 3
-names two properties that "have no assertion anywhere today" — that no
-`SECURITY DEFINER` function in `public` is owned by a superuser, and that the
-reveal owner's grants are exactly the three its job needs — because it was written
-from E0-20's text, which predates E0-10's later review round. Both landed in that
-round, and ADR 0043's closing paragraph says so. Writing the two tests the ticket
-asks for would not have produced two duplicates: same module, same subject, and
-under a similar name a second `def` at module scope **replaces** the first
-silently, so a test that exists today would have been deleted by a change whose
-whole purpose was to add one. The item was routed instead at what is genuinely
-unasserted — who else is named in an ACL, what the connection roles hold on a base
-table, and a membership granted `WITH INHERIT FALSE`. **Before writing a test a
-ticket asks for, check what already asserts it; a ticket is a record like any
-other, and one written from another ticket's text is a copy that drifted.**)*
+*18 instances recorded; the 3 most recent are below. The earlier 15 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-31 item 1, where the change was a **decision reversal** and the stale
 records were the ones that had argued for the old decision. ADR 0065 said
@@ -47,6 +32,22 @@ shape this entry names — written once, never re-read; and a signpost in E0-22,
 a live ticket, sending a reader to E0-21 for a residue that had moved twice.
 None of the four was in the brief, and the branch would have shipped with a
 green suite and four records pointing at the wrong owner.)*
+
+*(In E0-36 item 1, where the record that went stale was **the comment attached to
+the line being changed**. The brief named one site — ADR 0002's last consequence
+bullet, claiming the aggregate `ci` job "stays correct without edits as
+individual gates flip from tolerant to enforcing" — and it was right that this is
+the only claim in `docs/`. It is not the only claim. The verdict step's own
+header comment in `.github/workflows/ci.yml` said the check "fails if any gate
+failed or was cancelled; tolerant jobs report success, so this stays honest as
+the tree fills in", which is the argument for leaving `skipped` out of the
+pattern. Adding `skipped` to that same line would have left a comment three lines
+above it explaining why `skipped` is deliberately absent — and the next person to
+touch the verdict would have read the comment, believed the exclusion was
+considered, and put it back. **The record most likely to be missed is the one you
+are looking straight at**, because a comment above the line you are editing reads
+as context rather than as a claim. The sweep has to include the diff's own
+neighbourhood, not only the rest of the repository.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`

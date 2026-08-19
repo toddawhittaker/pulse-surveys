@@ -4,7 +4,37 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*6 occurrences recorded; two of them are catches.*
+*7 occurrences recorded; two of them are catches.*
+
+*(**An occurrence, not a catch**, in E0-36 item 3, by the orchestrating session,
+and the currency was a pytest marker. The question "which tests are marked
+`invariant`" was measured with an AST walk over `decorator_list`, which answered
+20. `pytest -m invariant --collect-only` answers 24: four tests are marked by a
+module-level `pytestmark = pytest.mark.invariant` — three in
+`tests/unit/test_no_service_reads_an_identity_table_directly.py`, one in
+`tests/unit/test_care_is_not_reachable_from_a_claim.py` — and a decorator walk
+cannot see any of them. The number went into the ticket and into a test docstring
+as the justification for the rule being green on the suite. **The implementer read
+both forms and got 24; the mutation that disables the `pytestmark` path makes the
+checker report exactly 20**, which is a clean scan printed over four real §4.1
+invariants it never looked at — item 3's own subject, inside the round that was
+fixing item 3. The entry's sharper half held too: those two modules use
+`pytestmark` **because every test in them is an invariant**, so the files that are
+wholly confidential are precisely the ones the walk was blind to. "Name the
+catalog, not the concept" is the corollary that applies — `decorator_list` is not
+the marked set, pytest's collector is — and the repair is to quote the count from
+the collector rather than from a walk. **The entry's own rule then closed the
+second half of it**, one round later: the eight planted samples in
+`tests/unit/test_the_invariant_gate_refuses_a_test_that_asserts_nothing.py` all
+used the decorator form, so nothing under `tests/**` would have noticed the
+checker's `pytestmark` path regressing — the currency had been named in the record
+and not yet planted in the battery. Two samples now carry it, refused and allowed,
+and it takes both: the refusal alone is passed by a checker that refuses every
+`pytestmark` module whatever its body, and the allowance alone is passed by a
+checker blind to the form, which scans nothing and objects to nothing. The refusal
+is checked as a non-zero exit **and** the offending test named, because a checker
+that cannot see the marking reports an empty scan, which may exit non-zero for its
+own reasons and would otherwise read as the rule having been applied.)*
 
 *(**A catch**, writing E0-35's tests — three static sweeps over writes to
 LMS-owned data. All three have an empty subject set today, because E0 ships no
@@ -52,26 +82,6 @@ is an inventory written down separately, which the table cannot shrink: a
 required-labels constant, a flat tuple of shapes, and a test over neither of the
 structures being guarded. **A control is only as complete as the list it iterates,
 and a list derived from the thing under test cannot notice a deletion.**)*
-
-*(Twice more on the same pull request, after this entry was
-written. **Both were found by review or by mutation, so neither is a catch** —
-this file's own rule is that a detection does not earn a bump. The counter stayed
-at 0 for these; it moved to 1 later in the same pull request, when the entry
-genuinely stopped an aggregate control from shipping — that instance is below,
-and this sentence read "stays at 0 until this entry stops somebody in advance"
-until the moment it did. **A column grant** is recorded in `pg_attribute.attacl`, which neither
-`has_table_privilege` nor `pg_class.relacl` reads — a fourth currency, found by a
-reviewer one round after the entry naming the third. And when the probe for it
-was added, nothing asked it about the roles that hold the grant: the sweep
-consulted the probes only for roles a runtime role could *become*, and a grant
-made directly to `pulse_app` is not a membership. Measured: 28 tests passed while
-that connection could read every student's name. **The control was the second
-half of the same miss.** It called the probe function directly rather than
-through the table of probes, so deleting the probe from the table left it green —
-a control that cannot fail when the thing it guards is removed is not a control.
-The repair on both was the same: ask the enumeration the question you actually
-care about, and make the control run the whole path rather than the piece you
-were thinking about.)*
 
 **What happened.** E0-33 added a sweep asserting that neither runtime connection
 role can *become* a role that may read identity. It was written because

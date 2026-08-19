@@ -1,11 +1,11 @@
 # Entry 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 0**
+**Caught: 1**
 
-*1 occurrence recorded, and it is not a catch.*
+*2 instances recorded: one occurrence, and one catch.*
 
-*(An occurrence, not a prevention: the counter stays at 0 because this
-entry did **not** stop the mistake. In E0-33, by the orchestrating session, against this entry's own
+*(An occurrence, not a prevention, and it earned no bump: this
+entry did **not** stop the mistake here. In E0-33, by the orchestrating session, against this entry's own
 command. `make ci 2>&1 | tail -45` printed the tail of a run in which `lint` had
 died on `ruff: command not found`, and the harness reported the *pipeline's*
 exit code of zero. The failing line `make: *** [Makefile:82: lint] Error 127`
@@ -13,6 +13,22 @@ was visible in the output that was read, and was read past, because the exit
 status said success. Re-running as `make ci > ci.log 2>&1; echo $?` reported 2.
 The entry was written five commits earlier in the same epic and was not recalled
 while typing the pipe — which is the point of it having a number.)*
+
+*(The first prevention, in E0-36 item 4, inside a **gate being written** rather
+than in a command being run. `scripts/ci/check_image_contents.sh` builds the
+runtime image and has to decide whether four planted files reached it. The
+obvious line is `docker run --rm "$image" python -c '…' | grep -qF "$name"`, and
+it is this entry exactly: `docker run` exits non-zero when the image is missing,
+when the interpreter cannot import the package, or when the listing raises, and
+in every one of those cases `grep` finds nothing, returns 1, and the check
+reports "no stray file reached the image" — a green gate over an image it never
+read. The script redirects the listing to a file, checks the status of the
+`docker run` separately, and refuses an empty listing before believing an
+absence. **The mechanism reaches further than the rule's wording suggests**: the
+original instance was a human piping a gate at a terminal, and this one is a pipe
+compiled into a gate, where it would have re-reported the same false green on
+every run rather than once. Any check whose verdict is "the search found
+nothing" has to prove separately that the search ran.)*
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 

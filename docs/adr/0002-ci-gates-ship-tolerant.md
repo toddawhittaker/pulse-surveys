@@ -67,7 +67,52 @@ cannot lie about what exists.
   should be. The acceptance criteria and E0-18's exit checklist are process
   controls, not technical ones. Accepted knowingly.
 - The `detect` job adds a few seconds to every run.
-- The aggregate `ci` job computes its verdict from `needs.*.result`, so it stays
-  correct without edits as individual gates flip from tolerant to enforcing.
+- ~~The aggregate `ci` job computes its verdict from `needs.*.result`, so it
+  stays correct without edits as individual gates flip from tolerant to
+  enforcing.~~ **Amended 2026-08-19 (E0-36 item 1): it did not.** Reading
+  `needs.*.result` is not enough on its own, because the result a failure
+  produces depends on where in the graph it happens. A job whose dependency
+  failed is reported `skipped` rather than `failure`, so a failing
+  `migration-drift` reached the verdict as `skipped,skipped,…` — `fast-gate`
+  skipped, everything below it skipped — and the pattern that looked for
+  `failure|cancelled` matched none of them. The required check printed "All gates
+  green" and exited 0 over a migration that had drifted from its models.
+
+  The verdict now treats `skipped` as a failure too, and that is only sound
+  because of a property of `ci.yml` rather than of the mechanism: every
+  tolerance in that workflow is at the *step* level, so no job the aggregate depends on is
+  ever legitimately skipped. A job-level `if:` on any of them would make a skip
+  ambiguous again, and
+  `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails and
+  says so if one appears.
+
+  **A second amendment, 2026-08-19, to the paragraph above rather than to the
+  decision.** That paragraph is true and was read as more reassuring than it is,
+  including by the session that wrote it. Step-level tolerance keeps the *skip*
+  analysis simple, and it is also the mechanism by which a tolerant job reports
+  **success** over work it did not do — the real steps switch themselves off,
+  the notice step runs, and the job is green. So "the aggregate now sees a
+  failing gate" is true of failures and skips, and says nothing about a gate
+  that was quietly turned off.
+
+  What decides that is the `detect` probe, and E0-36's independent security
+  review found two of the three answering false over trees that held the thing:
+  `tests/evals/**/*.py` needs `shopt -s globstar`, which was never set, and
+  `tests/e2e/*.spec.ts` does not descend. Either one silently disables its gate
+  with `CI` green, and the `evals` case takes SPEC §9.3's threat and self-harm
+  recall floor with it — the floor `CLAUDE.md` calls a hard gate whose lowering
+  is a safety decision. Both are fixed, and
+  `tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py` runs each
+  probe over planted trees and judges what it emits.
+
+  **This is the real cost of the decision, and it compounds the first
+  consequence rather than the aggregate's.** A tolerant gate is only as honest as
+  the probe that decides whether it runs, so every probe added under this pattern
+  needs a case that plants what its job needs and a case that plants nothing.
+  Neither the aggregate check nor a reviewer reading the YAML can supply that.
+
+  The decision above is unaffected — gates still ship tolerant and still name the
+  ticket that enforces them. What was wrong was the claim that the aggregate
+  needed no edits as they flipped.
 - The pattern generalizes badly beyond bootstrap. Once E0 is complete, a new
   tolerant gate should be treated as a smell rather than as this precedent.
