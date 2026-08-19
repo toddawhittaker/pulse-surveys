@@ -1,8 +1,9 @@
 # 0038 — The mock platform ships in the base Compose file, and is kept out of a deployment by what it holds
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-08-19 by
+[ADR 0068](0068-the-demo-seed-registers-the-mock-platform-behind-its-guard.md)
 **Date:** 2026-08-16
-**Tickets:** E0-14
+**Tickets:** E0-14, E0-31
 
 ## Context
 
@@ -40,6 +41,16 @@ so plainly so that nobody reads the base-file declaration as a claim of safety:
   issuer. A production Pulse with no such row rejects every launch it signs, and
   that is the boundary that actually matters.
 
+  **Amended 2026-08-19 (E0-31 item 1).** One thing in this repository now writes
+  that row: `seed_mock_platform` in `scripts/seed.py`, so that E0-18 can drive a
+  real launch. **What keeps it out of a deployment is the demo seed's own
+  environment guard** — the script refuses to run unless `ENVIRONMENT` resolves
+  to `development` (ADR 0063), and that check is evaluated again at the
+  registration itself rather than only at start-up. So this property no longer
+  reads "no such row exists anywhere in this repository"; it reads "no run
+  permitted to write it can start". ADR 0068 records the decision, what it
+  costs, and the two questions that replace the grep a reviewer used to make.
+
 ## Alternatives rejected
 
 **A Compose profile (`profiles: [dev]`).** The obvious answer, and it loses more
@@ -69,6 +80,13 @@ This record is what a reviewer should hold that decision against.
 **If Pulse ever ships a "run the whole compose file" deployment path**, this
 record becomes wrong and the profile question reopens — with the spec edit §7.2
 would then need.
+
+**A registration for it now exists, and its safety is a property of a Python
+guard.** That is a weaker claim than the one this record shipped with, and ADR
+0068 says so plainly rather than presenting it as equivalent. The reviewer's
+check moves from "grep the repository for the issuer and find nothing" to "does
+anything other than `seed_mock_platform` write it, and does that function still
+read the environment first".
 
 **The service is a signing oracle for its own fake identity, reachable by anyone
 who can reach the container.** It authenticates nobody: it will sign a launch as

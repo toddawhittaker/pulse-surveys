@@ -1,11 +1,21 @@
 # 0065 — The demo institution registers a fictional platform, and not the mock LMS
 
-**Status:** Accepted
+**Status:** Accepted; the second half superseded 2026-08-19 by
+[ADR 0068](0068-the-demo-seed-registers-the-mock-platform-behind-its-guard.md)
 **Date:** 2026-08-17
 **Tickets:** E0-17
 
-**Leaves [ADR 0038](0038-the-mock-platform-ships-in-the-base-compose-file.md)
-standing unamended**, which is the whole point of it.
+**What still holds.** The demo institution's own people belong to the fictional
+platform at `https://lms.pulse-demo.invalid` described below, and nothing about
+that has changed.
+
+**What no longer holds.** "`mock-lms` is not registered by this or any other
+path in the repository", and with it the claim to leave
+[ADR 0038](0038-the-mock-platform-ships-in-the-base-compose-file.md) standing
+unamended. E0-31 item 1 took the alternative this record rejected: the seed
+registers the mock as well, behind its `ENVIRONMENT` guard, so that E0-18 can
+launch. The rejection below is left exactly as written, because its reasoning is
+the cost ADR 0068 accepts rather than an argument that turned out to be wrong.
 
 ## Context
 
@@ -49,6 +59,10 @@ own people and authorises no launch at all.
 **`mock-lms` is not registered by this or any other path in the repository.**
 ADR 0038's fourth property therefore still holds as written, and that record is
 untouched.
+
+> **Superseded 2026-08-19 by ADR 0068.** `scripts/seed.py` now registers the
+> mock as well, in `seed_mock_platform`, behind the same `ENVIRONMENT` guard.
+> ADR 0038's fourth property has been amended to name that guard.
 
 The `ENVIRONMENT` guard ([ADR 0063](0063-the-demo-seed-runs-only-in-a-development-environment.md))
 sits above this in any case, so even the fictional row cannot be written by a
@@ -98,13 +112,26 @@ row comes from and how it is kept out of a deployment, and this record and ADR
 0038 are what that decision is held against. It is named in E0-17's pull request
 as deferred rather than left to be discovered.
 
+> **Settled 2026-08-19, as E0-31 item 1 rather than inside E0-18.** The row is
+> written by the seed, behind its environment guard; ADR 0068 records it.
+
 **A grep for `mock-lms:8000` across the repository still returns only the Compose
 files and the mock's own source**, and that is the check a reviewer should make
 on any future change to this script. `tests/integration/test_demo_seed_script.py`
 makes the same check against the seeded database, with the matcher run against
 four real platform issuers first so that it cannot pass by matching nothing.
 
+> **Superseded 2026-08-19.** The grep returns `scripts/seed.py` too, and the
+> database check has been inverted: it now asserts the registration is present
+> and that the guard refuses to write it outside a development environment. ADR
+> 0068 carries the two questions that replace the grep.
+
 **The demo institution cannot be launched into.** Nobody can complete an LTI
 launch as a seeded person, because the platform they belong to does not exist.
 That is the intended state until E0-18, and it is worth saying out loud so that
 the next person reads it as a decision rather than as a bug.
+
+> **Still true after ADR 0068.** The mock registration added in E0-31 carries no
+> `user` rows, so a launch from the mock arrives as one of *its* subjects and
+> still resolves to no seeded person. Turning one into a person is launch-time
+> provisioning, which SPEC §14.3 gives to E1.

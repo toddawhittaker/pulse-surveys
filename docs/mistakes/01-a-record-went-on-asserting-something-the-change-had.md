@@ -1,23 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 32**
+**Caught: 33**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*15 instances recorded; the 3 most recent are below. The earlier 12 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-16, and the record was **written in the same commit as the
-code it describes** — which is the version of this entry that no sweep catches,
-because there is no earlier record to go looking for. `README.md` gained "a
-parameter sent twice is refused rather than resolved last-wins" beside the fix
-that refused a duplicate within one collection; the reviewer measured a parameter
-sent once in the query and once in the body being accepted, so the sentence was
-false on the day it was written. The code now does what the line says and the
-line says which cases it covers. The lesson is about tense rather than staleness:
-a record written from the *intent* of a change asserts the property the author
-meant to build, and the gap between that and the property they built is exactly
-what a reviewer measures. Write the sentence from what you have run, not from
-what you have just fixed.)*
+*16 instances recorded; the 3 most recent are below. The earlier 13 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-16, and the sweep started from a list rather than from
 a file. Adding a service to the health gate's `REQUIRED_SERVICES` is one line;
@@ -51,6 +38,23 @@ unasserted — who else is named in an ACL, what the connection roles hold on a 
 table, and a membership granted `WITH INHERIT FALSE`. **Before writing a test a
 ticket asks for, check what already asserts it; a ticket is a record like any
 other, and one written from another ticket's text is a copy that drifted.**)*
+
+*(In E0-31 item 1, where the change was a **decision reversal** and the stale
+records were the ones that had argued for the old decision. ADR 0065 said
+"`mock-lms` is not registered by this or any other path in the repository" and
+handed a reviewer a check built on it — grep for the issuer, find nothing. The
+ticket named one record to amend, ADR 0038, and amending only that one would
+have left ADR 0065 asserting the opposite of what shipped, in the paragraphs
+whose whole purpose is to tell a reviewer the safety argument still holds. Five
+further sites the ticket did not name: the ADR index row, the epic README's
+dependency-graph line marking the item as the blocker on 18, its "two answers
+still want an existing record amended" sentence, E0-17's hazard note, and
+E0-18's context — which had to learn both that it was unblocked and what the
+unblocking deliberately did not do. **A reversal falsifies more records than a
+fix does**, because the records that argued the old way are the ones written
+most carefully. The one part to leave standing is the superseded record's
+rejected-alternative section: its reasoning is the cost the new decision
+accepts, not an argument that turned out to be wrong.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`

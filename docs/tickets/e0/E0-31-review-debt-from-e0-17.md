@@ -6,19 +6,23 @@
 
 ## Status — what is left here
 
-**Item 1 stays and is the only blocker in this range.** The rest moved or closed.
+**Item 1 is built. Nothing is left here.** The rest moved or closed.
 
 | Item | Now |
 |---|---|
-| 1 — E0-18 needs an `lti_platform` row and nothing creates one | **This ticket**, and it **blocks [E0-18](E0-18-e0-exit-smoke.md)**. Mechanism decided 2026-08-18: reuse the seed script's development-environment guard. |
+| 1 — E0-18 needs an `lti_platform` row and nothing creates one | **Done 2026-08-19.** `scripts/seed.py` registers the mock in `seed_mock_platform`, behind the development-environment guard decided on 2026-08-18. [ADR 0068](../../adr/0068-the-demo-seed-registers-the-mock-platform-behind-its-guard.md) records it, [ADR 0038](../../adr/0038-the-mock-platform-ships-in-the-base-compose-file.md) is amended to name the guard, and [ADR 0065](../../adr/0065-the-demo-institution-registers-a-fictional-platform.md) is superseded in part. **[E0-18](E0-18-e0-exit-smoke.md) is unblocked.** |
 | 2 — `design/`'s 27 course numbers all fail SPEC §8's bands | **Decided 2026-08-18: the design corpus is illustration**, not a source of seedable data, and says so. No renumbering. |
 | 3 — `DEVELOPMENT_ENVIRONMENT` is spelled in two files | [E0-37](E0-37-small-corrections.md) item 2 |
 | 4 — an unreachable adoption path worth a sentence | [E0-37](E0-37-small-corrections.md) item 6 |
 | 5 — two files outside `scripts/` that E0-17 touched | **Closed** — a record, made in E0-17's own pull request |
 
-Item 1 is the only item in E0-19 to E0-37 that blocks the E0 exit. Whoever takes
-it needs to have read [ADR 0038](../../adr/0038-the-mock-platform-ships-in-the-base-compose-file.md)
-first: adding the row carelessly is what makes that ADR wrong.
+Item 1 *was* the only item in E0-19 to E0-37 blocking the E0 exit. It carried a
+reading requirement — [ADR 0038](../../adr/0038-the-mock-platform-ships-in-the-base-compose-file.md)
+first, because adding the row carelessly is what makes that record wrong — and
+the outcome is that ADR 0038 was amended rather than quietly falsified. What it
+left open for E0-18 is one thing and it is named in ADR 0068: the registration
+carries no `user` rows, so a launch from the mock reaches the code and still
+resolves to no seeded person.
 
 
 ## Context
@@ -39,6 +43,10 @@ SPEC §8 and §2.1.
 ## Scope
 
 ### 1. E0-18 needs an `lti_platform` row for the mock LMS, and nothing creates one
+
+> **Built 2026-08-19.** What follows is the problem as it stood; the Status
+> block at the top of this file says what was done about it, and ADR 0068
+> carries the decision.
 
 E0-17 seeds a **fictional** platform at `https://lms.pulse-demo.invalid` — a
 reserved-TLD address that resolves nowhere and for which no key exists — precisely
@@ -132,9 +140,11 @@ ticket's stated scope, so a later reader of the diff is not left wondering.
 
 ## Acceptance criteria
 
-- [ ] E0-18 can complete a launch from the mock LMS, and whatever registers the
+- [x] E0-18 can complete a launch from the mock LMS, and whatever registers the
       mock is unreachable from a deployed environment with ADR 0038 amended to
-      say what enforces that.
+      say what enforces that. *(Done 2026-08-19. "Can complete a launch" here
+      means the registration boundary no longer rejects it; who the launching
+      subject resolves to is E1's provisioning and E0-18's own scope.)*
 - [ ] The `design/` question is decided one way and recorded, not left as two
       corpora that disagree.
 - [ ] `DEVELOPMENT_ENVIRONMENT` has one definition, or a test asserts the two

@@ -15,6 +15,27 @@ exercises both entry doors on every run (§9.2).
 Read first: SPEC §14.3 (E0's exit criterion), §9.2 (both doors exercised in
 every run), §2.1 (dual-door entry resolving to the same identity and purview).
 
+## The mock's registration exists now, and stops one step short
+
+E0-31 item 1 landed on 2026-08-19: `scripts/seed.py` registers the mock platform
+in `seed_mock_platform`, behind the guard that refuses to run outside a
+development environment. So a launch from `mock-lms` is no longer rejected for
+want of a row naming its issuer, which was the thing blocking this ticket.
+[ADR 0068](../../adr/0068-the-demo-seed-registers-the-mock-platform-behind-its-guard.md)
+records the decision and what it costs, and
+[ADR 0038](../../adr/0038-the-mock-platform-ships-in-the-base-compose-file.md) is
+amended to name the guard as what keeps the row out of a deployment.
+
+**What it deliberately did not settle is this ticket's.** That registration
+carries no `user` rows. A launch from the mock arrives as one of *its* two
+invented subjects (`mock-lms/app/seed.py`), not as one of the eighteen demo
+people, so it reaches the code and resolves to nobody. Provisioning the person a
+launch names is E1's by SPEC §14.3 — so "the landing view corresponds to the
+launching user's role" needs an answer here about where that role comes from
+before E1 builds provisioning. Do not close it by seeding a `user` row for a
+mock subject without saying so: that is a second registration decision, and ADR
+0068's reasoning applies to it too.
+
 ## Decide first: whether `/docs` and `/openapi.json` stay public
 
 `create_app()` builds `FastAPI(...)` without `docs_url` or `openapi_url`
