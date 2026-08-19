@@ -50,11 +50,15 @@ iterates to a fixed point; the two tests that plant those cases are at the foot
 of the file and require the sweep to report them. The enumeration this file
 computes is what E0-10's views and the CI invariant pass are both built on.
 
-**One test here is `invariant`-marked**, and it is the last one:
-`test_no_view_reads_a_column_the_identity_marker_names`. A view is read with its
-owner's privileges, so it is the one route to identity that E0-10's grants do not
-close, and this file holds the guard on it as the *database* reports it. Its
-docstring carries the reasoning; `scripts/ci/check_invariants.py` is what makes
+**Three tests here are `invariant`-marked**, and they are the last three:
+`test_no_view_reads_a_column_the_identity_marker_names`,
+`test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names`, and the
+self-test that keeps the two of them apart. A view is read with its owner's
+privileges, so it is the one route to identity that E0-10's grants do not close,
+and this file holds the guard on it as the *database* reports it — at both of the
+grains Postgres records, because it records a column read and a whole-row read
+differently and the first version of this file only asked about one. Their
+docstrings carry the reasoning; `scripts/ci/check_invariants.py` is what makes
 the mark mean something, by treating a skip, an xfail or an empty collection in
 that pass as a failure.
 
@@ -203,6 +207,58 @@ VIEW_COLUMN_DEPENDENCIES = """
       AND c.oid <> v.oid
     ORDER BY 1, 2, 3
 """
+
+# The same dependency, at **whole-row** grain — `refobjsubid = 0`, which is how
+# Postgres records a reference to a table's row as a value rather than to any of
+# its columns. This is a second question and not a relaxation of the `> 0` above,
+# and it exists because of what that filter hides. Measured against the live
+# database during E0-34's review:
+#
+#   SELECT to_jsonb(ui) FROM public.user_identity ui   ->  [(0, whole row)]
+#   SELECT ui           FROM public.user_identity ui   ->  [(0, whole row)]
+#   SELECT *            FROM public.user_identity      ->  [(1,id) … (4,identity_email)]
+#   SELECT ui.identity_name FROM public.user_identity ui -> [(3, identity_name)]
+#
+# **The two grains are disjoint on this stack, and that is measured rather than
+# assumed** — the four rows above are the whole of it: no column read records a
+# whole-row dependency, and no whole-row read records a column one. That is what
+# makes the two invariants below genuinely two rather than one subsuming the
+# other, and `test_a_whole_row_view_reference_is_recorded_at_table_grain` asserts
+# it in both directions so that a future Postgres changing its mind about
+# dependency recording is a red rather than a silent overlap.
+#
+# So the two whole-row spellings record **no column dependency at all**, and the
+# sweep above — `invariant`-marked, and the only guard on this door until now —
+# returns nothing for a view carrying every student's name and email address.
+# `row_to_json(ui)`, `hstore(ui)` and `TABLE public.user_identity` are the same
+# shape; the file-side guard in `test_identity_separated_views.py` was blind to
+# them too, and both halves were repaired in one round because one finding
+# defeated both.
+#
+# Column names are deliberately absent from this query: at this grain there are
+# none to report, and the assertion names the columns the *table* carries, which
+# is what a whole-row reference reads.
+VIEW_TABLE_DEPENDENCIES = """
+    SELECT DISTINCT v.relname AS view_name, c.relname AS table_name
+    FROM pg_depend d
+    JOIN pg_rewrite rw ON rw.oid = d.objid AND d.classid = 'pg_rewrite'::regclass
+    JOIN pg_class v ON v.oid = rw.ev_class
+    JOIN pg_namespace vn ON vn.oid = v.relnamespace
+    JOIN pg_class c ON c.oid = d.refobjid AND d.refclassid = 'pg_class'::regclass
+    JOIN pg_namespace cn ON cn.oid = c.relnamespace
+    WHERE v.relkind IN ('v', 'm')
+      AND vn.nspname = 'public'
+      AND cn.nspname = 'public'
+      AND d.refobjsubid = 0
+      AND c.oid <> v.oid
+    ORDER BY 1, 2
+"""
+
+# The objects the whole-row self-test plants and rolls back. Named for the ticket
+# so that one surviving a fixture change is traceable to it.
+PLANTED_IDENTITY_TABLE = "e0_34_planted_identity_table"
+PLANTED_WHOLE_ROW_VIEW = "e0_34_planted_whole_row_view"
+PLANTED_COLUMN_VIEW = "e0_34_planted_column_view"
 
 # Tables that hold no person at all (SPEC §2.1: the institution/college/
 # department/prefix hierarchy is Pulse's own org structure, built in the admin
@@ -650,6 +706,270 @@ def test_an_identity_column_named_neither_name_nor_email_is_still_caught(db_sess
     )
 
 
+def public_views(connection: Any) -> list[str]:
+    """Every view and materialised view in `public`, by name."""
+    return sorted(
+        {
+            row[0]
+            for row in connection.execute(
+                text(
+                    "SELECT c.relname FROM pg_class c JOIN pg_namespace n"
+                    " ON n.oid = c.relnamespace"
+                    " WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm')"
+                )
+            )
+        }
+    )
+
+
+def column_grained_identity_reads(connection: Any) -> list[str]:
+    """Every `view: table.column` where a view reads a column the marker names.
+
+    Extracted from the test below so that the self-test can run the same
+    computation over planted objects rather than a copy of it — and, more to the
+    point, so that it can assert what this reading does **not** see. A whole-row
+    reference records no column dependency at all, and that fact is now an
+    assertion rather than a measurement in a review comment.
+    """
+    marked_columns = database_marked_columns(connection)
+    return sorted(
+        f"{view}: {table}.{column}"
+        for view, table, column in connection.execute(text(VIEW_COLUMN_DEPENDENCIES))
+        if (table, column) in marked_columns
+    )
+
+
+def whole_row_identity_reads(connection: Any) -> list[str]:
+    """Every `view: table` where a view depends on the whole row of a marked table.
+
+    The other grain, and a different question from the one above rather than a
+    looser version of it. `refobjsubid = 0` is a reference to the row as a value —
+    `to_jsonb(ui)`, `row_to_json(ui)`, a bare `SELECT ui`, `TABLE public.x` — and
+    it reads every column the table has, including the ones the marker names,
+    while recording no column dependency for any of them.
+
+    The table is required to carry a marked column, not to *be* an identity table
+    by name: the marker is the enumeration this module exists to maintain, and a
+    table that carries one is a table whose whole row carries one.
+    """
+    tables = {table for table, _ in database_marked_columns(connection)}
+    return sorted(
+        f"{view}: {table}"
+        for view, table in connection.execute(text(VIEW_TABLE_DEPENDENCIES))
+        if table in tables
+    )
+
+
+@pytest.mark.invariant
+def test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names(
+    migrated_engine: Any,
+) -> None:
+    """The grain the column sweep cannot see: the row as a value.
+
+    Found by review on E0-34 and measured against the live database. A view
+    written `SELECT to_jsonb(ui) FROM public.user_identity ui` carries every
+    student's name and email address, and Postgres records its dependency at
+    `refobjsubid = 0` — so
+    `test_no_view_reads_a_column_the_identity_marker_names`, which filters
+    `refobjsubid > 0`, returns nothing for it. The file-side guard in
+    `test_identity_separated_views.py` was blind to it as well: no column name is
+    written and there is no `*`. Both halves of the §4.1 pair were green on a view
+    that reads the whole identity table, which is why one review finding repaired
+    two files.
+
+    **Why this is a second assertion rather than a relaxed `> 0`.** The two
+    dependency grains answer different questions and their failure messages want
+    to say different things: one names the column that leaked, and at this grain
+    there is no column to name — what leaked is every column the table has, and
+    the message lists them. Relaxing the filter would also fold "reads the row"
+    into "reads a column" for a reader trying to work out what to fix.
+
+    **What it necessarily also catches**, said plainly because it is the cost: a
+    view that names a marked table and reads *no* column of it records the same
+    whole-table dependency. No view in this schema does that today. If one is ever
+    wanted, this test is where the decision gets recorded, and the pull request
+    owes the reason a read path names an identity table at all (SPEC §8 asks for
+    views that structurally cannot join to identity).
+
+    **The mutation it exists to survive**: any of the four spellings — `to_jsonb`,
+    `row_to_json`, a bare row reference, `TABLE public.user_identity` — added to a
+    view in the migrated database. **The near miss it tolerates**: a view reading a
+    named column of a marked table, which is the test above's subject and records
+    no dependency at this grain; and a view reading the whole row of a table that
+    carries no marked column, which is most of the schema.
+    """
+    with migrated_engine.connect() as connection:
+        views = public_views(connection)
+        marked_columns = database_marked_columns(connection)
+        leaking = whole_row_identity_reads(connection)
+
+    assert views, (
+        "The migrated database holds no view in `public`, so this sweep looked at nothing and "
+        "would report success. `test_identity_separated_views.py` is where their absence is "
+        "diagnosed."
+    )
+    assert marked_columns, (
+        "Nothing in the migrated database carries the identity marker, so no table qualifies as "
+        "identity-bearing and this sweep has nothing to look for. The sweep test at the top of "
+        "this module is where that is diagnosed."
+    )
+
+    # **There is deliberately no "the query returned something" guard here**, and
+    # that is the difference between this test and its column-grained sibling. On
+    # a healthy schema this query returns *nothing at all*: a view that reads named
+    # columns records column dependencies and no whole-table one, so an empty
+    # result is the correct state rather than a sweep that has gone blind.
+    # Requiring a row would have been a red on the day this landed, for a reason
+    # having nothing to do with any view.
+    #
+    # The liveness this test needs is therefore proved somewhere a subject exists:
+    # `test_a_whole_row_view_reference_is_recorded_at_table_grain` plants a view
+    # that takes `to_jsonb` of a marked table and requires this same computation to
+    # report it. That is `docs/MISTAKES.md` entry 3's rule met by a plant rather
+    # than by an assumption about the schema — and entry 35's, which asks that a
+    # mechanism be *found* on a subject that certainly has it rather than trusted
+    # because it reports nothing.
+
+    carried = {
+        table: sorted(column for owner, column in marked_columns if owner == table)
+        for table in {table for table, _ in marked_columns}
+    }
+    # The suppression below is on a *message*, not on a statement, and it is here
+    # rather than avoided by rewording: the message quotes the exact query that was
+    # measured, and quoting it is the whole value of the message to whoever reads
+    # the red. Ruff sees an interpolated string containing `SELECT … FROM …` and
+    # cannot tell prose about a query from a query. Nothing here reaches a cursor.
+    #
+    # **The `noqa` goes on the first fragment**, which is where ruff reports the
+    # diagnostic for an implicitly concatenated message — not on the last, which is
+    # where a multi-line *triple-quoted* string wants it. Getting that backwards
+    # costs two errors rather than none: the `S608` stays unsuppressed and a
+    # `RUF100` appears for the unused directive.
+    assert not leaking, (
+        f"{leaking} — each is a view depending on the whole row of a table the identity marker "  # noqa: S608
+        f"names. Those tables carry {carried}, and a whole-row reference reads all of it.\n\n"
+        "This is the shape that records **no column dependency at all**, so "
+        "`test_no_view_reads_a_column_the_identity_marker_names` is green against it: "
+        "`SELECT to_jsonb(ui) FROM public.user_identity ui` was measured returning "
+        "`[(0, whole row)]` and no marked-column dependency whatever. A view is read with its "
+        "owner's privileges rather than its reader's, so every grant ADR 0001 writes is still "
+        "intact while the name is on the screen.\n\n"
+        "If the view names the table without reading any column of it, that is the same "
+        "dependency and this test cannot tell the two apart — the fix is still to stop naming it, "
+        "and if it genuinely must, that is a decision to record here rather than a filter to "
+        "widen."
+    )
+
+
+@pytest.mark.invariant
+def test_a_whole_row_view_reference_is_recorded_at_table_grain(db_session: Any) -> None:
+    """Both dependency grains, run against subjects that certainly have them.
+
+    The two invariants above divide the space between them — one reads columns,
+    one reads rows — and that division is a claim about what Postgres records.
+    `docs/MISTAKES.md` entry 3's rule for a claim like that is to execute it
+    against the thing it must catch *and* the thing it must allow, which is what
+    this does: a table with a marked column, a view over it that takes the whole
+    row, and a view over it that reads one column.
+
+    Four assertions, and the third and fourth are the finding itself. The
+    whole-row view must appear at table grain and must **not** appear at column
+    grain; the column view must appear at column grain and must **not** appear at
+    table grain. Without the two negatives, either invariant could be quietly
+    replaced by the other on the belief that one subsumes it — and the whole
+    reason this pair exists is that neither does.
+
+    **All four were measured against the pinned image before this landed**, on a
+    view reading a named column, a `SELECT *`, a `to_jsonb(ui)` and a bare
+    `SELECT ui`: the column read reported only column dependencies, the whole-row
+    reads reported only `(0, whole row)`, and neither reported the other's. So the
+    two grains are disjoint here as a fact rather than as a design intention, and
+    this test is what turns that fact into something that has to stay true.
+
+    **If the fourth assertion fails**, the table-grained invariant is the wrong
+    shape rather than the schema being wrong: it would mean Postgres has begun
+    recording a whole-table dependency for an ordinary column read, and the
+    invariant above would then flag every view that touches a marked table.
+    Narrow it in that case and say so; do not delete it, because the first
+    assertion is the leak.
+
+    Everything here is planted inside `db_session`'s transaction and rolled back
+    with it — Postgres puts DDL inside the transaction — so `public` is unchanged
+    at the end. The marker is a column comment, which is one of the three shapes
+    `marked` accepts, so the planted table qualifies as identity-bearing by the
+    module's own convention rather than by anything this test asserts about it.
+    """
+    session = db_session
+    session.execute(
+        text(
+            f"CREATE TABLE {PLANTED_IDENTITY_TABLE} "
+            "(id uuid PRIMARY KEY, identity_name text NOT NULL)"
+        )
+    )
+    session.execute(
+        text(
+            f"COMMENT ON COLUMN {PLANTED_IDENTITY_TABLE}.identity_name IS "
+            f"'{MARKER_TOKEN}: planted by the E0-34 self-test'"
+        )
+    )
+    # The two subjects, each on one line with its own suppression, which is the
+    # shape this repository already uses for a statement built by interpolation
+    # (`test_identity_grants.py`'s `READ_IDENTITY`, and the sweep samples in
+    # `test_identity_separated_views.py`). Ruff reads them as SQL built from a
+    # variable, which is what S608 is for; every name interpolated here is one of
+    # the `PLANTED_*` module constants declared beside `VIEW_TABLE_DEPENDENCIES`,
+    # nothing reaches these from outside the file, and the statements run inside
+    # `db_session`'s transaction and are rolled back with it.
+    # Per line rather than per file, so that a statement which ever does take an
+    # argument from anywhere else is flagged again.
+    whole_row_view = f"CREATE VIEW {PLANTED_WHOLE_ROW_VIEW} AS SELECT to_jsonb(planted) AS whole FROM public.{PLANTED_IDENTITY_TABLE} planted"  # noqa: S608
+    column_view = f"CREATE VIEW {PLANTED_COLUMN_VIEW} AS SELECT planted.identity_name FROM public.{PLANTED_IDENTITY_TABLE} planted"  # noqa: S608
+    session.execute(text(whole_row_view))
+    session.execute(text(column_view))
+
+    connection = session.connection()
+    assert (PLANTED_IDENTITY_TABLE, "identity_name") in database_marked_columns(connection), (
+        f"The planted `{PLANTED_IDENTITY_TABLE}.identity_name` does not read as marked, so neither "
+        "sweep below regards it as identity-bearing and every assertion in this test is about a "
+        "table nothing is looking at. The marker convention is what changed, not the dependency "
+        "grain: `marked` accepts a column comment carrying the token, and this test writes one."
+    )
+
+    at_table_grain = whole_row_identity_reads(connection)
+    at_column_grain = column_grained_identity_reads(connection)
+
+    assert any(entry.startswith(f"{PLANTED_WHOLE_ROW_VIEW}:") for entry in at_table_grain), (
+        f"`{PLANTED_WHOLE_ROW_VIEW}` takes `to_jsonb` of every row of a table carrying a marked "
+        f"column, and the whole-row sweep does not report it; it reported {at_table_grain}. "
+        "`test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names` asserts an absence "
+        "and would be green over a schema full of these."
+    )
+    assert not any(entry.startswith(f"{PLANTED_WHOLE_ROW_VIEW}:") for entry in at_column_grain), (
+        f"`{PLANTED_WHOLE_ROW_VIEW}` is reported by the *column*-grained sweep, which reported "
+        f"{at_column_grain}. That would be good news and it contradicts what was measured on this "
+        "database during E0-34's review — a whole-row reference recorded `[(0, whole row)]` and no "
+        "column dependency at all. If Postgres now records both, this pair of invariants overlaps "
+        "where it was designed not to, and that is worth knowing before anybody decides one of "
+        "them is redundant."
+    )
+    assert any(entry.startswith(f"{PLANTED_COLUMN_VIEW}:") for entry in at_column_grain), (
+        f"`{PLANTED_COLUMN_VIEW}` selects a marked column by name and the column-grained sweep "
+        f"does not report it; it reported {at_column_grain}. That sweep is the older of the two "
+        "invariants and the one E0-10 shipped, so this is the more serious of the two directions: "
+        "with it blind, a view selecting `identity_name` outright passes."
+    )
+    assert not any(entry.startswith(f"{PLANTED_COLUMN_VIEW}:") for entry in at_table_grain), (
+        f"`{PLANTED_COLUMN_VIEW}` reads one named column and the *whole-row* sweep reports it "
+        f"anyway; it reported {at_table_grain}. Then `refobjsubid = 0` is not the whole-row grain "
+        "it is being used as — Postgres is recording a table-level dependency for an ordinary "
+        "column read — and "
+        "`test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names` will flag every "
+        "view that touches a marked table, including ones that read nothing from it. Narrow that "
+        "test rather than deleting it: the whole-row read it was written for is a real leak that "
+        "nothing else in this suite sees."
+    )
+
+
 @pytest.mark.invariant
 def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) -> None:
     """Criterion: the structural test enumerates identity columns and finds none in any view.
@@ -680,9 +1000,10 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
     this module's `pytestmark = pytest.mark.integration` rather than replacing
     it, so the test still runs in the ordinary suite as well.
 
-    Only this test in this module is marked. The others are the marker
-    convention's own tripwires — they say what an identity column *is*, which is
-    a precondition for §4.1 rather than an instance of it, and
+    Only this test, its whole-row twin above and the self-test that separates them
+    are marked in this module. The others are the marker convention's own
+    tripwires — they say what an identity column *is*, which is a precondition for
+    §4.1 rather than an instance of it, and
     `test_application_role_privileges.py`'s docstring draws the same line for the
     same reason.
 
@@ -701,25 +1022,22 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
     called `instructor` and pass. That is the version somebody writes when a
     screen needs a name.
 
+    **And it reads only that grain**, which is the correction E0-34's review
+    made. A reference to the *row* — `to_jsonb(ui)`, `SELECT ui`,
+    `TABLE public.user_identity` — is recorded at `refobjsubid = 0` and carries no
+    column dependency at all, so the `> 0` filter below hides it completely.
+    `test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names` is that
+    grain, and the two together are what "no view reads identity" now means here.
+
     Three non-vacuity guards, and the third is the one that is easy to leave out:
     the dependency query has to return *something*, or an empty intersection is
     telling you about the query rather than about the views.
     """
     with migrated_engine.connect() as connection:
-        views = sorted(
-            {
-                row[0]
-                for row in connection.execute(
-                    text(
-                        "SELECT c.relname FROM pg_class c JOIN pg_namespace n"
-                        " ON n.oid = c.relnamespace"
-                        " WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm')"
-                    )
-                )
-            }
-        )
+        views = public_views(connection)
         dependencies = connection.execute(text(VIEW_COLUMN_DEPENDENCIES)).all()
         marked_columns = database_marked_columns(migrated_engine)
+        leaking = column_grained_identity_reads(connection)
 
     assert views, (
         "The migrated database holds no view in `public`, so this sweep looked at nothing and "
@@ -739,11 +1057,6 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
         "returns every identity column in the schema."
     )
 
-    leaking = sorted(
-        f"{view}: {table}.{column}"
-        for view, table, column in dependencies
-        if (table, column) in marked_columns
-    )
     assert not leaking, (
         f"{leaking} — each is a view reading a column the identity marker names. SPEC §8: the "
         "instructor and leadership read paths go through views that 'structurally cannot join to "
