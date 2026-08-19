@@ -610,9 +610,26 @@ jobs:
           python scripts/ci/check_licenses.py $ARGS
 
   # --------------------------------------------------------------------------
-  # One required check to point branch protection at. Fails if any gate failed
-  # or was cancelled; tolerant jobs report success, so this stays honest as the
-  # tree fills in.
+  # One required check to point branch protection at. Fails if any gate failed,
+  # was cancelled, or did not run.
+  #
+  # `skipped` is in that list, and it is the whole of E0-36 item 1. A job whose
+  # dependency failed is reported `skipped` rather than `failure`, so a failure
+  # anywhere above `fast-gate` — `migration-drift`, `lint-python`,
+  # `lint-frontend`, `ci-selftest`, or `detect` — used to arrive here as a row of
+  # skips that `grep -qE 'failure|cancelled'` matched none of. This check then
+  # printed "All gates green" and exited 0 over a migration that had drifted from
+  # its models, on the one check branch protection points at.
+  #
+  # The comment this replaces said `skipped` was left out because tolerant jobs
+  # report success and so the verdict stayed honest as the tree filled in. The
+  # first half is still true and the second no longer follows: every tolerance in
+  # this file is at the *step* level, with a `::notice::` step in place of the
+  # real work, so no job named below is ever legitimately skipped and a skip here
+  # always means something upstream failed. A job-level `if:` on any of them
+  # would break that, which is why nothing here has one and why
+  # `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails
+  # loudly the moment one appears.
   # --------------------------------------------------------------------------
   ci:
     name: CI
@@ -623,8 +640,11 @@ jobs:
       - name: Verdict
         run: |
           echo "Results: ${{ join(needs.*.result, ', ') }}"
-          if echo "${{ join(needs.*.result, ',') }}" | grep -qE 'failure|cancelled'; then
-            echo "::error::One or more gates failed."
+          if echo "${{ join(needs.*.result, ',') }}" | grep -qE 'failure|cancelled|skipped'; then
+            echo "::error::One or more gates failed, was cancelled, or did not run."
+            echo "A gate reports 'skipped' when a job it needed did not succeed, so a"
+            echo "skip above is an upstream failure — open the job list and find the"
+            echo "red one. It will be upstream of the gates listed here."
             exit 1
           fi
           echo "All gates green."
