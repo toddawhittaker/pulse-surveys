@@ -89,6 +89,60 @@ def classify_single(text: str) -> tuple[str, str]:
     return "unknown", "unrecognized license string"
 
 
+def classify_body(text: str) -> tuple[str, str]:
+    """The licence a *body* declares: the rule whose match appears earliest in it.
+
+    Not the first rule in RULES that matches somewhere, which is what a body got
+    when this branch was first written and which was a gate weakening. RULES is
+    ordered so that narrower families are tried before wider ones — LGPL before
+    GPL, Affero before either — and that ordering is right for an expression,
+    where the string names one licence and nothing else. Across 18,000 characters
+    of prose it stops meaning "the licence being declared" and starts meaning
+    "whichever family the text happens to mention first in rule order".
+
+    Measured, and this is why the function exists: the real GPL-2 says in its
+    preamble that "other Free Software Foundation software is covered by the GNU
+    Lesser General Public License instead". Under rule order that one sentence,
+    eighteen lines in, outranked the title at the top, so a package shipping the
+    full GPL-2 text classified `review` — an advisory that exits 0 — instead of
+    `deny`. The same shape made the full GPL-3 report the Affero rule's reason,
+    because its section 13 is headed "Use with the GNU Affero General Public
+    License".
+
+    **A licence text names itself before it mentions any other**, so position is
+    the signal. It works within a single line as well as across a file, which is
+    what keeps the narrower families winning: in "GNU AFFERO GENERAL PUBLIC
+    LICENSE" the Affero rule matches at offset 4 and the GPL rule at offset 11,
+    and in "GNU LESSER GENERAL PUBLIC LICENSE" the LGPL rule matches at 4 and the
+    GPL rule at 11. Both are measured, and both are asserted in
+    `scripts/ci/test_ci_scripts.py`.
+
+    `<` below is strict, so an exact tie would go to the earlier rule in RULES.
+    That is a choice about a case no pair of these patterns can produce — checked
+    across the titles above and the short forms `AGPL-3.0`, `LGPL-3.0`, `GPL-3.0`
+    and `MIT License`, no two rules match at the same offset — so it is written
+    down as the conservative direction rather than claimed as a guarantee
+    anything rests on.
+
+    **This is not a conservative scan and must not be described as one.** It
+    reports what a text declares. Two known-wrong answers on real texts, both
+    predating this function and both left alone here because correcting them
+    widens the gate further than this change is allowed to: the BSD text denies
+    on the "All rights reserved" in its copyright line, which is in every
+    BSD-family text by convention, and the MPL-2.0 text is `unknown` to the
+    allow rule because that rule spells the version "License 2" and the text
+    says "License Version 2.0". `scripts/ci/test_ci_scripts.py` records both so
+    they cannot change without somebody noticing.
+    """
+    earliest: int | None = None
+    found: tuple[str, str] | None = None
+    for pattern, verdict, reason in RULES:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match is not None and (earliest is None or match.start() < earliest):
+            earliest, found = match.start(), (verdict, reason)
+    return found if found is not None else ("unknown", "unrecognized license string")
+
+
 def classify(license_text: str) -> tuple[str, str]:
     """Return (verdict, reason) where verdict is allow | deny | review | unknown.
 
@@ -100,24 +154,24 @@ def classify(license_text: str) -> tuple[str, str]:
     branch decides.
 
     A **body** — the full licence text, which some packages put in the `License`
-    field instead of an identifier — is scanned whole against RULES in order,
-    with no splitting. See the comment below for why that is safe and why the
-    test is a newline.
+    field instead of an identifier — goes to `classify_body`, which takes the
+    rule matching earliest in the text rather than the first rule that matches
+    anywhere in it. A licence names itself before it mentions any other, and
+    rule order across thousands of characters of prose picks the family the text
+    mentions rather than the one it declares. Read that function before changing
+    anything here: getting it wrong classified the full GPL-2 as `review`, which
+    exits 0.
 
-    One imprecision worth knowing when reading a report: scanning a body whole
-    attributes the verdict to the first rule that matches anywhere in it, and a
-    licence text may *mention* another licence. The full GPL-3 body denies with
-    the Affero rule's reason, because its section 13 is headed "Use with the GNU
-    Affero General Public License". The verdict is right and conservative; only
-    the reason names the wrong family. Narrowing that would mean deciding which
-    mention is the declaration, which is a larger change than this one and buys
-    a better message rather than a better answer.
+    It reports what a text **declares**, so it is not a conservative scan and the
+    report should not be read as one. A body that declares MIT and mentions the
+    GPL classifies allow, which is the right answer about the package and would
+    be the wrong answer to "does anything here mention copyleft".
     """
     text = (license_text or "").strip()
     if not text:
         return "unknown", "no license metadata"
 
-    # A licence *body* rather than an expression, and it is scanned whole.
+    # A licence *body* rather than an expression, handed to `classify_body`.
     #
     # `tiktoken` has no `License-Expression`; its `License` field is the full
     # 1078-character MIT text, copyright notice and all. Splitting that on its
@@ -126,25 +180,21 @@ def classify(license_text: str) -> tuple[str, str]:
     # and the conjunction rule then took the worst of them and answered unknown
     # about a plainly MIT package.
     #
-    # **What makes the unsplit scan safe is the order of RULES**, not this
-    # condition: every deny and review rule sits above every allow rule, and
-    # `classify_single` is first-match-wins, so scanning a whole body reaches a
-    # deny before it can reach a permissive word that happens to appear in the
-    # prose. A full GPL body hits "General Public License" and denies; a full
-    # AGPL body hits "Affero" first and denies for that reason. Reordering RULES
-    # to put an allow rule above a deny rule turns this line into a hole, which
-    # is why the ordering comment above RULES says what it says.
-    #
-    # A newline is the whole test, and there is deliberately no length
-    # threshold. An SPDX expression is a single-line grammar, so no valid
+    # **A newline is the whole test, and there is deliberately no length
+    # threshold.** An SPDX expression is a single-line grammar, so no valid
     # expression contains a newline, and a threshold would be a tuning knob with
     # no correct value. Measured over the 99 packages installed here: exactly one
     # field contains a newline (tiktoken, 1078 characters) and the other 98 are
     # at most 36. A body flattened onto one line would still be split — and
     # still answer unknown, which is what it answers today, so that boundary
     # gives up nothing that currently works.
+    #
+    # What happens to it then is `classify_body`'s business, and the reason it is
+    # a separate function with its own ordering is written there: rule order is
+    # right for an expression and wrong for prose, and getting that wrong moved a
+    # full GPL-2 text from `deny` to `review`.
     if "\n" in text:
-        return classify_single(text)
+        return classify_body(text)
 
     if re.search(r"\bAND\b", text, re.IGNORECASE):
         parts = re.split(r"\bAND\b", text, flags=re.IGNORECASE)
