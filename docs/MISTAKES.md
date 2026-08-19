@@ -168,6 +168,10 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
+**Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
+exit status of `tail`, so a failing gate prints a passing line. Redirect to a
+file and check the status, or run the gate bare.
+
 ## 6. Shell expansion inside a commit message
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/06-shell-expansion-inside-a-commit-message.md)
@@ -247,8 +251,3 @@ built around is the one least likely to hold its privileges the ordinary way.
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
-
-
-**Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
-exit status of `tail`, so a failing gate prints a passing line. Redirect to a
-file and check the status, or run the gate bare.

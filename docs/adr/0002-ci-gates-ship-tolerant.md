@@ -79,8 +79,8 @@ cannot lie about what exists.
   green" and exited 0 over a migration that had drifted from its models.
 
   The verdict now treats `skipped` as a failure too, and that is only sound
-  because of a property of this file rather than of the mechanism: every
-  tolerance here is at the *step* level, so no job the aggregate depends on is
+  because of a property of `ci.yml` rather than of the mechanism: every
+  tolerance in that workflow is at the *step* level, so no job the aggregate depends on is
   ever legitimately skipped. A job-level `if:` on any of them would make a skip
   ambiguous again, and
   `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails and

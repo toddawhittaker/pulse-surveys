@@ -4,8 +4,8 @@
 
 *2 instances recorded: one occurrence, and one catch.*
 
-*(An occurrence, not a prevention: the counter stays at 0 because this
-entry did **not** stop the mistake. In E0-33, by the orchestrating session, against this entry's own
+*(An occurrence, not a prevention, and it earned no bump: this
+entry did **not** stop the mistake here. In E0-33, by the orchestrating session, against this entry's own
 command. `make ci 2>&1 | tail -45` printed the tail of a run in which `lint` had
 died on `ruff: command not found`, and the harness reported the *pipeline's*
 exit code of zero. The failing line `make: *** [Makefile:82: lint] Error 127`
