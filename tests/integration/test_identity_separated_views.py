@@ -315,26 +315,34 @@ class ObjectKind(NamedTuple):
     repair: the ordering defect this fold exists to fix was found in the view half
     and would have been written into the function half the same day.
 
-    `must_exist` is where they genuinely differ, and it is deliberately not
-    symmetric. SPEC §13 and E0-10 put the read views' SQL under `views_sql/`, so a
-    directory that creates no view is a defect. **Nothing in any record I can read
-    says where a *function's* SQL belongs**, so requiring the files to create one
-    would pin a decision no ticket has made — and would fail loudly on a repository
-    where every function is written inline in its revision, which is a legitimate
-    arrangement. The sweep is proven by
-    `test_the_text_sweeps_in_this_file_catch_what_they_claim_to` instead, which is
-    what lets an empty expectation here mean "the files create none" rather than
-    "the pattern is blind".
+    **Both kinds are held to the same rule, and a `must_exist` field that exempted
+    functions from it has been removed.** It was added on the ground that no record
+    said where a function's SQL belongs. That ground was false and a single grep
+    would have shown it:
+    [ADR 0041](../../docs/adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)
+    decides it in as many words — "the SQL lives in
+    `backend/app/views_sql/<object>_v<NNN>.sql`, and the revision executes it by
+    name. Five files ship with E0-10 — the roles, two views, the `SECURITY DEFINER`
+    reveal function, and the grants" — and the same record's Consequences describe
+    this test's job: "`alembic check` reads neither `pg_class` for views nor
+    `pg_proc`, so dropping a view, changing one by hand in a database, or **deleting
+    the `CREATE FUNCTION` from a file** leaves the check green. The tests are the
+    only reader."
+
+    SPEC §13 being silent about functions is not the same as no record answering,
+    and the exemption cost exactly what an exemption costs: with it, moving the
+    reveal's `CREATE FUNCTION` inline into a revision left the expectation empty,
+    the comparison vacuous and this test green, while its docstring went on claiming
+    it survives a dropped function. The identical change to a view failed loudly.
     """
 
     label: str
     creates: re.Pattern[str]
     drops: re.Pattern[str]
-    must_exist: bool
 
 
-VIEW = ObjectKind("view", CREATES_A_VIEW, DROPS_A_VIEW, must_exist=True)
-FUNCTION = ObjectKind("function", CREATES_A_FUNCTION, DROPS_A_FUNCTION, must_exist=False)
+VIEW = ObjectKind("view", CREATES_A_VIEW, DROPS_A_VIEW)
+FUNCTION = ObjectKind("function", CREATES_A_FUNCTION, DROPS_A_FUNCTION)
 OBJECT_KINDS = (VIEW, FUNCTION)
 
 
@@ -635,17 +643,20 @@ def test_every_object_created_under_views_sql_exists_in_the_migrated_database(
     `docs/MISTAKES.md` entry 13, and the copy is the one that would not have got
     the ordering repair below.
 
-    **The function half does not require the files to create anything**, and that
-    asymmetry is deliberate rather than an oversight — `ObjectKind.must_exist`
-    carries it. SPEC §13 and E0-10 put the read views' SQL under `views_sql/`, so a
-    directory creating no view is a defect. Nothing in any record settles where a
-    *function's* SQL belongs, so requiring one here would pin a decision no ticket
-    has made, and would fail on a repository that writes its functions inline in
-    revisions — a legitimate arrangement. What keeps the empty case honest is that
-    the sweep is proven elsewhere: `test_the_text_sweeps_in_this_file_catch_what_
-    they_claim_to` runs the `CREATE FUNCTION` pattern against five shapes it must
-    catch and seven it must allow, so an empty expectation here means the files
-    create none rather than that the pattern is blind.
+    **Both halves require the files to create something**, and the canary is the
+    same for each: an expectation that came back empty would compare an empty set
+    against the catalog and report success. For views that rule is SPEC §13's; for
+    functions it is
+    [ADR 0041](../../docs/adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md),
+    which puts the reveal function's SQL in this directory by name — "five files
+    ship with E0-10 — the roles, two views, the `SECURITY DEFINER` reveal function,
+    and the grants".
+
+    An earlier version exempted the function half from that canary, on the stated
+    ground that no record said where a function's SQL belongs. The record existed
+    and says the opposite; `ObjectKind`'s docstring holds what that cost. The
+    exemption is gone, and with it the field that carried it — both kinds are now
+    the same rule, which is what the record decides.
 
     **The gap it closes is measured rather than supposed.** E0-20 item 3b dropped
     `public.section_roster` from a freshly upgraded container and `alembic check`
@@ -680,18 +691,20 @@ def test_every_object_created_under_views_sql_exists_in_the_migrated_database(
     public.<the reveal>`, which is that table's fourth row and the one row of the
     six never mutated. It survives, too, a revision that stops executing one of the
     files under `views_sql/`, which is how the function half was demonstrated
-    missing.
+    missing; and **moving an object's `CREATE` out of its file and into an
+    `op.execute` in the revision**, leaving the database identical and only the
+    source moved, which is the arrangement ADR 0041 exists to forbid and the one
+    the removed exemption made invisible for functions.
     **The near miss it tolerates**: a third object added, in a file and in the
     database together; one renamed, with the drop and the create both under
     `views_sql/`; and one dropped and recreated in a single file, which stays
     expected because it stands at the end.
 
-    **The canary is the set of expected names itself, where there has to be one.**
-    A sweep that found nothing to expect would compare an empty set against the
-    catalog and report success (`docs/MISTAKES.md` entry 3) — so for views, which
-    SPEC §13 requires to be here, an empty expectation is a failure; for functions,
-    which no record places, it is a fact, and the sweep's own self-test is what
-    makes it a trustworthy one.
+    **The canary is the set of expected names itself**, for both kinds. A sweep
+    that found nothing to expect would compare an empty set against the catalog and
+    report success (`docs/MISTAKES.md` entry 3), so an empty expectation is a
+    failure whichever kind it is — SPEC §13 requires the views to be here and ADR
+    0041 requires the reveal function to be.
     """
     files = view_sql_files()
     assert files, (
@@ -701,14 +714,19 @@ def test_every_object_created_under_views_sql_exists_in_the_migrated_database(
     )
 
     expected = objects_standing_after((path.read_text(encoding="utf-8") for path in files), kind)
-    if kind.must_exist:
-        assert expected, (
-            f"No `.sql` file under {VIEWS_SQL_DIR} leaves a {kind.label} standing at the end of it "
-            f"— the files are {[path.name for path in files]}. Either they have moved out of the "
-            "directory SPEC §13 puts them in, every one of them is dropped again by a later file, "
-            "or this sweep has gone blind; in all three the comparison below is between an empty "
-            "set and whatever the database holds, and passes."
-        )
+    assert expected, (
+        f"No `.sql` file under {VIEWS_SQL_DIR} leaves a {kind.label} standing at the end of it — "
+        f"the files are {[path.name for path in files]}. Either the object's `CREATE` has moved "
+        "out of this directory and into an `op.execute` in a revision, every one of them is "
+        "dropped again by a later file, or this sweep has gone blind; in all three the comparison "
+        "below is between an empty set and whatever the database holds, and passes.\n\n"
+        "The first of the three is the one to check first, and it is what this assertion was "
+        "added for. ADR 0041 puts the SQL for every one of these objects — 'the roles, two views, "
+        "the `SECURITY DEFINER` reveal function, and the grants' — in a versioned file the "
+        "revision executes by name, precisely so that the text a migration ran can be read. "
+        "Moving a `CREATE` into the revision leaves the database identical and this comparison "
+        "with nothing to compare."
+    )
 
     with migrated_engine.connect() as connection:
         present = objects_in_catalog(connection, kind)
@@ -859,10 +877,10 @@ def test_the_text_sweeps_in_this_file_catch_what_they_claim_to() -> None:
             f"`object_history` does not read {sample!r} as creating `{CANARY_FUNCTION}`, which is "
             "a shape it exists to catch. The function half of "
             "`test_every_object_created_under_views_sql_exists_in_the_migrated_database` then "
-            "expects nothing, and — because that half deliberately does not require its "
-            "expectation to be non-empty, since no record says function SQL belongs in "
-            "`views_sql/` — it would report success having compared an empty set. This loop is "
-            "what stands in for that missing canary."
+            "expects nothing — and that test's canary would report it as a directory creating no "
+            "function, which is a different defect from a pattern that cannot see one. This loop "
+            "is what tells the two apart: with it green, an empty expectation there is a fact "
+            "about the files rather than about the regex."
         )
 
     for sample in FUNCTION_CREATE_MUST_ALLOW:
