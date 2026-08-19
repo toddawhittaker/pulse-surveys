@@ -90,6 +90,16 @@ Two things that rule deliberately does not do, and the cost of each:
   closes the gap between "no assertion is written" and "an assertion passed"; it
   does not close the gap between "an assertion is written" and "it ran".
 
+A shape the rule's two halves point opposite ways on, decided 2026-08-19 so that
+the round building the checker is not deciding it: a test whose only assertion
+sits inside a nested function it defines and then calls is **allowed**. The
+assertion is lexically inside the test, where a reader of the test can see it,
+and "helpers are not chased" is about a call leaving the function for something
+defined elsewhere. Allowing it is also what an ordinary AST walk of the body does
+without extra code, and refusing it would mean writing code to detect a shape
+nothing in this repository uses. Nothing in the tree depends on the answer either
+way — see the measurement below.
+
 Measured before the rule was chosen: all 20 `invariant`-marked tests in the tree
 carry an `assert` in their own body, none inside a nested function, and every one
 that uses `pytest.raises` also asserts directly. So the rule is green on the whole
