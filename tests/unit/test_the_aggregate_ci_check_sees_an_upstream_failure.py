@@ -27,11 +27,21 @@ criterion names `migration-drift`; the sweep below covers every job `ci` depends
 on, transitively, including `detect`. That rules out the second remedy *on its
 own*: adding the four fast jobs to `ci`'s needs catches a `migration-drift`
 failure but not a `detect` failure, which still cascades to an all-`skipped` join.
-Treating `skipped` as a failure covers both, and the coordinator's reading of the
-file supports it — every `detect`-driven tolerance in `e2e`, `evals`,
-`frontend-build` and `lint-frontend` is at the *step* level, so no job in `ci`'s
-needs is ever legitimately skipped and a skip there always means an upstream
-failure.
+Treating `skipped` as a failure covers both, and the file supports it: every
+`detect`-driven tolerance in `e2e`, `evals`, `frontend-build` and `lint-frontend`
+is at the *step* level, so no job in `ci`'s needs is ever legitimately skipped and
+a skip there always means an upstream failure.
+
+**That last sentence is true and it is not the whole picture, which is worth
+saying here because this module is where somebody will come looking.** Step-level
+tolerance is exactly the mechanism by which a job reports **success** over work it
+did not do: the real steps are switched off by their own `if:`, a `::notice::`
+step runs in their place, and the job is green. E0-36's security review found a
+live instance one line away in the file this module's fix edits — the `detect`
+job's `evals` probe cannot see `tests/evals/runner.py`, so the job that runs the
+§9.3 recall floor would report success without running it. Nothing here is wrong
+about `skipped`, and nothing here would notice that. The module named
+`test_the_detect_probes_see_the_files_their_jobs_run` is what does.
 
 **What this cannot see, stated so nothing here is cited as more than it is.**
 The model assumes the verdict is computed in a `run:` script of the `ci` job, that
