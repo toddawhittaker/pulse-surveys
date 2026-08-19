@@ -252,6 +252,15 @@ file and check the status, or run the gate bare.
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/26-a-fallback-path-swallowed-the-defect-that-triggered-it.md)
 
+## 36. A probe deciding whether a gate runs answered false over a tree that had the thing
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/36-a-probe-deciding-whether-a-gate-runs-answered.md)
+
+**Rule.** A probe that decides whether a gate runs is itself a gate. Plant what
+the job actually runs and require a yes; plant nothing and require a no; assert
+the whole set of outputs rather than the one you have in mind. `**` in a shell
+glob is a single `*` unless `globstar` is set.
+
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
