@@ -65,6 +65,7 @@ selftest: ## Self-test the CI checker scripts
 	@$(PYTHON) scripts/ci/test_ci_scripts.py
 	@bash -n scripts/ci/wait_for_health.sh && echo "    wait_for_health.sh parses"
 	@bash -n scripts/ci/check_job_runtime.sh && echo "    check_job_runtime.sh parses"
+	@bash -n scripts/ci/check_image_contents.sh && echo "    check_image_contents.sh parses"
 
 .PHONY: test-gates
 test-gates: test e2e evals ## Test gates: pytest, Playwright, AI evals
@@ -178,11 +179,21 @@ evals: ## AI eval runner with per-task precision/recall floors
 # the image; every other line here runs your checkout through the override's
 # bind mount. Why that pass exists is docs/adr/0011; this recipe exists to match
 # the workflow, and when the two disagree the workflow is right.
+#
+# One check runs before the stack comes up at all, and it is neither E0-02's nor
+# E0-03's: `check_image_contents.sh` plants a file matching each of
+# `.dockerignore`'s prompt-directory re-exclusions, builds, and looks inside the
+# image for them (E0-36 item 4). It sits here rather than with the others because
+# it is about what the build carried, not about what the stack does once it is
+# running, and because it needs the plant to happen before anything reads the
+# build context.
 .PHONY: docker-build
 docker-build: ## Build the images and check the stack against E0-02's and E0-03's criteria
 	$(call banner,docker compose build)
 	@test -f .env || { echo "    .env is missing — run: cp .env.example .env"; exit 1; }
 	@$(COMPOSE) build
+	$(call banner,image contents)
+	@./scripts/ci/check_image_contents.sh
 	$(call banner,compose stack health)
 	@set -e; \
 	trap '$(COMPOSE) down -v >/dev/null 2>&1 || true' EXIT; \

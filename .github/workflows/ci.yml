@@ -248,10 +248,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Self-test the CI checkers
         run: python scripts/ci/test_ci_scripts.py
+      # Every shared shell script under scripts/ci/, and the list has to grow with
+      # them: a syntax error in one of these is a gate that dies on its first
+      # line, and the job that would have found it is this one. `check_job_runtime.sh`
+      # and `check_image_contents.sh` both run only inside the `docker` job,
+      # which is minutes downstream of here.
       - name: Shell scripts parse
         run: |
           bash -n scripts/ci/wait_for_health.sh
           bash -n scripts/ci/check_job_runtime.sh
+          bash -n scripts/ci/check_image_contents.sh
 
   fast-gate:
     name: Fast gates passed
@@ -421,6 +427,15 @@ jobs:
         run: |
           cp .env.example .env
           docker compose build
+
+      # E0-36 item 4, and it builds an image of its own rather than inspecting
+      # the one above — the files it plants have to be in the tree before the
+      # build reads the context. In the passing case that build is a cache hit
+      # off the one this step follows, because `.dockerignore` excluding the
+      # planted files is exactly the condition under which the context has not
+      # changed.
+      - name: Nothing .dockerignore re-excludes reaches the runtime image
+        run: ./scripts/ci/check_image_contents.sh
 
       # Five services named, seven covered. `api` declares `depends_on` on a
       # healthy `db` and a healthy `redis`, so reaching healthy here means those

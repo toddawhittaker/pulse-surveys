@@ -164,6 +164,10 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/17-an-unqualified-table-name-let-the-caller-choose-which.md)
 
+## 34. A pipeline discarded a non-zero exit and printed a line that read as success
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+
 ## 6. Shell expansion inside a commit message
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/06-shell-expansion-inside-a-commit-message.md)
@@ -244,9 +248,6 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
 
-## 34. A pipeline discarded a non-zero exit and printed a line that read as success
-
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
