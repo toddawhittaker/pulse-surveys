@@ -157,13 +157,31 @@ content hash recorded in the revision would close it, and was left out as more
 machinery than the risk carries today — the same trade ADR 0032 made for prompts,
 where the file-naming scheme is enforced and the no-edit rule is not.
 
-**The name-mention sweep is weaker than it reads.**
+**What the E0-34 guard does not cover, and what stands there instead.** The rule
+it enforces is scoped to statements that *create a view*, not to files, because
+this directory also ships the `SECURITY DEFINER` reveal function, which reads
+identity by [ADR 0001](0001-identity-separation-by-database-role.md)'s design — a
+file-grained rule would be red on landing, and an exemption list keyed on a
+filename is worse than a property. The consequence is that **a second
+identity-reading function shipped into this directory has nothing behind it but
+the grant model**, and `identity_grants_v001.sql` says in as many words that the
+grant model does not protect the view files themselves. What stands there is this
+record's review rule, plus `test_identity_grants.py`'s sweep asserting that
+`pulse_app` may execute no `SECURITY DEFINER` function in `public`, which fires
+on the day such a file joins a `SCRIPTS` tuple. `CREATE TABLE … AS SELECT` in one
+of these files is outside the guard for the same reason and has its own followup.
+
+**The name-mention sweep was weaker than it read, and E0-33 closed it.**
 `test_every_read_view_is_created_from_a_sql_file_under_views_sql` looks for the
 view's *name* anywhere in the combined text of these files, so a view whose
 `CREATE VIEW` moved into a revision string still passes as long as some file
 mentions it — and `identity_grants_v001.sql` mentions both views, because it
 grants on them. Measured, not reasoned: with `section_roster_v001.sql` deleted
 and its `CREATE VIEW` inlined into the revision, all seven tests in that module
-stayed green. So the file-based layout is a decision this record holds, not one
-the suite enforces; tightening the sweep to require a `CREATE` of the object is
+stayed green. So the file-based layout was a decision this record held rather than
+one the suite enforced. **E0-33 tightened it**: `creates_view` now requires a
+`CREATE` of the object, and E0-34 widened that to every spelling Postgres
+accepts, including `RECURSIVE` and `TEMP`. The paragraph below described the
+older, weaker state and is kept for the measurement it records; tightening the
+sweep to require a `CREATE` of the object was
 noted for whoever owns that test.

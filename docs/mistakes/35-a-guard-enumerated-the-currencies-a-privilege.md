@@ -38,8 +38,11 @@ and a list derived from the thing under test cannot notice a deletion.**)*
 
 *(Twice more on the same pull request, after this entry was
 written. **Both were found by review or by mutation, so neither is a catch** —
-this file's own rule is that a detection does not earn a bump, and the counter
-stays at 0 until this entry stops somebody in advance. **A column grant** is recorded in `pg_attribute.attacl`, which neither
+this file's own rule is that a detection does not earn a bump. The counter stayed
+at 0 for these; it moved to 1 later in the same pull request, when the entry
+genuinely stopped an aggregate control from shipping — that instance is below,
+and this sentence read "stays at 0 until this entry stops somebody in advance"
+until the moment it did. **A column grant** is recorded in `pg_attribute.attacl`, which neither
 `has_table_privilege` nor `pg_class.relacl` reads — a fourth currency, found by a
 reviewer one round after the entry naming the third. And when the probe for it
 was added, nothing asked it about the roles that hold the grant: the sweep
