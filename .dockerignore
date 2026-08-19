@@ -86,6 +86,15 @@ mock-idp/**/*.py[cod]
 # until someone remembers to add it. It is the weaker half of the guarantee, and
 # it is here rather than in the glob because narrowing the glob costs a silent
 # production failure while missing a suffix costs a stray file.
+#
+# These four are the only lines in this file with a gate behind them.
+# `scripts/ci/check_image_contents.sh` (E0-36 item 4) plants one file per
+# pattern, builds the runtime image and looks inside it, so deleting a line here
+# now fails the Docker gate in both CI and `make docker-build` and names the line
+# that went. Before that, deleting any of them left every gate green. Nothing
+# yet guards the patterns above this block the same way; the four here were
+# singled out because the package-data glob in `pyproject.toml` makes this one
+# directory a path into the image that the others do not have.
 backend/**/*~
 backend/**/*.orig
 backend/**/*.rej

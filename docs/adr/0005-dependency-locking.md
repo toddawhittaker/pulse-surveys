@@ -55,6 +55,16 @@ backwards: it pins the packages pip-tools otherwise leaves floating because pip
 itself depends on them. Pinning them is the stricter behaviour, and pip-tools'
 own documentation says it will become the default.
 
+**The two compiles are ordered, not parallel** (added by E0-36 item 5). The
+runtime lock is compiled first and the dev lock is then compiled under
+`-c requirements.txt`, so the runtime resolution is a constraint on the dev one.
+Without that they are two independent solves over overlapping requirement sets,
+free to answer differently — and they did: `charset-normalizer` resolved to
+`3.5.1` in one file and `3.5.0` in the other during E0-13, minutes apart from the
+same index (`docs/MISTAKES.md` entry 25). Nothing that reads one file at a time
+can see that, so the whole suite was green against a version of a package the
+image does not ship.
+
 The lockfiles are the audited artifact too: `pip-audit` reads them directly
 rather than scanning an installed environment. The license check needs
 installed distributions to read, so it installs `requirements.txt` — the

@@ -41,10 +41,22 @@ diff <(grep -oE '^[A-Za-z0-9._-]+==\S+' requirements.txt | sort) \
 ```
 
 Anything it prints that is not simply absent from the dev file is a version skew,
-and `--upgrade-package <name>` on the dev compile is the immediate repair. The
-durable fix is to compile the dev lock with the runtime lock as a constraint file,
-which is a change to `make lock`'s recipe — proposed in E0-13's pull request
-rather than made inside it, because the recipe has to keep matching what CI does.
+and `--upgrade-package <name>` on the dev compile is the immediate repair.
+
+**The durable fix landed in E0-36 item 5** (2026-08-19): the dev compile now runs
+under `-c requirements.txt`, so the runtime resolution constrains the dev one
+rather than sitting beside it, and `make lock`'s recipe carries the reason. It
+was proposed in E0-13's pull request rather than made inside it, because a
+recipe change is not a dependency change. Two assertions now hold what the
+one-line `diff` above held by hand:
+`tests/unit/test_the_lockfiles_resolve_together.py` checks that the flag is on
+the recipe and, separately, that the two committed files agree on every shared
+package — the two fail apart, since a recipe nobody has re-run leaves the files
+skewed.
+
+**The `diff` above is still worth running**, and the two assertions are why: the
+constraint governs what the next `make lock` produces, not what is in the tree
+today.
 
 **And run `make audit`'s two arguments together before pushing**, rather than
 `pip-audit -r requirements.txt` alone. A gate that reads two files is the only one
