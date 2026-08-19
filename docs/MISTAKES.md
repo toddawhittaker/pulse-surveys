@@ -261,6 +261,15 @@ the job actually runs and require a yes; plant nothing and require a no; assert
 the whole set of outputs rather than the one you have in mind. `**` in a shell
 glob is a single `*` unless `globstar` is set.
 
+## 37. A harness ran the real artifact under conditions the runtime does not use
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/37-a-harness-ran-the-real-artifact-under-conditions.md)
+
+**Rule.** When you extract something to run it, copy the invocation and not just
+the body — the shell and its flags, the interpreter, the environment. Prefer a
+harness the repository already has to one you write, and say which properties of
+the runtime yours reproduces and which it does not.
+
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
