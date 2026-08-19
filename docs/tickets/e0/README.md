@@ -1,6 +1,6 @@
 # E0 — Foundations: build order
 
-Thirty-seven tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
+Thirty-eight tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
 single focused session and leaves the repository in a working state: CI green,
 Compose stack healthy, nothing half-wired at a boundary.
 
@@ -55,6 +55,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C.** Three rules held by a docstring with nothing to notice a new violation. Carries E0-21 item 1, E0-24 item 2 and E0-27 item 1, and makes the sweep-versus-hook choice all three declined. |
 | 36 | [Gates that report green over something they did not look at](E0-36-ci-gate-fidelity.md) | 04 | **Batch D.** Five items in `ci.yml`, `scripts/ci/` and the `Makefile`, including the aggregate `CI` check that prints "All gates green" over a real `migration-drift` failure. Carries E0-20 items 1 and 2, E0-32 item 1, E0-25 item 1 and E0-29 items 4b and 4c. Produces two pull requests. |
 | 37 | [Seven small corrections](E0-37-small-corrections.md) | 05, 13, 17 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, and E0-31 items 3 and 4. Item 1 is the only one with a confidentiality consequence. |
+| 38 | [A documentation-only change should not run the whole pipeline](E0-38-docs-only-runs-skip-the-heavy-gates.md) | 36 | **Batch D's sequel.** A Markdown-only pull request runs pytest, both image builds, Playwright, the evals and the supply-chain audit — about fifteen minutes of runner time to establish that no Python changed. Two traps: `test_ai_contracts.py` parses `docs/SPEC.md` at test time, and a path filter manufactures a second meaning for `skipped` that E0-36 item 1 must settle first. |
 
 ## Dependency graph
 
@@ -79,6 +80,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 15 ── 28            Batch E — mock LMS conformance
 16 ── 30            Batch F — mock IdP error redirects
 05, 13, 17 ── 37    Batch H — seven small corrections
+36 ── 38            after Batch D, and the dependency is real rather than tidy
 
 20, 21, 27, 32      redistributed; read for their measurements, do not build
 22, 23              Todd's, and 22's first question has an E4 deadline
@@ -112,6 +114,7 @@ here.
 | F | 30 | `mock-idp/app/` | medium |
 | G | 19 | `tests/unit/test_compose_stack.py` and its neighbour | medium |
 | H | 37 | seven files, one to twenty lines each | small |
+| — | 38 | `ci.yml` again, **after** 36 | small |
 
 **Suggested order: A and B first, as one sitting.** They are the same subject —
 the identity separation the whole of §4.1 rests on has no assertion over the
