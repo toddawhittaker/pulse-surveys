@@ -23,8 +23,10 @@ of that ticket for the same entry-13 reason: it needs the `CREATE` sweeps below,
 whose word boundary took an incident to get right, and a second copy of that
 regex is worth more trouble than the file boundary is.
 
-**Four tests here are E0-34's**, at the foot of the file, and they close a hole
-this module had while looking like it did not.
+**The tests at the foot of this file are E0-34's** — no count, because one was
+added by the review round that found the control below guarding nothing, and a
+number here is a record with a scheduled expiry (`docs/MISTAKES.md` entry 1).
+They close a hole this module had while looking like it did not.
 `test_no_view_reads_a_column_the_identity_marker_names` next door reads
 `pg_depend` out of the migrated database, so it sees only the views a migration
 has executed — a file that joins `user_identity` and selects a name sits in this
@@ -38,6 +40,14 @@ message points away from the defect spends the one moment somebody was looking.
 `test_no_view_created_under_views_sql_names_an_identity_column` is the guard, and
 the two planted-file tests below it are the demonstration that neither the
 `SCRIPTS` tuple nor the qualification sweep changes its answer.
+
+**The guard's two controls read their inventory from constants and not from the
+table of mechanisms they control**, and that separation is load-bearing rather
+than stylistic: with the controls parametrised over `IDENTITY_MECHANISMS`,
+deleting a mechanism deleted its own cases and the suite passed at the smaller
+size, with a planted file reading a marked identity column and nothing red. The
+comment above `REQUIRED_MECHANISM_LABELS` carries what was measured. Do not
+re-derive one from the other.
 
 **Nothing here names a view.** E0-10's scope asks for "a section-roster view and
 an enrollment-count view" and spells neither, so every view in `public` is
@@ -1204,30 +1214,31 @@ class IdentityFinding(NamedTuple):
 
 
 class IdentityMechanism(NamedTuple):
-    """One way a view's text can reach an identity column, and a subject that has it.
+    """One way a view's text can reach an identity column.
 
-    **A mechanism carries the samples that prove it can see**, and that is
-    `docs/MISTAKES.md` entry 35's rule rather than a convenience. A guard that
-    enumerates mechanisms and only ever reports absence cannot tell you which
-    mechanisms it can still see: E0-33's sweep enumerated the currencies a
-    privilege is held in, missed the one ADR 0001 deliberately uses, and stayed
-    green while a connection could read every student's name. So each mechanism
-    here has to be *found* on a subject that certainly has it.
+    **One line per mechanism, and the samples deliberately live somewhere else.**
+    `docs/MISTAKES.md` entry 35 asks for both in as many words — "put the
+    mechanisms in a table, one per line, so that disabling one is a single edit
+    that still parses" — and the first version of this file put the samples inside
+    this tuple, which made disabling one a multi-line deletion *and* took the
+    samples away with it. `IDENTITY_SWEEP_MUST_CATCH` is where they are now, and
+    the comment above it says what that cost when it was measured.
 
-    Two things follow from that entry's second half, and both are load-bearing.
-    The control runs **the whole path** — `identity_findings`, over the table —
-    rather than calling `find` directly, because a control asked of the probe
-    itself stays green when the probe is deleted from the table, which is how
-    E0-33 shipped one that guarded nothing. And each sample is written so that
-    **only its own mechanism** can catch it: the column samples name a relation
-    that is not an identity table, the star samples name no identity column. A
-    sample two mechanisms both catch would keep the aggregate non-empty with
-    either one deleted, and the control would be measuring the other.
+    The control that consumes them runs **the whole path** — `identity_findings`,
+    over the table — rather than calling `find` directly, because a control asked
+    of the probe itself stays green when the probe is deleted from the table,
+    which is how E0-33 shipped one that guarded nothing.
     """
 
     label: str
     find: Callable[[str, IdentityVocabulary], tuple[str, ...]]
-    must_catch: tuple[str, ...]
+
+
+class RequiredShape(NamedTuple):
+    """A shape this guard must catch, and the mechanism label required to catch it."""
+
+    label: str
+    template: str
 
 
 def identity_marker_module() -> Any:
@@ -1417,38 +1428,78 @@ def identity_columns_a_star_reaches(body: str, vocabulary: IdentityVocabulary) -
     )
 
 
-# The two mechanisms, and for each the shapes it must find on a subject that
-# certainly has one. `{column}` and `{table}` are substituted from the live
-# database — a real identity column on the real table that carries it — so that
-# the control is run against this schema's own vocabulary rather than against a
-# name this file invented. `{other}` is `CANARY`, a relation that exists in no
-# database and is certainly not an identity table, which is what keeps each column
-# sample outside the star mechanism's reach.
+# The mechanisms this guard is made of: one line each, so that disabling one is a
+# single edit that still parses and can therefore be measured.
 IDENTITY_MECHANISMS = (
-    IdentityMechanism(
-        label="column",
-        find=identity_columns_named,
-        must_catch=(
-            "CREATE VIEW public.{view} AS SELECT r.{column} FROM public.{other} r;",
-            "CREATE VIEW public.{view} AS SELECT r.{column} AS leaked FROM public.{other} r;",
-            "CREATE VIEW public.{view} AS SELECT 1 FROM public.{other} r"
-            " WHERE r.{column} IS NOT NULL;",
-            'CREATE OR REPLACE VIEW\n    public.{view} AS\nSELECT\n    r."{column}"\n'
-            "FROM public.{other} r;",
-            "CREATE MATERIALIZED VIEW public.{view} AS SELECT {column} FROM public.{other};",
-        ),
+    IdentityMechanism("column", identity_columns_named),
+    IdentityMechanism("star", identity_columns_a_star_reaches),
+)
+
+# ---------------------------------------------------------------------------
+# The inventory: what this guard is **required** to catch. Two constants, and
+# neither is derived from `IDENTITY_MECHANISMS`. That separation is the whole
+# point and is worth stating plainly, because re-deriving one from the other is a
+# tidy-looking edit that silently removes the guard.
+#
+# **Measured, on this file, before the separation existed.** The controls were
+# parametrised over `IDENTITY_MECHANISMS`, so deleting the `column` mechanism did
+# not fail its case — it *deleted* its case. The suite shrank to match the table
+# and reported success at the smaller size: "2 passed" where there had been 3, and
+# with a file planted under `views_sql/` selecting a marked identity column, the
+# guard and both controls reported three green while nothing in the tree looked at
+# that column. That is `docs/MISTAKES.md` entry 3's parametrised test that covers
+# every member but one — where the missing member is the one that was removed —
+# arriving one level above the mistake entry 35 exists to stop. A control whose
+# inventory of what must be caught comes from the structure it is guarding cannot
+# notice that structure getting smaller.
+#
+# So: `REQUIRED_MECHANISM_LABELS` is a written-down list of the mechanisms this
+# module is required to have, and shrinking it is a decision to argue for in a
+# pull request rather than a consequence of deleting code elsewhere.
+# `IDENTITY_SWEEP_MUST_CATCH` is the shapes, each tagged with the label required
+# to catch it. `{column}` and `{table}` are substituted from the live database — a
+# real identity column on the real table that carries it — so the controls run
+# against this schema's own vocabulary rather than a name this file invented.
+# `{other}` is `CANARY`, a relation that exists in no database and is certainly
+# not an identity table, which is what keeps each column shape outside the star
+# mechanism's reach: every shape below is catchable by exactly one mechanism, so
+# no mechanism can answer for another one's absence.
+# ---------------------------------------------------------------------------
+REQUIRED_MECHANISM_LABELS = ("column", "star")
+
+IDENTITY_SWEEP_MUST_CATCH = (
+    RequiredShape(
+        "column",
+        "CREATE VIEW public.{view} AS SELECT r.{column} FROM public.{other} r;",
     ),
-    IdentityMechanism(
-        label="star",
-        find=identity_columns_a_star_reaches,
-        must_catch=(
-            "CREATE VIEW public.{view} AS SELECT * FROM public.{table};",
-            "CREATE VIEW public.{view} AS SELECT ui.* FROM public.{table} ui;",
-            "CREATE VIEW public.{view} AS SELECT 1 AS n, ui.* FROM public.{table} ui;",
-            "CREATE VIEW public.{view} AS SELECT DISTINCT * FROM {table};",
-            "CREATE VIEW public.{view} AS SELECT *\n"
-            "FROM public.{other} r\nJOIN public.{table} ui ON ui.id = r.id;",
-        ),
+    RequiredShape(
+        "column",
+        "CREATE VIEW public.{view} AS SELECT r.{column} AS leaked FROM public.{other} r;",
+    ),
+    RequiredShape(
+        "column",
+        "CREATE VIEW public.{view} AS SELECT 1 FROM public.{other} r"
+        " WHERE r.{column} IS NOT NULL;",
+    ),
+    RequiredShape(
+        "column",
+        'CREATE OR REPLACE VIEW\n    public.{view} AS\nSELECT\n    r."{column}"\n'
+        "FROM public.{other} r;",
+    ),
+    RequiredShape(
+        "column",
+        "CREATE MATERIALIZED VIEW public.{view} AS SELECT {column} FROM public.{other};",
+    ),
+    RequiredShape("star", "CREATE VIEW public.{view} AS SELECT * FROM public.{table};"),
+    RequiredShape("star", "CREATE VIEW public.{view} AS SELECT ui.* FROM public.{table} ui;"),
+    RequiredShape(
+        "star", "CREATE VIEW public.{view} AS SELECT 1 AS n, ui.* FROM public.{table} ui;"
+    ),
+    RequiredShape("star", "CREATE VIEW public.{view} AS SELECT DISTINCT * FROM {table};"),
+    RequiredShape(
+        "star",
+        "CREATE VIEW public.{view} AS SELECT *\n"
+        "FROM public.{other} r\nJOIN public.{table} ui ON ui.id = r.id;",
     ),
 )
 
@@ -1550,72 +1601,139 @@ def sample_sql(template: str, vocabulary: IdentityVocabulary) -> str:
 
 
 @pytest.mark.invariant
+def test_the_identity_sweep_holds_every_mechanism_this_module_requires() -> None:
+    """The table of mechanisms is the required list — measured against a constant, not itself.
+
+    This test exists because its absence was measured. The catch control below is
+    parametrised, and it used to be parametrised over `IDENTITY_MECHANISMS`:
+    deleting the `column` mechanism therefore did not fail its case, it *deleted*
+    its case, and the controls reported success at the smaller size — 2 passed
+    where there had been 3, which is the only trace such a deletion leaves and
+    which nothing asserted. With that mechanism gone and a file planted under
+    `views_sql/` selecting a marked identity column, the guard and both controls
+    reported 3 passed while nothing in the tree was reading that column. A control
+    whose inventory comes from the structure it guards cannot see that structure
+    shrink.
+
+    So the inventory is written down separately, and this test is the one
+    assertion that compares the two. It is not parametrised, over anything.
+
+    **The mutation it exists to survive**: delete a line from
+    `IDENTITY_MECHANISMS` — with or without deleting that mechanism's shapes from
+    `IDENTITY_SWEEP_MUST_CATCH`, since `REQUIRED_MECHANISM_LABELS` names it
+    either way.
+    **The near miss it tolerates**: adding a mechanism, which fails here until its
+    label and at least one shape are written down too — deliberately, because a
+    mechanism with no subject that certainly has it is the state entry 35 exists
+    to stop.
+    """
+    provided = sorted(mechanism.label for mechanism in IDENTITY_MECHANISMS)
+    assert provided == sorted(REQUIRED_MECHANISM_LABELS), (
+        f"`IDENTITY_MECHANISMS` holds {provided} and this module requires "
+        f"{sorted(REQUIRED_MECHANISM_LABELS)}.\n\n"
+        "If a mechanism has been removed, everything it was the only guard on is now unguarded and "
+        "no other test in this file will say so — the controls are asserted over the shapes in "
+        "`IDENTITY_SWEEP_MUST_CATCH`, and `identity_findings` simply stops looking for what is no "
+        "longer in the table. That was measured on this file: with the `column` mechanism deleted, "
+        "a planted view file selecting a marked identity column left the guard and both controls "
+        "green.\n\n"
+        "Removing one is allowed and is a decision rather than a deletion: take its label out of "
+        "`REQUIRED_MECHANISM_LABELS` and its shapes out of `IDENTITY_SWEEP_MUST_CATCH` in the same "
+        "change, and say in the pull request which reads are no longer caught. Adding one fails "
+        "here until it is written down with at least one subject that certainly has it."
+    )
+
+    for label in REQUIRED_MECHANISM_LABELS:
+        shapes = [shape for shape in IDENTITY_SWEEP_MUST_CATCH if shape.label == label]
+        assert shapes, (
+            f"The {label!r} mechanism is required and `IDENTITY_SWEEP_MUST_CATCH` holds no shape "
+            "for it, so nothing establishes that it can see anything. That is exactly the state "
+            "`docs/MISTAKES.md` entry 35 records: a guard that only ever reports absence cannot "
+            "tell you which of its mechanisms are still working."
+        )
+
+    unknown = sorted({shape.label for shape in IDENTITY_SWEEP_MUST_CATCH} - set(provided))
+    assert not unknown, (
+        f"`IDENTITY_SWEEP_MUST_CATCH` requires {unknown} to catch something and no mechanism in "
+        "`IDENTITY_MECHANISMS` carries that label. The control below would fail on those shapes "
+        "with a message about a blind pattern, which is the wrong diagnosis: the mechanism is not "
+        "blind, it is absent."
+    )
+
+
+@pytest.mark.invariant
 @pytest.mark.parametrize(
-    "mechanism", IDENTITY_MECHANISMS, ids=[mechanism.label for mechanism in IDENTITY_MECHANISMS]
+    "shape",
+    IDENTITY_SWEEP_MUST_CATCH,
+    ids=[
+        f"{shape.label}-{position}"
+        for position, shape in enumerate(IDENTITY_SWEEP_MUST_CATCH, start=1)
+    ],
 )
 def test_the_view_file_identity_sweep_catches_the_shape_each_mechanism_names(
-    mechanism: IdentityMechanism, identity_vocabulary: IdentityVocabulary
+    shape: RequiredShape, identity_vocabulary: IdentityVocabulary
 ) -> None:
-    """Each mechanism is *found* on a subject that certainly has it — `docs/MISTAKES.md` entry 35.
+    """Each required shape is *found*, under the label required to find it — entry 35.
 
     A guard that enumerates the ways a thing can happen and only ever reports
     absence cannot tell you which of them it can still see. E0-33 shipped one:
     its sweep enumerated the currencies a privilege is held in, missed the one
     ADR 0001 deliberately uses, and 28 tests passed while a connection could read
-    every student's name. So each mechanism in `IDENTITY_MECHANISMS` gets a
-    subject that has it, and this test requires the sweep to say so.
+    every student's name. So every shape in `IDENTITY_SWEEP_MUST_CATCH` is put
+    through the sweep and has to come back reported.
 
-    **It runs the whole path.** The samples go through `identity_findings`, which
-    walks the table of mechanisms, rather than through `mechanism.find` — because
-    a control asked of the probe directly stays green when the probe is deleted
+    **It is parametrised over the inventory and not over the table**, which is
+    the repair described on `IDENTITY_SWEEP_MUST_CATCH`: parametrised over the
+    table, deleting a mechanism deleted its own cases and the suite passed at the
+    smaller size. `test_the_identity_sweep_holds_every_mechanism_this_module_requires`
+    is what makes that shrinkage visible; this test is what makes a mechanism that
+    is present but blind visible.
+
+    **It runs the whole path.** The sample goes through `identity_findings`,
+    which walks the table of mechanisms, rather than through `find` — because a
+    control asked of the probe directly stays green when the probe is deleted
     from the table, which is exactly how E0-33's first control came to guard
-    nothing. And each sample is caught by *one* mechanism only, so deleting
-    either entry from `IDENTITY_MECHANISMS` turns this red rather than leaving
-    the other one to answer for it.
+    nothing. And each shape is catchable by *one* mechanism only, so no mechanism
+    can answer for another one's blindness.
 
     **Marked `invariant` although it asserts nothing about the schema**, and the
     reason is mechanical: CI runs the invariant pass as `pytest -m invariant`, in
     isolation, so an unmarked control does not run there at all — and the guard
     it controls would then be an isolated green whose ability to see anything is
-    unchecked. `docs/MISTAKES.md` entry 3's rule for a pattern searched against
-    text is that it be run against what it must catch and what it must allow;
-    this is that rule inside the pass that CI treats as unskippable.
+    unchecked.
 
-    **The mutation it exists to survive**: delete either mechanism from
-    `IDENTITY_MECHANISMS`, or break its pattern — drop the `,` alternative from
-    `SELECTS_A_STAR`, drop the `\\b` from the column search, stop stripping
-    comments. **The near miss it tolerates**: a new mechanism added with its own
-    samples, which extends this test rather than moving it.
+    **The mutation it exists to survive**: break a pattern — drop the `,`
+    alternative from `SELECTS_A_STAR`, drop the `\\b` from the column search, stop
+    stripping comments — and, for a deleted mechanism, this goes red alongside the
+    test above rather than instead of it.
+    **The near miss it tolerates**: a new shape added for an existing mechanism,
+    which extends this test rather than moving it.
     """
     table, column = identity_pair(identity_vocabulary)
-    assert mechanism.must_catch, (
-        f"The {mechanism.label!r} mechanism carries no sample, so this test looked at nothing and "
-        "would report success — which is the state entry 35 describes: an enumeration that only "
-        "ever reports absence, with nothing establishing what it can see."
-    )
+    sample = sample_sql(shape.template, identity_vocabulary)
+    findings = identity_findings(sample, identity_vocabulary)
+    caught = {finding.mechanism for finding in findings}
 
-    for template in mechanism.must_catch:
-        sample = sample_sql(template, identity_vocabulary)
-        findings = identity_findings(sample, identity_vocabulary)
-        caught = {finding.mechanism for finding in findings}
-        assert mechanism.label in caught, (
-            f"The {mechanism.label!r} mechanism does not report {sample!r}, which reads "
-            f"`{column}` on `{table}` — a column this database marks as identity. The mechanism "
-            f"has gone blind, or has been taken out of `IDENTITY_MECHANISMS`; the sweep reported "
-            f"{sorted(caught)}.\n\n"
-            "`test_no_view_created_under_views_sql_names_an_identity_column` is built on this "
-            "sweep and asserts an absence, so a blind mechanism there is indistinguishable from a "
-            "directory of clean files — and this sample is written so that no other mechanism can "
-            "answer for this one."
-        )
-        named = {finding.column for finding in findings if finding.mechanism == mechanism.label}
-        assert column in named, (
-            f"The {mechanism.label!r} mechanism reports {sample!r} but names {sorted(named)} "
-            f"rather than `{column}`. E0-34's second criterion is about the message and not only "
-            "about the red: the same file already fails the schema-qualification sweep, whose "
-            "message is about missing `public.` prefixes, so a failure that does not name the "
-            "identity column is repaired by adding four prefixes with the join left in place."
-        )
+    assert shape.label in caught, (
+        f"The {shape.label!r} mechanism does not report {sample!r}, which reads "
+        f"`{column}` on `{table}` — a column this database marks as identity. The sweep reported "
+        f"{sorted(caught)}, and `IDENTITY_MECHANISMS` holds "
+        f"{sorted(mechanism.label for mechanism in IDENTITY_MECHANISMS)}.\n\n"
+        "If the label is in that table, the mechanism has gone blind. If it is not, it has been "
+        "deleted, and `test_the_identity_sweep_holds_every_mechanism_this_module_requires` is the "
+        "test that says so in one line.\n\n"
+        "`test_no_view_created_under_views_sql_names_an_identity_column` is built on this sweep and "
+        "asserts an absence, so a blind mechanism there is indistinguishable from a directory of "
+        "clean files — and this shape is written so that no other mechanism can answer for it."
+    )
+    named = {finding.column for finding in findings if finding.mechanism == shape.label}
+    assert column in named, (
+        f"The {shape.label!r} mechanism reports {sample!r} but names {sorted(named)} "
+        f"rather than `{column}`. E0-34's second criterion is about the message and not only "
+        "about the red: the same file already fails the schema-qualification sweep, whose "
+        "message is about missing `public.` prefixes, so a failure that does not name the "
+        "identity column is repaired by adding four prefixes with the join left in place."
+    )
 
 
 @pytest.mark.invariant
