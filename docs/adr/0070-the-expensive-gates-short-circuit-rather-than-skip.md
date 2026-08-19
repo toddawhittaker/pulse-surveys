@@ -114,6 +114,16 @@ is loud rather than silent.
   wheel metadata; the sharp edge is that *deleting* it breaks `COPY pyproject.toml
   README.md ./`, and that break would now surface on the next pull request that
   touches anything else rather than on the one that caused it.
+- **The classifier is only as good as the path list it is handed**, and that
+  list is computed in the workflow rather than in the classifier. Two ways it can
+  lie were found by audit and closed: git reports a detected rename as the
+  destination alone, so a service module moved into `docs/` arrived as a single
+  inert path until `--no-renames` split it; and the step is invoked as
+  `bash -e {0}`, so a bare command exiting non-zero ended it before it could emit
+  anything — on exit 1, which is the classifier's ordinary "not inert" answer.
+  Neither was visible to the classifier's own tests, because neither is about the
+  classifier. When this is next changed, the first question is what the diff
+  computation might not be saying.
 - **A guard with its sense reversed is invisible to the suite.** The wiring test
   reads conditions and does not evaluate them, so `== 'true'` where `!= 'true'`
   was meant passes every assertion. That half is verified by pushing to a scratch
