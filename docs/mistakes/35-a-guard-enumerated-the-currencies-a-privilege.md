@@ -4,7 +4,7 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*4 occurrences recorded; one of them is a catch.*
+*5 occurrences recorded; one of them is a catch.*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two
@@ -23,6 +23,18 @@ identity table, the star samples name no identity column. The corollary about
 running the whole path came from E0-33's own repair and is applied too: the
 control calls `identity_findings`, which walks the table, and never
 `mechanism.find`.)*
+
+*(**And it did not stop the level above.** The control that catch
+produced was parametrised over the mechanism table itself, so deleting a
+mechanism deleted its own case and the controls passed at the smaller size —
+three tests where there had been four, with a planted view file reading a marked
+identity column going completely unguarded. This entry's rule is about each
+mechanism being *found* on a subject that has it, and says nothing about where the
+list of subjects comes from. Found by mutation in review, so no bump. The repair
+is an inventory written down separately, which the table cannot shrink: a
+required-labels constant, a flat tuple of shapes, and a test over neither of the
+structures being guarded. **A control is only as complete as the list it iterates,
+and a list derived from the thing under test cannot notice a deletion.**)*
 
 *(Twice more on the same pull request, after this entry was
 written. **Both were found by review or by mutation, so neither is a catch** —
