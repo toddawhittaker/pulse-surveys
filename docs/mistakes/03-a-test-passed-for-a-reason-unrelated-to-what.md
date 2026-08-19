@@ -50,20 +50,32 @@ a marked test can produce. **When a gate's failure exit has more than one cause,
 inside the checker is what created the ambiguity in the first place — the guard
 against a vacuous pass became a second route to the same exit code.)*
 
-*(Building E0-29 item 4b, on a **verdict that was right for the wrong reason**.
-The licence checker now scans a whole licence body against its rule table
-instead of splitting it on connectors, and what keeps that from being a hole is
-that every deny and review rule sits above every allow rule, so a body reaches a
-deny before it can reach a permissive word occurring in its prose. The obvious
-test is that a GPL body denies and an AGPL body denies. Both do — and both go on
-denying if you move the `Affero` rule *below* the `General Public License` rule,
-which destroys exactly the ordering guarantee the design rests on, because an
-AGPL body denies either way. The verdict cannot see the property. So every body
-case asserts the **reason** as well as the verdict, and the reason is what the
-`affero-below-gpl` mutation trips; nothing else in the battery notices it.
+*(Building E0-29 item 4b, twice, and the second time is the one that matters.
+**First**, on a verdict that was right for the wrong reason: a licence body was
+scanned against the rule table in list order, and a GPL body and an AGPL body
+both deny whichever way you order the `Affero` and `General Public License`
+rules, so the verdict cannot see the ordering the design rests on. Every body
+case was given a **reason** assertion as well as a verdict for that.
+
+**Second**, on the fixtures those assertions ran against, which is where the
+lesson is. They were hand-written bodies plus a GPL-3 excerpt I had *trimmed* to
+avoid a mention of the AGPL that produced a confusing reason. The suite was
+green and the change had moved the real GPL-2 from `deny` to `review` — a
+build failure to an advisory that exits 0 — because the GPL-2 preamble says
+other FSF software "is covered by the GNU Lesser General Public License
+instead", eighteen lines in, and the LGPL rule sits above the GPL rule. **The
+trimming was the signal and I did not read it**: I had already met the
+mention-versus-declaration problem, solved it inside one fixture by cutting the
+text, and not asked whether it was general. A fixture edited to avoid an awkward
+result is a defect you have already found and declined to name. The battery now
+uses the smallest excerpt of each *real* text that carries both the declaring
+line and the phrase that used to trap it, each verified to produce the same
+verdict and reason as the full file, and `classify_body` takes the rule matching
+earliest in the text rather than the first rule that matches anywhere.
+
 **When a check's safety comes from which rule fires rather than from the answer,
-assert which rule fired** — otherwise the guarantee is a convention and the
-suite agrees with it right up until it stops being true.)*
+assert which rule fired** — and when a fixture has to be trimmed to make a test
+comfortable, the trimming is the finding.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
