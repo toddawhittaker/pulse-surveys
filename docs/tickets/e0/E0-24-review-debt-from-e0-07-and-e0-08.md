@@ -12,12 +12,21 @@ two are carried out of this epic with named owners.
 | Item | Now |
 |---|---|
 | 1 — `jwks_url` is credential-equivalent and unconstrained | **Carried to E1**, which writes and fetches the column and is the only code positioned to say what a legitimate value looks like |
-| 2 — nothing asserts there is no second writer of the derived section columns | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) |
+| 2 — nothing asserts there is no second writer of the derived section columns | [E0-35](E0-35-the-writer-and-the-marker-nobody-routed.md) — **built 2026-08-19** |
 | 3 — nothing re-derives a section when a term's start-letter map is edited | **Carried to E2/E11**, the owners ADR 0021 and ADR 0018 already name |
 | 4 — the summer start-letter map is invented by the test suite | **Decided 2026-08-18: no spec seed map.** The invented constants stay, marked as the suite's own choice, and the gap at position 6 survives any edit. |
 
 Items 1 and 3 are in the README's carried-out-of-E0 table, so a deferral recorded
 only in the ticket that deferred it does not become a deferral nobody picks up.
+
+**On item 2, as built.** E0-35 asserts that every assignment of `length_weeks`,
+`start_date`, `end_date` or `modality` under `backend/app/` sits inside
+`backend/app/services/section_codes.py`, so a second writer that *agrees* — the
+half two existing tests cannot see — now fails. The grain is the module rather
+than the function [ADR 0021](../../adr/0021-a-sections-derived-calendar-has-one-writer.md)
+names, and that record carries the amendment: the rule has a check behind it, the
+check is syntactic, and a second writer reached through a helper in another
+module or an ORM cascade is still invisible.
 
 On item 4, this ticket's job until it is answered is unchanged: the invented
 constants stay marked as the test suite's choice, and **the gap at position 6

@@ -129,7 +129,14 @@ declining to close it. The prefix is still unenforced: nothing stops a later tic
 adding an LMS-owned column without the marker, and nothing here can see one. What
 this decision does is make the *table* the unit, so that on the three tables §2.1
 names the marker's accuracy stops mattering. Off those tables it matters as much as
-it did. [E0-21](../tickets/e0/E0-21-review-debt.md) carries the residue.
+it did. The residue moved from [E0-21](../tickets/e0/E0-21-review-debt.md) item 1
+to [E0-35](../tickets/e0/E0-35-the-writer-and-the-marker-nobody-routed.md), **which
+closed it on 2026-08-19 at table grain**: a sweep now requires every column on a
+guarded table to be marked, structural, unwritable or recorded, so the unprefixed
+LMS-owned column arriving on `course` turns something red. That is a check beside
+this chokepoint rather than a change to it — nothing here can see such a column,
+and this record's sentence about that stands. Off the guarded tables the marker is
+as unenforced as it was. ADR 0014 carries the amendment.
 
 **A caller can bypass it by not calling it.** `guard_write` is a function, not a
 grant, so it holds for the write paths that go through the chokepoint and for no
@@ -139,6 +146,25 @@ because the database instrument that would close it does not exist yet. E0 ships
 HTTP write path at all, so today the set of callers is empty and the guard is
 scaffolding with tests on it. E1 is the first ticket that has to route a real write
 through it.
+
+**E0-35 put a tripwire on that bypass, and it is not the grant.** As of
+2026-08-19, `tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py`
+fails when a module under `backend/app/` writes one of these relations without
+calling `guard_write` somewhere in the same module. It is syntactic and its grain
+is the module rather than the path, so it catches the obvious way to write the
+wrong thing and proves nothing about ordering; the proof-shaped instrument is
+still the grant this record defers to E1.
+[ADR 0069](0069-three-rules-held-by-a-docstring-are-swept-out-of-the-source.md)
+records that decision and its limits.
+
+**How a *sanctioned* writer satisfies the sweep is not decided here, and E1 has
+to.** This record names the launch path that creates a `user` row, and E1's roster
+sync for the other three, as sanctioned writers, and nothing anywhere says what
+that means operationally: `guard_write(table="course")` refuses unconditionally,
+with no argument, context or flag that makes it return. The rule is satisfiable
+today only because nothing under `backend/app/` calls `guard_write` at all. Todd's
+decision, 2026-08-19: **write it down and leave the mechanism to E1**, which
+arrives with a real writer to design against. ADR 0069 carries the "done when".
 
 **A typo in the set refuses nothing.** `LMS_OWNED_TABLES` holds table *names*, so
 `"courses"` would refuse writes to a table that does not exist while leaving the
