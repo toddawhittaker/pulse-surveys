@@ -67,7 +67,27 @@ cannot lie about what exists.
   should be. The acceptance criteria and E0-18's exit checklist are process
   controls, not technical ones. Accepted knowingly.
 - The `detect` job adds a few seconds to every run.
-- The aggregate `ci` job computes its verdict from `needs.*.result`, so it stays
-  correct without edits as individual gates flip from tolerant to enforcing.
+- ~~The aggregate `ci` job computes its verdict from `needs.*.result`, so it
+  stays correct without edits as individual gates flip from tolerant to
+  enforcing.~~ **Amended 2026-08-19 (E0-36 item 1): it did not.** Reading
+  `needs.*.result` is not enough on its own, because the result a failure
+  produces depends on where in the graph it happens. A job whose dependency
+  failed is reported `skipped` rather than `failure`, so a failing
+  `migration-drift` reached the verdict as `skipped,skipped,…` — `fast-gate`
+  skipped, everything below it skipped — and the pattern that looked for
+  `failure|cancelled` matched none of them. The required check printed "All gates
+  green" and exited 0 over a migration that had drifted from its models.
+
+  The verdict now treats `skipped` as a failure too, and that is only sound
+  because of a property of this file rather than of the mechanism: every
+  tolerance here is at the *step* level, so no job the aggregate depends on is
+  ever legitimately skipped. A job-level `if:` on any of them would make a skip
+  ambiguous again, and
+  `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails and
+  says so if one appears.
+
+  The decision above is unaffected — gates still ship tolerant and still name the
+  ticket that enforces them. What was wrong was the claim that the aggregate
+  needed no edits as they flipped.
 - The pattern generalizes badly beyond bootstrap. Once E0 is complete, a new
   tolerant gate should be treated as a smell rather than as this precedent.
