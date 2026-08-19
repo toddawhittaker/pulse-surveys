@@ -11,7 +11,7 @@ decision for Todd, and one is carried to E1.
 
 | Item | Now |
 |---|---|
-| 1 — nothing asserts `.dockerignore`'s contents | [E0-36](E0-36-ci-gate-fidelity.md) item 4 |
+| 1 — nothing asserts `.dockerignore`'s contents | [E0-36](E0-36-ci-gate-fidelity.md) item 4, **built**. Its security review then found the guard covers four suffixes and not `*.pfx` or `*.secret`, which reach the runtime image with no line matching them; that half is [E0-37](E0-37-small-corrections.md) item 9. |
 | 2 — the `"150"` course-number literal in three test modules | [E0-37](E0-37-small-corrections.md) item 4 |
 | 3 — `fresh_scope`'s docstring overclaims | [E0-37](E0-37-small-corrections.md) item 5 |
 | 4 — `MISTAKES` entry 16 wants its database-shaped variant | **Closed** |
