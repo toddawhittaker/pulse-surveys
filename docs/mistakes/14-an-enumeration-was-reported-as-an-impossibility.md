@@ -4,6 +4,18 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
+*(A further occurrence in E0-33, and this time the search had not
+been performed at all — no counter bump, because the entry did not save anybody.
+A test author wrote "nothing in any record I can read says where a function's SQL
+belongs" into a docstring and used it to exempt one half of a test from its own
+canary; the orchestrating session repeated the ground in the ticket. ADR 0041
+decides it in as many words, names the reveal function among its five files, and
+describes that test's job in its Consequences — and the module carrying the claim
+already cited that ADR twice. **A universal about the record is a claim about a
+search; if no search happened, the sentence is not a finding, it is an assumption
+wearing one's clothes.** Grep before writing "nothing says", and cite what you
+searched.)*
+
 *(In E0-11, and it decided how an objection was argued rather than
 whether to file one. `docs/disputes/E0-11-01.md` claims that no rule can accept the
 `CHAIR → CHAIR` edge E0-09's properties require and refuse the one E0-11's matrix

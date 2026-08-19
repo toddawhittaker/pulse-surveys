@@ -97,11 +97,21 @@ What is genuinely unasserted, and what this item therefore owes:
   leaves `SELECT` on `user_identity` one `SET ROLE` away from the Care
   connection. Asked in `'MEMBER'` mode, it is visible.
 - **The view set and the function set**, which no test compares against the files
-  that create them in the file-to-catalog direction. Both are built. Where a
-  *function's* SQL belongs is unsettled — SPEC §13 places view SQL under
-  `views_sql/` and says nothing about functions — so the function half tolerates
-  an empty expectation rather than pinning a decision no ticket has made, and
-  says so where it is implemented.
+  that create them in the file-to-catalog direction. Both are built, and both are
+  held to the same rule.
+
+  **This paragraph said the opposite until 2026-08-18 and was wrong.** It read
+  that where a function's SQL belongs is "unsettled" because SPEC §13 names
+  `views_sql/` for views and says nothing about functions, and on that ground the
+  function half tolerated an empty expectation. [ADR 0041](../../adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)
+  settles it in as many words — the SQL lives in
+  `backend/app/views_sql/<object>_v<NNN>.sql`, and the five files it names
+  include the `SECURITY DEFINER` reveal function — and its Consequences describe
+  this very test's job. The spec being silent is not the same as the record being
+  silent, and nobody grepped. Measured: with the exemption in place, moving the
+  reveal's `CREATE FUNCTION` inline into its revision left the database identical
+  and the test passing over an empty comparison; the same change to a view failed
+  loudly.
 - **A privilege held on a column rather than on a table.** Added 2026-08-18 from
   PR #40's review, and it is the sharpest entry here: a column grant is recorded
   in `pg_attribute.attacl`, which neither `has_table_privilege` nor
