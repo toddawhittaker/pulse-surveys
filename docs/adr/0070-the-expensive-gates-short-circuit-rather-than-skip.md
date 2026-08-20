@@ -93,22 +93,77 @@ is loud rather than silent.
 
 ## Consequences
 
-- **A documentation-only run still costs five job schedules.** Each expensive job
+- **A documentation-only run still costs six job schedules.** Each expensive job
   starts, checks out, prints a `::notice::` and exits. That is the price of the
   decision and it is a few seconds against the fifteen minutes it saves.
+
+  **Six, not five.** `Build · frontend + bundle budget` is the sixth, and the
+  ticket, the first version of this record and the pull request body all said
+  five. It is free today only because there is no `frontend/` to build; once the
+  scaffold lands it is an `npm ci` and a production build, the same order of cost
+  as the rest. E0-38's security review found it unguarded and unnamed. It is
+  guarded now.
 - **`skipped` keeps exactly one meaning**, so E0-36's verdict step needs no new
   case and the proof it was given against the real pipeline still holds.
 - **A green run now has two shapes**, and the checks interface does not
   distinguish them: every gate passed, and every gate declined to look. The
   `::notice::` line in each short-circuited job is the only thing that says
-  which. This is ADR 0002's first consequence — "a tolerant job looks like a
+  which. **Two jobs had the guard and no notice** — `Test · Playwright e2e` and
+  `Test · AI eval floors` printed only their older "no specs yet" and "no runner
+  yet" lines, so on the first documentation-only run three of the five expensive
+  jobs said why they had not worked and two said nothing about it. Worse after
+  E0-18: `detect.e2e` turns true, the "no specs yet" step stops firing, and the
+  job would have printed nothing at all. Each of those jobs has its own notice
+  step now. This is ADR 0002's first consequence — "a tolerant job looks like a
   passing job" — arriving again by a different route, and it is accepted for the
   same reason.
-- **The classification is an allowlist, so the failure mode is a slow pipeline
-  rather than a skipped gate.** A path nobody has classified runs everything, a
-  missing or crashing classifier runs everything, and an empty diff runs
-  everything.
-- **`README.md` is inert and is also a build input.** `pyproject.toml` declares
+- **The classification is an allowlist, so a *misclassification* costs a slow
+  pipeline rather than a skipped gate.** A path nobody has classified runs
+  everything, a missing or crashing classifier runs everything, and an empty diff
+  runs everything.
+
+  **An earlier version of this line said the failure mode is a slow pipeline
+  rather than a skipped gate, full stop, and that was false.** E0-38's security
+  review found two ways to reach a skipped gate with the classification behaving
+  exactly as designed, and neither is a misclassification:
+
+  - **A repository root file named `-h`.** The classifier was invoked without a
+    `--` separator, so argparse parsed the path list and answered before any of
+    the reasoning above ran. `-h` exits 0, which is the *inert* answer, and that
+    switches off pytest, the §4.1 invariant suite, both image builds, Playwright,
+    the evals and the audit with the required check green. `-hx` and `--hel` do
+    the same by short-option clustering and abbreviation. Every near miss fails
+    safe — `-q` exits 2 and lands in the "neither answer" branch — which is
+    exactly why nothing caught it. Closed by passing `--`, and by the script
+    refusing leading-dash arguments.
+  - **A repository-wide sweep living inside a job the classification switches
+    off.** The reasoning above is about `docs/` as a build *input* — nothing
+    imports, executes, packages or lints it, and that is true. It is not true of
+    `docs/` as a *subject*. `test_no_unresolved_merge_conflicts.py` walks
+    `git ls-files` and `test_mock_lms_service.py` walks the tree from the root,
+    so a conflict marker or a private key committed in a Markdown file is their
+    subject — and a documentation-only pull request is both the shape that
+    introduces one and the shape that switched off the sweep. Conflict markers in
+    Markdown are `docs/MISTAKES.md` entry 21, which has happened here twice.
+    Closed by running those node ids in `lint-python`, which is unconditional,
+    and by a guard that fails when a new repository-wide sweep appears anywhere
+    else.
+
+  Both were live, both are reachable by ordinary mistake rather than by an
+  attacker, and neither is visible to the `PARSED_DOCUMENTS` sweep: that sweep
+  reads `/` chains, and a module that enumerates the whole repository builds no
+  chain at all. The corrected claim is the one at the top of this item, and it is
+  narrower than what it replaces.
+- **`README.md` was inert and is also a build input; it is no longer inert.**
+  Reversed on E0-38's security review, which asked whether a declared build input
+  belongs in the set that switches the build off. It does not. The saving given up
+  is README-only pull requests, of which this epic has produced none — the six
+  inert pull requests were tickets, ADRs and mistakes files. The original
+  reasoning and its cost are kept below, because the reversal is cheap only while
+  README-only changes stay rare, and whoever revisits this should see what was
+  weighed rather than only the answer.
+
+  The reasoning as it stood: **`README.md` is inert and is also a build input.** `pyproject.toml` declares
   it as the wheel's readme and `backend/Dockerfile` copies it, so a README-only
   pull request no longer builds the image that packages it. The effect is on
   wheel metadata; the sharp edge is that *deleting* it breaks `COPY pyproject.toml

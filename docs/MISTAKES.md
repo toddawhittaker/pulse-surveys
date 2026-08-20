@@ -270,6 +270,16 @@ the body — the shell and its flags, the interpreter, the environment. Prefer a
 harness the repository already has to one you write, and say which properties of
 the runtime yours reproduces and which it does not.
 
+## 38. An option parser answered before the guard did, and its answer was the permissive one
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/38-an-option-parser-answered-before-the-guard-did.md)
+
+**Rule.** When a guard takes untrusted names as arguments, the argument parser is
+part of the guard: pass `--` before any list that came from a diff or a glob, and
+refuse leading-dash arguments in the script too. A decision made before your logic
+runs is still your decision. Test the near miss that distinguishes the fix from
+doing nothing.
+
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
