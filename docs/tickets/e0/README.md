@@ -352,9 +352,15 @@ The pool is bound to the code path, not to the actor, because §2.1 permits one
 person to hold a Care assignment and a teaching assignment at once. A module that
 imports, calls or attributes a Care session fails
 `tests/unit/test_care_session_is_bound_to_the_care_service.py` by name. Care's
-route to identity is `reveal_identity`, which checks the actor and calls a
-`SECURITY DEFINER` function that checks the actor again and writes the audit row
-in the same transaction.
+route to identity is `reveal_identity`, which checks the actor and then calls
+**two** `SECURITY DEFINER` functions ([ADR
+0071](../../adr/0071-the-reveal-answers-only-a-committed-record.md)):
+`record_identity_reveal` writes the audit row and returns its id, the service
+commits, and `reveal_student_identity` answers only where that row's writing
+transaction has already committed. Each checks the actor again for itself. The
+single function that wrote its record inside the caller's transaction was E0-10's
+and is dropped — a caller who rolled back kept the name and left no row, which is
+what E0-26 item 1 closed.
 
 **The session is synchronous** ([ADR
 0013](../../adr/0013-the-database-session-is-synchronous.md)). Handlers that

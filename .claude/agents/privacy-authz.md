@@ -42,9 +42,16 @@ not route around it. A raw session handed out by a convenience function is the
 likely breach, not a deliberate join.
 
 **The Care door stays open and audited.** Care re-identification is legitimate
-and must keep working. Check that identity still cannot be obtained without the
-audit row being written in the same transaction, and that a reveal touching the
-revealer's own purview is flagged (SPEC §6.2).
+and must keep working. Check that identity still cannot be obtained without a
+record of the access surviving — **and note that "surviving" is not "in the same
+transaction"**. That was the rule until E0-26 item 1, and it was weaker than it
+read: a caller who rolled back kept the name and discarded the row, because
+Postgres streams the result before the caller decides. ADR 0071 replaced it with
+two calls — `public.record_identity_reveal` writes the row and returns its id,
+and `public.reveal_student_identity` answers only where that row's writing
+transaction has already committed. So a diff that puts the write back inside the
+caller's transaction is a regression, not a restoration. Also check that a reveal
+touching the revealer's own purview is flagged (SPEC §6.2).
 
 **Purview.** Sibling-lead isolation at every intermediate step, not just the
 result. Role grain respected — a lead's grant is only their led courses. Care
