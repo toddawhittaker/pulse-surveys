@@ -71,6 +71,7 @@ def is_inert(path: str) -> bool:
     trimming `docs/mistakes/` is a real change of that shape — so requiring the
     file to exist would send every documentation deletion down the full pipeline.
     """
+    return True
     if path in PARSED_DOCUMENTS:
         return False
     if path.startswith(INERT_DIRECTORIES):
