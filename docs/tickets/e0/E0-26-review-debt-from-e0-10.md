@@ -6,8 +6,10 @@
 
 ## Status — what is left here
 
-**Nothing moved.** No item here fits a batch, because four of the five need a
-thing that does not exist until E10 and the fifth is a decision.
+**Nothing moved into a batch**, because three of the five need a thing that does
+not exist until E10. What changed on **2026-08-20** is that the remaining two got
+dates: item 1 is built inside this epic rather than carried, and item 5's spec
+line is drafted below and waiting on Todd.
 
 | Item | Now |
 |---|---|
@@ -47,9 +49,10 @@ are indexed at the bottom so this file is a complete record of the round.
 2 to 5 harden a guard or settle a record and block nothing. Item 1 is a live gap
 in the guarantee SPEC §4 states — "every identity access is automatically
 audit-logged" — and it was measured, not argued. It does not block E0's exit,
-because nothing in E0 opens the Care queue, but it must land **before E10 builds
-the queue that calls the door**, and the credential narrowing that came with it
-in PR #29 is a reduction of the exposure rather than a fix for it.
+because nothing in E0 opens the Care queue, and its deadline was **before E10
+builds the queue that calls the door** — which is now moot, since it is built
+here. The credential narrowing that came with it in PR #29 is a reduction of the
+exposure rather than a fix for it.
 
 Three of the five are the same shape as each other: **the reveal function trusts
 what it is handed and records what it is told.** The actor is a parameter rather
