@@ -50,7 +50,7 @@ having arrived, never as a name being missing from a result set — an absence i
 satisfied by a query that returned nothing for an unrelated reason. That includes
 the record whose actor has since lost `CARE`: the ticket did not originally say
 what happens there, this module first accepted either a raise or an empty result
-and said so, and Todd settled it as a raise on 2026-08-20 for the reason the ticket
+and said so, and the ticket settled it as a raise on 2026-08-20 for the reason the ticket
 already gives elsewhere — an empty result is the value the service turns into
 `None`, so a refusal would reach §6.2's queue as "no identity on file".
 
@@ -126,6 +126,23 @@ AUDIT_TABLE = "audit_log"
 # by "some string came back", because a reveal that answers the student's key
 # twice, or a row of nulls, satisfies "it returned something" and reveals nobody.
 IDENTITY_COLUMNS = ("identity_name", "identity_email")
+
+# **The four refusals, by the SQLSTATE each carries.** ADR 0071 sells them as
+# "four distinct refusals … so a caller can tell them apart" and the SQL header
+# says the same, and until PR #53's review the tests asserted only that *something*
+# had been raised — so stripping every `USING ERRCODE` clause, or giving two
+# branches one code, left the whole module green while the property the records
+# advertise was gone. `test_identity_grants.py` already held this standard and
+# said why: "a malformed statement answers 42601 or 42703 and would satisfy a bare
+# 'it failed'". Same rule, now in both files.
+#
+# These are the spellings Postgres reports for the condition names the function
+# body raises: `insufficient_privilege`, `no_data_found`,
+# `invalid_parameter_value` and `object_not_in_prerequisite_state`.
+INSUFFICIENT_PRIVILEGE = "42501"
+NO_SUCH_RECORD = "P0002"
+NOT_AN_IDENTITY_REVEAL = "22023"
+RECORD_NOT_COMMITTED = "55000"
 
 # **Three students, and they are three different cases that must not collapse into
 # each other.** Every seeding helper below builds exactly one of them, and every
@@ -258,6 +275,16 @@ def attempt(connection: Any, statement: str, parameters: dict[str, Any]) -> tupl
     except DatabaseError as failure:
         return [], failure
     return rows, None
+
+
+def sqlstate(failure: Any) -> str | None:
+    """The SQLSTATE behind a SQLAlchemy error, if the driver reported one.
+
+    Spelled exactly as `test_identity_grants.py` spells it, because it is the same
+    question asked of the same driver, and two spellings of one lookup is how the
+    two answer differently after somebody changes a driver.
+    """
+    return getattr(getattr(failure, "orig", None), "sqlstate", None)
 
 
 def record(connection: Any, *, actor: Any, subject: Any) -> tuple[Any, Any]:
@@ -724,6 +751,14 @@ def test_the_reveal_raises_for_an_uncommitted_record_rather_than_returning_no_ro
         "call that was in fact refused. A refusal that is indistinguishable from an absence is a "
         "wrong answer wearing the right one's clothes."
     )
+    assert sqlstate(failure) == RECORD_NOT_COMMITTED, (
+        f"The refusal carried SQLSTATE {sqlstate(failure)} rather than {RECORD_NOT_COMMITTED}. "
+        "ADR 0071 sells four refusals a caller can tell apart, and this is the one that means "
+        "'commit your record and call again' — which is a different instruction from 'there is no "
+        "such record' or 'you are not Care staff', and E10's queue has to act differently on each. "
+        "Asserting only that something was raised leaves every `USING ERRCODE` clause in the "
+        "function free to be deleted with this module still green."
+    )
 
     caller.rollback()
     committed_id, refused = record(
@@ -981,6 +1016,13 @@ def test_recording_a_reveal_refuses_an_actor_with_no_live_care_assignment(
         "caller holding nothing rather than being told it was refused — and §6.2's queue would "
         "show that as a system fault rather than as a person without a `CARE` assignment."
     )
+    assert sqlstate(failure) == INSUFFICIENT_PRIVILEGE, (
+        f"The refusal carried SQLSTATE {sqlstate(failure)} rather than {INSUFFICIENT_PRIVILEGE}. "
+        "This is the one refusal in the door that means 'this person may not do this at all', and "
+        "§6.2's queue has to tell it apart from the three that mean the record is wrong. A bare "
+        "'it was refused' is also satisfied by a syntax error, a missing column or a type "
+        "mismatch, none of which is a privilege decision."
+    )
 
 
 @pytest.mark.invariant
@@ -1004,7 +1046,7 @@ def test_the_reveal_refuses_a_record_whose_actor_no_longer_holds_care(
     **The refusal is a raise, and that is settled rather than assumed.** The
     ticket as first written said the reveal raises for a record that is not
     committed and said nothing about a record whose actor has since lost `CARE`, so
-    this test accepted either a raise or an empty result. Todd settled it as a raise
+    this test accepted either a raise or an empty result. The ticket settled it as a raise
     on 2026-08-20, for the reason the ticket already gives one paragraph earlier: an
     empty result is the value the service turns into `None`, so a revoked actor
     would reach §6.2's queue as "this student has no identity on file" — a wrong
@@ -1062,6 +1104,12 @@ def test_the_reveal_refuses_a_record_whose_actor_no_longer_holds_care(
         "service hands back as `None`, so a revoked actor would reach §6.2's queue as 'no identity "
         "on file' about a student the queue is open on. The ticket refuses that collision for the "
         "uncommitted-record case in as many words, and it holds here for the same reason."
+    )
+    assert sqlstate(failure) == INSUFFICIENT_PRIVILEGE, (
+        f"The refusal carried SQLSTATE {sqlstate(failure)} rather than {INSUFFICIENT_PRIVILEGE}. "
+        "The reveal's re-check of the record's actor is the same privilege decision the recording "
+        "call makes, so it answers the same way; a caller cannot be expected to read one refusal "
+        "two ways depending on which half of the door raised it."
     )
 
 
@@ -1377,4 +1425,68 @@ def test_the_recording_call_hands_back_an_identifier_and_never_identity(
         f"`public.{RECORD_FUNCTION}` declares {output_parameters}. An `OUT`, `INOUT` or `TABLE` "
         "parameter is the other way a function hands a value back, and it is how a name would "
         "arrive from a call whose declared return type still reads as `uuid`."
+    )
+
+
+@pytest.mark.invariant
+def test_the_reveal_refuses_a_record_id_that_names_nothing(
+    care_connections: Any, committed_rows: Any, revealable: Revealable, reveal_interface: Any
+) -> None:
+    """An id that names no record is refused, and refused as its own thing.
+
+    Uses case 1, the student with a name and an address, for the control only.
+
+    Added by PR #53's review, which found this branch and the one below asserted
+    nowhere. Both are reachable in one line, and the reason they were missed is
+    worth saying: every other test here arrives at the reveal holding an id the
+    recording call gave it, so nothing had ever handed it one it did not make.
+
+    **Why it is `invariant`.** The reveal reads its subject out of whatever row the
+    id finds. A branch that answers instead of refusing for a row that is not
+    there is one `IF NOT FOUND` away from a branch that answers for a row that is
+    there but is not a reveal, and both end at a name leaving the database against
+    a record that does not account for it.
+
+    **The mutation it exists to survive**: deleting the `IF NOT FOUND THEN RAISE`
+    block. `SELECT … INTO` leaves the variables null, the committed-record check
+    then asks `pg_xact_status` about a null and answers null, `IS DISTINCT FROM
+    'committed'` is true, and the caller gets the *not-committed* refusal — the
+    wrong instruction, telling E10's queue to commit a record that does not exist.
+    So this test must assert the SQLSTATE and not merely that something was raised.
+    """
+    caller = care_connections()
+
+    control_id, refused = record(
+        caller, actor=revealable.care_person, subject=revealable.subject_user_id
+    )
+    assert refused is None, (
+        f"The control failed: `public.{RECORD_FUNCTION}` refused a live `CARE` actor — {refused}. "
+        "A door shut to everybody satisfies the refusal below without any check existing."
+    )
+    caller.commit()
+
+    rows, control_failure = reveal(caller, control_id)
+    caller.commit()
+    assert control_failure is None and identity_in(rows), (
+        f"The control failed: the reveal answered nothing for a committed record — {control_failure}. "
+        "Without a call that works, a refusal for an unknown id proves only that the door is shut."
+    )
+
+    invented = uuid4()
+    rows, failure = reveal(caller, invented)
+    kept = identity_in(rows)
+    caller.rollback()
+
+    assert failure is not None, (
+        f"`public.{REVEAL_FUNCTION}` answered {sorted(kept)} for the id {invented}, which names no "
+        f"`{AUDIT_TABLE}` row at all — the control two lines up proves the same call works against "
+        "a real record. A reveal that answers for an id nobody recorded is a reveal with no record "
+        "behind it, which is the whole of what §4 forbids."
+    )
+    assert sqlstate(failure) == NO_SUCH_RECORD, (
+        f"The refusal carried SQLSTATE {sqlstate(failure)} rather than {NO_SUCH_RECORD}. This is "
+        "the branch most likely to be deleted by accident, because dropping it does not open the "
+        "door — it misroutes the caller to 'your record is not committed', which tells E10's queue "
+        "to commit something that was never written. The four codes are how the queue tells the "
+        "four apart, and asserting only that a raise happened cannot see a misrouting."
     )

@@ -1894,6 +1894,17 @@ UNDEFINED_OBJECT = "42704"
 IDENTITY_REVISION = "446183e8cc5f"
 BELOW_THE_IDENTITY_REVISION = f"{IDENTITY_REVISION}-1"
 
+# E0-26 item 1's revision, pinned for the same reasons and asserted separately.
+# The three tests above are about what *E0-10's* downgrade takes back and cannot
+# reach this one: both of their ends are pinned below it. That left this
+# revision's own `downgrade()` — including a hand-written `REVOKE SELECT ON
+# public.audit_log FROM pulse_reveal_definer`, which exists precisely because a
+# privilege on a table that survives is the one thing a `DROP FUNCTION` cannot
+# carry — executed by no test at all. Two reviewers found that independently on
+# PR #53, and the test below is the answer.
+THE_COMMITTED_RECORD_REVISION = "b336333a2805"
+BELOW_THE_COMMITTED_RECORD_REVISION = f"{THE_COMMITTED_RECORD_REVISION}-1"
+
 # Which roles hold what on the `public` schema, and on the database, as the
 # catalog records it. `aclexplode` is what makes this readable without pinning an
 # ACL string: an `aclitem` renders as `grantee=privileges/grantor`, and the
@@ -3524,4 +3535,97 @@ def test_public_is_the_only_schema_this_deployment_defines(db_session: Any) -> N
         "If the schema is deliberate, widening those sweeps is part of the same change rather "
         "than a follow-up — a sweep that has silently stopped covering an object is worse than "
         "one that was never written, because the green reads as coverage."
+    )
+
+
+@pytest.mark.invariant
+def test_downgrading_the_committed_record_revision_takes_back_the_definers_read_of_the_log(
+    empty_database: Any,
+    alembic_config_pointed_at: Any,
+) -> None:
+    """E0-26's own `downgrade()` gives back the fourth grant, and is executed here.
+
+    **Why this exists.** The three tests above are pinned at both ends to E0-10's
+    revision, so they undo E0-10's migration and never touch this one. Two
+    reviewers on PR #53 found the same gap independently: this revision's
+    `downgrade()` worked when either of them ran it by hand, and nothing in CI ran
+    it. The part that matters is not the `DROP FUNCTION` — dropping a function
+    takes its `EXECUTE` grant with it — but the hand-written `REVOKE SELECT ON
+    public.audit_log FROM pulse_reveal_definer`, because `audit_log` survives the
+    downgrade and a privilege on a surviving table is exactly what a `DROP` cannot
+    carry. That is the same defect class E0-10's own round left behind once, which
+    is why the test above exists at all.
+
+    **Both ends pinned**, for the reason the section note gives at length: `-1` is
+    relative to head, so the day a revision lands on top of this one, a relative
+    step would undo that instead and every assertion here would be true of a
+    database nobody had changed.
+
+    **The baseline is read first and is not ceremony.** The assertions after the
+    downgrade are that a privilege is *absent*, and absent is what a database
+    produces when the migration never ran, when the role was never made, or when
+    `has_table_privilege` was asked about the wrong database. So the two grants
+    this revision certainly makes are read back at the revision before anything is
+    undone.
+
+    **The mutation it exists to survive**: deleting the `REVOKE` block from
+    `downgrade()`, or dropping the second entry from `DOWNGRADE_SCRIPTS`. Either
+    leaves `alembic check` green and every other test green, and leaves the
+    definer holding `SELECT` on the whole audit log after a downgrade that is
+    supposed to have taken it back.
+    """
+    from alembic import command
+
+    config = alembic_config_pointed_at(empty_database)
+    command.upgrade(config, THE_COMMITTED_RECORD_REVISION)
+
+    with catalog_connection(empty_database) as connection:
+        definer = the_reveal_definer(connection)
+        at_the_revision = privileges_held(connection, (definer,), (AUDIT_TABLE,))
+        halves_at_the_revision = len(the_care_door(connection))
+
+    assert (definer, AUDIT_TABLE, "SELECT") in at_the_revision, (
+        f"At revision {THE_COMMITTED_RECORD_REVISION}, the door's owner `{definer}` does not hold "
+        f"`SELECT` on `public.{AUDIT_TABLE}`. That is the fourth grant E0-26 item 1 adds, and it "
+        "is the whole subject of this test: with it absent here, the assertion below that the "
+        "downgrade takes it back is satisfied by a database that never had it. What the owner "
+        f"holds is {sorted(at_the_revision)}."
+    )
+    assert (definer, AUDIT_TABLE, "INSERT") in at_the_revision, (
+        f"At revision {THE_COMMITTED_RECORD_REVISION}, `{definer}` does not hold `INSERT` on "
+        f"`public.{AUDIT_TABLE}`. That grant is E0-10's and this revision does not touch it, so "
+        "its absence means the baseline is wrong rather than that this revision is."
+    )
+    assert halves_at_the_revision == CARE_DOOR_HALVES, (
+        f"At revision {THE_COMMITTED_RECORD_REVISION} the Care door has {halves_at_the_revision} "
+        f"halves rather than {CARE_DOOR_HALVES}. The downgrade assertions below are about what "
+        "this revision takes away, and they cannot mean anything if it did not put it there."
+    )
+
+    command.downgrade(config, BELOW_THE_COMMITTED_RECORD_REVISION)
+
+    with catalog_connection(empty_database) as connection:
+        after = privileges_held(connection, (definer,), (AUDIT_TABLE,))
+        halves_after = len(the_care_door(connection))
+
+    assert (definer, AUDIT_TABLE, "SELECT") not in after, (
+        f"After downgrading below {THE_COMMITTED_RECORD_REVISION}, `{definer}` still holds "
+        f"`SELECT` on `public.{AUDIT_TABLE}` — it holds {sorted(after)}. `audit_log` survives this "
+        "downgrade, so the grant has to be revoked by hand: dropping the two functions takes their "
+        "`EXECUTE` grants and nothing else. A definer left holding this read is an owner that can "
+        "see who revealed whom across the whole institution, reachable through a door "
+        f"`{CARE_ROLE}` may open, at a revision whose records say the grant does not exist."
+    )
+    assert (definer, AUDIT_TABLE, "INSERT") in after, (
+        f"After the downgrade, `{definer}` no longer holds `INSERT` on `public.{AUDIT_TABLE}` — it "
+        f"holds {sorted(after)}. That grant is E0-10's, not this revision's, and a `downgrade()` "
+        "that takes back more than its own migration granted leaves the earlier revision unable to "
+        "write its audit row: the reveal is then a door that returns a name and records nothing, "
+        "which is worse than the defect E0-26 item 1 closed."
+    )
+    assert halves_after == 1, (
+        f"After downgrading below {THE_COMMITTED_RECORD_REVISION} the Care door has {halves_after} "
+        "halves rather than E0-10's single three-argument function. A downgrade that leaves the "
+        "two-call door standing beside the restored one leaves both callable, and the old one "
+        "takes its subject from its caller."
     )
