@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # `true` only when every path the diff touched is documentation nothing
-      # depends on. Read by the five expensive gates, which switch their own work
+      # depends on. Read by the six expensive gates, which switch their own work
       # off rather than being skipped — the `ci` job's comment says why a
       # job-level `if:` would fail the required check instead.
       inert: ${{ steps.diff.outputs.inert }}
@@ -352,24 +352,24 @@ jobs:
         run: echo "::notice::No frontend/package.json yet — tsc and eslint have nothing to check. Enforcing once the frontend scaffold lands."
 
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.detect.outputs.frontend == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install (lockfile, exact)
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.detect.outputs.frontend == 'true'
         working-directory: frontend
         run: npm ci
 
       - name: tsc --noEmit
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.detect.outputs.frontend == 'true'
         working-directory: frontend
         run: npx tsc --noEmit
 
       - name: eslint
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.detect.outputs.frontend == 'true'
         working-directory: frontend
         run: npx eslint . --max-warnings=0
 
@@ -881,12 +881,12 @@ jobs:
         run: pip-audit --strict --desc -r requirements.txt -r requirements-dev.txt
 
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: npm audit (fail on high/critical)
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         working-directory: frontend
         run: |
           npm ci

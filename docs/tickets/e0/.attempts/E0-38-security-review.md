@@ -495,3 +495,285 @@ second way past it. Neither HIGH is a hole in that reasoning. HIGH 2 is
 underneath it, in a layer the reasoning never reaches, since `argparse` answers
 before `main` runs. HIGH 1 is beside it: the reasoning is about `docs/` as an
 input to the build, and the gap is `docs/` as a subject of the tests.
+
+---
+
+# Second pass — the fix round
+
+**Diff reviewed:** `git diff a7419ad..b1bbb37`, nine files, 1225 insertions — the
+count matches. **Working directory:** the shared checkout at
+`/home/todd/projects/pulse-surveys` for reading, and a detached worktree at
+`b1bbb37` under this session's scratchpad for every mutation. No `/security-review`
+pass was used: it resolves its base to `main` and would have re-read the whole
+branch. This is a hand review of that range only.
+
+**Standing caveat.** I wrote the first report. The distinction it drew —
+documentation as a build *input* versus documentation as a *subject* — is now in
+the workflow comments, in ADR 0070, in the guard's name and in the commit
+messages. I can test whether the fixes work. I cannot test whether that
+distinction is the right cut, and a section at the end names every place where it
+is the thing holding the fix up.
+
+## Half one — the five findings, tested by mutation
+
+Every mutation was applied in the scratchpad worktree, run, and reverted from a
+file snapshot rather than by `git checkout`. Baseline before and after: 18 passed.
+
+### HIGH 1 — a repository-wide sweep inside a job the filter switches off — **closed**
+
+Three mutations, three kills, plus an end-to-end check that the sweeps actually
+fire on a `docs/` offence.
+
+- Removing the two private-key node ids from the `lint-python` step fails
+  `test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off`
+  with `tests/unit/test_mock_lms_service.py (uses .walk() from the repository
+  root, git ls-files)`.
+- The blind spot named in the brief is genuinely gone. Rewriting the single
+  `ls-files` occurrence in `test_mock_lms_service.py`'s docstring to "enumerating
+  the index" *and* removing the node ids still fails, now reporting `.walk() from
+  the repository root` alone. The `root` widening is doing the work, not the
+  string.
+- Appending a conflict marker to `docs/MISTAKES.md` turns
+  `test_the_index_holds_no_conflict_marker` red. Appending a PEM private-key
+  header to `docs/adr/0070-…md` turns
+  `test_no_private_key_material_is_committed_to_the_repository` red. Both offences
+  live in paths `classify_changed_paths.py` calls inert, and both node ids now run
+  in `lint-python`, which has no `if:` and does not need `changed`.
+- The three node ids run standalone with `DATABASE_URL` unset, and `lint-python`
+  installs `requirements-dev.txt`, so pytest and the imports are there. The step
+  will not fail for want of a database.
+
+I also swept `tests/` by hand for a third live instance the guard cannot see —
+`os.walk`, `Path.cwd()`, an imported root, a `.parent.parent` chain, `subprocess`
+calling `find`/`grep`/`git`. There is none. Every other `rglob`/`walk` in the
+suite is scoped to `APP_ROOT`, `PROMPTS_DIR`, `SERVICES_ROOT`, `VIEWS_SQL_DIR`,
+`WORKFLOWS_DIR` or `TEST_TREE`. The finding is closed for the tree as it stands.
+What the guard will do about the *next* one is new finding 2.
+
+### HIGH 2 — argparse answering before the guard — **closed, both halves**
+
+- Removing `--` from the workflow fails
+  `test_the_workflow_passes_a_separator_before_the_path_list`.
+- Removing the script's dash-rejection branch fails
+  `test_a_leading_dash_path_is_refused_rather_than_classified` on `-h.md` and
+  `--help.md`, and fails `scripts/ci/test_ci_scripts.py` on the same two cases.
+  The near misses are what make the second half load-bearing, exactly as the
+  comments claim: with `--` present but the refusal gone, bare `-h` still exits 1
+  because it is not an inert family, and only the dash-named Markdown cases
+  survive to catch it.
+- Direct behaviour, run against the classifier: without `--`, `-h`, `-hx` and
+  `--hel` all exit 0 and `-q` exits 2 — the original finding reproduces exactly.
+  With `--`, every one of those exits 1, and so do `-h.md`, `--help.md`,
+  `docs/../backend/app/main.py`, `README.md` and an empty list. A second `--` in
+  the path list is refused by the dash branch rather than swallowed, so
+  `-- -- docs/MISTAKES.md` exits 1. Every route I could find is fail-closed.
+
+### MEDIUM 1 — only a pull request may be inert — **closed**
+
+Restoring the `case` that selected `PUSH_BEFORE`, and putting `PUSH_BEFORE` back
+in the step's `env:`, fails
+`test_the_changed_job_classifies_the_diff_on_a_runner_that_has_only_python3` on
+the documentation-only-push case. That test executes the real shell step rather
+than matching its text, which is the right shape. `PUSH_BEFORE` survives nowhere
+that reads it: the only remaining references are prose, and three test fixtures
+that still pass it in the environment where the step now ignores it. Harmless —
+if anyone re-added `${PUSH_BEFORE:-}` it would be empty, the base would be empty,
+and the "no base commit" branch emits `inert=false`.
+
+### MEDIUM 2 — `e2e` and `evals` have their own notice steps — **closed in the workflow, undefended**
+
+Both steps are present and correctly conditioned. Deleting both of them leaves
+the whole suite green. The consequence of a silent revert is a log line rather
+than a gate, so this is not worth a test on its own — but it is worth knowing
+that nothing holds it, because ADR 0070 now records the notices as the only thing
+distinguishing "every gate passed" from "every gate declined to look."
+
+### MEDIUM 3 — `frontend-build` guarded and in `changed`'s needs — **closed in the workflow, undefended, and see new finding 1**
+
+The guard is there and `needs: [changed, detect, fast-gate]` is correct. But
+removing the notice step, stripping `&& needs.changed.outputs.inert != 'true'`
+from all four remaining steps, and dropping `changed` from the job's needs — a
+complete revert of the fix — leaves 18 passed in the guard module and 3 passed in
+`test_the_aggregate_ci_check_sees_an_upstream_failure.py`. Nothing objects.
+
+## Half two — new findings
+
+### 1. MEDIUM — the inventory that would defend the `frontend-build` guard still lists five jobs
+
+`EXPENSIVE_GATES` in
+`tests/unit/test_a_documentation_only_diff_does_not_run_the_expensive_gates.py:277`
+holds `test`, `docker`, `e2e`, `evals`, `supply-chain`. `frontend-build` is not in
+it, and `test_every_expensive_gate_reaches_the_classification_and_conditions_its_work_on_it`
+reads that table, so the job it was added to guard is the one job the test does
+not check. `.github/workflows/ci.yml:61` still says "read by the five expensive
+gates" and `docs/tickets/e0/.attempts/E0-38.md:12` still says "the five expensive
+ones guard their own steps." ADR 0070 is the only record that says six.
+
+This is the finding MEDIUM 3 was about, one level up. MEDIUM 3 was "a sixth
+expensive job exists and no record knows it." The fix guarded the job and
+corrected one record, and left the inventory the guard test reads — the thing
+that makes the property enforceable rather than asserted — still saying five.
+
+What it takes to reach the bad outcome: someone tidies the `frontend-build`
+conditions, or reverts this commit's hunk, after the frontend scaffold lands. CI
+stays green and a documentation-only pull request runs `npm ci` and a production
+build again. Cost is minutes of runner time, not a skipped safety gate, which is
+why this is MEDIUM rather than HIGH.
+
+Fix: add `frontend-build` to `EXPENSIVE_GATES` with `npm run build` as its work
+pattern, and correct the two remaining "five" claims.
+
+### 2. MEDIUM — the sweep detector catches the idiom it was built for and misses every other route to the repository root
+
+I wrote eight probe modules into `tests/unit/` and ran the guard against them.
+
+| Probe | Route to the repository root | Detected |
+|---|---|---|
+| H (control) | `REPO_ROOT = Path(__file__).resolve().parents[2]`, then `REPO_ROOT.rglob` | **yes** |
+| A | `os.walk(REPO_ROOT)` | no |
+| B | `Path.cwd().rglob("*")` | no |
+| C | `from tests.conftest import REPO_ROOT`, then `REPO_ROOT.rglob` | no |
+| D | `subprocess.run(["grep", "-r", …, str(REPO_ROOT)])` | no |
+| E | `subprocess.run(["git", "grep", "-l", …])` | no |
+| F | `TREE = Path(__file__).resolve().parent.parent.parent`, then `TREE.rglob` | no |
+| G | a fixture named `project_tree` returning the root | no |
+
+Probe E is worth singling out. On its first run it *was* detected — because I had
+written the words "git ls-files" in its docstring. That is the same string-match
+accident the brief describes finding in `test_mock_lms_service.py`, reproduced by
+accident in a file written to test for it. Once the docstring was reworded it went
+undetected.
+
+The detector requires all three of: an `ast.Attribute` call named
+`walk`/`rglob`/`glob`/`iterdir`; a receiver that is a bare `ast.Name`; and that
+name being in `ROOT_FIXTURE_NAMES` or assigned a `<expr>.parents[N]` subscript in
+the same module. `os.walk` fails the receiver test. `Path.cwd()` is a call, not a
+name. An imported `REPO_ROOT` has no assignment to find. `.parent.parent.parent`
+is not a `parents[N]` subscript. A fixture named anything but `repo_root`,
+`repository_root` or `root` is not in the list. Anything reaching the tree through
+a subprocess is invisible entirely.
+
+None of these is exotic. `os.walk` and `Path.cwd()` are what a Python programmer
+who has not read this module writes, and `subprocess` calling `git` is what
+`test_no_unresolved_merge_conflicts.py` — one of the two modules the fix exists
+for — already does.
+
+What it takes to reach the bad outcome: write a new repository-wide test in the
+ordinary way. The guard says nothing, the sweep lives in the `test` job, and a
+documentation-only pull request switches off the answer to whatever it checks.
+That is HIGH 1 recurring, with a guard in place that reports success. MEDIUM
+rather than HIGH because no current module escapes and it needs a future commit
+to bite.
+
+Suggestion, and it is a judgment call: match on the *call* rather than the
+receiver — any `walk`/`rglob`/`glob`/`iterdir` in a test module whose receiver is
+not demonstrably a subdirectory constant, plus any `subprocess` argument list
+whose first element is `git`, `grep` or `find`. That over-detects much harder than
+`root` does, and it needs the exception set to be trustworthy first, which is
+finding 3.
+
+### 3. LOW — `SWEEPS_THAT_NEED_NO_PROTECTION` is a place to put anything inconvenient
+
+You asked directly, so: the three entries are honest today, and nothing makes them
+stay that way.
+
+The two E0-35 entries check out. Both modules call `swept_modules(APP_ROOT)` where
+`APP_ROOT = REPO_ROOT / "backend" / "app"` and the helper does `root.rglob("*.py")`.
+The reason given is accurate.
+
+Nothing validates the set. I added `"tests/unit/test_a_module_that_does_not_exist.py"`
+with the reason `"no reason at all"`, and exempted
+`test_no_unresolved_merge_conflicts.py` — one of the two modules the whole fix
+exists for — with the reason `"inconvenient"`. 18 passed. A key naming a deleted
+module persists silently, and if a future module ever takes that path it is
+exempted for free.
+
+Compounding it: the detector over-detects in a way that will feed the set. Probe
+J was `HERE = Path(__file__).resolve().parents[0]` then `HERE.rglob("test_*.py")`
+— a walk of `tests/unit` and nothing more — and it was reported as "uses `.rglob()`
+from the repository root," because `is_repository_root` matches any `.parents[N]`
+subscript including `parents[0]`. Every such module has to be triaged into the
+exception set, the set fills with entries whose reasons nobody rereads, and the
+triage becomes rote. That is the mechanism by which a set like this stops doing
+work.
+
+Two cheap changes, in order of value: assert that every key resolves to a file
+that the detector still flags, so a stale or unnecessary key is a failure; and
+require `is_repository_root` to match `parents[N]` for `N >= 1` at minimum, or
+better, compare the resolved depth against the module's own.
+
+### 4. LOW — `lint-frontend` has the guard and not the dependency, so the guard is dead
+
+`lint-frontend` declares `needs: detect` at `.github/workflows/ci.yml:345`, and
+four of its steps now read `needs.changed.outputs.inert != 'true'`. GitHub
+populates the `needs` context only from declared needs, so that expression
+evaluates against null: `'' != 'true'` is true, and the steps run on every event
+regardless of the classification. I checked every job in the file; `lint-frontend`
+is the only one with an undeclared `needs.` reference.
+
+The failure is in the safe direction — the work runs when it might have been
+skipped — and `lint-frontend` is a fast job with no frontend to check today, so
+nothing is at risk. But the workflow reads as though the job is guarded and it is
+not, and the same polarity means this class of mistake will always look harmless
+and always be invisible. Either add `changed` to the job's needs or take the four
+conditions back out; do not leave it saying something untrue.
+
+### 5. LOW — a condition duplicated in `supply-chain`
+
+`.github/workflows/ci.yml:884` and `:889` both read
+`needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+&& needs.changed.outputs.inert != 'true'`. It is a no-op. It is in the diff, which
+means the guard edits went in by pattern rather than being read back, and that is
+the same process that produced finding 4.
+
+### Checked and clean
+
+- **`README.md` leaving the inert set.** Correct and complete. `pyproject.toml:26`
+  declares `readme = "README.md"` and `backend/Dockerfile:44` has
+  `COPY pyproject.toml README.md ./`; those are the only two consumers. `CLAUDE.md`
+  and `CONTRIBUTING.md` are the other root Markdown files and neither is a build
+  input. No record anywhere still claims README.md is inert. Verified directly:
+  `README.md` exits 1, `CONTRIBUTING.md` exits 0.
+- **The `..` refusal.** `Path(path).parts` catches `docs/../backend/app/main.py`.
+  `./docs/SPEC.md`, an absolute path and a path with a backslash all fall through
+  to not-inert on their own.
+- **The empty path list.** `python3 classify_changed_paths.py --` with no paths
+  exits 1.
+- **`PUSH_BEFORE`.** Nothing that reads it remains.
+- **The guard module exempting itself.** The stated reason holds: a change that
+  could add a sweep module is a `.py` change, which is never inert, so the module
+  cannot be switched off on a diff that could invalidate it.
+
+## Where a genuinely independent reader is needed
+
+These are the places where my own report's framing is what the fix rests on. A
+reviewer who inherited the distinction cannot check it, and I inherited it from
+myself.
+
+1. **The input/subject distinction itself.** It is now in ADR 0070's consequences,
+   in three workflow comments, in the guard's failure message ("The inert set is
+   about what the build reads; this is about what the suite asserts") and in
+   MISTAKES entry 38. If that is the wrong cut — if there is a third category, or
+   if "subject" is broader than test assertions and takes in something like the
+   licence scan or the image content check — every one of those records is now
+   wrong in the same direction, and I am the last person who would notice.
+2. **`lint-python` as the home for the sweeps.** I supplied "unconditional job" as
+   the criterion and the fix satisfies it literally. Nobody has asked whether
+   duplicating three node ids into a lint job is better than making the sweep
+   portion of the `test` job unconditional, or than a small job of its own. The
+   guard test hard-codes `UNCONDITIONAL_SWEEP_JOB = "lint-python"`, so the choice
+   is now load-bearing in a second place.
+3. **The MEDIUM 1 verdict that a push may never be inert.** My report argued it,
+   the fix implements the argument, and the test now asserts the argument. Nothing
+   independent has checked whether a documentation-only push to an epic branch
+   with previously-red gates is a real path in this repository's merge flow, or
+   whether the saving given up matters. It could go either way and I am not the
+   one to say.
+4. **The three entries in `SWEEPS_THAT_NEED_NO_PROTECTION`.** I verified the two
+   E0-35 ones by reading their call sites. The third — the guard module exempting
+   itself — rests on reasoning I would have written the same way, which is not the
+   same as it being right.
+5. **`README.md`'s reversal.** I raised it and ADR 0070 now records my reasoning
+   as the decision, including the claim that this epic has produced no README-only
+   pull requests. Somebody should check that count against the branch history
+   rather than against the record that asserts it.

@@ -295,6 +295,20 @@ EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
         "the dependency audit and the licence scan",
         re.compile(r"^\s*(?:pip-audit|pip-licenses)\b", re.MULTILINE),
     ),
+    # The sixth, and it was missing from this inventory until E0-38's second
+    # review pass. The job was guarded and ADR 0070 was corrected to say six, but
+    # this dict is what makes the property *enforceable* rather than described —
+    # so `frontend-build` was the one expensive job the coverage test below did
+    # not check, and a complete revert of its guard left the suite green. That is
+    # docs/MISTAKES.md entry 35 again: the control's inventory has to name the
+    # thing the guarded structure cannot shrink.
+    #
+    # It is free today only because `detect.outputs.frontend` is false. Once the
+    # scaffold lands it is an `npm ci` and a production build.
+    "frontend-build": (
+        "the frontend production build and the bundle budget",
+        re.compile(r"^\s*npm\s+(?:ci|run\s+build)\b", re.MULTILINE),
+    ),
 }
 
 # The three fast jobs E0-38 leaves alone, and why each one.
@@ -926,7 +940,7 @@ def test_nothing_the_test_suite_opens_by_path_is_classified_inert() -> None:
 def test_every_expensive_gate_reaches_the_classification_and_conditions_its_work_on_it(
     ci_workflow_path: Path, ci_workflow: dict[str, Any]
 ) -> None:
-    """E0-38's scope: the five expensive gates short-circuit, and nothing else changes shape.
+    """E0-38's scope: the six expensive gates short-circuit, and nothing else changes shape.
 
     Each of `Test · pytest + invariants`, `Build · images + Compose health`,
     `Test · Playwright e2e`, `Test · AI eval floors` and
@@ -1132,7 +1146,7 @@ def test_the_fast_gates_run_whatever_the_diff_touched(
 
     **The mutation this survives:** add the same short-circuit step to
     `lint-python` on the grounds that Markdown cannot fail ruff. **The near miss
-    that must stay green:** anything at all happening in the five expensive jobs,
+    that must stay green:** anything at all happening in the six expensive jobs,
     since this looks only at these three.
     """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
@@ -2114,7 +2128,10 @@ def test_a_rename_out_of_a_code_directory_is_not_read_as_a_documentation_change(
 # under a code directory is not inert and the suite runs anyway. Only a walk
 # rooted at the *repository* is the problem, so the receiver is resolved rather
 # than the call being matched by name.
-INDEX_SWEEP = "ls-files"
+# Commands that enumerate the repository from a subprocess rather than from
+# Python. `test_no_unresolved_merge_conflicts.py` already sweeps this way, so
+# this is the ordinary idiom here and not an exotic one.
+SUBPROCESS_SWEEPS = ("ls-files", "git grep", "grep -r", "grep -R")
 WALK_CALLS = ("walk", "rglob", "glob", "iterdir")
 
 # Names that mean the repository root: the `…parents[N]` idiom this suite uses,
@@ -2132,7 +2149,24 @@ WALK_CALLS = ("walk", "rglob", "glob", "iterdir")
 # toward over-detection is the right direction: a false match is triaged once
 # into SWEEPS_THAT_NEED_NO_PROTECTION with a reason, and a missed one is a gate
 # that silently does not run.
-ROOT_FIXTURE_NAMES = ("repo_root", "repository_root", "root")
+ROOT_FIXTURE_NAMES = (
+    "repo_root",
+    "repository_root",
+    "root",
+    "project_root",
+    "project_tree",
+    # Not bare `tree`. It looked like a reasonable root name and it is the
+    # conventional name for a parsed AST, so `ast.walk(tree)` — which this module
+    # and five guard modules all use — read as a repository-wide sweep. Five
+    # false positives, each of which would have been triaged into the exception
+    # set, which is how an exception set fills up with noise and the triage goes
+    # rote. Over-detection is the safe direction; over-detection on a name this
+    # common is not.
+    "REPO_ROOT",
+    "REPOSITORY_ROOT",
+    "PROJECT_ROOT",
+    "TREE",
+)
 
 # Modules that sweep the repository but need no protection, each with the reason.
 # A new module that sweeps the root must be triaged into this set or into the
@@ -2158,36 +2192,104 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
 UNCONDITIONAL_SWEEP_JOB = "lint-python"
 
 
+def is_a_root_expression(node: ast.expr) -> bool:
+    """Whether `node` evaluates to the repository root rather than a directory in it.
+
+    Four spellings, all of which E0-38's second review pass found the first
+    version of this missing: `…parents[N]`, a `.parent.parent…` chain of depth
+    two or more, `Path.cwd()`, and the bare names in ROOT_FIXTURE_NAMES.
+
+    It over-detects on purpose. `parents[0]` is the containing directory and
+    matches here, so a walk scoped to `tests/unit` is reported as
+    repository-wide and has to be triaged. That is the safe direction: a false
+    match costs one entry in the exception set, which is itself now validated,
+    and a missed one costs a gate that silently does not run.
+    """
+    if is_repository_root(node):
+        return True
+
+    # `Path(__file__).resolve().parent.parent.parent` — two or more, because a
+    # single `.parent` is the module's own directory and means nothing here.
+    depth = 0
+    walker = node
+    while isinstance(walker, ast.Attribute) and walker.attr == "parent":
+        depth += 1
+        walker = walker.value
+    if depth >= 2:
+        return True
+
+    # `Path.cwd()`, which is the repository root whenever pytest is run from it.
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "cwd"
+    ):
+        return True
+
+    return isinstance(node, ast.Name) and node.id in ROOT_FIXTURE_NAMES
+
+
 def names_meaning_the_repository_root(tree: ast.Module) -> set[str]:
-    """Every local name in `tree` that holds the repository root itself."""
+    """Every local name in `tree` that holds the repository root itself.
+
+    Assignments, and also plain imports: `from tests.conftest import REPO_ROOT`
+    binds the name without an assignment anywhere in the module, and a module
+    that imports the root is exactly as repository-wide as one that computes it.
+    """
     roots: set[str] = set(ROOT_FIXTURE_NAMES)
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
             target = node.targets[0]
-            if isinstance(target, ast.Name) and is_repository_root(node.value):
+            if isinstance(target, ast.Name) and is_a_root_expression(node.value):
                 roots.add(target.id)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                imported = alias.asname or alias.name
+                if imported in ROOT_FIXTURE_NAMES:
+                    roots.add(imported)
     return roots
 
 
 def sweeps_the_repository(source: str) -> list[str]:
     """Which repository-wide idioms `source` uses, if any."""
     used: list[str] = []
-    if INDEX_SWEEP in source:
-        used.append("git ls-files")
+    for command in SUBPROCESS_SWEEPS:
+        if command in source:
+            used.append(f"a subprocess running `{command}`")
 
     tree = ast.parse(source)
     roots = names_meaning_the_repository_root(tree)
+
+    # A list of string arguments, which is how a subprocess sweep is spelled here
+    # — `["git", "grep", …]` never contains the substring "git grep".
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.List):
+            continue
+        words = [
+            e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        ]
+        joined = " ".join(words)
+        for command in SUBPROCESS_SWEEPS:
+            if command in joined and f"a subprocess running `{command}`" not in used:
+                used.append(f"a subprocess running `{command}`")
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         function = node.func
         if not isinstance(function, ast.Attribute) or function.attr not in WALK_CALLS:
             continue
-        receiver = function.value
-        rooted = (isinstance(receiver, ast.Name) and receiver.id in roots) or is_repository_root(
-            receiver
+
+        # `os.walk(root)` puts the root in the first argument rather than in the
+        # receiver, so both positions have to be read.
+        receiver_is_root = (
+            isinstance(function.value, ast.Name) and function.value.id in roots
+        ) or is_a_root_expression(function.value)
+        argument_is_root = bool(node.args) and (
+            (isinstance(node.args[0], ast.Name) and node.args[0].id in roots)
+            or is_a_root_expression(node.args[0])
         )
-        if rooted:
+        if receiver_is_root or argument_is_root:
             used.append(f".{function.attr}() from the repository root")
     return sorted(set(used))
 
@@ -2346,5 +2448,267 @@ def test_the_workflow_passes_a_separator_before_the_path_list(
             "The script also refuses leading-dash arguments, and that is the second half rather "
             "than a replacement: argparse runs first, so the script's refusal is unreachable "
             "unless this separator is here.",
+        ]
+    )
+
+
+def test_no_step_condition_reads_a_job_it_did_not_declare(
+    ci_workflow: dict[str, Any], ci_workflow_path: Path
+) -> None:
+    """An undeclared `needs.x` is an empty string, so the guard reading it is dead.
+
+    Found by E0-38's second review pass, in this ticket's own diff. Adding the
+    inert guard to `frontend-build` was done with a blanket edit over
+    `if: needs.detect.outputs.frontend == 'true'`, and that string appears in
+    three jobs. `lint-frontend` — a fast gate that E0-38 deliberately leaves
+    alone — got four guards and no `changed` in its `needs`, and `supply-chain`
+    got a second copy of a clause it already had.
+
+    The `needs` context holds only declared needs, so `needs.changed.outputs.inert`
+    in a job that does not need `changed` evaluates to `''`, and `'' != 'true'` is
+    true. **The polarity is why this needs a test rather than a reading**: the
+    dead guard's steps always run, so the job behaves exactly as it did before and
+    nothing goes red. A mistake that always looks harmless is one nobody finds.
+    """
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+    reference = re.compile(r"needs\.([a-z][a-z0-9-]*)\.")
+
+    undeclared: list[str] = []
+    duplicated: list[str] = []
+    for name, job in jobs.items():
+        declared = needs_of(job)
+        for step in (job or {}).get("steps") or []:
+            condition = str((step or {}).get("if") or "")
+            if not condition:
+                continue
+            label = str((step or {}).get("name") or (step or {}).get("uses") or "?")
+            for referenced in sorted(set(reference.findall(condition))):
+                if referenced not in declared:
+                    undeclared.append(
+                        f"  {name} / {label}\n"
+                        f"    reads:    needs.{referenced}\n"
+                        f"    declares: {declared or 'nothing'}"
+                    )
+            for clause in set(condition.split(" && ")):
+                if condition.split(" && ").count(clause) > 1:
+                    duplicated.append(f"  {name} / {label}: {clause!r} appears twice")
+
+    assert not undeclared, "\n".join(
+        [
+            "A step condition reads a job its own job did not declare in `needs`:",
+            *undeclared,
+            "",
+            "GitHub's `needs` context contains only declared needs, so that reference is the "
+            "empty string. A guard written `!= 'true'` is then always true and the step always "
+            "runs; a guard written `== 'true'` is always false and the step never runs. Either "
+            "way the condition says something the workflow does not do.",
+            "",
+            "Fix it by adding the job to `needs`, or by removing the condition if the guard was "
+            "not wanted there — those are different decisions and the diff should say which.",
+        ]
+    )
+    assert not duplicated, "\n".join(
+        [
+            "A step condition repeats one of its own clauses:",
+            *duplicated,
+            "",
+            "Harmless to evaluate and a reliable sign that a blanket edit ran over a condition "
+            "that already had the clause, which is how the undeclared references above got in.",
+        ]
+    )
+
+
+def test_the_sweep_exception_set_only_holds_modules_the_detector_still_flags(
+    ci_workflow: dict[str, Any], ci_workflow_path: Path
+) -> None:
+    """An exception nobody can reach is a place to put anything inconvenient.
+
+    E0-38's second review pass added a key for a module that does not exist, with
+    the reason "no reason at all", and exempted one of the two modules the fix
+    exists for with the reason "inconvenient". Both passed, because nothing
+    validated the set — it was only being used honestly.
+    """
+    detected = modules_that_enumerate_the_repository()
+
+    unreachable: list[str] = []
+    for module, reason in sorted(SWEEPS_THAT_NEED_NO_PROTECTION.items()):
+        if not (REPO_ROOT / module).is_file():
+            unreachable.append(f"  {module}: not a file in this repository ({reason})")
+        elif module not in detected:
+            unreachable.append(
+                f"  {module}: the detector does not flag it, so exempting it does nothing "
+                f"({reason})"
+            )
+
+    assert not unreachable, "\n".join(
+        [
+            "SWEEPS_THAT_NEED_NO_PROTECTION holds entries that exempt nothing:",
+            *unreachable,
+            "",
+            "Every key must name a real module that the detector still flags. A key that no "
+            "longer matches is either a module whose sweep was narrowed — in which case delete "
+            "the entry — or a module the detector has stopped seeing, which is the failure the "
+            "detector exists to prevent and is worth knowing about.",
+            "",
+            "This set is the one place in this module where a real finding can be made to "
+            "disappear by typing a filename, so it is the one that needs a check of its own.",
+        ]
+    )
+
+    # The set may not exempt a module the unconditional job is relying on.
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+    sweep_steps = "\n".join(
+        str(step.get("run", ""))
+        for step in (jobs.get(UNCONDITIONAL_SWEEP_JOB) or {}).get("steps") or []
+    )
+    both_ways = [m for m in SWEEPS_THAT_NEED_NO_PROTECTION if m in sweep_steps]
+    assert not both_ways, "\n".join(
+        [
+            "A module is exempted as needing no protection and is also protected:",
+            *(f"  {m}" for m in both_ways),
+            "",
+            f"One of the two is wrong. Either it needs to run in `{UNCONDITIONAL_SWEEP_JOB}`, in "
+            "which case it does not belong in the exception set, or it does not, in which case "
+            "the job should stop naming it.",
+        ]
+    )
+
+
+# The spellings a repository-wide sweep can be written in. Every one of these was
+# missed by the first version of the detector, and E0-38's second review pass
+# found them by writing exactly these probes. They are kept because a detector
+# is only as good as the shapes it has been shown: narrowing it later is a
+# one-line edit whose whole effect is invisible without them.
+#
+# The reviewer's own `git grep` probe was detected on its first run for the wrong
+# reason — it had the words "git ls-files" in its docstring. These carry no prose
+# for that reason.
+SWEEP_SPELLINGS: tuple[tuple[str, str], ...] = (
+    (
+        "the plain form, which is the control",
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def test_x():\n"
+        "    for path in REPO_ROOT.rglob('*'):\n        pass\n",
+    ),
+    (
+        "os.walk, where the root is an argument rather than the receiver",
+        "import os\nfrom pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def test_x():\n"
+        "    for parent, dirs, names in os.walk(REPO_ROOT):\n        pass\n",
+    ),
+    (
+        "Path.cwd(), which is the root whenever pytest runs from it",
+        "from pathlib import Path\n"
+        "def test_x():\n"
+        "    for path in Path.cwd().rglob('*'):\n        pass\n",
+    ),
+    (
+        "an imported root, which no assignment in the module binds",
+        "from tests.conftest import REPO_ROOT\n"
+        "def test_x():\n"
+        "    for path in REPO_ROOT.rglob('*'):\n        pass\n",
+    ),
+    (
+        "a subprocess running grep -r",
+        "import subprocess\n"
+        "def test_x():\n"
+        "    subprocess.run(['grep', '-r', 'TODO', '.'], check=False)\n",
+    ),
+    (
+        "a subprocess running git grep, which is how this suite already sweeps",
+        "import subprocess\n"
+        "def test_x():\n"
+        "    subprocess.run(['git', 'grep', '-n', 'TODO'], check=False)\n",
+    ),
+    (
+        "a .parent chain instead of parents[N]",
+        "from pathlib import Path\n"
+        "TREE = Path(__file__).resolve().parent.parent.parent\n"
+        "def test_x():\n"
+        "    for path in TREE.rglob('*.md'):\n        pass\n",
+    ),
+    (
+        "a fixture parameter holding the root",
+        "from pathlib import Path\n"
+        "def test_x(project_tree: Path):\n"
+        "    for path in project_tree.rglob('*'):\n        pass\n",
+    ),
+)
+
+
+def test_the_sweep_detector_sees_every_spelling_it_has_been_shown() -> None:
+    """A detector is worth what its blind spots are, and these were all live once."""
+    missed = [
+        f"  {case}\n{''.join('      ' + line + chr(10) for line in source.splitlines())}"
+        for case, source in SWEEP_SPELLINGS
+        if not sweeps_the_repository(source)
+    ]
+
+    assert not missed, "\n".join(
+        [
+            "The sweep detector does not see these, so a module written this way would assert "
+            "over `docs/` from inside a job an inert diff switches off, and nothing would say so:",
+            *missed,
+            "",
+            "Every one of these was missed by the first version of the detector and each was "
+            "found by writing the probe rather than by reading the code. If a change here is "
+            "deliberate — narrowing a name that over-matched, say — then the case it made "
+            "unnecessary should be deleted with the change and this list should still be "
+            "exhaustive of what remains.",
+        ]
+    )
+
+
+def test_the_sweep_detector_does_not_fire_on_an_ordinary_scoped_walk() -> None:
+    """Over-detection is the safe direction and is not free; this is the floor.
+
+    `ast.walk(tree)` is the case that made this worth an assertion. `tree` was in
+    the root-name list for one revision, and since `ast.walk`'s root arrives as
+    its first argument, five guard modules that sweep `backend/app` were reported
+    as repository-wide. Each would have been triaged into the exception set, which
+    is how that set fills with noise and the triage stops being read.
+    """
+    scoped = (
+        (
+            "a sweep over a subdirectory built from the root",
+            "from pathlib import Path\n"
+            "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+            "APP_ROOT = REPO_ROOT / 'backend' / 'app'\n"
+            "def test_x():\n"
+            "    for path in APP_ROOT.rglob('*.py'):\n        pass\n",
+        ),
+        (
+            "ast.walk over a parsed module, which is not a filesystem sweep at all",
+            "import ast\n"
+            "def test_x(source: str):\n"
+            "    for node in ast.walk(ast.parse(source)):\n        pass\n",
+        ),
+        (
+            "ast.walk over a name conventionally called tree",
+            "import ast\n"
+            "def test_x(source: str):\n"
+            "    tree = ast.parse(source)\n"
+            "    for node in ast.walk(tree):\n        pass\n",
+        ),
+    )
+
+    fired = [
+        f"  {case}: {sweeps_the_repository(source)}"
+        for case, source in scoped
+        if sweeps_the_repository(source)
+    ]
+
+    assert not fired, "\n".join(
+        [
+            "The sweep detector fires on a walk that is scoped to a directory, or on a walk that "
+            "is not over the filesystem at all:",
+            *fired,
+            "",
+            "A change under a code directory is never inert, so those sweeps run anyway and need "
+            "no protection. Each false match has to be triaged into "
+            "SWEEPS_THAT_NEED_NO_PROTECTION by hand, and a set full of noise is one nobody reads "
+            "— which is the failure the set is supposed to prevent.",
         ]
     )

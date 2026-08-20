@@ -110,8 +110,9 @@ is loud rather than silent.
   `::notice::` line in each short-circuited job is the only thing that says
   which. **Two jobs had the guard and no notice** — `Test · Playwright e2e` and
   `Test · AI eval floors` printed only their older "no specs yet" and "no runner
-  yet" lines, so on the first documentation-only run three of the five expensive
-  jobs said why they had not worked and two said nothing about it. Worse after
+  yet" lines, so on the first documentation-only run three of the five jobs
+  guarded at that point said why they had not worked and two said nothing about
+  it. (Five, because `frontend-build` was the sixth and was not yet guarded.) Worse after
   E0-18: `detect.e2e` turns true, the "no specs yet" step stops firing, and the
   job would have printed nothing at all. Each of those jobs has its own notice
   step now. This is ADR 0002's first consequence — "a tolerant job looks like a
