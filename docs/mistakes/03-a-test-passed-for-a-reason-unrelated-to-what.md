@@ -1,10 +1,44 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 42**
+**Caught: 43**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*21 instances recorded; the 3 most recent are below. The earlier 18 are in this file's git history and in the pull requests they cite.*
+*22 instances recorded; the 4 below are the most recent. **This file needs a trim
+and it needs one from git**: the three that were here are not in a single
+chronological order, so dropping the last would be dropping the one that only
+looks oldest, which is the hazard the trimming rule exists for. Whoever has a
+shell should date them and cut back to three.*
+
+*(Writing E0-26 item 1's tests, and it is the "assertion that cannot fail" shape
+in the place it is hardest to see — inside a control. The refusal test for a
+non-Care actor took the committed `audit_log` total before and after the refused
+`record_identity_reveal` call and asserted it had not moved, on the reasoning that
+a function checking the actor *after* inserting the row would be caught. It cannot
+be. A `RAISE` aborts the caller's transaction, so a row written before the check is
+discarded by the caller's own `ROLLBACK` whatever the implementation did, and the
+two orderings produce exactly the same count. Only a record written over a second
+connection would make the ordering observable, and this ticket rejects that
+mechanism. The assertion was removed, and what stands in its place is one that can
+fail — the permitted call's returned id must name a committed row read from the
+second connection, which kills a recording call that answers a uuid it invented.
+The docstring now says the ordering is worth doing and is not observable from
+here, so the next reader does not add the check back.*
+
+***A second application in the same ticket, counted once**, and it arrived through
+a fixture guard firing. `user_identity.identity_email` is nullable, the seeding
+helper fills only what the schema requires, and **nothing in `tests/` had ever
+seeded that column** — so every identity row the suite had ever made carried a null
+address. Two assertions written against it were therefore satisfied by nothing: the
+honest path's `returned["identity_email"] == revealable.identity_email` was
+`None == None`, and the leak half of the subject-substitution test asked whether the
+*other* student's address appeared in what came back, which is true of any result
+at all when that address is `None`. The obvious repair — seed an address for the
+one subject whose guard fired — would have left both. Both students are now seeded
+with an address explicitly, and the optional-address case that the null was
+accidentally standing in for became a subject of its own with a test that names it.
+Three cases that had been one are now three: a name with an address, a name with
+none, and no identity row at all.)*
 
 *(Writing E0-38's tests, and it is the variant where **the safe reading and the
 asserting reading are the same exit code**. The classification E0-38 adds must

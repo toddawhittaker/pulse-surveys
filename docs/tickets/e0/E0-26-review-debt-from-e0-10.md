@@ -159,7 +159,11 @@ What each call must hold:
   looking the same.
 - It re-checks that the record's actor still holds `CARE`, and that the record is
   an `IDENTITY_REVEAL`. The two-places rule E0-10 states does not weaken because
-  the door grew a second half.
+  the door grew a second half. **That refusal raises as well** — settled
+  2026-08-20, after the test author pointed out that the interface said "raises"
+  for an uncommitted record and said nothing here. An empty result is the value
+  the service turns into `None`, so refusing an actor who has lost `CARE` by
+  returning nothing recreates the collision this list refuses one line above.
 
 **A record written by the calling transaction does not count as committed, and
 "written by the calling transaction" has to mean the top-level one.** Comparing

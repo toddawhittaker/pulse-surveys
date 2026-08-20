@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 42** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 43** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -164,6 +164,10 @@ subject that certainly has it, as a control. A guard that only ever reports
 absence cannot tell you which mechanisms it can see — and the role a scheme is
 built around is the one least likely to hold its privileges the ordinary way.
 
+## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
+
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+
 ## 17. An unqualified table name let the caller choose which table a guard read
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/17-an-unqualified-table-name-let-the-caller-choose-which.md)
@@ -187,10 +191,6 @@ file and check the status, or run the gate bare.
 ## 18. A deliverable existed in the source tree and not in the built artifact
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/18-a-deliverable-existed-in-the-source-tree-and-not.md)
-
-## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
-
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 23. A validation created the appearance of a behaviour
 

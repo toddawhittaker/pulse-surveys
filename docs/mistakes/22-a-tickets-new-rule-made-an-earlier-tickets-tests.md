@@ -1,8 +1,27 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 1**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*(Writing E0-26 item 1's tests, and this time the sweep was run before the tests
+were, so the collision is a paragraph in a report rather than a dispute round.
+E0-26 splits the reveal into two calls and **drops** the three-argument
+`reveal_student_identity`, and `tests/integration/test_identity_grants.py` reaches
+its door through `the_reveal_function`, which asserts that `pulse_care` may execute
+**exactly one** `SECURITY DEFINER` function. After the split there are two, so that
+helper fails inside the setup of the ten tests that reach the door through it, none
+of which is about this ticket — and the four that go on to *call* the reveal do it
+inside `db_session`, whose transaction is never committed, which the new shape
+refuses by design. `grep -rn
+'reveal_student_identity' tests/` and one read of the helper found all of it in
+about ten minutes. Nothing was repaired: the repair is a migration of E0-10's
+module onto the new interface, it is larger than the ticket's own tests, and doing
+it half-way inside a ticket about something else is how a green suite stops meaning
+what it says. It is reported as a partitioned round for the same agent instead.
+The entry's second rule earned its place here too — `the_reveal_function`'s
+assertion message prescribes a repair to whoever trips it, and whoever trips it
+will be the implementer, who may not edit `tests/`.)*
 
 *(In E0-15's tests, and it stopped a test being written rather than
 repaired one. E0-15's scope says "every seeded course needs a title"; E0-14's scope
