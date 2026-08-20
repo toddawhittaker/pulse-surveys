@@ -1,13 +1,19 @@
 -- What each role may reach — tickets E0-10 and E0-26, SPEC §8, ADR 0001,
 -- ADR 0043, ADR 0071.
 --
--- **This replaces `identity_grants_v001.sql`**, which is still the text E0-10's
--- revision applied and is never edited (ADR 0041). Two things changed, both from
--- E0-26 item 1 splitting the reveal into two calls:
+-- **This supersedes `identity_grants_v001.sql`, and pulse_reveal_definer's grant
+-- list is now FOUR, not three.** v001 is still the text E0-10's revision applied
+-- and is never edited (ADR 0041), so its header goes on saying three — which was
+-- true of the revision that ran it, and is the reason it is not corrected. If you
+-- arrived at v001 or at `identity_roles_v001.sql` through a grep and read "three
+-- grants", this file is the successor and four is the current number. Two things
+-- changed, both from E0-26 item 1 splitting the reveal into two calls:
 --
 --   * the owner change, the REVOKE and the GRANT EXECUTE name the two new
 --     functions rather than the dropped three-argument one;
---   * pulse_reveal_definer gains a fourth grant, SELECT on public.audit_log.
+--   * pulse_reveal_definer gains a fourth grant, SELECT on public.audit_log,
+--     because the reveal now reads its subject and its actor out of the committed
+--     record instead of taking them from its caller (ADR 0071).
 --
 -- Everything else is v001 unchanged, restated rather than referred to, so that
 -- "what each role holds" stays one file somebody can read against the function

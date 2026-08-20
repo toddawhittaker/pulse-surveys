@@ -1,10 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 35**
+**Caught: 36**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*18 instances recorded; the 3 most recent are below. The earlier 15 are in this file's git history and in the pull requests they cite.*
+*19 instances recorded; the 4 most recent are below. The earlier 15 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-31 item 1, where the change was a **decision reversal** and the stale
 records were the ones that had argued for the old decision. ADR 0065 said
@@ -48,6 +48,34 @@ considered, and put it back. **The record most likely to be missed is the one yo
 are looking straight at**, because a comment above the line you are editing reads
 as context rather than as a claim. The sweep has to include the diff's own
 neighbourhood, not only the rest of the repository.)*
+
+*(In E0-26 item 1, and this one is a catch and a recurrence in the same commit,
+which is why it is worth the space. The change replaced the Care reveal, and the
+ticket named three records to repair. The sweep found five more that nothing had
+pointed at: ADR 0001's rejected-alternative block and its "one transaction"
+consequence, ADR 0042's "two connections mean two transactions" consequence —
+which named the wrong function once the door was split — and its "what this does
+not fix" paragraph, ADR 0043's three-grant decision list, `docker-compose.yml`'s
+comment justifying why `CARE_DATABASE_URL` is blanked, and the epic README's
+decision row. **The same sweep then missed eight more**, found only when a
+coordinator asked what the counter bump was for: the ADR index row still titled
+0043 "holding three grants"; two more sentences inside ADR 0043 itself; ADR
+0001's numbered decision item, false twice over — "Care's only access is **one**
+`SECURITY DEFINER` function that returns identity and writes the audit row **in
+the same transaction**"; two sentences in ADR 0040, which 0043 had already
+amended once for the role count; the repository's own top-level `README.md`; and
+`backend/app/models/__init__.py`, which is source rather than documentation.
+
+Three of the eight were inside the two ADRs being amended at the time, which is
+the shape worth naming: **the paragraphs that got repaired were the ones read
+while writing, not the file.** And none of the eight surfaces from grepping
+`reveal_student_identity`, because none of them names it — they carry the *fact*
+("three grants", "in the same transaction"), which is what a record about a
+mechanism actually says. The identifier grep found the sites that mention the
+function; the fact grep is what finds the sites that describe it. The index row
+was the worst of them, and this entry's own rule already says indexes are the
+highest risk, so knowing the rule was not enough — the sweep has to be a list of
+greps run, not an intention.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
@@ -106,6 +134,15 @@ something about that thing — comments, ADRs, tickets, indexes, READMEs, the pu
 request body, test docstrings. Indexes are the highest risk: written once, never
 re-read. "Re-read nearby prose" is not enough; it misses the record that was
 never written and the one that drifted out from under you.
+
+**Grep the fact, not the identifier, and re-read the whole record you are
+amending.** A record about a mechanism states a property — "three grants", "in
+the same transaction", "the only writer" — and a grep for the thing's *name*
+finds none of the sentences that carry it. So the sweep is at least two greps:
+one for the identifier, one for each fact the change makes false, in its own
+wording. And amending a record is not reading it: open the whole file, because
+the sentence three sections away from the one you were sent to fix is written by
+the same author making the same assumption.
 
 A thirteenth, in E0-15, and it is the sharpest instance of the count rule below
 because it happened **inside the commit that bumped this entry's counter for

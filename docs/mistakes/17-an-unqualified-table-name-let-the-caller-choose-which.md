@@ -5,6 +5,39 @@
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
 
+*(**The note below is not a catch, and the counter does not move.** E0-26 bumped
+this entry to 2 and the bump has been taken back down, because the thing it
+claimed was reasoned by analogy and then measured false — which is this file's own
+closing lesson happening to this file.)*
+
+*(In E0-26 item 1. The new reveal's `plpgsql` body is the first in this repository
+to call functions rather than only read relations — `pg_xact_status`,
+`pg_current_snapshot`, `pg_snapshot_xmax`, `div` — and all four were written
+`pg_catalog.`-qualified on the reasoning that a function name is resolved through
+`search_path` the same way a relation name is, so the rule above must extend to
+them. **It does not.** Measured on the pinned image with a `SECURITY DEFINER`
+body calling `div(9, 2)` unqualified, as a non-superuser, against every shadow
+available:
+
+| `search_path` on the function | baseline | `pg_temp.div` created | `public.div` created too |
+|---|---|---|---|
+| `pg_catalog, public, pg_temp` | 4 | 4 | 4 |
+| `public, pg_temp` (the `SET` rewritten, not merely dropped) | 4 | 4 | 4 |
+
+`pg_temp` is never searched for function names at all — only for relation and
+type names, which is the asymmetry that makes the relation case exploitable and
+this one not — and `pg_catalog` is searched **first** for functions whenever it
+is not named explicitly, so removing it from the `SET` does not help an attacker
+either. The four prefixes are readability and consistency with the relations
+beside them; they are not a guard, and the header comment in
+`reveal_student_identity_v002.sql` was corrected in the same change from claiming
+they are "the half that survives somebody later dropping the SET clause".
+
+The contrast case ran in the same probe and is worth keeping: a body with
+`SET search_path = pg_catalog, public, pg_temp` reading an unqualified `sentinel`
+table returned `public` both before and after a temp table shadowed it, which is
+the fixed spelling of the relation rule behaving as this entry says it should.)*
+
 **What happened.** E0-09's supervision-edge trigger names `role_assignment`
 unqualified in all three of its guard queries and in `'role_assignment'::regclass`,
 which keys its advisory lock. Postgres searches the temporary schema **first** for

@@ -53,9 +53,15 @@ Four things together:
 3. **The connection pool is bound to the service module, not to the actor.**
    Only the Care service can obtain a `pulse_care` session, and it separately
    verifies a live `CARE` assignment.
-4. **Care's only access is one `SECURITY DEFINER` function** that returns
-   identity and writes the audit row in the same transaction. `pulse_care` has
-   no direct `SELECT` on `user_identity`.
+4. **Care's only access is through `SECURITY DEFINER` functions**, and no other
+   route exists: `pulse_care` has no direct `SELECT` on `user_identity`.
+   *(As E0-10 shipped it this was one function, returning identity and writing
+   the audit row in the same transaction. Since E0-26 it is two —
+   `public.record_identity_reveal` writes the row and the caller commits it,
+   and `public.reveal_student_identity` returns nothing until that record is
+   committed. Both are owned by `pulse_reveal_definer` and executable only by
+   `pulse_care`. See [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md)
+   and the amended consequence below.)*
 
 ## Alternatives rejected
 

@@ -44,7 +44,10 @@ runs as the identity ADR 0001 called the third.
 *(Amended within the same ticket by
 [ADR 0043](0043-the-reveal-function-has-an-owner-of-its-own.md): the migration
 also creates `pulse_reveal_definer`, which owns the `SECURITY DEFINER` reveal
-function and holds three grants. It is not a fourth answer to "who runs
+function and holds exactly the grants that function's body spends — three as
+E0-10 shipped it, four since E0-26 split the reveal in two
+([ADR 0071](0071-the-reveal-answers-only-a-committed-record.md)). It is not a
+fourth answer to "who runs
 migrations" and not a connection role — it is `NOLOGIN`, has no credential
 anywhere, and exists so that the reveal's body runs with a readable list of
 privileges instead of the superuser's. What this record decides is unchanged.)*
@@ -129,7 +132,8 @@ that test protects.
 the reason ADR 0043 exists. A `SECURITY DEFINER` body spends its owner's
 privileges on every call rather than once at migration time, and a probe built
 the same way read every row of `pg_authid` for a `pulse_care` caller. The
-function now has a `NOLOGIN` owner holding three grants; the views still do
+function now has a `NOLOGIN` owner holding a short, readable list of grants —
+three then, four since E0-26; the views still do
 not, and ADR 0043 says why that asymmetry is deliberate and what it leaves
 open.)*
 

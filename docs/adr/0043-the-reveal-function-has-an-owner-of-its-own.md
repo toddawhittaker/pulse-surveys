@@ -1,8 +1,12 @@
-# 0043 — The reveal function has an owner of its own, holding three grants
+# 0043 — The reveal function has an owner of its own, holding a readable list of grants
 
-**Status:** Accepted — the budget in the title is now four, not three
+**Status:** Accepted — amended by ADR 0071; the list is four, and was three
 **Date:** 2026-08-16 (amended 2026-08-20)
 **Tickets:** E0-10, E0-26, E10
+**Relates to:** [ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md),
+which counts the roles this ticket creates, and
+[ADR 0042](0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md),
+which decides who may call this function.
 
 > **Amended 2026-08-20 by
 > [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md).** E0-26 item 1
@@ -13,12 +17,10 @@
 > subject and its actor **out of the record**, so the role gained a fourth grant,
 > `SELECT` on `public.audit_log`. The rule this record sets is unchanged and is
 > what makes that grant visible as a decision: the owner holds exactly what the
-> bodies do and nothing more, in a list short enough to read against them. The
-> count in the title is what moved, and this is the first time it has.
-**Relates to:** [ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md),
-which counts the roles this ticket creates, and
-[ADR 0042](0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md),
-which decides who may call this function.
+> bodies do and nothing more, in a list short enough to read against them. **The
+> count was three when this was written and is four**; it is the first time it has
+> moved, and the title no longer states a number, so the next move is an amendment
+> here rather than a heading nobody can rename.
 
 ## Context
 
@@ -26,7 +28,12 @@ which decides who may call this function.
 [ADR 0001](0001-identity-separation-by-database-role.md)'s scheme works:
 `pulse_care` holds no privilege on `public.user_identity`, so the only way it
 obtains a name is through a function that runs with **its owner's** privileges
-and writes an audit row in the same transaction.
+and writes an audit row. *(As E0-10 shipped it, that write was in the same
+transaction as the read, which E0-10's review measured as less than it claimed;
+since E0-26 the record is written by a separate call the caller must commit
+before any name is returned. See
+[ADR 0071](0071-the-reveal-answers-only-a-committed-record.md). Nothing in this
+record's decision turns on which of the two it is.)*
 
 Nothing in the first implementation set that owner. A function is owned by
 whoever created it, and every object here is created by `alembic upgrade head`,
@@ -139,7 +146,7 @@ unstated gets read as a wider one:
   arrives in a pull request whose subject is the change that needs it, argued in
   [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md), with the
   equality test below failing until somebody agrees to it.)*
-- **A body change within the three grants.** The function could be edited to
+- **A body change within the grants it holds.** The function could be edited to
   return every row of `user_identity` and would still write exactly one audit
   row: the record says an access happened, not what was read. E10 owns making the
   reveal case-shaped; today it takes a single subject key and that is the bound.

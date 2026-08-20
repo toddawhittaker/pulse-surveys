@@ -514,18 +514,22 @@ points at, so an injection in application code cannot reach a shell in the
 database container, read past a row-level security policy, or read a student's
 name — it holds no privilege of any kind on `user_identity`. `DB_CARE_USER`
 serves the Care queue (SPEC §6.2) and is the only role that can re-identify a
-student, through one `SECURITY DEFINER` function that writes an audit row before
-it reads the name and in the same transaction. It holds no direct `SELECT` on
-that table either, so every route to a name goes through that function. One gap
-is known and stated rather than papered over: a caller that runs the reveal and
-then rolls back its own transaction keeps the name and discards the audit row,
-because the rows are streamed before the caller decides. Closing that needs a
-second connection for the audit write and is E0-26 item 1. It is also why only
-the `api` process is given this credential.
+student, through two `SECURITY DEFINER` functions: one records that a reveal is
+about to happen and returns the record's id, and the other returns the name only
+against a record the caller has already **committed**. It holds no direct
+`SELECT` on that table either, so every route to a name goes through those
+functions, and a caller that rolls its own transaction back keeps neither the
+record nor the name. That was a real gap until E0-26 — the rows are streamed
+before the caller decides, so a rollback used to keep the name and discard the
+audit row — and
+[ADR 0071](docs/adr/0071-the-reveal-answers-only-a-committed-record.md) records
+how it was closed and what the fix costs: the log now over-records, so a row
+means an access was *authorised*. Only the `api` process is given this
+credential, which is a separate control and stays.
 
 A fourth role, `pulse_reveal_definer`, appears in `\du` and in none of this
-file. It owns the reveal function and holds three grants, so that the one
-function able to read a name runs with a readable list of privileges rather than
+file. It owns both halves of the reveal and holds four grants, so that the only
+code able to read a name runs with a readable list of privileges rather than
 the migration identity's. It cannot log in, has no password anywhere, and needs
 nothing from an operator —
 [ADR 0043](docs/adr/0043-the-reveal-function-has-an-owner-of-its-own.md) is why

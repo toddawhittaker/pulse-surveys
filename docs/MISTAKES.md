@@ -100,7 +100,10 @@ did not expect.
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
 request body, test docstrings. Indexes are the highest risk: written once, never
 re-read. "Re-read nearby prose" is not enough; it misses the record that was
-never written and the one that drifted out from under you.
+never written and the one that drifted out from under you. **Grep the fact,
+not the identifier** — a record states "three grants" or "in the same
+transaction", and a grep for the name finds none of those sentences. **And
+amending a record is not reading it**: open the whole file.
 
 ## 2. Behaviour shipped with nothing asserting it
 
@@ -123,7 +126,7 @@ fixture first — the message this one printed said exactly that, and was right.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 19** · [the incidents, the root cause, and the whole rule](mistakes/09-citing-a-guard-as-a-guarantee-without-executing-it.md)
+**Caught: 18** · [the incidents, the root cause, and the whole rule](mistakes/09-citing-a-guard-as-a-guarantee-without-executing-it.md)
 
 **Rule.** Before citing a guard, execute it against the case you claim it stops
 and the case you claim it allows. A guard that has never been run is a comment.
@@ -170,7 +173,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/17-an-unqualified-table-name-let-the-caller-choose-which.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/17-an-unqualified-table-name-let-the-caller-choose-which.md)
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 

@@ -57,6 +57,22 @@ ran, so editing it in place silently changes what an already-applied revision
 did. The version in the name is what makes the rule visible at the point somebody
 would break it.
 
+**A superseded file is history, and its prose is read that way.** This follows
+from immutability and was left unwritten until E0-26 hit it, so it is stated here
+rather than rediscovered. A `views_sql/` file is a record of what one revision
+applied, exactly like the migration that names it — so once a `_v002.sql` replaces
+it, the older file goes on describing a schema the database no longer has, and
+**that is correct rather than stale**. `identity_roles_v001.sql` says the reveal
+"runs with three grants"; it does now hold four, and the v001 sentence must not be
+corrected, because it was true of the revision that ran it. The repair for a
+reader who lands on the old file through a grep is a forward pointer, not an edit:
+**the superseding file's header names what it supersedes and restates the fact
+that moved**, so `identity_grants_v002.sql` says in its first paragraph that it
+replaces v001's grant list and that the count is four. Nothing outside
+`views_sql/` gets this exemption — an ADR, a README or a module docstring
+describing the *current* schema is a live claim and is repaired
+(`docs/MISTAKES.md` entry 1).
+
 **The boundary is the push and not the first `alembic upgrade head`**, and the
 distinction is not a softening — it is where the property the rule protects
 starts to matter. What must never be true is that two databases at the same

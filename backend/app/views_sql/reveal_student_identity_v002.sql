@@ -66,11 +66,16 @@
 --     the path — omitting it is what puts it first. ADR 0027 measured all four
 --     combinations against E0-09's trigger; the two that omit pg_temp store the
 --     write the guard exists to refuse.
---   * Every relation and every function schema-qualified, which is the half that
---     survives somebody later dropping the SET clause. A caller who can redirect
---     a name inside a SECURITY DEFINER function spends the definer's privileges
---     on a table of their own choosing — or, cheaper, empties an assignment
---     check.
+--   * Every relation schema-qualified, which is the half that survives somebody
+--     later dropping the SET clause. A caller who can redirect a name inside a
+--     SECURITY DEFINER function spends the definer's privileges on a table of
+--     their own choosing — or, cheaper, empties an assignment check. The
+--     function calls below are pg_catalog-qualified too, for consistency and
+--     not as a guard: pg_temp is never searched for function names, only for
+--     relation and type names, and pg_catalog is searched first for functions
+--     whenever it is not named. Measured both ways rather than assumed, after
+--     this line claimed the qualification protected them (docs/mistakes/
+--     17-an-unqualified-table-name-let-the-caller-choose-which.md).
 --   * No caller-supplied SQL anywhere: typed parameters, no dynamic statement,
 --     no format(), no EXECUTE.
 --

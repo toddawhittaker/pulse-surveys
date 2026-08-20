@@ -7,15 +7,20 @@
 *15 instances recorded; the 4 below are the most recent, and this file needs a trim
 to three from whoever next has a shell to date them with.*
 
-***The counter needs re-deriving from git, and this note is the evidence.** When
-E0-26's test round bumped this entry, `docs/MISTAKES.md` already read **21** while
-this file read **20**, and only three instance paragraphs were here — so a bump
-landed on the index without an instance, which is the parallel-branch case
-`docs/MISTAKES.md` cautions about ("two branches cut from the same commit that both
-bump the same entry merge without conflicting and count once"). Both now read 21
-and this file holds four paragraphs. If the index's 21 was somebody else's catch,
-the true count is 22 and their instance is missing. Re-derive from each branch's own
-diff against the merge base rather than trusting either number.*
+***Re-derived, and 21 is right.** The note that stood here asked whose the
+index's 21 was, having found `docs/MISTAKES.md` at **21** while this file read
+**20** with three instance paragraphs, and correctly declined to resolve it alone.
+The answer: the index bump was the implementer's, in `fcebebe`, and it was
+reflexive — this entry's rule is "grep every place that asks the same question and
+route them through **one helper**", and E0-26 does the opposite on purpose, because
+the `CARE` check is duplicated across the service and both halves of the door by
+design (SPEC §8, and `CLAUDE.md`'s carve-out that duplication in
+confidentiality-critical paths is the guarantee). Nothing was stopped, so there is
+no instance behind it. It has been withdrawn, which leaves 20 + the test round's
+genuine catch = **21**, and the fourth paragraph below is what the twenty-first
+counts. The lesson is the one the note was already reaching for: a bump with no
+instance paragraph is unfalsifiable a week later, so write the paragraph in the
+same change or do not move the number.*
 
 *(Repairing E0-26 item 1's test round. The suite reported one error —
 `ResourceClosedError: This result object does not return rows` — from the `pg_temp`
