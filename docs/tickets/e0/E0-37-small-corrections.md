@@ -1,8 +1,8 @@
-# E0-37 — Nine small corrections, none of which is worth a ticket alone
+# E0-37 — Eleven small corrections, none of which is worth a ticket alone
 
 **ID:** E0-37
 **Branch:** `e0/small-corrections`
-**Depends on:** E0-05, E0-13, E0-17, E0-36
+**Depends on:** E0-05, E0-13, E0-17, E0-36, E0-38
 
 ## Context
 
@@ -12,6 +12,11 @@ because tracking them separately costs more than fixing them. They were
 [E0-21](E0-21-review-debt.md) item 2, [E0-25](E0-25-review-debt-from-e0-09-to-e0-14.md)
 items 2 and 3, [E0-31](E0-31-review-debt-from-e0-17.md) items 3 and 4, and
 [E0-36](E0-36-ci-gate-fidelity.md)'s security review.
+
+**Items 10 and 11 were added on 2026-08-20**, from E0-38's third review pass.
+Both are LOW, neither has a live instance, and both are defects in E0-38's guards
+rather than in the gate those guards protect — which is why they are here rather
+than held against that ticket. The heading count moved with them.
 
 **The count said "seven" until 2026-08-19 and item 8 was already here**, added
 without it. That is `docs/MISTAKES.md` entry 1 in the file whose own subject is
@@ -202,6 +207,43 @@ The same measurement applies to `mock-lms/` and `mock-idp/`, which carry the sam
 package data, so nothing there is a path into an image. Named so it is not
 rediscovered.
 
+### 10. "Subject" is enforced only for a sweep rooted at the repository
+
+`tests/unit/test_a_documentation_only_diff_does_not_run_the_expensive_gates.py`.
+E0-38's inert set treats `docs/` as a build input, which is right, and its guard
+covers the other half — a test that *asserts about* a file the classifier calls
+inert. That guard fires only for a sweep whose root is the repository. A module
+walking `REPO_ROOT / "docs" / "adr"` is invisible to both halves: the path reader
+requires `is_file()` so a directory chain drops, and the walk detector requires a
+root receiver so a `BinOp` drops.
+
+No live instance. The likeliest way it arrives is a test asserting that every
+`docs/MISTAKES.md` entry links to a real file under `docs/mistakes/`, which is
+exactly this shape and is a reasonable thing for somebody to write.
+
+Make a sweep rooted at a directory *inside* the inert set count as
+repository-wide for the purpose of that guard.
+
+### 11. `EXPENSIVE_GATES` is hand-kept, in the module that says inventories must not be
+
+Same module. E0-38's second review pass found `frontend-build` guarded but
+missing from `EXPENSIVE_GATES`, so the one job just guarded was the one job the
+coverage test did not check. That was fixed by adding a sixth key — and the
+comment added in the same commit cites `docs/MISTAKES.md` entry 35, which says an
+inventory has to come from somewhere the guarded structure cannot shrink. A
+seventh expensive job added to `ci.yml` is still not noticed: the third pass
+added one running pytest, unguarded and wired into `ci`'s needs, and the suite
+stayed green.
+
+Direction is safe — an uninventoried job runs rather than being skipped — which
+is why this is LOW and not a hole.
+
+The pattern to copy is in the same file. The sweep detector derives its set from
+the tree and forces triage through an exception set that is itself validated.
+Derive the candidate gates from the workflow the same way: any job whose steps
+run one of the expensive commands is a candidate, and every candidate must be
+inventoried or exempted with a reason.
+
 ## Out of scope
 
 - **Database TLS.** Neither engine sets `sslmode`, so psycopg's default `prefer`
@@ -232,11 +274,20 @@ rediscovered.
       the installed directory** rather than by reading `.dockerignore`.
 - [ ] `scripts/ci/check_image_contents.sh` plants one file per newly guarded
       suffix, so deleting either new line turns the Docker gate red.
-- [ ] Items 1, 2, 3 and 4 verified by mutation.
+- [ ] A test module sweeping a directory inside the inert set — `REPO_ROOT /
+      "docs" / "adr"` is the case to use — is reported by E0-38's guard, and is
+      either run in the unconditional job or recorded in the exception set.
+      **Done when** planting such a module turns that guard red naming the file.
+- [ ] A seventh expensive job added to `ci.yml`, running an expensive command and
+      wired into `ci`'s needs, turns the suite red unless it is inventoried or
+      exempted with a reason. **Done when** the candidate set comes from the
+      workflow rather than from a hand-written dict, and adding such a job
+      without inventorying it fails.
+- [ ] Items 1, 2, 3, 4, 10 and 11 verified by mutation.
 
 ## Definition of done
 
-**Tests apply** to items 1 through 5.
+**Tests apply** to items 1 through 5, and to items 10 and 11, which are tests.
 
 **Docs apply** to items 6 and 8.
 

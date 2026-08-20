@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 41** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 42** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -260,6 +260,25 @@ file and check the status, or run the gate bare.
 the job actually runs and require a yes; plant nothing and require a no; assert
 the whole set of outputs rather than the one you have in mind. `**` in a shell
 glob is a single `*` unless `globstar` is set.
+
+## 37. A harness ran the real artifact under conditions the runtime does not use
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/37-a-harness-ran-the-real-artifact-under-conditions.md)
+
+**Rule.** When you extract something to run it, copy the invocation and not just
+the body — the shell and its flags, the interpreter, the environment. Prefer a
+harness the repository already has to one you write, and say which properties of
+the runtime yours reproduces and which it does not.
+
+## 38. An option parser answered before the guard did, and its answer was the permissive one
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/38-an-option-parser-answered-before-the-guard-did.md)
+
+**Rule.** When a guard takes untrusted names as arguments, the argument parser is
+part of the guard: pass `--` before any list that came from a diff or a glob, and
+refuse leading-dash arguments in the script too. A decision made before your logic
+runs is still your decision. Test the near miss that distinguishes the fix from
+doing nothing.
 
 ## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 

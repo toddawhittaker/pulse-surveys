@@ -41,6 +41,180 @@ jobs:
   # Gone already: `migrations` and `pytests`. E0-04 turned the `migration-drift`
   # and `test` jobs on, and they now run unconditionally.
   # --------------------------------------------------------------------------
+  # E0-38: what *changed*, as against what `detect` below answers, which is what
+  # exists. A documentation-only pull request ran pytest against testcontainers,
+  # built both images, brought up the Compose stack, ran Playwright, ran the eval
+  # floors and audited the supply chain — about fifteen minutes of runner time to
+  # establish that no Python changed, on a shape this epic produced six times.
+  #
+  # **Its own job rather than a fourth output on `detect`**, for two reasons.
+  # `detect` answers what exists and this answers what moved, which are different
+  # questions with different failure modes; and `detect`'s probe battery in
+  # tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py compares the
+  # whole set of outputs that job emits, so an extra one there is a committed
+  # E0-36 test turning red for no reason anybody would enjoy diagnosing.
+  changed:
+    name: Detect what changed
+    runs-on: ubuntu-latest
+    outputs:
+      # `true` only when every path the diff touched is documentation nothing
+      # depends on. Read by the six expensive gates, which switch their own work
+      # off rather than being skipped — the `ci` job's comment says why a
+      # job-level `if:` would fail the required check instead.
+      inert: ${{ steps.diff.outputs.inert }}
+    steps:
+      # Full history, because the step below diffs against the base commit and a
+      # shallow clone does not have it. A few seconds here against the fifteen
+      # minutes E0-38 measured on a documentation-only run.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # **Every failure here emits `inert=false`, which runs everything.** A base
+      # commit that is missing, a clone too shallow to hold it, a diff that
+      # errors: each means "we do not know what changed", and the only safe
+      # reading of that is the full pipeline. `classify_changed_paths.py` takes
+      # the same direction for the same reason, an empty path list included.
+      #
+      # The context values arrive through `env:` rather than being interpolated
+      # into the script. They are commit SHAs and an event name, so nothing here
+      # is attacker-controlled, but a `${{ }}` expanded inside a `run:` block is
+      # the shape of a script-injection finding and there is no reason to write
+      # one.
+      - id: diff
+        name: Classify the changed paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
+
+          # **Only a pull request may be inert.** A push event's base is
+          # `github.event.before`, which is the previous head of the branch, so
+          # the diff is incremental while the verdict is not. Land a
+          # documentation-only merge on an epic branch whose gates last went red
+          # and the diff holds only the new commits, everything short-circuits,
+          # and the branch badge reports success over code those gates failed on
+          # — through this repository's ordinary ticket-merge flow, with nobody
+          # doing anything unusual. A pull request is unaffected, because
+          # `base.sha` gives the whole delta rather than the last push, which is
+          # why the saving this ticket is for is untouched: documentation-only
+          # pull requests are the case it was measured on.
+          if [ "${EVENT_NAME:-}" != "pull_request" ]; then
+            echo "::notice::${EVENT_NAME:-unknown} is not a pull request, so the diff would be"
+            echo "::notice::incremental while the verdict is not. Every gate runs."
+            emit inert false
+            exit 0
+          fi
+          base="${PR_BASE_SHA:-}"
+
+          # A new branch pushes an all-zero "before", and a missing base is an
+          # empty string. Both mean there is nothing to diff against.
+          if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::no base commit to diff against; every gate runs."
+            emit inert false
+            exit 0
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::notice::base commit ${base} is not in this clone; every gate runs."
+            emit inert false
+            exit 0
+          fi
+
+          # Redirected to a file and the status checked separately, rather than
+          # read through a process substitution: `mapfile` succeeds whether or not
+          # `git` did, so reading it that way would turn a failed diff into an
+          # empty one (docs/MISTAKES.md entry 34). NUL-delimited because `design/`
+          # holds file names with spaces in them, and word-splitting would hand
+          # the classifier two paths it has never heard of in place of one it has.
+          #
+          # **`--no-renames`, and it is load-bearing.** Git detects renames by
+          # default and reports a rename as the destination alone, so
+          # `git mv backend/app/services/authz.py docs/whatever.md` arrives here
+          # as one inert path and the classifier — correctly, about the list it
+          # was handed — answers inert. pytest would not run on a change that
+          # deleted a service module. The hole is in the path list, not in the
+          # classifier. Without rename detection the delete and the add arrive as
+          # two paths, the source is outside the inert set, and everything runs.
+          # A rename *inside* `docs/mistakes/` still reports two inert paths and
+          # stays inert, which is what trimming that directory looks like.
+          if ! git diff --no-renames --name-only -z "${base}" HEAD > /tmp/changed-paths.z; then
+            echo "::notice::could not diff against ${base}; every gate runs."
+            emit inert false
+            exit 0
+          fi
+          # Also in an `if`, for the reason the classifier invocation below is:
+          # a bare command that fails ends the step under `-e`, and the failure
+          # mode of this step ending is every gate reporting `skipped` and the
+          # required check going red. No bare command is left in it.
+          if ! mapfile -t -d '' changed < /tmp/changed-paths.z; then
+            echo "::notice::could not read the changed-path list; every gate runs."
+            emit inert false
+            exit 0
+          fi
+
+          echo "  changed paths (${#changed[@]}):"
+          if [ "${#changed[@]}" -gt 0 ]; then
+            printf '    %s\n' "${changed[@]}"
+          fi
+
+          # `python3`, not `python`: this job deliberately runs no
+          # `actions/setup-python`, because the classifier is standard library
+          # only and does not need one — and without that action `python` is not
+          # on the runner's PATH. Measured by executing this script: it exits 127
+          # and the branch below would have emitted `inert=false` forever, so the
+          # filter would never once have fired and nothing would have said so.
+          #
+          # An empty list reaches the classifier as no arguments and it answers
+          # not-inert. Deliberate: an empty diff is far more often a broken
+          # comparison than an empty change.
+          # **In an `if`, not bare.** GitHub runs a `run:` block that declares
+          # no `shell:` as `bash -e {0}`, and `set -uo pipefail` above adds two
+          # options without clearing the inherited `-e` — only `set +e` would do
+          # that, and turning `-e` off wholesale to fix one line is the larger
+          # change. Under `-e` a bare command that exits non-zero ends the
+          # script, and **exit 1 is this classifier's "not inert" answer**: the
+          # ordinary answer for every pull request that touches code. Written
+          # bare, this step died before the `case` below could read the status,
+          # the job failed, every job needing it reported `skipped`, and E0-36
+          # made the aggregate treat `skipped` as failure — so every
+          # code-touching pull request failed CI. Measured under `bash -e`.
+          # **`--` before the paths, and it is load-bearing.** Without it
+          # argparse parses the path list, and it answers before `main` runs, so
+          # every fail-closed decision in this script and in that one is
+          # downstream of it. A repository root file named `-h` exits 0 — the
+          # classifier's "inert" answer — and switches off pytest, the §4.1
+          # invariant suite, both image builds, Playwright, the evals and the
+          # audit, with the required check green. The class is wider than `-h`:
+          # `-hx` is a short-option cluster and `--hel` is an argparse
+          # abbreviation, and both exit 0 too. Near misses like `-q` exit 2 and
+          # land in the `*)` branch below, which is why nothing caught this.
+          # The script rejects leading-dash arguments as well; both halves are
+          # deliberate, because the script advertises a general command line.
+          if python3 scripts/ci/classify_changed_paths.py -- "${changed[@]}"; then
+            status=0
+          else
+            status=$?
+          fi
+
+          # Its contract is exit 0 for inert and exit 1 for not. Anything else is
+          # the classifier failing rather than answering, and that is worth a line
+          # in the log: every route out of here still runs every gate, so a broken
+          # classifier is invisible in the result and would otherwise look exactly
+          # like a repository whose every pull request touches code.
+          case "${status}" in
+            0) emit inert true ;;
+            1) emit inert false ;;
+            *)
+              echo "::warning::classify_changed_paths.py exited ${status}, which is neither of"
+              echo "::warning::its two answers. Every gate runs. This is a broken checker, not a"
+              echo "::warning::busy repository."
+              emit inert false
+              ;;
+          esac
+
   detect:
     name: Detect what exists
     runs-on: ubuntu-latest
@@ -134,6 +308,37 @@ jobs:
           mypy
           mypy mock-lms/app
           mypy mock-idp/app
+
+      # **Repository-wide sweeps run here because this job is unconditional.**
+      # E0-38's inert set says `docs/` is documentation nothing depends on, and
+      # that is true of `docs/` as a build *input* — nothing imports, executes,
+      # packages or lints it. It is false of `docs/` as a *subject*. These
+      # sweeps enumerate the whole repository, so a documentation-only pull
+      # request is exactly when they have something new to look at, and leaving
+      # them in `Test · pytest + invariants` let the path filter switch off the
+      # answer to two incidents that have already happened here:
+      #
+      #   * conflict markers committed in a Markdown file — docs/MISTAKES.md
+      #     entry 21, which happened twice (7f5b300 in PR #24, again in PR #27);
+      #   * private key material committed anywhere in the tree, which a docs-only
+      #     pull request can carry as easily as a code one — a key pasted into an
+      #     ADR is the shape.
+      #
+      # Both were verified reachable: a tracked `docs/` file holding a conflict
+      # marker turns the first red, and `classify_changed_paths.py` calls that
+      # same path inert.
+      #
+      # They stay in tests/unit as well; this runs the same node ids a second
+      # time rather than moving them, because they belong to the suite and the
+      # suite is where someone looks for them. The duplication is the same shape
+      # as `ci-selftest` re-running the classifier battery, and for the same
+      # reason: a guard inside a job the classifier can switch off is not a guard.
+      - name: Repository-wide sweeps that a docs-only diff must not switch off
+        run: |
+          pytest -q \
+            "tests/unit/test_no_unresolved_merge_conflicts.py::test_the_index_holds_no_conflict_marker" \
+            "tests/unit/test_mock_lms_service.py::test_no_private_key_material_is_committed_to_the_repository" \
+            "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one"
 
   lint-frontend:
     name: Fast · tsc + eslint
@@ -299,16 +504,24 @@ jobs:
   # this gate instead of switching it off.
   test:
     name: Test · pytest + invariants
-    needs: [fast-gate]
+    needs: [changed, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Documentation-only diff — the suite did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so the suite did not run."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
       - uses: actions/setup-python@v5
+        if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install backend + test deps (locked)
+        if: needs.changed.outputs.inert != 'true'
         run: |
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
@@ -335,6 +548,7 @@ jobs:
       # reads the sources and refuses exactly that (E0-36 item 3). The Makefile's
       # `invariants` target runs both, in this order.
       - name: Invariant suite (§4.1) — no skips, and no test that asserts nothing
+        if: needs.changed.outputs.inert != 'true'
         run: |
           mkdir -p reports
           pytest -m invariant --junitxml=reports/invariants.xml || true
@@ -342,6 +556,7 @@ jobs:
           python scripts/ci/check_invariant_assertions.py tests
 
       - name: Unit + integration with coverage
+        if: needs.changed.outputs.inert != 'true'
         env:
           # testcontainers drives its own Postgres; the runner's Docker daemon
           # is what it talks to.
@@ -352,6 +567,7 @@ jobs:
             --junitxml=reports/pytest.xml
 
       - name: Upload coverage
+        if: needs.changed.outputs.inert != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
@@ -360,39 +576,43 @@ jobs:
 
   e2e:
     name: Test · Playwright e2e
-    needs: [detect, fast-gate]
+    needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Inert diff, so the e2e gate did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: echo "::notice::Every changed path is inert documentation (E0-38), so no e2e path was exercised."
+
       - name: No e2e specs yet
-        if: needs.detect.outputs.e2e != 'true'
+        if: needs.detect.outputs.e2e != 'true' && needs.changed.outputs.inert != 'true'
         run: echo "::notice::No tests/e2e specs yet. Enforcing in E0-18, which writes the first specs over the mock LMS (E0-14, landed) and the mock IdP (E0-16) — §9.2 requires both doors exercised in every run."
 
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.e2e == 'true'
+        if: needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp)
-        if: needs.detect.outputs.e2e == 'true'
+        if: needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
         run: |
           cp .env.example .env
           docker compose up -d --build
           ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
 
       - name: Run Playwright
-        if: needs.detect.outputs.e2e == 'true'
+        if: needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
         run: |
           npx --yes playwright install --with-deps chromium
           npx playwright test
 
       - name: Compose logs on failure
-        if: failure() && needs.detect.outputs.e2e == 'true'
+        if: failure() && needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
         run: docker compose logs --no-color --tail=200
 
       - uses: actions/upload-artifact@v4
-        if: failure() && needs.detect.outputs.e2e == 'true'
+        if: failure() && needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
         with:
           name: playwright-report
           path: playwright-report/
@@ -400,24 +620,28 @@ jobs:
 
   evals:
     name: Test · AI eval floors
-    needs: [detect, fast-gate]
+    needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Inert diff, so the eval floors did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: echo "::notice::Every changed path is inert documentation (E0-38), so no eval floor was checked."
+
       - name: No eval sets yet
-        if: needs.detect.outputs.evals != 'true'
+        if: needs.detect.outputs.evals != 'true' && needs.changed.outputs.inert != 'true'
         run: |
           echo "::notice::No tests/evals runner yet. E0-13 builds the gateway; the first eval set and the floors that gate on it are E2's, and this job stays tolerant until then."
           echo "::notice::Running the eval suite needs a provider API key as a repository secret and a secrets.* reference in this workflow. Under the secrets policy in CLAUDE.md that is Todd's call, so it is proposed, not wired."
 
       - uses: actions/setup-python@v5
-        if: needs.detect.outputs.evals == 'true'
+        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install backend (locked)
-        if: needs.detect.outputs.evals == 'true'
+        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
         run: |
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
@@ -428,7 +652,7 @@ jobs:
       # false negative there is a student in danger whose comment reached
       # nobody, which is why it is a hard gate and never a warning.
       - name: Eval runner (per-task floors; threat recall is a hard gate)
-        if: needs.detect.outputs.evals == 'true'
+        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
         run: python -m tests.evals.runner --enforce-floors
 
   # ==========================================================================
@@ -448,14 +672,22 @@ jobs:
   # they left, and it says so where it stands.
   docker:
     name: Build · images + Compose health
-    needs: [fast-gate]
+    needs: [changed, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Documentation-only diff — no image was built
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so no image was built."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
       - uses: docker/setup-buildx-action@v3
+        if: needs.changed.outputs.inert != 'true'
 
       - name: Build all images
+        if: needs.changed.outputs.inert != 'true'
         run: |
           cp .env.example .env
           docker compose build
@@ -467,6 +699,7 @@ jobs:
       # planted files is exactly the condition under which the context has not
       # changed.
       - name: Nothing .dockerignore re-excludes reaches the runtime image
+        if: needs.changed.outputs.inert != 'true'
         run: ./scripts/ci/check_image_contents.sh
 
       # Five services named, seven covered. `api` declares `depends_on` on a
@@ -476,6 +709,7 @@ jobs:
       # not the job runtime does, and nothing in the tool depends on either mock
       # — and a service nobody names is one this gate never looks at.
       - name: Stack comes up healthy (api, worker, beat, mock-lms, mock-idp, and through api db and redis)
+        if: needs.changed.outputs.inert != 'true'
         run: |
           docker compose up -d
           ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
@@ -488,6 +722,7 @@ jobs:
       # printed before the comparison so a failure says what was served rather
       # than only that something was wrong.
       - name: Health endpoint answers 200 on the published host port
+        if: needs.changed.outputs.inert != 'true'
         run: |
           set -euo pipefail
           code="$(curl --silent --show-error --max-time 10 \
@@ -500,6 +735,7 @@ jobs:
       # of the running container rather than read off the Dockerfile, because a
       # `USER` instruction can name a user whose uid is 0.
       - name: API container runs as a non-root user
+        if: needs.changed.outputs.inert != 'true'
         run: |
           set -euo pipefail
           uid="$(docker compose exec -T api id -u | tr -d '\r')"
@@ -512,6 +748,7 @@ jobs:
       # Makefile — see the comment at the top of it for why these three are not
       # written out here.
       - name: Job runtime (ping round trip, beat restart, worker without Redis)
+        if: needs.changed.outputs.inert != 'true'
         run: ./scripts/ci/check_job_runtime.sh
 
       # The only pass in this pipeline that runs what actually ships, and the
@@ -538,6 +775,7 @@ jobs:
       # `mock-lms` or `mock-idp`, so dropping any of them from this list would
       # leave the pass green against a container that never started.
       - name: Base file alone runs the installed application, not the mounted checkout
+        if: needs.changed.outputs.inert != 'true'
         run: |
           set -euo pipefail
           docker compose -f docker-compose.yml down -v
@@ -549,6 +787,7 @@ jobs:
       # the class of bug where the stack only comes up on a machine that has run
       # it before.
       - name: Teardown and restart leaves no manual cleanup, twice
+        if: needs.changed.outputs.inert != 'true'
         run: |
           set -euo pipefail
           for attempt in 1 2; do
@@ -569,31 +808,41 @@ jobs:
 
   frontend-build:
     name: Build · frontend + bundle budget
-    needs: [detect, fast-gate]
+    needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # The sixth expensive job. It is free today only because
+      # `detect.outputs.frontend` is false and there is no frontend to build;
+      # once the scaffold lands it is an `npm ci` and a production build, which
+      # is the same order of cost as the other five. E0-38's security review
+      # found it guarded by neither the ticket, the ADR nor the pull request
+      # body, all three of which said five.
+      - name: Inert diff, so the frontend build did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: echo "::notice::Every changed path is inert documentation (E0-38), so no frontend bundle was built."
+
       - name: Nothing to build yet
-        if: needs.detect.outputs.frontend != 'true'
+        if: needs.detect.outputs.frontend != 'true' && needs.changed.outputs.inert != 'true'
         run: echo "::notice::No frontend/ yet. Enforcing once the frontend scaffold lands."
 
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.frontend == 'true'
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Production build
-        if: needs.detect.outputs.frontend == 'true'
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         working-directory: frontend
         run: |
           npm ci
           npm run build
 
       - name: Bundle budget
-        if: needs.detect.outputs.frontend == 'true'
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         run: python scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json
 
   # ==========================================================================
@@ -602,16 +851,24 @@ jobs:
 
   supply-chain:
     name: Supply chain · audit + licenses
-    needs: [detect, fast-gate]
+    needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Documentation-only diff — nothing was audited
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so nothing was audited."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
       - uses: actions/setup-python@v5
+        if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install pinned audit tools
+        if: needs.changed.outputs.inert != 'true'
         run: pip install "pip-audit==${PIP_AUDIT_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
 
       # Audits the lockfiles rather than an installed environment: the locked
@@ -620,15 +877,16 @@ jobs:
       # advisory feed and which `--strict` would otherwise refuse to skip — is
       # not in the way.
       - name: pip-audit (fail on high/critical)
+        if: needs.changed.outputs.inert != 'true'
         run: pip-audit --strict --desc -r requirements.txt -r requirements-dev.txt
 
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.frontend == 'true'
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: npm audit (fail on high/critical)
-        if: needs.detect.outputs.frontend == 'true'
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         working-directory: frontend
         run: |
           npm ci
@@ -641,11 +899,13 @@ jobs:
       # of the shipped closure — stricter than §10 asks, deliberately
       # (docs/adr/0005-dependency-locking.md).
       - name: Install the runtime closure to scan (locked)
+        if: needs.changed.outputs.inert != 'true'
         run: pip install --require-hashes -r requirements.txt
 
       # MIT distribution is a spec requirement (§10, "Licensing hygiene"), so a
       # copyleft dependency is a build break rather than a note for later.
       - name: License compatibility (MIT distribution)
+        if: needs.changed.outputs.inert != 'true'
         run: |
           mkdir -p reports
           pip-licenses --format=json --with-urls > reports/py-licenses.json

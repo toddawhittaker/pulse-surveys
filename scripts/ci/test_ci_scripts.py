@@ -322,6 +322,101 @@ for label, body, want_verdict, want_reason in BODY_CASES:
     check(f"licenses: body — {label} (verdict)", verdict, want_verdict)
     check(f"licenses: body — {label} (reason)", want_reason in reason, True)
 
+# ---------------------------------------------------------------------------
+# classify_changed_paths.py — E0-38
+# ---------------------------------------------------------------------------
+# **Why this battery is here as well as under `tests/`.** The unit-test copy runs
+# in the `test` job, and the `test` job is one of the five this classifier can
+# switch off. So if the classification is wrongly permissive about some family of
+# paths, a pull request touching only that family short-circuits `test` and the
+# assertions that would have caught it do not run — the classifier's mistake
+# hiding the evidence of itself. That is the exact hazard this file's header
+# describes and the reason `ci-selftest` exists, and E0-38 keeps that job
+# unconditional for it. These cases run there.
+#
+# It is deliberate duplication across the test wall, not an oversight: the module
+# under `tests/` is written from the ticket, this one from the contract, and the
+# point of the copy is that it runs when the other one cannot.
+#
+# Exit 0 is inert (the expensive gates may short-circuit) and exit 1 is not
+# inert. Both directions are exercised, so a classifier that answers the same
+# thing to everything fails whichever answer it picked.
+CLASSIFIER_CASES = [
+    # Inert: the three families E0-38's scope names.
+    ("a ticket", ["docs/tickets/e0/README.md"], 0),
+    ("the mistakes file", ["docs/MISTAKES.md"], 0),
+    ("an architecture decision record", ["docs/adr/0002-ci-gates-ship-tolerant.md"], 0),
+    # A diff shows a deleted file and a new one exactly as it shows an edited
+    # one, so the classifier must never require the path to exist.
+    ("a document that is not in the tree", ["docs/adr/0071-invented.md"], 0),
+    ("a design file whose name has a space in it", ["design/Usage Rules.md"], 0),
+    ("a root Markdown file", ["CONTRIBUTING.md"], 0),
+    (
+        "several inert families at once",
+        ["CLAUDE.md", "docs/MISTAKES.md", "design/tokens.css"],
+        0,
+    ),
+    # `README.md` is a root Markdown file and is *not* inert: `pyproject.toml`
+    # declares it as the wheel's readme and `backend/Dockerfile` copies it, so
+    # it is a declared build input. E0-38's security review asked whether a
+    # build input belongs in the set that switches the build off; ADR 0070
+    # records the reversal.
+    ("the readme, which is a declared build input", ["README.md"], 1),
+    # Not inert. The spec is the one the naive version gets wrong: it is parsed
+    # at run time by the contract suite, so editing it is exactly when that suite
+    # has to run. PR #39 is the incident.
+    ("the spec, which the contract suite parses at run time", ["docs/SPEC.md"], 1),
+    # A `.py` file is never inert however documentary the edit. The classifier is
+    # given paths and never contents, which is the point: "did any `.py` change"
+    # is right where "did this feel like documentation" is not.
+    ("a Python file", ["backend/app/services/authz.py"], 1),
+    # A prompt is Markdown and is not documentation. It is versioned in-repo
+    # under SPEC §7.4 and editing it changes what every §9.3 eval floor measures,
+    # so a rule written as "a `.md` file is documentation" skips the eval gate on
+    # the one change that most needs it.
+    ("a prompt, which is Markdown", ["backend/app/ai/prompts/validity.v1.md"], 1),
+    ("the workflow that decides which gates run", [".github/workflows/ci.yml"], 1),
+    ("the project metadata", ["pyproject.toml"], 1),
+    ("a hash-pinned lockfile", ["requirements.txt"], 1),
+    ("the Compose file the build gate brings up", ["docker-compose.yml"], 1),
+    # The allowlist test: a path nobody has classified runs everything. This is
+    # what tells an allowlist from a denylist, and every other case here is
+    # satisfied by either.
+    ("a path of a kind nobody has met", ["ops/whatever/thing.unheard-of"], 1),
+    # One path outside the set is the whole answer, whatever it sits beside and
+    # in whichever order the paths arrive.
+    ("a Python file after inert documentation", ["docs/MISTAKES.md", "backend/app/main.py"], 1),
+    ("a Python file before inert documentation", ["backend/app/main.py", "docs/MISTAKES.md"], 1),
+    # An empty diff is the absence of evidence, and its usual cause is the diff
+    # computation failing rather than nothing having changed. Reading it as inert
+    # would turn a broken path computation into a green required check over a
+    # pipeline that never ran.
+    ("an empty diff", [], 1),
+    # Leading-dash paths. Passed after `--`, as the workflow passes them, these
+    # reach the script and it refuses them. Without `--` argparse answers first
+    # and `-h` exits 0 — the "inert" answer — which switched off five jobs with
+    # the required check green. E0-38's security review found it; the near
+    # misses are the reason nothing else did, because `-q` exits 2 and lands in
+    # the workflow's "neither answer" branch, which fails safe.
+    ("a root file named -h, after --", ["--", "-h"], 1),
+    ("a short-option cluster, after --", ["--", "-hx"], 1),
+    ("an argparse abbreviation, after --", ["--", "--hel"], 1),
+    ("a leading-dash path beside a real one", ["--", "-h", "backend/app/main.py"], 1),
+    ("a dash path that is not an option at all", ["--", "-q"], 1),
+    # The near misses. After `--`, `-h` is a positional path and the inert set
+    # rejects it anyway; a dash-named *root Markdown file* is an inert family,
+    # so these are the cases the script's own refusal is actually for.
+    ("a dash-named root Markdown file", ["--", "-h.md"], 1),
+    ("a dash-named root Markdown file spelled long", ["--", "--help.md"], 1),
+    # A `..` segment is refused rather than resolved. Unreachable from
+    # `git diff --name-only` today; one line, and the alternative is that the
+    # first caller who produces one gets a code path classified as inert.
+    ("a path escaping the inert directory", ["docs/../backend/app/main.py"], 1),
+]
+
+for label, paths, want_exit in CLASSIFIER_CASES:
+    check(f"changed paths: {label}", run("classify_changed_paths.py", *paths), want_exit)
+
 with tempfile.TemporaryDirectory() as tmp:
     d = Path(tmp)
 
@@ -672,7 +767,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 # ---------------------------------------------------------------------------
-total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + 15 + 16
+total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + len(CLASSIFIER_CASES) + 15 + 16
 if failures:
     print(f"FAIL: {len(failures)} of {total} checks failed:", file=sys.stderr)
     for line in failures:
