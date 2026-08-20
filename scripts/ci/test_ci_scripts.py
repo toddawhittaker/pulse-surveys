@@ -350,12 +350,18 @@ CLASSIFIER_CASES = [
     # one, so the classifier must never require the path to exist.
     ("a document that is not in the tree", ["docs/adr/0071-invented.md"], 0),
     ("a design file whose name has a space in it", ["design/Usage Rules.md"], 0),
-    ("a root Markdown file", ["README.md"], 0),
+    ("a root Markdown file", ["CONTRIBUTING.md"], 0),
     (
         "several inert families at once",
-        ["README.md", "docs/MISTAKES.md", "design/tokens.css"],
+        ["CLAUDE.md", "docs/MISTAKES.md", "design/tokens.css"],
         0,
     ),
+    # `README.md` is a root Markdown file and is *not* inert: `pyproject.toml`
+    # declares it as the wheel's readme and `backend/Dockerfile` copies it, so
+    # it is a declared build input. E0-38's security review asked whether a
+    # build input belongs in the set that switches the build off; ADR 0070
+    # records the reversal.
+    ("the readme, which is a declared build input", ["README.md"], 1),
     # Not inert. The spec is the one the naive version gets wrong: it is parsed
     # at run time by the contract suite, so editing it is exactly when that suite
     # has to run. PR #39 is the incident.
@@ -386,6 +392,26 @@ CLASSIFIER_CASES = [
     # would turn a broken path computation into a green required check over a
     # pipeline that never ran.
     ("an empty diff", [], 1),
+    # Leading-dash paths. Passed after `--`, as the workflow passes them, these
+    # reach the script and it refuses them. Without `--` argparse answers first
+    # and `-h` exits 0 — the "inert" answer — which switched off five jobs with
+    # the required check green. E0-38's security review found it; the near
+    # misses are the reason nothing else did, because `-q` exits 2 and lands in
+    # the workflow's "neither answer" branch, which fails safe.
+    ("a root file named -h, after --", ["--", "-h"], 1),
+    ("a short-option cluster, after --", ["--", "-hx"], 1),
+    ("an argparse abbreviation, after --", ["--", "--hel"], 1),
+    ("a leading-dash path beside a real one", ["--", "-h", "backend/app/main.py"], 1),
+    ("a dash path that is not an option at all", ["--", "-q"], 1),
+    # The near misses. After `--`, `-h` is a positional path and the inert set
+    # rejects it anyway; a dash-named *root Markdown file* is an inert family,
+    # so these are the cases the script's own refusal is actually for.
+    ("a dash-named root Markdown file", ["--", "-h.md"], 1),
+    ("a dash-named root Markdown file spelled long", ["--", "--help.md"], 1),
+    # A `..` segment is refused rather than resolved. Unreachable from
+    # `git diff --name-only` today; one line, and the alternative is that the
+    # first caller who produces one gets a code path classified as inert.
+    ("a path escaping the inert directory", ["docs/../backend/app/main.py"], 1),
 ]
 
 for label, paths, want_exit in CLASSIFIER_CASES:

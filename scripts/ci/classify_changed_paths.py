@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 # Directories whose entire contents are inert. `docs/` holds the spec, the ADRs,
 # the tickets, the mistakes files and the disputes; `design/` holds the canvases
@@ -60,7 +61,22 @@ INERT_DIRECTORIES = ("docs/", "design/")
 # Keep this in step with the suite. The sweep named in the module docstring is
 # what says it has fallen behind, and it names the file and the module that reads
 # it when it does.
-PARSED_DOCUMENTS = frozenset({"docs/SPEC.md"})
+PARSED_DOCUMENTS = frozenset(
+    {
+        "docs/SPEC.md",
+        # Not parsed by a test — declared as a build input. `pyproject.toml` names
+        # it as the wheel's readme and `backend/Dockerfile` copies it in
+        # `COPY pyproject.toml README.md ./`, so deleting it breaks the image
+        # build. Calling it inert meant a README-only pull request did not build
+        # the image that packages it, and a deletion surfaced on some later
+        # unrelated pull request instead of on the one that caused it. The saving
+        # given up is README-only pull requests, which this epic has produced
+        # none of; what it buys is that no declared build input sits in the set
+        # that switches the build off. E0-38's security review raised it and
+        # ADR 0070 records the reversal.
+        "README.md",
+    }
+)
 
 
 def is_inert(path: str) -> bool:
@@ -71,6 +87,13 @@ def is_inert(path: str) -> bool:
     trimming `docs/mistakes/` is a real change of that shape — so requiring the
     file to exist would send every documentation deletion down the full pipeline.
     """
+    # A path with a `..` segment is refused rather than resolved. Nothing in a
+    # `git diff --name-only` produces one today, so this is unreachable from the
+    # workflow; it is one line, and the alternative is that the first caller who
+    # does produce one gets `docs/../backend/app/main.py` classified as inert.
+    if ".." in Path(path).parts:
+        return False
+
     if path in PARSED_DOCUMENTS:
         return False
     if path.startswith(INERT_DIRECTORIES):
@@ -93,6 +116,25 @@ def main() -> int:
         help="the paths a diff touched, repository-relative",
     )
     args = parser.parse_args()
+
+    # A path beginning with a dash is refused rather than classified. argparse
+    # answers before this function runs, so a caller that forgets `--` never
+    # reaches here at all: a repository root file named `-h` prints the usage and
+    # exits 0, which is this script's "inert" answer, and switches off every
+    # expensive gate with the required check green. `-hx` and `--hel` do the same
+    # by short-option clustering and abbreviation. The workflow passes `--`, and
+    # this is the second half, because the usage above advertises a general
+    # command line and the next caller will not have read that comment.
+    dashed = [path for path in args.paths if path.startswith("-")]
+    if dashed:
+        print(
+            f"not inert: {len(dashed)} path(s) begin with a dash, which this script "
+            "refuses to classify because argparse would answer first:",
+            file=sys.stderr,
+        )
+        for path in dashed:
+            print(f"  {path}", file=sys.stderr)
+        return 1
 
     # An empty list is not a documentation-only change; it is the absence of
     # evidence. The likeliest way to produce one is not an empty commit but the

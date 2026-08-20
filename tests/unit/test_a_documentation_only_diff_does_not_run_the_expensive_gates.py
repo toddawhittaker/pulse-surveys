@@ -182,8 +182,14 @@ INERT_DIFFS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "a design file, including one whose name has a space in it",
         ("design/tokens.css", "design/Usage Rules.md"),
     ),
-    ("a root Markdown file", ("README.md",)),
-    ("several families at once", ("README.md", "docs/MISTAKES.md", "design/tokens.css")),
+    # `CONTRIBUTING.md` rather than `README.md`. The readme is a root Markdown
+    # file and is deliberately *not* inert: `pyproject.toml` declares it as the
+    # wheel's readme and `backend/Dockerfile` copies it in
+    # `COPY pyproject.toml README.md ./`, so it is a declared build input.
+    # E0-38's security review asked whether a build input belongs in the set that
+    # switches the build off, and ADR 0070 records the reversal and its cost.
+    ("a root Markdown file", ("CONTRIBUTING.md",)),
+    ("several families at once", ("CLAUDE.md", "docs/MISTAKES.md", "design/tokens.css")),
 )
 
 # Paths in neither set. The classification fails toward running everything, so a
@@ -207,6 +213,40 @@ UNCLASSIFIED_PATHS: tuple[tuple[str, str], ...] = (
         "backend/app/ai/prompts/validity.v1.md",
     ),
     ("a path of a kind nobody has met yet", "ops/whatever/thing.unheard-of"),
+    # A declared build input that reads as documentation. See the inert table
+    # above for why it moved.
+    ("the readme, which the wheel and the image both consume", "README.md"),
+    # A path that leaves the directory it appears to be in. Unreachable from
+    # `git diff --name-only` today, and one line to close.
+    ("a path escaping the inert directory", "docs/../backend/app/main.py"),
+)
+
+# Paths that begin with a dash. The workflow passes `--` before the path list and
+# the script refuses these as well; both halves are deliberate, because argparse
+# answers before the script's own logic runs and `-h` exits 0, which is the
+# "inert" answer. A repository root file named `-h` therefore switched off pytest,
+# the §4.1 invariant suite, both image builds, Playwright, the evals and the audit
+# with the required check green. E0-38's security review found it.
+#
+# The near misses are why nothing else found it: `-q` is not a valid option and
+# exits 2, which lands in the workflow's "neither answer" branch and fails safe.
+# Only the options argparse *recognises* are dangerous, and it recognises `-h`,
+# short-option clusters containing it, and any unambiguous abbreviation of
+# `--help`.
+LEADING_DASH_PATHS: tuple[tuple[str, str], ...] = (
+    ("a repository root file named -h", "-h"),
+    ("a short-option cluster argparse accepts", "-hx"),
+    ("an argparse abbreviation of --help", "--hel"),
+    ("a dash path that is not a valid option at all", "-q"),
+    # The near misses that make the script's own refusal load-bearing rather
+    # than redundant. Once `--` is passed, argparse treats `-h` as a positional
+    # path and the inert set answers "not a documentation family" anyway — so
+    # the bare cases above pass with the refusal removed. These do not: a root
+    # Markdown file *is* an inert family, so `-h.md` classifies inert with the
+    # refusal gone. Without a case of this shape the refusal looks like
+    # decoration and the next person deletes it.
+    ("a dash-named root Markdown file", "-h.md"),
+    ("a dash-named root Markdown file spelled long", "--help.md"),
 )
 
 # The document `tests/unit/test_ai_contracts.py` parses at test time, and the case
@@ -1579,11 +1619,21 @@ def test_the_changed_job_classifies_the_diff_on_a_runner_that_has_only_python3(
             (INERT_CHANGE,),
             "true",
         ),
+        # **A push is never inert, whatever it touched.** This case expected
+        # `true` until E0-38's security review, and the expectation was the
+        # defect rather than a description of one. A push event's base is
+        # `github.event.before` — the previous head of the branch — so the diff
+        # covers only the new commits while the verdict covers the whole tree.
+        # Merge a documentation-only ticket onto an epic branch whose gates last
+        # went red and every gate short-circuits, leaving the branch reporting
+        # success over code those gates failed on. Nothing unusual has to happen;
+        # that is this repository's ordinary ticket-merge flow. Pull requests keep
+        # the saving, because `base.sha` gives the whole delta.
         (
             "a documentation-only push to an epic branch",
             "push",
             (INERT_CHANGE,),
-            "true",
+            "false",
         ),
         (
             "a pull request that touches Python",
@@ -2028,5 +2078,273 @@ def test_a_rename_out_of_a_code_directory_is_not_read_as_a_documentation_change(
             "paths, the source is outside the inert set, and everything runs. The second case "
             "above is what it must not cost — a rename inside `docs/` reports two inert paths and "
             "stays inert, which is what trimming `docs/mistakes/` looks like.",
+        ]
+    )
+
+
+# ==========================================================================
+# The sweeps that must not sit inside a job the classification can switch off.
+#
+# E0-38's security review found the hole this closes, and it is a different
+# hole from the one `PARSED_DOCUMENTS` covers. That set answers "does a test
+# *open* a document the classification calls inert?" — it reads `/` chains, so
+# it sees `ROOT / "docs" / "SPEC.md"`. The property that actually matters is
+# "does a test *assert about* a file the classification calls inert", and a
+# module that enumerates the whole repository builds no chain at all. It is
+# invisible to that sweep by construction, not by oversight.
+#
+# Two live instances were found, both reachable by ordinary mistake rather than
+# by an attacker:
+#
+#   * `test_no_unresolved_merge_conflicts.py` walks `git ls-files`, so conflict
+#     markers committed in `docs/MISTAKES.md` are its subject — and that is
+#     docs/MISTAKES.md entry 21, which has happened twice here;
+#   * the private-key sweep in `test_mock_lms_service.py` walks the tree from
+#     the root, so a key pasted into an ADR is its subject.
+#
+# Both live in `Test · pytest + invariants`, which is one of the five jobs an
+# inert diff switches off. So a documentation-only pull request — the exact
+# shape that can introduce either — got a green required check from the job
+# that would have caught it.
+# ==========================================================================
+
+# `git ls-files` with no pathspec is the whole index by definition, so its
+# presence in a module is enough. Directory walks need more care: `.walk()` and
+# `.rglob()` over `backend/app/services` are ordinary and safe, because a change
+# under a code directory is not inert and the suite runs anyway. Only a walk
+# rooted at the *repository* is the problem, so the receiver is resolved rather
+# than the call being matched by name.
+INDEX_SWEEP = "ls-files"
+WALK_CALLS = ("walk", "rglob", "glob", "iterdir")
+
+# Names that mean the repository root: the `…parents[N]` idiom this suite uses,
+# the `repo_root` fixture in tests/conftest.py, and the bare `root` that a
+# helper taking the root as a parameter is called.
+#
+# **`root` is in this list deliberately, and it over-detects.** The private-key
+# sweep in `tests/unit/test_mock_lms_service.py` is `root.walk()` inside
+# `swept_files(root: Path)`, so the name is a parameter and no assignment in the
+# module binds it. Without `root` here, that module was matched only because the
+# string `ls-files` appears in one of its docstrings — the guard would have gone
+# blind the moment somebody reworded a comment, which is docs/MISTAKES.md entry
+# 35 — a guard that enumerates the currencies a thing can be held in and misses
+# the one the design actually uses. Erring
+# toward over-detection is the right direction: a false match is triaged once
+# into SWEEPS_THAT_NEED_NO_PROTECTION with a reason, and a missed one is a gate
+# that silently does not run.
+ROOT_FIXTURE_NAMES = ("repo_root", "repository_root", "root")
+
+# Modules that sweep the repository but need no protection, each with the reason.
+# A new module that sweeps the root must be triaged into this set or into the
+# unconditional job — that decision being forced is the point of this test.
+SWEEPS_THAT_NEED_NO_PROTECTION = {
+    # Both E0-35 sweeps take the root as a parameter, which is why they match
+    # above, and both are called with `APP_ROOT` — `backend/app` — over `*.py`
+    # only. A Python file is never inert, so a diff that could add a new writer
+    # or a second assignment site already runs everything.
+    "tests/unit/test_a_sections_derived_calendar_has_one_assignment_site.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
+    ),
+    "tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
+    ),
+    "tests/unit/test_a_documentation_only_diff_does_not_run_the_expensive_gates.py": (
+        "this module — it sweeps tests/ to build its own guards, and an inert diff "
+        "that switched it off would be switching off the assertions about itself, "
+        "which the guard below covers by checking the job rather than the module"
+    ),
+}
+
+UNCONDITIONAL_SWEEP_JOB = "lint-python"
+
+
+def names_meaning_the_repository_root(tree: ast.Module) -> set[str]:
+    """Every local name in `tree` that holds the repository root itself."""
+    roots: set[str] = set(ROOT_FIXTURE_NAMES)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and is_repository_root(node.value):
+                roots.add(target.id)
+    return roots
+
+
+def sweeps_the_repository(source: str) -> list[str]:
+    """Which repository-wide idioms `source` uses, if any."""
+    used: list[str] = []
+    if INDEX_SWEEP in source:
+        used.append("git ls-files")
+
+    tree = ast.parse(source)
+    roots = names_meaning_the_repository_root(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if not isinstance(function, ast.Attribute) or function.attr not in WALK_CALLS:
+            continue
+        receiver = function.value
+        rooted = (isinstance(receiver, ast.Name) and receiver.id in roots) or is_repository_root(
+            receiver
+        )
+        if rooted:
+            used.append(f".{function.attr}() from the repository root")
+    return sorted(set(used))
+
+
+def modules_that_enumerate_the_repository() -> dict[str, list[str]]:
+    """Test modules that sweep the whole repository, and which idiom each uses."""
+    found: dict[str, list[str]] = {}
+    for path in sorted(TEST_TREE.rglob("*.py")):
+        relative = str(path.relative_to(REPO_ROOT))
+        source = path.read_text(encoding="utf-8")
+        try:
+            used = sweeps_the_repository(source)
+        except SyntaxError as error:
+            pytest.fail(
+                f"{relative} does not parse ({error}), so this sweep skipped it. A module the "
+                "sweep cannot read is a module whose repository-wide assertion could quietly "
+                "end up in a job the classification switches off."
+            )
+        if used:
+            found[relative] = used
+    return found
+
+
+def test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off(
+    ci_workflow: dict[str, Any], ci_workflow_path: Path
+) -> None:
+    """A sweep whose subject is `docs/` may not live in a job `docs/` switches off."""
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+
+    job = jobs.get(UNCONDITIONAL_SWEEP_JOB)
+    assert job is not None, (
+        f"`{UNCONDITIONAL_SWEEP_JOB}` is not a job in {ci_workflow_path.name}. This test needs a job "
+        "that runs whatever the classification answers; if that job was renamed, rename it here "
+        "and check the new one is still unconditional."
+    )
+
+    # The job has to be unconditional in both the ways it could stop being one.
+    assert "if" not in job, (
+        f"`{UNCONDITIONAL_SWEEP_JOB}` has a job-level `if:`, so it is no longer the job that "
+        "always runs, and the sweeps it carries are switched off with it."
+    )
+    steps = job.get("steps") or []
+    sweep_steps = [
+        step
+        for step in steps
+        if "pytest" in str(step.get("run", "")) and "tests/unit" in str(step.get("run", ""))
+    ]
+    assert sweep_steps, (
+        f"`{UNCONDITIONAL_SWEEP_JOB}` runs no pytest node ids. The repository-wide sweeps were "
+        "moved out of it, or never landed, and the filter can switch them off again."
+    )
+    for step in sweep_steps:
+        assert "inert" not in str(step.get("if", "")), (
+            f"a sweep step in `{UNCONDITIONAL_SWEEP_JOB}` is guarded on the classification's "
+            "output, which is exactly the thing it exists to be independent of."
+        )
+
+    named_in_the_job = "\n".join(str(step.get("run", "")) for step in sweep_steps)
+
+    unprotected = []
+    for module, idioms in sorted(modules_that_enumerate_the_repository().items()):
+        if module in SWEEPS_THAT_NEED_NO_PROTECTION:
+            continue
+        if module in named_in_the_job:
+            continue
+        unprotected.append(f"  {module}  (uses {', '.join(idioms)})")
+
+    assert not unprotected, "\n".join(
+        [
+            "These test modules enumerate the whole repository, so a file under `docs/` is their "
+            "subject, and they run only in a job that an inert diff switches off:",
+            *unprotected,
+            "",
+            f"A documentation-only pull request is exactly when such a sweep has something new "
+            f"to look at, and it is exactly when it does not run. Either name the relevant node "
+            f"ids in the `{UNCONDITIONAL_SWEEP_JOB}` job, or — if it genuinely needs no "
+            f"protection — record it in "
+            "SWEEPS_THAT_NEED_NO_PROTECTION with the reason.",
+            "",
+            "Do not resolve this by adding the module's directory to the inert set. The inert "
+            "set is about what the build reads; this is about what the suite asserts, and the "
+            "two are not the same question.",
+        ]
+    )
+
+
+def test_a_leading_dash_path_is_refused_rather_than_classified() -> None:
+    """argparse answers before the script does, and its answer is the inert one."""
+    wrong: list[str] = []
+    for case, path in LEADING_DASH_PATHS:
+        verdict = classify(["--", path])
+        if verdict != NOT_INERT:
+            wrong.append(f"  {case}: {path!r} classified {verdict}, want {NOT_INERT}")
+
+        beside_real_code = classify(["--", path, "backend/app/main.py"])
+        if beside_real_code != NOT_INERT:
+            wrong.append(
+                f"  {case} beside a Python file: {path!r} classified "
+                f"{beside_real_code}, want {NOT_INERT}"
+            )
+
+    assert not wrong, "\n".join(
+        [
+            "A path beginning with a dash was not refused:",
+            *wrong,
+            "",
+            "These are passed after `--`, which is how the workflow passes them, so they reach "
+            "the script rather than argparse. Without `--` argparse parses the path list and "
+            "answers first: `-h` prints the usage and exits 0, which is this script's *inert* "
+            "answer, so a repository root file with that name switches off pytest, the §4.1 "
+            "invariant suite, both image builds, Playwright, the evals and the supply-chain "
+            "audit, and the required check goes green.",
+            "",
+            "Both halves are deliberate. The workflow passes `--` so argparse never sees a path; "
+            "the script refuses leading dashes so the next caller — the usage message advertises "
+            "a general command line — does not have to know that.",
+        ]
+    )
+
+
+def test_the_workflow_passes_a_separator_before_the_path_list(
+    ci_workflow: dict[str, Any], ci_workflow_path: Path
+) -> None:
+    """Without `--`, argparse parses the diff's paths and answers before the script."""
+    _, step = classification_step(ci_workflow, ci_workflow_path)
+    body = str(step.get("run", ""))
+
+    # An invocation, not a mention: the step also echoes the script's name in the
+    # `::warning::` it prints when the classifier answers something that is
+    # neither of its two answers, and that line is not a call.
+    invocations = [
+        line.strip()
+        for line in body.splitlines()
+        if "classify_changed_paths.py" in line
+        and "python3" in line
+        and not line.strip().startswith("#")
+        and not line.strip().startswith("echo")
+    ]
+    assert invocations, (
+        "the classification step does not invoke classify_changed_paths.py, so either the step "
+        "moved or this test is reading the wrong one."
+    )
+
+    without_separator = [line for line in invocations if "classify_changed_paths.py --" not in line]
+    assert not without_separator, "\n".join(
+        [
+            "The classifier is invoked without a `--` separator before the path list:",
+            *(f"  {line}" for line in without_separator),
+            "",
+            "The path list comes from `git diff`, so a repository root file named `-h` arrives "
+            "as an argument. argparse parses it before the script's own logic runs, prints the "
+            "usage and exits 0 — this script's *inert* answer — which switches off pytest, the "
+            "§4.1 invariant suite, both image builds, Playwright, the evals and the supply-chain "
+            "audit while the required check reports success.",
+            "",
+            "The script also refuses leading-dash arguments, and that is the second half rather "
+            "than a replacement: argparse runs first, so the script's refusal is unreachable "
+            "unless this separator is here.",
         ]
     )
