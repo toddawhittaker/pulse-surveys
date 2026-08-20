@@ -6,13 +6,14 @@
 
 ## Status — what is left here
 
-**Mostly decisions and records.** One item is a batch item, one is closed, two
-are Todd's, and the rest stay here or leave the epic.
+**Mostly decisions and records.** Two items are batch items, one is closed, two
+more became batch items on 2026-08-20, and the rest stay here or leave the epic.
+Nothing here is waiting on an answer.
 
 | Item | Now |
 |---|---|
-| 1a — cleartext to an off-machine endpoint with no credential | **Decided 2026-08-18: refuse it.** Require an encrypted transport whenever the model is on another host, credential or not. |
-| 1b — HTTP 429 and 500 outside the fail-open set | **Decided 2026-08-18: affirmed as built.** Both stay out of the fail-open set; the reasoning goes into ADR 0056. |
+| 1a — cleartext to an off-machine endpoint with no credential | **Decided 2026-08-18: refuse it.** Require an encrypted transport whenever the model is on another host, credential or not. **Built as [E0-37](E0-37-small-corrections.md) item 12** (scheduled 2026-08-20). |
+| 1b — HTTP 429 and 500 outside the fail-open set | **Decided 2026-08-18: affirmed as built.** Both stay out of the fail-open set; the reasoning goes into ADR 0056. **Written up as [E0-37](E0-37-small-corrections.md) item 13** (scheduled 2026-08-20). |
 | 2 — three taxonomy rows nothing asserts | **Carried out of E0** — none is producible from a loopback stub |
 | 3 — `MISTAKES` entry 26 presents a superseded resolution | **Closed** |
 | 4a — `tiktoken` reaches the network at first use | **This ticket**, as a recorded decision — it cannot be dropped without dropping the `[openai]` extra |
@@ -49,7 +50,9 @@ Read first: [ADR 0053](../../adr/0053-the-gateway-speaks-openai-through-pydantic
 
 ### 1. Two decisions that are Todd's, not an implementer's
 
-**Both settled 2026-08-18.** 1a is **refused**: an encrypted transport is required
+**Both settled 2026-08-18, and both have a home as of 2026-08-20**: 1a is
+[E0-37](E0-37-small-corrections.md) item 12 and 1b is its item 13. 1a is
+**refused**: an encrypted transport is required
 whenever the model is on another host, with or without a credential. The vLLM
 case is served by terminating TLS at the model or running it alongside the app,
 and `README.md` and `.env.example` change wherever they document the current

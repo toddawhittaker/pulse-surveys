@@ -6,16 +6,18 @@
 
 ## Status — what is left here
 
-**Nothing moved.** No item here fits a batch, because four of the five need a
-thing that does not exist until E10 and the fifth is a decision.
+**Nothing moved into a batch**, because three of the five need a thing that does
+not exist until E10. What changed on **2026-08-20** is that the remaining two got
+dates: item 1 is built inside this epic rather than carried, and item 5's spec
+line is drafted below and waiting on Todd.
 
 | Item | Now |
 |---|---|
-| 1 — the audit row and the identity read come apart on rollback | **Decided 2026-08-18: restructure the reveal** so it returns nothing until a separately committed record exists. Not `dblink`, not `postgres_fdw` — both put a credential inside a `SECURITY DEFINER` function. Must land **before E10**. |
+| 1 — the audit row and the identity read come apart on rollback | **Decided 2026-08-18: restructure the reveal** so it returns nothing until a separately committed record exists. Not `dblink`, not `postgres_fdw` — both put a credential inside a `SECURITY DEFINER` function. **Scheduled 2026-08-20: built here, in E0, before ticket 18**, rather than carried to E10. |
 | 2 — the reveal writes no conflict-of-interest marking | **Carried to E10** |
 | 3 — the acting person is a parameter, not a property of the connection | **Carried to E10**, which is the first thing with a request-bound actor to bind |
 | 4 — the Care sweep does not cover the module's own public entry point | **Carried to E10**, which supplies the second legitimate caller the rule needs to name |
-| 5 — §4.1 item 1's deferral to E2 has no home in a document E2 will read | **Todd's, and still open** — the fix is a line in SPEC §14.3's E2 entry. Half discharged by the README's carried-out table. |
+| 5 — §4.1 item 1's deferral to E2 has no home in a document E2 will read | **Drafted 2026-08-20, awaiting Todd.** The proposed wording is in item 5 below; nothing has been written to `docs/SPEC.md`. Half discharged by the README's carried-out table. |
 
 Item 5 is partly discharged in the meantime: the README now carries a
 carried-out-of-E0 table, which is the bookkeeping half of what item 5 asks for.
@@ -23,7 +25,17 @@ The spec half is still owed.
 
 Item 1 is the only item anywhere in E0-19 to E0-37 whose subject is a live gap in
 a guarantee the spec states rather than a missing assertion. It blocks nothing in
-E0 and it is not hardening.
+E0 and it is not hardening — and that is exactly why it was at risk of being
+carried indefinitely, which is why on **2026-08-20** it was scheduled here
+instead: everything the fix needs exists at this revision, and E10 is a long way
+off. It is the next thing built in this epic, ahead of E0-22's constraint and
+ahead of ticket 18.
+
+**It gets the full review treatment**, decided the same day: the gated reviewer
+agents that fire on its diff, both security passes — the specialist and the
+generic one — and a review from a session with no prior context. On E0-38 the
+cleared-context pass was the one that found what the other two missed, and this
+is a `SECURITY DEFINER` function that two earlier rounds already found holes in.
 
 
 ## Context
@@ -37,9 +49,10 @@ are indexed at the bottom so this file is a complete record of the round.
 2 to 5 harden a guard or settle a record and block nothing. Item 1 is a live gap
 in the guarantee SPEC §4 states — "every identity access is automatically
 audit-logged" — and it was measured, not argued. It does not block E0's exit,
-because nothing in E0 opens the Care queue, but it must land **before E10 builds
-the queue that calls the door**, and the credential narrowing that came with it
-in PR #29 is a reduction of the exposure rather than a fix for it.
+because nothing in E0 opens the Care queue, and its deadline was **before E10
+builds the queue that calls the door** — which is now moot, since it is built
+here. The credential narrowing that came with it in PR #29 is a reduction of the
+exposure rather than a fix for it.
 
 Three of the five are the same shape as each other: **the reveal function trusts
 what it is handed and records what it is told.** The actor is a parameter rather
@@ -61,7 +74,8 @@ function, which is a new privilege surface of exactly the kind
 [ADR 0043](../../adr/0043-the-reveal-function-has-an-owner-of-its-own.md) exists
 to keep small. Its own ADR still says what the chosen shape costs.
 
-The deadline is unchanged: **before E10 builds the queue that calls the door.**
+The deadline was **before E10 builds the queue that calls the door**, and it is
+now earlier than that: this is built in E0, before ticket 18.
 
 `public.reveal_student_identity` writes its `audit_log` row and reads
 `public.user_identity` in one transaction — the caller's. Postgres has already
@@ -182,6 +196,35 @@ Compare item 3b, which got a checklist line in `E0-20-gate-fidelity.md`.
 A deferral recorded only in the ticket that deferred it is a deferral nobody
 picks up. Give it a line in SPEC §14.3's E2 entry, or in the first E2 ticket file
 when one exists, and a line in this README's deferral bookkeeping.
+
+**Drafted 2026-08-20 and awaiting Todd.** Spec edits are Todd's per `CLAUDE.md`,
+so this is a proposal sitting in a ticket file and *not* a change to
+`docs/SPEC.md`. Three small additions to the **E2** entry in §14.3, in that
+entry's existing voice:
+
+> Add to the end of the descriptive paragraph:
+>
+> **§4.1 item 1 is asserted here** — no student-visible path exposes another
+> section — deferred from E0, which adds no student-visible path and none of the
+> scoping that gives "another section" its meaning.
+>
+> Add to the exit sentence, after "bounced with immediate feedback":
+>
+> ; and the §4.1 invariant suite carries a test for item 1 that fails when a
+> student-visible path returns data from a section the student is not enrolled
+> in.
+>
+> Add to the *Ticket breakdown* list, after "resubmission rules":
+>
+> §4.1 item 1 invariant.
+
+Note that §4.1 itself is **not** silent: item 1 already carries *"(Asserted from
+E2, the first epic with a student-visible path…)"*, and §4.1's preamble names it
+as one of the two items with no assertion behind it. What is missing is the other
+direction — somebody reading §14.3 to find out what E2 is has no way to learn
+that an invariant is waiting there. The addition is bookkeeping in the document
+E2 will actually be planned from, which is why it is three sentences and not a
+rule.
 
 ## Out of scope
 
