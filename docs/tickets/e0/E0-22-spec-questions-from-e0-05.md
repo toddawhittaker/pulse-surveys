@@ -25,6 +25,12 @@ it is exactly the rule this ticket exists to stop shipping unenforced.
 The remaining work does not batch with anything: it is one migration adding one
 constraint, plus the test that a second `institution` row is refused.
 
+**Scheduled 2026-08-20: its own short branch, after E0-26 item 1 and before
+E0-18.** Folding it into [E0-37](E0-37-small-corrections.md) was considered and
+declined — Batch H is text corrections and test guards, and a migration riding
+along with those is the one item in it that could break something. The branch is
+`e0/single-institution-constraint`.
+
 
 ## Context
 
@@ -118,7 +124,12 @@ change is larger than a schema edit.
 - [ ] **A constraint enforces it.** Not done, and it is this ticket's remaining
       scope: nothing yet stops a second `institution` row, so §8 currently states
       a rule the database does not hold. One migration, plus a test that the
-      second row is refused, verified by mutation.
+      second row is refused, verified by mutation. **Done when** dropping the
+      constraint turns that test red. Check what `alembic check` does with the
+      drop as well: if the shape chosen is one it cannot compare — an expression
+      index or a check constraint —
+      [E0-33](E0-33-catalog-drift-assertions.md)'s catalog assertions are where
+      that has to be caught, and this constraint should be named there.
 - [x] Neither answer is recorded only in an ADR. Both are spec questions, and
       `CLAUDE.md` is explicit that an ADR is not the instrument for something the
       spec should decide. **Both landed in SPEC**; ADR 0017's amendment points at
