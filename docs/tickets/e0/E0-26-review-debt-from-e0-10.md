@@ -178,11 +178,40 @@ call.** §6.2 requires "a plain, one-click procedural action", and that is about
 what Care staff do, not about how many statements the service sends. It records,
 commits, and then reveals in a second transaction.
 
-**What this costs, for the ADR to state**: the log now over-records rather than
-under-records. A caller that commits a record and then never reveals leaves a row
-saying an access was authorised, and §6.2's periodic review reads that as an
+**What this costs, for the ADR to state**: the log over-records in one direction
+and under-records in another. It over-records a caller that commits a record and then never reveals leaves a
+row saying an access was authorised, and §6.2's periodic review reads that as an
 access. That is the safe direction for a safety log and it is a real change in
 what a row means.
+
+**And it under-records, which was not seen until three reviewers measured it on
+PR #53.** Nothing marks a record spent, so one committed record answers any
+number of times: five spends returned the student's name five times and left
+`audit_log` at one row. §4's "every identity access is automatically audit-logged"
+therefore holds per *authorisation* and not per access. E0-10's single function
+wrote a row per call, so this is a hole this item opened rather than one it found.
+It is carried to **E10** with a "done when" in the epic README's carried-out
+table, because settling it needs a case and a disposition to spend a record
+against.
+
+**A spec sentence is owed and it is Todd's, drafted here and not written.**
+`CLAUDE.md` says an ADR is not the instrument for something that leaves the
+spec's own words false, and this leaves §4's words false in a way the ADR alone
+would only annotate. Proposed, for **SPEC §4**, replacing "every identity access
+is automatically audit-logged with actor, timestamp, and case":
+
+> every identity access is automatically audit-logged with actor, timestamp, and
+> case. An access is logged when it is *authorised*: the record is written and
+> committed before any name is returned, and re-reading a name under a record
+> already committed writes no second row. Whether a record may be spent more than
+> once is settled by the Care queue (§6.2), which is where a reveal has a case to
+> be spent against.
+
+Two things about that draft. It states what is *true today* rather than what
+would be nicer, which is the point — a spec sentence nothing enforces is what
+§4.1's preamble now exists to stop. And if the answer is instead that a spend
+must write its own row, the sentence stays as it is and the code changes; that
+choice is Todd's and either way it is not an ADR's to make.
 
 ### 2. The reveal writes no conflict-of-interest marking
 

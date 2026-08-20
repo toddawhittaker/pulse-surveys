@@ -152,8 +152,12 @@ is that the record is *committed*, not that it belongs to somebody else.
 
 ## Consequences
 
-**The log over-records rather than under-records, and that is a real change in
-what a row means.** A caller that commits a record and then never spends it —
+**The log over-records in one direction and under-records in another, and only
+the first was stated when this record was written.** The correction is below,
+under the re-spend consequence; read the two together rather than either alone.
+
+**It over-records an authorisation that was never spent, and that is a real
+change in what a row means.** A caller that commits a record and then never spends it —
 because the reveal raised, because the process died, because it simply chose not
 to — leaves a row saying an access was authorised when no name was read. §6.2 has
 this log "reviewed periodically outside the Care office", and that review reads a
@@ -174,11 +178,40 @@ long as nobody adds a grant beside the line that needed it" — and this is the
 first time that budget has moved. `pulse_care` still holds nothing on `audit_log`:
 the record it causes to be written is still not one it may read.
 
-**A committed record is a capability, and nothing limits it to one use.** The
-reveal can be called twice against the same id and will answer twice, writing
-nothing the second time. Whether a record may be spent more than once is a
-question this ticket deliberately leaves open and E10's queue should settle, since
-that is where a reveal has a case and a disposition to be spent against. The
+**A committed record is a capability, nothing limits it to one use, and that is
+where the log under-records.** The reveal can be called any number of times
+against the same id and answers every time, writing nothing. Measured during
+review: one committed record spent five times returned the student's name and
+address five times and left `audit_log` at one row — one of those five inside a
+transaction that was then rolled back.
+
+**So §4's sentence is still not literally true after the ticket that exists to
+make it true.** "Every identity access is automatically audit-logged" holds per
+*authorisation* here, not per access, and §6.2's periodic review outside the Care
+office counts rows as accesses. A credential holder who re-identifies the same
+student every week for a term appears in that review once. This is a hole the
+split creates rather than one it inherits: E0-10's single function wrote a row on
+every call, so the change that closed the rollback opened this. The paragraph
+above claiming the log "over-records rather than under-records" was written
+before that was measured and stated only the flattering half.
+
+What bounds it today is narrow and worth being precise about, because it is not
+"the log is fine": the record pins one actor and one subject, so a re-spend
+returns a name that record already accounts for and never a different student's;
+the id is a `gen_random_uuid()` primary key in a table neither runtime role may
+read; and a holder of the `pulse_care` credential can mint a fresh record at will
+anyway, which is E0-26 item 3. The marginal gain to an attacker is one fewer row,
+not one more name.
+
+**This wants a spec sentence and it is not an implementer's to write.**
+`CLAUDE.md` is explicit that an ADR is not the instrument for something that
+leaves the spec's own words false. A draft is in E0-26 item 1 awaiting Todd, and
+a "done when" against E10 is in the epic README's carried-out table, so the gap
+is carried by something other than this paragraph.
+
+Whether a record may be spent more than once is
+a question this ticket deliberately leaves open and E10's queue should settle,
+since that is where a reveal has a case and a disposition to be spent against. The
 practical bound today is that obtaining a second name still needs a second
 committed record.
 
