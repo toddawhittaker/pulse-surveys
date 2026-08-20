@@ -158,8 +158,13 @@ is loud rather than silent.
 - **`README.md` was inert and is also a build input; it is no longer inert.**
   Reversed on E0-38's security review, which asked whether a declared build input
   belongs in the set that switches the build off. It does not. The saving given up
-  is README-only pull requests, of which this epic has produced none — the six
-  inert pull requests were tickets, ADRs and mistakes files. The original
+  is README-only pull requests, of which this epic has produced none. E0-38's
+  third review pass checked that against the branch history rather than against
+  this record: the six inert pull requests are #2, #18, #20, #35, #36 and #41 —
+  tickets, ADRs, mistakes files, and #2 was `CLAUDE.md` with `CONTRIBUTING.md`,
+  which an earlier version of this line did not mention. Twelve pull requests
+  touched `README.md` and every one of them touched code as well, in diffs of
+  four to forty-nine files. The original
   reasoning and its cost are kept below, because the reversal is cheap only while
   README-only changes stay rare, and whoever revisits this should see what was
   weighed rather than only the answer.
@@ -180,7 +185,33 @@ is loud rather than silent.
   Neither was visible to the classifier's own tests, because neither is about the
   classifier. When this is next changed, the first question is what the diff
   computation might not be saying.
-- **A guard with its sense reversed is invisible to the suite.** The wiring test
-  reads conditions and does not evaluate them, so `== 'true'` where `!= 'true'`
-  was meant passes every assertion. That half is verified by pushing to a scratch
-  branch, which is what E0-38's last two criteria ask for and why they ask for it.
+- **Refusing to classify a push gives back close to half the saving, and that is
+  accepted.** Only a `pull_request` may be inert, because a push event's base is
+  `github.event.before` and the diff is then incremental while the verdict is
+  not. E0-38's third pass costed it: this repository has run CI 41 times on push
+  against 111 times on pull request, because every ticket merge produces an
+  epic-branch push, and roughly six of those pushes now run in full where the
+  incremental version would have short-circuited. It is still the right trade —
+  a branch badge reporting success over code whose gates failed is worse than a
+  slow pipeline — but the cost is most of the benefit and the record should say
+  so rather than leave it to be rediscovered.
+
+- **A guard with its sense reversed was invisible to the suite, and is not any
+  more.** The wiring test reads conditions and does not evaluate them, so
+  `== 'true'` where `!= 'true'` was meant passed every assertion — one character
+  making a gate run on documentation and never on code. This record used to leave
+  it there, deferring it to the scratch-branch push. That was wrong: the push is
+  a one-time act and the reversal needs a standing control, and the two are not
+  substitutes. `COMPARISON` was discarding the operator in a non-capturing group;
+  it captures it now, and every work step of all six gates must be switched off
+  by an inert diff rather than run only on one. On `evals` the reversed form
+  disables SPEC §9.3's threat and self-harm recall floor, which makes this a
+  safety gate rather than a tidiness one.
+
+  What the scratch push still verifies and this cannot is that the whole
+  arrangement behaves on a real runner — that the classifier answers rather than
+  dies, that a docs-only diff produces success and not pending, and that a real
+  defect still comes back red. That is what E0-38's last two criteria ask for and
+  why they ask for it. **Both pushes have to be redone whenever this job changes**
+  — the first inert-path verification was run against a workflow that three later
+  commits rewrote, and the record went on asserting it.
