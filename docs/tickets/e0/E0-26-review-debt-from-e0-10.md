@@ -123,6 +123,63 @@ taken, or the audit row survives the rollback; there is a test that performs the
 rollback and reads the surviving row count from a *second connection*; and the
 ADR says what the chosen mechanism costs.
 
+#### The shape, settled 2026-08-20 before any test was written
+
+Todd's decision names the mechanism and not the interface, and a test cannot be
+written against an interface that does not exist yet. So the door becomes two
+calls, and this is the interface the tests are written against:
+
+```sql
+-- Records that a reveal is about to happen. The caller must COMMIT this.
+public.record_identity_reveal(
+    in_actor_person_id uuid,
+    in_subject_user_id uuid,
+    in_case_id uuid
+) RETURNS uuid                       -- the audit_log row's id
+
+-- Returns identity, and only against a record that is already committed.
+public.reveal_student_identity(
+    in_reveal_id uuid
+) RETURNS TABLE (identity_name text, identity_email text)
+```
+
+The three-argument `reveal_student_identity` is **dropped**, not kept alongside.
+A door that still opens the old way is not closed.
+
+What each call must hold:
+
+- `record_identity_reveal` refuses an actor with no live `CARE` assignment,
+  exactly as the old function did, and writes the `audit_log` row. It returns the
+  row's id and nothing else — no identity, on any path.
+- `reveal_student_identity` takes only the record's id, so the subject is read
+  from the committed record and cannot be substituted by the caller.
+- It **raises** where the record is not committed, rather than returning zero
+  rows. Zero rows already means "this student has no identity row", which is a
+  legitimate answer the service returns as `None`, and the two must not arrive
+  looking the same.
+- It re-checks that the record's actor still holds `CARE`, and that the record is
+  an `IDENTITY_REVEAL`. The two-places rule E0-10 states does not weaken because
+  the door grew a second half.
+
+**A record written by the calling transaction does not count as committed, and
+"written by the calling transaction" has to mean the top-level one.** Comparing
+the audit row's `xmin` against the current transaction is not enough: a caller
+that wraps the first call in a `SAVEPOINT` gives the row a subtransaction id,
+which differs from the top-level id, and the check would pass on a record that
+still vanishes on `ROLLBACK`. Whatever is compared has to be a value that a
+savepoint cannot change.
+
+**`reveal_identity` in `services/safety.py` keeps its signature and stays one
+call.** §6.2 requires "a plain, one-click procedural action", and that is about
+what Care staff do, not about how many statements the service sends. It records,
+commits, and then reveals in a second transaction.
+
+**What this costs, for the ADR to state**: the log now over-records rather than
+under-records. A caller that commits a record and then never reveals leaves a row
+saying an access was authorised, and §6.2's periodic review reads that as an
+access. That is the safe direction for a safety log and it is a real change in
+what a row means.
+
 ### 2. The reveal writes no conflict-of-interest marking
 
 SPEC §6.2 requires the audit entry to be flagged where the revealed student is
