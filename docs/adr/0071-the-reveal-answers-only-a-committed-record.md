@@ -215,12 +215,21 @@ a fifth privilege all leave the drift gate green.
 `tests/integration/test_identity_grants.py` are the only readers. E0-20 item 3b
 carries the gate's blindness.
 
-**`tests/integration/test_identity_grants.py` fails against this change and has to
-move onto the new interface.** Its `the_reveal_function` helper asserts that
+**`tests/integration/test_identity_grants.py` moved onto the new interface in a
+partitioned round** (`docs/MISTAKES.md` entry 22), after this decision was written
+and before it merged. What it had to change is the measure of what this decision
+costs an existing guard: its `the_reveal_function` helper asserted that
 `pulse_care` may execute exactly one `SECURITY DEFINER` function and there are now
-two; four of its tests call the reveal inside a session that never commits, which
-this shape refuses by design; and
-`test_the_reveal_writes_its_audit_row_in_the_callers_own_transaction` asserts that
-the row does *not* survive a rollback, which its own docstring already said E0-26
-inverts. That migration is a partitioned round of its own
-(`docs/MISTAKES.md` entry 22) and belongs to the test author, not here.
+two, so it became `the_care_door` and states the count as two halves of one door;
+four of its tests called the reveal inside a session that never commits, which
+this shape refuses by design, and each became record, commit, then reveal on a
+committed connection; and
+`test_the_reveal_writes_its_audit_row_in_the_callers_own_transaction` asserted
+that the row does *not* survive a rollback, which is the property this decision
+inverts, so it is gone. What replaced it asserts something nothing in the suite
+had ever provoked: that `pulse_care` is refused `INSERT` and `DELETE` on
+`audit_log` behaviourally, on SQLSTATE, rather than only in the catalog. That
+matters more under this decision than under the one it replaces, because the
+caller now commits the record itself — so whether it could forge one, or remove
+one after taking a name, is what makes §4's guarantee a property rather than a
+sequence.

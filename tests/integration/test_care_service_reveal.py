@@ -58,12 +58,16 @@ REVEAL = "reveal_identity"
 NOT_CARE_STAFF_ERROR = "NotCareStaffError"
 
 # Which value fills which parameter of `reveal_identity`, matched against a
-# fragment of the parameter's name. **A copy of `REVEAL_ARGUMENT_ROLES` in
-# `tests/integration/test_identity_grants.py`**, which asks the same question of
-# the same function's SQL signature; the two are copies for the reason the three
-# `IDENTITY_NAME_FRAGMENTS` tuples are, and like those, change one and look at the
-# other. Order matters: `care_person_id` is the actor, `student_user_id` is the
-# subject, and a bare `person` is read as the actor only after both.
+# fragment of the parameter's name. **This used to be a copy of
+# `REVEAL_ARGUMENT_ROLES` in `tests/integration/test_identity_grants.py`, and it is
+# now the only one of the pair.** That module bound the SQL function's arguments
+# this way because E0-10 spelled no signature; E0-26 item 1 settles both halves of
+# the door in the ticket, so the guessing there is gone and the calls are written
+# out. This copy stays because the question it asks is still open: E0-26 leaves
+# `reveal_identity` in `services/safety.py` with its own signature — "it keeps its
+# signature and stays one call" — and no ticket has written that signature down.
+# Order matters: `care_person_id` is the actor, `student_user_id` is the subject,
+# and a bare `person` is read as the actor only after both.
 REVEAL_PARAMETER_ROLES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("session", "connection", "db"), "session"),
     (("case",), "case"),
@@ -76,8 +80,11 @@ REVEAL_PARAMETER_ROLES: tuple[tuple[tuple[str, ...], str], ...] = (
 REVEAL_NOTE = "E0-10 proof of mechanism"
 
 # Where a `user` row keeps the LMS subject, if the reveal names its student that
-# way rather than by key. A copy of `LMS_USER_ID_COLUMNS` in
-# `test_identity_grants.py`; SPEC §4 keys responses to "the LMS user ID (`sub`
+# way rather than by key. This was a copy of `LMS_USER_ID_COLUMNS` in
+# `test_identity_grants.py`, which went with the argument-guessing there when
+# E0-26 item 1 settled `record_identity_reveal(… in_subject_user_id uuid …)` on the
+# key; the service's own signature is still unwritten, so the question survives
+# here. SPEC §4 keys responses to "the LMS user ID (`sub`
 # from the launch)". A prefix match on `lms` alone would not do: `user` also
 # carries the platform reference, and revealing "the student whose id is that
 # platform" is a call that would succeed and mean nothing.

@@ -21,7 +21,20 @@ it half-way inside a ticket about something else is how a green suite stops mean
 what it says. It is reported as a partitioned round for the same agent instead.
 The entry's second rule earned its place here too — `the_reveal_function`'s
 assertion message prescribes a repair to whoever trips it, and whoever trips it
-will be the implementer, who may not edit `tests/`.)*
+will be the implementer, who may not edit `tests/`.*
+
+***What the partition was worth, measured after it ran.** Eight tests failed, all
+on the same assertion, and the count hid a second failure the way this entry's
+first instance did: `REVEAL_DEFINER_PRIVILEGES` is asserted as an exact set and was
+**never evaluated**, because the helper raised first — so the ticket's fourth grant
+was a defect queued behind a defect, and a round that had fixed only the visible
+one would have reported the module repaired. The repair round also found that three
+of the four converted tests are now near-duplicates of tests in the new module, and
+that the fourth — the `pg_temp` shadow hijack — is the only coverage there that
+exists nowhere else and had to be rewritten to aim at both halves of the split
+door. **Count the failures, then look for what the first one is standing in front
+of**: a helper that raises in setup suppresses every assertion in the test behind
+it, and an exact-set assertion is the kind whose silence looks like agreement.)*
 
 *(In E0-15's tests, and it stopped a test being written rather than
 repaired one. E0-15's scope says "every seeded course needs a title"; E0-14's scope

@@ -80,17 +80,24 @@ production. `services/safety.py`'s half of the door is
 `tests/integration/test_care_service_reveal.py`; nothing in this file goes near
 the service.
 
-**`test_identity_grants.py` has not moved onto this interface yet, and it has to.**
-That module reaches the door through `the_reveal_function`, which asserts that
-`pulse_care` may execute *exactly one* `SECURITY DEFINER` function; after the split
-there are two, and ten tests there fail inside their own setup on an implementation
-that is correct. Four of them go on to call the reveal inside `db_session`, whose
-transaction is never committed, which this ticket's shape refuses by design — and
-`test_the_reveal_writes_its_audit_row_in_the_callers_own_transaction` asserts that
-the row does *not* survive a rollback, which its own docstring already says E0-26
-inverts. That migration is larger than this module and is a partitioned round of
-its own (`docs/MISTAKES.md` entry 22); until it lands, a red there is that
-collision rather than a defect in the implementation.
+**`test_identity_grants.py` has moved onto this interface, and where the line
+between the two modules runs is worth knowing before adding a test to either.**
+That module's helper became `the_care_door`, and the count of halves moved out of
+it into `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` —
+a count is a fact about a revision, and two tests there inspect a downgraded one.
+Its four tests that go through the door now take a `pulse_care` login and
+record, commit and reveal, because none of them could be driven inside
+`db_session`; and `test_the_reveal_writes_its_audit_row_in_the_callers_own_
+transaction`, which asserted the row does *not* survive a rollback, is gone — its
+own docstring had named this ticket as the one that would invert it, and the
+inversion lives here, in
+`test_a_caller_that_rolls_back_keeps_no_name_it_is_not_recorded_as_having_taken`.
+
+**That module asks whether the grants let the door work and stop everything else;
+this one asks what the door does.** A behavioural rule about an uncommitted record,
+a savepoint, a revoked actor or a substituted subject belongs here. A rule about
+who holds `EXECUTE`, what the definer may reach, or what `pulse_care` may do to
+`audit_log` directly belongs there.
 """
 
 from typing import Any, NamedTuple
@@ -169,9 +176,27 @@ COUNT_ONE_AUDIT_ROW = 'SELECT count(*) FROM public."{table}" WHERE "{key}" = CAS
 
 # Everything a test here needs to know about one function in `public`, for the two
 # assertions that are about the door's *shape* rather than about what it does.
+#
+# **`argument_types` carries types and no names, and that is the repair for dispute
+# E0-26-01.** It was `pg_get_function_identity_arguments`, which renders
+# `in_reveal_id uuid` — the parameter's name as well as its type — so comparing it
+# against `'uuid'` refused the exact signature the ticket settles and could only
+# have been satisfied by an anonymous parameter. Three spellings were measured
+# during the ruling and two of them are traps:
+#
+#   - `p.proargtypes::regtype[]::text` renders `[0:0]={uuid}` rather than `{uuid}`,
+#     because `oidvector` is zero-based. A literal comparison there is the same
+#     false red one layer down;
+#   - `p.oid::regprocedure::text` is `search_path`-dependent — it schema-qualifies
+#     when the function is not visible on the current path — which makes it right
+#     for a failure message and wrong for a predicate. It stays as `signature`, and
+#     it is printed and never compared.
+#
+# `array_to_string(p.proargtypes::regtype[], ',')` gives `uuid` cleanly, and the
+# column is named for what it holds so that the next reader does not repeat this.
 FUNCTIONS = """
     SELECT p.oid::regprocedure::text AS signature,
-           pg_get_function_identity_arguments(p.oid) AS arguments,
+           array_to_string(p.proargtypes::regtype[], ',') AS argument_types,
            pg_get_function_result(p.oid) AS result,
            p.pronargs AS argument_count,
            p.proretset AS returns_a_set,
@@ -216,9 +241,20 @@ def attempt(connection: Any, statement: str, parameters: dict[str, Any]) -> tupl
     what the caller does with its transaction after a refusal is a thing the tests
     here decide statement by statement. A caller that has provoked an error is
     inside an aborted transaction until it says otherwise.
+
+    **`returns_rows` is checked though every statement this module sends is a
+    `SELECT`**, and the reason is `docs/MISTAKES.md` entry 13: its twin in
+    `test_identity_grants.py` is handed `CREATE TEMPORARY TABLE`, `INSERT` and
+    `DELETE`, and without this check `.mappings().all()` raises
+    `ResourceClosedError` — which is not a `DatabaseError`, so it escapes the
+    `except` and reaches the test as an error rather than as an answer. That was a
+    measured failure there and a latent one in a test that passed. The quirk is
+    faced in two places, so both places carry the same one-line answer rather than
+    one of them carrying a comment about it.
     """
     try:
-        rows = connection.execute(text(statement), parameters).mappings().all()
+        result = connection.execute(text(statement), parameters)
+        rows = result.mappings().all() if result.returns_rows else []
     except DatabaseError as failure:
         return [], failure
     return rows, None
@@ -1218,29 +1254,65 @@ def test_the_reveal_takes_the_records_identifier_and_nothing_else(
     measured still works against the old one.
 
     **Vacuity has no route in**: `reveal_interface` has already failed if no
-    function of this name exists, so "no overload takes three arguments" cannot be
-    true here of a schema that has no reveal at all.
+    function of this name exists, so "there is exactly one overload" cannot be true
+    here of a schema that has no reveal at all.
+
+    **Two faults reach this test and they get two messages**, because they are
+    repaired differently. A *second* overload means the migration created the new
+    function and did not `DROP` the old one, and both doors are open. A *single*
+    overload of the wrong shape means there is one door and it is not the one the
+    ticket settles — most usefully `reveal_student_identity(text)`, which takes the
+    record's id as a string and which `pronargs` alone would wave through.
+
+    **The type is compared and the parameter's name is not**, which is the repair
+    ruled in `docs/disputes/E0-26-01.md`. This assertion read
+    `pg_get_function_identity_arguments`, which renders `in_reveal_id uuid`, so it
+    refused the exact signature the ticket writes and could only ever have been
+    satisfied by an anonymous parameter — a workaround the implementer was right to
+    decline. `argument_types` in the `FUNCTIONS` query carries types and nothing
+    else; the comment above it holds the two spellings that look equivalent and are
+    not. **Do not respell this predicate against `signature`**: `regprocedure`
+    schema-qualifies depending on `search_path`, which makes it right for the
+    message below and wrong for the condition.
 
     **The mutation it exists to survive**: a migration whose `upgrade()` creates
-    the new function without dropping the old one — or, the same thing arriving by
-    a different door, a `downgrade()` that recreates the old one and is then run.
+    the one-argument function without dropping the three-argument one. `pronargs`
+    counts input arguments only — it is 1 for the reveal despite its `RETURNS
+    TABLE` columns, and 3 for the old door — so the old function fails the arity
+    half on its own. The `downgrade()` half of the round trip is deliberately *not*
+    claimed here: this test reads post-`upgrade` catalog state and never runs a
+    downgrade, and a docstring naming a mutation it does not exercise reads as
+    coverage. `test_identity_grants.py` is where downgrade round trips live.
     """
     overloads = reveal_interface[REVEAL_FUNCTION]
 
-    wrong_arity = [
-        row["signature"]
+    assert len(overloads) == 1, (
+        f"`public` carries {len(overloads)} functions called `{REVEAL_FUNCTION}`: "
+        f"{[row['signature'] for row in overloads]}. Every one of them is a door, and the "
+        "three-argument form is the one E0-26 item 1 exists to close: it takes the subject from "
+        "its caller, so the caller chooses whose name comes back, and the record it writes is the "
+        "caller's to roll back. Postgres overloads on argument types, so creating the new function "
+        "does not replace the old one — the migration has to `DROP` it by its full signature.\n\n"
+        "Every behavioural test in this file passes with both doors standing, because every one of "
+        "them calls the new signature. This is the only assertion that looks at what else is "
+        f"there.\n\n{THE_INTERFACE}"
+    )
+
+    misshapen = [
+        f"{row['signature']} takes {row['argument_count']} argument(s) of type "
+        f"({row['argument_types'] or 'none'})"
         for row in overloads
-        if row["argument_count"] != 1 or row["arguments"].strip().lower() != "uuid"
+        if row["argument_count"] != 1 or row["argument_types"].strip().lower() != "uuid"
     ]
-    assert not wrong_arity, (
-        f"`public` carries {wrong_arity} beside the one-argument reveal. Every overload of this "
-        f"name is a door: the three-argument form is the one E0-26 item 1 exists to close, and it "
-        "takes the subject from its caller, so the caller chooses whose name comes back and the "
-        "record it writes is the caller's to roll back. Postgres overloads on argument types, so "
-        "creating the new function does not replace the old one — the migration has to `DROP` it, "
-        "and `downgrade()` has to not bring it back into a database somebody then runs "
-        f"`upgrade` on again.\n\n{THE_INTERFACE}\n\n"
-        f"What is there: {[row['signature'] for row in overloads]}."
+    assert not misshapen, (
+        f"The one function called `{REVEAL_FUNCTION}` is not the door the ticket settles: "
+        f"{misshapen}. It takes exactly one argument and that argument is a `uuid` — the id of a "
+        "committed record, which is what makes the subject something the caller cannot "
+        "substitute.\n\n"
+        "The type is asserted and not only the count, because `reveal_student_identity(text)` has "
+        "one argument too. That is the shape that arrives when somebody later takes the record's "
+        "id as a string, and it widens what a caller may hand in from 'a uuid this database "
+        f"generated' to 'any text at all'.\n\n{THE_INTERFACE}"
     )
 
     not_definer = [row["signature"] for row in overloads if not row["security_definer"]]

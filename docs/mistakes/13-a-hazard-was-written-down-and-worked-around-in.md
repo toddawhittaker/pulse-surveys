@@ -1,10 +1,40 @@
 # Entry 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 20**
+**Caught: 21**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*14 instances recorded; the 3 most recent are below. The earlier 11 are in this file's git history and in the pull requests they cite.*
+*15 instances recorded; the 4 below are the most recent, and this file needs a trim
+to three from whoever next has a shell to date them with.*
+
+***The counter needs re-deriving from git, and this note is the evidence.** When
+E0-26's test round bumped this entry, `docs/MISTAKES.md` already read **21** while
+this file read **20**, and only three instance paragraphs were here — so a bump
+landed on the index without an instance, which is the parallel-branch case
+`docs/MISTAKES.md` cautions about ("two branches cut from the same commit that both
+bump the same entry merge without conflicting and count once"). Both now read 21
+and this file holds four paragraphs. If the index's 21 was somebody else's catch,
+the true count is 22 and their instance is missing. Re-derive from each branch's own
+diff against the merge base rather than trusting either number.*
+
+*(Repairing E0-26 item 1's test round. The suite reported one error —
+`ResourceClosedError: This result object does not return rows` — from the `pg_temp`
+shadow test, and the cause was a one-line assumption in a shared helper:
+`attempt()` called `.mappings().all()` on every result, and `CREATE TEMPORARY
+TABLE` returns none. This entry's rule is what turned a one-line fix into the
+finding. Grepping the helper's six call sites for the same question — which of
+these statements returns no rows? — found two more, the `INSERT` and the `DELETE`
+that `test_the_care_connection_cannot_forge_or_suppress_the_record_the_door_writes`
+must be refused on. **That test was passing**, and passing for the reason that
+makes this expensive: a refused statement raises `DatabaseError` before the rows
+are ever asked for, so the bug sat on the branch where the finding is and nowhere
+else. Under the exact mutation its own docstring names —
+`GRANT INSERT ON public.audit_log TO pulse_care` — the insert would have succeeded,
+the helper would have raised `ResourceClosedError`, which is not a `DatabaseError`
+and escapes the `except`, and an `invariant`-marked confidentiality test would have
+**errored instead of reporting a forgeable audit log**. Fixing only the failure the
+runner named would have left that. The check is now in both copies of the helper,
+in two modules, rather than in one with a comment in the other.)*
 
 *(In E0-16's second review pass, and the hazard is a duplicated
 request parameter. RFC 6749 §3.1 forbids one, the provider refused one, and the
