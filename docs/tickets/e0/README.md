@@ -54,7 +54,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 34 | [A view file that reads identity must fail on that ground](E0-34-view-file-identity-guards.md) | 10, 11 | **Batch B.** A `views_sql/*.sql` file joining `user_identity` passes the identity invariant vacuously and is caught only by a sweep whose message points at `public.` prefixes. Carries E0-32 items 2 and 3 and E0-27 item 2. |
 | 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C — built 2026-08-19.** Three rules held by a docstring, now three sweeps: an unmarked column on an LMS-owned table, a second assignment site for a section's derived calendar, and a module that writes an LMS-owned relation without naming `guard_write`. Closes E0-21 item 1, E0-24 item 2 and E0-27 item 1. ADR 0069 records the sweep-over-hook choice all three declined, ADR 0014 and ADR 0021 are amended, and one question is left open by decision: how a *sanctioned* writer satisfies the guard rule is E1's. |
 | 36 | [Gates that report green over something they did not look at](E0-36-ci-gate-fidelity.md) | 04 | **Batch D.** Five items in `ci.yml`, `scripts/ci/` and the `Makefile`, including the aggregate `CI` check that prints "All gates green" over a real `migration-drift` failure. Carries E0-20 items 1 and 2, E0-32 item 1, E0-25 item 1 and E0-29 items 4b and 4c. Produces two pull requests. |
-| 37 | [Eleven small corrections](E0-37-small-corrections.md) | 05, 13, 17, 36, 38 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, E0-31 items 3 and 4, E0-36's security review as item 9, E0-38's two open LOWs as items 10 and 11, and E0-29 items 1a and 1b as items 12 and 13. Item 12 withdraws a deployment shape the README currently documents as supported, which makes it the largest thing in the batch. Items 1 and 9 are the ones with a confidentiality consequence; item 9 is true of the image on disk today, which is why it depends on 36. Items 10 and 11 are defects in E0-38's guards rather than in the gate they protect, and neither has a live instance. |
+| 37 | [Thirteen small corrections](E0-37-small-corrections.md) | 05, 13, 17, 36, 38 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, E0-31 items 3 and 4, E0-36's security review as item 9, E0-38's two open LOWs as items 10 and 11, and E0-29 items 1a and 1b as items 12 and 13. Item 12 withdraws a deployment shape the README currently documents as supported, which makes it the largest thing in the batch. Items 1 and 9 are the ones with a confidentiality consequence; item 9 is true of the image on disk today, which is why it depends on 36. Items 10 and 11 are defects in E0-38's guards rather than in the gate they protect, and neither has a live instance. |
 | 38 | [A documentation-only change should not run the whole pipeline](E0-38-docs-only-runs-skip-the-heavy-gates.md) | 36 | **Batch D's sequel.** A Markdown-only pull request runs pytest, both image builds, Playwright, the evals and the supply-chain audit — about fifteen minutes of runner time to establish that no Python changed. Two traps: `test_ai_contracts.py` parses `docs/SPEC.md` at test time, and a path filter manufactures a second meaning for `skipped` that E0-36 item 1 must settle first. **Built and merged 2026-08-20** as PR #48, commit `e7cd892`, after three review passes of which the third was the first independent one. Its two remaining LOWs are E0-37 items 10 and 11; nothing else is left here. |
 
 ## Dependency graph
@@ -79,7 +79,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 02, 03 ── 19        Batch G — Compose credential surface
 15 ── 28            Batch E — mock LMS conformance
 16 ── 30            Batch F — mock IdP error redirects
-05, 13, 17, 36, 38 ─ 37  Batch H — eleven small corrections
+05, 13, 17, 36, 38 ─ 37  Batch H — thirteen small corrections
 36 ── 38            after Batch D, and the dependency is real rather than tidy
 
 20, 21, 27, 32      redistributed; read for their measurements, do not build
@@ -113,7 +113,7 @@ here.
 | E | 28 | `mock-lms/app/` | medium |
 | F | 30 | `mock-idp/app/` | medium |
 | G | 19 | `tests/unit/test_compose_stack.py` and its neighbour | medium |
-| H | 37 | a dozen files, one to twenty lines each, plus two guard corrections in E0-38's test module | small |
+| H | 37 | a dozen files, one to twenty lines each, plus two guard corrections in E0-38's test module and the AI transport rule in `config.py` | small, except item 12 |
 | — | 38 | `ci.yml` again, **after** 36 | small |
 
 **Suggested order: A and B first, as one sitting.** They are the same subject —

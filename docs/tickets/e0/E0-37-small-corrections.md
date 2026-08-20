@@ -1,4 +1,4 @@
-# E0-37 — Eleven small corrections, none of which is worth a ticket alone
+# E0-37 — Thirteen small corrections, none of which is worth a ticket alone
 
 **ID:** E0-37
 **Branch:** `e0/small-corrections`
@@ -6,7 +6,8 @@
 
 ## Context
 
-Nine items from five tickets, each between one line and about twenty, batched
+Nine items from five tickets to begin with, each between one line and about
+twenty, batched
 because tracking them separately costs more than fixing them. They were
 [E0-20](E0-20-gate-fidelity.md) item 4 and its two "also worth doing" entries,
 [E0-21](E0-21-review-debt.md) item 2, [E0-25](E0-25-review-debt-from-e0-09-to-e0-14.md)
@@ -17,6 +18,18 @@ items 2 and 3, [E0-31](E0-31-review-debt-from-e0-17.md) items 3 and 4, and
 Both are LOW, neither has a live instance, and both are defects in E0-38's guards
 rather than in the gate those guards protect — which is why they are here rather
 than held against that ticket. The heading count moved with them.
+
+**Items 12 and 13 were added on 2026-08-20 as well**, from
+[E0-29](E0-29-review-debt-from-e0-13.md) items 1a and 1b. Both were answered by
+Todd on 2026-08-18 and neither had a place to be built; Batch H is where they
+land. The heading count moved again, to thirteen.
+
+**Item 12 is the largest thing in this batch and the one to watch.** It withdraws
+a deployment shape `README.md` and `.env.example` currently document as
+supported, so it is a code change plus two documentation edits plus a test, not a
+one-line correction. This ticket's own out-of-scope rule applies to it before any
+other item: if it grows past this description, it leaves and gets its own
+ticket.
 
 **The count said "seven" until 2026-08-19 and item 8 was already here**, added
 without it. That is `docs/MISTAKES.md` entry 1 in the file whose own subject is
@@ -244,6 +257,49 @@ Derive the candidate gates from the workflow the same way: any job whose steps
 run one of the expensive commands is a candidate, and every candidate must be
 inventoried or exempted with a reason.
 
+### 12. Cleartext to an off-machine model endpoint is permitted when no credential is set
+
+`backend/app/config.py`, the `a_credentialled_endpoint_is_encrypted` validator.
+From [E0-29](E0-29-review-debt-from-e0-13.md) item 1a, **decided 2026-08-18:
+refuse it.**
+
+The validator returns early when `ai_provider_api_key` is `None`, so a base URL
+naming another host over plain `http` is accepted whenever no key is configured.
+That is the vLLM-in-a-cluster case, and it is documented as supported in
+`README.md` and `.env.example`. Student comment text crosses that link in the
+clear, which is what §10 does not allow. The decision is that an encrypted
+transport is required whenever the model is on another host, with or without a
+credential; the cluster case is served by terminating TLS at the model or running
+it alongside the app.
+
+The change is small — the early return goes, the rule becomes "off this machine
+means `https`" — and three things around it are not: the validator's name no
+longer describes it, its docstring argues at length for the case being removed
+including a paragraph headed "What this deliberately does not refuse", and both
+documents describe the old allowance. All four move together or the tree contains
+a record of a rule that is no longer the rule.
+
+**Done when** a settings object built with no key and an off-machine `http://`
+URL raises, the same URL over `https` does not, an on-this-machine `http://` URL
+still does not, and no wording anywhere in the repository still offers the
+cleartext cluster deployment.
+
+### 13. ADR 0056 does not say why 429 and 500 are outside the fail-open set
+
+From [E0-29](E0-29-review-debt-from-e0-13.md) item 1b, **affirmed as built
+2026-08-18**: both stay outside the set. Nothing changes in the taxonomy or in
+the code. What is missing is the reasoning, which lives in a review thread rather
+than in the record: a rate limit is a capacity decision an operator has to see,
+and a 500 means our own request is the problem, so flooring either hides a
+condition that never resolves — one comment at a time.
+
+E0-13's implementer named this as the row it expected an argument about. An
+affirmed decision with its argument only in the thread that raised it is
+indistinguishable, a year later, from one nobody examined.
+
+**Done when** ADR 0056 carries the reasoning for both codes and no longer reads
+as though the row were unexamined.
+
 ## Out of scope
 
 - **Database TLS.** Neither engine sets `sslmode`, so psycopg's default `prefer`
@@ -283,14 +339,23 @@ inventoried or exempted with a reason.
       exempted with a reason. **Done when** the candidate set comes from the
       workflow rather than from a hand-written dict, and adding such a job
       without inventorying it fails.
-- [ ] Items 1, 2, 3, 4, 10 and 11 verified by mutation.
+- [ ] With no credential configured at all, an `ai_provider_base_url` naming a
+      host that is not this machine over plain `http` is refused at startup, and
+      the same URL over `https` is accepted. `README.md` and `.env.example` no
+      longer describe the cleartext-in-a-cluster case as supported.
+- [ ] ADR 0056 states why HTTP 429 and 500 are outside the fail-open set, in the
+      record rather than only in a review thread. The taxonomy itself does not
+      change.
+- [ ] Items 1, 2, 3, 4, 10, 11 and 12 verified by mutation.
 
 ## Definition of done
 
-**Tests apply** to items 1 through 5, and to items 10 and 11, which are tests.
+**Tests apply** to items 1 through 5, to items 10 and 11, which are tests, and to
+item 12.
 
-**Docs apply** to items 6 and 8.
+**Docs apply** to items 6, 8, 12 and 13.
 
 **AI evals do not apply. Accessibility does not apply.**
 
-**Security review applies but is light**, and item 1 is the only one it is about.
+**Security review applies.** It is light for most of the batch, and items 1 and
+12 are what it is about — item 12 is a transport rule for text SPEC §10 protects.
