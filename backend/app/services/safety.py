@@ -4,7 +4,7 @@ SPEC §6.2 gives this queue to the Care role "and only the Care role: comment
 content and identity access are visible to no other role, including Admin and the
 VPAA". §13 names this module for it. E0-10 builds the door and E10 builds the
 queue behind it — the case model, the two actions, the disposition note — so what
-is here is the connection, the check, and the one call.
+is here is the connection, the check, and the one entry point.
 
 **The pool is bound to this module, not to the person asking.** §2.1 permits one
 person to hold a Care assignment *and* a reporting assignment — a Care staffer
@@ -16,20 +16,35 @@ hats they hold. Nothing outside this module obtains a Care session, and
 `tests/unit/test_care_session_is_bound_to_the_care_service.py` sweeps every module
 under `app/` for one that does.
 
-**The actor is checked twice, in two places, and that is the design.**
+**The door is two calls, and `reveal_identity` is still one.** E0-26 item 1
+split `public.reveal_student_identity` in two: `public.record_identity_reveal`
+writes the `audit_log` row and hands back its id, and the reveal takes that id
+and answers only where the record's writing transaction has **committed**. So a
+caller that rolls back keeps no name — the rollback destroys the record, and
+without a committed record the second call raises. What this module does with
+that is record, commit, and then reveal in a second transaction. §6.2 asks for
+"a plain, one-click procedural action", which is about what Care staff do rather
+than about how many statements the service sends, so `reveal_identity` keeps its
+signature and its single call.
+
+**The actor is checked three times, in three places, and that is the design.**
 `reveal_identity` verifies the actor holds a live `CARE` assignment before it
-calls anything, and `public.reveal_student_identity` verifies the same thing for
-itself. Neither alone:
+calls anything; `public.record_identity_reveal` verifies the actor it is handed;
+and `public.reveal_student_identity` verifies the actor named by the record it is
+spending. None alone:
 
 * the check here catches a **routing** mistake — a request that reached the Care
   service with an actor who is not Care staff is refused before a `SECURITY
   DEFINER` function is entered at all, so no audit row is written for an access
   that was never going to happen, and the caller gets an error naming the reason;
-* the check in the function catches **everything that did not come through
-  here** — a psql session on the Care credential, a future module that acquires a
-  session some other way, a bug in this file. That is the half that has to hold
-  when this one is bypassed, and it is asserted against the database with no
-  service in the picture.
+* the check in `record_identity_reveal` catches **everything that did not come
+  through here** — a psql session on the Care credential, a future module that
+  acquires a session some other way, a bug in this file. That is the half that
+  has to hold when this one is bypassed, and it is asserted against the database
+  with no service in the picture;
+* the check in the reveal catches a **stale** record. Without it a committed
+  record would be a bearer token: written while its actor held `CARE`, spent
+  after the assignment was revoked.
 
 **The configuration decides which process can reveal at all.**
 `CARE_DATABASE_URL` is optional in `Settings`, and its absence is the ordinary
@@ -70,9 +85,10 @@ __all__ = [
 # Whether this person holds an assignment in the Care role at all. E0-09's
 # `role_assignment` carries no validity dates, so "live" reads as "exists" today:
 # a revoked assignment is a deleted row. When E9 or E10 adds end-dating this
-# predicate gains it, and so does the copy inside
-# `public.reveal_student_identity` — they are two statements of one rule and they
-# move together (`docs/MISTAKES.md` entry 13).
+# predicate gains it, and so do the copies inside
+# `public.record_identity_reveal` and `public.reveal_student_identity` — they are
+# three statements of one rule and they move together (`docs/MISTAKES.md`
+# entry 13).
 _HOLDS_A_LIVE_CARE_ASSIGNMENT = text(
     "SELECT EXISTS ("
     " SELECT 1 FROM public.role_assignment AS acting"
@@ -81,13 +97,20 @@ _HOLDS_A_LIVE_CARE_ASSIGNMENT = text(
     ")"
 )
 
-# The reveal. `SELECT * FROM` a set-returning function rather than
+# The first half of the door: the record, which the caller must commit before the
+# second half will answer. It returns the `audit_log` row's id and nothing else —
+# no identity, on any path — so a scalar rather than a row.
+_RECORD_THE_REVEAL = text(
+    "SELECT public.record_identity_reveal(:actor_person_id, :subject_user_id, :case_id)"
+)
+
+# The second half. `SELECT * FROM` a set-returning function rather than
 # `SELECT reveal(...)`, so the two output columns arrive as columns rather than
-# as one composite value to take apart here.
+# as one composite value to take apart here. It takes the record's id and nothing
+# else, so the subject is read from the committed record and this module cannot
+# substitute one.
 _REVEAL = text(
-    "SELECT identity_name, identity_email"
-    " FROM public.reveal_student_identity("
-    " :actor_person_id, :subject_user_id, :case_id)"
+    "SELECT identity_name, identity_email FROM public.reveal_student_identity(:reveal_id)"
 )
 
 
@@ -200,17 +223,18 @@ def reveal_identity(
     seen but whose name never arrived over NRPS — which is a different answer from
     a refusal and is why `NotCareStaffError` is raised rather than returned.
 
-    The audit row is written before the identity is read and in the same
-    transaction, so an actor whose `INSERT` is refused never reaches the
-    `SELECT`, and a failure inside the function discards both. What that does not
-    give is atomicity against the *caller*: Postgres has already streamed the
-    rows by the time the caller decides, so a session that rolls back keeps the
-    name and discards the record. Reproduced on the pinned image. plpgsql has no
-    autonomous transaction, so closing it means writing the audit row over a
-    second connection — a dblink or a loopback foreign-data wrapper — which is
-    E0-26's. Until then the record holds against everything except a caller that
-    deliberately rolls back, and the credential that permits that reaches only
-    the `api` process.
+    **Three statements and two transactions, and the order is the guarantee.**
+    The record is written and *committed* first, and only then is identity read,
+    in a second transaction against the committed record. So there is no state in
+    which this returns a name that is not already recorded: a failure anywhere
+    after the commit — the reveal raising, the connection dropping, this process
+    being killed — leaves the record standing and hands back nothing.
+
+    That is the safe direction and it is not free: the log now over-records
+    rather than under-records. A record committed here for a reveal that then
+    fails is a row saying an access was authorised when no name was read, and
+    §6.2's periodic review outside the Care office reads it as an access.
+    ADR 0071 argues the trade.
 
     `case_id` is optional and defaults to nothing because there is no case model
     until E10; §4 asks for "actor, timestamp, and case" and the column is there
@@ -228,14 +252,20 @@ def reveal_identity(
                 "only by the Care role (SPEC 4, 6.2)."
             )
 
-        revealed = session.execute(
-            _REVEAL,
+        reveal_id = session.execute(
+            _RECORD_THE_REVEAL,
             {
                 "actor_person_id": actor_person_id,
                 "subject_user_id": subject_user_id,
                 "case_id": case_id,
             },
-        ).one_or_none()
+        ).scalar_one()
+        # The commit the whole ticket is about. Until it returns, the record is
+        # this transaction's to discard and `public.reveal_student_identity` will
+        # refuse to answer against it.
+        session.commit()
+
+        revealed = session.execute(_REVEAL, {"reveal_id": reveal_id}).one_or_none()
         session.commit()
 
     if revealed is None:

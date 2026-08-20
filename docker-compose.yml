@@ -50,12 +50,16 @@ x-application-environment: &application-environment
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
   # Second: the Care queue's own connection, blanked here and supplied by the
   # `api` service alone. `pulse_care` is the only credential in the cluster
-  # that can execute `public.reveal_student_identity`, and a caller holding it
-  # can read the `CARE` assignments it needs to borrow an actor and then run
-  # the reveal inside a transaction it rolls back — which keeps the name and
-  # discards the audit row. Reproduced on the pinned image, and it is the
-  # premise ADR 0042 rejected this blanking on, so that record is amended
-  # rather than left standing. `worker` and `beat` never serve this queue, and
+  # that can execute the reveal, and a caller holding it can read the `CARE`
+  # assignments it needs to borrow an actor. Until E0-26 it could also run the
+  # reveal inside a transaction it rolled back, keeping the name and discarding
+  # the audit row — reproduced on the pinned image, and the premise ADR 0042
+  # rejected this blanking on, so that record was amended rather than left
+  # standing. That half is closed as of ADR 0071: the door is two calls and the
+  # second answers only against a committed record. The borrowed actor is not,
+  # and is E0-26 item 3, so the blanking stands on its own terms — a credential
+  # in a process that never serves this queue buys nothing either way.
+  # `worker` and `beat` never serve this queue, and
   # `worker` is the process that ships student comment text to a third-party
   # model provider, so it is the last container in the stack that should hold
   # a route to a student's name. Blanked rather than omitted, for the same

@@ -14,12 +14,29 @@ of things that actually happen rather than a forecast — the same reasoning
 `AssignmentRole` gives for leaving `STUDENT` out.
 
 **Nothing in the application writes this table, and that is the design.** The row
-is written inside `public.reveal_student_identity`, the `SECURITY DEFINER`
-function that returns identity, in the same transaction as the read
-([ADR 0001](../../../docs/adr/0001-identity-separation-by-database-role.md)):
-"Putting the read and the audit write in one transaction means they cannot come
-apart." Neither runtime role holds `INSERT` here, so there is no second way to
-write a row and no way to obtain a name without one.
+is written inside `public.record_identity_reveal`, a `SECURITY DEFINER` function
+that returns the row's id and no identity at all. Neither runtime role holds
+`INSERT` here, so there is no second way to write a row.
+
+**A row has to be committed before any name is handed over, and that is what
+makes it a record rather than a courtesy.**
+[ADR 0001](../../../docs/adr/0001-identity-separation-by-database-role.md)
+originally put the write and the read in one transaction, which E0-10's review
+measured as less than it claimed: Postgres streams the result rows before the
+caller decides what to do with its transaction, so a caller that rolled back kept
+the name and discarded the row.
+[ADR 0071](../../../docs/adr/0071-the-reveal-answers-only-a-committed-record.md)
+replaced that with two calls — `public.record_identity_reveal` writes the row and
+`public.reveal_student_identity` answers only where the row's writing transaction
+has committed. So the ordering is enforced by the database rather than by a
+convention a code path can skip, and a caller that discards its transaction ends
+up with neither the row nor the name.
+
+**What that changes about what a row means.** The log now over-records rather
+than under-records: a committed row is a reveal that was *authorised*, not
+necessarily one whose name was read, because the caller may commit the record and
+never spend it. §6.2's periodic review outside the Care office should read a row
+that way. ADR 0071 states the cost.
 
 **What is deliberately absent.** §6.2's conflict-of-interest flag has no column
 yet. E0-10's scope leaves the choice between "leave the column or leave room for
@@ -45,9 +62,11 @@ class AuditAction(StrEnum):
     """What an `audit_log` row records having happened.
 
     One member, and it is the whole of E0-10's audit surface: a Care staff
-    member obtained a student's name and email address through the reveal
-    function. The member's value is its name, as every other enum in this model
-    layer does it — one spelling in Python and in the database.
+    member was authorised to obtain a student's name and email address through
+    the reveal function. "Authorised" rather than "obtained" since ADR 0071 — the
+    row is committed before the name is read, so it records the access having
+    been opened. The member's value is its name, as every other enum in this
+    model layer does it — one spelling in Python and in the database.
     """
 
     IDENTITY_REVEAL = "IDENTITY_REVEAL"

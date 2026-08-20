@@ -94,7 +94,7 @@ did not expect.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 35** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 36** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
@@ -113,7 +113,7 @@ second case arrives.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 20** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
+**Caught: 21** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
 
 **Rule.** When you work around a quirk of a type, a parser or an API, grep for
 every place that asks the same question and route them through one helper, in the
@@ -123,7 +123,7 @@ fixture first — the message this one printed said exactly that, and was right.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 18** · [the incidents, the root cause, and the whole rule](mistakes/09-citing-a-guard-as-a-guarantee-without-executing-it.md)
+**Caught: 19** · [the incidents, the root cause, and the whole rule](mistakes/09-citing-a-guard-as-a-guarantee-without-executing-it.md)
 
 **Rule.** Before citing a guard, execute it against the case you claim it stops
 and the case you claim it allows. A guard that has never been run is a comment.
@@ -141,7 +141,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
+**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
 
 ## 15. A property test's generator excluded the case its own docstring named
 
@@ -170,7 +170,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/17-an-unqualified-table-name-let-the-caller-choose-which.md)
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/17-an-unqualified-table-name-let-the-caller-choose-which.md)
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
