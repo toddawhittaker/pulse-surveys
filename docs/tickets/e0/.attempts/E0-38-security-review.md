@@ -777,3 +777,315 @@ myself.
    as the decision, including the claim that this epic has produced no README-only
    pull requests. Somebody should check that count against the branch history
    rather than against the record that asserts it.
+
+---
+
+# Third pass — independent
+
+**Reviewer:** a session cleared of context before starting, with no part in
+building E0-38 and no sight of the first two passes until after forming its own
+account of the change. **Date:** 2026-08-19.
+
+**What I read, in what order.** `.github/workflows/ci.yml` and
+`scripts/ci/classify_changed_paths.py` first, then the guard module, and only
+then ADR 0070, this file and `E0-38.md`. The order was deliberate: the second
+pass warned that a distinction it supplied is now load-bearing in six records,
+and a reader who meets the distinction before the code cannot check it.
+
+**Diffs used.** Primary `git diff b1bbb37..3886bf2` — 5 files, 733 insertions.
+Secondary `git diff origin/epic/e0-foundations...3886bf2` — 12 files, 4,722
+insertions. Working directory `/home/todd/projects/pulse-surveys` at `3886bf2`
+for reading and for running the suite; a throwaway worktree at `/tmp/e038-review`
+for every mutation. I did not run `/security-review`; it resolves its base to
+`main` here, so the checklist was redone by hand against the two diffs above.
+The main checkout is unchanged — clean tree, still on `e0/ci-docs-path-filter` at
+`3886bf2`, no stray worktrees, pytest/ruff/mypy intact.
+
+## My own account of the change, before reading any record
+
+`ci.yml` gains a `changed` job that answers one question: did this diff touch
+anything but inert documentation? It computes the changed-path list with
+`git diff --no-renames --name-only -z <base.sha> HEAD` and hands it to
+`classify_changed_paths.py`, which calls a path inert when it sits under `docs/`
+or `design/`, or is a Markdown file at the repository root — minus two named
+exceptions, `docs/SPEC.md`, which `test_ai_contracts.py` parses at test time, and
+`README.md`, which `backend/Dockerfile` copies as a build input. Exit 0 means
+inert and exit 1 means run everything, and every failure route — a non-pull-request
+event, a missing or unreachable base, a failed diff, an empty path list, a
+leading-dash argument, an exit code that is neither answer — takes the exit-1
+side. Six expensive jobs (`test`, `docker`, `e2e`, `evals`, `frontend-build`,
+`supply-chain`) stay in the aggregate `ci` check's `needs` and stay unconditional
+at the job level; each real step carries `if: needs.changed.outputs.inert != 'true'`
+and each job gains one notice step with the opposite condition, so a
+documentation-only run reports success rather than `skipped`. Three fast jobs run
+unconditionally, and `lint-python` additionally runs three pytest node ids whose
+subject is the whole repository — conflict markers and private key material —
+because a documentation-only diff is exactly when those have something new to
+look at.
+
+That account matches the records. I found no place where ADR 0070, this file or
+`E0-38.md` describes something the code does not do. Where I differ from them is
+about what the guards cover, not about what the change is.
+
+## The distinction the second pass asked about
+
+**It holds, and I checked it against the aggregator rather than against the
+argument for it.** The claim that a job-level `if:` would fail the required check
+is not a claim about GitHub's branch protection — it is a claim about this
+repository's own `ci` job, whose verdict step is
+`grep -qE 'failure|cancelled|skipped'` over `join(needs.*.result)`. A job whose
+`if:` evaluates false reports `skipped`, that grep matches, and the required
+check goes red on every documentation-only pull request. So the step-level
+placement is forced by E0-36 item 1, and the ADR's alternatives section is
+honest about the price: the job-level spelling would need the verdict to
+distinguish two kinds of `skipped` from a string that does not carry the reason.
+
+The input/subject cut (question 1) is the right cut, and I could not find a third
+category. I enumerated every way a `docs/` or `design/` file could matter to a
+run: a build input (only `README.md`, and no Dockerfile copies `docs/` or
+`design/`; `.dockerignore` and the Compose mounts add nothing); a document a test
+opens by path (only `docs/SPEC.md`, confirmed by executing the guard's own
+`repository_paths_named_by_the_suite()`); a document a repository-wide sweep
+asserts about (five modules, confirmed by executing
+`modules_that_enumerate_the_repository()`); a Markdown file collected as a
+doctest (`pyproject.toml` sets no `--doctest-glob`, so none). The licence scan
+and the image content check do not have `docs/` as a subject. The cut is sound.
+
+**But "subject" as operationalised is narrower than "subject" as stated,** and
+that is finding 3 below.
+
+## Findings
+
+### 1. The live verification of criterion 1 predates the workflow it certifies — MEDIUM
+
+`E0-38.md` records criterion 1 as met by PR #49, run 32315212503, with
+`PR_BASE_SHA` read as `a7419ad`. Five commits of the eleven on this branch land
+after `a7419ad`, and three of them change `.github/workflows/ci.yml` in the exact
+job and steps that criterion exercises:
+
+- the classifier invocation gained `--` (the HIGH 2 fix);
+- the push-event branch was rewritten — `PUSH_BEFORE` removed, non-pull-request
+  events now exit early;
+- `lint-python` gained a `pytest` step running three node ids;
+- `e2e`, `evals` and `frontend-build` each gained a notice step and changed
+  conditions, and `frontend-build` gained `changed` in its `needs:`.
+
+**No documentation-only run has ever executed the workflow as it now stands.**
+The record says criterion 1 is met; what is met is criterion 1 against an earlier
+workflow. This is not reasoning — I checked the run's head SHA. Run 32320026499
+is green on `3886bf2` with all fourteen jobs successful, which does verify the
+non-inert path at HEAD, including `lint-python`'s new pytest step. The inert path
+at HEAD is unverified.
+
+**What would close it:** one more scratch-branch pull request against this branch
+touching only a file under `docs/`, confirming `inert = true`, no `::warning::`,
+six notices rather than three, and `CI` green. That is minutes of work and it is
+the only claim in the ticket that a green local suite cannot stand in for.
+
+### 2. A guard with its sense reversed is invisible, and it need not be — MEDIUM
+
+Verified by mutation. In a worktree I changed one character in the `test` job —
+`needs.changed.outputs.inert != 'true'` to `== 'true'` on the `Unit + integration
+with coverage` step, so pytest runs *only* on documentation-only diffs and never
+on a diff that touches code. The whole unit suite stayed green: **360 passed**.
+
+ADR 0070's last consequence discloses this and `E0-38.md` defers it to the
+scratch-branch push. I am reporting it anyway, for two reasons. First, the
+scratch-branch push is a one-time act; it is not a standing control, so it says
+nothing about the pull request that reverses a guard six months from now.
+Second, the disclosure treats the gap as inherent to reading conditions rather
+than evaluating them, and that is not so here. `guard_verdict` already refuses
+any condition it does not model (`UNRECOGNISED`), so it only has to handle the
+forms actually in use — and there are exactly two in the whole file: 35
+occurrences of `!= 'true'` and 6 of `== 'true'`, one per job's notice step. The
+`COMPARISON` regex discards the operator in a non-capturing group. Capturing it
+and asserting that a signature step's `inert` comparison is `!=` would have
+caught the mutation above.
+
+**Severity.** A mistaken committer, one character, and no reviewer noticing. On
+the `evals` job that turns off SPEC §9.3's threat and self-harm recall floor on
+every code-touching pull request with `CI` green, which is the failure mode
+CLAUDE.md calls a safety decision rather than a build fix.
+
+### 3. "Subject" is enforced only for sweeps rooted at the repository — LOW
+
+Verified by mutation. I planted a module whose subject is `docs/adr/**`, walked
+through a scoped directory constant rather than from the root:
+
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    ADR_DIR = REPO_ROOT / "docs" / "adr"
+
+    def test_every_adr_has_a_status_line() -> None:
+        for path in ADR_DIR.rglob("*.md"):
+            assert "**Status:**" in path.read_text(encoding="utf-8"), path
+
+**The guard module stayed green — 22 passed.** It is invisible to both halves.
+`repository_paths_named_in` collects `/` chains only where the result `is_file()`,
+so a directory chain is dropped; `sweeps_the_repository` requires the walk's
+receiver or first argument to be a root expression or a root-bound name, and
+`REPO_ROOT / "docs" / "adr"` is a `BinOp`. The module would live in `test`, and
+an ADR-only pull request — exactly when it has something to say — would switch it
+off.
+
+ADR 0070's closing sentence is literally accurate: it promises a guard against a
+new *repository-wide* sweep, and that guard works (I planted one of those too and
+it went red with a message naming the file). The gap is between that sentence and
+the framing sentence above it, which states the property as "does a test *assert
+about* a file the classification calls inert". A scoped docs walk is a member of
+the stated class and not of the enforced one. No instance exists today — I
+checked every module in `tests/`.
+
+This is the most likely of my findings to arrive by ordinary work: a test that
+every `docs/MISTAKES.md` entry links to a real file under `docs/mistakes/` is a
+natural thing for this repository to write, and the scoped walk is how anyone
+would write it.
+
+### 4. The guard module depends on a document that an inert diff can delete — LOW
+
+Verified by mutation. `SWEEPS_THAT_NEED_NO_PROTECTION` exempts the guard module
+from itself on the reasoning that "a change that could add a sweep module is a
+`.py` change, which is never inert, so the module cannot be switched off on a
+diff that could invalidate it." That reasoning is incomplete. Line 891 asserts
+`"docs/DESIGN_BRIEF.md" in through_a_directory`, and `repository_paths_named_in`
+only yields a path that `is_file()`. I deleted `docs/DESIGN_BRIEF.md` in a
+worktree: the classifier calls that diff **inert** (exit 0), and the guard module
+**fails** — `assert 'docs/DESIGN_BRIEF.md' in set()`.
+
+So a documentation-only pull request that deletes or renames the design brief
+short-circuits the `test` job, merges green, and lands a red test that surfaces
+on the next unrelated code pull request. That is precisely the argument the
+second pass used to reverse `README.md`'s inertness — "a deletion surfaces on
+some later unrelated pull request instead of on the one that caused it" — reaching
+the opposite treatment for the same shape. Consistency, not severity, is what
+makes this worth recording.
+
+**Cheapest fix:** use a document the classifier already calls not-inert in that
+fixture (`docs/SPEC.md` is already the constant in the sibling assertion two lines
+above), which removes the dependency without adding anything.
+
+### 5. `EXPENSIVE_GATES` is still a hand-kept list — LOW
+
+Verified by mutation, in both directions. Dropping `frontend-build`'s guard now
+turns the suite red, so the primary diff's repair works and I confirmed it. But I
+then added a seventh expensive job — `perf-suite`, running `pytest tests/perf`,
+unguarded, wired into `ci`'s `needs` — and **the suite stayed green: 25 passed.**
+
+Nothing derives the inventory from the workflow. The comment added in this very
+commit cites `docs/MISTAKES.md` entry 35 — "the control's inventory has to name
+the thing the guarded structure cannot shrink" — and then repairs the instance by
+adding a sixth key to a dict rather than by deriving the set. The lesson is
+recorded and not applied.
+
+Severity is LOW because the direction is safe: an uninventoried job runs when it
+did not need to, costing runner time. The sharp case is the one just fixed — a
+job that *is* guarded and *is not* inventoried, whose guard can then be removed
+silently. A derivation exists and is short: every job in `ci`'s `needs` closure
+other than the three in `UNCONDITIONAL_GATES` and `changed`/`detect`/`fast-gate`
+must appear in `EXPENSIVE_GATES`. Note the contrast within the same module —
+`modules_that_enumerate_the_repository()` derives its set from the tree and
+forces triage through a validated exception set. That is the pattern; the gate
+inventory did not get it.
+
+## The five open questions
+
+**1. The input/subject distinction.** Sound. No third category — I enumerated
+build inputs, path-opened documents, repository-wide sweeps, and doctest
+collection, and checked each against the tree. The cut is right; the *enforcement*
+of the subject half is narrower than the statement of it, which is finding 3.
+
+**2. `lint-python` as the home for the sweeps.** Acceptable, and it could go
+either way. Reusing an unconditional job that already installs the test
+dependencies adds no job and no schedule, which is the right default. The cost is
+that `Fast · ruff + mypy` now runs pytest, so its name misdescribes it, and
+`UNCONDITIONAL_SWEEP_JOB = "lint-python"` pins the choice in a second place. A
+job of its own would be cleaner and costs one schedule. I would leave it; this is
+not worth a change on its own, and the step name and comment carry the reader.
+
+**3. A push may never be inert.** The reasoning is right and I would keep the
+fix, but the record understates what it costs. Pushes to `epic/**` are not a
+corner case: this repository has run CI 41 times on `push` against 111 times on
+`pull_request`, because every ticket merge into the epic branch produces one. Six
+of the 43 merged pull requests in this epic classify inert (I ran the classifier
+over every one — see below), so roughly six epic-branch pushes now run the full
+pipeline where the incremental-diff version would have short-circuited. **The
+safety fix gives back something close to half of the ticket's total saving.**
+That is the right trade — a branch badge reporting green over code whose gates
+failed is worse than the runner time — but it belongs in the record next to the
+decision, and it is not there.
+
+**4. The three `SWEEPS_THAT_NEED_NO_PROTECTION` entries.** The two E0-35 entries
+hold: both sweep `*.py` under `backend/app`, and I confirmed neither names any
+document, so a diff that could invalidate them is never inert. The third — the
+self-exemption — does not hold as written, which is finding 4.
+
+**5. `README.md`'s reversal.** Confirmed against the branch history rather than
+against the record. No pull request in this epic touched `README.md` alone.
+Twelve touched it, every one alongside code, in diffs of 4 to 49 files. The
+reversal costs nothing that has actually happened. One small correction: ADR 0070
+says the six inert pull requests "were tickets, ADRs and mistakes files", and
+PR #2 was `CLAUDE.md` and `CONTRIBUTING.md`, which are neither.
+
+**Were these the right five?** They were five real questions and one of them
+(number 4) was right to be on the list. But the list is drawn from where the
+second pass felt its own influence, not from where the design is weakest, and it
+misses the largest remaining hole — findings 1, 2 and 5 are none of them on it,
+and finding 2 is disclosed in ADR 0070 as a known limitation without ever being
+put to an independent reader.
+
+## The question nobody asked: is the saving worth what it costs?
+
+I ran `classify_changed_paths.py` over the diff of every pull request merged into
+`epic/e0-foundations` — 43 of them. Six classify inert: **#2, #18, #20, #35, #36,
+#41.** That is an independent confirmation of the ticket's "six pull requests of
+that shape", arrived at from the history rather than from the claim.
+
+**What it saves.** Six inert pull requests out of 43, at the measured ~15 minutes
+of runner time and ~10 minutes of wall clock each. Against the 111 pull-request
+runs the repository has actually executed, and netting off the new `changed` job
+(one schedule with `fetch-depth: 0` on *every* run, inert or not) and the six job
+schedules each inert run still pays for, the saving to date is on the order of
+one to two hours of runner time and perhaps an hour of human waiting, across four
+months of epic work.
+
+**What it costs.** 4,722 insertions across 12 files. 2,714 of those are one test
+module — 58% of the ticket, and about sixteen times the size of the 171-line
+script it guards. Three security-review passes, two fix rounds, and two live
+defects that this ticket *introduced* (the `-h` hole and the sweeps sitting inside
+a job the classification switched off), both of which existed only because the
+filter existed, and both of which were caught only because this ticket drew
+unusual review attention.
+
+**My honest view:** on runner minutes alone the trade is not good, and it would
+not be close. What makes it defensible is that E1 through E9 are still ahead, the
+documentation-to-code ratio in this project is not going to fall, and wall-clock
+latency on a documentation pull request is a human cost rather than a billing
+one. The classifier and the workflow change are proportionate — 171 lines and a
+job. The test module is not, and it is the part I would push back on: at 2,714
+lines it is itself a maintenance surface, and findings 3, 4 and 5 are all defects
+*in the guards* rather than in the thing guarded.
+
+This is a judgment call and the numbers above are the honest version of it. It is
+Todd's to make, not mine, and nothing in it is a reason to hold the ticket.
+
+## Verdict
+
+**Ready to merge once finding 1 is closed.** That one is a record asserting a
+verification that no longer covers the artifact, and closing it is one
+scratch-branch pull request rather than a code change.
+
+Findings 2 through 5 are real and none of them blocks. Finding 2 is the one worth
+doing before E1, because the guard it strengthens is the standing protection for
+a §9.3 safety floor and the change is small and local. Findings 3, 4 and 5 are
+LOW and would sit comfortably in a follow-up ticket with a "done when".
+
+Nothing I found contradicts the design. The fail-closed polarity holds at every
+route I could reach — I executed the classifier against 15 edge-case path shapes,
+including the four leading-dash forms with and without `--`, and every one lands
+on the side that runs the pipeline. The two HIGHs from the second pass are
+genuinely fixed and I verified both by execution rather than by reading.
+
+**Verified by running something:** findings 1 (run head SHAs via `gh`), 2, 3, 4,
+5 (all by mutation in a throwaway worktree), the six-inert-pull-request count, the
+`README.md` history, the classifier's edge-case behaviour, and the two HIGH fixes.
+**Reasoned about without running:** the `lint-python` placement judgment in
+question 2, and the economics above.

@@ -334,9 +334,27 @@ UNCONDITIONAL_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
 # where this is applied: `steps.classify.outputs.inert != ''` mentions the
 # classification and can never switch anything off, so a containment check alone
 # would accept a guard that does nothing.
+# **The operator is captured, and that is the point of this pattern.** It was
+# non-capturing until E0-38's third review pass, which flipped `!=` to `==` on
+# the `test` job's steps — one character — so pytest and the §4.1 invariant suite
+# would run *only* on documentation-only diffs, and therefore never on a change
+# that touches code. The whole unit suite stayed green: 360 passed. On `evals`
+# the same character turns off SPEC §9.3's threat and self-harm recall floor on
+# every code pull request, with the required check reporting success.
+#
+# ADR 0070 disclosed this as a known limitation and deferred it to the
+# scratch-branch push, which does catch it — but that push is a one-time act and
+# this is a standing control. The two are not substitutes.
 COMPARISON = re.compile(
-    r"(?P<reference>[A-Za-z_][A-Za-z0-9_.\-]*)\s*(?:==|!=)\s*(?P<quote>['\"])(?P<literal>[^'\"]*)(?P=quote)"
+    r"(?P<reference>[A-Za-z_][A-Za-z0-9_.\-]*)\s*(?P<operator>==|!=)\s*(?P<quote>['\"])(?P<literal>[^'\"]*)(?P=quote)"
 )
+
+# The two senses a step can be guarded in, and what each one means. A step that
+# does the job's real work runs when the diff is *not* inert; a notice step runs
+# when it is. There are exactly these two forms in the workflow, so a condition
+# in any other shape is reported as unrecognised rather than guessed at.
+SWITCHED_OFF_BY_INERT = "switched-off-by-inert"
+RUNS_ONLY_WHEN_INERT = "runs-only-when-inert"
 
 GUARDED = "guarded"
 UNRECOGNISED = "unrecognised"
@@ -361,7 +379,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = REPO_ROOT / "docs"
-BRIEF_PATH = DOCS / "DESIGN_BRIEF.md"
+SPEC_PATH = DOCS / "SPEC.md"
 '''
 
 MENTIONS_A_DOCUMENT_IN_PROSE = '''"""A module that cites `docs/MISTAKES.md` entry 3 and reads nothing."""
@@ -578,6 +596,28 @@ def guard_verdict(condition: str, prefixes: Sequence[str]) -> str:
         if any(reference.startswith(prefix) for prefix in mentioned) and match.group("literal"):
             return GUARDED
     return UNRECOGNISED
+
+
+def guard_sense(condition: str, prefixes: Sequence[str]) -> str | None:
+    """Which way round a guard is: switched off by an inert diff, or run only on one.
+
+    Returns None when the condition does not compare the classification at all.
+    Reading the operator is what makes a reversed guard visible; without it,
+    `!= 'true'` and `== 'true'` are the same assertion to this module and the
+    difference between them is whether a gate runs on code or on nothing.
+    """
+    mentioned = [prefix for prefix in prefixes if prefix in condition]
+    if not mentioned:
+        return None
+    for match in COMPARISON.finditer(condition):
+        reference = match.group("reference")
+        if not any(reference.startswith(prefix) for prefix in mentioned):
+            continue
+        literal, operator = match.group("literal"), match.group("operator")
+        if literal != "true":
+            continue
+        return SWITCHED_OFF_BY_INERT if operator == "!=" else RUNS_ONLY_WHEN_INERT
+    return None
 
 
 def signature_steps(job: Any, pattern: re.Pattern[str]) -> list[tuple[str, dict[str, Any]]]:
@@ -887,8 +927,20 @@ def test_nothing_the_test_suite_opens_by_path_is_classified_inert() -> None:
         "that the suite reads no documents at all."
     )
 
+    # `docs/SPEC.md`, not `docs/DESIGN_BRIEF.md`. The reader requires the path to
+    # resolve to a file that exists, so this fixture makes the module depend on
+    # whichever document it names — and E0-38's third review pass deleted
+    # `docs/DESIGN_BRIEF.md`, which the classifier calls inert, and turned this
+    # module red. A documentation-only pull request could then merge green and
+    # land a failing test on somebody else's next pull request.
+    #
+    # The spec is the right choice because it is already outside the inert set,
+    # for its own reason: `test_ai_contracts.py` parses it at run time. So a diff
+    # that deletes it runs the whole pipeline, and this module cannot be broken
+    # by a change that was allowed to skip the job it lives in. The sibling
+    # assertion above already uses it.
     through_a_directory = repository_paths_named_in(READS_A_DOCUMENT_THROUGH_A_DIRECTORY)
-    assert "docs/DESIGN_BRIEF.md" in through_a_directory, (
+    assert PARSED_SPEC in through_a_directory, (
         "The reader in this test cannot follow a path built in two steps — a directory constant, "
         "then a file under it. That is the obvious form for the second document-reading test "
         "somebody writes, so a sweep blind to it would miss exactly the case this exists for."
@@ -2710,5 +2762,107 @@ def test_the_sweep_detector_does_not_fire_on_an_ordinary_scoped_walk() -> None:
             "no protection. Each false match has to be triaged into "
             "SWEEPS_THAT_NEED_NO_PROTECTION by hand, and a set full of noise is one nobody reads "
             "— which is the failure the set is supposed to prevent.",
+        ]
+    )
+
+
+def test_no_expensive_gate_is_guarded_the_wrong_way_round(
+    ci_workflow: dict[str, Any], ci_workflow_path: Path
+) -> None:
+    """`== 'true'` where `!= 'true'` was meant runs the gate on documentation and nothing else.
+
+    E0-38's third review pass flipped one character on the `test` job and the
+    whole unit suite stayed green — 360 passed — with pytest and the §4.1
+    invariant suite now running only on documentation-only diffs, so never on a
+    change that touches code. On `evals` the same edit turns off SPEC §9.3's
+    threat and self-harm recall floor on every code pull request, and CLAUDE.md
+    calls that floor a hard gate.
+
+    ADR 0070 disclosed the gap and deferred it to the scratch-branch push. That
+    push does catch it and it is a one-time act; this is the standing control,
+    and the reason it was missing is that `COMPARISON` threw the operator away in
+    a non-capturing group.
+
+    The rule is per step, not per job: a step that does the gate's real work must
+    be switched **off** by an inert diff, and a step that merely prints a notice
+    must run **only** on one. Getting either backwards is the same defect.
+    """
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+
+    backwards: list[str] = []
+    unreadable: list[str] = []
+    for name, (what, pattern) in sorted(EXPENSIVE_GATES.items()):
+        job = jobs.get(name)
+        if job is None:
+            continue
+
+        # Per job, and from the jobs dict — the first version of this test passed
+        # the whole workflow and a Path, which `classification_prefixes` reads as
+        # a job name, so it returned no prefixes and every condition below was
+        # read as mentioning nothing. The test passed while asserting nothing,
+        # and the mutation battery is the only reason that is not still true.
+        prefixes = classification_prefixes(jobs, name)
+        if not prefixes:
+            unreadable.append(
+                f"  {name}: no route from the classification reaches this job's conditions, "
+                "so this test cannot read its guards"
+            )
+            continue
+        for label, step in signature_steps(job, pattern):
+            sense = guard_sense(str(step.get("if") or ""), prefixes)
+            if sense == RUNS_ONLY_WHEN_INERT:
+                backwards.append(
+                    f"  {name} / {label}\n"
+                    f"    runs: {what}\n"
+                    f"    but only when the diff IS inert, so it never runs on a code change"
+                )
+
+        for index, step in enumerate(steps_of(job)):
+            script = str(step.get("run") or "")
+            label = str(step.get("name") or f"step {index}")
+            sense = guard_sense(str(step.get("if") or ""), prefixes)
+            # Only the notices *about the classification*. A job may also carry a
+            # tolerance notice for a different reason — "No e2e specs yet", "No
+            # frontend/ yet" — and those correctly run when the diff is not
+            # inert, because when it is, the inert notice fires instead. The
+            # first version of this rule flagged all three of them.
+            explains_the_classification = "inert" in script.lower()
+            if (
+                sense == SWITCHED_OFF_BY_INERT
+                and "::notice::" in script
+                and explains_the_classification
+                and not pattern.search(script)
+            ):
+                backwards.append(
+                    f"  {name} / {label}\n"
+                    f"    prints a notice explaining that the gate was skipped,\n"
+                    f"    but only when the diff is NOT inert, which is when it did run"
+                )
+
+    assert not unreadable, "\n".join(
+        [
+            "This test could not read the guards on an expensive gate, so it asserted nothing "
+            "about it:",
+            *unreadable,
+            "",
+            "An expensive gate reaches the classification either through a step of its own or "
+            "through a job in its `needs`. If neither is true here, the gate is unguarded and "
+            "the coverage test above should have said so — two tests disagreeing about the same "
+            "job means one of them is reading it wrongly.",
+        ]
+    )
+
+    assert not backwards, "\n".join(
+        [
+            "A guard on an expensive gate reads the classification the wrong way round:",
+            *backwards,
+            "",
+            "One character separates these, and nothing else in this suite can tell them apart "
+            "— a job-level reading sees a condition mentioning the classification either way. "
+            "The consequence is not a slower pipeline: it is a gate that runs on documentation "
+            "and never on code, with the required check green.",
+            "",
+            "For `evals` that gate is SPEC §9.3's threat and self-harm recall floor, which "
+            "CLAUDE.md makes a hard gate and Todd's decision to move.",
         ]
     )
