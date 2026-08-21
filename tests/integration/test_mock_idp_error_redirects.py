@@ -48,6 +48,17 @@ duplicate-parameter split this ticket draws (ADR 0062 rule 3). And `begin`
 follows the provider's own redirects to find a login form; what is under test
 here *is* the redirect, so it is read where it arrives rather than followed.
 
+**Two later sections came out of E0-30's second review round**, and both are
+about what the redirect hands the client rather than about where it goes.
+`error_description` may carry only the characters RFC 6749 Appendix A allows in
+one, however the request was spelled — otherwise the caller picks the bytes the
+client receives. And a `state` of nothing but spaces is refused for being absent
+and must therefore not come back, which is one rule with a near miss beside it:
+a `state` with real content and spaces around it is still echoed exactly.
+The third finding of that round is registration-time and lives in
+`tests/unit/test_mock_idp_service.py`, beside the `code` and `state` rules it
+extends.
+
 **What could not be tested here, said plainly rather than left to be inferred.**
 `app/flow.py`'s `sign_in` refuses two things — a subject it does not know, and a
 seeded person whose assignments do not open this door — and only the first is
@@ -122,6 +133,49 @@ MARKER_STATE = "e0-30-state-marker"
 # what a second round of percent-encoding mangles. A client that reads this back
 # and compares it to what it stored is doing the one check `state` exists for.
 AWKWARD_STATE = "e0-30 state=one&two=three%2Ffour"
+
+# A `state` with real content and whitespace on both ends. It is not blank, so
+# nothing may treat it as absent, and RFC 6749 §4.1.2.1 requires the value the
+# client sent back unchanged — including the padding. This is the near miss for
+# the whitespace-only rule below: the tempting fix for "a blank `state` is
+# missing" is to strip `state` and echo what is left, which silently rewrites
+# this one and hands a client a value it cannot match.
+PADDED_STATE = "  e0-30-padded-state  "
+
+# The `state` values that carry no content at all, which the provider already
+# refuses the request for. Two spellings of the same thing, because "blank"
+# must not mean "exactly the one value that was measured".
+BLANK_STATES = {"a single space": " ", "three spaces": "   "}
+
+# A run of characters chosen so that a value reflected verbatim into
+# `error_description` breaks RFC 6749 Appendix A's grammar for it. It carries:
+#
+#   - `"` (%x22) and `\` (%x5C), the two printable ASCII characters NQSCHAR
+#     excludes, and the two that end a quoted string in a header, a JSON
+#     document or a log line early;
+#   - `§` (U+00A7), which is outside ASCII entirely;
+#   - something HTML-shaped. Every character of `<script>alert(1)</script>` is
+#     *inside* NQSCHAR, so this part is not what the assertion is about — it is
+#     here because the value a provider reflects is chosen by whoever sends the
+#     request, and the character bound is the only thing standing between that
+#     and whatever reads the redirect next.
+ADVERSARIAL_FRAGMENT = '"\\<script>alert(1)</script>§'
+
+# The same fragment inside a `code_challenge` that is **43 characters long**, for
+# the reason `MALFORMED_CODE_CHALLENGE` gives: 43 is the shortest a verifier may
+# be, so a length check cannot be what refuses it.
+POISONED_CODE_CHALLENGE = "a" * (43 - len(ADVERSARIAL_FRAGMENT)) + ADVERSARIAL_FRAGMENT
+
+# Three post-validation refusals whose offending parameter carries the fragment,
+# at three different raise sites. Three rather than one because the fix that is
+# wrong is a sanitiser applied at the raise site the reproduction named; the fix
+# that is right bounds the value where the redirect is built, and only that one
+# holds for all three.
+POISONED_REQUESTS = {
+    "a poisoned response_type": {"response_type": f"token{ADVERSARIAL_FRAGMENT}"},
+    "a poisoned scope token": {"scope": f"openid wibble{ADVERSARIAL_FRAGMENT}"},
+    "a poisoned code challenge": {"code_challenge": POISONED_CODE_CHALLENGE},
+}
 
 # A `code_challenge` carrying one character outside RFC 7636 §4.1's alphabet and
 # **43 characters long**. The length is why it is written out rather than typed
@@ -238,6 +292,29 @@ def with_repeated(
         else:
             built.extend([(name, existing), (name, value)])
     return built
+
+
+def outside_nqschar(value: str) -> list[str]:
+    """The characters of `value` that RFC 6749 Appendix A's `NQSCHAR` does not allow.
+
+    `NQSCHAR = %x20-21 / %x23-5B / %x5D-7E` — printable ASCII including the
+    space, excluding `"` (%x22) and `\\` (%x5C), and nothing above %x7E. Appendix
+    A.8 gives `error_description = 1*NQSCHAR`, so the empty string is out too and
+    is asserted separately by the caller.
+
+    Written as a predicate over code points rather than as a regular expression
+    or a whitelist string, so that what it refuses is the grammar transcribed
+    from the RFC rather than a set of characters somebody thought of.
+    """
+    return [
+        character
+        for character in value
+        if not (
+            0x20 <= ord(character) <= 0x21
+            or 0x23 <= ord(character) <= 0x5B
+            or 0x5D <= ord(character) <= 0x7E
+        )
+    ]
 
 
 def authorize(provider: Any, parameters: Sequence[tuple[str, str]]) -> Any:
@@ -540,7 +617,7 @@ def test_a_malformed_pkce_challenge_is_refused_as_invalid_request_by_redirect(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("state", [MARKER_STATE, AWKWARD_STATE])
+@pytest.mark.parametrize("state", [MARKER_STATE, AWKWARD_STATE, PADDED_STATE])
 def test_an_error_redirect_echoes_the_state_it_was_sent_byte_for_byte(
     mock_idp: Any, state: str
 ) -> None:
@@ -559,6 +636,14 @@ def test_an_error_redirect_echoes_the_state_it_was_sent_byte_for_byte(
     marker value survives naive string concatenation and this one does not,
     coming back as two parameters or as a doubly-escaped string. ADR 0062's rule
     for echo semantics, on the direction it did not cover.
+
+    **`PADDED_STATE` was added in E0-30's second fix round** and is the near miss
+    for `test_a_refusal_for_a_whitespace_only_state_carries_no_state_parameter_back`
+    below. That test says a `state` of nothing but spaces must be treated as
+    absent; the wrong way to satisfy it is to strip `state` and work with what is
+    left, which rewrites this value — which has real content — into something its
+    own client cannot match. Green today and green after the fix: it is here to
+    keep the blank rule from being widened into a trimming rule.
     """
     unknown_scope = SCOPE_REFUSALS["a scope token this provider does not offer"]
     parameters = parameters_for(mock_idp, state=state, scope=unknown_scope)
@@ -603,6 +688,133 @@ def test_a_refusal_for_a_missing_state_carries_no_state_parameter_back(mock_idp:
         f"{returned.get('state')!r}. RFC 6749 §4.1.2.1 returns the parameter 'if present in the "
         "client authorization request', and a client that receives one it never sent has been "
         "handed a value it must refuse to match."
+    )
+
+
+@pytest.mark.parametrize("case", sorted(BLANK_STATES))
+def test_a_refusal_for_a_whitespace_only_state_carries_no_state_parameter_back(
+    mock_idp: Any, case: str
+) -> None:
+    """A `state` of nothing but spaces is missing on the way in, so it is absent on the way out.
+
+    Kills the mutation the second fix round's third finding measured: the
+    provider refuses `state=%20%20%20` **for not having a `state`** and then puts
+    `state=%20%20%20` on the redirect it refuses with. One request, two
+    incompatible answers to "did a `state` arrive", and the half the client can
+    see is the wrong one — it is handed a `state` back, so it looks up a pending
+    login by a value the provider has already decided was never sent.
+
+    **Which of the two answers is the right one is not this test's choice, and it
+    is not open.** E0-30's out-of-scope list: item 1 "changes the *transport* of a
+    refusal, never its verdict — a request refused today is refused after this
+    ticket, with the same reasoning in `error_description`." A whitespace-only
+    `state` is refused today. So the verdict stays, and the redirect is what has
+    to agree with it.
+
+    Two spellings so that "blank" cannot come to mean the one value that was
+    measured. A tab is deliberately **not** among them: what this provider counts
+    as blank is its own decision, and the rule asserted here is only that
+    whatever it refuses the request for lacking, it does not then hand back.
+
+    A separate test rather than a case on
+    `test_a_refusal_for_a_missing_state_carries_no_state_parameter_back`, which
+    sends no `state` at all. That one is green today and guards the parameter
+    being *invented*; this one is red today and guards it being *reflected*.
+    Folded together, the new case would be indistinguishable from the old in the
+    failure output, and the old test would stop being a green control.
+    """
+    blank = BLANK_STATES[case]
+    parameters = parameters_for(mock_idp, state=blank)
+    assert dict(parameters)["state"] == blank, (
+        f"`parameters_for(state={blank!r})` sent {dict(parameters).get('state')!r}, so this test "
+        "would be about a different value than the one it is named for."
+    )
+
+    returned = refused_by_redirect(
+        mock_idp, authorize(mock_idp, parameters), f"a `state` of {case}"
+    )
+
+    assert returned.get("error") == INVALID_REQUEST, (
+        f"A request whose `state` was {blank!r} was refused as {returned.get('error')!r} rather "
+        f"than {INVALID_REQUEST!r}. E0-30 leaves the verdict alone and RFC 6749 §4.1.2.1 assigns "
+        "that code to a request missing a required parameter, so the assertion below would "
+        "otherwise be about a refusal for some other reason."
+    )
+    assert "state" not in returned, (
+        f"A request whose `state` was {blank!r} was refused for want of a `state`, and the refusal "
+        f"came back carrying `state`={returned.get('state')!r}. RFC 6749 §4.1.2.1 returns the "
+        "parameter 'if present in the client authorization request': the provider has already "
+        "judged that none was, and a client handed one anyway is asked to match a value the "
+        "provider itself does not believe it received."
+    )
+
+
+# ---------------------------------------------------------------------------
+# What the client is handed back: the characters `error_description` may carry.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("case", sorted(POISONED_REQUESTS))
+def test_an_error_description_carries_only_characters_rfc_6749_allows_in_one(
+    mock_idp: Any, case: str
+) -> None:
+    """RFC 6749 Appendix A.8: `error_description = 1*NQSCHAR`, whatever the request said.
+
+    Kills the mutation the second fix round's first finding measured: the
+    description is built by interpolating the offending value, so whoever sends
+    the request chooses the bytes the client receives. A request naming
+    `response_type` as `token"\\<script>…§` comes back with the `"`, the `\\` and
+    the non-ASCII character in `error_description`, none of which the grammar
+    admits — the quote and the backslash end a quoted string early wherever the
+    redirect is next read as one, and a value outside ASCII is not something a
+    client parsing an OAuth error response has agreed to receive.
+
+    **This asserts nothing at all about the wording**, and that is deliberate.
+    The right fix may stop quoting the caller's value entirely, quote a
+    normalised form of it, or bound the whole description at the point the
+    redirect is built — and the last of those is the one that holds, which is why
+    three raise sites are driven rather than the one the reproduction used. A fix
+    that sanitises where the reproduction pointed passes one case and fails the
+    others.
+
+    What is asserted beside the bound is that the description still **says
+    something**: `1*NQSCHAR` is one character or more, and deleting the
+    description is the other way to satisfy a character rule. E0-30's own
+    out-of-scope list keeps the reasoning for the refusal in that member.
+    """
+    assert len(POISONED_CODE_CHALLENGE) == 43, (
+        f"`POISONED_CODE_CHALLENGE` is {len(POISONED_CODE_CHALLENGE)} characters long. It must be "
+        "43 — the shortest a PKCE verifier may be — or the challenge case is refused for its "
+        "length before anything looks at what is in it."
+    )
+
+    parameters = parameters_for(mock_idp, **POISONED_REQUESTS[case])
+
+    returned = refused_by_redirect(mock_idp, authorize(mock_idp, parameters), case)
+
+    description = returned.get("error_description", "")
+    assert description, (
+        f"The refusal of {case} came back with `error_description`={description!r}. RFC 6749 "
+        "Appendix A.8 is `1*NQSCHAR` — one character or more — and a description deleted to "
+        "satisfy a character rule has taken the reason for the refusal with it."
+    )
+
+    offending = outside_nqschar(description)
+    named = [f"{character!r} (U+{ord(character):04X})" for character in sorted(set(offending))]
+    assert not offending, "\n".join(
+        [
+            f"The refusal of {case} came back with an `error_description` carrying {named}, which "
+            "RFC 6749 Appendix A.8's `1*NQSCHAR` does not admit "
+            "(`%x20-21 / %x23-5B / %x5D-7E`).",
+            "",
+            f"The whole value was {description!r}.",
+            "",
+            "The request chose those characters. A description built by interpolating the "
+            "offending parameter lets whoever sends the request decide what bytes arrive at the "
+            'client — a `"` or a `\\` ends a quoted string early in whatever reads the redirect '
+            "next, and a character outside ASCII is not one an OAuth error response may carry at "
+            "all.",
+        ]
     )
 
 
