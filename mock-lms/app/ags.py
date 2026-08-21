@@ -633,14 +633,16 @@ class GradeBook:
         number in front of a student that the platform has just said does not
         exist.
 
-        **What happens when an ungraded score arrives after a graded one is not
-        settled here.** This fold takes the newest, so an ungraded score retracts
-        the grade before it; Canvas instead ignores the score and leaves the
-        earlier grade standing. Those are opposite behaviours, AGS settles
-        neither, and no test pins one — it is
-        [E0-28](../../docs/tickets/e0/E0-28-review-debt-from-e0-15.md)'s to
-        decide. What is written here is the continuation of the existing rule
-        rather than an answer to that question.
+        **What happens when an ungraded score arrives after a graded one is open
+        by decision, and stays open.** This fold takes the newest, so an ungraded
+        score retracts the grade before it; Canvas instead ignores the score and
+        leaves the earlier grade standing. Those are opposite behaviours and AGS
+        settles neither, so no test pins one. E0-28 looked at this and
+        deliberately did not carry it — an earlier version of this paragraph said
+        the question was E0-28's to decide, and that was never true of the
+        ticket's scope. It belongs to whoever builds E3's passback, which is the
+        first code with a reason to care which way it goes. What is written here
+        is the continuation of the existing rule rather than an answer.
 
         **Newest by timestamp, with arrival order breaking a tie**, and not by
         arrival order alone. The 409 above already makes the log monotonic per

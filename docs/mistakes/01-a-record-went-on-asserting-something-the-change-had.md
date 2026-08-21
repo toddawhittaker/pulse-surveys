@@ -1,42 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 40**
+**Caught: 41**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*23 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 20 are in this file's git history and in the pull requests they cite.*
-
-*(E0-30's second fix round, where the false records were made false by a
-**two-name change to a frozenset**. Adding `error` and `error_description` to
-`app.config.RESPONSE_PARAMETERS` — so a registered redirect URI can no longer
-preset a name a refusal now appends — falsified three sentences the round's brief
-did not name: the `ConfigurationError` message and the comment beside the set,
-both of which said "the authorization response appends" and now have two
-responses to account for; `app.flow.added_to_query`'s docstring, which said
-`validate` "refuses only one already holding `code` or `state`"; and ADR 0062's
-fifth rule, which said the same thing in the same words. **Grepping the fact
-rather than the identifier is the whole of why they were found**: a search for
-`RESPONSE_PARAMETERS` finds the first and neither of the others, because neither
-mentions the constant — a search for "already carrying" and "already holding"
-finds all three. The same search turned up a fourth site, `docs/mistakes/13`'s
-account of the E0-16 incident that put the rule there, and that one was
-deliberately left alone: a historical instance says what was true then, and
-editing one to match today is how an incident record stops being evidence. The
-sweep also had to be run twice, because the round's first commit changed
-behaviour and its second changed the records — the second sweep is the one that
-counts.)*
-
-*(Writing E0-18's door fixtures, and the record was **an index inside a file being
-edited for something else**. `tests/conftest.py` opens with a per-ticket account of
-what each group of fixtures is for and why it is shared — E0-04's database
-fixtures, E0-14's mock platform, E0-16's provider, E0-17's seed runner — and it is
-the highest-risk shape this entry names twice over: written once, never re-read,
-and sitting three hundred lines above the code anyone actually opens the file for.
-Six new fixtures went in at the bottom for E0-18's two doors, including the first
-one in that file that drives *this project's* application rather than a mock, and
-adding them without touching the top would have left an index that describes the
-file as it was four tickets ago. The change is one paragraph; the point is that
-nothing about editing the bottom of a file suggests reading the top of it.)*
+*24 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 21 are in this file's git history and in the pull requests they cite.*
 
 *(E0-18 PR 1's second round, and this one is the entry applied **to the shape of
 an assertion rather than to a sentence**. The claim-to-Care sweep had to gain a
@@ -79,6 +47,25 @@ sweep's `EXCEPTIONS` reason, and the module that had been arguing its own case
 went on arguing it. A record made false by a change to *another* file is the one
 no author's diff-reading catches, because it is not in the diff — only asking
 "what else asserts something about this" does.)*
+
+*(E0-28, Batch E, and the three false records were **made false by code in a
+different file, a different ticket's guess, and a count in prose**. The batch
+made the mock platform's results container page, refused NRPS's own query
+parameters, gave every line item id a query string, and seeded one member with no
+enrollment window. The dispatch brief named the records for the last of those —
+E0-15's criterion, ADR 0048, two module docstrings — and named none of the other
+three. `README.md`'s seed section said "Two of them are not ordinary" about
+`BIOL-215-R3WW`'s late add and drop, and the new windowless student made it
+three: the count-in-prose shape this entry already warns about, found by grepping
+the *fact* rather than any identifier the change touched. ADR 0051's closing
+paragraph guessed that item 3 would need "a seeded line item shaped differently",
+and item 3 landed as every id carrying a query instead — a record that was a
+prediction when written and a false statement once the prediction was answered,
+which nothing in the diff points at. And `docs/tickets/e1/carried-from-e0.md`'s
+preamble said item 6 "adds the last section below" while a later section had been
+appended after it by another ticket, so the sentence was already false before this
+batch touched the file and would have stayed false through a change that rewrote
+the section it describes.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
