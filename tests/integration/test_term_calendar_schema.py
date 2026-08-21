@@ -545,7 +545,21 @@ def seed_row(
             ordered = sorted(column.foreign_keys, key=lambda fk: str(fk.target_fullname))
             target = ordered[0].column
             if target.table.name not in chain:
-                chain[target.table.name] = seed_row(session, tables, target.table.name, chain)
+                # SPEC §8 permits exactly one `institution` row and E0-22's
+                # `uq_institution_one_row` holds it, so an ancestor there is the row
+                # that is already present rather than a new one. Everywhere else a
+                # fresh chain means a fresh ancestor: two chains are two departments,
+                # and quietly sharing one would make a test about two a test about one.
+                existing = (
+                    session.execute(target.table.select().limit(1)).mappings().one_or_none()
+                    if target.table.name == "institution"
+                    else None
+                )
+                chain[target.table.name] = (
+                    existing
+                    if existing is not None
+                    else seed_row(session, tables, target.table.name, chain)
+                )
             values[column.name] = chain[target.table.name][target.name]
             continue
         if column.nullable:
