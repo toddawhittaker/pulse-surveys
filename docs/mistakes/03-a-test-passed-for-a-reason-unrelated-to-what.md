@@ -1,17 +1,34 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 44**
+**Caught: 45**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*23 instances recorded; the 3 below are the most recent, newest first. The
-earlier 20 are in this file's git history and in the pull requests they cite.*
+*24 instances recorded; the 3 below are the most recent, newest first. The
+earlier 21 are in this file's git history and in the pull requests they cite.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
 were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
+
+*(E0-30's second fix round, and it is the shape where **the assertion names the
+defect instead of the rule**. The first draft for the reflected-`error_description`
+finding asserted that the offending bytes were *absent from* the description — which
+passes against a provider that deletes the description entirely, against one that
+drops the parameter altogether, and against any rewording of a message the fix is
+free to rewrite, so it would have pinned prose and guaranteed nothing. What stands
+instead is RFC 6749 Appendix A.8's grammar transcribed as a character-set bound,
+with the `1*` half of `1*NQSCHAR` asserted separately as non-emptiness: the
+production rather than a guess at the fix, and the reason three raise sites are
+driven rather than the one the reproduction named. The registration half of the same
+round is this entry's other face. `pytest.raises(Exception, match=...)` is satisfied
+by any exception whose message matches, so "it refused" and "it refused for this
+reason" are separate claims — and the only thing separating them is the accepted-query
+control beside the new cases, a registered `?tenant=x` that must still register.
+Without it, both new cases pass perfectly against a rule that had become "refuse
+every query", which is a different and worse provider.)*
 
 *(Writing E0-30's error-redirect battery, and it is the shape where **the
 obvious assertion is satisfied by three different wrong providers at once**.
@@ -60,35 +77,6 @@ with an address explicitly, and the optional-address case that the null was
 accidentally standing in for became a subject of its own with a test that names it.
 Three cases that had been one are now three: a name with an address, a name with
 none, and no identity row at all.)*
-
-*(Writing E0-38's tests, and it is the variant where **the safe reading and the
-asserting reading are the same exit code**. The classification E0-38 adds must
-fail toward running everything, so the pipeline has to read any non-zero exit —
-a crash, a bad argument, a missing file — as "not inert, run the full pipeline".
-The obvious `classify()` helper copies that: exit 0 is inert, anything else is
-not inert. Six of the seven behaviour cases in the module assert **not inert**,
-and no classifier existed yet, so `sys.executable` on a script that is not there
-exits 2 and all six would have passed on the day the ticket opened — a red-green
-ticket whose tests were green before anybody started, and which would have stayed
-green over a classifier that crashed on every input. `classify()` now fails
-loudly on a missing file and on any exit outside the two the contract names, so a
-not-inert verdict can only come from a classifier that ran and decided. The same
-reading put two controls and a canary on the sweep that derives the parsed
-documents from the suite: it must find the document in a module shaped like
-`test_ai_contracts.py`, find nothing in a module that only cites documents in
-prose, and still find `docs/SPEC.md` in the real tree — because a reader that has
-gone blind reports that the suite parses no documents at all, which satisfies
-"every document a test reads is outside the inert set" perfectly.
-
-**A second application in the same ticket, counted once.** The test that holds
-the `python3`-not-`python` fix runs the workflow step on a planted PATH holding
-`git` and `python3` and no `python`. The whole battery is satisfied by a PATH on
-which `python` is still resolvable — under it the mutation runs perfectly and
-every case passes — and whether it is resolvable depends on the machine the suite
-happens to be on, not on anything the test controls. So the absence is proved by
-running `command -v python` under the planted PATH and requiring it to fail,
-before any case is believed. An environment a test builds is as capable of being
-wrong as one it finds.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

@@ -71,10 +71,14 @@ redirect to an address you have not validated).
   line is drawn, so it gets its own tests.
 - `state` is echoed exactly as it arrived. Error parameters are *added to*
   the registered URI's query, not substituted for it — a registered URI may
-  legitimately carry its own query (only one already holding `code` or `state`
-  is refused at registration), so use `&` where a query exists. If the refusal
-  is that `state` itself is missing, the redirect carries no `state`
-  parameter, per the RFC's "if present".
+  legitimately carry its own query (only one already holding a name a response
+  appends is refused at registration), so use `&` where a query exists. If the
+  refusal is that `state` itself is missing, the redirect carries no `state`
+  parameter, per the RFC's "if present". **The second review round found both
+  halves of that last sentence needed more than they said**: `error` and
+  `error_description` had to join `code` and `state` in the registration rule,
+  since a refusal now appends them too, and "missing" has to mean what the
+  request was refused for lacking — a `state` of nothing but spaces included.
 
 Reviewer's estimate from the round: about 40 lines plus tests. The refusal
 volume has grown since (unknown scope, malformed challenge, duplicate

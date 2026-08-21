@@ -43,9 +43,13 @@ what that parse produced or what actually arrived.** Concretely, in
 `mock-idp/app/`:
 
 1. **Values are read exactly** (`app.flow.submitted`). Nothing trims, lowercases,
-   decodes twice or coerces. `required()` judges *presence* on a trimmed copy and
-   hands the untrimmed value on, because "three spaces is not a `state`" is a
-   different statement from "your `state` is these three spaces".
+   decodes twice or coerces. `app.flow.carried()` judges *presence* on a trimmed
+   copy and hands the untrimmed value on, because "three spaces is not a `state`"
+   is a different statement from "your `state` is these three spaces". It is one
+   function rather than the same test written wherever an answer is wanted:
+   `required()` refuses the request on its verdict and the error redirect decides
+   whether to echo `state` on the same one, so the two cannot disagree about
+   whether a parameter arrived.
 2. **Grammar checks use the specification's grammar**, written out where it is
    used: `SCOPE_TOKEN` for RFC 6749 Appendix A.4, `PKCE_ALPHABET` for RFC 7636
    §4.1. A standard-library parser named after a thing is not a check against it.
@@ -60,8 +64,10 @@ what that parse produced or what actually arrived.** Concretely, in
 5. **Configuration is checked against the shape it will be used in.**
    `ProviderSettings.validate` refuses a redirect URI carrying a fragment — by
    looking for `#` in the string, not for a truthy `urlsplit` component — and one
-   whose query already carries `code` or `state`, because the authorization
-   response appends exactly those.
+   whose query already carries a name a response appends. That set is
+   `app.config.RESPONSE_PARAMETERS`, and it is a set rather than a pair because
+   E0-30 gave the provider a second response to send to the same address: `code`
+   and `state` on a grant, `error` and `error_description` on a refusal.
 
 ## Alternatives rejected
 
@@ -134,6 +140,31 @@ to the registered URI's query rather than substituted for it — one rule, so th
 two responses cannot come to disagree about a registration that carries a query
 of its own.
 
+**E0-30's own security review then found the first rule broken inside the change
+that implements that decision**, which is worth recording rather than quietly
+fixing, because it is the clearest instance of the defect this record is about. A
+request whose `state` was three spaces was refused *for carrying no `state`* and
+the refusal came back carrying `state=%20%20%20`: the presence verdict was taken
+by `required()` on the way in and then **re-derived** at the redirect as
+`state or None`, which asks Python whether the string is truthy and gets the
+opposite answer. One request, two incompatible answers to "did a `state`
+arrive", and the client can only see the wrong one. The verdict is
+`app.flow.carried()`'s now, and the redirect reads it rather than taking it
+again.
+
+**The same round bounded `error_description`, and that is this record's rule
+turned the other way round.** Every refusal quotes the parameter that was wrong,
+so a caller who sends `response_type=token"\<script>…§` chooses the bytes the
+client receives — a `"` or a `\` ends a quoted string early in whatever reads the
+redirect next. A value is not repaired on the way *in*, by rule 1, so it has to
+be bounded on the way *out*: `app.flow.bounded_to_nqschar` maps the description
+onto RFC 6749 Appendix A.8's `1*NQSCHAR` at `error_response`, the single place
+the redirect's parameters are built, rather than at each raise site — a bound
+that has to be remembered at every `raise` is one that will be forgotten at the
+next. The refusal *pages* keep their prose exactly as raised: a page is escaped
+and read by a person, and the grammar is a property of the protocol field, not of
+the sentence.
+
 **A gate enforces the first rule, and its limits are part of what it enforces.**
 `tests/unit/test_the_provider_judges_the_value_that_arrived.py` sweeps every call
 to `strip`, `lower`, `upper`, `casefold`, `split` or `unquote` under
@@ -171,6 +202,17 @@ three configuration reads in `config.py`, four presence tests, the scope split
 against RFC 6749 Appendix A.4's delimiter, and the three that normalise a media
 type off one request header. The other two limits are properties of how the gate
 is written rather than of the tree, and neither changed.
+
+**Re-verified again after E0-30's second fix round, which added one
+transformation and moved another.** `bounded_to_nqschar` is new, and it is not a
+normalisation of request data: it maps the provider's *own* description onto a
+character set on the way out, nothing compares its result with anything a client
+kept, and `state` goes back untouched beside it. It is written as a comprehension
+over a frozenset rather than as a call to any swept name — which also makes it an
+example of the second limit, since the gate would not see it whichever way it
+were spelled. The presence test that was in `required()` is now in `carried()`,
+one function further down the same call, so the sweep still finds eleven calls
+with the same permissions and the swept set is still six names.
 
 So the rule is enforced against the mechanism that produced all five defects, and
 a sixth arriving by another route is still caught by review or by nothing.
