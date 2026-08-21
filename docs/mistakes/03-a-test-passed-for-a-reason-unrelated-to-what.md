@@ -1,14 +1,52 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 43**
+**Caught: 45**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*22 instances recorded; the 4 below are the most recent. **This file needs a trim
-and it needs one from git**: the three that were here are not in a single
-chronological order, so dropping the last would be dropping the one that only
-looks oldest, which is the hazard the trimming rule exists for. Whoever has a
-shell should date them and cut back to three.*
+*24 instances recorded; the 3 below are the most recent, newest first. The
+earlier 21 are in this file's git history and in the pull requests they cite.*
+
+*The trim the last reader asked for has been done, from git rather than from the
+page order, and the warning was worth writing down: the two E0-36 paragraphs
+were **not** in chronological order, so cutting from the bottom would have kept
+the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
+this file.*
+
+*(E0-30's second fix round, and it is the shape where **the assertion names the
+defect instead of the rule**. The first draft for the reflected-`error_description`
+finding asserted that the offending bytes were *absent from* the description — which
+passes against a provider that deletes the description entirely, against one that
+drops the parameter altogether, and against any rewording of a message the fix is
+free to rewrite, so it would have pinned prose and guaranteed nothing. What stands
+instead is RFC 6749 Appendix A.8's grammar transcribed as a character-set bound,
+with the `1*` half of `1*NQSCHAR` asserted separately as non-emptiness: the
+production rather than a guess at the fix, and the reason three raise sites are
+driven rather than the one the reproduction named. The registration half of the same
+round is this entry's other face. `pytest.raises(Exception, match=...)` is satisfied
+by any exception whose message matches, so "it refused" and "it refused for this
+reason" are separate claims — and the only thing separating them is the accepted-query
+control beside the new cases, a registered `?tenant=x` that must still register.
+Without it, both new cases pass perfectly against a rule that had become "refuse
+every query", which is a different and worse provider.)*
+
+*(Writing E0-30's error-redirect battery, and it is the shape where **the
+obvious assertion is satisfied by three different wrong providers at once**.
+"The refusal is a 3xx to the registered URI carrying `error`" passes against a
+provider that hands back an authorization code beside the error, against one
+that answers a single constant code for every refusal, and against one that
+re-encodes the `state` a client will compare byte for byte. So the helper every
+redirect case goes through refuses a `code` in the returned query, requires
+`error` to be one of RFC 6749 §4.1.2.1's codes **and** each test to say which,
+and requires `error_description` to carry something. The page assertions were
+worse, and worse in exactly the way this entry is named for: "this refusal did
+not redirect" was a true statement about the provider as it stood, which
+redirected nothing at all — all eight page cases passed on the day the ticket
+opened and would have gone on passing over an implementation that never changed.
+The ordering near miss, which is the one that guards against an open redirector,
+now asserts both halves in one run: the same unknown scope with the registered
+redirect URI must redirect, and with an unregistered one must not, so the
+negative half is only read once the positive half has been seen.)*
 
 *(Writing E0-26 item 1's tests, and it is the "assertion that cannot fail" shape
 in the place it is hardest to see — inside a control. The refusal test for a
@@ -39,79 +77,6 @@ with an address explicitly, and the optional-address case that the null was
 accidentally standing in for became a subject of its own with a test that names it.
 Three cases that had been one are now three: a name with an address, a name with
 none, and no identity row at all.)*
-
-*(Writing E0-38's tests, and it is the variant where **the safe reading and the
-asserting reading are the same exit code**. The classification E0-38 adds must
-fail toward running everything, so the pipeline has to read any non-zero exit —
-a crash, a bad argument, a missing file — as "not inert, run the full pipeline".
-The obvious `classify()` helper copies that: exit 0 is inert, anything else is
-not inert. Six of the seven behaviour cases in the module assert **not inert**,
-and no classifier existed yet, so `sys.executable` on a script that is not there
-exits 2 and all six would have passed on the day the ticket opened — a red-green
-ticket whose tests were green before anybody started, and which would have stayed
-green over a classifier that crashed on every input. `classify()` now fails
-loudly on a missing file and on any exit outside the two the contract names, so a
-not-inert verdict can only come from a classifier that ran and decided. The same
-reading put two controls and a canary on the sweep that derives the parsed
-documents from the suite: it must find the document in a module shaped like
-`test_ai_contracts.py`, find nothing in a module that only cites documents in
-prose, and still find `docs/SPEC.md` in the real tree — because a reader that has
-gone blind reports that the suite parses no documents at all, which satisfies
-"every document a test reads is outside the inert set" perfectly.
-
-**A second application in the same ticket, counted once.** The test that holds
-the `python3`-not-`python` fix runs the workflow step on a planted PATH holding
-`git` and `python3` and no `python`. The whole battery is satisfied by a PATH on
-which `python` is still resolvable — under it the mutation runs perfectly and
-every case passes — and whether it is resolvable depends on the machine the suite
-happens to be on, not on anything the test controls. So the absence is proved by
-running `command -v python` under the planted PATH and requiring it to fail,
-before any case is believed. An environment a test builds is as capable of being
-wrong as one it finds.)*
-
-*(Writing E0-36's tests, twice over. The sweep asking whether a failing gate
-reaches the required `CI` check runs the aggregate job's own verdict script under
-`bash` and reads a non-zero exit as "the failure was seen" — so a verdict that
-exits non-zero for any reason at all, an expression this module substituted
-wrongly or a script `bash` could not parse, would report every job as caught and
-go on doing so forever. The all-success vector is now executed first and required
-to exit 0 before any of the non-zeros count, and an expression the substituter
-does not understand fails loudly rather than rendering to an empty string. The
-same reading put a non-emptiness guard on both sides of the Docker-gate parity
-test, where "the two callers run the same checks" is most perfectly satisfied by
-a job that has been renamed and a recipe that was never found; and it made the
-`-c requirements.txt` search run against the two spellings it claims to catch and
-against the `--output-file=requirements.txt` it must not match, before its
-silence about the Makefile is believed. Item 3's round then found the same shape
-already merged and green: `test_invariant_gate_is_strict.py` guards its absence
-assertion with "the Makefile still invokes the checker at all", and that guard
-read the file line by line without cutting shell comments — so the two comment
-lines above the `invariants` target, which name `check_invariants.py` while
-explaining it, satisfied the guard on their own. Deleting the invocation from the
-recipe and leaving the prose would have kept that test green over a `make ci` that
-had stopped checking the invariant run. The helper now cuts comments before a line
-counts as a command, which is the same rule the two CI-workflow modules already
-applied one layer up.)*
-
-*(Building E0-36 item 3, in the checker's own self-test, and it is the variant
-where **the exit code means more than one thing**. `check_invariant_assertions.py`
-exits 1 for three different reasons: the rule refused a marked test, it found no
-marked test at all, and it could not parse a file. Every refusal check in
-`scripts/ci/test_ci_scripts.py` was written as `== 1`, which a checker that never
-saw the marker satisfies perfectly — it reports an empty scan, and that is 1 too.
-This was not reasoned out; the mutation battery found it. Two samples had been
-added *specifically* to kill a mutation reading only the first decorator, they
-went green under that mutation, and the second survivor — dropping the descent
-into test classes — went green for the same reason. So the samples added to close
-a hole were themselves satisfied by the hole. The repair is the one the test
-author had already used on the other side of the wall: a refusal is checked as
-the pair `(1, the offending test was named)`, which only a checker that read the
-body and applied the rule can produce, and the two "is this shape seen at all"
-samples now carry an assertion and expect **0**, which only a checker that found
-a marked test can produce. **When a gate's failure exit has more than one cause,
-`== 1` is not an assertion about which one**, and adding a non-emptiness guard
-inside the checker is what created the ambiguity in the first place — the guard
-against a vacuous pass became a second route to the same exit code.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

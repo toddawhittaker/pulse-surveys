@@ -49,11 +49,13 @@ from app.config import (
     ProviderSettings,
 )
 from app.flow import (
+    AuthorizationRedirectError,
     AuthorizationRequestError,
     Flows,
     TokenRequestError,
     authorization_response,
     discovery_document,
+    error_response,
     repeated_parameters,
 )
 from app.pages import index_page, login_page, refusal_page, registration_document
@@ -67,14 +69,19 @@ SUMMARY = "A development-only OpenID Connect provider for the web-login roles (S
 # How a form submission and a token request both arrive.
 FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
 
-# What a refused authorization request or login answers with. A 400 and a page:
-# the request failed, and the one thing a provider must not do with a failed
-# authorization request is redirect it (RFC 6749 §4.1.2.1).
+# What a refusal answers with when there is nowhere to deliver it: a 400 and a
+# page. That is the case where the request named no address this provider has
+# established the right to send anyone to — an unknown `client_id`, an
+# unregistered `redirect_uri`, either of the two arriving twice, or a login
+# answering no pending request. RFC 6749 §4.1.2.1 forbids the redirect there and
+# requires it everywhere else, and `app.flow.Flows.begin` is where the two sides
+# are separated.
 REFUSED = 400
 
-# Sending a browser onward after a successful login. 303 rather than 302, so the
-# browser follows with `GET` whatever it arrived with — the login was a `POST`,
-# and a 302 leaves the method to the client.
+# Sending a browser onward: after a successful login, and to the registered
+# redirect URI with a refusal on it. 303 rather than 302, so the browser follows
+# with `GET` whatever it arrived with — the login was a `POST`, and a 302 leaves
+# the method to the client. RFC 6749 §4.1.2 fixes no particular 3xx.
 SEE_OTHER = 303
 
 # RFC 6749 §5.1: a token response is never cached, successful or not. A client
@@ -187,32 +194,27 @@ def create_app() -> FastAPI:
 
     @app.get(
         AUTHORIZATION_PATH,
-        response_class=HTMLResponse,
         summary="The authorization endpoint: checks the request, then asks who you are",
     )
-    def authorize(request: Request) -> HTMLResponse:
+    def authorize(request: Request) -> Response:
         """Check an authorization request and answer with the login form.
 
         `GET` only. OIDC Core 1.0 §3.1.2.1 requires `GET` and permits `POST`, and
         a browser navigating to a login page uses the first; serving one shape is
         one shape to get right.
 
-        A refusal is a page with a 400 and no redirect, for the reason
-        `app.flow.Flows.begin` gives at length: the parameter most likely to be
-        wrong is the one naming where to send the browser.
+        **A refusal comes back one of two ways, and which one is not this
+        route's decision.** `app.flow.Flows.begin` refuses with an address
+        attached once it has established one, and without an address until then,
+        so the two exception types are the split point rather than anything
+        counted here. The pairs are handed over as pairs because the duplicate
+        rule is one of the checks that straddles it, and a mapping is where a
+        repeated name stops being visible (RFC 6749 §3.1).
         """
-        pairs = list(request.query_params.multi_items())
-        repeated = repeated_parameters(pairs)
-        if repeated:
-            return HTMLResponse(
-                refusal_page(
-                    f"The authorization request carries {repeated} more than once. RFC 6749 "
-                    "§3.1: a request parameter MUST NOT be included more than once."
-                ),
-                status_code=REFUSED,
-            )
         try:
-            pending = flows.begin(dict(pairs), settings)
+            pending = flows.begin(list(request.query_params.multi_items()), settings)
+        except AuthorizationRedirectError as refusal:
+            return RedirectResponse(error_response(refusal), status_code=SEE_OTHER)
         except AuthorizationRequestError as refusal:
             return HTMLResponse(refusal_page(str(refusal)), status_code=REFUSED)
         return HTMLResponse(login_page(settings, pending, directory))
@@ -224,7 +226,13 @@ def create_app() -> FastAPI:
         The response is a redirect to the **registered** redirect URI — the one
         checked when the authorization request arrived, carried here on the
         server side rather than in this form, so that nothing about where a code
-        is delivered depends on what was just posted.
+        is delivered depends on what was just posted. A refusal goes to the same
+        address, carrying `access_denied` instead of a code (RFC 6749 §4.1.2.1),
+        and for the same reason: the address is the one the pending request
+        holds, never one this submission named.
+
+        A login that answers no pending request is the exception, and it is a
+        page: there is no checked address behind it to send anyone to.
         """
         try:
             submitted = await form_body(request, "login")
@@ -232,6 +240,8 @@ def create_app() -> FastAPI:
             return HTMLResponse(refusal_page(str(refusal)), status_code=REFUSED)
         try:
             pending, issued = flows.sign_in(submitted, directory)
+        except AuthorizationRedirectError as refusal:
+            return RedirectResponse(error_response(refusal), status_code=SEE_OTHER)
         except AuthorizationRequestError as refusal:
             return HTMLResponse(refusal_page(str(refusal)), status_code=REFUSED)
         return RedirectResponse(authorization_response(pending, issued), status_code=SEE_OTHER)

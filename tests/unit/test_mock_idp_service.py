@@ -33,18 +33,23 @@ import the provider's settings class instead of driving it: a redirect URI is
 judged when the settings are built, before anything is served, so the only way to
 ask the question is to build them. RFC 6749 §3.1.2 gives the first — "the
 endpoint URI MUST NOT include a fragment component" — and the second follows from
-what this provider does with the URI: the authorization response appends `code`
-and `state`, so a URI already carrying either is one it would return to with a
-duplicate parameter on it. Both are configuration, so both fail at startup or not
-at all, and the cost of missing either lands on whoever configured it rather than
-on whoever wrote it.
+what this provider does with the URI: the authorization response appends
+parameters of its own — `code` and `state` on the way to success, and after
+E0-30 `error` and `error_description` on the way to a refusal — so a URI already
+carrying one of those names is one it would return to with a duplicate parameter
+on it. Both are configuration, so both fail at startup or not at all, and the
+cost of missing either lands on whoever configured it rather than on whoever
+wrote it.
 
-Three of those four cases are ordinary. The fourth is the finding: a **bare** `#`
+Four of those six cases are ordinary. One is E0-16's finding: a **bare** `#`
 was read through `urlsplit(...).fragment`, whose empty string is falsy, so the one
 spelling that looks like a typo registered cleanly while the obvious one was
-caught. The accepted cases beside them — the shipped URI, and one carrying an
-unrelated query parameter — are what keep the rules from being satisfied by a
-check that refuses everything.
+caught. Two are E0-30's, and are the same rule catching up with a response that
+grew: once a refusal is a redirect, `error` and `error_description` go onto this
+URI too, and a registration presenting either sends a client the operator's
+preset instead of the provider's verdict. The accepted cases beside them all —
+the shipped URI, and one carrying an unrelated query parameter — are what keep
+the rules from being satisfied by a check that refuses everything.
 """
 
 from pathlib import Path
@@ -61,9 +66,15 @@ import pytest
 #     string for a trailing `#` and therefore falsy, so that spelling registered
 #     while `#stolen` was caught. One rule, two results, and only one of them was
 #     ever wrong — which is why both are here.
-#   - A query already carrying `code` or `state`, the two names the authorization
-#     response appends. Registering either means the provider emits the duplicate
-#     parameter it refuses inbound.
+#   - A query already carrying one of the names the authorization response
+#     appends. Registering one means the provider emits the duplicate parameter
+#     it refuses inbound. E0-16 had two of them, `code` and `state`; **E0-30's
+#     error redirects add `error` and `error_description`**, which are appended to
+#     this same URI on every post-validation refusal, and the two new cases here
+#     are that finding. A refusal against a URI registered as
+#     `…/callback?error=preset` is delivered as `?error=preset&error=invalid_scope`,
+#     and a client reading the first `error` of two reads whatever the operator
+#     put there rather than what the provider decided.
 #
 # The patterns are deliberately loose about wording and tight about subject: a
 # message that quotes the offending URI contains the parameter name too, so
@@ -73,6 +84,8 @@ REFUSED_REDIRECT_SUFFIXES = {
     "an empty fragment": ("#", r"(?i)fragment|#"),
     "a preset state parameter": ("?state=preset", r"(?i)state"),
     "a preset code parameter": ("?code=preset", r"(?i)code"),
+    "a preset error": ("?error=preset", r"(?i)error"),
+    "a preset error_description": ("?error_description=preset", r"(?i)error_description"),
 }
 
 # A query parameter the authorization response will never collide with. The
@@ -250,7 +263,7 @@ def test_the_registered_redirect_uri_the_provider_ships_with_is_accepted(
 
     A settings object that raised on *every* redirect URI would satisfy each of
     those refusals perfectly and would also refuse every deployment. Asserting it
-    once, by name, is what makes the four refusals mean something — and it is
+    once, by name, is what makes the six refusals mean something — and it is
     separate rather than repeated inside each of them because "the shipped
     configuration builds" is a claim about this provider, not about any one bad
     value.
@@ -297,12 +310,29 @@ def test_a_redirect_uri_the_provider_could_not_return_to_exactly_is_refused(
         falsy, so the one spelling that looks like an oversight registered
         cleanly. It is here beside `#frag` because they are one rule and two
         results, and only one of them was ever wrong.
-      - **A query already carrying `code` or `state`.** The authorization response
-        appends exactly those two, so a URI presenting them is a URI the provider
-        would return to carrying each name twice — the duplicate it refuses on the
-        way in, emitted on the way out. That is not in the RFC; it follows from
-        what this provider does with the URI, which is why it is checked where the
-        URI is registered rather than where a request arrives.
+      - **A query already carrying a name the authorization response appends.**
+        A URI presenting one is a URI the provider would return to carrying that
+        name twice — the duplicate it refuses on the way in, emitted on the way
+        out. That is not in the RFC; it follows from what this provider does with
+        the URI, which is why it is checked where the URI is registered rather
+        than where a request arrives.
+
+        **The set of those names is not fixed, and it grew.** E0-16 appended
+        `code` and `state`. E0-30 makes every post-validation refusal an RFC 6749
+        §4.1.2.1 redirect to this same URI, which appends `error` and
+        `error_description` as well, so those two belong in the rule for exactly
+        the reason the first two do — and a client that reads the first `error` of
+        two reads the value whoever wrote the configuration chose. That is why
+        both new cases are here rather than one: a fix that adds `error` and stops
+        leaves the description, which is the half a developer acts on.
+
+    The failure this shape is prone to is the one `docs/MISTAKES.md` entry 3
+    describes: `pytest.raises(Exception, match=...)` is satisfied by any exception
+    whose message matches, so "it refused" and "it refused for this reason" are
+    different claims. What separates them here is
+    `test_a_redirect_uri_carrying_an_unrelated_query_parameter_is_accepted` below,
+    which fails the moment the rule becomes "no query at all" — so an exception
+    raised for one of these six suffixes is one raised about that suffix.
 
     The exception type is deliberately not pinned. What is asserted is that the
     failure *names* what was wrong with the value, which is what someone reading a

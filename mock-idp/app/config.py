@@ -95,10 +95,21 @@ LOGIN_PATH = "/oidc/login"
 MOCK_REGISTRATION_PATH = "/mock/registration"
 
 
-# What the authorization response appends to the registered redirect URI
-# (RFC 6749 §4.1.2). Named here because `validate()` refuses a registration that
-# would collide with them; `app.flow.authorization_response` is what appends them.
-RESPONSE_PARAMETERS = frozenset({"code", "state"})
+# Every name this provider appends to the registered redirect URI, from either
+# of the two responses it sends there. `code` and `state` are the success
+# response's (RFC 6749 §4.1.2, `app.flow.authorization_response`); `error` and
+# `error_description` are the refusal's (RFC 6749 §4.1.2.1,
+# `app.flow.error_response`), which E0-30 added — before it, every refusal after
+# the address had validated was a page and this set was the first two names.
+#
+# **It is one set rather than two because `validate()` asks one question of it**:
+# a registered query already carrying any of these names is a URI this provider
+# would return to carrying that name twice — the duplicate it refuses on the way
+# in, emitted on the way out — and a client reading the first `error` of two
+# reads whatever the configuration preset rather than the refusal. Which of the
+# two responses would have collided does not change the answer, so splitting the
+# set would only make it possible for one half to be forgotten.
+RESPONSE_PARAMETERS = frozenset({"code", "state", "error", "error_description"})
 
 
 class ConfigurationError(RuntimeError):
@@ -185,9 +196,13 @@ class ProviderSettings:
         # `state` to this URI as a query, and a browser given
         # `…/cb#frag?code=…` keeps everything after the `#` client-side, so the
         # code never reaches the tool and the failure reads as a provider that
-        # issued nothing. E0-18 is expected to repoint this variable at a
-        # published host address, which is exactly when a hand-edited value picks
-        # a fragment up.
+        # issued nothing. The value this variable takes is settled and it is two
+        # values: the base Compose file keeps the container-facing default
+        # `http://api:8000/auth/oidc/callback`, and E0-18 repoints it in
+        # `docker-compose.override.yml` — dev and CI wiring, absent from
+        # deployments — to `http://localhost:8000/auth/oidc/callback`, because
+        # E0-18 drives the browser from the host. Two hand-written absolute URLs
+        # in two files is exactly the edit that picks a fragment up.
         # `"#" in ...` rather than `urlsplit(...).fragment`, and the difference is
         # a measured hole rather than a style: a URI ending in a bare `#` has an
         # **empty** fragment, which is falsy, so the truthiness test registered it.
@@ -205,10 +220,13 @@ class ProviderSettings:
 
         # A query is legal on a redirection URI and this provider merges its own
         # parameters into it. What is not legal is a query that already carries
-        # the two names the authorization response appends: the browser would be
-        # sent `?state=preset&code=…&state=…`, so this service would emit the
+        # one of the names a response appends: the browser would be sent
+        # `?state=preset&code=…&state=…`, so this service would emit the
         # duplicate it refuses on the way in — and a client reading the first
-        # `state` would compare against a value it never generated.
+        # `state` would compare against a value it never generated. The same
+        # holds for `error` and `error_description` since E0-30 made a refusal a
+        # redirect, and a client that branches on a preset `error` branches on
+        # whoever wrote the configuration rather than on what happened.
         preset = sorted(
             name
             for name, _ in parse_qsl(urlsplit(self.redirect_uri).query, keep_blank_values=True)
@@ -217,9 +235,10 @@ class ProviderSettings:
         if preset:
             raise ConfigurationError(
                 f"{REDIRECT_URI_VARIABLE} is {self.redirect_uri!r}, whose query already carries "
-                f"{preset}. The authorization response appends {sorted(RESPONSE_PARAMETERS)} to "
-                "this URI (RFC 6749 §4.1.2), so registering either name here produces a redirect "
-                "carrying it twice."
+                f"{preset}. This provider appends {sorted(RESPONSE_PARAMETERS)} to this URI — "
+                "`code` and `state` on a granted request (RFC 6749 §4.1.2), `error` and "
+                "`error_description` on a refused one (§4.1.2.1) — so registering any of those "
+                "names here produces a redirect carrying it twice."
             )
 
     def absolute(self, path: str) -> str:

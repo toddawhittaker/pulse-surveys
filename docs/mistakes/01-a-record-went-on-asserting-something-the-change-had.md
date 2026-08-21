@@ -1,27 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 36**
+**Caught: 37**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*19 instances recorded; the 4 most recent are below. The earlier 15 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-31 item 1, where the change was a **decision reversal** and the stale
-records were the ones that had argued for the old decision. ADR 0065 said
-"`mock-lms` is not registered by this or any other path in the repository" and
-handed a reviewer a check built on it — grep for the issuer, find nothing. The
-ticket named one record to amend, ADR 0038, and amending only that one would
-have left ADR 0065 asserting the opposite of what shipped, in the paragraphs
-whose whole purpose is to tell a reviewer the safety argument still holds. Five
-further sites the ticket did not name: the ADR index row, the epic README's
-dependency-graph line marking the item as the blocker on 18, its "two answers
-still want an existing record amended" sentence, E0-17's hazard note, and
-E0-18's context — which had to learn both that it was unblocked and what the
-unblocking deliberately did not do. **A reversal falsifies more records than a
-fix does**, because the records that argued the old way are the ones written
-most carefully. The one part to leave standing is the superseded record's
-rejected-alternative section: its reasoning is the cost the new decision
-accepts, not an argument that turned out to be wrong.)*
+*20 instances recorded; the 4 most recent are below, oldest of the four first — dated from `git log -S"its first phrase"` on this file rather than read off the page order. The earlier 16 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-35, a documentation-only pass over three new sweeps. The brief named
 five records to correct and the entry found four more by asking the question
@@ -76,6 +59,26 @@ function; the fact grep is what finds the sites that describe it. The index row
 was the worst of them, and this entry's own rule already says indexes are the
 highest risk, so knowing the rule was not enough — the sweep has to be a list of
 greps run, not an intention.)*
+
+*(E0-30's second fix round, where the false records were made false by a
+**two-name change to a frozenset**. Adding `error` and `error_description` to
+`app.config.RESPONSE_PARAMETERS` — so a registered redirect URI can no longer
+preset a name a refusal now appends — falsified three sentences the round's brief
+did not name: the `ConfigurationError` message and the comment beside the set,
+both of which said "the authorization response appends" and now have two
+responses to account for; `app.flow.added_to_query`'s docstring, which said
+`validate` "refuses only one already holding `code` or `state`"; and ADR 0062's
+fifth rule, which said the same thing in the same words. **Grepping the fact
+rather than the identifier is the whole of why they were found**: a search for
+`RESPONSE_PARAMETERS` finds the first and neither of the others, because neither
+mentions the constant — a search for "already carrying" and "already holding"
+finds all three. The same search turned up a fourth site, `docs/mistakes/13`'s
+account of the E0-16 incident that put the rule there, and that one was
+deliberately left alone: a historical instance says what was true then, and
+editing one to match today is how an incident record stops being evidence. The
+sweep also had to be run twice, because the round's first commit changed
+behaviour and its second changed the records — the second sweep is the one that
+counts.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
