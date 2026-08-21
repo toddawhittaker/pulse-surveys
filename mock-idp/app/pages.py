@@ -201,9 +201,16 @@ def hidden(name: str, value: str) -> str:
     )
 
 
-def option(value: str, label: str) -> str:
-    """One `<select>` option. The value is the wire value; the label is for a human."""
-    return f'<option value="{escape(value, quote=True)}">{escape(label)}</option>'
+def option(value: str, label: str, *, selected: bool = False) -> str:
+    """One `<select>` option. The value is the wire value; the label is for a human.
+
+    `selected` marks it pre-chosen. It is a presentational hint from the caller
+    (the tool's forwarded `login_hint`), so it moves nothing else about the form:
+    the value is still escaped, and no other option changes because this one is
+    marked.
+    """
+    mark = " selected" if selected else ""
+    return f'<option value="{escape(value, quote=True)}"{mark}>{escape(label)}</option>'
 
 
 def page(title: str, body: str) -> str:
@@ -307,6 +314,7 @@ def login_page(
     settings: ProviderSettings,
     pending: PendingAuthorization,
     directory: SeededDirectory,
+    preselect: str | None = None,
 ) -> str:
     """The form that asks who is signing in, and posts the answer.
 
@@ -318,10 +326,22 @@ def login_page(
     identifier. Everything else about it was checked when it arrived and stayed
     on the server; a hidden `redirect_uri` here would be a value the browser gets
     to choose after the check that validated it.
+
+    `preselect` is the caller's forwarded `login_hint` (OIDC Core 1.0 §3.1.2.1):
+    when it equals a seeded subject that option renders `selected`, so a developer
+    who clicked a person on the dev console lands on that person. It is
+    presentational only — the option is marked by a plain equality on the subject,
+    every option is still offered, and a hint matching nobody leaves the form as it
+    renders with none.
     """
     people = directory.web_login_people()
     choices = "\n          ".join(
-        option(subject.subject, f"{subject.label} — {subject.subject}") for subject in people
+        option(
+            subject.subject,
+            f"{subject.label} — {subject.subject}",
+            selected=subject.subject == preselect,
+        )
+        for subject in people
     )
     return page(
         LOGIN_TITLE,
