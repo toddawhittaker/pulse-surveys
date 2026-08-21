@@ -55,6 +55,18 @@ LINE_ITEM_PAGE_SIZE = 5
 # ship a sync that asks for everything and works only here.
 MAX_LINE_ITEM_LIMIT = 100
 
+# The same two numbers for the Result container, which pages on the same terms
+# (E0-28 item 4). A real platform pages results: a 200-student section on a
+# platform paging at 50 reads back 50 results and 150 apparent non-submitters,
+# and E3 would then re-post 150 grades every week and never converge.
+#
+# Separate constants from the line-item pair rather than one shared page size,
+# because they are two containers whose sizes are two decisions — a gradebook
+# holds one line item per section and a result per student, so nothing says the
+# two must move together. They happen to agree today.
+RESULT_PAGE_SIZE = 5
+MAX_RESULT_LIMIT = 100
+
 # The scopes AGS 2.0 names for the two things §3.4 does, plus the two read-only
 # scopes a platform advertises beside them. A tool asks its token endpoint for
 # exactly these strings, so a scope of this platform's own devising would be one

@@ -66,10 +66,15 @@ def nrps_claim(settings: PlatformSettings, context_id: str) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class MembershipPage:
-    """One page of one section's roster, with the header that pages it."""
+    """One page of one section's roster, with the header that pages it.
+
+    `link_header` is always a header. A one-page roster carries `first`, `last`
+    and `current` and no `next` (E0-28 item 5), so there is no page of any
+    container this platform serves that says nothing about where it sits.
+    """
 
     document: dict[str, Any]
-    link_header: str | None
+    link_header: str
 
 
 def member_document(platform: SeededPlatform, enrollment: MockEnrollment) -> dict[str, Any]:

@@ -206,3 +206,13 @@ class PlatformSettings:
     def line_item_url(self, context_id: str, line_item_id: str) -> str:
         """One line item's own URL, which AGS makes its `id`."""
         return self.absolute(LINE_ITEM_PATH, context_id=context_id, line_item_id=line_item_id)
+
+    def results_url(self, context_id: str, line_item_id: str) -> str:
+        """Where one line item's AGS Result container is served.
+
+        Built here, from the platform's own paths, because it is what the result
+        container's `Link` header is built on — and a `Link` relation composed
+        from `request.url` would carry whatever `Host` header arrived rather than
+        the address a tool can resolve. See `advertised` in `app.main`.
+        """
+        return self.absolute(RESULTS_PATH, context_id=context_id, line_item_id=line_item_id)
