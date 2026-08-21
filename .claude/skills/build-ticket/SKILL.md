@@ -1,115 +1,132 @@
 ---
 name: build-ticket
-description: Build one ticket through the test-author → implementer → arbitrator loop. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch, runs tests-first, and stops at a PR without merging.
+description: Build one ticket through the orchestrated tests-first loop - test-author writes red, implementer turns green, verifier proves it, a fresh-context security pass reviews the diff. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and stops at a PR without merging.
 ---
 
 # Build a ticket
 
-Drives one ticket from `docs/tickets/` to an open pull request. You orchestrate;
-the subagents do the work.
+Drives one ticket from `docs/tickets/` to an open pull request. **You are the
+orchestrator: you design, brief, arbitrate, and verify-by-delegation. The
+subagents build.** Your brief is where the leverage is — a design decision
+settled in the brief stays settled; one left open comes back as a review
+finding or a wasted round.
 
-`$1` is the ticket ID (`E0-05`) or an ordinal the user gave loosely ("ticket 3"
-means `E0-03`). If it is ambiguous, ask rather than guess — building the wrong
-ticket wastes a whole loop.
+`$1` is the ticket ID (`E0-05`) or a loose ordinal ("ticket 3" means `E0-03`).
+If ambiguous, ask — building the wrong ticket wastes a whole loop.
 
-## 1. Set up
+## 1. Plan, before any agent
 
-Read the ticket file and `docs/tickets/e0/README.md` for its dependencies.
+Read the ticket, its epic README row, and the spec sections the ticket names.
+Check its dependencies actually merged into the epic branch; if not, stop and
+say so.
 
-**Check its dependencies actually landed.** If the ticket depends on E0-04 and
-E0-04 is not merged into the epic branch, stop and say so. Building against a
-missing dependency produces work that has to be redone.
+Then write the work order — this is the step that used to be skipped and used
+to cost two extra rounds:
 
-Confirm the epic branch exists and is current, then cut the ticket branch named in
-the ticket's `**Branch:**` field:
+- **Settle every design decision the ticket leaves open**: module homes,
+  contracts between components, exact identifiers tests and code must agree on
+  (testids, setting names, error shapes), what is refused vs ignored vs
+  defaulted, and any test seam the machinery needs. Verify file:line facts
+  against the tree yourself before putting them in a brief — stale line
+  numbers are the most common brief defect.
+- **Name the traps** the agents cannot know: the relevant `docs/MISTAKES.md`
+  entries, sweeps and gates their change will trip, environment quirks. Put
+  them in the brief, not in a follow-up.
+- **Draw the boundary**: what this ticket deliberately does not build, and
+  where each deferred thing is recorded.
 
-```bash
-git checkout epic/e0-foundations && git pull
-git checkout -b e0/<slug>
-```
+Cut the ticket branch named in the ticket's `**Branch:**` field, from the
+current epic branch.
 
-## 2. Test author
+## 2. Test author (red)
 
-Spawn `test-author` with: the ticket's full text, the spec sections it names,
-and the instruction to write failing tests for the acceptance criteria.
+Spawn `test-author` with the work order. It reads the ticket and spec
+*directly* — never only your paraphrase; your framing propagating unexamined
+into the tests is this workflow's known failure mode. It has no shell and a
+hook denies it the implementation; only it may write under `tests/`. Require
+of it:
 
-It cannot read `backend/app/**` or `frontend/src/**` — a hook denies it. That is
-deliberate. If it reports that the ticket does not tell it enough to write a
-test without guessing at an interface, **that is a defect in the ticket**. Stop,
-tell the user, and fix the ticket first.
+- Every test's docstring names the mutation it must kill, near-misses
+  included.
+- **Boundary tests in pairs** — both directions of any accepted/refused line.
+  The round-3 lesson: a prediction about *which* side holds the hole is often
+  wrong, and two-directional tests catch the miss for free.
+- New test machinery ships with **must-be-green control tests**, and the rule
+  "a red control means the tests are broken, not the code".
+- A manifest (scratchpad file): per test, the mutation and predicted colour.
+  Predictions are hypotheses the runs check, not facts.
+- If the ticket does not say enough to write a test without inventing an
+  interface, that is a ticket defect — it reports it; you stop and fix the
+  ticket.
 
-**Verify the tests fail for the right reason.** Run them. A test that errors on
-import is not red, it is broken — send it back. A test that fails on an
-assertion, or on a symbol the ticket says should exist, is correctly red.
+Run `ruff format` and `ruff check` on its output yourself (it has no shell).
+Have `verifier` run the suite: every red must be behavioral (assertion), never
+an import or fixture error, and the red/green split must match the manifest.
+Divergence goes back to the author. Then commit the tests alone, subject
+`e<N>/<slug>: <what>, tests first and red`.
 
-Commit the tests alone:
+## 3. Implementer (green)
 
-```
-e0/<slug>: failing tests for <ticket> acceptance criteria
-```
+Spawn `implementer` with the work order, the manifest path, and the settled
+rulings restated (pre-arbitrate the objection spots you can foresee — it
+prevents churn). Its first act is confirming the reds itself, controls first.
+`tests/**` is read-only for it (a hook enforces this): a test it believes
+wrong gets `docs/disputes/<TICKET>-NN.md` per `docs/disputes/README.md` and a
+stop on that item while everything independent proceeds.
 
-## 3. Implementer
-
-Spawn `implementer` **once**, with the ticket, the failing tests, and the path
-to `docs/tickets/e0/.attempts/<TICKET>.md` if it exists.
-
-For every subsequent attempt, **re-address the same agent by name with
-`SendMessage`** rather than spawning a new one. That is what keeps it warm — it
-remembers what it already tried, which is the whole point. Spawning a second
-implementer throws that away and it will re-propose rejected approaches.
-
-It cannot write to `tests/**`; a hook denies it.
-
-Loop until the suite is green, or until it escalates.
+It verifies its own work — the named suites, `ruff`, `mypy`, `alembic check`
+where schema moved — and commits in small steps, behavior separate from
+refactors and from documentation, appending each attempt to
+`docs/tickets/e0/.attempts/<TICKET>.md`. For a second attempt within the
+ticket, `SendMessage` the same agent rather than spawning fresh — it remembers
+what it tried. Never edit the tree while it works in it.
 
 ## 4. Dispute, if one happens
 
-The implementer writes `docs/disputes/<TICKET>-NN.md` and stops. Read
-`docs/disputes/README.md` for what the file must contain; if it is missing
-something, send it back before arbitrating — an arbitrator ruling on a
-half-stated objection rules badly.
+**You arbitrate.** Read the objection, the test, and the governing spec
+section; when the question is about behavior, run it. Rule on sources, never
+on argument quality. Three outcomes: the test is wrong (test-author fixes it
+with your ruling); the implementer is wrong (send the *reasoning*, not an
+order); the spec is silent (**stop and surface to Todd** — this produces a
+spec edit or an ADR, and it is the reason the loop exists). Record the ruling
+in the dispute file.
 
-Spawn `arbitrator` **fresh**. Never the implementer's own session, and never
-reuse a previous arbitrator — each dispute gets clean eyes.
+## 5. Verify (proven, not reported)
 
-Three outcomes:
+Spawn `verifier`: fresh full-suite runs with exact totals, then the mutation
+battery from the manifest. No green is believed on its author's word. A
+survivor is a decision for you — cover it, or record it as named residue with
+the reason; never silently drop it. Commit before any battery runs.
 
-1. **Test is wrong** → re-invoke `test-author` with the ruling. It fixes the
-   test. The implementer resumes.
-2. **Implementer is wrong** → `SendMessage` the warm implementer the
-   arbitrator's *reasoning*, not an order. Reasoning is what stops it repeating
-   the class of mistake.
-3. **Spec is ambiguous** → **stop the whole loop and surface it to the user.**
-   Do not proceed, do not pick a reading, do not let the implementer decide.
-   This produces a spec edit or an ADR, and it is the reason the loop exists.
-   Most genuine disputes are spec ambiguities surfacing; without this, whichever
-   side is more stubborn quietly wins.
+## 6. Security review (fresh context)
 
-## 5. Finish
+Spawn `app-security` with the branch, the diff range against the epic branch
+(**name the base — the default scoping is wrong on ticket branches**), and the
+instruction to form its view of the diff *before* reading the ticket. Tell it
+"Nothing found" is an allowed answer that must show what it checked. List the
+ticket's recorded decisions so it can tell a decision from an oversight — with
+standing to challenge any decision it judges unsafe.
 
-- `make ci` green locally.
-- Remove any CI tolerance this ticket is responsible for — the ticket's
-  acceptance criteria say which. A ticket that adds tests but leaves the test
-  gate tolerant has not finished.
-- Commit behavior changes and refactors separately, never in the same commit.
-- Check whether the ticket made a construction decision the spec does not
-  answer. If so, write the ADR **in this pull request** — that is the policy.
-- Open the pull request into the epic branch with the template filled in: the
-  ticket, the §14.2 items that apply, security review findings, and anything
-  deliberately deferred.
-- Run `/review-pr` on it.
+Findings get a fix round: **declare the stopping rule before the round starts**
+(typically: tests-first fixes, one re-verification, targeted re-mutations, no
+further round unless something is red or a HIGH appears), then hold to it and
+record rule and residue in the PR body. A fix round has the defect density of
+the original work; the round's fixes get verified the same way the original
+did.
 
-**Then stop.** Do not merge. Todd approves and merges; his written approval is
-the trigger, never your own judgment that the work looks done.
+## 7. Finish
 
-## Throughout
+- Record-correcting edits (ADR amendments, MISTAKES bumps, docstrings the
+  change falsified) land as the last content commits, after the code stops
+  moving.
+- Any construction decision the spec does not answer gets its ADR in this PR.
+- Remove any CI tolerance this ticket owns per its acceptance criteria.
+- Push; open the PR into the epic branch: the ticket, the §14.2 items covered,
+  the security findings and resolutions, the arbitrations, and everything
+  deliberately deferred with where it is recorded.
+- **Then stop. Do not merge.** Todd's written approval in conversation is the
+  only merge trigger.
 
-The implementer appends every attempt to `docs/tickets/e0/.attempts/<TICKET>.md`
-as it goes. If it does not, remind it.
-
-**If a ticket spans two sittings, resume the session rather than starting a new
-one.** Subagent transcripts persist with their session, so `claude --resume`
-brings the warm implementer back with its reasoning intact — including why it
-abandoned each approach. A *new* session cannot reach it, and falls back to the
-attempt log, which carries the conclusions but not the reasoning. Tell the user
-this if you notice a ticket is going to span a break.
+If a ticket spans sittings, resume the session (`claude --resume`) rather than
+starting fresh — the warm implementer's reasoning survives with it; the
+attempt log carries only the conclusions.

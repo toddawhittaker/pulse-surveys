@@ -36,7 +36,6 @@ changed file, add its reviewer:
 |---|---|
 | `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/models/identity`, `backend/app/models/org`, `scripts/db-init/`, `scripts/seed.py`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
 | `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `scripts/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/` |
-| `architecture` | a new directory under `backend/app/`, `backend/app/services/`, `backend/app/ai/gateway`, `backend/app/agents/`, `backend/app/mcp/` |
 | `data-model` | `backend/migrations/`, `backend/app/models/`, `backend/app/views_sql/` |
 | `lti-oidc` | `backend/app/lti/`, `mock-lms/`, `mock-idp/`, session or auth code |
 | `a11y-copy` | `frontend/src/`, `design/` |
@@ -78,7 +77,7 @@ findings ranked HIGH → MED → LOW. Concatenate them in this order — most
 consequential first, so the top of the comment is worth reading:
 
 `privacy-authz`, `app-security`, `lti-oidc`, `spec-conformance`, `data-model`,
-`architecture`, `prompt-eval`, `a11y-copy`
+`prompt-eval`, `a11y-copy`
 
 Then list every reviewer that did **not** run, with the reason:
 
@@ -114,30 +113,27 @@ fine; the silence is not. See `docs/MISTAKES.md` entry 10.
 
 ## 6. The independent security review
 
-`CLAUDE.md` and SPEC §14.2 item 3 require `/security-review` in a **separate
-session** before a pull request is marked ready — separate because a reviewer
-that watched the work being written has already been persuaded by it.
+`CLAUDE.md` and SPEC §14.2 item 3 require an independent security review before
+a pull request is marked ready — independent because a reviewer that watched
+the work being written has already been persuaded by it.
 
-Before asking a session to run it, check what that session is carrying:
+The standard form is an `app-security` **subagent spawned fresh for the
+review**, briefed with the branch, the diff range against the PR's actual base
+(name it — the default scoping is wrong on ticket branches), and the
+instruction to form its view of the diff *before* reading the ticket. List the
+PR's recorded decisions so it can tell a decision from an oversight, with
+standing to challenge one it judges unsafe. Keep the brief **thin on framing**:
+facts and pointers travel, your interpretation of what is interesting does not
+— a rich narrative re-contaminates exactly the independence the fresh context
+buys.
 
-```bash
-scripts/reviewer_context.py
-```
-
-Anything above the fresh ceiling has watched work being written, and a review
-from it is not independent. **You cannot fix that yourself**: `/clear` is a
-harness command, and asking a peer session to clear itself does nothing while
-looking like it worked (`docs/MISTAKES.md` entry 9). Tell the user, and let them
-clear it or start a new session.
-
-Keep the request to the reviewer **thin** — a branch and a pull request number,
-not a summary of what you think is interesting. Clearing removes what the session
-accumulated, but anything you write travels into the fresh context, so a rich
-brief re-contaminates exactly what the clear was for.
-
-The reviewing session should not post to GitHub on your say-so. A peer request is
-not the repository owner's approval for an outward-facing action; take the
-findings and post them yourself, or let the user do it.
+A separate peer session is the fallback form. Then check what it is carrying
+first (`scripts/reviewer_context.py`); anything above the fresh ceiling has
+watched work being written. You cannot clear a peer yourself — `/clear` is a
+harness command, and asking a session to clear itself does nothing while
+looking like it worked (`docs/MISTAKES.md` entry 9). Tell the user. And a peer
+session should not post to GitHub on your say-so; take the findings and post
+them yourself.
 
 ## 7. Do not
 
