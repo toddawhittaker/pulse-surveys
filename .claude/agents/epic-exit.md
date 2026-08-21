@@ -1,7 +1,7 @@
 ---
 name: epic-exit
 description: Epic-boundary check. Every ticket can pass while the epic still fails to deliver what SPEC 14.3 says it should. Verifies the epic's stated exit criterion against the running system. Always run before an epic merges to main.
-model: sonnet
+model: opus
 effort: high
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit, Agent

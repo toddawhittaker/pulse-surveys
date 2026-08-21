@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deny writes to test files.
 #
-# Scoped to the `implementer` agent via its frontmatter. AGENTS_INTENT.md:
+# Scoped to the `implementer` agent via its frontmatter. CLAUDE.md, "How a ticket is built":
 # "Never modify, skip, xfail, or delete a test to make it pass. If it believes
 # a test is wrong, it escalates and stops."
 #
@@ -55,10 +55,10 @@ BLOCKED: the implementer may not modify test files, including from a shell.
 
 Running tests is fine — \`pytest tests/unit\` and \`make ci\` are your feedback
 loop and are not blocked. Rewriting one is not. If you believe a test is wrong,
-escalate rather than edit: write docs/disputes/<TICKET>-NN.md and stop. A
-separate arbitrator rules.
+escalate rather than edit: write docs/disputes/<TICKET>-NN.md and stop. The
+orchestrating session arbitrates from the sources.
 
-(AGENTS_INTENT.md — Implementer, hard rules)
+(CLAUDE.md — How a ticket is built)
 EOF
       exit 2
       ;;
@@ -86,13 +86,13 @@ If you believe this test is wrong, do not change it. Escalate:
        - the spec section you are relying on, quoted
        - what you tried, and why you think the test rather than the code is
          at fault
-  2. Stop. The arbitrator is a separate session and will rule.
+  2. Stop. The orchestrating session arbitrates from the sources.
 
 Three outcomes: the test is wrong and its author is re-invoked; you are wrong
 and get an explanation; or the spec is ambiguous, which is Todd's call and
 produces a spec edit or an ADR. That third outcome is why the loop exists.
 
-(AGENTS_INTENT.md — Implementer, hard rules)
+(CLAUDE.md — How a ticket is built)
 EOF
     exit 2
     ;;
