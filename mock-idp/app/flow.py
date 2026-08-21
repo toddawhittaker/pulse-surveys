@@ -186,6 +186,22 @@ ACCESS_DENIED = "access_denied"
 UNSUPPORTED_RESPONSE_TYPE = "unsupported_response_type"
 INVALID_SCOPE = "invalid_scope"
 
+# The characters RFC 6749 Appendix A.8 admits in an `error_description`:
+# `error-description = 1*NQSCHAR`, where `NQSCHAR = %x20-21 / %x23-5B / %x5D-7E`.
+# That is printable ASCII including the space, without `"` (%x22) and `\` (%x5C),
+# and nothing at all above `~`. Transcribed from the grammar as three ranges
+# rather than typed out as a string of characters somebody thought of.
+NQSCHAR = frozenset(
+    chr(code) for code in [*range(0x20, 0x22), *range(0x23, 0x5C), *range(0x5D, 0x7F)]
+)
+
+# What stands in for a character the grammar does not admit. A substitution
+# rather than a deletion, one character for one character: a description that
+# quotes what the client sent should show that something was there and could not
+# be carried, rather than reading as though the client had sent something else.
+# The substitute is itself inside `NQSCHAR`, which is what closes the rule.
+NQSCHAR_SUBSTITUTE = "?"
+
 # The two parameters that decide where a response may be sent: one names the
 # client whose registration holds the address, and the other names the address
 # itself. They are the reason a refusal is sometimes a page — see `Flows.begin`.
@@ -423,14 +439,47 @@ def submitted(parameters: Mapping[str, Any], name: str) -> str:
     return "" if value is None else str(value)
 
 
-def required(parameters: Mapping[str, Any], name: str, subject: str) -> str:
-    """One parameter that must be present, returned unaltered, or a refusal naming it.
+def carried(parameters: Mapping[str, Any], name: str) -> str | None:
+    """One parameter exactly as it arrived, or `None` when what arrived says nothing.
 
+    **This is the one place this provider decides whether a parameter is there.**
     Presence is judged on the *trimmed* value and the *untrimmed* one is handed
     back. That split is deliberate: a parameter sent as three spaces carries
     nothing a client could have meant, so saying "it carries no `state`" is more
-    use than "your `state` is malformed" — but every check downstream of this
-    has to see what actually arrived, so nothing is repaired on the way past.
+    use than "your `state` is malformed" — but every check downstream of this has
+    to see what actually arrived, so nothing is repaired on the way past. A value
+    with content comes back whole, leading and trailing spaces included.
+
+    **One function because the verdict has two readers and they must not
+    disagree.** `required` below refuses the request when this answers `None`,
+    and `Flows.begin` puts no `state` on the refusal it sends back when this
+    answers `None` about `state` — RFC 6749 §4.1.2.1's "if present in the client
+    authorization request", reading the same answer the refusal was made on.
+    Deriving the second of those independently is
+    [ADR 0062](../../docs/adr/0062-a-request-is-parsed-once-at-the-edge.md)
+    rule 1's defect exactly, and it was shipped: `state or None` asks Python
+    whether the string is truthy, decides that `"   "` is present, and hands the
+    client back the very value the provider has just refused the request for not
+    having. One request, two incompatible answers to "did a `state` arrive", and
+    the client can only see the wrong one.
+
+    Judging presence here rather than trimming for it is the other half of that.
+    The tempting repair — strip `state` and work with what is left — rewrites
+    `"  a  "` into a value the client cannot match against what it sent, which is
+    E0-16's `HIGH` about repaired parameters coming straight back.
+    """
+    value = submitted(parameters, name)
+    if not value.strip():
+        return None
+    return value
+
+
+def required(parameters: Mapping[str, Any], name: str, subject: str) -> str:
+    """One parameter that must be present, returned unaltered, or a refusal naming it.
+
+    Presence is `carried`'s judgment rather than a second one made here, so a
+    refusal for a missing parameter and the redirect that carries it back cannot
+    come to different conclusions about what the client sent.
 
     Always `invalid_request`, because RFC 6749 §4.1.2.1 assigns that code to a
     request "missing a required parameter" whichever parameter it is. Where the
@@ -438,8 +487,8 @@ def required(parameters: Mapping[str, Any], name: str, subject: str) -> str:
     code — the two parameters checked before there is any address to answer to
     come back on a page, and every other one comes back to the client.
     """
-    value = submitted(parameters, name)
-    if not value.strip():
+    value = carried(parameters, name)
+    if value is None:
         raise AuthorizationRequestError(
             INVALID_REQUEST,
             f"The {subject} carries no `{name}`. It carries {sorted(parameters)}.",
@@ -534,14 +583,19 @@ class Flows:
         # read rather than a page for whoever is holding the browser. `state`
         # comes back with it exactly as it arrived — including for the refusals
         # raised above the check that it arrived at all, which is why it is read
-        # here and handed on. The same read as the one `_pending_request` makes
-        # through `required`, so the two cannot come to different conclusions
-        # about what the client sent (ADR 0062 rule 1).
-        state = submitted(values, "state")
+        # here and handed on.
+        #
+        # `carried` is the same judgment `_pending_request` makes through
+        # `required`, and it is called rather than repeated so the two cannot
+        # come to different conclusions about what the client sent (ADR 0062
+        # rule 1). Its `None` is what `delivered_to` wants for "no `state`
+        # arrived", so a request refused for carrying no `state` — three spaces
+        # included — is refused without one coming back.
+        state = carried(values, "state")
         try:
             pending = self._pending_request(values, repeated, client_id, redirect_uri)
         except AuthorizationRequestError as refusal:
-            raise refusal.delivered_to(redirect_uri, state or None) from refusal
+            raise refusal.delivered_to(redirect_uri, state) from refusal
 
         self._prune()
         self._pending[pending.request_id] = pending
@@ -1032,9 +1086,11 @@ def added_to_query(url: str, parameters: Sequence[tuple[str, str]]) -> str:
 
     A registered redirect URI may legitimately carry a query of its own — a
     tenant, a locale, a return path — and `ProviderSettings.validate` refuses
-    only one already holding `code` or `state`, which are the names the success
-    response appends. So the parameters are joined onto whatever is there with
-    `&`, and a deployment that registered a query gets it back.
+    only one already holding a name a response appends, which is
+    `app.config.RESPONSE_PARAMETERS`: `code` and `state` from the success
+    response, `error` and `error_description` from the refusal. So the parameters
+    are joined onto whatever is there with `&`, and a deployment that registered
+    a query gets it back.
 
     The query is built by hand rather than with `urlencode` over a mapping so
     that the order is fixed and readable in a log, and `quote` is applied to
@@ -1063,6 +1119,39 @@ def authorization_response(pending: PendingAuthorization, issued: AuthorizationC
     return added_to_query(pending.redirect_uri, [("code", issued.code), ("state", pending.state)])
 
 
+def bounded_to_nqschar(description: str) -> str:
+    """`description` with every character RFC 6749's grammar refuses replaced by one it admits.
+
+    Appendix A.8 gives `error-description = 1*NQSCHAR`, and `NQSCHAR` is
+    printable ASCII without `"` and `\\`. Every refusal in this module quotes the
+    parameter that was wrong, so without a bound here **whoever sends the request
+    chooses the bytes the client receives**: a `"` or a `\\` ends a quoted string
+    early in whatever reads the redirect next — a header, a JSON document, a log
+    line — and a character outside ASCII is not one a client parsing an OAuth
+    error response has agreed to receive.
+
+    **One character in, one character out, so a description that said something
+    still says something**, which is the `1*` half of the same production.
+    Dropping the refused characters instead would let a description made entirely
+    of them come back empty, taking the reason for the refusal with it.
+
+    **The refusal pages keep their prose exactly as it is raised, and that is not
+    an oversight.** A page is rendered by `app.pages.refusal_page`, which escapes
+    what it puts in the document, and it is read by whoever is holding the
+    browser — the verbose quoting is the whole use of it. This bound is about
+    what leaves in a *redirect*, where the same sentence stops being prose and
+    becomes a protocol field some other program parses. One refusal, two readers,
+    and only one of them has a grammar.
+
+    Applied here rather than at each raise site because here is the single place
+    the error redirect's parameters are built, and a bound that has to be
+    remembered at every `raise` is one that will be forgotten at the next.
+    """
+    return "".join(
+        character if character in NQSCHAR else NQSCHAR_SUBSTITUTE for character in description
+    )
+
+
 def error_response(refusal: AuthorizationRedirectError) -> str:
     """Where the browser goes when a request is refused after its target validated.
 
@@ -1072,10 +1161,15 @@ def error_response(refusal: AuthorizationRedirectError) -> str:
     authorization request" — so a refusal whose subject *is* a missing `state`
     carries none rather than an empty one, because a client that receives a
     `state` it never generated has been handed a value it must refuse to match.
+
+    The description is bounded to the grammar on the way out and `state` is not
+    touched at all. The two are not inconsistent: the description is this
+    provider's own sentence, and `state` is the client's own value, which RFC
+    6749 §4.1.2 requires back as "the exact value received from the client".
     """
     parameters: list[tuple[str, str]] = [
         ("error", refusal.error),
-        ("error_description", refusal.description),
+        ("error_description", bounded_to_nqschar(refusal.description)),
     ]
     if refusal.state is not None:
         parameters.append(("state", refusal.state))
