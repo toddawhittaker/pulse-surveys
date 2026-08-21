@@ -116,7 +116,7 @@ second case arrives.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 22** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
+**Caught: 23** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
 
 **Rule.** When you work around a quirk of a type, a parser or an API, grep for
 every place that asks the same question and route them through one helper, in the

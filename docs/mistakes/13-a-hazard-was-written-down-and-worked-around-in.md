@@ -1,10 +1,10 @@
 # Entry 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 22**
+**Caught: 23**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*16 instances recorded; the 3 below are the most recent, newest first.*
+*17 instances recorded; the 4 below are the most recent, newest first.*
 
 *The trim this file asked for has been done, without a shell, by ticket order
 rather than by `git log`: the two **E0-16** paragraphs went, because E0-16 precedes
@@ -25,6 +25,22 @@ genuine catch = **21**, and the fourth paragraph below is what the twenty-first
 counts. The lesson is the one the note was already reaching for: a bump with no
 instance paragraph is unfalsifiable a week later, so write the paragraph in the
 same change or do not move the number.*
+
+*(Building E0-18 PR 1, the two doors themselves, and the hazard is **one URL a
+platform compares exactly.** The launch door's `redirect_uri` is
+`PUBLIC_BASE_URL` plus the launch path, and the platform checks it character for
+character against its registered `MOCK_LMS_TOOL_LAUNCH_URL` — so the path had to be
+written in `app/lti/launch.py`, which builds the redirect, *and* in
+`app/api/lti.py`, which declares the route it names. Two copies, and the failure
+mode of a drift between them is a launch the platform refuses with a message about
+an unregistered address, which reads as a broken platform. `LOGIN_PATH` and
+`LAUNCH_PATH` are now constants in the module that builds the URL, and the router
+declares its routes from them. The same grep found a second one and it was already
+written twice by then: both doors assemble a redirect out of a configured endpoint
+plus parameters, and both had a copy of "append a query without dropping the one
+the endpoint already had". It went into `app/api/deps.py::with_query`, which both
+routers call. Neither is subtle; both were about to ship, because the second caller
+is what makes the first one look like duplication.)*
 
 *(Writing E0-18's two door suites, before either door existed, and the hazard is
 that **two test modules were about to answer the same question twice.** The launch

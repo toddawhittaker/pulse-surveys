@@ -1,0 +1,298 @@
+"""Which empty view a verified token lands on, and the page it lands on — E0-18.
+
+This is the seam E0-18's boundary section asks for by name: "the seam to leave
+is one function that maps a verified token to a landing role, called from both
+doors, so E1 edits one place". `landing_role_for` is that function, and the four
+routes in `app/api/lti.py` and `app/api/auth.py` reach it and nothing else.
+
+**The role comes from the verified token and never from the database.** E0 has no
+identity resolution on either door — no `user` row is written for a mock subject,
+no purview is computed, and `app.services.authz.transitive_purview` raises by
+design (ADR 0003). A view labelled by a signature-verified claim is an honest
+statement about what the issuer said; a view labelled by a claim nobody checked
+would not be. E1 replaces this with the app-owned assignment model, which is the
+whole reason the mapping is one function rather than a branch in each router.
+
+**The two doors read two different vocabularies, and neither is this file's
+choice.** A launch carries the LIS v2 membership URIs LTI 1.3 draws roles from; a
+web login carries SPEC §2's own role names under the claim
+`mock-idp/app/flow.py` publishes and ADR 0058 documents. So the function
+dispatches on which claim the verified token carries, rather than on which router
+called it — a router that had to say which door it was would be a second place
+the two vocabularies are known.
+
+**Every page is empty, and that is the design rather than a stub.** SPEC §4.1's
+visibility invariants and §6.2's Care surface both say what these screens may
+show; E0 computes none of it. So each page carries a heading naming the view, one
+line saying nothing is here yet, and no identifier of any kind — not even the
+signed-in person's own, which would be legitimate and which nothing needs. Two
+`@pytest.mark.invariant` tests hold the leadership and Care pages to it.
+
+**UNRESOLVED, and this module is the whole of the disagreement.** E0-09 criterion
+10 says no LTI claim and no OIDC claim may ever produce a Care assignment, and
+`tests/unit/test_care_is_not_reachable_from_a_claim.py` enforces it by failing any
+module under `app/` that both reads a claim and names the role in code.
+`landing_role_for` does both, because E0-18 specifies the web door as landing a
+verified `CARE` roles claim on the Care empty view. That test is red on this
+branch and the isolated invariant pass fails with it.
+
+No implementation satisfies both: the sweep matches the bare name, the attribute
+and the string alike, so the only way past it is to move the literal into a second
+module — which leaves the composition unchanged and turns a gate green, and is
+exactly the evasion the test's own docstring says it cannot see. Deriving the
+view from the database instead is what E0-18 rules out ("E0 does not build: any
+database identity resolution on either door").
+
+What is *not* in dispute is the property: nothing here writes a
+`role_assignment`, the Care queue does not exist, and the reveal is gated twice
+on a live assignment in the database — `app.services.safety` before it calls, and
+`reveal_student_identity` again inside its own body. A `CARE` claim buys an empty
+page in E0. Whether that makes the tripwire too wide or this door wrong is not
+the implementer's call; the objection is filed and an arbitrator rules.
+
+The markup follows `docs/DESIGN_BRIEF.md` and `design/tokens.css`: chalk ground,
+spruce ink, Literata for the heading and Schibsted Grotesk for the body, the flat
+mist pulse line the brief gives to empty states, and nothing else. The webfonts
+are **not** linked: an LMS iframe fetching Google Fonts is a third-party request
+from inside somebody's LMS, the stacks fall back to a serif and a grotesque that
+are already there, and E1's frontend is where the real loading strategy belongs.
+"""
+
+from collections.abc import Mapping, Sequence
+from enum import StrEnum
+from html import escape
+from typing import Any
+
+__all__ = ["LandingRole", "landing_page", "landing_role_for", "refusal_page"]
+
+# What a refused entry says. Deliberately one sentence and a reason, with no
+# retry link: there is nowhere for a browser to go from here that is not the
+# platform or the provider it came from, and a link built out of a request that
+# just failed validation is the open redirect both doors exist to refuse.
+REFUSAL_HEADING = "This did not open"
+
+# The claim each door states its roles in. Neither is this project's to choose:
+# the first is spelled by LTI 1.3, and the second is what E0-16's provider issues
+# (ADR 0058) and what its `/mock/registration` document declares under
+# `roles_claim`.
+LTI_ROLES_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/roles"
+WEB_ROLES_CLAIM = "https://pulse.example/claims/roles"
+
+# The LIS v2 membership URIs a launch dispatches on, spelled as the vocabulary
+# spells them. SPEC §7.3 asks for strict LTI 1.3 core, and a role compared under
+# any other name is a role no conformant platform sends.
+MEMBERSHIP_VOCABULARY = "http://purl.imsglobal.org/vocab/lis/v2/membership#"
+INSTRUCTOR_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Instructor"
+LEARNER_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Learner"
+
+# SPEC §2's reporting chain, which is one view in E0 because it is one shape of
+# screen: a roll-up over whatever the holder supervises. The scope differs per
+# role and E9 is where that becomes visible; nothing here computes it.
+LEADERSHIP_ROLES = ("VP_ACADEMICS", "DEAN", "ASSISTANT_DEAN", "CHAIR", "LEAD_FACULTY")
+
+
+class LandingRole(StrEnum):
+    """The five empty views E0 can land somebody on, by the testid each carries.
+
+    The value *is* the `data-testid`, so the contract a Playwright spec addresses
+    and the contract this module implements are the same string rather than two
+    strings that have to agree. `mock-idp/app/pages.py` names its own controls
+    the same way and for the same reason.
+    """
+
+    STUDENT = "pulse-landing-student"
+    INSTRUCTOR = "pulse-landing-instructor"
+    LEADERSHIP = "pulse-landing-leadership"
+    CARE = "pulse-landing-care"
+    ADMIN = "pulse-landing-admin"
+
+
+# What each view is called and what it says while it is empty. One tuple per
+# role, so adding a view is one entry rather than a template plus a branch.
+VIEW_HEADINGS: dict[LandingRole, tuple[str, str]] = {
+    LandingRole.STUDENT: (
+        "Your weekly check-in",
+        "There is no survey open for you yet. When one opens, it appears here.",
+    ),
+    LandingRole.INSTRUCTOR: (
+        "Your section report",
+        "There are no responses to report yet. Reports appear here once a week has closed.",
+    ),
+    LandingRole.LEADERSHIP: (
+        "Your roll-up",
+        "There is nothing to roll up yet. Sections you oversee appear here once they report.",
+    ),
+    # §6.2 keeps the Care surface to the threat queue and nothing else, and E0
+    # builds no queue. One heading's worth of content, and the design brief gives
+    # this screen no motion at all.
+    LandingRole.CARE: (
+        "Community standards queue",
+        "Nothing needs attention.",
+    ),
+    LandingRole.ADMIN: (
+        "Pulse console",
+        "There is nothing to administer yet.",
+    ),
+}
+
+
+def stated_roles(claim: Any) -> tuple[str, ...]:
+    """The role strings in a roles claim, whatever shape the issuer sent it in.
+
+    LTI 1.3 and OIDC both make this an array, and both mocks send one. A single
+    string is accepted because some platforms send one, and a claim of any other
+    shape yields nothing rather than raising — an unusable claim and an absent
+    claim lead to the same refusal, and the refusal is the caller's to make.
+    """
+    if isinstance(claim, str):
+        return (claim,)
+    if isinstance(claim, Sequence):
+        return tuple(role for role in claim if isinstance(role, str))
+    return ()
+
+
+def launch_landing(roles: Sequence[str]) -> LandingRole | None:
+    """Instructor beats Learner, per E0-18: "Learner → student, Instructor → instructor".
+
+    Ordered rather than exclusive because one enrollment can carry both — a
+    teaching assistant enrolled as a learner in the course she grades is the
+    ordinary case — and the higher-standing role is the one whose screen is
+    useful. Comparison is exact against the LIS URI: `pylti1p3` and every
+    conformant tool read these as URIs, and a substring match on "Instructor"
+    would also match a claim that merely mentioned one.
+    """
+    if INSTRUCTOR_ROLE_URI in roles:
+        return LandingRole.INSTRUCTOR
+    if LEARNER_ROLE_URI in roles:
+        return LandingRole.STUDENT
+    return None
+
+
+def web_login_landing(roles: Sequence[str]) -> LandingRole | None:
+    """Leadership, then CARE, then ADMIN — E0-18's "highest-standing role in it".
+
+    The order is a precedence and not a list of cases: a person can hold more
+    than one of these, and the two-hat person E0-16 seeds is the case the ticket
+    is built around. Falling through to `None` rather than to a default view is
+    the point of the third branch — a dispatch with a default lands every role it
+    does not recognise, including one a future provider invents, on somebody's
+    screen.
+    """
+    if any(role in LEADERSHIP_ROLES for role in roles):
+        return LandingRole.LEADERSHIP
+    if "CARE" in roles:
+        return LandingRole.CARE
+    if "ADMIN" in roles:
+        return LandingRole.ADMIN
+    return None
+
+
+def landing_role_for(claims: Mapping[str, Any]) -> LandingRole | None:
+    """The view a verified token's roles claim names, or `None` if none does.
+
+    **The one seam E1 edits.** Both doors call this and neither has a role rule
+    of its own, so replacing "the token says so" with "the assignment model says
+    so" is a change in this function.
+
+    `None` is a refusal, not a default: a verified token stating a role this
+    system has no screen for is a real state — an LMS sends `Mentor`, a provider
+    sends a role a later spec adds — and the honest answer is to refuse rather
+    than to pick the least-privileged view and look like it worked.
+    """
+    if LTI_ROLES_CLAIM in claims:
+        return launch_landing(stated_roles(claims[LTI_ROLES_CLAIM]))
+    if WEB_ROLES_CLAIM in claims:
+        return web_login_landing(stated_roles(claims[WEB_ROLES_CLAIM]))
+    return None
+
+
+# The page, as one f-string rather than a template engine: there is one layout,
+# it has two variables, and nothing in the locked closure renders templates. The
+# style block is inline for the same reason — E0 serves no static assets, and a
+# stylesheet route would be a second thing to keep in step with `tokens.css`
+# until E1's frontend replaces both.
+#
+# The pulse line is the brief's empty-state variant: flat, in mist, with the
+# rounded caps the motif is drawn with. Flat is what it means here — nothing has
+# arrived yet.
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{heading} · Pulse Surveys</title>
+<style>
+  :root {{
+    --chalk: #F6F8F4;
+    --spruce: #1E3932;
+    --spruce-60: #5B7269;
+    --mist: #93A5A0;
+    --marigold: #DFA320;
+    --font-display: 'Literata', Georgia, serif;
+    --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-7: 48px;
+  }}
+  :focus-visible {{ outline: 2px solid var(--marigold); outline-offset: 2px; }}
+  body {{
+    margin: 0;
+    background: var(--chalk);
+    color: var(--spruce);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.5;
+  }}
+  main {{ max-width: 720px; margin: 0 auto; padding: var(--space-7) var(--space-5); }}
+  h1 {{ font-family: var(--font-display); font-size: 25px; font-weight: 600; margin: 0; }}
+  .pulse {{ display: block; margin: var(--space-4) 0; }}
+  p {{ color: var(--spruce-60); margin: 0; }}
+</style>
+</head>
+<body>
+<main data-testid="{testid}">
+<h1>{heading}</h1>
+<svg class="pulse" width="120" height="8" viewBox="0 0 120 8" aria-hidden="true"
+     fill="none" stroke="var(--mist)" stroke-width="2.5" stroke-linecap="round">
+  <path d="M2 4 H118"/>
+</svg>
+<p>{empty_state}</p>
+</main>
+</body>
+</html>
+"""
+
+
+def landing_page(role: LandingRole) -> str:
+    """The empty view for `role`, as a whole HTML document.
+
+    Everything interpolated is a constant from this module, so the escaping below
+    changes nothing today. It is written anyway: the day somebody puts a section
+    title or a person's name in a heading, the escaping is already where it has
+    to be rather than something a reviewer has to notice is missing.
+    """
+    heading, empty_state = VIEW_HEADINGS[role]
+    return PAGE.format(
+        testid=escape(role.value, quote=True),
+        heading=escape(heading),
+        empty_state=escape(empty_state),
+    )
+
+
+def refusal_page(reason: str) -> str:
+    """The page a refused launch or a refused web login gets, in the same layout.
+
+    **It carries no landing testid**, and that is a property both door suites
+    assert rather than a detail: a refusal that served a landing page has
+    admitted the caller and merely said so in the status line. The testid slot is
+    filled with a name of its own so the markup stays one template.
+
+    `reason` is written by `app.lti.launch` or by `app.api.auth` and is never
+    assembled from the request. It is escaped anyway, for the reason
+    `landing_page` gives about its own constants.
+    """
+    return PAGE.format(
+        testid="pulse-entry-refused",
+        heading=escape(REFUSAL_HEADING),
+        empty_state=escape(reason),
+    )
