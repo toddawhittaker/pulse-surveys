@@ -103,3 +103,30 @@ deferral. E0-28's acceptance criteria require them to land here.
 
 E0-28 also adds a pointer to E0-35's sanctioned-writer question, on the same
 terms: a pointer, not a copy.
+
+## The §4.1 view sweep is blind to an aliased identity column and to join keys
+
+**Found 2026-08-21 by the reviewer self-test, not by a live defect.** The
+`privacy-authz` reviewer, given a planted `views_sql` file that joins
+`user_identity` and returns a person-naming column, caught it — and then ran
+the repository's own §4.1 sweep (`tests/integration/test_identity_separated_views.py`)
+over that same file and found it **green**. Two blind spots, measured:
+
+- The sweep matches identity columns by name against `IDENTITY_NAME_FRAGMENTS`.
+  A view that aliases `user_identity.identity_name AS respondent_display_name`
+  exposes the name and matches no fragment, so the sweep passes. Spelling the
+  same column `ui.identity_name` is what makes the sweep fire — the guard keys
+  on the output label, which the view author chooses.
+- `user.lms_user_id` is a stable per-person join key (the LTI `sub`), and it is
+  flagged by nothing: `lms_` is ADR 0014's *ownership* marker, not an identity
+  marker, and it matches no identity fragment. A view returning it beside a
+  comment lets an instructor resolve a named student in the LMS in one step,
+  with every §4.1 guard green.
+
+Neither is live today — no such view exists — which is why this is inherited
+rather than fixed now. **Done when** the identity-separation sweep is closed
+over both: an aliased identity column is caught by what the column *is* (its
+lineage to `user_identity`) rather than by the label the view gives it, and the
+set of columns `pulse_app` may read from a view is enumerated so a new grant on
+a join key fails the sweep rather than passing it. The reviewer's own writeup,
+and the fixture `identity-column-in-view`, hold the reproduction.
