@@ -611,13 +611,16 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      # The runtime closure (alembic and the seed's dependencies) plus the app
-      # itself, from the committed lockfile with hashes — the shape every other
-      # Python job here uses.
+      # The dev closure plus the app itself, from the committed lockfile with
+      # hashes — the shape every other Python job here uses. The dev lock rather
+      # than the runtime one because `pip install -e . --no-build-isolation`
+      # needs the setuptools build backend present, and that ships in the dev
+      # extra, not the runtime closure. alembic and the seed's own dependencies
+      # are a subset of both.
       - name: Install backend to migrate and seed (locked)
         if: needs.changed.outputs.inert != 'true'
         run: |
-          pip install --require-hashes -r requirements.txt
+          pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
 
       - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp)
