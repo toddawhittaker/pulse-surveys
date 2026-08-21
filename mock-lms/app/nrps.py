@@ -18,6 +18,11 @@ all, while SPEC §3.4 and §9.2 both have the sync read enrollment windows from
 NRPS — so every platform that supplies one supplies it as an extension, and this
 mock does the same rather than teaching E1 that the dates are core. See
 `docs/adr/0048-enrollment-windows-ride-on-a-namespaced-nrps-extension.md`.
+
+**One seeded member carries no such extension at all**, and the key is absent
+rather than empty (E0-28 item 1, 2026-08-21). ADR 0048's rule holds for every
+member that carries the extension; the exception exists so that E1 meets the
+platform supplying no enrollment dates in a test rather than in a deployment.
 """
 
 from dataclasses import dataclass
@@ -77,20 +82,30 @@ def member_document(platform: SeededPlatform, enrollment: MockEnrollment) -> dic
 
     No name of any kind, and `email` is the only personal field — see
     `app.seed` and ADR 0050.
+
+    **The extension key is omitted entirely for an enrollment with no window**
+    (E0-28 item 1), rather than emitted with a `null` `start`. The three shapes
+    are three different statements to a tool: an absent key says this platform
+    supplies no enrollment dates, which is what every mainstream platform says,
+    while a key present and empty says it supplies them and has none for this
+    student. E1's `PlatformProfile` adapter (§7.3) branches on which of those it
+    is looking at, so a seed serving the tidy one would send it down the wrong
+    branch. Exactly one seeded enrollment is written that way; see `app.seed`.
     """
     user = platform.user(enrollment.user_id)
     document: dict[str, Any] = {
         "status": enrollment.status,
         "user_id": enrollment.user_id,
         "roles": list(enrollment.roles),
-        ENROLLMENT_EXTENSION: {
+    }
+    if enrollment.opened_at is not None:
+        document[ENROLLMENT_EXTENSION] = {
             "start": enrollment.opened_at,
             # Present and `null` rather than omitted. A tool reading an absent
             # key cannot tell "still enrolled" from "this platform does not
             # supply an end", and those need different handling in E1.
             "end": enrollment.closed_at,
-        },
-    }
+        }
     if user is not None:
         document["email"] = user.email
     return document

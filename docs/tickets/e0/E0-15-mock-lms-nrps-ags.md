@@ -110,7 +110,12 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
   ```
 
   `start` is required on every member and is an RFC 3339 timestamp with an
-  offset, never a bare date — E0-06 made the calendar timezone-aware throughout
+  offset, never a bare date — **amended 2026-08-21 by
+  [E0-28](E0-28-review-debt-from-e0-15.md) item 1: on every member but one.** The
+  exception is a single `NURS-8100-Q2FF` student whose member carries no
+  extension key at all, and it exists because the sentence below — "what a
+  platform that supplies none should do is E1's question" — was a question no
+  seeded roster let E1 ask. E0-06 made the calendar timezone-aware throughout
   and a naive stamp here would hand E1 a value it has to guess a zone for. `end`
   is `null` for a member still enrolled and a timestamp for one who dropped.
   Todd's decision, 2026-08-17; ADR 0048. E1 learns from this that enrollment
@@ -147,6 +152,12 @@ places platforms deviate), §3.4 (participation and enrollment windows), §2.2
       carries none of those three fields, because a `Result` does not have them.
 - [ ] Every NRPS member carries the enrollment extension named in the scope,
       with an offset-bearing `start`, and `end` set on the dropped member alone.
+      **Amended 2026-08-21 by [E0-28](E0-28-review-debt-from-e0-15.md) item 1:
+      every member *but exactly one*.** One student in `NURS-8100-Q2FF` carries
+      no extension key at all, so that E1 meets the platform supplying no
+      enrollment dates — which is every mainstream platform — in a test rather
+      than in a deployment. The rule itself is not withdrawn: the other members
+      still carry an offset-bearing `start`, and both directions are asserted.
 - [ ] Every seeded context carries a `title`.
 - [ ] Seed sections use at least two different start letters and both `WW` and
       `FF` modalities, so E0-07's parser has real input.

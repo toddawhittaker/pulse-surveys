@@ -8,7 +8,7 @@ institution is
 E0-17's, and it is seeded into Pulse's own database rather than into this
 platform.
 
-Six things about the shape are deliberate rather than incidental.
+Seven things about the shape are deliberate rather than incidental.
 
 **Every course carries a title, and a number SPEC §8 admits.** `course.lms_title`
 is `NOT NULL` (E0-05), so a titleless course is a row Pulse cannot store, and §8
@@ -50,6 +50,16 @@ student who takes one course.
 **One enrollment window ends, and it is the same person the roster reports as
 gone.** SPEC §3.4 has the tool learn about a drop from NRPS enrollment data, and
 a seed where `status` and `end` disagree is one E1 has to pick a side in.
+
+**Exactly one enrollment carries no window at all** (E0-28 item 1, 2026-08-21).
+E0-15 requires the extension on every member and that rule is not withdrawn: no
+mainstream platform supplies enrollment dates through NRPS, so a seed where every
+member carries one lets E1 write `member[EXTENSION]["start"]`, pass every test
+here, and meet a `KeyError` or a denominator of zero against a real platform. The
+one exception is a student in `NURS-8100-Q2FF` — a section away from the
+add-and-drop assertions, `Active`, still enrolled — and `app.nrps` omits the
+extension key entirely for it. What the tool should do with a member that carries
+none is E1's question; see the pull request for E0-28.
 """
 
 from dataclasses import dataclass, field
@@ -99,6 +109,19 @@ Q_SECTIONS_OPEN = f"2026-09-28T00:00:00{EASTERN_DAYLIGHT}"
 # `status` and `end` holds for exactly one person.
 LATE_ADD_OPENS = f"2026-09-28T00:00:00{EASTERN_DAYLIGHT}"
 DROP_CLOSES = f"2026-10-19T00:00:00{EASTERN_DAYLIGHT}"
+
+# Which of `NURS-8100-Q2FF`'s students carries no enrollment window (E0-28 item
+# 1). An ordinal rather than a user identifier, because `student()` mints the
+# identifier from the section and the ordinal and a second spelling of it here
+# would be a second thing to keep in step.
+#
+# The section is the choice, not the number: it is away from the add-and-drop
+# assertions, which read one section's windows against each other and would
+# quietly lose an input to a member carrying none. The number only has to be a
+# student rather than one of the two people the launch page offers — those are
+# reached by name from the launch suite and from every AGS fixture, and none of
+# those tests is about a member with no window.
+WINDOWLESS_STUDENT_ORDINAL = 3
 
 
 @dataclass(frozen=True)
@@ -159,13 +182,21 @@ class MockEnrollment:
     add's denominator from. `closed_at` is `None` for a member still enrolled;
     where it is set, `status` says the same thing in NRPS's own vocabulary, and
     the two are written together here so they cannot drift.
+
+    **`opened_at` is `None` for an enrollment this platform supplies no window
+    for**, and it stays a required constructor argument with no default so that
+    writing one is deliberate rather than something an omission produces. That is
+    E0-28 item 1: exactly one seeded enrollment is written this way, and
+    `app.nrps` omits the whole extension key for it — an absent key is what a
+    platform that supplies no enrollment dates serves, and a key present and
+    empty is a different statement.
     """
 
     user_id: str
     context_id: str
     roles: tuple[str, ...]
     status: MembershipStatus
-    opened_at: str
+    opened_at: str | None
     closed_at: str | None = None
 
 
@@ -333,6 +364,11 @@ def seeded_platform() -> SeededPlatform:
       - `NURS-8100-Q2FF` holds five, which is exactly one page and no more — the
         boundary where a platform that advertises a next page whenever the page
         it just served was full serves an empty one.
+
+    Two rewrites are applied over the uniform sections at the end: the late add
+    and the drop in `BIOL-215-R3WW`, and the one windowless enrollment in
+    `NURS-8100-Q2FF`. Each is a function a reader can check against the rule it
+    comes from, rather than a branch inside the loop above.
     """
     contexts = (CELL_BIOLOGY, COLLEGE_ALGEBRA, NURSING_INQUIRY)
     placements = tuple(
@@ -366,7 +402,7 @@ def seeded_platform() -> SeededPlatform:
         users=tuple(users),
         contexts=contexts,
         placements=placements,
-        enrollments=tuple(with_the_add_and_the_drop(enrollments)),
+        enrollments=tuple(without_an_enrollment_window(with_the_add_and_the_drop(enrollments))),
     )
 
 
@@ -412,3 +448,45 @@ def with_the_add_and_the_drop(enrollments: list[MockEnrollment]) -> list[MockEnr
         else:
             rewritten.append(enrollment)
     return rewritten
+
+
+def without_an_enrollment_window(enrollments: list[MockEnrollment]) -> list[MockEnrollment]:
+    """Replace one of `NURS-8100-Q2FF`'s enrollments with one carrying no window.
+
+    E0-28 item 1. E0-15 requires an enrollment window on every member and that
+    rule stands; this adds the one case beside it, because **no mainstream
+    platform supplies enrollment dates through NRPS at all**. Without it, every
+    seeded roster teaches E1 that `member[EXTENSION]["start"]` is always there —
+    which passes every test in this repository and, against a real platform,
+    either raises `KeyError` or falls through to a denominator of zero. SPEC §3.4
+    makes the second of those a wrong participation score rather than a crash,
+    which is the failure worth seeding a case against.
+
+    A rewrite over a uniform section rather than a branch in the loop, for the
+    reason `with_the_add_and_the_drop` is one: which person differs, and how, is
+    one function to read.
+
+    `Active` and still enrolled, on purpose. A member that is both departed and
+    windowless folds two edge cases into one person, so a tool that mishandles
+    either is only ever seen failing once — and this section's `status`/`end`
+    correspondence would have a departed member it cannot read a window from.
+
+    **What the tool should do with a member carrying no window is not decided
+    here.** SPEC §3.4 divides by weeks enrolled and says nothing about a platform
+    that supplies none; ADR 0048 already leaves that to E1, and E0-28 raises it
+    rather than answering it.
+    """
+    windowless = student(NURSING_INQUIRY, WINDOWLESS_STUDENT_ORDINAL).user_id
+    return [
+        MockEnrollment(
+            user_id=enrollment.user_id,
+            context_id=enrollment.context_id,
+            roles=enrollment.roles,
+            status="Active",
+            opened_at=None,
+            closed_at=None,
+        )
+        if enrollment.context_id == NURSING_INQUIRY.context_id and enrollment.user_id == windowless
+        else enrollment
+        for enrollment in enrollments
+    ]
