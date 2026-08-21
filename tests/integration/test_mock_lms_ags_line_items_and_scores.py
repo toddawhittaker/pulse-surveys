@@ -14,6 +14,14 @@ specification's: AGS 2.0 defines the Score service as the line item's own URL
 with `/scores` appended, which is what lets E0-15's criterion 3 speak of an
 identifier "that score posting accepts" without naming a second URL.
 
+**Appended to the path, not to the string** (E0-28 item 3). A line item id may
+carry a query — Moodle's is `…/lineitems/3/lineitem?type_id=1` — and the segment
+goes before it, so `MockPlatform.scores_url` and `results_url` insert rather than
+concatenate and every URL below is built through them.
+`tests/integration/test_mock_lms_paging_and_service_urls.py` is where that
+assembly is asserted, on both sides: the insertion is accepted and the
+concatenation is refused.
+
 **What is deliberately not here.** Tool-side line-item management, the
 participation formula and retry handling are E3's, and E0-15's out-of-scope list
 says so. Nothing below asserts what Pulse computes or when it posts. There is no

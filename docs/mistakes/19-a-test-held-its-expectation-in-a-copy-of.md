@@ -1,10 +1,22 @@
 # Entry 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 4**
+**Caught: 5**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*4 instances recorded; the 3 most recent are below. The earliest is in this file's git history and in the pull request it cites.*
+*5 instances recorded; the 3 most recent are below. The earlier 2 are in this file's git history and in the pull requests they cite.*
+
+*(Writing E0-28's tests, over the two page-size caps. The ticket's own complaint
+about item 10 is that `MAX_LINE_ITEM_LIMIT` "is a number no test names" — removing
+the clamp left every test green — and the obvious repair imports the constant from
+`mock-lms/app/ags.py` so the test cannot drift from it. That import is this entry:
+the cap and the assertion would then be one fact in one blast radius, and moving
+the cap to 101 would move both and stay green, which is the second half of exactly
+the mutation the item exists to make loud. Both caps are written into the test file
+with a comment saying they are deliberately not derived, and the assertion is an
+exact count rather than "no more than the cap" so an off-by-one is red too. The
+same round declined `seed_constant`, the fixture that reads a constant out of a
+mock's source, for the same reason.)*
 
 *(In E0-15's tests, over SPEC §8's course-number bands. The mock's seeded
 numbers are checked against a transcription of the table, because §8 states the rule
@@ -15,19 +27,6 @@ met: the comment says the constants are deliberately not derived and why, and a
 control test walks every edge the table names, including `2150` from the `design/`
 corpus the ticket warns about. Without the control the transcription is a second copy
 of the rule with nobody comparing it to the first.)*
-
-*(In E0-11's tests, and it changed where three constants were read
-from. The role ranks that decide which supervision edges are legal are written
-out of SPEC §2.1's canonical chain rather than read back out of the trigger under
-test — the only other copy of that order is inside the guard, so a test that
-queried it would let both be renumbered together while staying green. The
-LMS-owned table list is §2.1's ownership sentence rather than a copy of the
-module's own `LMS_OWNED_TABLES`, which is the constant it exists to check. The
-n-threshold default is §4's "default 5" rather than whatever `Settings` answers,
-so a configuration defect and a resolver defect fail as two different
-assertions. The `Purview` field list is transcribed from the ticket and says so,
-because reading it off the dataclass would admit a seventh field silently — this
-entry's rule for a value that genuinely has to be written into the test.)*
 
 *(In E0-33, deciding where "exactly what the migrations wrote" is
 **written**. The hand-written set of what the two connection roles may hold on a

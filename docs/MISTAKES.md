@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 49** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 50** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -152,7 +152,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
+**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/19-a-test-held-its-expectation-in-a-copy-of.md)
 
 ## 14. An enumeration was reported as an impossibility
 
@@ -169,7 +169,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
