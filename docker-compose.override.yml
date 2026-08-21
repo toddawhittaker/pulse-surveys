@@ -99,7 +99,26 @@ services:
   # PYTHONPATH to `/app/backend`, which is the backend's import root and not this
   # service's. Editing the mock means `docker compose up -d --build mock-lms`,
   # and README.md says so where it tells you how to reach it.
+  #
+  # **The two tool URLs are repointed at the published address** (E0-18, and it
+  # settles E0-30 item 3). The base file names `http://api:8000/...`, which is
+  # correct for a container talking to a container — and a launch is neither. It
+  # is a *browser* being redirected: the launch page runs at
+  # `localhost:8080`, the form posts to the tool, the tool redirects back to the
+  # authorization endpoint, and the platform posts the signed `id_token` to the
+  # tool again. Every one of those hops is made by the browser on the host, which
+  # cannot resolve `api`. And `MOCK_LMS_TOOL_LAUNCH_URL` is compared **exactly**
+  # against the `redirect_uri` the tool builds out of `PUBLIC_BASE_URL`, so these
+  # two lines and that setting have to name the same address or no launch
+  # completes at all.
+  #
+  # They live here rather than in the base file because they are development
+  # wiring: a deployment reaches its real LMS at a real address, and
+  # `localhost:8000` would be nonsense there.
   mock-lms:
+    environment:
+      MOCK_LMS_TOOL_LOGIN_URL: http://localhost:8000/lti/login
+      MOCK_LMS_TOOL_LAUNCH_URL: http://localhost:8000/lti/launch
     ports:
       - '127.0.0.1:8080:8000'
 
@@ -113,6 +132,17 @@ services:
   # backend's import root and not this service's. Editing the mock means
   # `docker compose up -d --build mock-idp`, and README.md says so where it tells
   # you how to reach it.
+  #
+  # **The redirect URI is repointed for the same reason**, and the base file's
+  # own comment asks for exactly this. The provider sends the browser back to the
+  # tool with an authorization code, and it compares this value exactly — twice,
+  # once when the authorization request arrives and again when the code is
+  # redeemed — against the `redirect_uri` the tool builds out of
+  # `PUBLIC_BASE_URL`. The token endpoint and the key set are *not* repointed:
+  # the tool fetches those itself, from inside the `api` container, where
+  # `mock-idp:8000` is the address that resolves.
   mock-idp:
+    environment:
+      MOCK_IDP_TOOL_REDIRECT_URI: http://localhost:8000/auth/oidc/callback
     ports:
       - '127.0.0.1:8081:8000'

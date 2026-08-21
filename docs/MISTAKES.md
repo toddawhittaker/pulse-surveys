@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 45** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 48** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -94,7 +94,7 @@ did not expect.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 37** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 40** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
@@ -107,7 +107,7 @@ amending a record is not reading it**: open the whole file.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 30** · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
+**Caught: 31** · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
 
 **Rule.** After fixing something, try to reintroduce it. If the suite stays
 green, you have written a convention, not a guarantee. Prefer asserting the
@@ -116,7 +116,7 @@ second case arrives.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 21** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
+**Caught: 23** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
 
 **Rule.** When you work around a quirk of a type, a parser or an API, grep for
 every place that asks the same question and route them through one helper, in the

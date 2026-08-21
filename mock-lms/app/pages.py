@@ -29,6 +29,19 @@ from app.seed import SeededPlatform
 
 LAUNCH_PAGE_TITLE = "Mock LMS — LTI 1.3 launch"
 
+# The `data-testid` values E0-18's Playwright specs drive this form by, named the
+# way `mock-idp/app/pages.py` names its own: once, here, so a rename is one line
+# rather than a rename plus a search through a spec directory. They are on the
+# three controls a browser touches — which person launches, from which placement,
+# and the button that sends it — and on nothing else, because a testid on a
+# static element is a contract nobody needs.
+#
+# Added by E0-18, which asks for them in the same pull request as the tool's own
+# landing testids. The specs that address them are PR 2's.
+USER_CONTROL_TESTID = "mock-lms-login-hint"
+PLACEMENT_CONTROL_TESTID = "mock-lms-message-hint"
+SUBMIT_CONTROL_TESTID = "mock-lms-launch"
+
 
 def hidden(name: str, value: str) -> str:
     """One hidden form field, both halves escaped."""
@@ -96,17 +109,20 @@ def launch_page(settings: PlatformSettings, platform: SeededPlatform) -> str:
 
       <p>
         <label for="login_hint">Launch as</label>
-        <select id="login_hint" name="login_hint">
+        <select id="login_hint" name="login_hint"
+                data-testid="{escape(USER_CONTROL_TESTID, quote=True)}">
           {users}
         </select>
       </p>
       <p>
         <label for="lti_message_hint">Placement</label>
-        <select id="lti_message_hint" name="lti_message_hint">
+        <select id="lti_message_hint" name="lti_message_hint"
+                data-testid="{escape(PLACEMENT_CONTROL_TESTID, quote=True)}">
           {placements}
         </select>
       </p>
-      <p><button type="submit">Launch</button></p>
+      <p><button type="submit"
+                 data-testid="{escape(SUBMIT_CONTROL_TESTID, quote=True)}">Launch</button></p>
     </form>
 
     <h2>Registration</h2>

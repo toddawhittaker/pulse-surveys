@@ -1,64 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 37**
+**Caught: 40**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*20 instances recorded; the 4 most recent are below, oldest of the four first — dated from `git log -S"its first phrase"` on this file rather than read off the page order. The earlier 16 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-35, a documentation-only pass over three new sweeps. The brief named
-five records to correct and the entry found four more by asking the question
-rather than working the list: ADR 0014's own "Until something closes that"
-sentence, which the record had written about itself and could not know was now
-answered; three index rows in `docs/adr/README.md`, which is the highest-risk
-shape this entry names — written once, never re-read; and a signpost in E0-22,
-a live ticket, sending a reader to E0-21 for a residue that had moved twice.
-None of the four was in the brief, and the branch would have shipped with a
-green suite and four records pointing at the wrong owner.)*
-
-*(In E0-36 item 1, where the record that went stale was **the comment attached to
-the line being changed**. The brief named one site — ADR 0002's last consequence
-bullet, claiming the aggregate `ci` job "stays correct without edits as
-individual gates flip from tolerant to enforcing" — and it was right that this is
-the only claim in `docs/`. It is not the only claim. The verdict step's own
-header comment in `.github/workflows/ci.yml` said the check "fails if any gate
-failed or was cancelled; tolerant jobs report success, so this stays honest as
-the tree fills in", which is the argument for leaving `skipped` out of the
-pattern. Adding `skipped` to that same line would have left a comment three lines
-above it explaining why `skipped` is deliberately absent — and the next person to
-touch the verdict would have read the comment, believed the exclusion was
-considered, and put it back. **The record most likely to be missed is the one you
-are looking straight at**, because a comment above the line you are editing reads
-as context rather than as a claim. The sweep has to include the diff's own
-neighbourhood, not only the rest of the repository.)*
-
-*(In E0-26 item 1, and this one is a catch and a recurrence in the same commit,
-which is why it is worth the space. The change replaced the Care reveal, and the
-ticket named three records to repair. The sweep found five more that nothing had
-pointed at: ADR 0001's rejected-alternative block and its "one transaction"
-consequence, ADR 0042's "two connections mean two transactions" consequence —
-which named the wrong function once the door was split — and its "what this does
-not fix" paragraph, ADR 0043's three-grant decision list, `docker-compose.yml`'s
-comment justifying why `CARE_DATABASE_URL` is blanked, and the epic README's
-decision row. **The same sweep then missed eight more**, found only when a
-coordinator asked what the counter bump was for: the ADR index row still titled
-0043 "holding three grants"; two more sentences inside ADR 0043 itself; ADR
-0001's numbered decision item, false twice over — "Care's only access is **one**
-`SECURITY DEFINER` function that returns identity and writes the audit row **in
-the same transaction**"; two sentences in ADR 0040, which 0043 had already
-amended once for the role count; the repository's own top-level `README.md`; and
-`backend/app/models/__init__.py`, which is source rather than documentation.
-
-Three of the eight were inside the two ADRs being amended at the time, which is
-the shape worth naming: **the paragraphs that got repaired were the ones read
-while writing, not the file.** And none of the eight surfaces from grepping
-`reveal_student_identity`, because none of them names it — they carry the *fact*
-("three grants", "in the same transaction"), which is what a record about a
-mechanism actually says. The identifier grep found the sites that mention the
-function; the fact grep is what finds the sites that describe it. The index row
-was the worst of them, and this entry's own rule already says indexes are the
-highest risk, so knowing the rule was not enough — the sweep has to be a list of
-greps run, not an intention.)*
+*23 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 20 are in this file's git history and in the pull requests they cite.*
 
 *(E0-30's second fix round, where the false records were made false by a
 **two-name change to a frozenset**. Adding `error` and `error_description` to
@@ -79,6 +25,60 @@ editing one to match today is how an incident record stops being evidence. The
 sweep also had to be run twice, because the round's first commit changed
 behaviour and its second changed the records — the second sweep is the one that
 counts.)*
+
+*(Writing E0-18's door fixtures, and the record was **an index inside a file being
+edited for something else**. `tests/conftest.py` opens with a per-ticket account of
+what each group of fixtures is for and why it is shared — E0-04's database
+fixtures, E0-14's mock platform, E0-16's provider, E0-17's seed runner — and it is
+the highest-risk shape this entry names twice over: written once, never re-read,
+and sitting three hundred lines above the code anyone actually opens the file for.
+Six new fixtures went in at the bottom for E0-18's two doors, including the first
+one in that file that drives *this project's* application rather than a mock, and
+adding them without touching the top would have left an index that describes the
+file as it was four tickets ago. The change is one paragraph; the point is that
+nothing about editing the bottom of a file suggests reading the top of it.)*
+
+*(E0-18 PR 1's second round, and this one is the entry applied **to the shape of
+an assertion rather than to a sentence**. The claim-to-Care sweep had to gain a
+named exception, and an exception is a record: it says "this module reads a claim
+and names Care, and here is why that is allowed". Written as a set the assertion
+merely subtracts, that record survives the module being deleted, renamed, or
+rewritten until it no longer reads a claim at all — and it goes on excusing
+something that is no longer there while the sweep quietly stops sweeping. So the
+assertion is an **equality** between the flagged set and the exception set's
+keys, and a stale exception fails as loudly as a new offender, with its own half
+of the message. The same round widened
+`tests/integration/test_identity_grants.py`'s hand-written privilege set by two
+entries, and the derivation comment above it was extended in the same edit as the
+constant — that constant exists precisely so a widening cannot justify itself, so
+an entry added without its paragraph would have made the whole block a record
+that no longer accounts for what it guards.)*
+
+*(E0-18 PR 1's third round, where the false records would have been **the "what
+is deliberately not here" paragraphs at the top of two test modules**. Both door
+suites open by enumerating what they cover and what they leave to E1 — one says
+"what *is* here is the set E0-18's own acceptance criteria name" and lists the
+seven, the other says "two of the three refusals cannot be posed on the wire" —
+and the round adds four sections to each. Appending tests without touching those
+paragraphs leaves an index that undercounts its own file, in the highest-risk
+shape this entry names: written once, three hundred lines above the tests anyone
+opens the file for. The same round's other repair was `tests/conftest.py`'s
+per-ticket index, which had to gain a sentence for a fixture that signs tokens,
+and the claim-to-Care sweep's exception reason — a record that argued the Care
+claim is harmless *from the web door alone*, which stopped being the whole
+argument the moment the launch door gained a rule of its own about the same
+claim.
+
+The implementer's half of the same round found one the test author could not
+see, and it is the more expensive shape: `backend/app/services/landing.py`'s
+module docstring still carried three paragraphs of **"UNRESOLVED, and this
+module is the whole of the disagreement"** — a dispute that had been arbitrated
+one round earlier, in a change to a different file. Nothing in the source
+pointed at it: the arbitration was recorded where the ruling belonged, in the
+sweep's `EXCEPTIONS` reason, and the module that had been arguing its own case
+went on arguing it. A record made false by a change to *another* file is the one
+no author's diff-reading catches, because it is not in the diff — only asking
+"what else asserts something about this" does.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`

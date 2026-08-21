@@ -1,11 +1,11 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 45**
+**Caught: 48**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*24 instances recorded; the 3 below are the most recent, newest first. The
-earlier 21 are in this file's git history and in the pull requests they cite.*
+*27 instances recorded; the 3 below are the most recent, newest first. The
+earlier 24 are in this file's git history and in the pull requests they cite.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
@@ -13,70 +13,56 @@ were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
 
-*(E0-30's second fix round, and it is the shape where **the assertion names the
-defect instead of the rule**. The first draft for the reflected-`error_description`
-finding asserted that the offending bytes were *absent from* the description — which
-passes against a provider that deletes the description entirely, against one that
-drops the parameter altogether, and against any rewording of a message the fix is
-free to rewrite, so it would have pinned prose and guaranteed nothing. What stands
-instead is RFC 6749 Appendix A.8's grammar transcribed as a character-set bound,
-with the `1*` half of `1*NQSCHAR` asserted separately as non-emptiness: the
-production rather than a guess at the fix, and the reason three raise sites are
-driven rather than the one the reproduction named. The registration half of the same
-round is this entry's other face. `pytest.raises(Exception, match=...)` is satisfied
-by any exception whose message matches, so "it refused" and "it refused for this
-reason" are separate claims — and the only thing separating them is the accepted-query
-control beside the new cases, a registered `?tenant=x` that must still register.
-Without it, both new cases pass perfectly against a rule that had become "refuse
-every query", which is a different and worse provider.)*
+*(E0-18 PR 1's third round, and it is the shape where **a refusal is the right
+answer for a reason the test did not name.** The new rule is that each door reads
+one roles vocabulary, and the obvious test smuggles `https://pulse.example/claims/
+roles: ["CARE"]` into a launch with an empty LIS roles claim and requires a 4xx.
+Written with that claim name transcribed from the ticket, it goes green against a
+door that reads the web vocabulary happily — because a claim name nobody reads is
+a launch carrying no role at all, which is refused anyway. So the claim name and
+the three role spellings are read off the provider's own published registration
+document (ADR 0058), and each is asserted to be a role that document really
+publishes before it is smuggled anywhere. The same round has the other face too:
+these launches carry claims no mock will mint, so they are re-signed by a key set
+of the suite's own with the registration pointed at it — and every refusal in that
+set would be satisfied by a door that simply could not verify the new signature,
+so both doors carry a control that re-signs the claims **unchanged** and requires
+the landing page to appear.)*
 
-*(Writing E0-30's error-redirect battery, and it is the shape where **the
-obvious assertion is satisfied by three different wrong providers at once**.
-"The refusal is a 3xx to the registered URI carrying `error`" passes against a
-provider that hands back an authorization code beside the error, against one
-that answers a single constant code for every refusal, and against one that
-re-encodes the `state` a client will compare byte for byte. So the helper every
-redirect case goes through refuses a `code` in the returned query, requires
-`error` to be one of RFC 6749 §4.1.2.1's codes **and** each test to say which,
-and requires `error_description` to carry something. The page assertions were
-worse, and worse in exactly the way this entry is named for: "this refusal did
-not redirect" was a true statement about the provider as it stood, which
-redirected nothing at all — all eight page cases passed on the day the ticket
-opened and would have gone on passing over an implementation that never changed.
-The ordering near miss, which is the one that guards against an open redirector,
-now asserts both halves in one run: the same unknown scope with the registered
-redirect URI must redirect, and with an unregistered one must not, so the
-negative half is only read once the positive half has been seen.)*
+*(E0-18 PR 1's second round, and it is the shape where **the reader cannot see
+the write it is asserting did not happen.** The new test drives a whole web login
+as the Care person and requires `role_assignment`, `user` and `person` to hold
+the same number of rows afterwards — and the tool commits on a connection of its
+own, so a counter that held one transaction open across the flow would answer out
+of the snapshot it started in and report "unchanged" whatever the door did. It
+opens a connection per count instead, and is shown reading a table the migration
+filled (`alembic_version`) before it reports any table empty, because "nothing was
+written" and "this connection is looking at the wrong database" are otherwise the
+same observation. The wrong-`aud` refusal on the same door is the other face: it
+is posed by re-posing the code exchange as the registered client rather than by
+editing the token, so the signature survives, and it reads the delivered token's
+`aud` back and requires it to name the other client — without which the 4xx is
+just as easily a flow that failed at the exchange.)*
 
-*(Writing E0-26 item 1's tests, and it is the "assertion that cannot fail" shape
-in the place it is hardest to see — inside a control. The refusal test for a
-non-Care actor took the committed `audit_log` total before and after the refused
-`record_identity_reveal` call and asserted it had not moved, on the reasoning that
-a function checking the actor *after* inserting the row would be caught. It cannot
-be. A `RAISE` aborts the caller's transaction, so a row written before the check is
-discarded by the caller's own `ROLLBACK` whatever the implementation did, and the
-two orderings produce exactly the same count. Only a record written over a second
-connection would make the ordering observable, and this ticket rejects that
-mechanism. The assertion was removed, and what stands in its place is one that can
-fail — the permitted call's returned id must name a committed row read from the
-second connection, which kills a recording call that answers a uuid it invented.
-The docstring now says the ordering is worth doing and is not observable from
-here, so the next reader does not add the check back.*
-
-***A second application in the same ticket, counted once**, and it arrived through
-a fixture guard firing. `user_identity.identity_email` is nullable, the seeding
-helper fills only what the schema requires, and **nothing in `tests/` had ever
-seeded that column** — so every identity row the suite had ever made carried a null
-address. Two assertions written against it were therefore satisfied by nothing: the
-honest path's `returned["identity_email"] == revealable.identity_email` was
-`None == None`, and the leak half of the subject-substitution test asked whether the
-*other* student's address appeared in what came back, which is true of any result
-at all when that address is `None`. The obvious repair — seed an address for the
-one subject whose guard fired — would have left both. Both students are now seeded
-with an address explicitly, and the optional-address case that the null was
-accidentally standing in for became a subject of its own with a test that names it.
-Three cases that had been one are now three: a name with an address, a name with
-none, and no identity row at all.)*
+*(Writing E0-18's door tests, before any door existed, and it is the shape where
+**the only obvious way to pose a case breaks something else at the same time.**
+The launch and web doors both have to refuse a token whose `exp` has passed, and
+the natural test edits `exp` in the payload and re-encodes it — which invalidates
+the signature. That test is refused by a tool that checks nothing but the
+signature, and by a tool that checks nothing at all if the decoder trips first, so
+it would have gone green over an implementation with no expiry check in it. What
+stands instead winds `time.time` back for the length of the mint, so the mock
+issues a token that is genuinely expired and genuinely signed, and beside it a
+near miss that winds the clock back thirty seconds and requires the launch to be
+**accepted** — without which the refusal is evidence that winding the clock breaks
+a launch rather than evidence that anything reads `exp`. The same shape decided
+three other things in the same batch: the wrong-`aud` and unknown-`deployment_id`
+cases move the registration rather than the token, so each refusal differs from
+the happy path in exactly one value; the `/docs` gate's closed direction carries a
+`/healthz` control, because "both routes answer 404" is also true of an
+application serving nothing; and the two empty-landing-page tests assert the
+landing testid is present before reporting that no other person's address is on
+it, with the scan shown finding those addresses in a sample built out of them.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

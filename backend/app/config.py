@@ -79,6 +79,23 @@ _PROBLEM_EXPLANATIONS = {
 }
 
 
+# The one `ENVIRONMENT` value that turns on a developer convenience. Free-form,
+# and **not** an enumeration `Settings` enforces — `ENVIRONMENT` appears zero
+# times in `docs/SPEC.md`, so this is a comparison against a convention
+# `.env.example` documents. Anything that is not this exact string is treated as
+# a deployment.
+#
+# It lives here rather than beside its readers because there are now three of
+# them and each held its own copy: `app/db.py` before it lets the engine echo
+# SQL, `scripts/seed.py` before it will run at all (ADR 0063), and from E0-18
+# `app/main.py` before it serves `/docs` and `/openapi.json` (ADR 0074). Three
+# copies of one string is `docs/MISTAKES.md` entry 13, and the module every one
+# of them already imports is this one. **E0-18 does not edit the other two**:
+# E0-37 item 2 is the ticket that migrates them onto this constant, and doing it
+# here would put an unrelated change in an auth pull request.
+DEVELOPMENT_ENVIRONMENT = "development"
+
+
 class ConfigurationError(Exception):
     """The environment does not configure the application, and startup stops here.
 
@@ -309,12 +326,83 @@ class Settings(BaseSettings):
     # `production` are conventions nothing enforces. Two readers compare against
     # the first of those: `app/db.py` before it lets the engine echo SQL, and
     # `scripts/seed.py` before it will run at all (ADR 0063).
+    # E0-18 adds a third reader, `app/main.py`, which compares against
+    # `DEVELOPMENT_ENVIRONMENT` below before it serves `/docs` and
+    # `/openapi.json` (ADR 0074).
     environment: str = Field(description="Deployment name, reported by /healthz. Free-form.")
 
     # --- defaulted: optional, each for its own reason -------------------------
     #
     # The reason is on the field. It is not the same reason twice, and no
     # heading here summarizes it — see the module docstring for why not.
+
+    # --- the two entry doors' addresses (E0-18) -------------------------------
+    #
+    # Seven values, and every one of them is an address. They are defaulted, and
+    # the reason is the third of the three this module keeps apart: **the spec
+    # never spoke to them.** §6.3's configuration surface names no LTI or OIDC
+    # endpoint, §7.3 leaves the platform's addresses to the registration, and
+    # E0-23 decided that `lti_platform` gains service-address columns in E1,
+    # with the code that reads them. So the values below are E0's stand-in and
+    # the ADR says so (docs/adr/0075).
+    #
+    # **Each default is this repository's own development stack**, spelled the
+    # way `docker-compose.override.yml` publishes it. That is deliberate and it
+    # is not the "working literal default" the module docstring refuses: none of
+    # these addresses can resolve in a deployment, so a deployment that forgets
+    # one gets a launch that fails at its first hop rather than a system that is
+    # quietly wrong. What a required field would buy instead is a startup
+    # refusal, and what it would cost is that `docker compose up` from a clean
+    # checkout — E0's own exit criterion (§14.3) — stops working without an
+    # `.env` nobody has written yet.
+    #
+    # **Two horizons, decided per value rather than per service.** A browser on
+    # the host reaches these services on published ports at `localhost`; the API
+    # container reaches them by Compose service name. A value a browser is
+    # redirected to is `localhost`; a value the tool fetches server-side is the
+    # service name. Getting this backwards produces a stack that passes every
+    # in-process test and sends a real browser to a name it cannot resolve.
+    public_base_url: str = Field(
+        default="http://localhost:8000",
+        description=(
+            "Browser-facing base URL of this tool. `/lti/launch` and "
+            "`/auth/oidc/callback` are derived from it, and both mocks compare "
+            "the result exactly against what they were registered with."
+        ),
+    )
+    lti_platform_authorization_endpoint: str = Field(
+        default="http://localhost:8080/oidc/authorize",
+        description=(
+            "Browser-facing OIDC authorization endpoint of the LTI platform. A settings "
+            "field because `lti_platform` has no column for it until E1 (E0-23)."
+        ),
+    )
+    oidc_issuer: str = Field(
+        default="http://mock-idp:8000",
+        description=(
+            "The `iss` a web login's `id_token` must state (OIDC Core 1.0 §3.1.3.7). Not "
+            "browser-facing: it is compared against a claim, never redirected to."
+        ),
+    )
+    oidc_authorization_endpoint: str = Field(
+        default="http://localhost:8081/oidc/authorize",
+        description="Browser-facing OIDC authorization endpoint of the identity provider.",
+    )
+    oidc_token_endpoint: str = Field(
+        default="http://mock-idp:8000/oidc/token",
+        description="Server-facing OIDC token endpoint, where this tool redeems a code.",
+    )
+    oidc_jwks_url: str = Field(
+        default="http://mock-idp:8000/.well-known/jwks.json",
+        description="Server-facing key set a web login's `id_token` is verified against.",
+    )
+    oidc_client_id: str = Field(
+        default="mock-idp-client",
+        description=(
+            "This tool's registered client at the identity provider. The client is public: "
+            "it holds no secret, and PKCE is what binds a code to it (RFC 7636)."
+        ),
+    )
 
     # The spec never spoke to this one. §6.3 enumerates the configuration
     # surface and no log level is in it; no other section mentions one. INFO is

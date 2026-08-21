@@ -12,15 +12,14 @@ escalation in this product costs an attacker somebody else's data; this one cost
 them a name attached to a comment about self-harm. It is marked `invariant`, so
 CI runs it in a pass of its own and treats a skip as a failure.
 
-**What this test is today, said plainly.** No claim-mapping code exists yet —
-E0-14 builds the LTI launch and E0-16 the OIDC login — so the set of modules this
-sweeps is currently empty, and the assertion over it is currently vacuous. That
-is the honest description, and it is why the canary below carries the weight: the
-sweep is required to find the Care role somewhere in the source before it is
-allowed to report that no claim path names it. A search that has gone blind
-otherwise reads exactly like a search that found nothing wrong
-(`docs/MISTAKES.md` entry 3). The test arms itself the day a launch module lands,
-which is the day it matters.
+**What this test is today, said plainly.** It is armed. When it was written no
+claim-mapping code existed and the sweep was vacuous; E0-18's two doors landed
+it — several modules read a claim, several name the role, and one does both and
+is the exception below. The canary still carries weight for the same reason it
+always did: the sweep is required to find the Care role somewhere in the source
+before it is allowed to report anything about which paths name it, because a
+search that has gone blind reads exactly like a search that found nothing wrong
+(`docs/MISTAKES.md` entry 3).
 
 **Why the syntax tree rather than the file text.** A correct implementation is
 very likely to *say* "CARE" in a comment or a docstring in exactly the module
@@ -29,6 +28,14 @@ writes next to the mapping. Searching the text would turn that sentence into a
 failure and teach the next person to delete the comment. So both halves are read
 out of the parsed module: comments are not in a syntax tree at all, and a
 docstring is a string constant that is not the bare word.
+
+**One module is a named exception, and the exception set is an equality.**
+`EXCEPTIONS` below carries the modules this sweep flags on purpose, each with the
+reason it is allowed to, and the assertion is that the flagged set *equals* the
+exception set. So an exception that has gone stale — the module deleted, or
+rewritten so that it no longer reads a claim — fails exactly as loudly as a new
+unexcepted claim-reader naming the role. A list of things to ignore that nobody
+has to keep true is how a sweep quietly stops sweeping.
 
 **What it cannot see** (`docs/MISTAKES.md` entry 14, which is about not
 overclaiming a search): a mapping that reaches the role through a variable, a
@@ -69,6 +76,38 @@ CLAIM_STRING_FRAGMENTS = (
     "lis/v2/",
     "openid",
 )
+
+# The modules this sweep flags **on purpose**, each with the reason it is allowed
+# to, keyed by path relative to the repository root. The assertion below is an
+# equality against these keys: adding one is a decision somebody has to write down
+# here, and leaving a stale one is a failure rather than a silence.
+EXCEPTIONS = {
+    "backend/app/services/landing.py": (
+        "E0-18's landing seam: it maps a verified web-login roles claim to which "
+        "empty page to render. Navigation, not capability — the criterion this "
+        "file enforces is that no claim may *produce a Care assignment*, and this "
+        "module writes no `role_assignment` row and grants nothing. That is "
+        "asserted behaviourally, not argued: "
+        "`tests/integration/test_web_login_door.py::"
+        "test_the_web_door_writes_no_row_for_the_care_person_it_lands` drives the "
+        "whole flow as the Care person and requires the row counts to be "
+        "unchanged. The Care queue itself is E10's, and every read on it is gated "
+        "on a live `CARE` assignment in the database through the authz chokepoint "
+        "(E0-11, `app/services/authz.py`) — never on a claim, so a forged or "
+        "administrator-granted claim buys an empty page and nothing else. The "
+        "claim that buys it can also only arrive at the door SPEC §2 gives Care: "
+        "`tests/integration/test_lti_launch_door.py::"
+        "test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused` and "
+        "`::test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_"
+        "role_names` require the launch door to refuse a launch stating `CARE` in "
+        "the web door's roles claim and to ignore that claim entirely when an LIS "
+        "role is present, so an LMS administrator cannot reach even the empty page "
+        "by writing one into a launch. E1 "
+        "replaces claim-derived landing roles with the assignment model, at which "
+        "point this exception should go and this equality will say so. "
+        "Arbitrated 2026-08-21 on E0-18 PR 1."
+    ),
+}
 
 
 def parsed_modules() -> dict[Path, ast.Module]:
@@ -139,6 +178,10 @@ def test_no_module_that_reads_a_claim_names_the_care_role() -> None:
     because they hold a live `CARE` role assignment, never because of anything in
     an LTI or OIDC claim"); this is the version that cannot be satisfied by a
     resolver that reads claims carefully.
+
+    The set flagged is required to **equal** `EXCEPTIONS`, so this fails in both
+    directions: a module that starts reading claims beside the role, and an
+    exception nobody has re-examined since the module it names changed.
     """
     modules = parsed_modules()
     assert modules, (
@@ -157,15 +200,24 @@ def test_no_module_that_reads_a_claim_names_the_care_role() -> None:
     )
 
     reading_claims = {path for path, tree in modules.items() if maps_claims_to_roles(tree)}
-    offenders = sorted(
-        path.relative_to(REPO_ROOT) for path in reading_claims.intersection(naming_care)
-    )
-    assert not offenders, (
-        f"{offenders} both read a claim and name the {CARE_ROLE} role. E0-09: 'No LTI claim, no "
-        "OIDC claim, and no LMS role may ever produce a `CARE` assignment… a claim-to-Care "
-        "mapping would let an LMS administrator grant themselves identity access, walking past "
-        "every guarantee in §4.' Care is the only role that can re-identify a student (§6.2), and "
-        "the administrator of the platform controls what the claim says. If this module names the "
-        "role only to exclude it, name it out of a shared enumeration in the model layer instead, "
-        "so that the exclusion is a fact about the role rather than a literal in the door."
+    flagged = {
+        path.relative_to(REPO_ROOT).as_posix() for path in reading_claims.intersection(naming_care)
+    }
+    unexcepted = sorted(flagged - set(EXCEPTIONS))
+    stale = sorted(set(EXCEPTIONS) - flagged)
+    assert flagged == set(EXCEPTIONS), (
+        f"{unexcepted} both read a claim and name the {CARE_ROLE} role without being named in "
+        f"`EXCEPTIONS`, and {stale} are excepted here without being flagged any more. E0-09: 'No "
+        "LTI claim, no OIDC claim, and no LMS role may ever produce a `CARE` assignment… a "
+        "claim-to-Care mapping would let an LMS administrator grant themselves identity access, "
+        "walking past every guarantee in §4.' Care is the only role that can re-identify a student "
+        "(§6.2), and the administrator of the platform controls what the claim says.\n"
+        "A module in the first list is a new claim-to-Care path: if it names the role only to "
+        "exclude it, name it out of a shared enumeration in the model layer instead, so the "
+        "exclusion is a fact about the role rather than a literal in the door — and if it produces "
+        "no assignment at all, that is an exception somebody decides and writes into `EXCEPTIONS` "
+        "above with a behavioural test beside it, not something this sweep infers.\n"
+        "A module in the second list is an exception that has gone stale: it was deleted or it no "
+        "longer reads a claim, and an ignore rule nobody has to keep true is how a sweep stops "
+        "sweeping. Remove the entry."
     )
