@@ -1,0 +1,851 @@
+"""The tool's web door: `GET /auth/oidc/login` and `/auth/oidc/callback` — ticket E0-18.
+
+SPEC §2 gives every role except instructor and student a second way in, and E0-16
+built the provider it goes through. E0-18 PR 1 builds the tool's half: an
+authorization code flow with PKCE, started at `/auth/oidc/login` and finished at
+`/auth/oidc/callback`, landing the caller on the empty view their **verified**
+roles claim names. Everything below is asserted over HTTP against the application
+`app.main:create_app()` returns, with the mock provider served in process through
+`app.state.http`.
+
+**The flow is driven the way a browser drives it.** The tool's redirect is read,
+its parameters are carried to the provider's own authorization endpoint, an
+identity is chosen at the login form, and the `code` and `state` the provider
+sends back are delivered to the tool's callback — which then redeems that code
+**server-side**, through the seam, with the PKCE verifier only it holds. Nothing
+is short-circuited, so the exchange below is the exchange a deployment performs.
+
+**What is deliberately not here.** E0-18's boundary section gives E1 the unified
+session, provisioning, the dual-door identity merge and role resolution from the
+assignment model. So no test below asserts anything about a `user` row, a session
+that outlives the flow, or a purview — `transitive_purview` raises by design (ADR
+0003) and the leadership landing view is empty *because* of it. The wrong-door
+person — an instructor trying to sign in here — is E0-16's own test and is not
+re-proved.
+
+**Two of the three refusals cannot be posed on the wire**, and the seam is how they
+are posed instead: the provider signs with a key nothing here holds, so a token
+that is tampered with, or one that expired an hour ago, is produced by wrapping the
+tool's own call to the token endpoint rather than by editing a string. Both leave
+every other property of the flow intact, which is what keeps a 4xx meaning the one
+thing the test names (`docs/MISTAKES.md` entry 3).
+"""
+
+from typing import Any
+from urllib.parse import parse_qsl, urlsplit
+
+import httpx
+import pytest
+
+pytestmark = pytest.mark.integration
+
+# The mock provider's configuration surface, from `mock-idp/app/config.py`. Only
+# the redirect URI is set: it is compared exactly, both when the authorization
+# request arrives and again when the code is redeemed, so the tool's
+# `PUBLIC_BASE_URL` and this value have to be the same address or no flow
+# completes at all.
+MOCK_IDP_TOOL_REDIRECT_URI_VARIABLE = "MOCK_IDP_TOOL_REDIRECT_URI"
+
+# Where the tool is configured to send a browser to begin a web login. Chosen so
+# that no implementation could arrive at it by accident — a redirect built from the
+# issuer plus a guessed path, or from the discovery document at request time, would
+# agree with the real provider and disagree with this. E0-18 makes the
+# browser-facing authorize URL a setting of its own precisely because it is not the
+# server-facing one. `.invalid` is reserved by RFC 2606.
+CONFIGURED_AUTHORIZATION_ENDPOINT = "http://identity-provider.invalid/e0-18-configured-authorize"
+
+# An issuer the tool is told to expect from a provider that will state a different
+# one. Used for the `iss` refusal, and for nothing else.
+UNTRUSTED_ISSUER = "http://an-issuer-this-tool-does-not-trust.invalid"
+
+# The roles §2 gives the web door, and the view E0-18 lands each on: "leadership
+# roles → leadership empty view, `CARE` → Care empty view, `ADMIN` → admin empty
+# view". The leadership set is §2's reporting chain; Care and Admin are the two
+# roles §2 gives this door and no other.
+LEADERSHIP_ROLES = ("VP_ACADEMICS", "DEAN", "ASSISTANT_DEAN", "CHAIR", "LEAD_FACULTY")
+LEADERSHIP_VIEW = "pulse-landing-leadership"
+CARE_VIEW = "pulse-landing-care"
+ADMIN_VIEW = "pulse-landing-admin"
+
+# The launch-door view the two-hat person reaches by her other assignment.
+INSTRUCTOR_VIEW = "pulse-landing-instructor"
+
+# The mock platform's configuration surface again, for the one test that drives
+# both doors. Kept here rather than imported from the launch module: a test module
+# importing its sibling depends on where pytest put `tests/` on `sys.path`, and an
+# import error is not a red.
+MOCK_LMS_TOOL_LOGIN_URL_VARIABLE = "MOCK_LMS_TOOL_LOGIN_URL"
+MOCK_LMS_TOOL_LAUNCH_URL_VARIABLE = "MOCK_LMS_TOOL_LAUNCH_URL"
+
+# The LTI 1.3 roles claim, spelled as the specification spells it.
+LTI_ROLES_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/roles"
+
+# How far back the provider's clock is wound while the tool redeems its code, to
+# obtain a session that is certainly expired and one that certainly is not. The
+# pair is the point: without the second, the refusal would be evidence that winding
+# the clock breaks a flow rather than evidence that the tool checks `exp`.
+CERTAINLY_EXPIRED_SECONDS = 3600
+CERTAINLY_STILL_VALID_SECONDS = 30
+
+# What RFC 7636 requires of a public client, and what E0-16's provider refuses
+# anything else for.
+REQUIRED_CHALLENGE_METHOD = "S256"
+
+
+def redirect_target(response: Any, purpose: str) -> str:
+    """The `Location` of a redirect, or a failure saying what came back instead."""
+    assert response.status_code in (302, 303, 307), (
+        f"The tool answered {response.status_code} rather than a redirect when {purpose}. Body "
+        f"begins {response.text[:300]!r}. E0-18: '`GET /auth/oidc/login` — starts the code flow "
+        "against the mock IdP: 302 to its authorization endpoint'."
+    )
+    location = response.headers.get("location")
+    assert (
+        location
+    ), f"The tool answered {response.status_code} with no `Location` header when {purpose}."
+    return location
+
+
+def query_of(url: str) -> dict[str, str]:
+    """The query parameters of a URL, as a mapping."""
+    return dict(parse_qsl(urlsplit(url).query))
+
+
+def views_in(response: Any, contract: Any) -> list[str]:
+    """Which of the five landing testids the body carries."""
+    return [testid for testid in contract.landing_testids if testid in response.text]
+
+
+def lands_on(response: Any, contract: Any, expected: str) -> None:
+    """The response is the landing page for `expected`, and for nothing else."""
+    assert response.status_code == 200, (
+        f"The web login was answered {response.status_code} rather than 200. Body begins "
+        f"{response.text[:400]!r}."
+    )
+    found = views_in(response, contract)
+    assert found == [expected], (
+        f"The landing page carries {found or 'no landing testid at all'}, and E0-18 has this "
+        f"session land on `{expected}`. Every other view's testid has to be absent as well as "
+        "this one present: a page carrying several is right about none of them."
+    )
+
+
+def refused(response: Any, contract: Any, what: str) -> None:
+    """The tool refused, and rendered nobody's landing page while doing it."""
+    assert 400 <= response.status_code < 500, (
+        f"The tool answered {response.status_code} to {what}. E0-18 requires a 4xx: this is auth "
+        f"code, and the callback is where a token from an unauthenticated caller first reaches "
+        f"real tool code. Body begins {response.text[:400]!r}."
+    )
+    found = views_in(response, contract)
+    assert not found, (
+        f"The tool refused {what} with {response.status_code} and still rendered {found}. A "
+        "refusal that serves a landing page has admitted the session and merely said so in the "
+        "status line."
+    )
+
+
+def person_holding(provider: Any, role: str, *, and_a_launch_assignment: bool = False) -> Any:
+    """The one seeded person the registration document publishes with `role`.
+
+    Read off `/mock/registration` (ADR 0058) rather than transcribed, so this module
+    holds no copy of `mock-idp/app/seed.py` and a reseeding cannot leave it quietly
+    asserting over somebody who is no longer there.
+
+    `and_a_launch_assignment` distinguishes the two people who hold Care: the
+    office, and the person who also teaches. Without it, "the Care person" is
+    whichever of the two the document happens to list first.
+    """
+    found = [
+        user
+        for user in provider.published_users()
+        if role in (user.get("roles") or [])
+        and bool(user.get("launch_only_roles")) == and_a_launch_assignment
+    ]
+    assert len(found) == 1, (
+        f"The registration document publishes {len(found)} people holding {role!r} with "
+        f"launch_only_roles {'set' if and_a_launch_assignment else 'empty'}; this test names one. "
+        f"It publishes {[user.get('subject') for user in provider.published_users()]}."
+    )
+    return found[0]
+
+
+def identifying_strings(provider: Any, except_for: Any) -> list[str]:
+    """Every seeded person's address and subject, apart from one person's own.
+
+    The signed-in person's own identifiers are excluded deliberately. A landing
+    page naming who is signed in is legitimate; a landing page naming *anybody
+    else* has enumerated people, and E0-18 says the leadership and Care views are
+    empty by design because nothing here computes a purview to populate them
+    (ADR 0003, §2.1).
+    """
+    mine = {value for value in except_for.values() if isinstance(value, str) and value}
+    found: list[str] = []
+    for user in provider.published_users():
+        for member in ("email", "subject"):
+            value = user.get(member)
+            if isinstance(value, str) and value and value not in mine:
+                found.append(value)
+    return found
+
+
+@pytest.fixture
+def provider(mock_idps: Any, door_contract: Any) -> Any:
+    """The mock provider, registered to return to this tool's own callback.
+
+    `MOCK_IDP_TOOL_REDIRECT_URI` is compared exactly — on the way in and again at
+    the token endpoint — so this is what makes "the tool builds its redirect URI
+    from `PUBLIC_BASE_URL`" a property the provider itself enforces rather than one
+    only a test believes.
+    """
+    return mock_idps(
+        {
+            MOCK_IDP_TOOL_REDIRECT_URI_VARIABLE: (
+                f"{door_contract.public_base_url}{door_contract.oidc_callback}"
+            )
+        }
+    )
+
+
+@pytest.fixture
+def open_web_door(tool_doors: Any, door_contract: Any, provider: Any) -> Any:
+    """Build the tool for this provider, with settings a test may override.
+
+    Every OIDC endpoint comes out of the provider's discovery document, which is
+    how a client learns them and which means nothing about the mock's URLs is
+    written down here. The host in those URLs is also what routes the tool's
+    server-side calls back into the in-process provider, so a door that fetched
+    from anywhere else reaches no mock and says so.
+    """
+    document = provider.discovery()
+    registration = provider.registration()
+    names = door_contract.settings
+
+    def endpoint(member: str) -> str:
+        value = document.get(member)
+        assert isinstance(value, str) and value, (
+            f"The provider's discovery document advertises no `{member}` (it carries "
+            f"{sorted(document)}). That member is how a client configures itself, and E0-18's "
+            "settings hold exactly these addresses."
+        )
+        return value
+
+    def build(*, around: Any = None, **overrides: str) -> Any:
+        values = {
+            names["public_base_url"]: door_contract.public_base_url,
+            names["oidc_issuer"]: endpoint("issuer"),
+            names["oidc_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
+            names["oidc_token_endpoint"]: endpoint("token_endpoint"),
+            names["oidc_jwks_url"]: endpoint("jwks_uri"),
+            names["oidc_client_id"]: registration["client_id"],
+        }
+        values.update({names[key]: value for key, value in overrides.items()})
+        host = urlsplit(endpoint("token_endpoint")).hostname
+        return tool_doors(values, {host: provider}, around=around)
+
+    return build
+
+
+@pytest.fixture
+def token_endpoint_path(provider: Any) -> str:
+    """The path the tool redeems a code at, for the two tests that wrap that call."""
+    return urlsplit(provider.discovery()["token_endpoint"]).path
+
+
+@pytest.fixture
+def tool(open_web_door: Any) -> Any:
+    """The tool, configured correctly for the running provider."""
+    return open_web_door()
+
+
+def begin(tool: Any, contract: Any) -> dict[str, str]:
+    """Start a web login and read the authorization request the tool built."""
+    response = tool.get(contract.oidc_login)
+    return query_of(redirect_target(response, "a web login was started"))
+
+
+def sign_in(provider: Any, parameters: dict[str, str], person: Any, **substitutions: str) -> Any:
+    """Carry the tool's authorization request to the provider and sign in as `person`.
+
+    `substitutions` replaces one of the tool's own parameters, which is how the
+    nonce refusal is posed: the provider puts back whatever it was given, so a
+    session carrying a nonce the tool never generated is one parameter different
+    from the happy path and identical in every other respect.
+    """
+    attempt = provider.begin_from(list({**parameters, **substitutions}.items()), "")
+    submitted = provider.submit_login(attempt, provider.identity_of(person, attempt))
+    assert submitted.code, (
+        f"The provider issued no authorization code for {person.get('subject')!r}: it answered "
+        f"{submitted.response.status_code} and sent {submitted.location!r}. E0-16's criterion 3 is "
+        "that this flow completes, and its own suite asserts it — a failure here is this module "
+        "driving the provider wrongly rather than a defect in the tool."
+    )
+    return submitted
+
+
+def complete(tool: Any, contract: Any, submitted: Any) -> Any:
+    """Deliver the provider's response to the tool's callback."""
+    return tool.get(
+        contract.oidc_callback, params={"code": submitted.code, "state": submitted.state}
+    )
+
+
+def logged_in(tool: Any, contract: Any, provider: Any, person: Any, **substitutions: str) -> Any:
+    """One whole web login, from `/auth/oidc/login` to the landing page."""
+    parameters = begin(tool, contract)
+    return complete(tool, contract, sign_in(provider, parameters, person, **substitutions))
+
+
+# ---------------------------------------------------------------------------
+# `GET /auth/oidc/login` — what the tool asks the provider for.
+# ---------------------------------------------------------------------------
+
+
+def test_the_login_endpoint_redirects_to_the_configured_authorization_endpoint(
+    tool: Any, door_contract: Any
+) -> None:
+    """Criterion: a 302 to the provider's authorization endpoint.
+
+    **Dies if the endpoint is derived rather than configured.** E0-18 splits the
+    provider's addresses into a browser-facing authorize URL and server-facing
+    token and JWKS URLs, because a browser reaches the provider on a published port
+    and the tool reaches it by container name — a tool that built one from the other
+    works in a test harness and sends a real browser somewhere it cannot resolve.
+    """
+    location = redirect_target(tool.get(door_contract.oidc_login), "a web login was started")
+
+    split = urlsplit(location)
+    without_query = f"{split.scheme}://{split.netloc}{split.path}"
+    assert without_query == CONFIGURED_AUTHORIZATION_ENDPOINT, (
+        f"The tool redirected to {without_query!r} and the configured authorization endpoint is "
+        f"{CONFIGURED_AUTHORIZATION_ENDPOINT!r}. E0-18 makes the browser-facing authorize URL a "
+        "setting of its own; a value assembled from the issuer would agree with the provider by "
+        "construction and would not be configuration."
+    )
+
+
+def test_the_authorization_request_names_the_configured_client_and_the_tools_own_callback(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion: the request carries `client_id` and `redirect_uri`.
+
+    **Dies if the callback URL is built from the incoming request** — from its
+    `Host` header, or from the URL the test client used — rather than from
+    `PUBLIC_BASE_URL`. That mistake is invisible behind a correctly configured
+    reverse proxy and is how a redirect URI ends up being whatever an attacker's
+    `Host` header said.
+    """
+    parameters = begin(tool, door_contract)
+
+    assert parameters.get("client_id") == provider.registration()["client_id"], (
+        f"The authorization request names client {parameters.get('client_id')!r}; the provider "
+        f"registers {provider.registration()['client_id']!r}."
+    )
+    expected = f"{door_contract.public_base_url}{door_contract.oidc_callback}"
+    assert parameters.get("redirect_uri") == expected, (
+        f"The authorization request's `redirect_uri` is {parameters.get('redirect_uri')!r} and the "
+        f"tool's own callback is {expected!r}. The provider compares this exactly, twice, so the "
+        "two disagreeing is a flow that cannot complete — and a value taken from the request is "
+        "one the caller chose."
+    )
+
+
+def test_the_authorization_request_asks_for_the_code_flow_with_the_openid_scope(
+    tool: Any, door_contract: Any
+) -> None:
+    """Criterion: `response_type=code` and a scope including `openid`.
+
+    **Dies against an implicit-flow request.** `response_type=id_token` returns a
+    token in the URL fragment with no code exchange and no PKCE — a downgrade that
+    still lands somebody on a landing page, so nothing else in this module would
+    notice. `openid` is what makes the response an OpenID Connect one at all
+    (OIDC Core 1.0 §3.1.2.1): without it a conformant provider issues no `id_token`
+    and there is nothing to read a role out of.
+    """
+    parameters = begin(tool, door_contract)
+
+    assert parameters.get("response_type") == "code", (
+        f"The tool asked for `response_type` {parameters.get('response_type')!r}. E0-18 starts an "
+        "authorization *code* flow; anything else skips the server-side exchange and the PKCE "
+        "binding with it."
+    )
+    scopes = (parameters.get("scope") or "").split()
+    assert "openid" in scopes, (
+        f"The tool asked for scope {parameters.get('scope')!r}, which does not include `openid`. "
+        "That value is what distinguishes an OpenID Connect request from a plain OAuth 2.0 one, "
+        "and without it there is no `id_token` and no roles claim."
+    )
+
+
+def test_the_authorization_request_carries_an_s256_pkce_challenge(
+    tool: Any, door_contract: Any
+) -> None:
+    """Criterion: PKCE with `S256`.
+
+    **Dies if PKCE is omitted, and dies if it is downgraded to `plain`.** Both
+    matter and they are different mutations: a public client with no secret has
+    nothing but PKCE binding the code to the client that asked for it, and a `plain`
+    challenge puts the verifier itself in the redirect a browser records in its
+    history. E0-16's provider refuses anything but `S256`, so an omission surfaces
+    as a flow that does not complete — which reads as a broken provider unless
+    something asserts this directly.
+    """
+    parameters = begin(tool, door_contract)
+
+    assert parameters.get("code_challenge"), (
+        f"The authorization request carries no `code_challenge` (it carries "
+        f"{sorted(parameters)}). The tool is a public client with no secret, so the challenge is "
+        "the only thing binding the authorization code to it."
+    )
+    assert parameters.get("code_challenge_method") == REQUIRED_CHALLENGE_METHOD, (
+        f"The challenge method is {parameters.get('code_challenge_method')!r} rather than "
+        f"{REQUIRED_CHALLENGE_METHOD!r}. `plain` sends the verifier in the URL, which is the one "
+        "place PKCE exists to keep it out of."
+    )
+
+
+def test_two_web_logins_carry_a_fresh_state_and_a_fresh_nonce(
+    tool: Any, door_contract: Any
+) -> None:
+    """Criterion: `state` and `nonce` are per flow.
+
+    **Dies against a constant**, which is what a value read from configuration or
+    derived from the client looks like — and which validates perfectly in any
+    single flow, so every other test in this module passes against it.
+    """
+    first = begin(tool, door_contract)
+    second = begin(tool, door_contract)
+
+    for name in ("state", "nonce", "code_challenge"):
+        assert first.get(
+            name
+        ), f"The authorization request carries no `{name}` (it carries {sorted(first)})."
+        assert first[name] != second.get(name), (
+            f"Two web logins carried the same `{name}` ({first[name]!r}). A reused `state` is no "
+            "cross-site request forgery defence, a reused `nonce` makes every session a replay, "
+            "and a reused challenge means one verifier opens every code this tool ever gets."
+        )
+
+
+# ---------------------------------------------------------------------------
+# The landing pages, one per role §2 gives this door.
+# ---------------------------------------------------------------------------
+
+
+def test_the_dean_lands_on_the_leadership_view(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """E0-18's criterion: the dean's web login lands on the leadership view.
+
+    The whole flow is real — authorization request, login form, code, and a
+    server-side exchange carrying the verifier — so this fails if any link is
+    missing. It is the first of three, and the three together are what make the
+    dispatch on the roles claim observable at all.
+    """
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
+
+    lands_on(response, door_contract, LEADERSHIP_VIEW)
+
+
+def test_the_care_office_lands_on_the_care_view(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """`CARE` → the Care empty view (§6.2, and E0-18's route description).
+
+    The Care office rather than the person who also teaches: she is the subject of
+    her own test below, and picking whichever of the two the document listed first
+    would make one of these two tests silently about the other.
+    """
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "CARE"))
+
+    lands_on(response, door_contract, CARE_VIEW)
+
+
+def test_the_administrator_lands_on_the_admin_view(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """`ADMIN` → the admin empty view, the last of the three the web door serves.
+
+    **Dies if the role dispatch falls through to a default.** A tool that landed
+    everything it did not recognise on one view passes the leadership test and the
+    Care test if Care is checked explicitly; Admin is the case that catches the
+    fallback, because it is last in E0-18's precedence order.
+    """
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "ADMIN"))
+
+    lands_on(response, door_contract, ADMIN_VIEW)
+
+
+@pytest.mark.invariant
+def test_the_leadership_view_names_nobody_but_the_person_signed_in(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """SPEC §4.1 over the one view that would otherwise list people.
+
+    E0-18: the leadership landing views "are empty *by design* and must not
+    traverse" `transitive_purview`, which raises (ADR 0003). So the honest
+    assertion is that the page names nobody but its own caller — a page that
+    enumerated the institution would have obtained that list from somewhere, and
+    there is nowhere in E0 it could legitimately have come from.
+
+    Two guards keep this from passing on emptiness, which is what
+    `docs/MISTAKES.md` entry 3 is about here. The landing testid has to be present,
+    so a 404 or a blank body fails rather than passes; and the scan is shown
+    finding the very strings it reports absent, so a search that has gone blind
+    says so instead of reporting a clean page.
+    """
+    dean = person_holding(provider, "DEAN")
+    response = logged_in(tool, door_contract, provider, dean)
+    lands_on(response, door_contract, LEADERSHIP_VIEW)
+
+    others = identifying_strings(provider, dean)
+    assert others, (
+        "No seeded person other than the dean publishes an address or a subject, so this test has "
+        "nothing to look for and would pass against a page listing the whole institution."
+    )
+    canary = " ".join(others)
+    assert all(value in canary for value in others), (
+        "The scan below cannot find these strings in a sample built out of them, so its silence "
+        "about the landing page means nothing."
+    )
+
+    leaked = sorted({value for value in others if value in response.text})
+    assert not leaked, (
+        f"The leadership landing page carries {leaked}, which identify seeded people other than "
+        "the dean who signed in. E0-18 makes this view empty by design: purview is not computed "
+        "in E0, so a page that lists people got that list from somewhere §4.1 does not sanction."
+    )
+
+
+@pytest.mark.invariant
+def test_the_care_view_names_nobody_but_the_person_signed_in(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """The same, for the one view SPEC §6.2 spends a paragraph on.
+
+    E0-18: "The Care page shows a heading and nothing else — read §6.2 before
+    writing even that." Care is the one role in this system that can re-identify a
+    student, so a Care landing page that arrived carrying anybody is the most
+    expensive version of this mistake. Same two guards as above, for the same
+    reason.
+    """
+    care = person_holding(provider, "CARE")
+    response = logged_in(tool, door_contract, provider, care)
+    lands_on(response, door_contract, CARE_VIEW)
+
+    others = identifying_strings(provider, care)
+    assert others, (
+        "No seeded person other than the Care office publishes an address or a subject, so this "
+        "test has nothing to look for."
+    )
+    canary = " ".join(others)
+    assert all(value in canary for value in others), (
+        "The scan below cannot find these strings in a sample built out of them, so its silence "
+        "about the landing page means nothing."
+    )
+
+    leaked = sorted({value for value in others if value in response.text})
+    assert not leaked, (
+        f"The Care landing page carries {leaked}. §6.2 keeps the Care surface to the threat queue "
+        "and nothing else, and E0 builds no queue — so this page has one heading's worth of "
+        "content and any identifier on it came from a read nothing sanctions."
+    )
+
+
+# ---------------------------------------------------------------------------
+# `GET /auth/oidc/callback` — one refusal per check.
+# ---------------------------------------------------------------------------
+
+
+def test_a_callback_carrying_a_state_the_tool_never_issued_is_refused(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion: mismatched `state`. **Dies if `state` is accepted without comparison.**
+
+    The `code` is a real one the provider just issued for this tool; only the
+    `state` beside it is a value the tool never sent. A tool that reads `state` out
+    of the query and does not compare it to what it stored passes every other test
+    in this module.
+    """
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    response = tool.get(
+        door_contract.oidc_callback,
+        params={"code": submitted.code, "state": "a-state-this-tool-never-issued"},
+    )
+
+    refused(response, door_contract, "a callback carrying a `state` the tool never issued")
+
+
+def test_a_callback_carrying_no_state_at_all_is_refused(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """The absent case, which the mismatch above does not cover.
+
+    `if state and state != expected` passes the test above and fails this one, and
+    it is the defence an attacker defeats by sending nothing. A different mutation
+    is a different case.
+    """
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    response = tool.get(door_contract.oidc_callback, params={"code": submitted.code})
+
+    refused(response, door_contract, "a callback carrying no `state` at all")
+
+
+def test_a_session_carrying_a_nonce_the_tool_never_sent_is_refused(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion: mismatched `nonce`. **Dies if the nonce is sent and never compared.**
+
+    The provider puts back whatever nonce it was given, so substituting one
+    parameter of the tool's own authorization request produces a correctly signed
+    session whose nonce the tool never generated. Everything else — `state`, the
+    code, the verifier, the audience, the issuer, the signature — is the happy
+    path's.
+
+    Without this the nonce is decoration: generated, sent, echoed, never read, and
+    E1's replay work built on a value nothing compares.
+    """
+    parameters = begin(tool, door_contract)
+    assert parameters.get("nonce"), (
+        "The tool's authorization request carries no `nonce`, so there is nothing to substitute "
+        "and nothing for the callback to compare."
+    )
+    submitted = sign_in(
+        provider,
+        parameters,
+        person_holding(provider, "DEAN"),
+        nonce="a-nonce-the-tool-never-generated",
+    )
+
+    response = complete(tool, door_contract, submitted)
+
+    refused(response, door_contract, "a session whose `nonce` is not the one the tool sent")
+
+
+def test_a_session_from_an_issuer_the_tool_does_not_trust_is_refused(
+    open_web_door: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion: wrong `iss`. **Dies if `iss` is never compared to the configured issuer.**
+
+    The tool is configured to expect one issuer and the provider states another;
+    every other setting still names the running provider, so the flow completes and
+    the only thing wrong with what arrives is who says it issued it. OIDC Core 1.0
+    §3.1.3.7 makes this comparison mandatory, and without it any provider the tool
+    can reach can mint sessions for it.
+
+    If this fails with the tool's fetch reaching no mock at all, that is the same
+    finding in a different shape: the tool derived its token and JWKS URLs from the
+    issuer instead of reading the settings E0-18 gives them, so pointing the issuer
+    somewhere untrusted moved the endpoints too.
+    """
+    tool = open_web_door(oidc_issuer=UNTRUSTED_ISSUER)
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
+
+    refused(response, door_contract, "a session stating an issuer the tool does not trust")
+
+
+def test_a_callback_is_refused_when_the_token_endpoint_answers_with_a_tampered_id_token(
+    open_web_door: Any,
+    door_contract: Any,
+    provider: Any,
+    token_endpoint_path: str,
+    tamper_with: Any,
+) -> None:
+    """Criterion: bad signature. **Dies if the `id_token` is decoded and not verified.**
+
+    The token arrives from the token endpoint over a channel the tool trusts, which
+    is exactly why it has to be verified anyway: a client that skips the signature
+    because the exchange was server-side has made the roles claim a statement by
+    whoever answered the connection. The tamper re-encodes altered claims and keeps
+    the original signature, so the token is well formed in every respect except the
+    arithmetic — a corrupted string would be refused at the decoder and would prove
+    nothing.
+    """
+
+    def around(request: Any, deliver: Any) -> Any:
+        answered = deliver()
+        if urlsplit(str(request.url)).path != token_endpoint_path:
+            return answered
+        body = dict(answered.json())
+        # Without this the refusal below could be the exchange having failed for
+        # some reason of its own, with nothing tampered at all — a green that says
+        # nothing about the signature (`docs/MISTAKES.md` entry 3).
+        assert answered.status_code == 200 and body.get("id_token"), (
+            f"The token endpoint answered {answered.status_code} with {sorted(body)}, so there was "
+            "no `id_token` to tamper with and the tool refused a flow that never completed."
+        )
+        body["id_token"] = tamper_with(str(body["id_token"]))
+        return httpx.Response(answered.status_code, json=body, request=request)
+
+    tool = open_web_door(around=around)
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
+
+    refused(response, door_contract, "a session whose `id_token` was altered after signing")
+
+
+def test_a_callback_is_refused_when_the_session_expired_an_hour_ago(
+    open_web_door: Any,
+    door_contract: Any,
+    provider: Any,
+    token_endpoint_path: str,
+    wind_the_clock_back: Any,
+) -> None:
+    """Criterion: stale `exp`. **Dies if `exp` is never compared to now.**
+
+    The provider's clock is wound back while it mints, and only while it mints, so
+    the `id_token` that comes back is genuinely expired and genuinely signed. The
+    tool's own clock is the real one when it judges what arrived.
+
+    Its pair is the next test, and neither is worth much alone.
+    """
+
+    def around(request: Any, deliver: Any) -> Any:
+        if urlsplit(str(request.url)).path != token_endpoint_path:
+            return deliver()
+        with wind_the_clock_back(CERTAINLY_EXPIRED_SECONDS):
+            return deliver()
+
+    tool = open_web_door(around=around)
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
+
+    refused(response, door_contract, "a session whose `id_token` expired an hour ago")
+
+
+def test_a_session_minted_seconds_ago_is_still_accepted(
+    open_web_door: Any,
+    door_contract: Any,
+    provider: Any,
+    token_endpoint_path: str,
+    wind_the_clock_back: Any,
+) -> None:
+    """The near miss for the test above: a session that is old and not yet expired.
+
+    **This is what makes that refusal mean "expired" rather than "minted under a
+    wound-back clock".** Without it, a tool that refused every session produced this
+    way — for any reason nobody has looked at — would satisfy the expiry test while
+    checking nothing, and so would one that demanded an `iat` of this instant.
+
+    The wind-back is short enough to sit inside any `id_token` lifetime a provider
+    would issue, so this session is valid by every reading.
+    """
+
+    def around(request: Any, deliver: Any) -> Any:
+        if urlsplit(str(request.url)).path != token_endpoint_path:
+            return deliver()
+        with wind_the_clock_back(CERTAINLY_STILL_VALID_SECONDS):
+            return deliver()
+
+    tool = open_web_door(around=around)
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
+
+    lands_on(response, door_contract, LEADERSHIP_VIEW)
+
+
+# ---------------------------------------------------------------------------
+# The person who uses both doors. E0-18 criterion 4.
+# ---------------------------------------------------------------------------
+
+
+def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_launch(
+    tool_doors: Any,
+    door_contract: Any,
+    provider: Any,
+    mock_platforms: Any,
+    open_web_door: Any,
+    register_platform: Any,
+) -> None:
+    """E0-18: "the two-hat person exists on both doors and both doors open for her".
+
+    §2: "Entry doors are a property of the assignment, not the person." She holds a
+    Care assignment, which enters by web login, and an instructor assignment, which
+    enters by launch — so the two views she reaches are not a contradiction, they
+    are the model working. Her web session states `CARE` and nothing else, because
+    her teaching assignment does not open this door; her launch states the LIS
+    Instructor role, because it does.
+
+    **The database-level assertion that these are one person is E1's, not this
+    ticket's**, and E0-18 says so: it needs the dual-door identity merge E1's
+    breakdown owns, and E0 writes no `user` row for a mock subject. What ties the
+    two halves below to one human is `mock-idp/app/seed.py::LMS_INSTRUCTOR_USER_ID`,
+    the cross-mock reference published as `lms_user_id` — pinned to the platform's
+    own constant by `tests/unit/test_the_mock_seeds_name_one_person.py`, and used
+    here to choose which launch to drive.
+
+    Both doors in one test on purpose. Split in two, each half is satisfied by a
+    seed the other person is missing from, and the fact worth asserting — that one
+    published identity opens both — is not stated anywhere.
+    """
+    hers = person_holding(provider, "CARE", and_a_launch_assignment=True)
+    lms_user_id = hers.get("lms_user_id")
+    assert lms_user_id, (
+        f"The two-hat person is published without an `lms_user_id` ({hers!r}). ADR 0058 makes it "
+        "the member that says which LMS user she is, and without it these are two fixtures rather "
+        "than one human."
+    )
+
+    web = open_web_door()
+    care_landing = logged_in(web, door_contract, provider, hers)
+    lands_on(care_landing, door_contract, CARE_VIEW)
+
+    platform = mock_platforms(
+        {
+            MOCK_LMS_TOOL_LOGIN_URL_VARIABLE: (
+                f"{door_contract.public_base_url}{door_contract.lti_login}"
+            ),
+            MOCK_LMS_TOOL_LAUNCH_URL_VARIABLE: (
+                f"{door_contract.public_base_url}{door_contract.lti_launch}"
+            ),
+        }
+    )
+    offers = [
+        offer
+        for offer in platform.require_offers()
+        if offer.parameters.get("login_hint") == lms_user_id
+    ]
+    assert offers, (
+        f"The mock platform offers no launch for {lms_user_id!r}, the LMS user the provider says "
+        "she is. The two mocks then name two different people and this test cannot ask its "
+        "question."
+    )
+
+    assert any(
+        "Instructor" in role for role in platform.mint(offers[0]).claims.get(LTI_ROLES_CLAIM) or []
+    ), (
+        "Her launch carries no instructor role. The assignment that makes her the two-hat person "
+        "is her teaching one, and it is the launch door that carries it."
+    )
+
+    jwks_url = platform.discovery()["jwks_uri"]
+    register_platform(offers[0], jwks_url)
+    launch_tool = tool_doors(
+        {
+            door_contract.settings["public_base_url"]: door_contract.public_base_url,
+            door_contract.settings["lti_authorization_endpoint"]: (
+                "http://lti-platform.invalid/e0-18-configured-authorize"
+            ),
+        },
+        {urlsplit(jwks_url).hostname: platform},
+    )
+
+    started = launch_tool.post(door_contract.lti_login, data=offers[0].parameters)
+    parameters = query_of(redirect_target(started, "her launch was initiated"))
+    path = platform.endpoint("authorization_endpoint", ("auth",), "answers with a signed token")
+    answered = (
+        platform.client.post(path, data=parameters)
+        if path in platform.paths("POST")
+        else platform.client.get(path, params=parameters)
+    )
+    id_token, state, _ = platform.read_authorization_response(answered, path)
+    instructor_landing = launch_tool.post(
+        door_contract.lti_launch, data={"id_token": id_token, "state": state}
+    )
+
+    lands_on(instructor_landing, door_contract, INSTRUCTOR_VIEW)

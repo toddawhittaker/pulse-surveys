@@ -1,11 +1,15 @@
 # Entry 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 21**
+**Caught: 22**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*15 instances recorded; the 4 below are the most recent, and this file needs a trim
-to three from whoever next has a shell to date them with.*
+*16 instances recorded; the 3 below are the most recent, newest first.*
+
+*The trim this file asked for has been done, without a shell, by ticket order
+rather than by `git log`: the two **E0-16** paragraphs went, because E0-16 precedes
+E0-26 and E0-33 in the epic and no reading of the dates puts either of them above
+those two. If that is wrong, both are in this file's git history.*
 
 ***Re-derived, and 21 is right.** The note that stood here asked whose the
 index's 21 was, having found `docs/MISTAKES.md` at **21** while this file read
@@ -21,6 +25,22 @@ genuine catch = **21**, and the fourth paragraph below is what the twenty-first
 counts. The lesson is the one the note was already reaching for: a bump with no
 instance paragraph is unfalsifiable a week later, so write the paragraph in the
 same change or do not move the number.*
+
+*(Writing E0-18's two door suites, before either door existed, and the hazard is
+that **two test modules were about to answer the same question twice.** The launch
+door and the web door need the same four things — the five landing `data-testid`
+values, the clock-winding that produces a signed-but-stale token, the
+tamper-that-keeps-the-signature, and the `lti_platform`/`lti_deployment`
+registration, because the two-hat person is driven through the launch door from the
+web-login module. A copy of the landing testids in each module is the version that
+bites: PR 2's Playwright specs address the same five, so a rename would have had
+three places to reach and the suite that missed it would go on passing about a view
+nobody serves. All four went into `tests/conftest.py` and are reached as fixtures,
+which is also the only channel the house rule allows — a test module that imports
+its sibling `conftest` by name depends on where pytest put `tests/` on `sys.path`.
+The registration in particular was written in the launch module first and moved,
+which is the honest version of this entry: the second caller is what makes the
+duplication visible, and it arrived twenty minutes later.)*
 
 *(Repairing E0-26 item 1's test round. The suite reported one error —
 `ResourceClosedError: This result object does not return rows` — from the `pg_temp`
@@ -40,36 +60,6 @@ and escapes the `except`, and an `invariant`-marked confidentiality test would h
 **errored instead of reporting a forgeable audit log**. Fixing only the failure the
 runner named would have left that. The check is now in both copies of the helper,
 in two modules, rather than in one with a comment in the other.)*
-
-*(In E0-16's second review pass, and the hazard is a duplicated
-request parameter. RFC 6749 §3.1 forbids one, the provider refused one, and the
-rule ran over **one collection at a time**: `form_body` read the body and never
-looked at the query string, so a name sent once in each was two singletons rather
-than one duplicate. Measured: a token request with a valid body and
-`?code=bogus&grant_type=bogus` on the URL answered 200 with an `id_token`, and a
-login with `?sub=<one person>` and `sub=<another>` in the body issued a code. The
-rule now runs over the query and the body together, and values still come from
-the body alone, because honouring a query parameter would add the second place
-rather than close it. The same hazard was open at a third place, in the opposite
-direction and found in the same pass: the registered redirect URI was not checked
-for a query already carrying `code` or `state`, so a provider that refuses
-duplicates inbound would have **emitted** one — `?state=preset&code=…&state=…` —
-and a client comparing the first `state` would compare against a value it never
-generated. Refusing a shape on the way in says nothing about producing it on the
-way out, and that is the direction this entry is easiest to miss in.)*
-
-*(In E0-16, an hour after the fifteenth and found because of it.
-A review pass over the finished provider found that a `code_verifier` carrying a
-character outside ASCII crashed the comparison rather than being refused by it —
-RFC 7636 computes the challenge over ASCII octets, so `.encode("ascii")` raises
-and the container answers 500. The fix was one check. This entry is why the next
-question was "what else faces the same hazard", and the answer was the
-`code_challenge`, which is the *other* half of the same comparison and was
-crashing `secrets.compare_digest` at the token endpoint from a value the
-authorization endpoint had accepted an hour earlier. Both were reproduced before
-and after. The repair is one function, `pkce_shape_problem`, called at both ends,
-because RFC 7636 gives the two parameters one ABNF production and two copies of
-it could disagree about the one thing they exist to be compared against.)*
 
 *(Writing E0-33's tests. Its item 3 wants the view *set* compared
 with what the migrations wrote, which is the direction

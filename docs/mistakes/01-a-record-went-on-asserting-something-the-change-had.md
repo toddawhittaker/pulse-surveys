@@ -1,20 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 37**
+**Caught: 38**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*20 instances recorded; the 4 most recent are below, oldest of the four first — dated from `git log -S"its first phrase"` on this file rather than read off the page order. The earlier 16 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-35, a documentation-only pass over three new sweeps. The brief named
-five records to correct and the entry found four more by asking the question
-rather than working the list: ADR 0014's own "Until something closes that"
-sentence, which the record had written about itself and could not know was now
-answered; three index rows in `docs/adr/README.md`, which is the highest-risk
-shape this entry names — written once, never re-read; and a signpost in E0-22,
-a live ticket, sending a reader to E0-21 for a residue that had moved twice.
-None of the four was in the brief, and the branch would have shipped with a
-green suite and four records pointing at the wrong owner.)*
+*21 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 18 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-36 item 1, where the record that went stale was **the comment attached to
 the line being changed**. The brief named one site — ADR 0002's last consequence
@@ -79,6 +69,18 @@ editing one to match today is how an incident record stops being evidence. The
 sweep also had to be run twice, because the round's first commit changed
 behaviour and its second changed the records — the second sweep is the one that
 counts.)*
+
+*(Writing E0-18's door fixtures, and the record was **an index inside a file being
+edited for something else**. `tests/conftest.py` opens with a per-ticket account of
+what each group of fixtures is for and why it is shared — E0-04's database
+fixtures, E0-14's mock platform, E0-16's provider, E0-17's seed runner — and it is
+the highest-risk shape this entry names twice over: written once, never re-read,
+and sitting three hundred lines above the code anyone actually opens the file for.
+Six new fixtures went in at the bottom for E0-18's two doors, including the first
+one in that file that drives *this project's* application rather than a mock, and
+adding them without touching the top would have left an index that describes the
+file as it was four tickets ago. The change is one paragraph; the point is that
+nothing about editing the bottom of a file suggests reading the top of it.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`

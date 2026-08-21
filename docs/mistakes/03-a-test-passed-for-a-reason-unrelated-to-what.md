@@ -1,17 +1,37 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 45**
+**Caught: 46**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*24 instances recorded; the 3 below are the most recent, newest first. The
-earlier 21 are in this file's git history and in the pull requests they cite.*
+*25 instances recorded; the 3 below are the most recent, newest first. The
+earlier 22 are in this file's git history and in the pull requests they cite.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
 were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
+
+*(Writing E0-18's door tests, before any door existed, and it is the shape where
+**the only obvious way to pose a case breaks something else at the same time.**
+The launch and web doors both have to refuse a token whose `exp` has passed, and
+the natural test edits `exp` in the payload and re-encodes it — which invalidates
+the signature. That test is refused by a tool that checks nothing but the
+signature, and by a tool that checks nothing at all if the decoder trips first, so
+it would have gone green over an implementation with no expiry check in it. What
+stands instead winds `time.time` back for the length of the mint, so the mock
+issues a token that is genuinely expired and genuinely signed, and beside it a
+near miss that winds the clock back thirty seconds and requires the launch to be
+**accepted** — without which the refusal is evidence that winding the clock breaks
+a launch rather than evidence that anything reads `exp`. The same shape decided
+three other things in the same batch: the wrong-`aud` and unknown-`deployment_id`
+cases move the registration rather than the token, so each refusal differs from
+the happy path in exactly one value; the `/docs` gate's closed direction carries a
+`/healthz` control, because "both routes answer 404" is also true of an
+application serving nothing; and the two empty-landing-page tests assert the
+landing testid is present before reporting that no other person's address is on
+it, with the scan shown finding those addresses in a sample built out of them.)*
 
 *(E0-30's second fix round, and it is the shape where **the assertion names the
 defect instead of the rule**. The first draft for the reflected-`error_description`
@@ -47,36 +67,6 @@ The ordering near miss, which is the one that guards against an open redirector,
 now asserts both halves in one run: the same unknown scope with the registered
 redirect URI must redirect, and with an unregistered one must not, so the
 negative half is only read once the positive half has been seen.)*
-
-*(Writing E0-26 item 1's tests, and it is the "assertion that cannot fail" shape
-in the place it is hardest to see — inside a control. The refusal test for a
-non-Care actor took the committed `audit_log` total before and after the refused
-`record_identity_reveal` call and asserted it had not moved, on the reasoning that
-a function checking the actor *after* inserting the row would be caught. It cannot
-be. A `RAISE` aborts the caller's transaction, so a row written before the check is
-discarded by the caller's own `ROLLBACK` whatever the implementation did, and the
-two orderings produce exactly the same count. Only a record written over a second
-connection would make the ordering observable, and this ticket rejects that
-mechanism. The assertion was removed, and what stands in its place is one that can
-fail — the permitted call's returned id must name a committed row read from the
-second connection, which kills a recording call that answers a uuid it invented.
-The docstring now says the ordering is worth doing and is not observable from
-here, so the next reader does not add the check back.*
-
-***A second application in the same ticket, counted once**, and it arrived through
-a fixture guard firing. `user_identity.identity_email` is nullable, the seeding
-helper fills only what the schema requires, and **nothing in `tests/` had ever
-seeded that column** — so every identity row the suite had ever made carried a null
-address. Two assertions written against it were therefore satisfied by nothing: the
-honest path's `returned["identity_email"] == revealable.identity_email` was
-`None == None`, and the leak half of the subject-substitution test asked whether the
-*other* student's address appeared in what came back, which is true of any result
-at all when that address is `None`. The obvious repair — seed an address for the
-one subject whose guard fired — would have left both. Both students are now seeded
-with an address explicitly, and the optional-address case that the null was
-accidentally standing in for became a subject of its own with a test that names it.
-Three cases that had been one are now three: a name with an address, a name with
-none, and no identity row at all.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
