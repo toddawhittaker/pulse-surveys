@@ -176,8 +176,12 @@ class Institution(Base):
     live in `app.config.Settings` (`INSTITUTION_TIMEZONE`), not here — this row
     is the node the hierarchy hangs off.
 
-    **A deployment serves exactly one institution, and the database holds that
-    rule rather than assuming it** (SPEC §8). It is what makes the rest of the
+    **A deployment serves exactly one institution, and the database holds as much
+    of that as a database can** (SPEC §8). What the index below enforces is *at
+    most* one: zero rows is permitted and nothing here requires a row to exist, so
+    "exactly one" is a property of a seeded deployment rather than of the schema.
+    That is the whole gap, and it is the harmless half — a deployment with no
+    institution has no containment tree either. It is what makes the rest of the
     module coherent: `prefix.code` is unique across the whole table while
     `college.name` is unique per institution and `department.name` per college,
     and with one institution those are the same rule instead of two that

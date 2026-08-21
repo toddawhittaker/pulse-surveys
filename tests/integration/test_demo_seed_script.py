@@ -3324,6 +3324,13 @@ FOREIGN_INSTITUTION_NAME = "Another University Entirely"
 # other reason is not this test passing.
 ONE_INSTITUTION = "uq_institution_one_row"
 
+# What `main` exits when it refuses on purpose, and the first line of the
+# traceback it prints when it does not. A refusal and a crash both fail the run,
+# and only these two tell them apart — which is how this test was green against a
+# forty-line stack trace until PR #54's security review measured it.
+REFUSED = 2
+TRACEBACK = "Traceback (most recent call last)"
+
 
 @pytest.fixture(scope="module")
 def seed_beside_another_institution(
@@ -3388,10 +3395,67 @@ def test_a_database_holding_another_institution_refuses_the_seed(
         "permitting at most one `institution` row. A run that completes here has either written "
         "a second one or adopted somebody else's."
     )
-    assert ONE_INSTITUTION in said_by(run), (
-        f"The seed was refused, but the message does not name `{ONE_INSTITUTION}`.\n"
+    assert run.returncode == REFUSED and TRACEBACK not in said_by(run), (
+        f"The seed did not complete, but it crashed rather than refusing: it exited "
+        f"{run.returncode} and printed a traceback.\n"
+        f"{run.report()}\n"
+        f"Every deliberate refusal in this script exits {REFUSED} with one sentence, because "
+        "`main` catches `SeedError` and nothing else. A constraint refusing the row raises "
+        "`IntegrityError`, which escapes — so the operator who pointed `make seed` at a real "
+        "database meets a stack trace for a condition the script decided about on purpose. "
+        "PR #54's security review measured exactly that (F1), and `seed_containment` checks for "
+        "a standing institution before it writes."
+    )
+    assert ONE_INSTITUTION in said_by(run) or FOREIGN_INSTITUTION_NAME in said_by(run), (
+        f"The seed was refused, but the message names neither `{ONE_INSTITUTION}` nor the "
+        f"institution that is in the way (`{FOREIGN_INSTITUTION_NAME}`).\n"
         f"{run.report()}\n"
         "SPEC §8's rule exists so that the error arrives at the institution rather than at a "
-        "prefix code three tables away (ADR 0017). A refusal from somewhere else means the rule "
-        "under test is not what stopped the run."
+        "prefix code three tables away (ADR 0017). A refusal that names neither is a refusal "
+        "from somewhere else, and the rule under test is not what stopped the run."
+    )
+
+
+def test_the_run_refused_beside_another_institution_writes_nothing(
+    seed_beside_another_institution: ForeignRowsSeed,
+    metadata_tables: dict[str, Any],
+) -> None:
+    """The other half of the refusal, and the one the sibling scenario asserts too.
+
+    ADR 0064: "the whole load is one transaction. A run that fails half way leaves
+    nothing, so the next run does not build on a partial institution." "It did not
+    finish" and "it left nothing" are two claims, and a test making only the first
+    passes over a run that wrote four tables and then died.
+
+    **What this costs and what it is worth, said plainly.** No mutation available
+    today turns it red, and that is a property of where the guard sits rather than
+    of the assertion: `seed_containment` checks for a standing institution before
+    it writes anything at all, so at the moment of the refusal there is nothing to
+    leave behind, and removing the guard moves the failure to the very same row.
+    What it protects against is a *reordering* — a later version of this script
+    that seeds people or platform registrations before it reaches the institution,
+    at which point the refused run has written four tables and only this
+    comparison would say so. It is a tripwire on the load order, and naming it one
+    is more useful than implying it has teeth it does not have today.
+
+    Written as the whole snapshot rather than a row count, and labelled the way
+    the idempotency tests label, so a row is compared by its values and by what
+    its keys point at rather than by a uuid that changes every run.
+    """
+    planted = seed_beside_another_institution
+    assert (
+        planted.run is not None
+    ), "The fixture never ran the seed, so nothing here can mean anything."
+
+    before = labelled(metadata_tables, planted.before)
+    after = labelled(metadata_tables, planted.after)
+    assert sum(counted(planted.before).values()), (
+        "The database held no rows before the run, so this compares two empty databases. The "
+        "planted institution is what should have filled it."
+    )
+    assert before == after, (
+        "The refused run changed a database it was supposed not to touch.\n"
+        f"Row counts before: {counted(planted.before)}\n"
+        f"Row counts after: {counted(planted.after)}\n"
+        f"{planted.run.report()}"
     )

@@ -86,12 +86,15 @@ uses too. Matching there would adopt a real prefix rather than create one, and
 carry every course under it along — so `seed_containment` refuses instead, naming
 the code and the department that holds it. ADR 0064 carries the measurement.
 
-**Since E0-22 the database refuses it first.** SPEC §8 says a deployment serves
-exactly one institution and `uq_institution_one_row` holds that, so a database
-already holding somebody else's institution refuses this run at its own
-institution insert, before any key above is matched. The prefix guard still does
-its job — inside the one institution, where a real department can hold `MATH`
-and this file would otherwise adopt it.
+**Since E0-22 it refuses on the institution first.** SPEC §8 says a deployment
+serves exactly one institution and `uq_institution_one_row` holds that, so a
+database already holding somebody else's institution has no room for this one.
+`seed_containment` checks for a standing institution before it writes anything
+and refuses in one sentence; without that check the index refuses the `INSERT`
+instead, and an `IntegrityError` is not a `SeedError`, so the operator would meet
+a traceback for a decision this file makes on purpose. The prefix guard still
+does its job — inside the one institution, where a real department can hold
+`MATH` and this file would otherwise adopt it.
 """
 
 import os
@@ -167,9 +170,17 @@ class SeedError(Exception):
     """The seed will not run, or cannot finish, and says which in one sentence.
 
     Raised for every condition this script refuses on purpose — a deployed
-    environment, a missing variable, a calendar that does not fit its term — so
-    that `main` can print one line instead of a traceback. Anything else that goes
-    wrong keeps its traceback, because it is a defect rather than a decision.
+    environment, a missing variable, a calendar that does not fit its term, a
+    database already holding another institution — so that `main` can print one
+    line instead of a traceback. Anything else that goes wrong keeps its
+    traceback, because it is a defect rather than a decision.
+
+    **That means a rule the database enforces usually needs a guard here too.**
+    A constraint refusing a row raises `IntegrityError`, which is not a
+    `SeedError`, so it escapes `main` and the operator meets a stack trace for a
+    condition this file decided about on purpose. Both keys in `seed_containment`
+    that are not scoped to a row this seed created — `prefix.code` and the
+    institution itself — are checked before the write for exactly that reason.
     """
 
 
@@ -925,6 +936,30 @@ def seed_containment(session: Session) -> dict[tuple[str, str], UUID]:
     to exist first — `seed_calendar` is called between the two.
     """
     nodes: dict[tuple[str, str], UUID] = {}
+
+    # **The second natural key in this file that is not scoped to a row the seed
+    # created**, and it is the root of the tree. SPEC §8 says a deployment serves
+    # exactly one institution and `uq_institution_one_row` refuses a second row
+    # (ADR 0072), so a database already holding somebody else's institution has no
+    # room for this one. Without this guard the refusal still happens — at the
+    # `INSERT`, as an `IntegrityError` with a forty-line traceback — and an
+    # operator who pointed `make seed` at a real database would meet a stack trace
+    # rather than a sentence. The rule exists to put the error on the row that is
+    # actually wrong; a traceback puts it back where E0-22 found it.
+    #
+    # An institution under this file's own name is this seed's own row from an
+    # earlier run and is reused, which is what keeps the second run idempotent.
+    standing = session.scalars(select(Institution)).first()
+    if standing is not None and standing.name != INSTITUTION_NAME:
+        raise SeedError(
+            f"This database already holds the institution {standing.name!r}, which this seed did "
+            "not create.\n"
+            "Pulse serves one institution per deployment (SPEC §8), enforced by "
+            "`uq_institution_one_row`, so there is no second row for the demo institution to "
+            "occupy. Nothing has been written.\n"
+            "Use a database of your own for the demo, or drop the institution that is there "
+            "first."
+        )
 
     institution = upsert(session, Institution, {"name": INSTITUTION_NAME})
     nodes["institution", INSTITUTION_NAME] = institution.id

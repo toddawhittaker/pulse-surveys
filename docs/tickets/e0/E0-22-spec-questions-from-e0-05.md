@@ -47,6 +47,33 @@ it. Two things the ticket did not predict:
     another institution refuses the seed, and the refusal names
     `uq_institution_one_row`.
 
+**What the security review found, 2026-08-21.** It ran on PR #54 in a session
+with no prior context, both passes, against the right diff. **No security
+vulnerability and no blocker**, and four findings, all from the project-specific
+pass:
+
+  - **MEDIUM: the seed crashed rather than refusing.** The constraint refused the
+    row as designed — as an `IntegrityError`, which is not a `SeedError`, so it
+    escaped `main` and printed a forty-line traceback with exit 1 where every
+    other deliberate refusal prints a sentence and exits 2. Nothing was written
+    (row-count deltas measured zero across every table) and nothing leaked, but
+    the error arrived in the form this rule exists to replace. Fixed:
+    `seed_containment` checks for a standing institution before it writes.
+  - **LOW: `SeedError`'s docstring** claimed every deliberate refusal is a
+    `SeedError`. True again with the fix, and the docstring now states the general
+    rule — a rule the database enforces usually needs a guard in the script too.
+  - **LOW: the new seed test could not tell a refusal from a crash**, and was
+    green against the traceback. It now asserts exit 2 and no traceback, and a
+    second test asserts the refused run wrote nothing.
+  - **LOW, deferred with a done-when: `SINGLE_ROW_TABLES`** is a hand-maintained
+    list nothing checks against the schema, and the four inline copies of the rule
+    do not read it. Left while it has one correct entry; the done-when is at the
+    list and in ADR 0072.
+
+It also cleared four of the five risks named in the brief — including that
+sharing the institution node made no assertion vacuous, measured both ways — and
+reproduced the 41-test figure exactly.
+
 **What `alembic check` does with the drop, measured before the shape was
 chosen.** The ticket's last criterion anticipated an object the drift gate cannot
 compare, and asked for it to be named in [E0-33](E0-33-catalog-drift-assertions.md)'s

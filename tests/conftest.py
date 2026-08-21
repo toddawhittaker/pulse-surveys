@@ -3117,13 +3117,23 @@ def foreign_key_columns(table: Any, target: str) -> list[str]:
     )
 
 
-# The tables the schema permits exactly one row in. `institution` is the only one
+# The tables the schema permits at most one row in. `institution` is the only one
 # and SPEC §8 is why: a deployment serves one institution, held by
 # `uq_institution_one_row` since E0-22. It matters here because every containment
 # chain these fixtures build ends at an institution, so a test that builds two
 # chains in one transaction used to write two institution rows without meaning
 # to — and now the second insert is refused, in a test about something else
 # entirely. `chain_row` below reuses the row that is already there.
+#
+# **Hand-maintained, and nothing checks it against the schema** — PR #54's
+# security review raised that (F4) and it is deliberately left as it is while the
+# list has one correct entry. A second name added here makes every chain share a
+# row at that level, which is the vacuity `chain_row`'s own docstring warns
+# about, and the four modules below carrying their own copy of `seed_row` do not
+# read this list at all: they spell `"institution"` inline. **Done when** a
+# second table needs single-row treatment: derive this list from the single-row
+# constraints the schema carries, or assert it against them, and make the four
+# copies read it rather than a literal.
 SINGLE_ROW_TABLES = ("institution",)
 
 

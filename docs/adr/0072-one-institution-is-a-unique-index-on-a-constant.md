@@ -100,3 +100,28 @@ that the change is larger than a schema edit.
 **The index is not a `pg_constraint` row.** Somebody auditing the schema for
 SPEC §8's "constraint" by reading `pg_constraint` finds nothing, and has to look
 at `pg_index`. `\d institution` shows it either way.
+
+**What it enforces is *at most* one, not exactly one.** Zero rows is permitted
+and nothing requires a row to exist, so "exactly one" is a property of a seeded
+deployment rather than of the schema — which is what SPEC §8 says too, in one
+sentence that uses both phrasings. The gap is the harmless half: a deployment
+with no institution has no containment tree hanging off it either.
+
+**A rule the database enforces needs a guard in `scripts/seed.py` as well.** PR
+#54's security review found the first version of this shipping without one: the
+constraint refused the row as designed, as an `IntegrityError`, which is not a
+`SeedError`, so it escaped `main` and an operator who pointed `make seed` at a
+real database got a forty-line traceback and exit 1 where every other deliberate
+refusal prints a sentence and exits 2. Nothing was written and nothing leaked,
+but the error arrived in the form the rule exists to replace. `seed_containment`
+now checks for a standing institution before it writes, next to the prefix guard
+that was already there for the same reason, and `SeedError`'s own docstring
+records the general rule.
+
+**`SINGLE_ROW_TABLES` in `tests/conftest.py` is a hand-maintained inventory of
+one.** Nothing checks it against the schema, and the four modules carrying their
+own copy of `seed_row` spell `"institution"` inline rather than reading it — so
+the list governs one of five copies of the rule. Left as it is while it has one
+correct entry, and the note sits at the list. **Done when** a second table needs
+single-row treatment: derive the list from the constraints the schema carries, or
+assert it against them, and make the four copies read it.
