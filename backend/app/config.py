@@ -344,7 +344,7 @@ class Settings(BaseSettings):
     # endpoint, §7.3 leaves the platform's addresses to the registration, and
     # E0-23 decided that `lti_platform` gains service-address columns in E1,
     # with the code that reads them. So the values below are E0's stand-in and
-    # the ADR says so (docs/adr/0073).
+    # the ADR says so (docs/adr/0075).
     #
     # **Each default is this repository's own development stack**, spelled the
     # way `docker-compose.override.yml` publishes it. That is deliberate and it
