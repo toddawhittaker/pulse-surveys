@@ -53,6 +53,20 @@ dependencies = [
     "celery==5.6.3",
     "redis==8.1.0",
     "httpx==0.28.1",
+    # The JSON Web Token library both entry doors verify with (E0-18). Nothing
+    # else in the locked closure verifies an RS256 signature: the two mocks
+    # *sign* with standard-library arithmetic under ADR 0035's mock-only bound,
+    # and that bound explicitly forbids copying it into the tool. `pylti1p3`,
+    # which SPEC §13 assigns to `lti/`, is not adopted here — it covers only the
+    # launch door, needs a framework adapter, and E1 restructures this code
+    # anyway. See docs/adr/0073.
+    #
+    # `cryptography` is declared beside it rather than left implicit: PyJWT
+    # publishes it as the `crypto` extra, so a bare `PyJWT` locks a closure that
+    # cannot verify RS256 at all and fails at the first launch rather than at
+    # install time. An import we depend on is a dependency we name.
+    "PyJWT==2.13.0",
+    "cryptography==50.0.0",
     # The AI provider client, imported by `backend/app/ai/gateway.py` and by
     # nothing else — SPEC §7.4 puts every model call behind one internal gateway,
     # and `tests/unit/test_provider_library_is_confined_to_the_gateway.py` holds
