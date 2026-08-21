@@ -23,6 +23,16 @@ that outlives the flow, or a purview — `transitive_purview` raises by design (
 person — an instructor trying to sign in here — is E0-16's own test and is not
 re-proved.
 
+**Four things arrived in the third review round**, and they are the last two
+sections of this module. This door reads one roles claim and ignores the LTI one,
+which needs sessions carrying claims no seeded person produces — so those are
+re-signed by `suite_key_set` inside the same token-endpoint seam, with a control
+test saying the machinery itself is accepted. The login cookie carries `Secure`
+outside development and does not carry it inside. A `state` that is not ASCII is
+refused rather than crashed, and the refusal still burns the single-use cookie.
+And no refusal page repeats the server-side key set address the tool failed to
+reach.
+
 **Two of the three refusals cannot be posed on the wire**, and the seam is how they
 are posed instead: the provider signs with a key nothing here holds, so a token
 that is tampered with, or one that expired an hour ago, is produced by wrapping the
@@ -85,6 +95,30 @@ MOCK_LMS_TOOL_LAUNCH_URL_VARIABLE = "MOCK_LMS_TOOL_LAUNCH_URL"
 
 # The LTI 1.3 roles claim, spelled as the specification spells it.
 LTI_ROLES_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/roles"
+
+# The LIS v2 membership role the *launch* door dispatches an instructor on. It
+# appears here only as a value to smuggle into a web session: it is what an
+# identity provider — or anyone who can put a token in front of this door — would
+# state if the web door read the launch door's vocabulary.
+MEMBERSHIP_ROLE = "http://purl.imsglobal.org/vocab/lis/v2/membership#"
+INSTRUCTOR_ROLE_URI = f"{MEMBERSHIP_ROLE}Instructor"
+
+# `ENVIRONMENT`, spelled as `tests/unit/test_docs_exposure.py` spells it, and the
+# two values that matter: the one a laptop carries and the one a deployment does.
+ENVIRONMENT_VARIABLE = "ENVIRONMENT"
+DEVELOPMENT = "development"
+PRODUCTION = "production"
+
+# The cookie attribute that keeps a browser from sending the login cookie over
+# plain HTTP (RFC 6265 §4.1.2.5), lowercased at the comparison because a
+# `Set-Cookie` attribute name is case-insensitive.
+SECURE_ATTRIBUTE = "secure"
+
+# A `state` that is well formed as a query parameter and not representable as
+# ASCII. `secrets.compare_digest` raises `TypeError` rather than answering `False`
+# when either side is a `str` outside ASCII, so this is the value that separates
+# "the tool compared and refused" from "the tool crashed on the way to comparing".
+NON_ASCII_STATE = "é"
 
 # How far back the provider's clock is wound while the tool redeems its code, to
 # obtain a session that is certainly expired and one that certainly is not. The
@@ -269,7 +303,7 @@ def open_web_door(tool_doors: Any, door_contract: Any, provider: Any) -> Any:
         )
         return value
 
-    def build(*, around: Any = None, **overrides: str) -> Any:
+    def build(*, around: Any = None, environment: str | None = None, **overrides: str) -> Any:
         values = {
             names["public_base_url"]: door_contract.public_base_url,
             names["oidc_issuer"]: endpoint("issuer"),
@@ -279,10 +313,29 @@ def open_web_door(tool_doors: Any, door_contract: Any, provider: Any) -> Any:
             names["oidc_client_id"]: registration["client_id"],
         }
         values.update({names[key]: value for key, value in overrides.items()})
+        if environment is not None:
+            values[ENVIRONMENT_VARIABLE] = environment
         host = urlsplit(endpoint("token_endpoint")).hostname
         return tool_doors(values, {host: provider}, around=around)
 
     return build
+
+
+@pytest.fixture
+def web_jwks_url(provider: Any) -> str:
+    """Where this tool is configured to fetch the provider's signing keys.
+
+    Out of the discovery document, like every other endpoint the tool is
+    configured with, so the address this module reasons about and the address the
+    tool fetches cannot become two different strings.
+    """
+    advertised = provider.discovery().get("jwks_uri")
+    assert isinstance(advertised, str) and advertised, (
+        "The provider's discovery document advertises no `jwks_uri` (it carries "
+        f"{sorted(provider.discovery())}), so there is no key set address to configure or to "
+        "reason about."
+    )
+    return advertised
 
 
 @pytest.fixture
@@ -1040,3 +1093,386 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     )
 
     lands_on(instructor_landing, door_contract, INSTRUCTOR_VIEW)
+
+
+# ---------------------------------------------------------------------------
+# One door, one vocabulary. This is the launch door's rule from the other side:
+# `test_lti_launch_door.py` asserts that door reads only the LIS roles claim, and
+# these three assert this one reads only `roles_claim` and never the LTI claim.
+# ---------------------------------------------------------------------------
+
+
+def re_signing(
+    keys: Any,
+    token_endpoint_path: str,
+    claims_in_token: Any,
+    adjust: Any,
+    seen: list[dict[str, Any]],
+) -> Any:
+    """An `around` hook that re-signs the `id_token` the token endpoint answered with.
+
+    The exchange is the real one — the tool's own code, its own verifier, the
+    provider's own token endpoint — and what comes back is decoded, changed in the
+    one place the test is about, and signed by `suite_key_set`. The tool is
+    configured to fetch its key set from that same suite key set, so the token that
+    arrives is genuinely signed, genuinely fresh, states the trusted issuer and
+    echoes the tool's own nonce.
+
+    The key set request is answered here as well, because only the provider's host
+    is mounted: delivering it would reach no mock at all.
+
+    `seen` collects the claims as the provider issued them, so a test can assert
+    its premise instead of assuming it — that the session really did carry the
+    claim it is about (`docs/MISTAKES.md` entry 3).
+    """
+
+    def around(request: Any, deliver: Any) -> Any:
+        served = keys.serve(request)
+        if served is not None:
+            return served
+        answered = deliver()
+        if urlsplit(str(request.url)).path != token_endpoint_path:
+            return answered
+        body = dict(answered.json())
+        assert answered.status_code == 200 and body.get("id_token"), (
+            f"The token endpoint answered {answered.status_code} with {sorted(body)}, so there was "
+            "no `id_token` to re-sign and whatever the tool answered is about a flow that never "
+            "completed."
+        )
+        claims = dict(claims_in_token(str(body["id_token"])))
+        seen.append(claims)
+        body["id_token"] = keys.sign(adjust(dict(claims)))
+        return httpx.Response(answered.status_code, json=body, request=request)
+
+    return around
+
+
+def test_a_session_re_signed_by_this_suite_still_lands_the_care_view(
+    open_web_door: Any,
+    door_contract: Any,
+    provider: Any,
+    token_endpoint_path: str,
+    claims_in_token: Any,
+    suite_key_set: Any,
+) -> None:
+    """The control for the two tests below, and they are worth nothing without it.
+
+    The claims are the provider's own, unchanged, signed again by the key set this
+    tool is configured to verify against. If this lands on the Care view then the
+    machinery — the key, the served JWK Set, the `kid`, the re-encoding — produces
+    sessions this door accepts, and a refusal below can only be the one claim it
+    changed. If it does not, the tests below are red about the harness rather than
+    about the door, and this is where that shows.
+    """
+    seen: list[dict[str, Any]] = []
+    tool = open_web_door(
+        around=re_signing(
+            suite_key_set, token_endpoint_path, claims_in_token, lambda claims: claims, seen
+        ),
+        oidc_jwks_url=suite_key_set.jwks_url,
+    )
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "CARE"))
+
+    assert seen, "The tool never redeemed its code, so nothing was re-signed and nothing is proved."
+    lands_on(response, door_contract, CARE_VIEW)
+
+
+def test_a_session_also_carrying_an_lti_roles_claim_lands_where_its_own_claim_names(
+    open_web_door: Any,
+    door_contract: Any,
+    provider: Any,
+    token_endpoint_path: str,
+    claims_in_token: Any,
+    suite_key_set: Any,
+) -> None:
+    """The foreign vocabulary is **ignored**, not merely outranked.
+
+    A session stating `CARE` in this door's own roles claim and the LIS Instructor
+    role in the LTI claim lands on the Care view. This is the boundary control on
+    the refusal below: a door that refused any session carrying an unfamiliar claim
+    would satisfy that one while being wrong about this, and a door that read both
+    vocabularies and happened to prefer its own would pass this and fail that.
+
+    Its premise is asserted rather than assumed: the session as the provider issued
+    it carries this door's roles claim, and the LTI claim is added on top.
+    """
+    roles_claim = provider.roles_claim_name()
+    seen: list[dict[str, Any]] = []
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims[LTI_ROLES_CLAIM] = [INSTRUCTOR_ROLE_URI]
+        return claims
+
+    tool = open_web_door(
+        around=re_signing(suite_key_set, token_endpoint_path, claims_in_token, adjust, seen),
+        oidc_jwks_url=suite_key_set.jwks_url,
+    )
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "CARE"))
+
+    assert seen and seen[0].get(roles_claim), (
+        f"The session the provider issued carries no `{roles_claim}` (it carries "
+        f"{sorted(seen[0]) if seen else 'nothing — the code was never redeemed'}), so this test is "
+        "not about a door choosing between two vocabularies."
+    )
+    lands_on(response, door_contract, CARE_VIEW)
+
+
+def test_a_session_stating_only_an_lti_roles_claim_is_refused(
+    open_web_door: Any,
+    door_contract: Any,
+    provider: Any,
+    token_endpoint_path: str,
+    claims_in_token: Any,
+    suite_key_set: Any,
+) -> None:
+    """**Dies if the web door consults the launch door's vocabulary.**
+
+    The session states the LIS Instructor role and nothing in this door's own roles
+    claim. SPEC §2 gives this door the roles the LMS may not name; a door that read
+    the LTI claim would take a role vocabulary an LMS administrator controls and
+    use it to choose a screen here — the mirror image of the rule
+    `test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused` asserts in
+    `tests/integration/test_lti_launch_door.py`.
+
+    There is no view this door may serve for an instructor: E0-18 gives it
+    leadership, Care and admin, and the LIS roles belong to the launch door. So the
+    only answer is a refusal, and `refused` requires that no landing testid at all
+    appears — a door that fell through to a default fails here whichever view it
+    chose.
+    """
+    roles_claim = provider.roles_claim_name()
+    seen: list[dict[str, Any]] = []
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims.pop(roles_claim, None)
+        claims[LTI_ROLES_CLAIM] = [INSTRUCTOR_ROLE_URI]
+        return claims
+
+    tool = open_web_door(
+        around=re_signing(suite_key_set, token_endpoint_path, claims_in_token, adjust, seen),
+        oidc_jwks_url=suite_key_set.jwks_url,
+    )
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "CARE"))
+
+    assert seen and seen[0].get(roles_claim), (
+        f"The session the provider issued carries no `{roles_claim}`, so removing it changed "
+        "nothing and this test is not posing the question it names."
+    )
+    refused(
+        response,
+        door_contract,
+        f"a session stating {INSTRUCTOR_ROLE_URI!r} in `{LTI_ROLES_CLAIM}` and nothing in "
+        f"`{roles_claim}`",
+    )
+
+
+# ---------------------------------------------------------------------------
+# The cookie this door's login sets, and what a refusal says and does.
+# ---------------------------------------------------------------------------
+
+
+def answer_to(deliver: Any, what: str) -> Any:
+    """What the tool answered, or a failure saying it raised instead of answering.
+
+    `tool_doors` builds its `TestClient` with `raise_server_exceptions` at the
+    default, so an exception escaping a route arrives here rather than as a 500.
+    That *is* the crash the tests below are about — a door that stops rather than
+    refuses — and it is worth one sentence naming it rather than a traceback that
+    reads like a broken test.
+    """
+    try:
+        return deliver()
+    except Exception as failure:
+        pytest.fail(
+            f"The tool raised {type(failure).__name__}: {failure} rather than answering {what}. An "
+            "exception that escapes a route is fail-closed and is still a defect: the caller gets "
+            "no page, and everything the refusal path would have done on the way out — clearing "
+            "the single-use cookie, keeping server-side addresses out of the response — did not "
+            "happen."
+        )
+
+
+def cookies_set_by(response: Any, purpose: str) -> list[str]:
+    """Every `Set-Cookie` header on a response, or a failure saying there were none."""
+    headers = response.headers.get_list("set-cookie")
+    assert headers, (
+        f"The web login set no cookie at all when {purpose} (it answered {response.status_code} "
+        f"with headers {sorted(response.headers)}). E0-18 has the verifier and state ride 'the same "
+        "short-lived signed cookie mechanism as the launch door', and with no cookie there is "
+        "nothing for the callback to compare against."
+    )
+    return headers
+
+
+def attributes_of(header: str) -> set[str]:
+    """The attribute names in one `Set-Cookie`, lowercased, without their values."""
+    return {part.split("=", 1)[0].strip().lower() for part in header.split(";")[1:]}
+
+
+def test_the_login_cookie_is_marked_secure_outside_development(
+    open_web_door: Any, door_contract: Any
+) -> None:
+    """**Dies if the cookie is issued without `Secure`.**
+
+    This cookie carries the `state`, the `nonce` and the PKCE verifier. The verifier
+    is the only thing binding an authorization code to this client — E0-18 makes
+    the tool a public client with no secret — so a cookie a browser will send over
+    plain HTTP puts the one secret in the flow on the wire.
+
+    Its pair is the next test: the flag has to be conditional, because a `Secure`
+    cookie is not sent to `http://localhost` and would break the development flow
+    this ticket exists to open.
+    """
+    tool = open_web_door(environment=PRODUCTION)
+
+    response = tool.get(door_contract.oidc_login)
+
+    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {PRODUCTION!r}"):
+        assert SECURE_ATTRIBUTE in attributes_of(header), (
+            f"The web login set `{header}` with `{ENVIRONMENT_VARIABLE}` set to {PRODUCTION!r}, "
+            "and it carries no `Secure` attribute. That cookie holds the PKCE verifier, which is "
+            "the whole of what binds an authorization code to this client."
+        )
+
+
+def test_the_login_cookie_is_not_marked_secure_in_development(
+    open_web_door: Any, door_contract: Any
+) -> None:
+    """The near miss for the test above: `Secure` unconditionally breaks the laptop.
+
+    A browser reaches this tool at `http://localhost:8000` on a developer's
+    machine, and does not send a `Secure` cookie there — so the callback finds no
+    state, no nonce and no verifier, and refuses a flow that was correct. Without
+    this, "always set `Secure`" satisfies the requirement above and is the wrong
+    fix.
+    """
+    tool = open_web_door(environment=DEVELOPMENT)
+
+    response = tool.get(door_contract.oidc_login)
+
+    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {DEVELOPMENT!r}"):
+        assert SECURE_ATTRIBUTE not in attributes_of(header), (
+            f"The web login set `{header}` with `{ENVIRONMENT_VARIABLE}` set to {DEVELOPMENT!r}. "
+            "A `Secure` cookie is not sent to `http://localhost`, so every web login on a "
+            "developer's laptop comes back to a callback that has nothing to compare."
+        )
+
+
+def test_a_callback_whose_state_is_not_ascii_is_refused_and_the_cookie_is_burned(
+    open_web_door: Any, door_contract: Any, provider: Any, token_endpoint_path: str
+) -> None:
+    """**Dies if the comparison crashes instead of refusing** (and see entry 13).
+
+    `secrets.compare_digest` raises `TypeError` when either side is a `str` holding
+    a character outside ASCII, so a `state` of `é` takes a door that compares
+    directly out through the error handler rather than through the refusal. The
+    crash is fail-closed, which is why a suite that only asks whether the login
+    succeeded never sees it; what it skips is what the refusal path does on the way
+    out, and here that is the single-use cookie.
+
+    Both halves are asserted. The second — the correct `state` for the same login,
+    delivered afterwards, is refused too — is the one worth having, and it is
+    guarded: if the door redeemed the code before comparing the state, then the
+    second refusal could be a spent code rather than a burned cookie, and that
+    guard fires instead of the test passing for the wrong reason.
+    """
+    exchanges: list[str] = []
+
+    def around(request: Any, deliver: Any) -> Any:
+        if urlsplit(str(request.url)).path == token_endpoint_path:
+            exchanges.append(str(request.url))
+        return deliver()
+
+    tool = open_web_door(around=around)
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    crashed = answer_to(
+        lambda: tool.get(
+            door_contract.oidc_callback, params={"code": submitted.code, "state": NON_ASCII_STATE}
+        ),
+        f"a callback whose `state` was {NON_ASCII_STATE!r}",
+    )
+
+    assert crashed.status_code != 500, (
+        f"The tool answered 500 to a callback whose `state` was {NON_ASCII_STATE!r}. That is "
+        "`secrets.compare_digest` raising `TypeError` on a non-ASCII `str` rather than answering "
+        f"`False`. Body begins {crashed.text[:400]!r}."
+    )
+    refused(crashed, door_contract, f"a callback whose `state` was {NON_ASCII_STATE!r}")
+    assert not exchanges, (
+        f"The tool redeemed its code at the token endpoint ({exchanges}) while answering a callback "
+        "whose `state` it had not accepted. Two things follow: an unauthenticated caller can make "
+        "this tool spend a code, and the assertion below could no longer tell a burned cookie from "
+        "a code that had already been used."
+    )
+
+    replayed = answer_to(
+        lambda: complete(tool, door_contract, submitted),
+        "the correct `state` for a login whose cookie a refusal should have burned",
+    )
+
+    assert 400 <= replayed.status_code < 500, (
+        f"After refusing the non-ASCII `state`, the tool answered {replayed.status_code} to the "
+        "correct `state` for the same login. The cookie holding the state, the nonce and the PKCE "
+        "verifier should have been cleared on the way out of the refusal: one login buys one "
+        "attempt, and a refusal that leaves it in place hands an attacker as many tries as they "
+        "like at a cookie the browser is still carrying."
+    )
+
+
+def test_a_refusal_does_not_name_the_key_set_address_the_tool_could_not_reach(
+    open_web_door: Any, door_contract: Any, provider: Any, web_jwks_url: str
+) -> None:
+    """**Dies if the refusal page carries the server-side address it failed to fetch.**
+
+    The provider's key set URL is a server-side address — a Compose service name
+    that means nothing to a browser and everything to somebody mapping the network
+    behind the tool. A refusal that repeats it, in a message or a traceback,
+    publishes that topology to whoever provoked the fetch, and provoking it takes
+    nothing more than completing a login.
+
+    The failure is provoked through the seam rather than by misconfiguring the
+    tool, so an address in the refusal is the configured one rather than one this
+    test typed. The host alone is asserted: that is the part that names a machine.
+    """
+    split = urlsplit(web_jwks_url)
+    host = split.hostname
+    assert host, (
+        f"The configured key set URL {web_jwks_url!r} has no host, so there is no address for this "
+        "test to look for."
+    )
+    fetched: list[str] = []
+
+    def around(request: Any, deliver: Any) -> Any:
+        if request.url.host == host and request.url.path == split.path:
+            fetched.append(str(request.url))
+            return httpx.Response(404, text="no key set here", request=request)
+        return deliver()
+
+    tool = open_web_door(around=around)
+
+    response = answer_to(
+        lambda: logged_in(tool, door_contract, provider, person_holding(provider, "DEAN")),
+        "a session whose key set the tool could not fetch",
+    )
+
+    assert fetched, (
+        f"The tool never fetched the configured key set at {web_jwks_url!r}, so whatever it "
+        "answered was decided before any fetch failed and this test is looking at the wrong "
+        "refusal (`docs/MISTAKES.md` entry 3)."
+    )
+    refused(response, door_contract, "a session whose key set could not be fetched")
+    assert response.text.strip(), (
+        "The refusal has an empty body, so 'the address is not in it' is true of a page with "
+        "nothing in it and says nothing about what the tool prints when it has something to say."
+    )
+    assert host not in response.text, (
+        f"The refusal page names {host!r}, the host of the key set URL the tool fetches "
+        f"server-side ({web_jwks_url!r}). Body begins {response.text[:400]!r}. That address is a "
+        "Compose service name: useless to the browser that received it, and the network map to "
+        "anyone else."
+    )

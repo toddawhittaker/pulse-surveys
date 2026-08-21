@@ -32,6 +32,15 @@ assert that a Learner's launch lands on the student view and an Instructor's on 
 instructor view, with the other four testids absent. Absent as well as present,
 because a page carrying every view is a page that is right about none of them.
 
+**Four things arrived in the third review round**, and they are the last three
+sections of this module. One door reads one roles vocabulary, which needs launches
+carrying claims no seeded person produces — so those are signed by `suite_key_set`
+against a registration pointing at it, with a control test that says the machinery
+itself is accepted. The login cookie carries `Secure` outside development and does
+not carry it inside. A `state` or a `nonce` that is not ASCII is refused rather
+than crashed, and the refusal still burns the single-use cookie. And no refusal
+page repeats the server-side key set address the tool failed to reach.
+
 **Where the values come from.** Nothing about the mock platform is transcribed
 here. The issuer, client ID and deployment ID are read out of the OIDC
 third-party-initiated login request its launch page publishes — the same source
@@ -44,6 +53,7 @@ and reading the LIS roles claim, rather than by naming a seeded user identifier.
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+import httpx
 import pytest
 
 pytestmark = [pytest.mark.integration, pytest.mark.lti]
@@ -83,6 +93,38 @@ ROLES_CLAIM = LTI_CLAIM + "roles"
 MEMBERSHIP_ROLE = "http://purl.imsglobal.org/vocab/lis/v2/membership#"
 INSTRUCTOR_ROLE_URI = f"{MEMBERSHIP_ROLE}Instructor"
 LEARNER_ROLE_URI = f"{MEMBERSHIP_ROLE}Learner"
+
+# A third role from the same LIS vocabulary, which E0-18 gives this door no view
+# for. It is a real membership role a real LMS emits — a mentor is a parent or an
+# advisor watching a learner — so a launch carrying it is well formed and names
+# somebody this system has nothing to show. Used for the no-recognised-role case.
+MENTOR_ROLE_URI = f"{MEMBERSHIP_ROLE}Mentor"
+
+# The roles SPEC §2 gives the **web** door, spelled as `test_web_login_door.py`
+# spells them. They appear in this module only as values to smuggle *into* a
+# launch: they are what an LMS administrator would name if the launch door read
+# the web door's vocabulary. Each one is checked against the roles the provider
+# actually publishes before it is used, so this is a live vocabulary rather than
+# three strings this file invented (`docs/MISTAKES.md` entry 3).
+WEB_DOOR_ROLES = ("CARE", "VP_ACADEMICS", "ADMIN")
+
+# `ENVIRONMENT`, spelled as `tests/unit/test_docs_exposure.py` spells it, and the
+# two values that matter: the one a laptop carries and the one a deployment does.
+ENVIRONMENT_VARIABLE = "ENVIRONMENT"
+DEVELOPMENT = "development"
+PRODUCTION = "production"
+
+# The cookie attribute that keeps a browser from sending the launch cookie over
+# plain HTTP, spelled as RFC 6265 §4.1.2.5 spells it, lowercased at the comparison
+# because a `Set-Cookie` attribute name is case-insensitive.
+SECURE_ATTRIBUTE = "secure"
+
+# A `state` that is well formed as a form field and not representable as ASCII.
+# `secrets.compare_digest` raises `TypeError` rather than answering `False` when
+# either side is a `str` outside ASCII, so this is the value that separates "the
+# tool compared and refused" from "the tool crashed on the way to comparing".
+NON_ASCII_STATE = "é"
+NON_ASCII_NONCE = "é"
 
 # What each of those two lands on, per E0-18: "Learner → student empty view,
 # Instructor → instructor empty view".
@@ -147,17 +189,91 @@ def registration(platform: Any, jwks_url: str, register_platform: Any) -> Any:
 
 
 @pytest.fixture
-def tool(
+def open_launch_door(
     tool_doors: Any, door_contract: Any, platform: Any, registration: Any, jwks_url: str
 ) -> Any:
+    """Build the tool for this platform, with settings a test may override.
+
+    A factory rather than one instance, for the same reason `open_web_door` is one:
+    three of the cases below are properties of an application built differently —
+    one whose `ENVIRONMENT` is a deployment's, and one whose key-set fetch is
+    answered by something other than the platform.
+    """
+    names = door_contract.settings
+
+    def build(*, around: Any = None, environment: str | None = None, **overrides: str) -> Any:
+        values = {
+            names["public_base_url"]: door_contract.public_base_url,
+            names["lti_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
+        }
+        values.update({names[key]: value for key, value in overrides.items()})
+        if environment is not None:
+            values[ENVIRONMENT_VARIABLE] = environment
+        return tool_doors(values, {urlsplit(jwks_url).hostname: platform}, around=around)
+
+    return build
+
+
+@pytest.fixture
+def tool(open_launch_door: Any) -> Any:
     """The application, configured for this platform and able to reach it in process."""
+    return open_launch_door()
+
+
+@pytest.fixture
+def registration_naming_this_suites_key(
+    platform: Any, suite_key_set: Any, register_platform: Any
+) -> Any:
+    """The platform, registered against **this suite's** key set rather than its own.
+
+    Used instead of `registration`, never beside it: two rows registering one
+    issuer would leave the door choosing between them, and which one it chose
+    would decide the result of every test below.
+    """
+    return register_platform(platform.require_offers()[0], suite_key_set.jwks_url)
+
+
+@pytest.fixture
+def tool_verifying_against_this_suites_key(
+    tool_doors: Any,
+    door_contract: Any,
+    registration_naming_this_suites_key: Any,
+    suite_key_set: Any,
+) -> Any:
+    """The tool, whose registration points its signature check at `suite_key_set`.
+
+    Only the key set's host is mounted. That is deliberate: the launch door's one
+    server-side fetch is the key set named by the registration it resolved, so a
+    door reaching any other address fails loudly here instead of being quietly
+    served the platform's real keys.
+    """
     return tool_doors(
         {
             door_contract.settings["public_base_url"]: door_contract.public_base_url,
             door_contract.settings["lti_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
         },
-        {urlsplit(jwks_url).hostname: platform},
+        {suite_key_set.host: suite_key_set},
     )
+
+
+@pytest.fixture
+def web_vocabulary(mock_idps: Any) -> tuple[str, frozenset[str]]:
+    """The claim name and the role spellings the **web** door reads, from the provider.
+
+    Read off the mock provider's published registration document (ADR 0058) rather
+    than written down here, and this is the whole reason the tests below mean
+    anything. A refusal is a refusal: if this module smuggled a claim name no door
+    reads, a launch carrying it would be refused for carrying no role at all, and
+    the test would report that as "the launch door ignores the web vocabulary"
+    (`docs/MISTAKES.md` entry 3). The claim asserted here is the one
+    `test_web_login_door.py::test_the_care_office_lands_on_the_care_view` proves
+    the web door honours.
+    """
+    provider = mock_idps()
+    published = frozenset(
+        role for user in provider.published_users() for role in (user.get("roles") or [])
+    )
+    return provider.roles_claim_name(), published
 
 
 def offer_for_role(platform: Any, role_uri: str) -> Any:
@@ -277,6 +393,45 @@ def refused(response: Any, contract: Any, what: str) -> None:
         "refusal that serves a landing page has admitted the launch and merely said so in the "
         "status line."
     )
+
+
+def re_signed_launch(
+    tool: Any,
+    contract: Any,
+    platform: Any,
+    keys: Any,
+    claims_in_token: Any,
+    adjust: Any,
+) -> Any:
+    """A whole launch whose `id_token` was re-signed after `adjust` changed its claims.
+
+    Every part of the flow is the real one — the platform's launch form, the tool's
+    own authorization request, the platform's signed answer — and the token
+    delivered at the end carries that answer's claims with one thing changed. It is
+    signed by `suite_key_set`, which is the key set the registration in front of
+    this tool names, so the signature, the issuer, the audience, the deployment,
+    the nonce, the state and the expiry are all still correct.
+
+    The one thing changed is the roles vocabulary, which is what makes a 4xx below
+    mean the vocabulary. The control that says so is the first test in the section
+    that uses this helper: the same flow with the claims re-signed unchanged, which
+    is required to land on the student view.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+    started = initiate(tool, contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    id_token, state, _ = authorize(platform, parameters)
+
+    claims = dict(claims_in_token(id_token))
+    assert claims.get(ROLES_CLAIM), (
+        f"The launch the platform signed carries no `{ROLES_CLAIM}` (it carries "
+        f"{sorted(claims)}), so there is no roles claim for this test to change and nothing it "
+        "says about which vocabulary the door reads would mean anything."
+    )
+    adjusted = adjust(dict(claims))
+    signed = keys.sign(adjusted)
+    assert signed != id_token, "Re-signing produced the platform's own token, so nothing changed."
+    return land(tool, contract, signed, state)
 
 
 # ---------------------------------------------------------------------------
@@ -737,3 +892,473 @@ def test_a_launch_whose_nonce_is_not_the_one_the_tool_sent_is_refused(
     response = land(tool, door_contract, id_token, state)
 
     refused(response, door_contract, "a launch whose `nonce` is not the one the tool sent")
+
+
+# ---------------------------------------------------------------------------
+# One door, one vocabulary. SPEC §2 gives Care, leadership and admin the web door
+# *precisely so* the LMS cannot name those roles, and this is that rule at the
+# navigation layer — E0-09 criterion 10's shape, one layer up from the assignment
+# table. It is also the premise the Care sweep's exception argues from
+# (`tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS`).
+# ---------------------------------------------------------------------------
+
+
+def test_a_launch_re_signed_with_the_registered_key_is_still_accepted(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+) -> None:
+    """The control for every re-signed case below, and they are worth nothing without it.
+
+    The claims are the platform's own, unchanged, signed again by the key set this
+    tool's registration names. If this lands on the student view then the machinery
+    — the key, the served JWK Set, the `kid`, the re-encoding — produces launches
+    this door accepts, and a refusal in the tests below can only be the one claim
+    they changed. If it does *not*, every one of them is a red about the harness
+    rather than about the door, and this is where that shows (`docs/MISTAKES.md`
+    entry 3).
+    """
+    response = re_signed_launch(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        lambda claims: claims,
+    )
+
+    lands_on(response, door_contract, STUDENT_VIEW)
+
+
+@pytest.mark.parametrize("web_role", WEB_DOOR_ROLES)
+def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    web_vocabulary: tuple[str, frozenset[str]],
+    web_role: str,
+) -> None:
+    """**Dies if the launch door consults the web door's vocabulary.**
+
+    SPEC §2 gives Care, leadership and admin a second way in *precisely so* that
+    the LMS cannot name those roles: the person who administers the platform writes
+    what an `id_token` says, and E0-09 criterion 10 is that no claim may produce a
+    Care capability. This is that rule one layer up — at the navigation layer,
+    where a launch door that read the web door's roles claim would let the same
+    administrator put themselves on the Care screen by adding a claim to a launch.
+
+    The launch is otherwise entirely correct: signed by the registered key set,
+    the right issuer, audience, deployment, nonce, state and expiry. Its LIS roles
+    claim is empty and it states a web-door role in the web door's own claim. There
+    is no view this door may serve for it, so the only answer is a refusal — and
+    `refused` requires that no landing testid at all appears, which covers the Care
+    page and the other four together.
+
+    The claim name and the role spelling are read off the provider's published
+    registration document rather than written here, so this cannot pass by
+    smuggling a claim nobody reads.
+    """
+    claim, published = web_vocabulary
+    assert web_role in published, (
+        f"The mock provider publishes nobody holding {web_role!r} (it publishes "
+        f"{sorted(published)}), so this test is smuggling a role the web door never sees and a "
+        "refusal below would say nothing about which vocabulary the launch door reads."
+    )
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims[ROLES_CLAIM] = []
+        claims[claim] = [web_role]
+        return claims
+
+    response = re_signed_launch(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        adjust,
+    )
+
+    refused(
+        response,
+        door_contract,
+        f"a launch whose LIS roles claim is empty and which states {web_role!r} in `{claim}`, the "
+        "claim SPEC §2 gives the web door",
+    )
+
+
+def test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_is_refused(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    web_vocabulary: tuple[str, frozenset[str]],
+) -> None:
+    """The absent case, which an empty list does not cover.
+
+    `claims.get(ROLES_CLAIM, [])` and `claims[ROLES_CLAIM]` behave differently when
+    the claim is missing rather than empty — the second raises, and a door that
+    catches broadly around it could fall through to a default. A different mutation
+    is a different case, which is the reason this module already has a launch with
+    no `state` beside the launch with the wrong one.
+    """
+    claim, published = web_vocabulary
+    assert "CARE" in published, (
+        f"The mock provider publishes nobody holding 'CARE' (it publishes {sorted(published)}), so "
+        "this test is smuggling a role the web door never sees."
+    )
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims.pop(ROLES_CLAIM, None)
+        claims[claim] = ["CARE"]
+        return claims
+
+    response = re_signed_launch(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        adjust,
+    )
+
+    refused(
+        response,
+        door_contract,
+        f"a launch carrying no LIS roles claim at all and stating 'CARE' in `{claim}`",
+    )
+
+
+def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_names(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    web_vocabulary: tuple[str, frozenset[str]],
+) -> None:
+    """The foreign vocabulary is **ignored**, not merely outranked.
+
+    A launch stating the LIS Learner role and `CARE` in the web door's claim lands
+    on the student view. This is the boundary control on the two refusals above: a
+    door that refused every launch carrying an unfamiliar claim would satisfy them
+    while being wrong about what it does with one, and a door that read both
+    vocabularies and happened to prefer the LIS one would pass this and fail those.
+    Together the three say the launch door reads one claim and does not look at the
+    other.
+
+    It is expected to pass today, and its value is in what it stops the fix from
+    being: refusing anything that smells of the web vocabulary is not the fix.
+    """
+    claim, published = web_vocabulary
+    assert "CARE" in published, (
+        f"The mock provider publishes nobody holding 'CARE' (it publishes {sorted(published)}), so "
+        "the value smuggled below is not one the web door would ever act on."
+    )
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims[ROLES_CLAIM] = [LEARNER_ROLE_URI]
+        claims[claim] = ["CARE"]
+        return claims
+
+    response = re_signed_launch(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        adjust,
+    )
+
+    lands_on(response, door_contract, STUDENT_VIEW)
+
+
+def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_is_refused(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+) -> None:
+    """**Dies if the door defaults instead of refusing.**
+
+    E0-18 gives this door two dispatches and no third: "Learner → student empty
+    view, Instructor → instructor empty view". A launch whose LIS roles claim names
+    neither is one this system has no view for, and a door that fell through to a
+    default would put a mentor — a parent or an advisor, in the LIS vocabulary — on
+    whichever page came last in the `if`. The wrong default here is a person seeing
+    a screen nobody decided they should see, and it is the same fall-through the
+    web door's admin test exists to catch.
+
+    Nothing else is changed: no web-door claim is added, so a 4xx can only be the
+    role. The Mentor URI is from the same LIS membership vocabulary the recognised
+    two come from, so this is not a malformed claim either.
+    """
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims[ROLES_CLAIM] = [MENTOR_ROLE_URI]
+        return claims
+
+    response = re_signed_launch(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        adjust,
+    )
+
+    refused(
+        response,
+        door_contract,
+        f"a launch whose only LIS role is {MENTOR_ROLE_URI!r}, which E0-18 gives this door no view "
+        "for",
+    )
+
+
+# ---------------------------------------------------------------------------
+# The cookie the login initiation sets, and what a refusal says and does.
+# ---------------------------------------------------------------------------
+
+
+def answer_to(deliver: Any, what: str) -> Any:
+    """What the tool answered, or a failure saying it raised instead of answering.
+
+    `tool_doors` builds its `TestClient` with `raise_server_exceptions` at the
+    default, so an exception escaping a route arrives here rather than as a 500.
+    That *is* the crash the tests below are about — a door that stops rather than
+    refuses — and it is worth one sentence naming it rather than a traceback that
+    reads like a broken test.
+    """
+    try:
+        return deliver()
+    except Exception as failure:
+        pytest.fail(
+            f"The tool raised {type(failure).__name__}: {failure} rather than answering {what}. An "
+            "exception that escapes a route is fail-closed and is still a defect: the request gets "
+            "no page, and everything the refusal path would have done on the way out — clearing "
+            "the single-use cookie, keeping server-side addresses out of the response — did not "
+            "happen."
+        )
+
+
+def cookies_set_by(response: Any, purpose: str) -> list[str]:
+    """Every `Set-Cookie` header on a response, or a failure saying there were none."""
+    headers = response.headers.get_list("set-cookie")
+    assert headers, (
+        f"The login initiation set no cookie at all when {purpose} (it answered "
+        f"{response.status_code} with headers {sorted(response.headers)}). E0-18 puts `state` and "
+        "`nonce` 'into a short-lived signed cookie', and with no cookie there is nothing for the "
+        "launch endpoint to compare against — and nothing for this test to read an attribute off."
+    )
+    return headers
+
+
+def attributes_of(header: str) -> set[str]:
+    """The attribute names in one `Set-Cookie`, lowercased, without their values."""
+    return {part.split("=", 1)[0].strip().lower() for part in header.split(";")[1:]}
+
+
+def test_the_login_cookie_is_marked_secure_outside_development(
+    open_launch_door: Any, door_contract: Any, platform: Any
+) -> None:
+    """**Dies if the cookie is issued without `Secure`.**
+
+    The launch cookie carries the `state` and `nonce` a launch is judged against.
+    Without `Secure` a browser sends it over plain HTTP, so anyone on the path can
+    read it — and this is auth code, where E0-18 says "absence of basic
+    state/nonce/signature checks is not tolerable even briefly". The attribute is
+    free and the omission is invisible in every test that does not look for it.
+
+    Its pair is the next test: the flag has to be conditional, because a `Secure`
+    cookie is not sent to `http://localhost` and would break the development flow
+    this whole ticket exists to open.
+    """
+    tool = open_launch_door(environment=PRODUCTION)
+    offer = platform.require_offers()[0]
+
+    response = initiate(tool, door_contract, offer)
+
+    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {PRODUCTION!r}"):
+        assert SECURE_ATTRIBUTE in attributes_of(header), (
+            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
+            f"{PRODUCTION!r}, and it carries no `Secure` attribute. That cookie holds the `state` "
+            "and `nonce` this door judges a launch by, and without `Secure` a browser will send it "
+            "over plain HTTP to anyone who can put a request in front of it."
+        )
+
+
+def test_the_login_cookie_is_not_marked_secure_in_development(
+    open_launch_door: Any, door_contract: Any, platform: Any
+) -> None:
+    """The near miss for the test above: `Secure` unconditionally breaks the laptop.
+
+    E0-18's whole point is that `docker compose up` yields a launchable-into system,
+    and a browser reaches it at `http://localhost:8000`. A `Secure` cookie is not
+    sent back over that, so the launch that set it is refused for a mismatched
+    `state` — which reads as a broken door rather than as a cookie flag.
+
+    Without this, "always set `Secure`" satisfies the requirement above and is the
+    wrong fix.
+    """
+    tool = open_launch_door(environment=DEVELOPMENT)
+    offer = platform.require_offers()[0]
+
+    response = initiate(tool, door_contract, offer)
+
+    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {DEVELOPMENT!r}"):
+        assert SECURE_ATTRIBUTE not in attributes_of(header), (
+            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
+            f"{DEVELOPMENT!r}. A `Secure` cookie is not sent to `http://localhost`, so every launch "
+            "from the mock LMS on a developer's laptop arrives with no cookie and is refused for a "
+            "`state` mismatch."
+        )
+
+
+def test_a_launch_whose_state_is_not_ascii_is_refused_and_the_cookie_is_burned(
+    tool: Any, door_contract: Any, platform: Any
+) -> None:
+    """**Dies if the comparison crashes instead of refusing.**
+
+    `secrets.compare_digest` raises `TypeError` when either side is a `str` holding
+    a character outside ASCII, so a `state` of `é` takes a door that compares
+    directly out through the error handler rather than through the refusal. The
+    crash is fail-closed — nobody is admitted — which is why it survives a suite
+    that only asks whether the launch succeeded. What it skips is everything the
+    refusal path does on the way out, and on this door that is the single-use
+    cookie.
+
+    So both halves are asserted, and the second is the one worth having: after the
+    refusal, the launch the tool itself set up — correct `state`, correct token —
+    is delivered and must also be refused, because the cookie it would have been
+    judged against is gone. `test_a_learner_launch_lands_on_the_student_view` is
+    the control for that half: it is this same sequence without the `é` attempt,
+    and it answers 200.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+    started = initiate(tool, door_contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    id_token, state, _ = authorize(platform, parameters)
+    assert state, "The platform returned no `state`, so there is no correct value to replay below."
+
+    crashed = answer_to(
+        lambda: land(tool, door_contract, id_token, NON_ASCII_STATE),
+        f"a launch whose `state` was {NON_ASCII_STATE!r}",
+    )
+
+    assert crashed.status_code != 500, (
+        f"The tool answered 500 to a launch whose `state` was {NON_ASCII_STATE!r}. That is "
+        "`secrets.compare_digest` raising `TypeError` on a non-ASCII `str` rather than answering "
+        f"`False`. Body begins {crashed.text[:400]!r}."
+    )
+    refused(crashed, door_contract, f"a launch whose `state` was {NON_ASCII_STATE!r}")
+
+    replayed = answer_to(
+        lambda: land(tool, door_contract, id_token, state),
+        "the correct `state` for a login initiation whose cookie a refusal should have burned",
+    )
+
+    assert 400 <= replayed.status_code < 500, (
+        f"After refusing the non-ASCII `state`, the tool answered {replayed.status_code} to the "
+        "correct `state` for the same login initiation. The cookie holding it should have been "
+        "cleared on the way out of the refusal: one login initiation buys one attempt, and a "
+        "refusal that leaves the cookie in place hands an attacker as many tries as they like at "
+        "a `state` the browser is still carrying."
+    )
+
+
+def test_a_launch_whose_nonce_is_not_ascii_is_refused_rather_than_crashing(
+    tool: Any, door_contract: Any, platform: Any
+) -> None:
+    """The same hazard on the other value compared the same way (entry 13).
+
+    The nonce is the tool's own, echoed by the platform into the signed token, so a
+    non-ASCII nonce is posed by answering the tool's authorization request with one
+    parameter changed — the token is correctly signed over it and everything else,
+    `state` included, is the tool's own. If the door compares it with
+    `secrets.compare_digest`, this is the second place the same `TypeError` lives,
+    and a fix applied only to `state` leaves it.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+    started = initiate(tool, door_contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    assert parameters.get("nonce"), (
+        "The tool's authorization request carries no `nonce`, so there is nothing to substitute "
+        "and nothing for the launch endpoint to compare."
+    )
+
+    id_token, state, _ = authorize(platform, {**parameters, "nonce": NON_ASCII_NONCE})
+    response = answer_to(
+        lambda: land(tool, door_contract, id_token, state),
+        f"a launch whose `nonce` was {NON_ASCII_NONCE!r}",
+    )
+
+    assert response.status_code != 500, (
+        f"The tool answered 500 to a launch whose `nonce` was {NON_ASCII_NONCE!r}. `state` and "
+        "`nonce` are compared the same way and the fix belongs in one place: a door that refuses "
+        f"one and crashes on the other has the hazard written down in one of the two places facing "
+        f"it. Body begins {response.text[:400]!r}."
+    )
+    refused(response, door_contract, f"a launch whose `nonce` was {NON_ASCII_NONCE!r}")
+
+
+def test_a_refusal_does_not_name_the_key_set_address_the_tool_could_not_reach(
+    open_launch_door: Any, door_contract: Any, platform: Any, jwks_url: str
+) -> None:
+    """**Dies if the refusal page carries the server-side address it failed to fetch.**
+
+    `lti_platform.jwks_url` is a server-side address — a Compose service name that
+    means nothing to a browser and everything to somebody mapping the network
+    behind the tool. A refusal that repeats it, in a message or a traceback,
+    publishes the tool's internal topology to whoever provoked the fetch, and
+    provoking it takes nothing more than delivering a launch.
+
+    The failure is provoked through the seam rather than by misconfiguring the
+    tool, so the address in the refusal — if it appears — is the *configured* one
+    rather than one this test typed. The host alone is asserted, because that is
+    the part that is a network location; a door that named the path and not the
+    host would still not be naming a machine.
+    """
+    split = urlsplit(jwks_url)
+    host = split.hostname
+    assert host, (
+        f"The registered key set URL {jwks_url!r} has no host, so there is no address for this "
+        "test to look for and nothing for the tool to fetch."
+    )
+    fetched: list[str] = []
+
+    def around(request: Any, deliver: Any) -> Any:
+        if request.url.host == host and request.url.path == split.path:
+            fetched.append(str(request.url))
+            return httpx.Response(404, text="no key set here", request=request)
+        return deliver()
+
+    tool = open_launch_door(around=around)
+
+    response = answer_to(
+        lambda: launched(tool, door_contract, platform, offer_for_role(platform, LEARNER_ROLE_URI)),
+        "a launch whose key set the tool could not fetch",
+    )
+
+    assert fetched, (
+        f"The tool never fetched the registered key set at {jwks_url!r}, so whatever it answered "
+        "was decided before any fetch failed and this test is looking at the wrong refusal "
+        "(`docs/MISTAKES.md` entry 3)."
+    )
+    refused(response, door_contract, "a launch whose key set could not be fetched")
+    assert response.text.strip(), (
+        "The refusal has an empty body, so 'the address is not in it' is true of a page with "
+        "nothing in it and says nothing about what the tool would print when it has something to "
+        "say."
+    )
+    assert host not in response.text, (
+        f"The refusal page names {host!r}, the host of the key set URL the tool fetches "
+        f"server-side ({jwks_url!r}). Body begins {response.text[:400]!r}. That address is a "
+        "Compose service name: it is useless to the browser that received it and it is the "
+        "network map to anyone else."
+    )

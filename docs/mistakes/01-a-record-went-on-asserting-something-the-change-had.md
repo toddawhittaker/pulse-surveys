@@ -1,38 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 39**
+**Caught: 40**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*22 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 19 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-26 item 1, and this one is a catch and a recurrence in the same commit,
-which is why it is worth the space. The change replaced the Care reveal, and the
-ticket named three records to repair. The sweep found five more that nothing had
-pointed at: ADR 0001's rejected-alternative block and its "one transaction"
-consequence, ADR 0042's "two connections mean two transactions" consequence —
-which named the wrong function once the door was split — and its "what this does
-not fix" paragraph, ADR 0043's three-grant decision list, `docker-compose.yml`'s
-comment justifying why `CARE_DATABASE_URL` is blanked, and the epic README's
-decision row. **The same sweep then missed eight more**, found only when a
-coordinator asked what the counter bump was for: the ADR index row still titled
-0043 "holding three grants"; two more sentences inside ADR 0043 itself; ADR
-0001's numbered decision item, false twice over — "Care's only access is **one**
-`SECURITY DEFINER` function that returns identity and writes the audit row **in
-the same transaction**"; two sentences in ADR 0040, which 0043 had already
-amended once for the role count; the repository's own top-level `README.md`; and
-`backend/app/models/__init__.py`, which is source rather than documentation.
-
-Three of the eight were inside the two ADRs being amended at the time, which is
-the shape worth naming: **the paragraphs that got repaired were the ones read
-while writing, not the file.** And none of the eight surfaces from grepping
-`reveal_student_identity`, because none of them names it — they carry the *fact*
-("three grants", "in the same transaction"), which is what a record about a
-mechanism actually says. The identifier grep found the sites that mention the
-function; the fact grep is what finds the sites that describe it. The index row
-was the worst of them, and this entry's own rule already says indexes are the
-highest risk, so knowing the rule was not enough — the sweep has to be a list of
-greps run, not an intention.)*
+*23 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 20 are in this file's git history and in the pull requests they cite.*
 
 *(E0-30's second fix round, where the false records were made false by a
 **two-name change to a frozenset**. Adding `error` and `error_description` to
@@ -81,6 +53,21 @@ entries, and the derivation comment above it was extended in the same edit as th
 constant — that constant exists precisely so a widening cannot justify itself, so
 an entry added without its paragraph would have made the whole block a record
 that no longer accounts for what it guards.)*
+
+*(E0-18 PR 1's third round, where the false records would have been **the "what
+is deliberately not here" paragraphs at the top of two test modules**. Both door
+suites open by enumerating what they cover and what they leave to E1 — one says
+"what *is* here is the set E0-18's own acceptance criteria name" and lists the
+seven, the other says "two of the three refusals cannot be posed on the wire" —
+and the round adds four sections to each. Appending tests without touching those
+paragraphs leaves an index that undercounts its own file, in the highest-risk
+shape this entry names: written once, three hundred lines above the tests anyone
+opens the file for. The same round's other repair was `tests/conftest.py`'s
+per-ticket index, which had to gain a sentence for a fixture that signs tokens,
+and the claim-to-Care sweep's exception reason — a record that argued the Care
+claim is harmless *from the web door alone*, which stopped being the whole
+argument the moment the launch door gained a rule of its own about the same
+claim.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
