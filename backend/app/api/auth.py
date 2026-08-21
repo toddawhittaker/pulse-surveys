@@ -240,19 +240,26 @@ def begin_web_login(request: Request) -> Response:
     state = secrets.token_urlsafe(OPAQUE_VALUE_BYTES)
     nonce = secrets.token_urlsafe(OPAQUE_VALUE_BYTES)
 
-    authorization_url = with_query(
-        settings.oidc_authorization_endpoint,
-        {
-            "response_type": RESPONSE_TYPE,
-            "scope": SCOPE,
-            "client_id": settings.oidc_client_id,
-            "redirect_uri": callback_url(settings),
-            "state": state,
-            "nonce": nonce,
-            "code_challenge": challenge,
-            "code_challenge_method": CODE_CHALLENGE_METHOD,
-        },
-    )
+    parameters = {
+        "response_type": RESPONSE_TYPE,
+        "scope": SCOPE,
+        "client_id": settings.oidc_client_id,
+        "redirect_uri": callback_url(settings),
+        "state": state,
+        "nonce": nonce,
+        "code_challenge": challenge,
+        "code_challenge_method": CODE_CHALLENGE_METHOD,
+    }
+    # `login_hint` is presentational only (OIDC Core 1.0 §3.1.2.1): forwarded so
+    # the provider's form can pre-select a person, it never touches state, nonce
+    # or PKCE, and it is never read into any security decision — the identity
+    # still comes from the verified id_token at the callback. Absent when the
+    # caller sent none, so no constant is ever injected.
+    login_hint = request.query_params.get("login_hint")
+    if login_hint:
+        parameters["login_hint"] = login_hint
+
+    authorization_url = with_query(settings.oidc_authorization_endpoint, parameters)
     response = RedirectResponse(authorization_url, status_code=FOUND)
     carry_across(
         response,

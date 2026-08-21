@@ -28,7 +28,7 @@ import httpx
 from fastapi import FastAPI
 
 from app import __version__
-from app.api import auth, health, lti
+from app.api import auth, dev, health, lti
 from app.config import DEVELOPMENT_ENVIRONMENT, Settings
 
 # What the tool waits for any single outbound request. A per-request timeout
@@ -119,5 +119,9 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(lti.router)
     app.include_router(auth.router)
+    # The developer test console. Always registered; the handler gates itself on
+    # `ENVIRONMENT == development` and answers 404 elsewhere, so production is
+    # indistinguishable from a route that does not exist (ADR 0074).
+    app.include_router(dev.router)
 
     return app
