@@ -1152,12 +1152,17 @@ def test_an_authorization_request_with_a_malformed_pkce_challenge_does_not_crash
     first is not implied by the second, because a 500 also produces no session
     and would read as a refusal.
 
-    **What is deliberately not asserted: the shape of the refusal.** E0-16 does
-    not say what a malformed authorization request should answer, and the
-    implementer deferred error redirects entirely — refusals here are pages, not
-    `?error=invalid_request` back to the client, which is what RFC 6749 §4.1.2.1
-    describes and what E1 will meet. Pinning a status or a body would be this
-    file settling that; it is named in the pull request instead.
+    **What is deliberately not asserted here: the shape of the refusal.** E0-16
+    did not say what a malformed authorization request should answer, and this
+    test was written while error redirects were deferred. **E0-30 settled it** —
+    a refusal raised after `client_id` and `redirect_uri` have validated arrives
+    as RFC 6749 §4.1.2.1's redirect carrying `error`, `error_description` and the
+    echoed `state`, and `tests/integration/test_mock_idp_error_redirects.py`
+    holds a test per code. This test keeps asserting the *verdict* — no crash,
+    no session — because E0-30 changed only where a refusal is delivered, and
+    because that is what makes the two modules fail for different reasons: this
+    one goes red if a malformed challenge is honoured, and that one goes red if a
+    refusal comes back as a page.
     """
     control = mock_idp.login()
     assert control.tokens.get("id_token"), (
@@ -1841,10 +1846,17 @@ def test_an_authorization_request_naming_an_unregistered_redirect_uri_is_refused
     automatically redirect the user-agent to the invalid redirect URI", because
     doing so hands the code to whoever named it.
 
-    Asserted as *where the code went*, not as a status. A provider may refuse
-    with an error page, a 400 or a redirect back to the registered URI carrying
-    an error, and all three are conformant; what none of them may do is send an
-    authorization code to the URI it was handed.
+    Asserted as *where the code went*, not as a status. Several shapes are
+    conformant here — a refusal page, a 400, or a redirect back to the
+    *registered* URI carrying an error — and what none of them may do is send an
+    authorization code to the URI it was handed. **E0-30 chose among them for
+    this provider**: an unregistered redirect URI is refused before there is any
+    address to redirect to, so it stays a page, and
+    `tests/integration/test_mock_idp_error_redirects.py` asserts that choice
+    along with the near miss that makes it load-bearing — an unregistered URI
+    sent together with a second defect, which must still not redirect. This
+    assertion is unchanged by that ticket and is deliberately the weaker,
+    longer-lived one: no code reaches the address, whatever the transport.
     """
     attempt = mock_idp.begin(redirect_uri=UNREGISTERED_REDIRECT_URI)
 
