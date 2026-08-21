@@ -2999,24 +2999,41 @@ def seeded_prefixes_and_courses(
     return numbers, institutions
 
 
-def plant_a_foreign_institution(
-    plant_in: Any, metadata_tables: dict[str, Any], demo: Any, code: str, number: str
+def plant_foreign_rows(
+    plant_in: Any,
+    metadata_tables: dict[str, Any],
+    demo: Any,
+    institution: str,
+    code: str,
+    number: str,
 ) -> str:
-    """One institution the seed did not create, holding `code` and a course under it.
+    """A college, department and prefix the seed did not create, holding `code`.
 
-    Everything but the prefix code and the course number is invented by
-    `seed_row`, which is the point: the institution, the college and the
-    department are somebody else's, with names the seed has never heard of. Only
-    the prefix code is shared, because ADR 0017 makes that the one containment
-    value that is unique across the whole deployment.
+    Everything but the institution's name, the prefix code and the course number
+    is invented by `seed_row`, which is the point: the college and the department
+    are somebody else's, with names the seed has never heard of. Only the prefix
+    code is shared, because ADR 0017 makes that the one containment value that is
+    unique across the whole deployment.
+
+    **The institution is the seed's own, and that changed in E0-22.** These rows
+    used to hang off an institution invented here as well — a real institution
+    beside the demo one. SPEC §8 now says a deployment serves exactly one
+    institution and `uq_institution_one_row` holds it, so a second row is refused
+    by the database and the scenario is no longer reachable: the seed's insert
+    fails at its own institution, before any prefix is looked at, and the guard
+    under test is never reached. Naming the planted institution the way the seed
+    names its own is what puts the foreign rows *inside* the one institution,
+    which is where a developer's own work now lives.
 
     Answers the department's name, which is what the refusal has to quote.
     """
     prefix_table = require_table(metadata_tables, "prefix")
     code_column = require_column(prefix_table, PREFIX_CODE_COLUMNS)
+    institution_name = require_column(require_table(metadata_tables, "institution"), NAME_COLUMNS)
     department_name = require_column(require_table(metadata_tables, "department"), NAME_COLUMNS)
 
     chain: dict[str, Any] = {}
+    plant_in(demo, "institution", chain, **{institution_name: institution})
     plant_in(demo, "prefix", chain, **{code_column: code})
     plant_in(
         demo,
@@ -3035,21 +3052,23 @@ def collided_seed(
     plant_in: Any,
     metadata_tables: dict[str, Any],
 ) -> ForeignRowsSeed:
-    """A fresh database holding a foreign institution whose prefix code the seed uses.
+    """A fresh database holding a foreign department whose prefix code the seed uses.
 
     `seeded_demo` is requested so the module database has been seeded and its
-    prefix codes can be read; the run under test happens somewhere else entirely.
-    Nothing here asserts — a seed that wrote no prefixes leaves `code` unset and
-    the tests below say which failure to read first.
+    prefix codes and institution name can be read; the run under test happens
+    somewhere else entirely. Nothing here asserts — a seed that wrote no prefixes
+    leaves `code` unset and the tests below say which failure to read first.
     """
-    numbers, _ = seeded_prefixes_and_courses(demo_database, metadata_tables)
-    if not numbers:
+    numbers, institutions = seeded_prefixes_and_courses(demo_database, metadata_tables)
+    if not numbers or not institutions:
         return ForeignRowsSeed(None, None, None, None, {}, None, {})
 
     code = sorted(numbers)[0]
     number = numbers[code]
     demo = demo_databases()
-    department = plant_a_foreign_institution(plant_in, metadata_tables, demo, code, number)
+    department = plant_foreign_rows(
+        plant_in, metadata_tables, demo, sorted(institutions)[0], code, number
+    )
 
     with demo.connect() as connection:
         before = read_rows(connection, metadata_tables)
@@ -3061,20 +3080,31 @@ def collided_seed(
 
 @pytest.fixture(scope="module")
 def uncollided_seed(
-    demo_databases: Any, plant_in: Any, metadata_tables: dict[str, Any]
+    demo_database: Any,
+    seeded_demo: Any,
+    demo_databases: Any,
+    plant_in: Any,
+    metadata_tables: dict[str, Any],
 ) -> ForeignRowsSeed:
-    """The control: the same foreign institution, holding a prefix code the seed does not use.
+    """The control: the same foreign rows, holding a prefix code the seed does not use.
 
-    Unlike `collided_seed` it needs nothing from the module's own seeded database
-    — the code it plants is a constant precisely because it is meant to be one the
+    The code it plants is a constant precisely because it is meant to be one the
     seed never uses, and the test asserts that rather than this fixture assuming
-    it.
+    it. The institution name is not a constant and cannot be: since E0-22 the
+    planted rows have to sit inside the one institution the seed itself writes
+    (`plant_foreign_rows` says why), so this fixture reads that name off the
+    seeded database exactly as `collided_seed` does.
     """
+    _, institutions = seeded_prefixes_and_courses(demo_database, metadata_tables)
+    if not institutions:
+        return ForeignRowsSeed(None, None, None, None, {}, None, {})
+
     demo = demo_databases()
-    department = plant_a_foreign_institution(
+    department = plant_foreign_rows(
         plant_in,
         metadata_tables,
         demo,
+        sorted(institutions)[0],
         UNCLAIMED_PREFIX_CODE,
         FALLBACK_PLANTED_COURSE_NUMBER,
     )
@@ -3160,7 +3190,7 @@ def test_a_prefix_code_another_department_already_holds_is_refused(
     )
 
 
-def test_the_refused_run_leaves_the_pre_existing_rows_and_writes_no_demo_institution(
+def test_the_refused_run_leaves_the_pre_existing_rows_and_adds_no_institution(
     seeded_demo: Any,
     collided_seed: ForeignRowsSeed,
     demo_database: Any,
@@ -3172,16 +3202,21 @@ def test_the_refused_run_leaves_the_pre_existing_rows_and_writes_no_demo_institu
     0064). The rows that were there are exactly as they were — the planted
     prefix still belongs to its own department and the planted course still has
     its own title, which are the two the review measured being changed. And
-    nothing the seed writes is left over: no demo institution, no orphan college,
-    no partial term.
+    nothing the seed writes is left over: no orphan college, no partial term, no
+    institution row that was not already there.
 
-    The demo institution is named from the seeded database rather than written
-    down, so this cannot pass by looking for a string the seed stopped using.
-
-    The whole-snapshot comparison after it is the general form, and it is what
-    would catch a refusal that had already written something further down the
-    tree. It uses the same labels the idempotency test does, so a row is compared
-    by its values and by what its keys point at, never by its uuid.
+    **The demo institution stopped being the canary in E0-22, and the first
+    assertion says what is left of it.** This test used to look for an
+    institution *named* the way the seed names its own, because the planted rows
+    hung off an institution of their own and the seed's would have been a second
+    row. `uq_institution_one_row` refuses a second row now (SPEC §8), so the
+    planted institution carries the seed's name and the seed matches it rather
+    than writing one. What can still be asserted is that the run added no
+    institution at all, and the whole-snapshot comparison below carries the rest
+    of the transaction claim — it is the general form, and it is what would catch
+    a refusal that had already written something further down the tree. It uses
+    the same labels the idempotency test does, so a row is compared by its values
+    and by what its keys point at, never by its uuid.
     """
     seeded(seeded_demo)
     planted(collided_seed)
@@ -3189,21 +3224,20 @@ def test_the_refused_run_leaves_the_pre_existing_rows_and_writes_no_demo_institu
     institution_name = require_column(require_table(metadata_tables, "institution"), NAME_COLUMNS)
 
     assert demo_institutions, (
-        "The seeded database names no institution, so 'the refused run wrote no demo institution' "
-        "would be a search for nothing. "
+        "The seeded database names no institution, so 'the refused run added none' would be a "
+        "claim about a seed that writes no institution in the first place. "
         "`test_seeding_a_freshly_migrated_database_completes_without_error` is where that is "
         "asserted."
     )
 
-    left_behind = sorted(
-        demo_institutions
-        & {str(row[institution_name]) for row in rows_of(collided_seed.after, "institution")}
-    )
-    assert not left_behind, (
-        f"The refused run left {left_behind} behind in a database it was supposed not to touch.\n"
+    before = {str(row[institution_name]) for row in rows_of(collided_seed.before, "institution")}
+    after = {str(row[institution_name]) for row in rows_of(collided_seed.after, "institution")}
+    arrived = sorted(after - before)
+    assert not arrived, (
+        f"The refused run left {arrived} behind in a database it was supposed not to touch.\n"
         f"{collided_seed.run.report()}\n"
         "ADR 0064: 'the whole load is one transaction. A run that fails half way leaves nothing, "
-        "so the next run does not build on a partial institution.' A refusal that leaves a demo "
+        "so the next run does not build on a partial institution.' A refusal that leaves an "
         "institution standing is worse than the adoption it prevented — the next run matches its "
         "own half-built rows and the failure becomes invisible."
     )
@@ -3236,7 +3270,7 @@ def test_the_refused_run_leaves_the_pre_existing_rows_and_writes_no_demo_institu
     )
 
 
-def test_a_foreign_institution_the_seed_does_not_collide_with_is_seeded_successfully(
+def test_foreign_rows_the_seed_does_not_collide_with_are_seeded_successfully(
     seeded_demo: Any,
     uncollided_seed: ForeignRowsSeed,
     demo_database: Any,
@@ -3269,7 +3303,7 @@ def test_a_foreign_institution_the_seed_does_not_collide_with_is_seeded_successf
         "above and nothing would say so."
     )
     assert uncollided_seed.run is not None and uncollided_seed.run.succeeded, (
-        "The seed was refused against a database holding a foreign institution whose prefix code "
+        "The seed was refused against a database holding a foreign department whose prefix code "
         f"it does not use (`{UNCLAIMED_PREFIX_CODE}`, held by "
         f"`{uncollided_seed.department}`).\n"
         f"{uncollided_seed.run.report() if uncollided_seed.run else 'no run'}\n"
@@ -3277,4 +3311,151 @@ def test_a_foreign_institution_the_seed_does_not_collide_with_is_seeded_successf
         "work is the ordinary case for `make seed`, and refusing it would make the guard "
         "unusable. This is what keeps the refusal above attributable to the shared code rather "
         "than to the database being non-empty."
+    )
+
+
+# A name for an institution the seed will never write. It has to be something
+# `INSTITUTION_NAME` in `scripts/seed.py` cannot become, and the test asserts the
+# seeded database does not carry it rather than assuming that here.
+FOREIGN_INSTITUTION_NAME = "Another University Entirely"
+
+# The object SPEC §8's single-institution rule is made of (E0-22). Named here so
+# the assertion is about *which* rule refused the run: a seed that failed for any
+# other reason is not this test passing.
+ONE_INSTITUTION = "uq_institution_one_row"
+
+# What `main` exits when it refuses on purpose, and the first line of the
+# traceback it prints when it does not. A refusal and a crash both fail the run,
+# and only these two tell them apart — which is how this test was green against a
+# forty-line stack trace until PR #54's security review measured it.
+REFUSED = 2
+TRACEBACK = "Traceback (most recent call last)"
+
+
+@pytest.fixture(scope="module")
+def seed_beside_another_institution(
+    demo_database: Any,
+    seeded_demo: Any,
+    demo_databases: Any,
+    plant_in: Any,
+    metadata_tables: dict[str, Any],
+) -> ForeignRowsSeed:
+    """A fresh database already holding an institution that is not the seed's, and the run."""
+    institution_name = require_column(require_table(metadata_tables, "institution"), NAME_COLUMNS)
+    demo = demo_databases()
+    plant_in(demo, "institution", None, **{institution_name: FOREIGN_INSTITUTION_NAME})
+
+    with demo.connect() as connection:
+        before = read_rows(connection, metadata_tables)
+    run = demo.run()
+    with demo.connect() as connection:
+        after = read_rows(connection, metadata_tables)
+    return ForeignRowsSeed(demo, None, None, None, before, run, after)
+
+
+def test_a_database_holding_another_institution_refuses_the_seed(
+    seeded_demo: Any,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+    seed_beside_another_institution: ForeignRowsSeed,
+) -> None:
+    """SPEC §8's rule reaches `make seed`, and it is the rule that refuses the run — ticket E0-22.
+
+    `scripts/seed.py`'s own docstring says it will not share a database with a
+    real institution. Until E0-22 that was a claim about its natural keys: the
+    prefix guard (ADR 0064) was the only thing standing between a demo load and
+    somebody's real containment tree, and a real *institution* row was simply
+    written alongside the demo one. SPEC §8 now says a deployment serves exactly
+    one institution, so there is no alongside: the run is refused at the
+    institution, before any key is matched.
+
+    **The refusal has to name `uq_institution_one_row`**, and that is not
+    politeness either. Every other way this run could fail — a missing table, a
+    prefix collision, a bad `ENVIRONMENT` — would satisfy "the seed did not
+    succeed", and the whole point of the rule is that the error arrives at the row
+    that is actually wrong rather than three tables downstream on a prefix code
+    (ADR 0017).
+    """
+    seeded(seeded_demo)
+    _, demo_institutions = seeded_prefixes_and_courses(demo_database, metadata_tables)
+
+    assert FOREIGN_INSTITUTION_NAME not in demo_institutions, (
+        f"The seed now writes an institution called `{FOREIGN_INSTITUTION_NAME}`, which is the "
+        "name this test plants to represent somebody else's. Change "
+        "`FOREIGN_INSTITUTION_NAME`; leaving it makes this test plant the seed's own row and "
+        "assert that the seed collides with itself."
+    )
+
+    run = seed_beside_another_institution.run
+    assert run is not None and not run.succeeded, (
+        "The seed ran to completion against a database that already held an institution it did "
+        f"not write (`{FOREIGN_INSTITUTION_NAME}`).\n"
+        f"{run.report() if run else 'no run'}\n"
+        "SPEC §8: a deployment serves exactly one institution, enforced by a constraint "
+        "permitting at most one `institution` row. A run that completes here has either written "
+        "a second one or adopted somebody else's."
+    )
+    assert run.returncode == REFUSED and TRACEBACK not in said_by(run), (
+        f"The seed did not complete, but it crashed rather than refusing: it exited "
+        f"{run.returncode} and printed a traceback.\n"
+        f"{run.report()}\n"
+        f"Every deliberate refusal in this script exits {REFUSED} with one sentence, because "
+        "`main` catches `SeedError` and nothing else. A constraint refusing the row raises "
+        "`IntegrityError`, which escapes — so the operator who pointed `make seed` at a real "
+        "database meets a stack trace for a condition the script decided about on purpose. "
+        "PR #54's security review measured exactly that (F1), and `seed_containment` checks for "
+        "a standing institution before it writes."
+    )
+    assert ONE_INSTITUTION in said_by(run) or FOREIGN_INSTITUTION_NAME in said_by(run), (
+        f"The seed was refused, but the message names neither `{ONE_INSTITUTION}` nor the "
+        f"institution that is in the way (`{FOREIGN_INSTITUTION_NAME}`).\n"
+        f"{run.report()}\n"
+        "SPEC §8's rule exists so that the error arrives at the institution rather than at a "
+        "prefix code three tables away (ADR 0017). A refusal that names neither is a refusal "
+        "from somewhere else, and the rule under test is not what stopped the run."
+    )
+
+
+def test_the_run_refused_beside_another_institution_writes_nothing(
+    seed_beside_another_institution: ForeignRowsSeed,
+    metadata_tables: dict[str, Any],
+) -> None:
+    """The other half of the refusal, and the one the sibling scenario asserts too.
+
+    ADR 0064: "the whole load is one transaction. A run that fails half way leaves
+    nothing, so the next run does not build on a partial institution." "It did not
+    finish" and "it left nothing" are two claims, and a test making only the first
+    passes over a run that wrote four tables and then died.
+
+    **What this costs and what it is worth, said plainly.** No mutation available
+    today turns it red, and that is a property of where the guard sits rather than
+    of the assertion: `seed_containment` checks for a standing institution before
+    it writes anything at all, so at the moment of the refusal there is nothing to
+    leave behind, and removing the guard moves the failure to the very same row.
+    What it protects against is a *reordering* — a later version of this script
+    that seeds people or platform registrations before it reaches the institution,
+    at which point the refused run has written four tables and only this
+    comparison would say so. It is a tripwire on the load order, and naming it one
+    is more useful than implying it has teeth it does not have today.
+
+    Written as the whole snapshot rather than a row count, and labelled the way
+    the idempotency tests label, so a row is compared by its values and by what
+    its keys point at rather than by a uuid that changes every run.
+    """
+    planted = seed_beside_another_institution
+    assert (
+        planted.run is not None
+    ), "The fixture never ran the seed, so nothing here can mean anything."
+
+    before = labelled(metadata_tables, planted.before)
+    after = labelled(metadata_tables, planted.after)
+    assert sum(counted(planted.before).values()), (
+        "The database held no rows before the run, so this compares two empty databases. The "
+        "planted institution is what should have filled it."
+    )
+    assert before == after, (
+        "The refused run changed a database it was supposed not to touch.\n"
+        f"Row counts before: {counted(planted.before)}\n"
+        f"Row counts after: {counted(planted.after)}\n"
+        f"{planted.run.report()}"
     )

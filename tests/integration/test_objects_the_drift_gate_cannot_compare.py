@@ -58,8 +58,13 @@ than it is (`docs/MISTAKES.md` entry 14):
     there is nothing here to compare. E0-11's climbing rule is a trigger and is
     asserted behaviourally in
     `test_the_upgrade_refuses_a_stored_edge_that_does_not_climb.py`.
-  - **Indexes.** `alembic check` does compare them, which is why they are absent
-    here rather than forgotten.
+  - **Indexes, including one on an expression.** `alembic check` does compare
+    them, which is why they are absent here rather than forgotten. The
+    expression half is the surprising one, since a generated column's expression
+    and a check constraint's expression are both outside the comparison: E0-22
+    measured `uq_institution_one_row`, a unique index on `(true)`, against the
+    drop, against `unique` removed and against the expression changed, and the
+    gate caught all three (ADR 0072).
   - **Roles, grants, views and function owners** — E0-33 item 3, which extends
     `test_identity_grants.py` (the grant and role half) and
     `test_identity_separated_views.py` (the view set), because both already hold

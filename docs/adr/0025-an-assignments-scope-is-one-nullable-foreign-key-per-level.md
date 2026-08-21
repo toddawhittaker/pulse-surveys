@@ -81,9 +81,11 @@ The cleanest answer to "what does a singular `scope_node_id` point at", and it
 would make this column a single foreign key. Rejected for scope and for timing:
 it is a redesign of E0-05's shipped containment schema, it needs a decision about
 whether `org_node` owns identity for the six tables or merely mirrors them, and
-E0-22 already has an open spec question about how many institutions a deployment
-holds. This ticket cannot settle that, and a half-built node table would be
-worse than either shape. It stays available — collapsing five columns into one is
+E0-22 had an open spec question at the time about how many institutions a
+deployment holds (answered on 2026-08-18: exactly one, SPEC §8, enforced since
+2026-08-20 by [ADR 0072](0072-one-institution-is-a-unique-index-on-a-constant.md)).
+This ticket could not settle that, and a half-built node table would be worse
+than either shape. It stays available — collapsing five columns into one is
 a later migration, and the grain rule survives it as a check over the node's
 kind.
 

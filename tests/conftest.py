@@ -3117,14 +3117,58 @@ def foreign_key_columns(table: Any, target: str) -> list[str]:
     )
 
 
+# The tables the schema permits at most one row in. `institution` is the only one
+# and SPEC §8 is why: a deployment serves one institution, held by
+# `uq_institution_one_row` since E0-22. It matters here because every containment
+# chain these fixtures build ends at an institution, so a test that builds two
+# chains in one transaction used to write two institution rows without meaning
+# to — and now the second insert is refused, in a test about something else
+# entirely. `chain_row` below reuses the row that is already there.
+#
+# **Hand-maintained, and nothing checks it against the schema** — PR #54's
+# security review raised that (F4) and it is deliberately left as it is while the
+# list has one correct entry. A second name added here makes every chain share a
+# row at that level, which is the vacuity `chain_row`'s own docstring warns
+# about, and the four modules below carrying their own copy of `seed_row` do not
+# read this list at all: they spell `"institution"` inline. **Done when** a
+# second table needs single-row treatment: derive this list from the single-row
+# constraints the schema carries, or assert it against them, and make the four
+# copies read it rather than a literal.
+SINGLE_ROW_TABLES = ("institution",)
+
+
+def chain_row(session: Any, tables: dict[str, Any], name: str, chain: dict[str, Any]) -> Any:
+    """The row a chain needs at one level: the one already there, or a new one.
+
+    "Already there" is asked only of `SINGLE_ROW_TABLES`. Everywhere else a new
+    row is what a fresh chain means — two chains are two departments, and a
+    helper that quietly shared one would make a test about two departments a test
+    about one.
+    """
+    if name in SINGLE_ROW_TABLES:
+        table = require_table(tables, name)
+        existing = session.execute(table.select().limit(1)).mappings().one_or_none()
+        if existing is not None:
+            return existing
+    return seed_row(session, tables, name, chain)
+
+
 def seed_row(
     session: Any,
     tables: dict[str, Any],
     name: str,
     chain: dict[str, Any] | None = None,
+    /,
     **overrides: Any,
 ) -> Any:
     """Insert one row into `name`, building whatever ancestors it requires.
+
+    **The four parameters are positional-only**, and the `/` is load-bearing:
+    `name` is also the name of a column on four of this schema's tables, so
+    without it `seed_row(session, tables, "institution", name="…")` is a
+    `TypeError` about two values for one argument rather than a row with the
+    name the caller asked for. Every call site already passes these four
+    positionally.
 
     `chain` is the set of ancestor rows built so far, keyed by table name, so a
     caller can put two rows under one parent by passing the same chain and two
@@ -3152,7 +3196,7 @@ def seed_row(
             ordered = sorted(column.foreign_keys, key=lambda fk: str(fk.target_fullname))
             target = ordered[0].column
             if target.table.name not in chain:
-                chain[target.table.name] = seed_row(session, tables, target.table.name, chain)
+                chain[target.table.name] = chain_row(session, tables, target.table.name, chain)
             values[column.name] = chain[target.table.name][target.name]
             continue
         if column.nullable:
@@ -3411,7 +3455,7 @@ class SupervisionGraph:
         """
         table = require_table(self.tables, kind)
         if kind not in self._chain:
-            seed_row(self.session, self.tables, kind, self._chain)
+            self._chain[kind] = chain_row(self.session, self.tables, kind, self._chain)
         return self._chain[kind][single_primary_key(table)]
 
     def new_branch(self, *keep: str) -> dict[str, Any]:
@@ -3427,12 +3471,15 @@ class SupervisionGraph:
         `term` is always kept, since a second section in a second term would be
         a different comparison entirely.
 
-        **An institution is never duplicated**, and that is a deliberate refusal
-        rather than an omission: whether a deployment holds one institution or
-        many is an open spec question ([E0-22](../docs/tickets/e0/E0-22-spec-questions-from-e0-05.md)),
-        so a fixture that wrote a second one would answer it, and every test
-        built on this would fail inside its own seeding the day the answer is
-        "one". Institution-scoped roles therefore share the one node.
+        **An institution is never duplicated**, and since E0-22 that is the
+        schema's rule rather than this fixture's caution. It used to read as a
+        refusal to answer an open spec question — whether a deployment holds one
+        institution or many — and to predict that every test built on this would
+        fail inside its own seeding the day the answer was "one". The answer is
+        "one" (SPEC §8), `uq_institution_one_row` holds it, and the prediction was
+        right: `chain_row` is what keeps those tests seeding, by handing back the
+        institution that is already there. Institution-scoped roles share the one
+        node.
         """
         if kind not in CONTAINMENT_ORDER:
             pytest.fail(f"{kind!r} is not one of SPEC §2.1's containment levels.")
@@ -5685,12 +5732,16 @@ def plant_in(metadata_tables: dict[str, Any]) -> Callable[..., Any]:
     Nothing here asserts. A row the schema refuses raises from the insert, and
     that is a defect in the plant rather than in the script under test; the tests
     that use this say what they were planting in their own messages.
+
+    Positional-only for the same reason `seed_row` is: an override called `name`
+    is a column on four tables here and would otherwise collide with the table
+    argument.
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
     def plant(
-        demo: DemoSeed, name: str, chain: dict[str, Any] | None = None, **overrides: Any
+        demo: DemoSeed, name: str, chain: dict[str, Any] | None = None, /, **overrides: Any
     ) -> Any:
         engine = create_engine(demo.database.superuser_url)
         try:

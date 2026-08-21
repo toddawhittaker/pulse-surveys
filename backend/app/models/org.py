@@ -48,6 +48,7 @@ from sqlalchemy import (
     Date,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -169,14 +170,47 @@ END
 
 
 class Institution(Base):
-    """The top of the containment hierarchy (SPEC §2.1).
+    """The top of the containment hierarchy, and there is at most one of it (SPEC §2.1, §8).
 
     The academic calendar and the timezone are institution *configuration* and
     live in `app.config.Settings` (`INSTITUTION_TIMEZONE`), not here — this row
     is the node the hierarchy hangs off.
+
+    **A deployment serves exactly one institution, and the database holds as much
+    of that as a database can** (SPEC §8). What the index below enforces is *at
+    most* one: zero rows is permitted and nothing here requires a row to exist, so
+    "exactly one" is a property of a seeded deployment rather than of the schema.
+    That is the whole gap, and it is the harmless half — a deployment with no
+    institution has no containment tree either. It is what makes the rest of the
+    module coherent: `prefix.code` is unique across the whole table while
+    `college.name` is unique per institution and `department.name` per college,
+    and with one institution those are the same rule instead of two that
+    disagree (ADR 0017). Without the rule, a second institution's `BIOL` is
+    refused by `uq_prefix_code` — an error naming a constraint, no institution,
+    and the wrong row.
+
+    **Why a unique index on a constant rather than a check constraint.** A check
+    constraint sees one row at a time and cannot count the table, so "at most one
+    row" is not expressible as one. A unique index on an expression that is the
+    same value for every row is: the second row collides with the first, and the
+    error names this index. The measured alternative was a `singleton boolean`
+    column carrying `UNIQUE` and `CHECK (singleton)`, which spells the same trick
+    in three schema objects and puts a column with no meaning in the domain table;
+    it was rejected for that. ADR 0072 records the choice.
+
+    **`alembic check` does compare this index**, in both directions and including
+    its expression — measured on the pinned Alembic before the shape was chosen,
+    against the drop, against `unique` removed, and against the expression
+    changed. That is not what a reader of E0-33 would expect, since a generated
+    column's expression and a check constraint's expression are both outside the
+    comparison, so it is written down here: the drift gate covers this object and
+    no catalog assertion has to.
     """
 
     __tablename__ = "institution"
+    # Named explicitly: the `ix` template in `app.models.base` interpolates a
+    # column name, and a textual expression has none to give it.
+    __table_args__ = (Index("uq_institution_one_row", text("(true)"), unique=True),)
 
     id: Mapped[UUID] = mapped_column(
         Uuid, primary_key=True, server_default=text("gen_random_uuid()")

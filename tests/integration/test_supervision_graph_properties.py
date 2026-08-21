@@ -45,8 +45,8 @@ runs (`docs/MISTAKES.md` entry 15):
     schema no longer admits, and forests wider than ten. The width bound is about
     how long a database-backed property takes, not about what is plausible.
   - the institution-scoped top of the chain, in the **forest** property only.
-    `fresh_scope` deliberately never duplicates the institution — whether a
-    deployment holds more than one is an open spec question (E0-22) — so two
+    `fresh_scope` never duplicates the institution — a deployment holds exactly
+    one (SPEC §8, held by `uq_institution_one_row` since E0-22) — so two
     `VP_ACADEMICS` assignments in one generated forest would share one scope node,
     and a uniqueness rule no ticket mentions could then refuse a row and be read as
     the rank or the cycle guard firing (`docs/MISTAKES.md` entry 13). The forest
@@ -59,7 +59,7 @@ runs (`docs/MISTAKES.md` entry 15):
     failure names the row that was refused rather than any guard, and the answer
     would be to draw the cycle from the five lower ranks and leave length six to
     `test_a_six_assignment_cycle_is_refused`, which writes one VP per test.
-  - one institution, for the same open question.
+  - one institution, for the same reason.
   - the *first* edge of a graph is always written by INSERT and every later one by
     UPDATE, which is deliberate: re-pointing an existing assignment is what an
     admin does in the People editor (§6.3), and it is the write that closes a

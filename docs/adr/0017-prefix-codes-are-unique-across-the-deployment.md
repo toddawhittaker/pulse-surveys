@@ -1,6 +1,6 @@
 # 0017 — Prefix codes are unique across the deployment, not per institution
 
-**Status:** Accepted — amended 2026-08-18
+**Status:** Accepted — amended 2026-08-18, and again 2026-08-20
 **Date:** 2026-08-14
 **Tickets:** E0-05, E0-22
 
@@ -9,9 +9,14 @@
 > and requires a constraint permitting at most one `institution` row. The
 > decision below is unchanged and its reasoning still holds — what changes
 > is that the alternative rejected as "wider than E0-05" was the right one
-> and has now been taken at the level that could take it. The constraint
-> itself is not built yet; [E0-22](../tickets/e0/E0-22-spec-questions-from-e0-05.md)
-> owns it.
+> and has now been taken at the level that could take it.
+>
+> **Amendment, 2026-08-20.** The constraint is built. It is a unique index on
+> a constant expression, `uq_institution_one_row`, and
+> [ADR 0072](0072-one-institution-is-a-unique-index-on-a-constant.md) records
+> why that shape and what `alembic check` does with it. The assumption below
+> is no longer latent, and the consequence that depended on it is retired
+> where it stands.
 
 ## Context
 
@@ -33,11 +38,12 @@ and two independent reviewers read the original docstring as claiming it was.
 deployment, owned by one department.
 
 The docstring says so plainly and names the assumption it rests on: a deployment
-serves one institution. That assumption is **latent, not enforced**, and this
-record does not pretend otherwise. `app.config.Settings` carrying a single
-`INSTITUTION_TIMEZONE` is consistent with it and is not evidence for it — a
+serves one institution. That assumption was **latent, not enforced** when this
+was written, and this record did not pretend otherwise; the 2026-08-20 amendment
+above is where it stopped being latent. `app.config.Settings` carrying a single
+`INSTITUTION_TIMEZONE` was consistent with it and was never evidence for it — a
 configuration default is not a statement that only one `institution` row may
-exist.
+exist, which is why it took a constraint to make one.
 
 ## Alternatives rejected
 
@@ -59,11 +65,13 @@ than E0-05: whether the product is single-tenant by construction is a statement
 about what Pulse *is*, the spec did not make it, and a schema ticket should not
 make it by side effect.
 
-**It has since been taken.** SPEC §8 says a deployment serves exactly one
-institution and requires the constraint, decided 2026-08-18. So this is no
-longer an alternative rejected — it is the answer, arrived at from the document
-that governs rather than from a schema ticket, which is the process working
-rather than the record being wrong.
+**It has since been taken, and built.** SPEC §8 says a deployment serves exactly
+one institution and requires the constraint, decided 2026-08-18; E0-22 built it
+as `uq_institution_one_row` on 2026-08-20
+([ADR 0072](0072-one-institution-is-a-unique-index-on-a-constant.md)). So this is
+no longer an alternative rejected — it is the answer, arrived at from the
+document that governs rather than from a schema ticket, which is the process
+working rather than the record being wrong.
 
 **Scope to the institution — `UniqueConstraint("institution_id", "code")`.**
 The literal reading of the original docstring, and the correct rule if a
@@ -76,18 +84,17 @@ a case no deployment has would buy a hypothetical at the cost of the invariant.
 
 ## Consequences
 
-**A second institution row breaks prefix insertion, and does so unhelpfully —
-until the constraint lands.** The schema permits more than one `institution`
-today, so nothing stops a second one being seeded, and its `BIOL` is refused by
-`uq_prefix_code` with an error naming a constraint and no institution. That was
-the accepted cost of leaving the assumption latent. **The amendment above ends
-the acceptance**: once E0-22's constraint lands, the second `institution` row is
-refused at the row that is actually wrong and this consequence is retired. Until
-it lands, the consequence stands exactly as written.
+**A second institution row broke prefix insertion, and did so unhelpfully.**
+The schema permitted more than one `institution`, so nothing stopped a second
+one being seeded, and its `BIOL` was refused by `uq_prefix_code` with an error
+naming a constraint and no institution. That was the accepted cost of leaving
+the assumption latent. **This consequence is retired as of 2026-08-20**: the
+second `institution` row is now refused at the row that is actually wrong, by
+`uq_institution_one_row`, and nothing reaches a prefix code to be confused by.
 
 Multi-institution remains an unsupported configuration, and the day it becomes
-one, this constraint, the new single-row constraint and `INSTITUTION_TIMEZONE`
-all have to move — which is the honest signal that the change is larger than a
+one, this constraint, `uq_institution_one_row` and `INSTITUTION_TIMEZONE` all
+have to move — which is the honest signal that the change is larger than a
 schema edit.
 
 **The asymmetry with `college.name` and `department.name` is deliberate.** A
