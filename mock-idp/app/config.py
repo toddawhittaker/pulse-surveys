@@ -185,9 +185,13 @@ class ProviderSettings:
         # `state` to this URI as a query, and a browser given
         # `…/cb#frag?code=…` keeps everything after the `#` client-side, so the
         # code never reaches the tool and the failure reads as a provider that
-        # issued nothing. E0-18 is expected to repoint this variable at a
-        # published host address, which is exactly when a hand-edited value picks
-        # a fragment up.
+        # issued nothing. The value this variable takes is settled and it is two
+        # values: the base Compose file keeps the container-facing default
+        # `http://api:8000/auth/oidc/callback`, and E0-18 repoints it in
+        # `docker-compose.override.yml` — dev and CI wiring, absent from
+        # deployments — to `http://localhost:8000/auth/oidc/callback`, because
+        # E0-18 drives the browser from the host. Two hand-written absolute URLs
+        # in two files is exactly the edit that picks a fragment up.
         # `"#" in ...` rather than `urlsplit(...).fragment`, and the difference is
         # a measured hole rather than a style: a URI ending in a bare `#` has an
         # **empty** fragment, which is falsy, so the truthiness test registered it.
