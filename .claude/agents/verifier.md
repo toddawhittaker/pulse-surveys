@@ -36,6 +36,14 @@ FAILURE (assertion) from an ERROR (import, fixture, exception) in every red
 you report — they mean different things and the orchestrator triages them
 differently.
 
+**Formatting is part of green.** Run `.venv/bin/ruff format --check` over the
+files under review (or the whole tree) in every green pass and report it as its
+own line. A format-only failure reddens CI's format gate exactly like a broken
+test, and it is cheapest to catch before anything is committed — the test author
+has no shell and cannot format what it writes, so an unformatted test file
+sails to the tests-only commit and reddens CI on the branch. `ruff check`
+(lint) and `ruff format --check` (formatting) are different gates; run both.
+
 ## Mutation batteries
 
 The discipline, non-negotiable, each row:

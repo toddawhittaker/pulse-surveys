@@ -59,10 +59,13 @@ of it:
   interface, that is a ticket defect — it reports it; you stop and fix the
   ticket.
 
-Run `ruff format` and `ruff check` on its output yourself (it has no shell).
-Have `verifier` run the suite: every red must be behavioral (assertion), never
-an import or fixture error, and the red/green split must match the manifest.
-Divergence goes back to the author. Then commit the tests alone, subject
+Run `ruff format` and `ruff check` on its output yourself (it has no shell — it
+cannot format what it writes, and an unformatted test file reddens CI's `ruff
+format --check` gate). Have `verifier` run the suite **and `ruff format
+--check`**: every red must be behavioral (assertion), never an import or fixture
+error, the red/green split must match the manifest, and the tree must be
+format-clean. Divergence goes back to the author; a format miss you fix yourself
+before committing. Then commit the tests alone, subject
 `e<N>/<slug>: <what>, tests first and red`.
 
 ## 3. Implementer (green)
