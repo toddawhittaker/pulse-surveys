@@ -523,8 +523,10 @@ record nor the name. That was a real gap until E0-26 — the rows are streamed
 before the caller decides, so a rollback used to keep the name and discard the
 audit row — and
 [ADR 0071](docs/adr/0071-the-reveal-answers-only-a-committed-record.md) records
-how it was closed and what the fix costs: the log now over-records, so a row
-means an access was *authorised*. Only the `api` process is given this
+how it was closed and what the fix costs in both directions: a row means an
+access was *authorised* rather than one that certainly happened, and — the half
+that matters more — nothing limits a committed record to a single spend, so the
+log under-records too. Closing that is E10's. Only the `api` process is given this
 credential, which is a separate control and stays.
 
 A fourth role, `pulse_reveal_definer`, appears in `\du` and in none of this

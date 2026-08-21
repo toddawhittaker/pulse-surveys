@@ -41,11 +41,17 @@
 -- opens the old way is not closed.
 --
 -- **What it costs, stated because a control whose price is unstated gets read as
--- free**: the log now over-records rather than under-records. A caller that
--- commits a record and then never spends it leaves a row saying an access was
--- authorised, and §6.2's periodic review reads that as an access. That is the
--- safe direction for a safety log and it is a real change in what a row means.
--- ADR 0071 argues it.
+-- free**: the log errs in **both** directions. It over-records, because a caller
+-- that commits a record and then never spends it leaves a row saying an access
+-- was authorised, and §6.2's periodic review reads that as an access. It also
+-- under-records, which is the direction §4 forbids: nothing below limits a
+-- committed record to a single spend, so one row can stand behind any number of
+-- reads of the name it points at. Measured during review of PR #53 — one record
+-- spent five times returned the name five times and left audit_log at one row.
+-- The over-recording is the safe direction and was chosen; the under-recording
+-- is a hole this shape opened, since E0-10's single function wrote a row on
+-- every call. ADR 0071 states both, the epic README carries the second to E10
+-- with a "done when", and a draft §4 sentence awaits Todd.
 --
 -- **This is deliberately the one hole in the wall**, so every line of both
 -- functions is a control:

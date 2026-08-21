@@ -114,7 +114,8 @@ record of a reveal that failed.
 > code path can skip. Recording first, and refusing to read until the record is
 > durable, is the opposite: the ordering is enforced by the database, and a code
 > path that skips the record gets no name. What is given up is stated in 0071 —
-> the log now over-records rather than under-records.
+> the log over-records an authorisation that was never spent, and under-records
+> because nothing limits a committed record to a single use.
 
 ## Consequences
 

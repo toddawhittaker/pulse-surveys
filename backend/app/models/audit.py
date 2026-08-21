@@ -32,11 +32,14 @@ has committed. So the ordering is enforced by the database rather than by a
 convention a code path can skip, and a caller that discards its transaction ends
 up with neither the row nor the name.
 
-**What that changes about what a row means.** The log now over-records rather
-than under-records: a committed row is a reveal that was *authorised*, not
-necessarily one whose name was read, because the caller may commit the record and
-never spend it. §6.2's periodic review outside the Care office should read a row
-that way. ADR 0071 states the cost.
+**What that changes about what a row means.** A committed row is a reveal that
+was *authorised*, not necessarily one whose name was read, because the caller may
+commit the record and never spend it. The log errs in **both** directions, and
+the second is the one §4 forbids: nothing limits a committed record to a single
+spend, so one row can stand behind any number of reads of the name it points at.
+§6.2's periodic review outside the Care office counts rows as accesses and will
+therefore count low. ADR 0071 states both directions; the re-spend half is
+carried to E10.
 
 **What is deliberately absent.** §6.2's conflict-of-interest flag has no column
 yet. E0-10's scope leaves the choice between "leave the column or leave room for

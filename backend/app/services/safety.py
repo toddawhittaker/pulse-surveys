@@ -230,11 +230,13 @@ def reveal_identity(
     after the commit — the reveal raising, the connection dropping, this process
     being killed — leaves the record standing and hands back nothing.
 
-    That is the safe direction and it is not free: the log now over-records
-    rather than under-records. A record committed here for a reveal that then
-    fails is a row saying an access was authorised when no name was read, and
-    §6.2's periodic review outside the Care office reads it as an access.
-    ADR 0071 argues the trade.
+    That is the safe direction and it is not free: a record committed here for
+    a reveal that then fails is a row saying an access was authorised when no
+    name was read, and §6.2's periodic review outside the Care office reads it as
+    an access. The log errs the other way too, which is the direction §4 forbids:
+    nothing limits a committed record to a single spend, so one row can stand
+    behind several reads of the same subject's name. ADR 0071 argues both, and
+    the re-spend half is E10's.
 
     `case_id` is optional and defaults to nothing because there is no case model
     until E10; §4 asks for "actor, timestamp, and case" and the column is there
