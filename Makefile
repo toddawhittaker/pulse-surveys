@@ -155,13 +155,15 @@ test: invariants ## pytest unit + integration with coverage
 	@pytest tests/unit tests/integration --cov=backend/app --cov-report=term-missing
 
 .PHONY: e2e
-e2e: ## Playwright against the Compose stack
+# Enforcing since E0-18: the specs exist, so this runs the suite unconditionally
+# — an empty tests/e2e fails loudly rather than skipping. It assumes the Compose
+# stack is already up (`make up`) and the database migrated and seeded
+# (`make migrate seed`), and that `npm ci && npx playwright install chromium` has
+# put the browser on disk; it does not bring Docker up itself. README.md's
+# "Running the e2e suite locally" walks the full sequence.
+e2e: ## Playwright against the Compose stack (stack must be up and seeded)
 	$(call banner,Playwright e2e)
-	@if [ -n "$$(find tests/e2e -name '*.spec.ts' -print -quit 2>/dev/null)" ]; then \
-		npx playwright test; \
-	else \
-		$(call skip,no tests/e2e specs yet); \
-	fi
+	@npx playwright test
 
 .PHONY: evals
 evals: ## AI eval runner with per-task precision/recall floors
@@ -267,7 +269,8 @@ licenses: ## Fail on dependencies incompatible with MIT distribution
 	@pip-licenses --format=json --with-urls > reports/py-licenses.json
 	@args="--python-json reports/py-licenses.json"; \
 	if [ -f frontend/package.json ]; then \
-		(cd frontend && npx --yes license-checker-rseidelsohn@4.3.0 --json > ../reports/npm-licenses.json); \
+		npm ci; \
+		(cd frontend && npx license-checker-rseidelsohn --json > ../reports/npm-licenses.json); \
 		args="$$args --npm-json reports/npm-licenses.json"; \
 	fi; \
 	$(PYTHON) scripts/ci/check_licenses.py $$args
