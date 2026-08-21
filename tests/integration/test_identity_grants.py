@@ -2639,6 +2639,23 @@ MEMBER_OF_ROLES = """
 #     application may reach — it is the only thing in this suite asserting that a
 #     classification verdict cannot be rewritten or erased on the connection the
 #     application runs on.
+#   - `pulse_app` **reads** `lti_platform` and `lti_deployment`, and holds nothing
+#     else on either. E0-18's launch door resolves every launch through them: the
+#     issuer names the registration, the registered `client_id` is what an
+#     `id_token`'s `aud` is compared against, the key set URL is where the
+#     verifying key comes from, and `lti_deployment` is what the launch's
+#     `deployment_id` claim is matched against. Without `SELECT`, every launch is
+#     refused by Postgres with 42501 rather than by any check the door makes.
+#     Two things make this a narrow widening rather than a convenience grant.
+#     **These are configuration tables** — an issuer, a client id, a key set URL,
+#     a deployment id — carrying no personal data, so nothing §4.1 governs is
+#     reachable through them. And **`SELECT` alone**: the door registers nothing
+#     and records no fetch, so `INSERT` and `UPDATE` stay withheld and a
+#     registration remains something a deployment writes rather than something a
+#     launch can create for itself.
+#     Recorded here because widening this constant is exactly the conversation
+#     this equality exists to force — a grant file may not justify its own grant.
+#     Decided by the orchestrator on 2026-08-21, on E0-18 PR 1.
 #
 # **Hand-written and derived from the record, not read out of the grant files**
 # (`docs/MISTAKES.md` entry 19), which is the same decision
@@ -2663,6 +2680,8 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (CARE_ROLE, "role_assignment", "SELECT"),
         (APPLICATION_ROLE, "classification", "SELECT"),
         (APPLICATION_ROLE, "classification", "INSERT"),
+        (APPLICATION_ROLE, "lti_platform", "SELECT"),
+        (APPLICATION_ROLE, "lti_deployment", "SELECT"),
     }
 )
 

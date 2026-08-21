@@ -36,6 +36,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import pytest
+from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
@@ -57,6 +58,11 @@ CONFIGURED_AUTHORIZATION_ENDPOINT = "http://identity-provider.invalid/e0-18-conf
 # An issuer the tool is told to expect from a provider that will state a different
 # one. Used for the `iss` refusal, and for nothing else.
 UNTRUSTED_ISSUER = "http://an-issuer-this-tool-does-not-trust.invalid"
+
+# A client the provider registers nobody under. The tool is configured as this
+# client for the `aud` refusal, so the correctly signed token it receives is
+# addressed to somebody else. Used there and nowhere else.
+UNREGISTERED_CLIENT_ID = "a-client-this-provider-issues-no-token-to"
 
 # The roles §2 gives the web door, and the view E0-18 lands each on: "leadership
 # roles → leadership empty view, `CARE` → Care empty view, `ADMIN` → admin empty
@@ -90,6 +96,39 @@ CERTAINLY_STILL_VALID_SECONDS = 30
 # What RFC 7636 requires of a public client, and what E0-16's provider refuses
 # anything else for.
 REQUIRED_CHALLENGE_METHOD = "S256"
+
+# The capability table. E0-09 criterion 10: "No LTI claim, no OIDC claim, and no
+# LMS role may ever produce a `CARE` assignment." A row here is what *holding* a
+# role is in this system — E0-11 resolves every actor's roles out of it and
+# nowhere else — so this is the table the claim must not reach.
+ASSIGNMENT_TABLE = "role_assignment"
+
+# The two tables a door would write if it provisioned the person it just
+# authenticated. E0-18's boundary section gives provisioning to E1 ("E0 does not
+# build… any `user` row for a mock subject"), so today the honest count is
+# unchanged; when E1 builds it, this half of the assertion moves in E1's own pull
+# request, deliberately and with the reason written down.
+PROVISIONING_TABLES = ("user", "person")
+
+# A table the migration itself fills, used as the control on the counter below.
+# Without it "nothing was written" and "this connection is reading an empty
+# database, or a different one" are the same observation (`docs/MISTAKES.md`
+# entry 3).
+STAMPED_TABLE = "alembic_version"
+
+
+def committed_row_count(engine: Any, table: str) -> int:
+    """How many rows `table` holds right now, read on a connection of its own.
+
+    A connection per call on purpose. The tool opens its own connection out of
+    `DATABASE_URL` and commits on it, and a reader that held one transaction open
+    across the whole flow would answer out of the snapshot it started with — so it
+    would report "unchanged" whatever the door did, which is the shape of a test
+    that passes for a reason unrelated to what it asserts.
+    """
+    query = text(f'SELECT count(*) FROM public."{table}"')  # noqa: S608
+    with engine.connect() as connection:
+        return int(connection.execute(query).scalar_one())
 
 
 def redirect_target(response: Any, purpose: str) -> str:
@@ -552,6 +591,83 @@ def test_the_care_view_names_nobody_but_the_person_signed_in(
     )
 
 
+@pytest.mark.invariant
+def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
+    tool: Any,
+    door_contract: Any,
+    provider: Any,
+    migrated_engine: Any,
+    committed_rows: Any,
+) -> None:
+    """The claim produced a page, never a capability. E0-09 criterion 10, behaviourally.
+
+    **Dies if the callback writes an assignment, or provisions a person, from the
+    claim.** This is the other half of the exception
+    `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` grants to
+    `backend/app/services/landing.py`. That exception rests on one factual claim —
+    the landing seam chooses a screen and writes nothing — and an exception that
+    rests on a sentence in a comment is an exception that stops being true without
+    anyone noticing. So the sentence is asserted here, against the whole flow, as
+    the Care person: authorization request, login form, code, server-side
+    exchange, landing page, and not one row anywhere.
+
+    The Care half is the one that must never move. E0-09: "No LTI claim, no OIDC
+    claim, and no LMS role may ever produce a `CARE` assignment… a claim-to-Care
+    mapping would let an LMS administrator grant themselves identity access."
+    E0-11 resolves what an actor may do out of `role_assignment` and out of
+    nothing else, so as long as the claim reaches no row in that table, a forged
+    or administrator-granted `CARE` claim buys an empty page.
+
+    The provisioning half moves once, deliberately: E0-18's boundary gives E1 the
+    `user` row and the dual-door identity merge, and when E1 builds them this
+    assertion changes in E1's own pull request with the reason written down. What
+    it must not do is start passing quietly because a door began provisioning
+    early.
+
+    Two guards keep this from passing on nothing having happened: the flow has to
+    land on the Care view, so a 4xx or a door that was never reached fails rather
+    than passes; and the counter is shown reading a table the migration filled, so
+    a reader pointed at an empty or unmigrated database says so instead of
+    reporting a clean flow. `committed_rows` is taken for its teardown alone — it
+    removes whatever appeared during the test, so a door that does write leaves a
+    failure here rather than a row for somebody else's non-vacuity guard to trip
+    over three tickets from now.
+    """
+    stamped = committed_row_count(migrated_engine, STAMPED_TABLE)
+    assert stamped >= 1, (
+        f"`public.{STAMPED_TABLE}` holds {stamped} rows, so this counter is reading a database "
+        "nothing has migrated — and it would report every table below as empty and unchanged no "
+        "matter what the door wrote. The tool and this connection are both configured from "
+        "`migrated_database`."
+    )
+    counted = (ASSIGNMENT_TABLE, *PROVISIONING_TABLES)
+    before = {name: committed_row_count(migrated_engine, name) for name in counted}
+
+    care = person_holding(provider, "CARE")
+    response = logged_in(tool, door_contract, provider, care)
+    lands_on(response, door_contract, CARE_VIEW)
+
+    after = {name: committed_row_count(migrated_engine, name) for name in counted}
+
+    assert after[ASSIGNMENT_TABLE] == before[ASSIGNMENT_TABLE], (
+        f"A web login stating `CARE` took `public.{ASSIGNMENT_TABLE}` from "
+        f"{before[ASSIGNMENT_TABLE]} rows to {after[ASSIGNMENT_TABLE]}. A claim has produced an "
+        "assignment, which is precisely what E0-09 criterion 10 forbids: the person who "
+        "administers the identity provider controls what the claim says, and a row in this table "
+        "is what the reveal in §6.2 is gated on. The landing seam may choose a screen from a "
+        "claim; nothing may grant from one."
+    )
+    grew = sorted(name for name in PROVISIONING_TABLES if after[name] != before[name])
+    assert not grew, (
+        f"The web login wrote to {grew} — {[(name, before[name], after[name]) for name in grew]}. "
+        "E0-18's boundary section gives provisioning and the dual-door identity merge to E1: 'E0 "
+        "does not build any database identity resolution on either door, any `user` row for a mock "
+        "subject.' A door that provisions from a claim has decided, ahead of E1 and without the "
+        "merge, that this subject is a new human. If E1 is the change that provoked this, move "
+        "this assertion in E1's pull request and say what the door now writes."
+    )
+
+
 # ---------------------------------------------------------------------------
 # `GET /auth/oidc/callback` — one refusal per check.
 # ---------------------------------------------------------------------------
@@ -647,6 +763,81 @@ def test_a_session_from_an_issuer_the_tool_does_not_trust_is_refused(
     response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
 
     refused(response, door_contract, "a session stating an issuer the tool does not trust")
+
+
+def test_a_session_whose_audience_is_not_this_tools_client_is_refused(
+    open_web_door: Any,
+    door_contract: Any,
+    provider: Any,
+    token_endpoint_path: str,
+    claims_in_token: Any,
+) -> None:
+    """Criterion: wrong `aud`. **Dies if the audience is never compared to the client id.**
+
+    OIDC Core 1.0 §3.1.3.7 requires it, and without it a token minted for any
+    other client of the same provider is a session here — which is the whole point
+    of an audience: the provider says who a token is *for*, and a client that does
+    not read that accepts tokens addressed to somebody else.
+
+    **Posed without breaking the signature**, which is what makes the 4xx mean
+    `aud` rather than arithmetic. The tool is configured as a client the provider
+    registers nobody under, and the two places that would otherwise refuse the
+    flow before the audience is ever read are carried by the real client id
+    instead: the authorization request the browser delivers, and the code exchange
+    the tool makes server-side, which the seam re-poses through the provider's own
+    token endpoint. So the `id_token` that arrives is genuinely signed, genuinely
+    fresh, states the trusted issuer and echoes the tool's own nonce — and names an
+    audience this tool is not.
+
+    The premise is asserted rather than assumed: the token's `aud` is read back and
+    required to name the registered client and not the tool's own. Without that,
+    this test would pass just as well against a flow that failed at the exchange
+    for a reason nobody looked at (`docs/MISTAKES.md` entry 3).
+    """
+    registered = provider.registration()["client_id"]
+    received: dict[str, Any] = {}
+
+    def around(request: Any, deliver: Any) -> Any:
+        if urlsplit(str(request.url)).path != token_endpoint_path:
+            return deliver()
+        fields = [
+            (name, value)
+            for name, value in parse_qsl(request.content.decode("utf-8"))
+            if name != "client_id"
+        ]
+        answered = provider.redeem_from([*fields, ("client_id", registered)])
+        body = dict(provider.body_of(answered))
+        assert answered.status_code == 200 and body.get("id_token"), (
+            f"Redeeming the tool's own code as the registered client answered "
+            f"{answered.status_code} with {sorted(body)}, so no token was issued and the refusal "
+            "below would be a flow that never completed rather than an audience the tool rejected. "
+            f"The tool posted {sorted(name for name, _ in fields)} to the token endpoint."
+        )
+        received["claims"] = claims_in_token(str(body["id_token"]))
+        return httpx.Response(answered.status_code, json=body, request=request)
+
+    tool = open_web_door(around=around, oidc_client_id=UNREGISTERED_CLIENT_ID)
+
+    response = logged_in(
+        tool, door_contract, provider, person_holding(provider, "DEAN"), client_id=registered
+    )
+
+    claims = received.get("claims")
+    assert claims, (
+        "The tool never redeemed its code at the token endpoint, so no `id_token` reached it and "
+        "whatever it answered was decided before any audience was read. This test can only say "
+        "something about `aud` if the token arrives."
+    )
+    audience = claims.get("aud")
+    named = audience if isinstance(audience, list) else [audience]
+    assert registered in named and UNREGISTERED_CLIENT_ID not in named, (
+        f"The token that reached the tool names audience {audience!r}. This test needs it "
+        f"addressed to {registered!r} — the provider's registered client — and not to "
+        f"{UNREGISTERED_CLIENT_ID!r}, which is what the tool is configured as; otherwise there is "
+        "no audience mismatch here and the refusal below would be about something else."
+    )
+
+    refused(response, door_contract, "a session whose `aud` names a different client")
 
 
 def test_a_callback_is_refused_when_the_token_endpoint_answers_with_a_tampered_id_token(

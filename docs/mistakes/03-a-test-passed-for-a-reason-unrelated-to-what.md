@@ -1,17 +1,32 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 46**
+**Caught: 47**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*25 instances recorded; the 3 below are the most recent, newest first. The
-earlier 22 are in this file's git history and in the pull requests they cite.*
+*26 instances recorded; the 3 below are the most recent, newest first. The
+earlier 23 are in this file's git history and in the pull requests they cite.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
 were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
+
+*(E0-18 PR 1's second round, and it is the shape where **the reader cannot see
+the write it is asserting did not happen.** The new test drives a whole web login
+as the Care person and requires `role_assignment`, `user` and `person` to hold
+the same number of rows afterwards — and the tool commits on a connection of its
+own, so a counter that held one transaction open across the flow would answer out
+of the snapshot it started in and report "unchanged" whatever the door did. It
+opens a connection per count instead, and is shown reading a table the migration
+filled (`alembic_version`) before it reports any table empty, because "nothing was
+written" and "this connection is looking at the wrong database" are otherwise the
+same observation. The wrong-`aud` refusal on the same door is the other face: it
+is posed by re-posing the code exchange as the registered client rather than by
+editing the token, so the signature survives, and it reads the delivered token's
+`aud` back and requires it to name the other client — without which the 4xx is
+just as easily a flow that failed at the exchange.)*
 
 *(Writing E0-18's door tests, before any door existed, and it is the shape where
 **the only obvious way to pose a case breaks something else at the same time.**
@@ -49,24 +64,6 @@ reason" are separate claims — and the only thing separating them is the accept
 control beside the new cases, a registered `?tenant=x` that must still register.
 Without it, both new cases pass perfectly against a rule that had become "refuse
 every query", which is a different and worse provider.)*
-
-*(Writing E0-30's error-redirect battery, and it is the shape where **the
-obvious assertion is satisfied by three different wrong providers at once**.
-"The refusal is a 3xx to the registered URI carrying `error`" passes against a
-provider that hands back an authorization code beside the error, against one
-that answers a single constant code for every refusal, and against one that
-re-encodes the `state` a client will compare byte for byte. So the helper every
-redirect case goes through refuses a `code` in the returned query, requires
-`error` to be one of RFC 6749 §4.1.2.1's codes **and** each test to say which,
-and requires `error_description` to carry something. The page assertions were
-worse, and worse in exactly the way this entry is named for: "this refusal did
-not redirect" was a true statement about the provider as it stood, which
-redirected nothing at all — all eight page cases passed on the day the ticket
-opened and would have gone on passing over an implementation that never changed.
-The ordering near miss, which is the one that guards against an open redirector,
-now asserts both halves in one run: the same unknown scope with the registered
-redirect URI must redirect, and with an unregistered one must not, so the
-negative half is only read once the positive half has been seen.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

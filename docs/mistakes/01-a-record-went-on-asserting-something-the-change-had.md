@@ -1,26 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 38**
+**Caught: 39**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*21 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 18 are in this file's git history and in the pull requests they cite.*
-
-*(In E0-36 item 1, where the record that went stale was **the comment attached to
-the line being changed**. The brief named one site — ADR 0002's last consequence
-bullet, claiming the aggregate `ci` job "stays correct without edits as
-individual gates flip from tolerant to enforcing" — and it was right that this is
-the only claim in `docs/`. It is not the only claim. The verdict step's own
-header comment in `.github/workflows/ci.yml` said the check "fails if any gate
-failed or was cancelled; tolerant jobs report success, so this stays honest as
-the tree fills in", which is the argument for leaving `skipped` out of the
-pattern. Adding `skipped` to that same line would have left a comment three lines
-above it explaining why `skipped` is deliberately absent — and the next person to
-touch the verdict would have read the comment, believed the exclusion was
-considered, and put it back. **The record most likely to be missed is the one you
-are looking straight at**, because a comment above the line you are editing reads
-as context rather than as a claim. The sweep has to include the diff's own
-neighbourhood, not only the rest of the repository.)*
+*22 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 19 are in this file's git history and in the pull requests they cite.*
 
 *(In E0-26 item 1, and this one is a catch and a recurrence in the same commit,
 which is why it is worth the space. The change replaced the Care reveal, and the
@@ -81,6 +65,22 @@ one in that file that drives *this project's* application rather than a mock, an
 adding them without touching the top would have left an index that describes the
 file as it was four tickets ago. The change is one paragraph; the point is that
 nothing about editing the bottom of a file suggests reading the top of it.)*
+
+*(E0-18 PR 1's second round, and this one is the entry applied **to the shape of
+an assertion rather than to a sentence**. The claim-to-Care sweep had to gain a
+named exception, and an exception is a record: it says "this module reads a claim
+and names Care, and here is why that is allowed". Written as a set the assertion
+merely subtracts, that record survives the module being deleted, renamed, or
+rewritten until it no longer reads a claim at all — and it goes on excusing
+something that is no longer there while the sweep quietly stops sweeping. So the
+assertion is an **equality** between the flagged set and the exception set's
+keys, and a stale exception fails as loudly as a new offender, with its own half
+of the message. The same round widened
+`tests/integration/test_identity_grants.py`'s hand-written privilege set by two
+entries, and the derivation comment above it was extended in the same edit as the
+constant — that constant exists precisely so a widening cannot justify itself, so
+an entry added without its paragraph would have made the whole block a record
+that no longer accounts for what it guards.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
