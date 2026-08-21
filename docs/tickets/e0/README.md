@@ -191,6 +191,7 @@ up.
 | E0-24 item 3 — re-derive a section when its term's map is edited | **E2 / E11** | the owners ADR 0021 and ADR 0018 already name |
 | E0-25 item 5 — the mock LMS cannot mint a deliberately wrong launch | **E1** | tool-side launch validation is E1's, and E0-14 defined no interface for a bad launch deliberately |
 | E0-26 item 2 — the reveal writes no conflict-of-interest marking | **E10** | the wide case needs E9's purview union; the narrow case wants the queue that reads it |
+| **A committed reveal record can be spent more than once** (new, 2026-08-20) | **E10** | settling it needs a case and a disposition to spend a record against, which is what E10 builds. Found by three reviewers on PR #53 and measured: one record spent five times returned the name five times and left `audit_log` at one row, so §4's "every identity access is automatically audit-logged" holds per authorisation rather than per access. **This is a hole E0-26 item 1 created, not one it inherited** — E0-10's single function wrote a row on every call. **Done when** either a record cannot be spent twice, or every spend writes its own row, and SPEC §4 says which of those "every identity access" means — **and it is settled before or with the queue that puts a reveal id on a screen, not after it.** ADR 0071 bounds discovery of a reveal id with "the id is a `gen_random_uuid()` primary key in a table neither runtime role may read", which is a statement about the database only. A queue that displays or links a reveal puts that id in a template, a URL or a log line, and the bound stops holding the day it does (independent review of PR #53, 2026-08-20) |
 | E0-26 item 3 — the acting person is a parameter, not a property of the connection | **E10** | the first thing with a request-bound actor to bind |
 | E0-26 item 4 — the Care sweep misses the module's own entry point | **E10** | the rule is "only the Care queue imports it", and the queue is E10's to write |
 | E0-29 item 2 — three rows of ADR 0056's taxonomy nothing asserts | **out of E0** | DNS failure, TLS handshake failure and pool timeout are not producible from a loopback stub |
@@ -215,7 +216,7 @@ says which answers needed one and where it went.
 | E0-22 q1 | Benchmark minimum — every figure, or only drawn lines? | **Every figure computed from a comparison set**, not only a drawn line. | **landed** — §4.1 item 7, §5.1 rewritten to point at it. Its *test* is E4's. |
 | E0-22 q2 | Does one deployment serve exactly one institution? | **Yes, and enforce it.** A constraint permitting at most one `institution` row, which makes global and institution-scoped uniqueness the same rule. | **landed** — §8, with ADR 0017 amended. The *constraint* is E0-22's own remaining work. |
 | E0-23 | What triggers the first roster pull? | **Any instructor or leadership launch**, and the roster service address is stored from that launch. A student launch does not trigger one. Every later scheduled sync works from the stored address, and a never-synced section is visible as such. | **landed** — §7.3, §2.1 points at it. The column and its sync are E1's. |
-| E0-26 item 1 | Which mechanism closes the rollback that keeps a name and leaves no audit row? | **Restructure the reveal so it returns nothing until a separately committed record exists.** Not `dblink`, not a loopback `postgres_fdw` — both put a database credential inside a `SECURITY DEFINER` function, which is a new privilege surface. Its ADR says what the chosen shape costs. | no |
+| E0-26 item 1 | Which mechanism closes the rollback that keeps a name and leaves no audit row? | **Restructure the reveal so it returns nothing until a separately committed record exists.** Not `dblink`, not a loopback `postgres_fdw` — both put a database credential inside a `SECURITY DEFINER` function, which is a new privilege surface. Its ADR — [0071](../../adr/0071-the-reveal-answers-only-a-committed-record.md), written with the change — says what the chosen shape costs in both directions: a row records an access that was *authorised* rather than one that happened, and a committed record can be spent more than once, so the log under-records too — that half carried to E10. | no |
 | E0-29 item 1a | Is cleartext to an off-machine model endpoint acceptable? | **No — refuse it.** Require an encrypted transport whenever the model is on another host, with or without a credential. A cluster deployment terminates TLS at the model or runs it alongside the app. `README.md` and `.env.example` change wherever they document the current allowance. | no |
 | E0-29 item 1b | Do HTTP 429 and 500 belong in the fail-open set? | **No — affirmed as built.** A rate limit is a capacity decision an operator must see and a 500 means our request is the problem; flooring either hides a condition that never resolves. The reasoning goes into ADR 0056 so it stops being an open row. | no |
 | E0-31 item 2 | `design/`'s 27 course numbers versus SPEC §8's bands. | **The design corpus is illustration.** It is not a source of seedable data and says so, so nobody reconciles it against §8 or seeds from it. No renumbering. | no |
@@ -352,9 +353,15 @@ The pool is bound to the code path, not to the actor, because §2.1 permits one
 person to hold a Care assignment and a teaching assignment at once. A module that
 imports, calls or attributes a Care session fails
 `tests/unit/test_care_session_is_bound_to_the_care_service.py` by name. Care's
-route to identity is `reveal_identity`, which checks the actor and calls a
-`SECURITY DEFINER` function that checks the actor again and writes the audit row
-in the same transaction.
+route to identity is `reveal_identity`, which checks the actor and then calls
+**two** `SECURITY DEFINER` functions ([ADR
+0071](../../adr/0071-the-reveal-answers-only-a-committed-record.md)):
+`record_identity_reveal` writes the audit row and returns its id, the service
+commits, and `reveal_student_identity` answers only where that row's writing
+transaction has already committed. Each checks the actor again for itself. The
+single function that wrote its record inside the caller's transaction was E0-10's
+and is dropped — a caller who rolled back kept the name and left no row, which is
+what E0-26 item 1 closed.
 
 **The session is synchronous** ([ADR
 0013](../../adr/0013-the-database-session-is-synchronous.md)). Handlers that

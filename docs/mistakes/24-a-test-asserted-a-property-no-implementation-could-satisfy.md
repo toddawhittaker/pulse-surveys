@@ -4,6 +4,30 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
+*(A second instance, E0-26 item 1, ruled the same way in
+[E0-26-01](../disputes/E0-26-01.md). Same entry, different sub-shape: not a needle
+that collides with prose, but **a predicate that read a rendering carrying more
+than the property under test**.
+`test_the_reveal_takes_the_records_identifier_and_nothing_else` compared
+`pg_get_function_identity_arguments(oid)` against `'uuid'` to pin the reveal's
+argument type. That function renders the parameter's **name** as well —
+`in_reveal_id uuid` — so the assertion refused the exact signature the ticket
+settles, the signature its own failure message told the reader to build, and the
+signature its own module printed in `THE_INTERFACE`. Only an anonymous parameter
+could satisfy it, and nothing anywhere asked for one. The implementer declined the
+workaround, wrote the objection, and waited — which is what entry 24's own closing
+paragraph says to do and is the opposite of what happened the first time.
+The repair is `array_to_string(p.proargtypes::regtype[], ',')`, which carries types
+and no names. **Two neighbouring spellings are traps and were measured during the
+ruling**: `p.proargtypes::regtype[]::text` renders `[0:0]={uuid}` rather than
+`{uuid}`, because `oidvector` is zero-based, so a literal comparison there is the
+same false red one layer down; and `p.oid::regprocedure::text` is
+`search_path`-dependent, schema-qualifying when the function is not visible on the
+current path, which makes it right for a failure message and wrong for a
+predicate. The column was also called `arguments` while holding a rendering of
+names *and* types, and is now called `argument_types`, because the name is what
+invited the comparison.)*
+
 
 **What happened.** E0-13's leak detector searched every rendering of `Settings`
 for any eight-character run of the fake credential
@@ -56,6 +80,17 @@ objection, then wait.)*
 anything the assertion legitimately renders.** In practice: make it random-only,
 with no word in it. Put the human-readable label in the *constant's name*, where
 it helps a reader, not in its value, where it is a needle.
+
+**And the same rule pointing the other way, from the second instance: when a
+predicate compares against a value some other system rendered, ask what else that
+rendering carries.** A catalog function, a `repr()`, a serialiser and a formatter
+are all written to be *read*, so they add names, labels, qualifiers and bounds that
+the property under test says nothing about — and an equality against one of those
+is an assertion about all of it. Print the readable rendering in the failure
+message, where the extra material helps; compare against the narrowest value that
+carries the property, and say in a comment which neighbouring spelling you rejected
+and what it renders instead. A column named for the property while holding the
+rendering is how the next person makes the same comparison.
 
 The general form is worth stating because it is entry 3's mirror — and **the two
 do not cost the same**, which the objection first argued and the arbitrator

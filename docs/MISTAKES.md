@@ -79,7 +79,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 42** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 43** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -94,13 +94,16 @@ did not expect.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 35** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 36** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
 request body, test docstrings. Indexes are the highest risk: written once, never
 re-read. "Re-read nearby prose" is not enough; it misses the record that was
-never written and the one that drifted out from under you.
+never written and the one that drifted out from under you. **Grep the fact,
+not the identifier** — a record states "three grants" or "in the same
+transaction", and a grep for the name finds none of those sentences. **And
+amending a record is not reading it**: open the whole file.
 
 ## 2. Behaviour shipped with nothing asserting it
 
@@ -113,7 +116,7 @@ second case arrives.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 20** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
+**Caught: 21** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
 
 **Rule.** When you work around a quirk of a type, a parser or an API, grep for
 every place that asks the same question and route them through one helper, in the
@@ -141,7 +144,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
+**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
 
 ## 15. A property test's generator excluded the case its own docstring named
 
@@ -163,6 +166,10 @@ you have removed the only signal that would have told you it did not work.
 subject that certainly has it, as a control. A guard that only ever reports
 absence cannot tell you which mechanisms it can see — and the role a scheme is
 built around is the one least likely to hold its privileges the ordinary way.
+
+## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
+
+**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 
@@ -187,10 +194,6 @@ file and check the status, or run the gate bare.
 ## 18. A deliverable existed in the source tree and not in the built artifact
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/18-a-deliverable-existed-in-the-source-tree-and-not.md)
-
-## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
-
-**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 23. A validation created the appearance of a behaviour
 

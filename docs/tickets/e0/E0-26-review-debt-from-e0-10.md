@@ -123,6 +123,96 @@ taken, or the audit row survives the rollback; there is a test that performs the
 rollback and reads the surviving row count from a *second connection*; and the
 ADR says what the chosen mechanism costs.
 
+#### The shape, settled 2026-08-20 before any test was written
+
+Todd's decision names the mechanism and not the interface, and a test cannot be
+written against an interface that does not exist yet. So the door becomes two
+calls, and this is the interface the tests are written against:
+
+```sql
+-- Records that a reveal is about to happen. The caller must COMMIT this.
+public.record_identity_reveal(
+    in_actor_person_id uuid,
+    in_subject_user_id uuid,
+    in_case_id uuid
+) RETURNS uuid                       -- the audit_log row's id
+
+-- Returns identity, and only against a record that is already committed.
+public.reveal_student_identity(
+    in_reveal_id uuid
+) RETURNS TABLE (identity_name text, identity_email text)
+```
+
+The three-argument `reveal_student_identity` is **dropped**, not kept alongside.
+A door that still opens the old way is not closed.
+
+What each call must hold:
+
+- `record_identity_reveal` refuses an actor with no live `CARE` assignment,
+  exactly as the old function did, and writes the `audit_log` row. It returns the
+  row's id and nothing else — no identity, on any path.
+- `reveal_student_identity` takes only the record's id, so the subject is read
+  from the committed record and cannot be substituted by the caller.
+- It **raises** where the record is not committed, rather than returning zero
+  rows. Zero rows already means "this student has no identity row", which is a
+  legitimate answer the service returns as `None`, and the two must not arrive
+  looking the same.
+- It re-checks that the record's actor still holds `CARE`, and that the record is
+  an `IDENTITY_REVEAL`. The two-places rule E0-10 states does not weaken because
+  the door grew a second half. **That refusal raises as well** — settled
+  2026-08-20, after the test author pointed out that the interface said "raises"
+  for an uncommitted record and said nothing here. An empty result is the value
+  the service turns into `None`, so refusing an actor who has lost `CARE` by
+  returning nothing recreates the collision this list refuses one line above.
+
+**A record written by the calling transaction does not count as committed, and
+"written by the calling transaction" has to mean the top-level one.** Comparing
+the audit row's `xmin` against the current transaction is not enough: a caller
+that wraps the first call in a `SAVEPOINT` gives the row a subtransaction id,
+which differs from the top-level id, and the check would pass on a record that
+still vanishes on `ROLLBACK`. Whatever is compared has to be a value that a
+savepoint cannot change.
+
+**`reveal_identity` in `services/safety.py` keeps its signature and stays one
+call.** §6.2 requires "a plain, one-click procedural action", and that is about
+what Care staff do, not about how many statements the service sends. It records,
+commits, and then reveals in a second transaction.
+
+**What this costs, for the ADR to state**: the log over-records in one direction
+and under-records in another. It over-records a caller that commits a record and then never reveals leaves a
+row saying an access was authorised, and §6.2's periodic review reads that as an
+access. That is the safe direction for a safety log and it is a real change in
+what a row means.
+
+**And it under-records, which was not seen until three reviewers measured it on
+PR #53.** Nothing marks a record spent, so one committed record answers any
+number of times: five spends returned the student's name five times and left
+`audit_log` at one row. §4's "every identity access is automatically audit-logged"
+therefore holds per *authorisation* and not per access. E0-10's single function
+wrote a row per call, so this is a hole this item opened rather than one it found.
+It is carried to **E10** with a "done when" in the epic README's carried-out
+table, because settling it needs a case and a disposition to spend a record
+against.
+
+**A spec sentence is owed and it is Todd's, drafted here and not written.**
+`CLAUDE.md` says an ADR is not the instrument for something that leaves the
+spec's own words false, and this leaves §4's words false in a way the ADR alone
+would only annotate. Proposed, for **SPEC §4**, replacing "every identity access
+is automatically audit-logged with actor, timestamp, and case":
+
+> every identity access is automatically audit-logged with actor, timestamp, and
+> case. An access is logged when it is *authorised*: the record is written and
+> committed before any name is returned, and re-reading a name under a record
+> already committed writes no second row. Whether a record may be spent more than
+> once is settled by the Care queue (§6.2), which is where a reveal has a case to
+> be spent against.
+
+Two things about that draft. It states what is *true today* rather than what
+would be nicer, which is the point — a spec sentence nothing enforces is what
+§4.1's preamble now exists to stop. And if the answer is instead that a spend
+must write its own row, the sentence stays as it is and the code changes; that
+choice is Todd's and either way it is not an ADR's to make.
+
 ### 2. The reveal writes no conflict-of-interest marking
 
 SPEC §6.2 requires the audit entry to be flagged where the revealed student is

@@ -1,8 +1,40 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 1**
+**Caught: 2**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*(Writing E0-26 item 1's tests, and this time the sweep was run before the tests
+were, so the collision is a paragraph in a report rather than a dispute round.
+E0-26 splits the reveal into two calls and **drops** the three-argument
+`reveal_student_identity`, and `tests/integration/test_identity_grants.py` reaches
+its door through `the_reveal_function`, which asserts that `pulse_care` may execute
+**exactly one** `SECURITY DEFINER` function. After the split there are two, so that
+helper fails inside the setup of the ten tests that reach the door through it, none
+of which is about this ticket — and the four that go on to *call* the reveal do it
+inside `db_session`, whose transaction is never committed, which the new shape
+refuses by design. `grep -rn
+'reveal_student_identity' tests/` and one read of the helper found all of it in
+about ten minutes. Nothing was repaired: the repair is a migration of E0-10's
+module onto the new interface, it is larger than the ticket's own tests, and doing
+it half-way inside a ticket about something else is how a green suite stops meaning
+what it says. It is reported as a partitioned round for the same agent instead.
+The entry's second rule earned its place here too — `the_reveal_function`'s
+assertion message prescribes a repair to whoever trips it, and whoever trips it
+will be the implementer, who may not edit `tests/`.*
+
+***What the partition was worth, measured after it ran.** Eight tests failed, all
+on the same assertion, and the count hid a second failure the way this entry's
+first instance did: `REVEAL_DEFINER_PRIVILEGES` is asserted as an exact set and was
+**never evaluated**, because the helper raised first — so the ticket's fourth grant
+was a defect queued behind a defect, and a round that had fixed only the visible
+one would have reported the module repaired. The repair round also found that three
+of the four converted tests are now near-duplicates of tests in the new module, and
+that the fourth — the `pg_temp` shadow hijack — is the only coverage there that
+exists nowhere else and had to be rewritten to aim at both halves of the split
+door. **Count the failures, then look for what the first one is standing in front
+of**: a helper that raises in setup suppresses every assertion in the test behind
+it, and an exact-set assertion is the kind whose silence looks like agreement.)*
 
 *(In E0-15's tests, and it stopped a test being written rather than
 repaired one. E0-15's scope says "every seeded course needs a title"; E0-14's scope

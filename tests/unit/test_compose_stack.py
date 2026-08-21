@@ -1033,12 +1033,22 @@ def test_only_the_api_service_is_left_holding_the_care_credential(
     process that ships student comment text to a third-party model provider — or
     a `docker exec` by an operator holding no `CARE` assignment is then enough:
     read the variable, connect as `pulse_care`, read a live `CARE` assignment out
-    of `public.role_assignment`, which that role may `SELECT`, and call the reveal
+    of `public.role_assignment`, which that role may `SELECT`, and call the door
     with the borrowed person as the acting actor. It returns a student's name and
     email address, and the audit row names the borrowed Care staffer rather than
-    the caller. A caller that rolls its own transaction back keeps the name and
-    leaves no audit row at all, which is the premise ADR 0042 had rejected this
-    blanking on, measured false on the pinned image.
+    the caller.
+
+    **One half of that has since been closed and this rule is not it.** The
+    rollback — a caller keeping the name and leaving no audit row at all, measured
+    false on the pinned image against ADR 0042's premise — is closed by E0-26
+    item 1: the reveal returns nothing until a separately committed record exists,
+    so a caller that rolls back gets no name. What is *not* closed is the borrowing,
+    which is E0-26 item 3 and is carried to E10: the acting person is still a
+    parameter rather than a property of the connection, so a credential holder can
+    still read a real Care staffer's `person_id` and pass it, and the record that
+    now reliably survives names that staffer. Possession of this variable is
+    therefore still the whole of the exposure, and narrowing who holds it is still
+    the control — which is what this test is for.
 
     **Blanked, not omitted, and that distinction is the whole rule.**
     `env_file: - .env` has already delivered all three variables by the time a
@@ -1140,11 +1150,13 @@ def test_only_the_api_service_is_left_holding_the_care_credential(
             "(SPEC §6.2, ADR 0042 as amended by E0-10):",
             *problems,
             "",
-            "`pulse_care` is the only role in the cluster with EXECUTE on "
-            "public.reveal_student_identity. A caller holding it can read a live CARE "
-            "assignment out of role_assignment, borrow that person as the acting actor, and "
-            "roll its own transaction back — which returns the student's name and email and "
-            "leaves no audit row. `worker` and `beat` never serve this queue, and `worker` is "
+            "`pulse_care` is the only role in the cluster with EXECUTE on the Care door — "
+            "public.record_identity_reveal and public.reveal_student_identity. A caller "
+            "holding it can read a live CARE assignment out of role_assignment and borrow "
+            "that person as the acting actor, which returns the student's name and email and "
+            "leaves a record naming the borrowed staffer (E0-26 item 3, carried to E10). The "
+            "rollback half of this — keeping the name and leaving no record at all — is closed "
+            "by E0-26 item 1. `worker` and `beat` never serve this queue, and `worker` is "
             "the container that runs E0-13's gateway over untrusted comment text. Blank each "
             "of them in the shared `x-application-environment` anchor: an empty value removes "
             "what `env_file` set, and omitting the entry does not. If a second process "
@@ -1250,9 +1262,10 @@ def test_no_compose_file_hands_a_container_the_care_credential(
             "(SPEC §6.2, ADR 0042 as amended by E0-10):",
             *problems,
             "",
-            "`pulse_care` is the only role that can execute public.reveal_student_identity, "
-            "and a caller holding it can borrow a live CARE assignment out of role_assignment "
-            "and roll the transaction back, keeping the name and leaving no audit row. It does "
+            "`pulse_care` is the only role that can execute the Care door, and a caller "
+            "holding it can borrow a live CARE assignment out of role_assignment and reveal "
+            "under that person's name — E0-26 item 3, carried to E10. Rolling the transaction "
+            "back no longer keeps the name: E0-26 item 1 closed that half. It does "
             "not matter which file the value is written in: the override's `environment:` "
             "beats the base file's, and its shared anchor reaches every application service. "
             "Set it to an empty string, or do not name it. If a second process genuinely needs "

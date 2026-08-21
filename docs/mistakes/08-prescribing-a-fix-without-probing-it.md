@@ -1,6 +1,6 @@
 # Entry 8. Prescribing a fix without probing it
 
-**Caught: 5**
+**Caught: 6**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -27,6 +27,34 @@ close a second one: `defined_here` subtracts **any** assigned name, so
 `app/services/safety.py` itself uses — masks the attribute read and the sweep
 reports nothing with the widened tuple in place. The prescription was necessary
 and not sufficient, and reading it would not have shown that.)*
+
+*(In E0-26 item 1, and the third time — on my own design this time rather than a
+reviewer's prescription. The reveal had to refuse a record its caller has not
+committed, and the ticket ruled out the obvious spelling: comparing the row's
+`xmin` against `pg_current_xact_id()` is defeated by a caller who wraps the
+recording call in a `SAVEPOINT`, because the row then carries a subtransaction
+id. I had settled on a second mechanism that avoids the whole question —
+`NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'transactionid' AND
+transactionid = <the row's xmin>)`, reasoning from the documented behaviour that a
+subtransaction acquires a lock on its own xid, so "no lock" means the writer has
+ended and a visible row whose writer has ended is committed. Types match, no epoch
+arithmetic, one predicate.
+
+Probed before writing. On the pinned image, after `BEGIN; SAVEPOINT s1; INSERT …;
+RELEASE SAVEPOINT s1;`, `SELECT count(*) FROM pg_locks WHERE locktype =
+'transactionid' AND pid = pg_backend_pid()` answers **1, not 2** — the
+subtransaction id is not there to be found. The guard would have reported "the
+writer has ended" for the savepoint row and opened the door: the exact defect the
+ticket named, reached by a different route than the one it warned about, in the
+one `SECURITY DEFINER` function in this codebase. `pg_xact_status` was taken
+instead, and measured against all three cases before being written down.
+
+**The mechanism that avoids the trap is the one to probe hardest**, because it is
+chosen precisely for not having the known flaw and nobody looks for a second one.
+And note the shape: this candidate failed *open*, which is the direction a
+confidentiality guard must never take — it decides from the absence of evidence,
+so an empty answer is a yes. Probing is what turned that from a review finding
+into fifteen minutes.)*
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and

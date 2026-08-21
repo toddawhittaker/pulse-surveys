@@ -176,6 +176,21 @@ which is **E0-26 item 1**. Until then the record holds against everything except
 that deliberately rolls back, and this change is what narrows the set of
 processes that can be that caller to one.
 
+> **Closed on 2026-08-20 by [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md),
+> and not by a second connection.** The door is two calls now: a record the caller
+> must commit, and a reveal that raises until it is committed. A caller that rolls
+> back keeps no name, so the paragraph above is discharged rather than still
+> waiting.
+>
+> **This record's reversal is unaffected, and the credential stays withheld from
+> `worker` and `beat`.** The reversal rests on two measured facts and only the
+> first is now closed: possession of the credential no longer obtains a name
+> silently, but the second — that a holder can read a live `CARE` assignment out
+> of `public.role_assignment` and record a reveal in a real Care staffer's name —
+> is E0-26 item 3, carried to E10, and is untouched. Even without it, a credential
+> reaching a process that never serves the Care queue buys nothing, which is the
+> trade E0-19 exists to keep making the same way.
+
 ## Consequences
 
 **A deployment that upgrades to E0-10 must set three new variables and recreate
@@ -210,7 +225,16 @@ inside the function discards both.
 can separate them", and that is false: the rows are already streamed by the time
 the caller decides, so a caller that rolls back keeps the name and discards the
 record. It is the premise the reversal above rests on, and closing it is E0-26
-item 1.)*
+item 1. Amended again by E0-26 on 2026-08-20, which closed it through
+[ADR 0071](0071-the-reveal-answers-only-a-committed-record.md) and made the
+paragraph above wrong twice over. The audit row is no longer written inside
+`public.reveal_student_identity` — it is written by
+`public.record_identity_reveal`, which `reveal_identity` calls and **commits**
+first — and "two connections mean two transactions" is now three statements
+across two of them on the Care connection. The guarantee that holds is narrower
+than this paragraph's original claim and is enough: no name is handed over until
+the record is committed, so a caller that separates the two ends up holding the
+record and not the name.)*
 
 **E10 inherits an interface, not a queue.** `reveal_identity` takes the acting
 person, the subject and an optional case id, and raises `NotCareStaffError`

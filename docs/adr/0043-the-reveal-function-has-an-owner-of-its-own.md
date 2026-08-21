@@ -1,12 +1,26 @@
-# 0043 — The reveal function has an owner of its own, holding three grants
+# 0043 — The reveal function has an owner of its own, holding a readable list of grants
 
-**Status:** Accepted
-**Date:** 2026-08-16
-**Tickets:** E0-10, E10
+**Status:** Accepted — amended by ADR 0071; the list is four, and was three
+**Date:** 2026-08-16 (amended 2026-08-20)
+**Tickets:** E0-10, E0-26, E10
 **Relates to:** [ADR 0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md),
 which counts the roles this ticket creates, and
 [ADR 0042](0042-the-care-pool-has-its-own-credential-and-opens-on-first-use.md),
 which decides who may call this function.
+
+> **Amended 2026-08-20 by
+> [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md).** E0-26 item 1
+> split the reveal into two functions — `public.record_identity_reveal`, which
+> writes the `audit_log` row and returns its id, and
+> `public.reveal_student_identity(uuid)`, which answers only against a record
+> that is already committed — and the definer owns both. The reveal reads its
+> subject and its actor **out of the record**, so the role gained a fourth grant,
+> `SELECT` on `public.audit_log`. The rule this record sets is unchanged and is
+> what makes that grant visible as a decision: the owner holds exactly what the
+> bodies do and nothing more, in a list short enough to read against them. **The
+> count was three when this was written and is four**; it is the first time it has
+> moved, and the title no longer states a number, so the next move is an amendment
+> here rather than a heading nobody can rename.
 
 ## Context
 
@@ -14,7 +28,12 @@ which decides who may call this function.
 [ADR 0001](0001-identity-separation-by-database-role.md)'s scheme works:
 `pulse_care` holds no privilege on `public.user_identity`, so the only way it
 obtains a name is through a function that runs with **its owner's** privileges
-and writes an audit row in the same transaction.
+and writes an audit row. *(As E0-10 shipped it, that write was in the same
+transaction as the read, which E0-10's review measured as less than it claimed;
+since E0-26 the record is written by a separate call the caller must commit
+before any name is returned. See
+[ADR 0071](0071-the-reveal-answers-only-a-committed-record.md). Nothing in this
+record's decision turns on which of the two it is.)*
 
 Nothing in the first implementation set that owner. A function is owned by
 whoever created it, and every object here is created by `alembic upgrade head`,
@@ -45,10 +64,15 @@ granted:
 
 * `SELECT` on `public.role_assignment` — the actor's live `CARE` assignment;
 * `INSERT` on `public.audit_log` — the record;
-* `SELECT` on `public.user_identity` — the name.
+* `SELECT` on `public.user_identity` — the name;
+* *(added by E0-26, ADR 0071)* `SELECT` on `public.audit_log` — the committed
+  record, which the reveal now reads its subject and its actor out of instead of
+  taking them from its caller.
 
-and then `ALTER FUNCTION public.reveal_student_identity(uuid, uuid, uuid) OWNER
-TO pulse_reveal_definer`.
+and then `ALTER FUNCTION … OWNER TO pulse_reveal_definer` on each function it
+owns — `public.reveal_student_identity(uuid, uuid, uuid)` as E0-10 shipped it,
+and since E0-26 `public.record_identity_reveal(uuid, uuid, uuid)` and
+`public.reveal_student_identity(uuid)`.
 
 **It is not a connection role, and three things say so.** It is `NOLOGIN`; no
 mechanism in this repository gives it a password — no `.env` entry, no
@@ -113,12 +137,16 @@ any definer function the application role can call.
 **What this does not protect against**, stated because a control whose limits are
 unstated gets read as a wider one:
 
-- **A migration that grants the role more.** The three grants are a budget, and
+- **A migration that grants the role more.** The grants are a budget, and
   the fail-closed property lasts exactly as long as nobody adds a grant beside
   the line that needed it. Nothing in CI detects that — see the measurement
   below — so line-by-line review of `views_sql/` is the only control, and it is
-  the reason the ticket asks for that review by name.
-- **A body change within the three grants.** The function could be edited to
+  the reason the ticket asks for that review by name. *(E0-26 is the first time
+  the budget moved, and it moved the way this paragraph asks: the fourth grant
+  arrives in a pull request whose subject is the change that needs it, argued in
+  [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md), with the
+  equality test below failing until somebody agrees to it.)*
+- **A body change within the grants it holds.** The function could be edited to
   return every row of `user_identity` and would still write exactly one audit
   row: the record says an access happened, not what was read. E10 owns making the
   reveal case-shaped; today it takes a single subject key and that is the bound.

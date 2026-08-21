@@ -1,10 +1,45 @@
 # Entry 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 20**
+**Caught: 21**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*14 instances recorded; the 3 most recent are below. The earlier 11 are in this file's git history and in the pull requests they cite.*
+*15 instances recorded; the 4 below are the most recent, and this file needs a trim
+to three from whoever next has a shell to date them with.*
+
+***Re-derived, and 21 is right.** The note that stood here asked whose the
+index's 21 was, having found `docs/MISTAKES.md` at **21** while this file read
+**20** with three instance paragraphs, and correctly declined to resolve it alone.
+The answer: the index bump was the implementer's, in `fcebebe`, and it was
+reflexive — this entry's rule is "grep every place that asks the same question and
+route them through **one helper**", and E0-26 does the opposite on purpose, because
+the `CARE` check is duplicated across the service and both halves of the door by
+design (SPEC §8, and `CLAUDE.md`'s carve-out that duplication in
+confidentiality-critical paths is the guarantee). Nothing was stopped, so there is
+no instance behind it. It has been withdrawn, which leaves 20 + the test round's
+genuine catch = **21**, and the fourth paragraph below is what the twenty-first
+counts. The lesson is the one the note was already reaching for: a bump with no
+instance paragraph is unfalsifiable a week later, so write the paragraph in the
+same change or do not move the number.*
+
+*(Repairing E0-26 item 1's test round. The suite reported one error —
+`ResourceClosedError: This result object does not return rows` — from the `pg_temp`
+shadow test, and the cause was a one-line assumption in a shared helper:
+`attempt()` called `.mappings().all()` on every result, and `CREATE TEMPORARY
+TABLE` returns none. This entry's rule is what turned a one-line fix into the
+finding. Grepping the helper's six call sites for the same question — which of
+these statements returns no rows? — found two more, the `INSERT` and the `DELETE`
+that `test_the_care_connection_cannot_forge_or_suppress_the_record_the_door_writes`
+must be refused on. **That test was passing**, and passing for the reason that
+makes this expensive: a refused statement raises `DatabaseError` before the rows
+are ever asked for, so the bug sat on the branch where the finding is and nowhere
+else. Under the exact mutation its own docstring names —
+`GRANT INSERT ON public.audit_log TO pulse_care` — the insert would have succeeded,
+the helper would have raised `ResourceClosedError`, which is not a `DatabaseError`
+and escapes the `except`, and an `invariant`-marked confidentiality test would have
+**errored instead of reporting a forgeable audit log**. Fixing only the failure the
+runner named would have left that. The check is now in both copies of the helper,
+in two modules, rather than in one with a comment in the other.)*
 
 *(In E0-16's second review pass, and the hazard is a duplicated
 request parameter. RFC 6749 §3.1 forbids one, the provider refused one, and the

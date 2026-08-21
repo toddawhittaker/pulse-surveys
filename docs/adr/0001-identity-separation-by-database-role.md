@@ -53,9 +53,15 @@ Four things together:
 3. **The connection pool is bound to the service module, not to the actor.**
    Only the Care service can obtain a `pulse_care` session, and it separately
    verifies a live `CARE` assignment.
-4. **Care's only access is one `SECURITY DEFINER` function** that returns
-   identity and writes the audit row in the same transaction. `pulse_care` has
-   no direct `SELECT` on `user_identity`.
+4. **Care's only access is through `SECURITY DEFINER` functions**, and no other
+   route exists: `pulse_care` has no direct `SELECT` on `user_identity`.
+   *(As E0-10 shipped it this was one function, returning identity and writing
+   the audit row in the same transaction. Since E0-26 it is two —
+   `public.record_identity_reveal` writes the row and the caller commits it,
+   and `public.reveal_student_identity` returns nothing until that record is
+   committed. Both are owned by `pulse_reveal_definer` and executable only by
+   `pulse_care`. See [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md)
+   and the amended consequence below.)*
 
 ## Alternatives rejected
 
@@ -97,6 +103,19 @@ record of a reveal that failed.
 > alternative is still rejected, for the reason above — a separate step is a
 > convention — but the transaction buys less than this record claimed, and the
 > difference is the whole of E0-26 item 1.
+>
+> **Amended 2026-08-20 by
+> [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md), which does
+> split the read from the write and keeps this alternative rejected all the
+> same.** The door is two calls now: `public.record_identity_reveal` writes the
+> row and the caller commits it, and `public.reveal_student_identity` **raises**
+> until that record is committed. What was rejected above is logging as a
+> separate step *after* reading identity, which makes the trail a convention a
+> code path can skip. Recording first, and refusing to read until the record is
+> durable, is the opposite: the ordering is enforced by the database, and a code
+> path that skips the record gets no name. What is given up is stated in 0071 —
+> the log over-records an authorisation that was never spent, and under-records
+> because nothing limits a committed record to a single use.
 
 ## Consequences
 
@@ -125,6 +144,16 @@ record of a reveal that failed.
   everything except a caller that rolls back on purpose, and the credential that
   permits that is narrowed to the `api` process alone by the same pull request
   that corrects this record.
+
+  *(Closed 2026-08-20 by
+  [ADR 0071](0071-the-reveal-answers-only-a-committed-record.md), and not by a
+  second connection — both candidates named above were rejected, because each
+  puts a database credential inside a `SECURITY DEFINER` function. The reveal is
+  two calls now and answers only against a record that is already committed, so
+  a caller that rolls back keeps neither the record nor the name. The sentence
+  this consequence corrected is not restored: one transaction still does not make
+  a reveal atomic against its caller. It is that no name leaves the database
+  until the record of it is durable.)*
 - **The audit table is on the write path of a safety-critical read.** If it is
   unwritable, the reveal fails. That is the correct trade — an unauditable reveal
   should not happen — but it makes the audit table's availability a Care-queue

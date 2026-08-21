@@ -74,7 +74,7 @@ in the ticket rather than argued here:
     shape this ticket exists to stop shipping. The late-bound SQL E0-10 adds is
     the `SECURITY DEFINER` reveal function, and that test lives in
     `test_identity_grants.py` beside the machinery that calls it:
-    `test_a_shadowed_table_does_not_change_what_the_reveal_function_returns`.
+    `test_a_shadowed_table_does_not_change_what_the_care_door_returns`.
 
 For views the two rules below are hygiene rather than a guard, and the ticket
 says so in as many words. They are still asserted, because the file is the model
@@ -844,7 +844,7 @@ def test_no_read_view_is_also_declared_as_an_orm_table(
 # subject. It stood a `pg_temp` copy of a view's base table up and asserted the
 # view was unchanged — and the ticket has since measured that a view is
 # early-bound, so that test passes against unqualified SQL and cannot fail. It is
-# now `test_a_shadowed_table_does_not_change_what_the_reveal_function_returns` in
+# now `test_a_shadowed_table_does_not_change_what_the_care_door_returns` in
 # `test_identity_grants.py`, pointed at the `SECURITY DEFINER` function, which is
 # the SQL in this ticket that really does resolve names on every call. It lives
 # there rather than here because that is where the machinery for calling the

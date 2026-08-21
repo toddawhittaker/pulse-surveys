@@ -156,7 +156,7 @@ import string
 import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from html.parser import HTMLParser
@@ -3929,6 +3929,72 @@ def care_service_environment(
     for name, value in values.items():
         monkeypatch.setenv(name, value)
     return values
+
+
+# ---------------------------------------------------------------------------
+# E0-26 item 1 — a `pulse_care` connection whose transaction the test controls.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def care_connections(
+    migrated_database: DatabaseUnderTest, committed_rows: CommittedRows
+) -> Iterator[Callable[[], Any]]:
+    """Open `pulse_care` connections whose `BEGIN`, `COMMIT` and `ROLLBACK` are the test's.
+
+    E0-26 item 1 is entirely about what a caller keeps when it rolls **its own**
+    transaction back, so that transaction has to be a real top-level one. Every
+    other database fixture in this file is deliberately the opposite: `db_session`
+    opens a transaction outside the session and has the session join it with a
+    savepoint, so a rollback there is a `ROLLBACK TO SAVEPOINT`. The ticket names
+    that difference as the thing a wrong implementation is defeated by — "a caller
+    that wraps the first call in a `SAVEPOINT` gives the row a subtransaction id" —
+    so a test written on `db_session` would be measuring the near miss while
+    believing it measured the rollback.
+
+    **A factory rather than one connection**, because the ticket's "done when"
+    requires the surviving audit row to be counted from a connection other than the
+    one that rolled back. A count taken on the rolling-back connection is a
+    statement about what that connection can see and says nothing about what
+    survived, and that is the shape of the test this ticket replaces.
+
+    `committed_rows` is depended on rather than used, and the reason is teardown
+    order: fixtures are finalised in reverse of setup, so naming it here makes its
+    diff-delete run *after* these connections are closed. A `pulse_care` connection
+    still holding an uncommitted `audit_log` insert would otherwise block that
+    delete on a row lock for as long as the run was willing to wait.
+    """
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(migrated_database.care_url)
+    opened: list[Any] = []
+
+    def open_one() -> Any:
+        connection = engine.connect()
+        opened.append(connection)
+        current = connection.execute(text("SELECT current_user")).scalar_one()
+        connection.rollback()
+        assert current == TEST_CARE_USER, (
+            f"A connection opened on `care_url` authenticates as {current!r} rather than as "
+            f"`{TEST_CARE_USER}`. Every refusal a test drives over this connection is supposed to "
+            "be attributable to what the Care role may do, and a connection authenticating as "
+            "something else would satisfy a refusal test whatever the migration granted — or, if "
+            "it were the bootstrap superuser, would satisfy the permitted half and the refused "
+            "half at once."
+        )
+        return connection
+
+    try:
+        yield open_one
+    finally:
+        # Suppressed rather than raised: a connection left inside an aborted
+        # transaction is an ordinary outcome of a test whose subject is a refusal,
+        # and a teardown that raised would replace the test's own failure with its
+        # own.
+        for connection in opened:
+            with suppress(Exception):
+                connection.close()
+        engine.dispose()
 
 
 # ---------------------------------------------------------------------------

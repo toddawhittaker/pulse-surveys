@@ -6,18 +6,28 @@ application", and that "only the Care role's queue path can reach identity, and
 only via the audited reveal action".
 [ADR 0001](../../docs/adr/0001-identity-separation-by-database-role.md) settles
 the mechanism: three roles, no grant of any kind on `user_identity` for either
-runtime role, and one `SECURITY DEFINER` function that returns identity and
-writes the audit row in the same transaction.
+runtime role, and a `SECURITY DEFINER` door that returns identity and leaves a
+record of having done so.
 
-**A fourth role exists and is not a runtime one**: the function's owner. A
+**That door is two functions, not one, since E0-26 item 1.** E0-10 built one
+function that returned identity and wrote the audit row in the same transaction —
+the caller's — and its review measured what that leaves open: `BEGIN; SELECT …;
+ROLLBACK;` returned the name and left `audit_log` empty, because Postgres has
+already streamed the rows to the client by the time the caller decides. So the
+door became `record_identity_reveal`, which writes the record and returns its id
+and no identity on any path, and `reveal_student_identity`, which returns identity
+only against a record the caller has already committed. Where this file says "the
+door", it means both.
+
+**A fourth role exists and is not a runtime one**: the door's owner. A
 `SECURITY DEFINER` function executes as whoever owns it, so the owner *is* the
 privilege the door opens, and owning it with the identity that runs migrations
 makes the door a superuser one — measured on this stack, such a function read
 `pg_catalog.pg_authid` for a `pulse_care` session that was refused that table
 directly one statement later. The two tests at the end of the Care section below
 hold the repair: no `SECURITY DEFINER` function in `public` is owned by a
-superuser, and the owner's grants are exactly the three its job needs. Neither
-names the role or the function, because E10 replaces the function and a rule
+superuser, and the owner's grants are exactly the four its job needs. Neither
+names the role or the function, because E10 replaces the door and a rule
 spelled with its name would retire with it.
 
 **Denial, never absence.** Every confidentiality assertion here is that the
@@ -60,11 +70,33 @@ ticket's instruction rather than a preference.** The `SECURITY DEFINER` function
 takes the acting person and verifies a live `CARE` assignment itself, and
 `services/safety.py` verifies independently before calling it. Where both can
 refuse, a behavioural test cannot say which one did (`docs/MISTAKES.md` entry 3),
-so `test_the_reveal_function_refuses_an_actor_with_no_live_care_assignment` calls
-the function over SQL with no service anywhere in the picture — that is the half
-that has to hold when the service is bypassed. The service's own half is a
-source-level assertion in `tests/unit/test_care_session_is_bound_to_the_care_
-service.py`, because its runtime interface is not named yet.
+so `test_the_care_door_refuses_an_actor_with_no_live_care_assignment` calls the
+door over SQL with no service anywhere in the picture — that is the half that has
+to hold when the service is bypassed. The service's own half is a source-level
+assertion in `tests/unit/test_care_session_is_bound_to_the_care_service.py`,
+because its runtime interface is not named yet.
+
+**E0-26 item 1 split that door in two and four tests here moved with it.** The
+reveal returns nothing until a separately committed record exists, so
+`record_identity_reveal` writes the record and the caller commits it before
+`reveal_student_identity` will spend it. Two consequences run through this file.
+The door is two functions rather than one, which
+`test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` states — and
+states *alone*, because a count is a fact about a revision and the two downgrade
+tests inspect an earlier one, where E0-10's single three-argument door is right.
+`the_care_door` therefore asserts that the door exists and never how many halves it
+has. And a call through the door cannot be made inside `db_session`, whose
+transaction is never committed — so the four tests that go through it take a real
+`pulse_care` login from `care_connections` and seed through `committed_rows`,
+while every test that only reads the catalog still uses `db_session`.
+
+**Where the line between this module and E0-26's runs.** This one asks whether the
+*grants* let the door work and stop everything else; `tests/integration/test_the_
+reveal_commits_its_record.py` asks what the door *does* — an uncommitted record, a
+record written inside a savepoint, a revoked actor, a substituted subject, a
+student with no identity row. Only the happy path is walked here, and it is walked
+because a grant list trimmed one entry too far closes the door while every refusal
+in this file stays green.
 
 **What this module still does not cover.** The two-hat criterion — a reporting
 path cannot obtain a `pulse_care` session even when the acting person also holds
@@ -110,6 +142,12 @@ RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
 # the split.
 IDENTITY_TABLE = "user_identity"
 
+# SPEC §8's log, which "is append-only and includes all re-identifications". Named
+# here because E0-26 item 1 made it a table this file provokes a refusal on: the
+# Care connection now commits the record the door writes, so what that connection
+# may do to the table is a question with an answer.
+AUDIT_TABLE = "audit_log"
+
 # The statement every denial test in this file runs. A constant rather than an
 # f-string built at the call site, so that what `pulse_app` and `pulse_care` are
 # each refused is literally the same statement — a refusal of two differently
@@ -124,10 +162,10 @@ READ_IDENTITY = f'SELECT * FROM public."{IDENTITY_TABLE}" LIMIT 1'  # noqa: S608
 # existence of a value.
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 
-# What the reveal function's owner may do, and the whole of it. **Derived from
-# three sentences of E0-10 rather than copied from the migration**, so that this
-# constant can be checked against the ticket instead of against the SQL it is
-# supposed to police (`docs/MISTAKES.md` entry 19):
+# What the Care door's owner may do, and the whole of it. **Derived from sentences
+# of the tickets rather than copied from the migration**, so that this constant can
+# be checked against what was asked for instead of against the SQL it is supposed
+# to police (`docs/MISTAKES.md` entry 19). Three come from E0-10:
 #
 #   - it "returns identity"                              → user_identity: SELECT
 #   - it "verifies a live `CARE` assignment itself"       → role_assignment: SELECT
@@ -137,11 +175,38 @@ TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFEREN
 # of the two-condition design that has to hold when the service is bypassed, so
 # the function reads the supervision table on its own account. The audit table's
 # name is SPEC §8's.
+#
+# **The fourth arrived with E0-26 item 1 and is the widest of the four**:
+#
+#   - the reveal "takes only the record's id, so the subject is read from the
+#     committed record and cannot be substituted by the caller", and it "re-checks
+#     that the record's actor still holds `CARE`, and that the record is an
+#     `IDENTITY_REVEAL`"                                  → audit_log: SELECT
+#
+# Say plainly what that buys the definer, because an entry added to make a
+# function work is exactly the kind that is read as bookkeeping. Before it, the
+# door's owner could **write** a record it could not read back: the subject, the
+# actor and the case all arrived as arguments, and the row it inserted was
+# write-only from where it stood. Now it can read every row of `audit_log` — who
+# revealed whom, when, and under which case, across the whole institution and for
+# all time — because the reveal reads its subject, actor and action out of the
+# record instead of trusting a caller, and because whether the record is committed
+# is a property of the row that is not independently grantable. That is the log
+# §6.2 says is "reviewable by Admin" and "reviewed periodically outside the Care
+# office", and the role holding it is reachable through one door `pulse_care` may
+# open. It is not a route to a *name* — `user_identity: SELECT` was already in the
+# set — but it is a route to the pattern of who has been named, which is its own
+# disclosure.
+#
+# `pulse_care` gains nothing from this: the grant is the definer's, and
+# `test_the_care_connection_cannot_forge_or_suppress_the_record_the_door_writes`
+# is what says the Care connection still cannot touch that table itself.
 REVEAL_DEFINER_PRIVILEGES = frozenset(
     {
         ("user_identity", "SELECT"),
         ("role_assignment", "SELECT"),
         ("audit_log", "INSERT"),
+        ("audit_log", "SELECT"),
     }
 )
 
@@ -279,26 +344,33 @@ TABLE_COLUMNS = """
 # relation is a failed assertion naming it rather than an error inside the query.
 RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oid")
 
-# How an argument of the reveal function is filled, matched against a fragment of
-# its name. **This file's choice**, and the one place a name the ticket does not
-# spell is guessed at — deliberately narrow, and a parameter none of these
-# reaches stops the test with a message saying so rather than being filled with
-# something plausible. Order matters: `care_person_id` is an actor, not a person
-# picked at random, and `student_user_id` is the subject.
-REVEAL_ARGUMENT_ROLES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("case",), "case"),
-    (("note", "reason", "justification", "disposition"), "note"),
-    (("actor", "care", "staff", "revealer", "requester", "requested_by"), "actor"),
-    (("user", "subject", "student", "sub", "identity"), "subject"),
-    (("person",), "actor"),
+# The Care door, and the two halves E0-26 item 1 split it into. **Spelled here,
+# where E0-10 refused to spell it**, and the change of stance is worth stating.
+# E0-10 named neither the function nor its signature, so this file discovered both
+# and bound arguments by matching parameter names against a table of fragments —
+# roughly 120 lines whose whole job was to avoid settling an interface the ticket
+# had left open. E0-26's "The shape, settled 2026-08-20 before any test was
+# written" settles it: two calls, both signatures written out, in a section that
+# exists because a test cannot be written against an interface that does not exist.
+# So the guessing machinery is gone and the names are constants.
+#
+# **The rules in this file are still spelled without them.** No `SECURITY DEFINER`
+# function in `public` may be owned by a superuser; the definer's grants are
+# exactly what its job needs; `pulse_app` may execute nothing. Those sweep over
+# whatever is there, because E10 replaces this door and a rule carrying its name
+# would retire with it. What is named below is only how a *test calls* the door,
+# which is a different thing from what a rule is about.
+RECORD_FUNCTION = "record_identity_reveal"
+REVEAL_FUNCTION = "reveal_student_identity"
+CARE_DOOR_HALVES = 2
+
+# How the two halves are called. The record's third argument is a null case id:
+# there is no case model until E10, and E0-10 shipped its reveal the same way.
+RECORD_CALL = (
+    f"SELECT public.{RECORD_FUNCTION}("
+    "CAST(:actor AS uuid), CAST(:subject AS uuid), CAST(NULL AS uuid))"
 )
-
-# Where a `user` row keeps the LMS subject, if the reveal takes one instead of a
-# key. A copy of the candidate list in `test_identity_schema.py`; SPEC §4 says
-# responses are "keyed to the LMS user ID (`sub` from the launch)".
-LMS_USER_ID_COLUMNS = ("lms_user_id", "lms_sub", "lms_subject", "lms_id", "sub")
-
-REVEAL_NOTE = "E0-10 proof of mechanism"
+REVEAL_CALL = f"SELECT * FROM public.{REVEAL_FUNCTION}(CAST(:reveal_id AS uuid))"  # noqa: S608
 
 
 def require_role(session: Any, role: str) -> None:
@@ -381,28 +453,38 @@ def read_views(session: Any) -> list[str]:
     return [row[0] for row in session.execute(text(READ_VIEWS))]
 
 
-def row_counts(session: Any) -> dict[str, int]:
-    """How many rows every table in `public` holds, right now, in this transaction."""
-    names = [row[0] for row in session.execute(text(PUBLIC_TABLES))]
-    return {
-        name: session.execute(text(f'SELECT count(*) FROM public."{name}"')).scalar_one()  # noqa: S608
-        for name in names
-    }
-
-
 def security_definer_functions(session: Any, role: str) -> list[Any]:
     """Every `SECURITY DEFINER` function this project defines, and whether `role` may call it."""
     require_role(session, role)
     return session.execute(text(SECURITY_DEFINER_FUNCTIONS), {"role": role}).mappings().all()
 
 
-def the_reveal_function(session: Any) -> Any:
-    """The one `SECURITY DEFINER` function `pulse_care` may execute.
+def the_care_door(session: Any) -> list[Any]:
+    """Every `SECURITY DEFINER` function `pulse_care` may execute, whatever revision this is.
 
-    Fails, rather than choosing, when there is more than one: E0-10 says
-    "`pulse_care` gets `EXECUTE` on a **single** `SECURITY DEFINER` function", so
-    two is the criterion reporting itself and not something for this file to
-    disambiguate.
+    **It asserts that the door exists and deliberately not how many halves it has**,
+    and that division is the repair for a real failure rather than a preference.
+    An earlier version of this helper asserted the count — one before E0-26 item 1,
+    `CARE_DOOR_HALVES` after it — and both of the downgrade tests below broke on it:
+    they run against the schema *at* the identity revision, where E0-10's single
+    three-argument door is exactly right, and were being told by a helper that
+    describes head. A count is a fact about a revision, and only the caller knows
+    which revision it is looking at.
+
+    So the count lives with the caller that knows: at head it is
+    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`, which
+    states E0-26's settled number once and carries the reason for it; the two
+    downgrade tests state none, because neither is about the door's shape.
+
+    **What stays here is non-emptiness**, which is true at every revision that has a
+    Care door at all and is what the callers below need before they can ask
+    anything: the owner of nothing is not a role, and a shadow test with no function
+    to attack reports success having attempted nothing.
+
+    Which half is which is deliberately not decided here. Nothing in this module
+    needs to know: seven of its callers want the owner, and the tests that call the
+    door go through `open_the_care_door` below, which is the one place either name
+    is spelled.
     """
     executable = [
         row for row in security_definer_functions(session, CARE_ROLE) if row["executable"]
@@ -410,134 +492,37 @@ def the_reveal_function(session: Any) -> Any:
     assert executable, (
         "No `SECURITY DEFINER` function in `public` is executable by `pulse_care`. E0-10: 'The "
         "Care path must remain open, and this ticket proves it… `pulse_care` gets `EXECUTE` on a "
-        "single `SECURITY DEFINER` function that returns identity and writes the audit row in the "
-        "same transaction, so a name cannot be obtained without leaving a record.' Care "
-        "re-identification is the one legitimate route to identity (§4, §6.2) and is deliberately "
-        "not blocked; this test is what stops a later change closing it silently."
+        "single `SECURITY DEFINER` function… so a name cannot be obtained without leaving a "
+        "record.' Care re-identification is the one legitimate route to identity (§4, §6.2) and "
+        "is deliberately not blocked; this test is what stops a later change closing it silently."
     )
-    assert len(executable) == 1, (
-        f"`pulse_care` may execute {len(executable)} `SECURITY DEFINER` functions: "
-        f"{[row['signature'] for row in executable]}. The ticket says a single one, and the "
-        "reason is the audit: every additional door is a way to obtain a name without leaving a "
-        "record, and the whole guarantee is that there is exactly one way in."
-    )
-    return executable[0]
+    return sorted(executable, key=lambda row: row["name"])
 
 
-def reveal_arguments(function: Any, context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Bind the reveal function's parameters from what this test has seeded.
+def the_reveal_definer(session: Any) -> str:
+    """The one role that owns the Care door, whichever half is asked about.
 
-    Returns the argument list to interpolate and the parameters to bind. Every
-    placeholder is cast to the parameter's declared type, which does two things:
-    a `None` for the case id arrives as a typed NULL rather than as "could not
-    determine data type", and a value bound as text reaches a `uuid` parameter as
-    a uuid.
+    Every rule in this file about the definer — that it is not a superuser, that
+    its grants are exactly what its job needs, that it is the control proving the
+    identity probes can see a grant — is a rule about a *privilege set*. Two owners
+    would be two privilege sets, only one of which any of those rules measured, so
+    the shared owner is asserted here rather than assumed by picking the first row.
 
-    **What it refuses to do is guess.** A parameter no fragment in
-    `REVEAL_ARGUMENT_ROLES` reaches stops the test with a message naming it,
-    because E0-10 names neither the function nor its signature, and filling an
-    unknown parameter with something plausible would make the test pass against a
-    design the ticket never asked for.
+    **Its assertion holds at every revision**, which is what lets the two downgrade
+    tests use it: E0-10's one door and E0-26's two both have exactly one owner, and
+    a helper that also stated a count could not serve both.
     """
-    names = list(function["argument_names"])
-    types = list(function["argument_types"])
-
-    if not names and len(types) == 1:
-        # One unnamed argument: the subject, by elimination. The same
-        # accommodation `SectionCodeService.call` makes in tests/conftest.py, for
-        # the same reason — a single parameter's *name* is not something the
-        # ticket decides.
-        names = ["subject"]
-    if len(names) < len(types):
-        pytest.fail(
-            f"`{function['signature']}` takes {len(types)} argument(s) and names {names}. This "
-            "test binds arguments by name, and cannot tell which value belongs where without "
-            "them. E0-10 does not spell the function's signature at all; say what it is in the "
-            "pull request and `REVEAL_ARGUMENT_ROLES` in this file is the one place that changes."
-        )
-
-    rendered: list[str] = []
-    parameters: dict[str, Any] = {}
-    for index, (name, declared) in enumerate(zip(names, types, strict=False)):
-        role = next(
-            (
-                role
-                for fragments, role in REVEAL_ARGUMENT_ROLES
-                if any(fragment in (name or "").lower() for fragment in fragments)
-            ),
-            None,
-        )
-        if role is None:
-            pytest.fail(
-                f"`{function['signature']}` takes a parameter `{name}` of type {declared}, and "
-                "this test has nothing to fill it from. It can supply the user whose identity is "
-                "being revealed, the person acting (who holds a live `CARE` assignment), a null "
-                "case id — E0-10 ships the reveal before there is any case model — and a short "
-                "note. A parameter outside that set is an interface question for the ticket: say "
-                "what it is for in the pull request and add it to `REVEAL_ARGUMENT_ROLES` here."
-            )
-        value = reveal_argument_value(role, declared, context, function["signature"], name)
-        key = f"arg{index}"
-        parameters[key] = value
-        rendered.append(f"CAST(:{key} AS {declared})")
-
-    return ", ".join(rendered), parameters
-
-
-def reveal_argument_value(
-    role: str, declared: str, context: dict[str, Any], signature: str, name: str | None
-) -> Any:
-    """One argument's value, chosen by what the parameter is for and what it is typed."""
-    if role == "case":
-        return None
-    if role == "note":
-        return REVEAL_NOTE
-    if role == "actor":
-        if "uuid" in declared:
-            return context["actor_person_id"]
-    elif role == "subject":
-        if "uuid" in declared:
-            return context["user_id"]
-        if context.get("lms_user_id") is not None:
-            return context["lms_user_id"]
-    pytest.fail(
-        f"`{signature}` takes `{name}` as {declared}, and this test reads it as the "
-        f"{role} but has no value of that type for it. It holds the seeded user's key and LMS "
-        "subject and the acting person's key. E0-10 spells no signature for the reveal function, "
-        "so this is an interface question for the ticket rather than something to coerce here."
+    door = the_care_door(session)
+    owners = sorted({row["owner"] for row in door})
+    assert len(owners) == 1, (
+        f"The Care door — {[row['signature'] for row in door]} — is owned by {owners}. A "
+        "`SECURITY DEFINER` function "
+        "spends its owner's privileges, so two owners are two privilege surfaces — and every "
+        "assertion in this file about what the definer may reach would be measuring one of them "
+        "while the other went unread. ADR 0043 gives the reveal an owner of its own precisely so "
+        "that the set of grants behind the door is short enough to read against the function body."
     )
-
-
-def attempt_the_reveal(
-    session: Any, function: Any, context: dict[str, Any]
-) -> tuple[list[Any], Any]:
-    """Call the reveal as `pulse_care`; answer its rows, or the error it raised.
-
-    The call runs inside a savepoint that is *released* on success, so the rows
-    the function wrote stay in the enclosing transaction for a caller that wants
-    to count them, and a refusal leaves the transaction usable — which is what
-    lets `RESET ROLE` run and the failure be reported as itself rather than as a
-    `PendingRollbackError` from the context manager unwinding.
-
-    Answering rather than asserting, because both outcomes are a criterion: the
-    Care path must work for an actor holding a live `CARE` assignment, and the
-    function must refuse one who does not. A helper that asserted either would
-    make the other test read backwards.
-    """
-    arguments, parameters = reveal_arguments(function, context)
-    name = function["name"]
-    statement = text(f'SELECT * FROM public."{name}"({arguments})')  # noqa: S608
-
-    with acting_as(session, CARE_ROLE):
-        savepoint = session.begin_nested()
-        try:
-            rows = session.execute(statement, parameters).mappings().all()
-        except DatabaseError as failure:
-            savepoint.rollback()
-            return [], failure
-        savepoint.commit()
-
-    return rows, None
+    return owners[0]
 
 
 CARE_PATH_IS_OPEN_DELIBERATELY = (
@@ -548,24 +533,104 @@ CARE_PATH_IS_OPEN_DELIBERATELY = (
 )
 
 
-def call_the_reveal(
-    session: Any, function: Any, context: dict[str, Any], *, refusal_means: str = ""
+def attempt(connection: Any, statement: str, parameters: dict[str, Any]) -> tuple[list[Any], Any]:
+    """Run `statement`; answer its rows and the database error it raised, if any.
+
+    **`returns_rows` is checked rather than assumed, and that is a repair for two
+    failures rather than defensiveness.** SQLAlchemy raises `ResourceClosedError`
+    — "This result object does not return rows. It has been closed automatically."
+    — from `.mappings().all()` on a statement with no result set, and that is not a
+    `DatabaseError`, so it escapes this helper's `except` and reaches the test as an
+    error rather than as an answer.
+
+    Three callers here hand it statements that return nothing: the
+    `CREATE TEMPORARY TABLE` that stands up each `pg_temp` shadow, and the `INSERT`
+    and `DELETE` that the Care connection must be refused on `audit_log`. The first
+    is the measured failure — the shadow test errored on its first shadow, before
+    any assertion ran. **The other two are the more interesting half**: those
+    statements are expected to be *refused*, so the `DatabaseError` arrives first
+    and the bug never shows. Under the exact mutation that test's docstring names —
+    `GRANT INSERT ON public.audit_log TO pulse_care` — the insert would succeed,
+    this helper would raise `ResourceClosedError`, and the test would error out
+    instead of failing on the assertion that says a forged record is possible. A
+    test that cannot report the finding it exists to make is not a guard
+    (`docs/MISTAKES.md` entry 3, and entry 13: the same quirk faced in two places,
+    routed through one helper).
+    """
+    try:
+        result = connection.execute(text(statement), parameters)
+        rows = result.mappings().all() if result.returns_rows else []
+    except DatabaseError as failure:
+        return [], failure
+    return rows, None
+
+
+def open_the_care_door(
+    connection: Any, *, actor: Any, subject: Any, refusal_means: str = ""
 ) -> list[Any]:
-    """The reveal, where a refusal is a failed test rather than an answer."""
-    rows, failure = attempt_the_reveal(session, function, context)
+    """Record a reveal, commit it, and spend it — the whole door, on one Care connection.
+
+    **Why this needs a connection rather than `db_session`.** E0-26 item 1 makes
+    `reveal_student_identity` return nothing until a separately committed record
+    exists, and `db_session` opens a transaction outside the session that is never
+    committed. Every call through it would be refused, correctly, for a reason that
+    has nothing to do with the grants this module is about. So the four tests below
+    that go through the door take a real `pulse_care` login from `care_connections`
+    and drive their own transactions, and the rows they ask about come from
+    `committed_rows` rather than from `seed_rows`.
+
+    That is also what `services/safety.py` does — "it records, commits, and then
+    reveals in a second transaction" — so the sequence here is the production one
+    rather than a shape invented for a test.
+
+    A refusal at either half is a failed test, because every caller below is
+    exercising the door working. The behavioural rules about *when* it refuses
+    belong to `tests/integration/test_the_reveal_commits_its_record.py`, which is
+    E0-26's own module; this file's business is whether the grants let the door
+    work at all.
+    """
+    rows, failure = attempt(connection, RECORD_CALL, {"actor": actor, "subject": subject})
     assert failure is None, (
-        f"`{function['signature']}` refused a call by `{CARE_ROLE}`: {failure}. "
-        f"{refusal_means or CARE_PATH_IS_OPEN_DELIBERATELY} The arguments supplied were "
-        f"{context}; if this test read the parameters wrongly, the signature is the interface "
-        "E0-10 does not spell and `REVEAL_ARGUMENT_ROLES` is where its reading of it lives."
+        f"`public.{RECORD_FUNCTION}` refused a call by `{CARE_ROLE}`: {failure}. "
+        f"{refusal_means or CARE_PATH_IS_OPEN_DELIBERATELY}"
     )
-    return rows
+    assert rows, (
+        f"`public.{RECORD_FUNCTION}` returned no row. It is declared `RETURNS uuid` and answers "
+        "the id of the `audit_log` row it wrote, which is the only thing the second half takes."
+    )
+    reveal_id = next(iter(rows[0].values()))
+    connection.commit()
+
+    revealed, failure = attempt(connection, REVEAL_CALL, {"reveal_id": reveal_id})
+    assert failure is None, (
+        f"`public.{REVEAL_FUNCTION}` refused a committed record: {failure}. "
+        f"{refusal_means or CARE_PATH_IS_OPEN_DELIBERATELY}"
+    )
+    connection.commit()
+    return revealed
 
 
-def seed_identity(seed_rows: Any) -> dict[str, Any]:
-    """One `user` with one `user_identity` row, and what a caller needs to name them."""
+def seed_identity(committed_rows: Any) -> dict[str, Any]:
+    """One `user` with one `user_identity` row, committed, and how to name them.
+
+    Committed rather than seeded into `db_session`'s transaction, because the Care
+    connection that asks about this student is a second connection and would
+    otherwise be asked to reveal somebody who, from where it is standing, does not
+    exist.
+
+    **The LMS subject is no longer returned, and that is E0-26 settling an
+    interface E0-10 left open.** This used to hand back both the key and the LMS
+    subject because E0-10 spelled no signature and the reveal might have taken
+    either. `record_identity_reveal(in_actor_person_id uuid, in_subject_user_id
+    uuid, in_case_id uuid)` takes the key, so `LMS_USER_ID_COLUMNS` has gone from
+    this module with the argument-guessing machinery that needed it. The copy in
+    `tests/integration/test_care_service_reveal.py` stays: the *service*'s
+    `reveal_identity` keeps its own signature, which E0-26 does not change.
+    """
     chain: dict[str, Any] = {}
-    identity = seed_rows(IDENTITY_TABLE, chain)
+    identity = committed_rows.seed(IDENTITY_TABLE, chain)
+    committed_rows.commit()
+
     user = chain.get("user")
     assert user is not None, (
         f"Seeding `{IDENTITY_TABLE}` did not seed a `user` with it, so this test has no user to "
@@ -592,12 +657,12 @@ def seed_identity(seed_rows: Any) -> dict[str, Any]:
         f"The seeded `user` row has columns {list(user.keys())} and none of them reads as its "
         "primary key. ADR 0016 makes every primary key one server-generated uuid."
     )
-    lms_key = next((key for key in LMS_USER_ID_COLUMNS if key in user), None)
-    return {
-        "user_id": user[user_key],
-        "lms_user_id": user[lms_key] if lms_key else None,
-        "identity_values": values,
-    }
+    return {"user_id": user[user_key], "identity_values": values}
+
+
+def identity_in(rows: list[Any]) -> set[str]:
+    """Every non-null value the door handed back, as strings."""
+    return {str(value) for row in rows for value in row.values() if value is not None}
 
 
 # ---------------------------------------------------------------------------
@@ -888,8 +953,8 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     functions = security_definer_functions(db_session, APPLICATION_ROLE)
     assert functions, (
         "This project defines no `SECURITY DEFINER` function in `public`, so this test swept "
-        "nothing. E0-10 ships exactly one, for the Care reveal; "
-        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` diagnoses "
+        "nothing. E0-10 ships the Care door and E0-26 item 1 made it two functions; "
+        "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses "
         "its absence."
     )
 
@@ -940,8 +1005,9 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     reveal *by design* — §4 and §6.2 require that door to be open — so a rule that
     reported it would fail against the correct schema. It is asserted separately
     and in both directions instead: `test_the_application_role_may_not_execute_the_
-    reveal_function` says `pulse_app` may call nothing, and `the_reveal_function`
-    says `pulse_care` may call exactly one. Asked about a role a runtime role can
+    reveal_function` says `pulse_app` may call nothing, and
+    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` says
+    `pulse_care` may call exactly those two. Asked about a role a runtime role can
     *become*, the same mechanism is dangerous and is not filtered.
 
     **Two controls.** The application role must be able to read a view, so that
@@ -979,7 +1045,7 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
         "no grants at all rather than of this ticket's grant model."
     )
 
-    definer = the_reveal_function(db_session)["owner"]
+    definer = the_reveal_definer(db_session)
     assert ways_to_reach_identity(db_session, definer), (
         f"The identity probes report no route at all for `{definer}`, the owner of the reveal "
         f"function — which holds `SELECT` on `{IDENTITY_TABLE}` by construction (ADR 0043) and "
@@ -1000,6 +1066,60 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
         "the column grant failed none until this assertion existed. ADR 0001 rejects column "
         "grants by name in its 'Alternatives rejected', which is precisely why somebody reaches "
         "for one when a screen needs a name."
+    )
+
+
+def test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door(db_session: Any) -> None:
+    """E0-10's central criterion, at the count E0-26 item 1 settled it to.
+
+    "`pulse_care` gets `EXECUTE` on a **single** `SECURITY DEFINER` function that
+    returns identity and writes the audit row in the same transaction, so a name
+    cannot be obtained without leaving a record" — E0-10, and the reason it gave for
+    the number is the one that still governs: every additional door is a way to
+    obtain a name without leaving a record.
+
+    E0-26 item 1 split that door because writing the record in the caller's
+    transaction let the caller roll it back. `record_identity_reveal` writes the
+    record and the caller commits it; `reveal_student_identity` returns identity
+    only against a record that is already committed. The first half returns a `uuid`
+    and no identity on any path, so it is not a second way to obtain a name — it is
+    the turnstile in front of the one way, and two is the settled count. A **third**
+    is the thing E0-10's sentence was about.
+
+    **This was an assertion inside `the_care_door` until the two downgrade tests
+    ran it against E0-10's schema and it reported a correct database as wrong.** A
+    count is a fact about a revision. This test knows it is looking at head, so the
+    count lives here; the downgrade tests state none, because neither is about the
+    door's shape. That is also why this is a test rather than a stricter helper: a
+    helper's assertion fires wherever the helper is called, including in nine places
+    that are asking about something else.
+
+    **Not `invariant`-marked, by this file's own line**, which the E0-33 section
+    below draws: a marked test guards one *route* into identity — a direct read, a
+    join from a view, `EXECUTE` on the reveal, `SET ROLE` — and an inventory asserts
+    that the grant set has no member nobody sanctioned, which is a precondition for
+    the doors being the only doors rather than an instance of §4.1 itself. "How many
+    doors are there" is an inventory. The doors themselves are marked next door.
+
+    **The mutation it exists to survive**: a later migration adding a third
+    `SECURITY DEFINER` function and granting `EXECUTE` on it to `pulse_care` — a
+    convenience wrapper, a bulk variant, an E10 replacement landed beside the old
+    one rather than instead of it. Nothing else in this file counts them: the
+    grantee sweeps ask *who* holds something, never *how many things*.
+    """
+    door = the_care_door(db_session)
+
+    assert len(door) == CARE_DOOR_HALVES, (
+        f"`{CARE_ROLE}` may execute {len(door)} `SECURITY DEFINER` functions: "
+        f"{[row['signature'] for row in door]}. E0-26 item 1 settles the count at "
+        f"{CARE_DOOR_HALVES} — `{RECORD_FUNCTION}`, which writes the record and returns its id "
+        f"and no identity on any path, and `{REVEAL_FUNCTION}`, which returns identity only "
+        "against a record the caller has already committed.\n\n"
+        "**More than two is the case E0-10's 'single' was written about**: every additional door "
+        "is a way to obtain a name without leaving a record, and the guarantee is that there is "
+        "exactly one way in. Fewer than two means one half of the split is missing, and "
+        "`tests/integration/test_the_reveal_commits_its_record.py` diagnoses which — its "
+        "`reveal_interface` fixture fails naming the absent function."
     )
 
 
@@ -1024,7 +1144,7 @@ def test_the_care_role_is_refused_a_direct_select_on_user_identity(db_session: A
         "reveal function, and therefore without the audit row it writes in the same transaction — "
         "and §4's 'every identity access is automatically audit-logged with actor, timestamp, and "
         "case' is a convention that the next code path can skip. "
-        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` is the "
+        "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` is the "
         "other half: the door stays open, through the function."
     )
     assert sqlstate(failure) == INSUFFICIENT_PRIVILEGE, (
@@ -1034,8 +1154,8 @@ def test_the_care_role_is_refused_a_direct_select_on_user_identity(db_session: A
     )
 
 
-def test_the_care_role_obtains_identity_through_the_one_function_it_may_execute(
-    db_session: Any, seed_rows: Any, supervision_graph: Any
+def test_the_care_roles_grants_are_enough_to_complete_a_reveal(
+    care_connections: Any, committed_rows: Any
 ) -> None:
     """Criterion: "a `pulse_care` connection **can** still obtain identity".
 
@@ -1044,148 +1164,143 @@ def test_the_care_role_obtains_identity_through_the_one_function_it_may_execute(
     while every denial test above stays green. A wall where the ticket asks for a
     door fails nothing else in this file.
 
+    **This module's question is whether the grants are enough**, which is why it
+    lives here beside them and not only in E0-26's module. Every other test in this
+    section asserts that something is *refused*, and a grant list trimmed one entry
+    too far satisfies all of them: `EXECUTE` missing on either half, or the
+    definer's `SELECT` on `audit_log` missing, closes the door while every refusal
+    stays green. It was renamed when E0-26 item 1 split the door in two: the old
+    name ended "…through_the_one_function_it_may_execute", which asserted the count
+    in its title and asserted it wrongly the moment there were two. The count is now
+    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`'s alone.
+
+    **The behavioural half is E0-26's**, in
+    `tests/integration/test_the_reveal_commits_its_record.py`: what the reveal does
+    with an uncommitted record, a revoked actor or a substituted subject is that
+    module's subject, and this one deliberately only walks the happy path.
+
     The returned row is compared against the identity that was seeded, rather
     than merely being non-empty: a function that returns a row of nulls, or the
     user's key back, would satisfy "it returned something" and reveal nobody.
     """
-    subject = seed_identity(seed_rows)
-    hats = supervision_graph.care_and_instructor_person()
-    function = the_reveal_function(db_session)
-    rows = call_the_reveal(
-        db_session,
-        function,
-        {
-            "user_id": subject["user_id"],
-            "lms_user_id": subject["lms_user_id"],
-            "actor_person_id": hats["person"],
-        },
-    )
+    subject = seed_identity(committed_rows)
+    hats = committed_rows.graph.care_and_instructor_person()
+    committed_rows.commit()
 
-    returned = {str(value) for row in rows for value in row.values() if value is not None}
-    assert returned & subject["identity_values"], (
-        f"`{function['signature']}` returned {rows} for the seeded user, which carries "
-        f"{sorted(subject['identity_values'])}. E0-10 ships this function as the proof that Care "
-        "re-identification still works — 'E10 replaces the stub with the real audited reveal', so "
+    rows = open_the_care_door(care_connections(), actor=hats["person"], subject=subject["user_id"])
+
+    assert identity_in(rows) & subject["identity_values"], (
+        f"The Care door returned {rows} for the seeded user, which carries "
+        f"{sorted(subject['identity_values'])}. E0-10 ships this door as the proof that Care "
+        "re-identification works — 'E10 replaces the stub with the real audited reveal', so "
         "what E10 inherits has to be a door rather than a wall. A reveal that returns no identity "
         "is a wall with a handle painted on it."
     )
 
 
-def test_the_reveal_writes_its_audit_row_in_the_callers_own_transaction(
-    db_session: Any, seed_rows: Any, supervision_graph: Any
+@pytest.mark.invariant
+def test_the_care_connection_cannot_forge_or_suppress_the_record_the_door_writes(
+    care_connections: Any, committed_rows: Any
 ) -> None:
-    """The function writes the record itself, on the caller's transaction — no more than that.
+    """The record is written *for* the caller and is not writable *by* it.
 
-    Two things are asserted, and both are about *where* the write happens:
+    **This test replaces `test_the_reveal_writes_its_audit_row_in_the_callers_own_
+    transaction`, which E0-26 item 1 inverted.** That test asserted that rolling
+    back removed the audit row again, on the reasoning that the write must
+    therefore have been on the caller's transaction rather than on a second
+    connection. Its own docstring said the assertion described today's mechanism
+    rather than a guarantee, named E0-26 as the ticket that would invert it, and
+    named the half worth keeping: "the record is not something a caller adds
+    afterwards, and it is not written by a path that could be skipped." That half
+    is what is below, and E0-26's own module holds the rollback behaviour —
+    `tests/integration/test_the_reveal_commits_its_record.py::test_a_caller_that_
+    rolls_back_keeps_no_name_it_is_not_recorded_as_having_taken` reads the
+    surviving count from a second connection, which is what the old assertion could
+    not do.
 
-      - calling the function **adds a row somewhere** while the caller has the
-        identity in hand. An implementation that returns identity and leaves the
-        logging to its caller adds nothing here, and that is the one this kills;
-      - rolling the transaction back **removes it again**, which is what says the
-        write was made on the caller's transaction rather than on a second
-        connection of the function's own. `plpgsql` has no autonomous transaction,
-        so today there is nowhere else for it to have gone.
+    **Why the property matters more after the split than before it.** The record is
+    now committed by the *caller*: `record_identity_reveal` writes it and the caller
+    runs the `COMMIT`. So "can this caller write one without going through the door,
+    or remove one after going through it" is the question that decides whether §4's
+    "every identity access is automatically audit-logged" is a property or a habit.
+    A `pulse_care` connection that could `INSERT` into `audit_log` could record a
+    reveal that never happened, or one naming somebody else; one that could `DELETE`
+    could take a name and then take the record of having taken it, which is exactly
+    the hole E0-26 exists to close, reached by a different route.
 
-    **What this test does not prove, stated because its previous name claimed it.**
-    It was called `test_a_rollback_discards_the_revealed_identity_and_its_audit_
-    row_together`, after E0-10's criterion "rolling back the transaction discards
-    both the read and the audit row, so the two cannot come apart". The assertions
-    below are correct and the conclusion drawn from them was not. A rollback
-    discards both *inside the database*; Postgres has already streamed the result
-    rows to the client by the time the caller decides what to do with the
-    transaction, so
+    **Behaviour, beside a catalog rule that already exists.**
+    `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
+    asserts as an exact equality that `pulse_care` holds nothing on any base table
+    including `audit_log`. That is the rule as *stated*; this is the rule
+    *working*, and `docs/MISTAKES.md` entry 3 is why both exist — "the catalog test
+    cannot see whether the rule works and the behavioural test cannot see whether
+    it exists". Every other behavioural refusal in this file is about
+    `user_identity`; nothing until now provoked one on the audit table.
 
-        BEGIN;
-        SELECT * FROM public.reveal_student_identity(<a real CARE person>, <a user>, NULL);
-        ROLLBACK;
+    **Two controls.** The door is opened first on the same connection, so a refusal
+    below is attributable to `audit_log` rather than to a role that can do nothing;
+    and each refusal is checked on its SQLSTATE, because a malformed statement
+    answers 42601 or 42703 and would satisfy a bare "it failed".
 
-    returns the real name and email address and leaves `audit_log` at zero rows.
-    That was reproduced twice on the pinned image during E0-10's review, each time
-    with the controls that make it a finding rather than a coincidence: a non-CARE
-    actor is still refused, and the identical call without the `ROLLBACK` does
-    write the row, so the rollback alone is the difference. **The read and the
-    record can come apart, and the party who can separate them is the one holding
-    the Care credential.** Nothing in this file closes that, and no reader should
-    leave this test believing otherwise.
+    **The mutation it exists to survive**: `GRANT INSERT ON public.audit_log TO
+    pulse_care`, which is what somebody writes when the queue needs to log something
+    the door does not log for it.
 
-    Closing it is **`docs/tickets/e0/E0-26-review-debt-from-e0-10.md` item 1**,
-    which is done when a caller that rolls back keeps no name it is not recorded
-    as having taken, and which needs the audit row written over a **second
-    connection** that commits independently — `dblink` or a loopback
-    `postgres_fdw`, each of which puts a credential inside a `SECURITY DEFINER`
-    function and wants its own ADR. E0-26 must land before E10 builds the queue
-    that calls this door.
-
-    **So the second assertion below is asserting today's mechanism, and E0-26 will
-    invert it.** When the write moves to a second connection the row will survive
-    the rollback deliberately, and that is the fix rather than a regression: this
-    test is then the one to rewrite, against E0-26's own requirement that the
-    surviving row is read back from a connection other than the one that rolled
-    back. Until then it holds the property the current design does have — the
-    record is not something a caller adds afterwards, and it is not written by a
-    path that could be skipped.
-
-    **The audit table is not named**, because E0-10 does not name it and SPEC §8's
-    `audit_log` is a list of tables rather than a decision about this one. What is
-    asserted is that *some* table gained a row and lost it again, which is the
-    property; which table it was is in the failure message.
+    **And the reason `attempt` checks `returns_rows` is this test**, though the
+    check was added for a failure next door. Neither statement below returns rows,
+    so under exactly the mutation named above the insert would succeed, the helper
+    would raise `ResourceClosedError` — not a `DatabaseError`, so it escapes the
+    `except` — and this test would error out rather than failing on the assertion
+    that says a forged record is possible. It passed all the way through the repair
+    round with that hole in it, because a refused statement raises before the rows
+    are asked for: the bug was reachable only along the path where the finding is.
     """
-    subject = seed_identity(seed_rows)
-    hats = supervision_graph.care_and_instructor_person()
-    function = the_reveal_function(db_session)
-    context = {
-        "user_id": subject["user_id"],
-        "lms_user_id": subject["lms_user_id"],
-        "actor_person_id": hats["person"],
+    subject = seed_identity(committed_rows)
+    hats = committed_rows.graph.care_and_instructor_person()
+    committed_rows.commit()
+
+    caller = care_connections()
+    revealed = open_the_care_door(caller, actor=hats["person"], subject=subject["user_id"])
+    assert identity_in(revealed) & subject["identity_values"], (
+        "The control failed: the Care door did not return the seeded identity, so the refusals "
+        "below would be about a connection that cannot do anything. "
+        "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses that."
+    )
+
+    # `WHERE false` on the delete, because a privilege check does not depend on the
+    # predicate and an unqualified `DELETE` written into a test file is a statement
+    # whose harmlessness rests entirely on a rollback behaving.
+    forgeries = {
+        "forge a record": f'INSERT INTO public."{AUDIT_TABLE}" DEFAULT VALUES',
+        "suppress a record": f'DELETE FROM public."{AUDIT_TABLE}" WHERE false',  # noqa: S608
     }
+    for what, statement in forgeries.items():
+        _, failure = attempt(caller, statement, {})
+        caller.rollback()
 
-    before = row_counts(db_session)
-    savepoint = db_session.begin_nested()
-    revealed = call_the_reveal(db_session, function, context)
-    during = row_counts(db_session)
-    savepoint.rollback()
-    after = row_counts(db_session)
-
-    assert revealed, (
-        f"`{function['signature']}` returned no row, so nothing was revealed and the audit "
-        "assertion below would be about a call that did nothing. "
-        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` diagnoses "
-        "that."
-    )
-
-    written = {name: during[name] - before[name] for name in before if during[name] > before[name]}
-    assert written, (
-        f"Calling `{function['signature']}` returned identity and wrote no row to any table: the "
-        f"counts across {len(before)} tables are unchanged. §4 requires that 'every identity "
-        "access is automatically audit-logged with actor, timestamp, and case', and E0-10 puts "
-        "the write inside the function rather than beside it. An audit the caller is trusted to "
-        "write afterwards is the design ADR 0001 rejected — it is a step a later code path can "
-        "skip — and it passes every other test in this file. (What the write being inside the "
-        "function does *not* buy is a record the caller cannot discard: see this test's "
-        "docstring, and E0-26 item 1.)"
-    )
-
-    surviving = {name: after[name] - before[name] for name in before if after[name] != before[name]}
-    assert not surviving, (
-        f"After rolling the transaction back, {surviving} still differs from the counts before "
-        "the reveal. So the audit row was not written on the transaction the caller controls, and "
-        "this assertion — which is a description of today's mechanism rather than a guarantee — "
-        "no longer holds.\n\n"
-        "**Read E0-26 item 1 before treating this as a regression.** That ticket moves the audit "
-        "write onto a second connection that commits independently, precisely so that the row "
-        "survives a caller's `ROLLBACK`, because Postgres has already streamed the identity to "
-        "that caller by then and the record must not be theirs to discard. If that is what has "
-        "just landed, this test is the one to rewrite, against E0-26's own requirement that the "
-        "surviving row is read back from a connection other than the one that rolled back — and "
-        "the assertion above, that the row is written by the function rather than by its caller, "
-        "is the half to keep."
-    )
+        assert failure is not None, (
+            f"`{CARE_ROLE}` could {what} directly: `{statement}` was accepted. The Care connection "
+            "commits the record the door writes for it, so a connection that can also write or "
+            "remove rows in that table decides what the log says — §4's 'every identity access is "
+            "automatically audit-logged with actor, timestamp, and case' then records whatever the "
+            "credential holder chose, and §6.2's review outside the Care office is reading it. "
+            "SPEC §8 makes `audit_log` append-only, and the door's owner is the only role that "
+            "may write to it."
+        )
+        assert sqlstate(failure) == INSUFFICIENT_PRIVILEGE, (
+            f"`{statement}` failed with SQLSTATE {sqlstate(failure)} rather than "
+            f"{INSUFFICIENT_PRIVILEGE} (insufficient privilege): {failure}. A missing table, a "
+            "malformed statement or an aborted transaction would each satisfy 'it failed' while "
+            f"saying nothing about what `{CARE_ROLE}` may do — and the table has to exist, since "
+            "the door writes the record into it."
+        )
 
 
-def test_the_reveal_function_refuses_an_actor_with_no_live_care_assignment(
-    db_session: Any, seed_rows: Any, supervision_graph: Any
+@pytest.mark.invariant
+def test_the_care_door_refuses_an_actor_with_no_live_care_assignment(
+    care_connections: Any, committed_rows: Any
 ) -> None:
-    """Criterion: the function refuses a non-Care actor **on its own**, with no service involved.
+    """Criterion: the door refuses a non-Care actor **on its own**, with no service involved.
 
     E0-10 settles the design that an earlier version of the ticket left
     contradictory: the check lives in *both* places. `services/safety.py` verifies
@@ -1194,82 +1309,81 @@ def test_the_reveal_function_refuses_an_actor_with_no_live_care_assignment(
     own test is entry 3's second rule — where both can refuse, a behavioural test
     through the service cannot say which one did. Nothing here goes near the
     service: the call is SQL, on a `pulse_care` connection, exactly as a caller
-    who reached the function by some other route would make it.
+    who reached the door by some other route would make it.
+
+    **E0-26 item 1 moved the check to the first half of the door**, which is the
+    one a caller reaches first: `record_identity_reveal` refuses an actor with no
+    live `CARE` assignment, exactly as the old three-argument function did, so the
+    refusal below arrives before any record exists to spend. It is asserted here as
+    a raise, and this is where the assertion got stronger. The old version accepted
+    either a raise or an empty result, because E0-10's words were "gets nothing"
+    and it did not choose. E0-26's shape decides it: the record call is declared
+    `RETURNS uuid`, so "no identity came back" is true of every call it will ever
+    make and would be an assertion about nothing.
 
     **The control is the same call with a Care actor**, which is what tells "this
-    actor is refused" apart from "this function refuses everyone", from a wrong
-    argument binding, and from a database that has stopped working. Both actors
-    are real people in the same graph: one holds a `CARE` assignment and a
-    teaching assignment (§2.1's two-hat case), the other holds only a lead-faculty
-    assignment.
-
-    **What counts as refusing is left open**, because the ticket's words are "gets
-    nothing": raising and returning no identity both pass. The assertion is that
-    no identity comes back, and it is not the weak "a name is absent from the
-    result" shape only because the control above obtained that same identity
-    through that same call seconds earlier.
+    actor is refused" apart from "this door refuses everyone" and from a database
+    that has stopped working. Both actors are real people in the same graph: one
+    holds a `CARE` assignment and a teaching assignment (§2.1's two-hat case), the
+    other holds only a lead-faculty assignment.
 
     "Live" is read as "exists" here, because E0-09's `role_assignment` has no
     end-dating — an assignment that has been revoked is a deleted row today. When
     E10 or E9 adds validity dates, an expired assignment becomes a second case
     worth its own test, and this one keeps its meaning.
-    """
-    subject = seed_identity(seed_rows)
-    hats = supervision_graph.care_and_instructor_person()
-    function = the_reveal_function(db_session)
 
-    without_care = hats["lead"][supervision_graph.person_column]
+    **The reveal half re-checks the same thing**, and that is E0-26's module:
+    `test_the_reveal_commits_its_record.py::test_the_reveal_refuses_a_record_whose_
+    actor_no_longer_holds_care` revokes the assignment between the record and the
+    reveal, which is the case this test cannot reach.
+    """
+    subject = seed_identity(committed_rows)
+    hats = committed_rows.graph.care_and_instructor_person()
+    without_care = hats["lead"][committed_rows.graph.person_column]
+    committed_rows.commit()
+
     assert without_care != hats["person"], (
         "The fixture handed back the same person for the Care actor and the lead-faculty actor, "
         "so the two calls below would be the same call and the refusal would prove nothing. "
         "`SupervisionGraph.care_and_instructor_person` builds the lead with its own person."
     )
 
-    allowed = call_the_reveal(
-        db_session,
-        function,
-        {
-            "user_id": subject["user_id"],
-            "lms_user_id": subject["lms_user_id"],
-            "actor_person_id": hats["person"],
-        },
+    caller = care_connections()
+    allowed = open_the_care_door(
+        caller,
+        actor=hats["person"],
+        subject=subject["user_id"],
         refusal_means=(
             "This is the control for the refusal below rather than the assertion: the actor here "
-            "holds a live `CARE` assignment, so the reveal has to succeed before a refusal for an "
+            "holds a live `CARE` assignment, so the door has to open before a refusal for an "
             "actor without one says anything about the assignment. "
-            "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` is "
-            "where a Care actor being refused is diagnosed."
+            "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` is where a Care actor "
+            "being refused is diagnosed."
         ),
     )
     assert (
-        allowed
-    ), "The control call returned no row, so there is nothing to contrast a refusal with."
+        identity_in(allowed) & subject["identity_values"]
+    ), "The control call returned no identity, so there is nothing to contrast a refusal with."
 
-    rows, failure = attempt_the_reveal(
-        db_session,
-        function,
-        {
-            "user_id": subject["user_id"],
-            "lms_user_id": subject["lms_user_id"],
-            "actor_person_id": without_care,
-        },
+    _, failure = attempt(
+        caller, RECORD_CALL, {"actor": without_care, "subject": subject["user_id"]}
     )
+    caller.rollback()
 
-    leaked = {str(value) for row in rows for value in row.values() if value is not None}
-    assert failure is not None or not (leaked & subject["identity_values"]), (
-        f"`{function['signature']}` returned {rows} for an actor who holds a lead-faculty "
-        f"assignment and no `CARE` assignment — the identity {sorted(subject['identity_values'])} "
-        "that the same call returned a moment ago for an actor who does hold one. The function is "
-        "`SECURITY DEFINER`, so it reads `user_identity` with its owner's privileges no matter who "
-        "calls it: the acting person's assignment is the only thing between a `pulse_care` "
-        "connection and any student's name. E0-10: the function 'takes the acting person as an "
-        "argument and verifies a live `CARE` assignment itself… a caller reaching the function by "
-        "any other route still gets nothing'.\n\n"
-        "**Raising or returning nothing are both accepted here**, because the ticket says "
-        "'gets nothing' and does not choose between them — but they are not equally good, and the "
-        "pull request should say which was chosen. A raise is auditable and tells the caller it "
-        "was refused; an empty result is indistinguishable from a student who does not exist, "
-        "which is a difference §6.2's queue will care about at E10."
+    assert failure is not None, (
+        f"`public.{RECORD_FUNCTION}` accepted an actor who holds a lead-faculty assignment and no "
+        "`CARE` assignment — the same call it accepted a moment ago for an actor who does hold "
+        "one, which returned "
+        f"{sorted(subject['identity_values'])}. The door is `SECURITY DEFINER`, so it reads "
+        "`user_identity` with its owner's privileges no matter who calls it: the acting person's "
+        "assignment is the only thing between a `pulse_care` connection and any student's name. "
+        "E0-10: the function 'takes the acting person as an argument and verifies a live `CARE` "
+        "assignment itself… a caller reaching the function by any other route still gets "
+        "nothing'.\n\n"
+        "**A record written here is worse than a name returned here**, which is why the refusal "
+        "belongs on this half. `record_identity_reveal` returns no identity on any path, so a call "
+        "it wrongly accepts hands back a committed record naming an innocent staff member — and "
+        "the reveal that spends it then reads its actor out of that record."
     )
 
 
@@ -1278,10 +1392,10 @@ def public_table_columns(session: Any, table: str) -> list[tuple[str, str]]:
     return list(session.execute(text(TABLE_COLUMNS), {"table": table}).tuples())
 
 
-def test_a_shadowed_table_does_not_change_what_the_reveal_function_returns(
-    db_session: Any, seed_rows: Any, supervision_graph: Any
+def test_a_shadowed_table_does_not_change_what_the_care_door_returns(
+    care_connections: Any, committed_rows: Any, db_session: Any
 ) -> None:
-    """The E0-09 hijack, aimed at the one piece of SQL in this ticket that binds late.
+    """The E0-09 hijack, aimed at the two pieces of SQL in this ticket that bind late.
 
     Postgres searches the temporary schema **first** for relation names, and does
     so whether or not `pg_temp` appears in `search_path` — being unlisted is what
@@ -1303,65 +1417,94 @@ def test_a_shadowed_table_does_not_change_what_the_reveal_function_returns(
     temp table silently failed to be created, and it would look exactly as it
     looks now.
 
-    **What is shadowed is discovered from the function's own body**, so the test
-    aims at the tables it actually reads rather than at a guess. The shadow copies
+    **What is shadowed is discovered from the functions' own bodies**, so the test
+    aims at the tables they actually read rather than at a guess. The shadow copies
     the real column list out of the catalog rather than using `CREATE TABLE …
     (LIKE …)`: `LIKE` needs `SELECT` on the source, which `pulse_care` does not
     have on `user_identity` — and a shadow missing a column would make the
     *vulnerable* function fail with "column does not exist", refusing the call and
     turning this test green against the defect (`docs/MISTAKES.md` entry 3).
+
+    **E0-26 item 1 doubled what this has to cover, and it is one call rather than
+    two.** The door is now `record_identity_reveal` and `reveal_student_identity`,
+    and both read `role_assignment`, so the shadow set is the union of what both
+    bodies name. Driving the whole door once with the shadows standing exercises
+    both halves: the record call's assignment check meets an empty
+    `role_assignment` if it binds late, and the reveal meets an empty
+    `user_identity` and an empty `audit_log` if it does.
+
+    **`audit_log` in the shadow set is why `user_identity` has to be in it too.**
+    A vulnerable record call writes its row into `pg_temp.audit_log` and a
+    vulnerable reveal reads it back from there, and the caller commits in between —
+    so the committed-record check E0-26 adds is satisfied *inside the shadow* and
+    is not what catches this. The empty `user_identity` is: there is no name in it
+    to return. If a later change stops the reveal naming `user_identity`, this test
+    stops covering the reveal half, and the non-emptiness assertion below is what
+    would say so.
+
+    **The shadow now stands on a real `pulse_care` login rather than on a `SET
+    ROLE`**, because `pg_temp` is per session and the door has to be driven on the
+    session that owns the shadow — and the door cannot be driven inside
+    `db_session` at all, whose transaction is never committed. `db_session` stays
+    for the catalog reads, which need the bootstrap identity's view and take no
+    part in the attack.
     """
-    subject = seed_identity(seed_rows)
-    hats = supervision_graph.care_and_instructor_person()
-    function = the_reveal_function(db_session)
-    context = {
-        "user_id": subject["user_id"],
-        "lms_user_id": subject["lms_user_id"],
-        "actor_person_id": hats["person"],
-    }
+    subject = seed_identity(committed_rows)
+    hats = committed_rows.graph.care_and_instructor_person()
+    committed_rows.commit()
 
-    baseline = call_the_reveal(db_session, function, context)
-    revealed = {str(value) for row in baseline for value in row.values() if value is not None}
-    assert revealed & subject["identity_values"], (
-        "The reveal did not return the seeded identity before any shadow existed, so the "
-        "comparison after one is created would be between two wrong answers. "
-        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` diagnoses "
-        "that."
+    caller = care_connections()
+    baseline = open_the_care_door(caller, actor=hats["person"], subject=subject["user_id"])
+    assert identity_in(baseline) & subject["identity_values"], (
+        "The door did not return the seeded identity before any shadow existed, so the comparison "
+        "after one is created would be between two wrong answers. "
+        "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses that."
     )
 
-    body = db_session.execute(
-        text(FUNCTION_BODY), {"signature": function["signature"]}
-    ).scalar_one()
+    halves = the_care_door(db_session)
+    bodies = "\n".join(
+        db_session.execute(text(FUNCTION_BODY), {"signature": half["signature"]}).scalar_one() or ""
+        for half in halves
+    )
     tables = [row[0] for row in db_session.execute(text(PUBLIC_TABLES))]
-    named = [table for table in tables if re.search(rf"\b{re.escape(table)}\b", body or "")]
+    named = [table for table in tables if re.search(rf"\b{re.escape(table)}\b", bodies)]
     assert named, (
-        f"`{function['signature']}` names none of the {len(tables)} tables in `public` anywhere in "
-        "its body, so there is nothing to shadow and this test would report success having "
-        "attempted nothing. A reveal that reads no table cannot be returning identity from one."
+        f"The two halves of the door name none of the {len(tables)} tables in `public` anywhere in "
+        "their bodies, so there is nothing to shadow and this test would report success having "
+        "attempted nothing. A door that reads no table cannot be returning identity from one."
     )
-
-    with acting_as(db_session, CARE_ROLE):
-        for table in named:
-            columns = ", ".join(
-                f'"{name}" {declared}' for name, declared in public_table_columns(db_session, table)
-            )
-            assert columns, (
-                f"`public.{table}` reports no columns, so the shadow would be an empty-shaped "
-                "table and a vulnerable function would fail on the column list rather than read "
-                "the shadow."
-            )
-            refusal = refused(db_session, f'CREATE TEMPORARY TABLE "{table}" ({columns})')
-            assert refusal is None, (
-                f"`{CARE_ROLE}` could not create a temporary table called `{table}`: {refusal}. "
-                "The `TEMPORARY` privilege is granted to `PUBLIC` by default, which is what makes "
-                "this attack available to any authenticated role — so if this deployment revokes "
-                "it deliberately, that is a second control worth saying out loud in the pull "
-                "request, and this test then has to stand the shadow up as the bootstrap identity "
-                "the way E0-09's did, with the weaker claim stated."
-            )
+    assert IDENTITY_TABLE in named, (
+        f"The door's bodies name {named}, which does not include `{IDENTITY_TABLE}`. That table is "
+        "what makes this test catch a late-binding *reveal*: with `audit_log` shadowed, a "
+        "vulnerable record call writes its row into `pg_temp` and a vulnerable reveal reads it "
+        "back from there, so the committed-record check is satisfied inside the shadow and only an "
+        "empty identity table stops a name coming out. If the reveal has stopped naming it — "
+        "reading identity through a view, say — the shadow set has to follow it there, or this "
+        "test covers the record half alone while reading as though it covered both."
+    )
 
     for table in named:
-        bare, qualified = db_session.execute(
+        columns = ", ".join(
+            f'"{name}" {declared}' for name, declared in public_table_columns(caller, table)
+        )
+        assert columns, (
+            f"`public.{table}` reports no columns, so the shadow would be an empty-shaped "
+            "table and a vulnerable function would fail on the column list rather than read "
+            "the shadow."
+        )
+        _, refusal = attempt(caller, f'CREATE TEMPORARY TABLE "{table}" ({columns})', {})
+        assert refusal is None, (
+            f"`{CARE_ROLE}` could not create a temporary table called `{table}`: {refusal}. "
+            "The `TEMPORARY` privilege is granted to `PUBLIC` by default, which is what makes "
+            "this attack available to any authenticated role — so if this deployment revokes "
+            "it deliberately, that is a second control worth saying out loud in the pull "
+            "request, and this test then has to stand the shadow up as the bootstrap identity "
+            "the way E0-09's did, with the weaker claim stated."
+        )
+    caller.commit()
+
+    for table in named:
+        bare, qualified = caller.execute(
             RESOLVE_BOTH, {"bare": f'"{table}"', "qualified": f'public."{table}"'}
         ).one()
         assert bare is not None and qualified is not None and bare != qualified, (
@@ -1370,28 +1513,29 @@ def test_a_shadowed_table_does_not_change_what_the_reveal_function_returns(
             "neither may be null: if the bare name has not moved, the shadow is not on this "
             "session and the call below is the ordinary call the baseline already made."
         )
+    caller.commit()
 
-    shadowed = call_the_reveal(
-        db_session,
-        function,
-        context,
+    shadowed = open_the_care_door(
+        caller,
+        actor=hats["person"],
+        subject=subject["user_id"],
         refusal_means=(
             f"The shadow tables {named} are the only thing that changed between this call and the "
-            "baseline one, which succeeded. So the function resolved at least one relation name "
+            "baseline one, which succeeded. So one of the two halves resolved a relation name "
             "into `pg_temp` — the assignment check finding an empty `role_assignment` and refusing "
-            "a Care actor is the likeliest shape. That is the hijack, and it is a refusal here "
-            "rather than a wrong answer only by luck."
+            "a Care actor is the likeliest shape, and the reveal finding no record in an empty "
+            "`audit_log` is the next. That is the hijack, and it is a refusal here rather than a "
+            "wrong answer only by luck."
         ),
     )
-    after = {str(value) for row in shadowed for value in row.values() if value is not None}
-    assert after & subject["identity_values"], (
-        f"With an empty `pg_temp` copy of {named} in the session, the reveal returned {shadowed} "
+    assert identity_in(shadowed) & subject["identity_values"], (
+        f"With an empty `pg_temp` copy of {named} in the session, the door returned {shadowed} "
         f"instead of the identity it returned a moment ago ({sorted(subject['identity_values'])}). "
-        "The function is reading tables the caller created: Postgres searches the temporary schema "
-        "first for relation names, and `pulse_care` needs only the `TEMPORARY` privilege — granted "
-        "to `PUBLIC` by default — to put one there. ADR 0027's fix is both halves, and this "
-        "function needs both more than the trigger did, because it runs as its owner: "
-        "schema-qualify every relation it names, and set "
+        "The functions are reading tables the caller created: Postgres searches the temporary "
+        "schema first for relation names, and `pulse_care` needs only the `TEMPORARY` privilege — "
+        "granted to `PUBLIC` by default — to put one there. ADR 0027's fix is both halves, and "
+        "these functions need both more than the trigger did, because they run as their owner: "
+        "schema-qualify every relation they name, and set "
         "`SET search_path = pg_catalog, public, pg_temp`, naming `pg_temp` last because omitting "
         "it is what puts it first. `test_identity_separated_views.py` asserts each half out of the "
         "catalog; this is the one that shows what they are for."
@@ -1433,8 +1577,8 @@ def test_no_security_definer_function_is_owned_by_a_superuser(db_session: Any) -
     functions = security_definer_functions(db_session, CARE_ROLE)
     assert functions, (
         "This project defines no `SECURITY DEFINER` function in `public`, so this test swept "
-        "nothing and would report success. E0-10 ships exactly one, for the Care reveal; "
-        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` diagnoses "
+        "nothing and would report success. E0-10 ships the Care door and E0-26 item 1 made it two "
+        "functions; `test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses "
         "its absence."
     )
 
@@ -1479,7 +1623,7 @@ def test_no_security_definer_function_is_owned_by_a_superuser(db_session: Any) -
 def test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs(
     db_session: Any,
 ) -> None:
-    """Exactly three, because a fourth is what there is to catch.
+    """Exactly four, because a fifth is what there is to catch.
 
     The owner exists to be small. Once it is not a superuser
     (`test_no_security_definer_function_is_owned_by_a_superuser`), what the door
@@ -1490,30 +1634,43 @@ def test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs(
     `alembic check` reads no grants at all and no test but this one enumerates
     them.
 
-    The expected set is derived from three sentences of the ticket rather than
-    from the migration, and `REVEAL_DEFINER_PRIVILEGES` at the top of this file
-    shows the derivation: the function returns identity, checks the actor's `CARE`
-    assignment itself, and writes the audit row. The middle one is the half of the
-    design that has to hold when the service is bypassed, which is why
-    `role_assignment` is in the set and why two would have been the wrong number.
+    The expected set is derived from sentences of the tickets rather than from the
+    migration, and `REVEAL_DEFINER_PRIVILEGES` at the top of this file shows the
+    derivation for each entry: the door returns identity, checks the actor's `CARE`
+    assignment itself, writes the record, and — the fourth, from E0-26 item 1 —
+    reads the record back. The `role_assignment` entry is the one that surprises
+    people and is the half of the design that has to hold when the service is
+    bypassed.
+
+    **It said "exactly three" until E0-26 item 1**, and the number moved because
+    the door changed rather than because the rule softened. Splitting the door into
+    a record the caller commits and a reveal that spends it means the reveal reads
+    its subject, its actor and its action out of `audit_log` instead of taking them
+    from whoever called it, which needs `SELECT` there. What that widens is written
+    out beside the constant: the owner could previously write a record it could not
+    read back, and can now read the whole log — who revealed whom and when. The
+    assertion stays an equality, because the equality is the control: a fifth entry
+    arriving to make some later migration convenient is what this exists to catch,
+    and `>=` would wave it through.
 
     **What this cannot see, stated rather than implied** (`docs/MISTAKES.md` entry
-    14): a change *within* those three. The function may come to read a different
+    14): a change *within* those four. The door may come to read a different
     column of `user_identity`, or every row of `role_assignment` rather than the
-    actor's, and nothing here moves — the audit row records that an access
-    happened, not what was read. The grant is the outer bound on the blast radius,
-    not a description of the body.
+    actor's, and nothing here moves. The grant is the outer bound on the blast
+    radius, not a description of the body. That reading matters more for the fourth
+    entry than for the other three: `audit_log: SELECT` is what a reveal reading one
+    record needs and what a sweep of every record needs, and this test cannot tell
+    the two apart.
 
     Vacuity has no route in: the expected set is non-empty, so a
     `has_table_privilege` that answered `false` to everything fails this rather
     than passing it, and one that answered `true` to everything fails it too.
     """
-    function = the_reveal_function(db_session)
-    owner = function["owner"]
+    owner = the_reveal_definer(db_session)
     relations = [row[0] for row in db_session.execute(text(PUBLIC_RELATIONS))]
     assert relations, (
         "There is no table or view in `public`, so this sweep has nothing to ask about and the "
-        "comparison below would be between an empty set and three expected members — failing for "
+        "comparison below would be between an empty set and four expected members — failing for "
         "a reason that has nothing to do with grants."
     )
 
@@ -1534,19 +1691,25 @@ def test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs(
         f"{relation}:{privilege}" for relation, privilege in REVEAL_DEFINER_PRIVILEGES - held
     )
     assert not unexpected and not missing, (
-        f"`{owner}` owns `{function['signature']}`, so what it holds is what that function can "
+        f"`{owner}` owns both halves of the Care door, so what it holds is what that door can "
         f"reach. Beyond what its job needs: {unexpected}. Missing from what its job needs: "
         f"{missing}.\n\n"
         "The first list is the one to read first. A `SECURITY DEFINER` function spends its "
         "owner's privileges on behalf of a caller who does not have them, so every grant this "
-        "role holds is reachable through the one door `pulse_care` may open — and nothing else in "
+        "role holds is reachable through the door `pulse_care` may open — and nothing else in "
         "this build would notice a new one, because `alembic check` compares schema and not "
         "grants. If the owner has come to own a relation rather than to be granted on it, that "
         "shows up here as every privilege on that relation at once.\n\n"
-        "The second list means the reveal cannot do its job and some other test is about to fail "
-        "for a reason that reads as unrelated: without `role_assignment:SELECT` the function "
-        "cannot check the actor's `CARE` assignment, and without `audit_log:INSERT` it cannot "
-        "leave the record that makes the read legitimate."
+        "The second list means the door cannot do its job and some other test is about to fail "
+        "for a reason that reads as unrelated: without `role_assignment:SELECT` it cannot check "
+        "the actor's `CARE` assignment, without `audit_log:INSERT` it cannot leave the record that "
+        "makes the read legitimate, and without `audit_log:SELECT` the reveal cannot read back the "
+        "record whose subject and actor it is supposed to use instead of its caller's word.\n\n"
+        "**If `audit_log:SELECT` is the entry in the first list, read E0-26 item 1 before removing "
+        "it.** It is the fourth grant, it arrived with the split door, and it is the widest of the "
+        "four: it lets the owner read every row of the log rather than only write to it. The "
+        "comment on `REVEAL_DEFINER_PRIVILEGES` says what that costs. Removing it closes the "
+        "reveal, which is a §4 and §6.2 failure rather than a tightening."
     )
 
 
@@ -1709,8 +1872,19 @@ UNDEFINED_OBJECT = "42704"
 # the *upgrade* is the other half of the same problem in the other direction —
 # `privileges_held` would report a later revision's unrevoked grant as a defect in
 # E0-10's `downgrade()`, which cannot revoke a grant it never made, and
-# `the_reveal_function` requires there to be exactly one `SECURITY DEFINER`
-# function, which is a fact about E0-10 rather than about head.
+# the door's shape is E0-26's rather than E0-10's, which is a fact about head
+# rather than about the revision these two tests inspect.
+#
+# **That second hazard has already fired once, and the repair is worth knowing
+# before writing another test down here.** `the_care_door` used to assert the
+# number of `SECURITY DEFINER` functions `pulse_care` may execute, and both tests
+# below broke on it the day E0-26 landed: they run against the schema *at* the
+# identity revision, where E0-10's single three-argument door is exactly right, and
+# a helper describing head told them a correct database was wrong. The count now
+# lives in `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`,
+# which knows which revision it is looking at. **Anything a helper asserts, it
+# asserts down here too** — so a helper used by a downgrade test may only state
+# what is true at every revision it will meet.
 #
 # **Only one identifier is written down**, and that is deliberate. Alembic
 # resolves `<revision>-1` against the chain, so the parent is derived rather than
@@ -1719,6 +1893,17 @@ UNDEFINED_OBJECT = "42704"
 # wrong parent.
 IDENTITY_REVISION = "446183e8cc5f"
 BELOW_THE_IDENTITY_REVISION = f"{IDENTITY_REVISION}-1"
+
+# E0-26 item 1's revision, pinned for the same reasons and asserted separately.
+# The three tests above are about what *E0-10's* downgrade takes back and cannot
+# reach this one: both of their ends are pinned below it. That left this
+# revision's own `downgrade()` — including a hand-written `REVOKE SELECT ON
+# public.audit_log FROM pulse_reveal_definer`, which exists precisely because a
+# privilege on a table that survives is the one thing a `DROP FUNCTION` cannot
+# carry — executed by no test at all. Two reviewers found that independently on
+# PR #53, and the test below is the answer.
+THE_COMMITTED_RECORD_REVISION = "b336333a2805"
+BELOW_THE_COMMITTED_RECORD_REVISION = f"{THE_COMMITTED_RECORD_REVISION}-1"
 
 # Which roles hold what on the `public` schema, and on the database, as the
 # catalog records it. `aclexplode` is what makes this readable without pinning an
@@ -1930,7 +2115,7 @@ def test_downgrading_the_identity_revision_leaves_no_grant_on_a_surviving_table(
     command.upgrade(config, the_identity_revision(config))
 
     with catalog_connection(empty_database) as connection:
-        definer = the_reveal_function(connection)["owner"]
+        definer = the_reveal_definer(connection)
         roles = (APPLICATION_ROLE, CARE_ROLE, definer)
         views_at_the_revision = read_views(connection)
         at_the_revision = privileges_held(connection, roles, public_relations(connection))
@@ -2142,7 +2327,7 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
     command.upgrade(config, the_identity_revision(config))
 
     with catalog_connection(empty_database) as connection:
-        definer = the_reveal_function(connection)["owner"]
+        definer = the_reveal_definer(connection)
         still_present = (APPLICATION_ROLE, definer)
         views_at_the_revision = read_views(connection)
         at_the_revision = privileges_held(connection, still_present, public_relations(connection))
@@ -2263,14 +2448,26 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
 # `test_neither_runtime_role_can_become_a_role_that_may_read_identity`. The line
 # this section first drew — §4.1 is about what a reader can see and these are
 # about what a role may do — was the wrong one, and a security review of PR #40
-# said why: all three marked tests in this file are role-capability tests, and one
-# of them, `test_the_application_role_may_not_execute_the_reveal_function`, is
+# said why: every marked test in this file is a role-capability test, and one of
+# them, `test_the_application_role_may_not_execute_the_reveal_function`, is
 # exactly "may this role call this function". The line that actually separates
 # them is **door from inventory**. A marked test guards one route into identity: a
 # direct read, a join from a view, `EXECUTE` on the reveal, and now `SET ROLE`.
 # The other two here are inventories — they assert that the grant set has no
 # member nobody sanctioned — which is a precondition for the doors being the only
 # doors rather than an instance of §4.1 itself.
+#
+# **E0-26 item 1 added two marks by that same line, and they are doors.**
+# `test_the_care_door_refuses_an_actor_with_no_live_care_assignment` guards the
+# route through the door itself — the acting person's `CARE` assignment is the only
+# thing between a `pulse_care` connection and any student's name — and it was
+# unmarked before only because the count of marked tests was never the point. And
+# `test_the_care_connection_cannot_forge_or_suppress_the_record_the_door_writes`
+# guards the record rather than the name, which §4 makes the same guarantee: an
+# access nobody can prove happened is an access with no door in front of it, since
+# the caller now commits that record itself. Do not count the marked tests from
+# this comment; `pytest -m invariant --collect-only` is the only currency that sees
+# both marking forms (`docs/MISTAKES.md` entry 35).
 #
 # The `SET ROLE` door earns its mark on its own evidence: the mutation its
 # docstring records left all 42 tests in this suite passing while `pulse_app`
@@ -2279,8 +2476,8 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
 # confidentiality guard must not sit.
 
 # Every base table in `public`. Separate from `PUBLIC_TABLES` above, which is
-# `relkind = 'r'` and feeds `row_counts` — a partitioned parent would be counted
-# twice there and must not be missed here, and a sweep that covered every kind of
+# `relkind = 'r'` and feeds the `pg_temp` shadow test — a partitioned parent would
+# be missed there and must not be missed here, and a sweep that covered every kind of
 # table but one is the shape `docs/MISTAKES.md` entry 14 records. Views are
 # deliberately absent: reading them is what the application role is *for*.
 PUBLIC_BASE_TABLES = """
@@ -2460,7 +2657,7 @@ MEMBER_OF_ROLES = """
 #
 # The definer is not here: it is not a connection role, and
 # `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
-# pins its three grants as an equality already.
+# pins its four grants as an equality already.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -2752,7 +2949,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     is where it is caught; a rule that went red on any new grant at all would fail
     on the third read view.
     """
-    definer = the_reveal_function(db_session)["owner"]
+    definer = the_reveal_definer(db_session)
     expected = {APPLICATION_ROLE, CARE_ROLE, definer}
     granted = db_session.execute(text(RELATION_GRANTEES)).mappings().all()
     on_columns = db_session.execute(text(COLUMN_GRANTEES)).mappings().all()
@@ -2771,7 +2968,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
         f"its ACL: the sweep found {[dict(row) for row in executable]}. That grant is E0-10's "
         "central criterion — the Care role may call a single such function — so its absence means "
         "either the Care door is shut, which "
-        "`test_the_care_role_obtains_identity_through_the_one_function_it_may_execute` diagnoses, "
+        "`test_the_care_roles_grants_are_enough_to_complete_a_reveal` diagnoses, "
         "or this sweep is not reading `pg_proc.proacl` at all. In the second case the assertion "
         "below is satisfied by any function grant to anybody."
     )
@@ -2797,7 +2994,8 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
         "two connection roles of ADR 0001 and the reveal function's own owner from ADR 0043 — plus "
         "whoever owns it, which is the migration identity ADR 0009 sanctions. On a `SECURITY "
         f"DEFINER` function it is `{CARE_ROLE}` and the owner, and nothing else: E0-10 gives the "
-        "Care role `EXECUTE` on a single one, and `pulse_app` is refused it by name in an "
+        "Care role `EXECUTE` on the door and E0-26 item 1 made that door two halves, and "
+        "`pulse_app` is refused both by name in an "
         "`invariant`-marked test above. Anything else holds a privilege that no ticket in this "
         "epic granted and that nothing in this repository will ever revoke.\n\n"
         "`PUBLIC` appearing here is the worst case and reads like the mildest, and it reads "
@@ -3075,8 +3273,9 @@ def test_neither_runtime_role_can_become_a_role_that_may_read_identity(db_sessio
       - the predicate must **fire** on the reveal function's owner, by the grant
         mechanism. That role holds `SELECT` on `user_identity` by construction;
       - the predicate must **fire** on `pulse_care`, by the execute mechanism. That
-        role may call exactly one `SECURITY DEFINER` function, which is E0-10's
-        central criterion and is asserted by `the_reveal_function`.
+        role may call exactly the two halves of the Care door, which is E0-10's
+        central criterion as E0-26 item 1 amended it and is asserted by
+        `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`.
 
     Three of the four are repairs for things a security review found rather than
     hygiene: each time, had the mechanism been probed for and *required to be
@@ -3109,7 +3308,7 @@ def test_neither_runtime_role_can_become_a_role_that_may_read_identity(db_sessio
     identity only. Changing that test's mode changes the meaning of an E0-10
     assertion, and is raised rather than done here.
     """
-    definer = the_reveal_function(db_session)["owner"]
+    definer = the_reveal_definer(db_session)
     connected_as = db_session.execute(text(CURRENT_ROLE)).scalar_one()
 
     assert db_session.execute(text(MEMBER_OF_ROLES), {"role": connected_as}).all(), (
@@ -3336,4 +3535,97 @@ def test_public_is_the_only_schema_this_deployment_defines(db_session: Any) -> N
         "If the schema is deliberate, widening those sweeps is part of the same change rather "
         "than a follow-up — a sweep that has silently stopped covering an object is worse than "
         "one that was never written, because the green reads as coverage."
+    )
+
+
+@pytest.mark.invariant
+def test_downgrading_the_committed_record_revision_takes_back_the_definers_read_of_the_log(
+    empty_database: Any,
+    alembic_config_pointed_at: Any,
+) -> None:
+    """E0-26's own `downgrade()` gives back the fourth grant, and is executed here.
+
+    **Why this exists.** The three tests above are pinned at both ends to E0-10's
+    revision, so they undo E0-10's migration and never touch this one. Two
+    reviewers on PR #53 found the same gap independently: this revision's
+    `downgrade()` worked when either of them ran it by hand, and nothing in CI ran
+    it. The part that matters is not the `DROP FUNCTION` — dropping a function
+    takes its `EXECUTE` grant with it — but the hand-written `REVOKE SELECT ON
+    public.audit_log FROM pulse_reveal_definer`, because `audit_log` survives the
+    downgrade and a privilege on a surviving table is exactly what a `DROP` cannot
+    carry. That is the same defect class E0-10's own round left behind once, which
+    is why the test above exists at all.
+
+    **Both ends pinned**, for the reason the section note gives at length: `-1` is
+    relative to head, so the day a revision lands on top of this one, a relative
+    step would undo that instead and every assertion here would be true of a
+    database nobody had changed.
+
+    **The baseline is read first and is not ceremony.** The assertions after the
+    downgrade are that a privilege is *absent*, and absent is what a database
+    produces when the migration never ran, when the role was never made, or when
+    `has_table_privilege` was asked about the wrong database. So the two grants
+    this revision certainly makes are read back at the revision before anything is
+    undone.
+
+    **The mutation it exists to survive**: deleting the `REVOKE` block from
+    `downgrade()`, or dropping the second entry from `DOWNGRADE_SCRIPTS`. Either
+    leaves `alembic check` green and every other test green, and leaves the
+    definer holding `SELECT` on the whole audit log after a downgrade that is
+    supposed to have taken it back.
+    """
+    from alembic import command
+
+    config = alembic_config_pointed_at(empty_database)
+    command.upgrade(config, THE_COMMITTED_RECORD_REVISION)
+
+    with catalog_connection(empty_database) as connection:
+        definer = the_reveal_definer(connection)
+        at_the_revision = privileges_held(connection, (definer,), (AUDIT_TABLE,))
+        halves_at_the_revision = len(the_care_door(connection))
+
+    assert (definer, AUDIT_TABLE, "SELECT") in at_the_revision, (
+        f"At revision {THE_COMMITTED_RECORD_REVISION}, the door's owner `{definer}` does not hold "
+        f"`SELECT` on `public.{AUDIT_TABLE}`. That is the fourth grant E0-26 item 1 adds, and it "
+        "is the whole subject of this test: with it absent here, the assertion below that the "
+        "downgrade takes it back is satisfied by a database that never had it. What the owner "
+        f"holds is {sorted(at_the_revision)}."
+    )
+    assert (definer, AUDIT_TABLE, "INSERT") in at_the_revision, (
+        f"At revision {THE_COMMITTED_RECORD_REVISION}, `{definer}` does not hold `INSERT` on "
+        f"`public.{AUDIT_TABLE}`. That grant is E0-10's and this revision does not touch it, so "
+        "its absence means the baseline is wrong rather than that this revision is."
+    )
+    assert halves_at_the_revision == CARE_DOOR_HALVES, (
+        f"At revision {THE_COMMITTED_RECORD_REVISION} the Care door has {halves_at_the_revision} "
+        f"halves rather than {CARE_DOOR_HALVES}. The downgrade assertions below are about what "
+        "this revision takes away, and they cannot mean anything if it did not put it there."
+    )
+
+    command.downgrade(config, BELOW_THE_COMMITTED_RECORD_REVISION)
+
+    with catalog_connection(empty_database) as connection:
+        after = privileges_held(connection, (definer,), (AUDIT_TABLE,))
+        halves_after = len(the_care_door(connection))
+
+    assert (definer, AUDIT_TABLE, "SELECT") not in after, (
+        f"After downgrading below {THE_COMMITTED_RECORD_REVISION}, `{definer}` still holds "
+        f"`SELECT` on `public.{AUDIT_TABLE}` — it holds {sorted(after)}. `audit_log` survives this "
+        "downgrade, so the grant has to be revoked by hand: dropping the two functions takes their "
+        "`EXECUTE` grants and nothing else. A definer left holding this read is an owner that can "
+        "see who revealed whom across the whole institution, reachable through a door "
+        f"`{CARE_ROLE}` may open, at a revision whose records say the grant does not exist."
+    )
+    assert (definer, AUDIT_TABLE, "INSERT") in after, (
+        f"After the downgrade, `{definer}` no longer holds `INSERT` on `public.{AUDIT_TABLE}` — it "
+        f"holds {sorted(after)}. That grant is E0-10's, not this revision's, and a `downgrade()` "
+        "that takes back more than its own migration granted leaves the earlier revision unable to "
+        "write its audit row: the reveal is then a door that returns a name and records nothing, "
+        "which is worse than the defect E0-26 item 1 closed."
+    )
+    assert halves_after == 1, (
+        f"After downgrading below {THE_COMMITTED_RECORD_REVISION} the Care door has {halves_after} "
+        "halves rather than E0-10's single three-argument function. A downgrade that leaves the "
+        "two-call door standing beside the restored one leaves both callable, and the old one "
+        "takes its subject from its caller."
     )
