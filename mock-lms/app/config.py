@@ -88,7 +88,20 @@ RESULTS_PATH = f"{LINE_ITEM_PATH}/results"
 # score post answers with. It is served because it is handed out: a URL a
 # platform composes and does not serve is a link a tool follows once, in the job
 # that needed it.
-RESULT_PATH = f"{RESULTS_PATH}/{{user_id}}"
+#
+# **`:path` is Starlette's converter, and this constant registers a route and
+# does nothing else.** An LTI `sub` may contain a slash — a platform keying users
+# on an LDAP distinguished name or a path-shaped external id issues those
+# routinely — and `ags.result_url` percent-encodes the whole identifier, so the
+# URL the platform hands out carries `%2F`. ASGI hands the router the *decoded*
+# path, where the default converter stops at the slash: without `:path` the
+# platform answers its own composed URL with Starlette's 404 (E0-28 item 9).
+#
+# It must never go through `absolute()` or `str.format`. `{user_id:path}` is a
+# format specification to Python and formatting it raises, which is why nothing
+# builds a result URL from this template — `ags.result_url` composes one from the
+# line item's own `id`, which is what AGS derives a result URL from anyway.
+RESULT_PATH = f"{RESULTS_PATH}/{{user_id:path}}"
 
 # The inspection surface, and the `/mock/` prefix is the point (ADR 0047): a
 # conformant AGS `Result` has no timestamp and no progress fields, so what the
