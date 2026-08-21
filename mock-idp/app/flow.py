@@ -17,6 +17,14 @@ says which one failed:
   to the invalid redirect URI". Redirecting an error to an address that just
   failed validation is how an open redirector is built, and here it would be one
   with an authorization code attached.
+- **Every refusal after those two is delivered to the client**, as §4.1.2.1's
+  redirect to the registered URI carrying `error`, `error_description` and the
+  `state` that arrived. That is the same rule read the other way round: once the
+  address has validated, a page tells the browser's user something and tells the
+  client nothing, and the case that actually occurs in use — a person who does
+  not complete the login — is `access_denied` arriving that way. `Flows.begin`
+  is where the line is drawn, and `Flows._pending_request` is everything on the
+  far side of it.
 - **PKCE is required, S256 only.** A provider that checks a verifier when one
   arrives and issues a session when none does offers no protection at all: an
   attacker holding a stolen code omits the parameter. RFC 7636 §4.6 requires the
@@ -164,13 +172,78 @@ SUPPORTED_CLAIMS = (
 )
 
 
-class AuthorizationRequestError(ValueError):
-    """An authorization request cannot be answered, and why.
+# The four codes RFC 6749 §4.1.2.1 defines that this provider's refusals reach.
+# Written out rather than spelled at each raise site, because the value is what a
+# client branches on: `invalid_request` sends a developer looking at what they
+# sent, `access_denied` says the request was fine and the person was not signed
+# in, and the two are the difference between a bug and a cancelled login. The
+# three §4.1.2.1 codes absent here — `unauthorized_client`, `server_error` and
+# `temporarily_unavailable` — describe states this provider does not have: it
+# registers one client, and a mock that answered `server_error` would be
+# reporting a fault where it had made a decision.
+INVALID_REQUEST = "invalid_request"
+ACCESS_DENIED = "access_denied"
+UNSUPPORTED_RESPONSE_TYPE = "unsupported_response_type"
+INVALID_SCOPE = "invalid_scope"
 
-    Carries a prose reason rather than an OAuth error code, because it is
-    rendered on a page for whoever is debugging a login at eleven at night and
-    the reason is what they need. The route turns it into a 400.
+# The two parameters that decide where a response may be sent: one names the
+# client whose registration holds the address, and the other names the address
+# itself. They are the reason a refusal is sometimes a page — see `Flows.begin`.
+ADDRESS_PARAMETERS = ("client_id", "redirect_uri")
+
+
+class AuthorizationRequestError(ValueError):
+    """An authorization request cannot be answered: which code, and why.
+
+    Both halves, because the two have different readers — a client branches on
+    `error`, and a person debugging a login at eleven at night reads the prose.
+    RFC 6749 §4.1.2.1 names the codes and calls the prose `error_description`.
+
+    **Raising this says nothing about how the refusal is delivered.** It arrives
+    as a page while nothing has established an address to send anyone to, and as
+    `AuthorizationRedirectError` once something has — `Flows.begin` and
+    `Flows.sign_in` are where that changes, and each of them converts one into
+    the other at exactly the point it becomes true.
     """
+
+    def __init__(self, error: str, description: str) -> None:
+        super().__init__(description)
+        self.error = error
+        self.description = description
+
+    def delivered_to(self, redirect_uri: str, state: str | None) -> "AuthorizationRedirectError":
+        """This refusal, addressed to a redirect URI that has already validated.
+
+        `state` is the value that arrived, or `None` when none did: RFC 6749
+        §4.1.2.1 returns it "if present in the client authorization request", and
+        a client handed a `state` it never sent has been handed a value it must
+        refuse to match.
+        """
+        return AuthorizationRedirectError(
+            error=self.error,
+            description=self.description,
+            redirect_uri=redirect_uri,
+            state=state,
+        )
+
+
+@dataclass(frozen=True)
+class AuthorizationRedirectError(Exception):
+    """A refusal with somewhere to deliver it: RFC 6749 §4.1.2.1's error redirect.
+
+    Carrying the address rather than looking one up, and **not a subclass of
+    `AuthorizationRequestError`**, so that the two are told apart by their type
+    rather than by a handler asking whether some member happens to be set. A
+    refusal that has no validated address cannot be constructed as this and
+    cannot be delivered by redirect, which is the whole of the rule §4.1.2.1
+    states: a server that finds the redirect URI invalid "MUST NOT automatically
+    redirect the user-agent to the invalid redirect URI".
+    """
+
+    error: str
+    description: str
+    redirect_uri: str
+    state: str | None
 
 
 @dataclass(frozen=True)
@@ -358,11 +431,18 @@ def required(parameters: Mapping[str, Any], name: str, subject: str) -> str:
     nothing a client could have meant, so saying "it carries no `state`" is more
     use than "your `state` is malformed" — but every check downstream of this
     has to see what actually arrived, so nothing is repaired on the way past.
+
+    Always `invalid_request`, because RFC 6749 §4.1.2.1 assigns that code to a
+    request "missing a required parameter" whichever parameter it is. Where the
+    refusal is delivered is decided by where this was called from, not by the
+    code — the two parameters checked before there is any address to answer to
+    come back on a page, and every other one comes back to the client.
     """
     value = submitted(parameters, name)
     if not value.strip():
         raise AuthorizationRequestError(
-            f"The {subject} carries no `{name}`. It carries {sorted(parameters)}."
+            INVALID_REQUEST,
+            f"The {subject} carries no `{name}`. It carries {sorted(parameters)}.",
         )
     return value
 
@@ -385,45 +465,133 @@ class Flows:
     # -- the authorization endpoint -----------------------------------------
 
     def begin(
-        self, parameters: Mapping[str, Any], settings: ProviderSettings
+        self, parameters: Sequence[tuple[str, str]], settings: ProviderSettings
     ) -> PendingAuthorization:
         """Check an authorization request and remember it until somebody signs in.
 
-        The order of the checks is load-bearing, not stylistic. `client_id` and
-        `redirect_uri` come first because every later refusal is answered with a
-        page rather than a redirect, and answering *any* refusal by redirecting
-        to an address this method has not yet validated is the hole RFC 6749
-        §4.1.2.1 is about.
+        **The order of the checks is load-bearing, and it is where this provider
+        draws RFC 6749 §4.1.2.1's line.** A refusal is delivered to the client, by
+        redirect, only from an address this provider has established the right to
+        use — so the checks that establish it come first and are answered with a
+        page, and every refusal after them is answered by `_pending_request`
+        below, which cannot run until they have all passed.
+
+        Three refusals stay on this side of that line:
+
+        - A `client_id` this provider did not register names no registration, so
+          there is no registered address to answer to.
+        - A `redirect_uri` that is not the registered one is the case the
+          specification names outright: a server that finds it invalid "MUST NOT
+          automatically redirect the user-agent to the invalid redirect URI".
+          Redirecting an error to an address that just failed validation is how
+          an open redirector is built.
+        - Either of those two arriving **twice** is the same problem one step
+          earlier. Which of two values under one name is read is the framework's
+          choice rather than the specification's, so one of the two orderings
+          would always be the attacker's, and neither value can be trusted to
+          decide where a refusal goes.
+
+        The parameters arrive as pairs rather than as a mapping because `dict()`
+        is where a repeated name stops being visible (ADR 0062 rule 3), and the
+        line above is drawn across that rule as well as across the checks.
         """
         subject = "authorization request"
+        values = dict(parameters)
 
-        client_id = required(parameters, "client_id", subject)
-        if client_id != settings.client_id:
+        repeated = repeated_parameters(parameters)
+        untrusted = [name for name in repeated if name in ADDRESS_PARAMETERS]
+        if untrusted:
             raise AuthorizationRequestError(
-                f"No registration for `client_id` {client_id!r}. This provider has one "
-                f"registered client, {settings.client_id!r}; `GET /mock/registration` publishes "
-                "it."
+                INVALID_REQUEST,
+                f"The authorization request carries {untrusted} more than once. RFC 6749 §3.1: a "
+                "request parameter MUST NOT be included more than once — and these are the two "
+                "that decide where a response may be sent, so a request carrying either of them "
+                "twice has named no address this provider may answer to. A page rather than a "
+                "redirect, for that reason (RFC 6749 §4.1.2.1).",
             )
 
-        redirect_uri = required(parameters, "redirect_uri", subject)
+        client_id = required(values, "client_id", subject)
+        if client_id != settings.client_id:
+            raise AuthorizationRequestError(
+                INVALID_REQUEST,
+                f"No registration for `client_id` {client_id!r}. This provider has one "
+                f"registered client, {settings.client_id!r}; `GET /mock/registration` publishes "
+                "it.",
+            )
+
+        redirect_uri = required(values, "redirect_uri", subject)
         if redirect_uri != settings.redirect_uri:
             raise AuthorizationRequestError(
+                INVALID_REQUEST,
                 f"`redirect_uri` {redirect_uri!r} is not registered for this client. The "
                 f"registered one is {settings.redirect_uri!r}, compared exactly as RFC 6749 "
                 "§3.1.2.3 requires. A provider that sent a code to an address it was handed is "
                 "an open redirector with a session attached, so this refusal is a page rather "
-                "than a redirect (RFC 6749 §4.1.2.1)."
+                "than a redirect (RFC 6749 §4.1.2.1).",
             )
 
-        response_type = required(parameters, "response_type", subject)
+        # The address is known good from here, so a refusal is the client's to
+        # read rather than a page for whoever is holding the browser. `state`
+        # comes back with it exactly as it arrived — including for the refusals
+        # raised above the check that it arrived at all, which is why it is read
+        # here and handed on. The same read as the one `_pending_request` makes
+        # through `required`, so the two cannot come to different conclusions
+        # about what the client sent (ADR 0062 rule 1).
+        state = submitted(values, "state")
+        try:
+            pending = self._pending_request(values, repeated, client_id, redirect_uri)
+        except AuthorizationRequestError as refusal:
+            raise refusal.delivered_to(redirect_uri, state or None) from refusal
+
+        self._prune()
+        self._pending[pending.request_id] = pending
+        return pending
+
+    def _pending_request(
+        self,
+        values: Mapping[str, Any],
+        repeated: Sequence[str],
+        client_id: str,
+        redirect_uri: str,
+    ) -> PendingAuthorization:
+        """The rest of the checks, and the pending request they produce.
+
+        A method of its own rather than the rest of `begin`, because that is what
+        makes the transport rule structural instead of a comment: every refusal
+        raised in here is delivered to `redirect_uri` by the caller, and nothing
+        in here can run before `begin` has established that `redirect_uri` is the
+        registered one.
+
+        The pending request is built and handed back rather than stored, so that
+        the only path to the store is the one that has come through `begin`.
+        """
+        subject = "authorization request"
+
+        # The same repetition `begin` counted, and by now it cannot hold either
+        # of the two names that decide the address — a request repeating one of
+        # those never reaches here. So what is left is a request that named a
+        # good address and then repeated something else, and RFC 6749 §4.1.2.1
+        # calls a request that "includes a parameter more than once"
+        # `invalid_request` — not `invalid_scope`, which would send a client
+        # looking at two values that are each perfectly good.
+        if repeated:
+            raise AuthorizationRequestError(
+                INVALID_REQUEST,
+                f"The authorization request carries {list(repeated)} more than once. RFC 6749 "
+                "§3.1: a request parameter MUST NOT be included more than once, and a mapping is "
+                "where the repetition stops being visible.",
+            )
+
+        response_type = required(values, "response_type", subject)
         if response_type != RESPONSE_TYPE:
             raise AuthorizationRequestError(
+                UNSUPPORTED_RESPONSE_TYPE,
                 f"The authorization request asks for `response_type` {response_type!r}. This "
                 f"provider serves the authorization code flow, {RESPONSE_TYPE!r}, and nothing "
-                "else — an implicit or hybrid response would put a session in a URL."
+                "else — an implicit or hybrid response would put a session in a URL.",
             )
 
-        scope = required(parameters, "scope", subject)
+        scope = required(values, "scope", subject)
         asked = scope.split(SCOPE_DELIMITER)
         # The grammar first, because every check below reads these tokens and a
         # token this provider invented by splitting on the wrong character is a
@@ -431,17 +599,19 @@ class Flows:
         illegal = [token for token in asked if not SCOPE_TOKEN.fullmatch(token)]
         if illegal:
             raise AuthorizationRequestError(
+                INVALID_SCOPE,
                 f"The authorization request asks for scope {scope!r}, which is not a scope: "
                 f"{illegal!r} is not `1*NQCHAR`. RFC 6749 Appendix A.4 makes a scope one or "
                 "more tokens of printable ASCII — no space, quote or backslash — separated by "
                 "single spaces, so a tab, a newline, a non-breaking space or a doubled space is "
-                "part of a token rather than a gap between two."
+                "part of a token rather than a gap between two.",
             )
         if OPENID_SCOPE not in asked:
             raise AuthorizationRequestError(
+                INVALID_SCOPE,
                 f"The authorization request asks for scope {scope!r}, which does not include "
                 f"{OPENID_SCOPE!r}. Without it this is a plain OAuth 2.0 request and there is no "
-                "`id_token` to issue (OIDC Core 1.0 §3.1.2.1)."
+                "`id_token` to issue (OIDC Core 1.0 §3.1.2.1).",
             )
         # RFC 6749 §3.3 lets a server either refuse an unknown scope or ignore it
         # and say so in the response. **Refusing is the honest half here**, and it
@@ -453,9 +623,10 @@ class Flows:
         unknown = sorted(set(asked) - set(SUPPORTED_SCOPES))
         if unknown:
             raise AuthorizationRequestError(
+                INVALID_SCOPE,
                 f"The authorization request asks for {unknown}, which this provider does not "
                 f"serve. It serves {list(SUPPORTED_SCOPES)}, and its discovery document says so "
-                "in `scopes_supported` (RFC 6749 §3.3, §4.1.2.1 `invalid_scope`)."
+                "in `scopes_supported` (RFC 6749 §3.3, §4.1.2.1 `invalid_scope`).",
             )
         # Deduplicated, in the order asked, so what comes back in the token
         # response is a grant a client can compare with its own request. Carried
@@ -464,26 +635,32 @@ class Flows:
         # grammar to keep in step with this one.
         granted = tuple(dict.fromkeys(asked))
 
-        state = required(parameters, "state", subject)
-        nonce = required(parameters, "nonce", subject)
+        state = required(values, "state", subject)
+        nonce = required(values, "nonce", subject)
 
-        code_challenge = required(parameters, "code_challenge", subject)
+        # RFC 7636 §4.4.1 assigns `invalid_request` to both of the refusals below
+        # — a challenge the alphabet rules out and a method this provider does
+        # not offer are different mistakes with one code, so which one it was is
+        # in the prose and nowhere else.
+        code_challenge = required(values, "code_challenge", subject)
         malformed = pkce_shape_problem(code_challenge)
         if malformed is not None:
             raise AuthorizationRequestError(
+                INVALID_REQUEST,
                 f"`code_challenge` is malformed: {malformed}. Registering it as it stands would "
-                "produce a code no exchange could ever redeem."
+                "produce a code no exchange could ever redeem.",
             )
 
-        method = submitted(parameters, "code_challenge_method")
+        method = submitted(values, "code_challenge_method")
         if method != CODE_CHALLENGE_METHOD:
             raise AuthorizationRequestError(
+                INVALID_REQUEST,
                 f"The authorization request offers `code_challenge_method` {method!r}. This "
                 f"provider requires {CODE_CHALLENGE_METHOD!r} (RFC 7636 §4.2): `plain` sends the "
-                "verifier itself in this request, and an absent method defaults to it."
+                "verifier itself in this request, and an absent method defaults to it.",
             )
 
-        pending = PendingAuthorization(
+        return PendingAuthorization(
             request_id=secrets.token_urlsafe(OPAQUE_VALUE_BYTES),
             client_id=client_id,
             redirect_uri=redirect_uri,
@@ -493,9 +670,6 @@ class Flows:
             code_challenge=code_challenge,
             expires_at=now() + PENDING_REQUEST_LIFETIME_SECONDS,
         )
-        self._prune()
-        self._pending[pending.request_id] = pending
-        return pending
 
     # -- the login form's submission ----------------------------------------
 
@@ -508,36 +682,27 @@ class Flows:
 
         The request is spent whatever the outcome, so a submitted form cannot be
         replayed — including the refusals, which is the case worth saying out
-        loud: a login that is refused is still a login that happened.
+        loud: a login that is refused is still a login that happened. It is spent
+        *before* anybody is resolved, and that ordering is the rule: a refusal
+        that returned early and left the pending request in place would turn one
+        authorization request into an unlimited number of login attempts against
+        a `state` and a challenge the client generated once.
 
-        **The refusal below is SPEC §2's door rule and not a lookup failure.**
-        `may_use_web_login` is computed from the person's assignments, and the
-        same property decides which people the form offers, so there is one rule
-        rather than two that could disagree. A person who holds only an
-        instructor or a student assignment is refused here for the reason the
-        ticket gives: web login is not their door. A subject nobody seeded is
-        refused too, and from outside the two look identical — E0-16 forbids
-        seeding either launch-only role, so this provider has no way to tell a
-        launch-only person it has never heard of from anybody else it has never
-        heard of, and both answers are the same one.
+        **Which is also why the refusal is delivered to the client.** The pending
+        request holds the redirect URI this provider checked when the
+        authorization request arrived, so by the time anyone can be refused here
+        there is a validated address to refuse at — and from the client's side a
+        person who was not signed in is RFC 6749 §4.1.2.1's `access_denied`,
+        which is the branch E1's callback needs to be able to reach. What cannot
+        be delivered that way is a login answering no authorization request at
+        all: `_spend_pending` refuses those, and it refuses them with a page,
+        because a login with no pending request behind it has named no address.
         """
         pending = self._spend_pending(submitted(parameters, "request"))
-
-        subject = required(parameters, "sub", "login")
-        person = directory.person(subject)
-        if person is None:
-            raise AuthorizationRequestError(
-                f"No seeded identity {subject!r}. This provider signs in the people it was "
-                "seeded with and nobody else; `GET /mock/registration` lists them. SPEC §2 keeps "
-                "web login for the leadership, Care and Admin roles — an instructor or a student "
-                "enters by LTI launch, which is the mock LMS's door and not this one."
-            )
-        if not person.may_use_web_login:
-            raise AuthorizationRequestError(
-                f"{subject!r} holds {[role.value for role in person.launch_only_roles]} and "
-                "nothing that opens this door. SPEC §2: entry doors are a property of the "
-                "assignment, and instructor and student assignments enter by LTI launch only."
-            )
+        try:
+            person = self._person_signing_in(parameters, directory)
+        except AuthorizationRequestError as refusal:
+            raise refusal.delivered_to(pending.redirect_uri, pending.state) from refusal
 
         issued = AuthorizationCode(
             code=secrets.token_urlsafe(OPAQUE_VALUE_BYTES),
@@ -552,6 +717,46 @@ class Flows:
         self._prune()
         self._codes[issued.code] = issued
         return pending, issued
+
+    def _person_signing_in(
+        self, parameters: Mapping[str, Any], directory: SeededDirectory
+    ) -> MockPerson:
+        """Who this login says it is, or the refusal that says nobody was signed in.
+
+        **The second refusal is SPEC §2's door rule and not a lookup failure.**
+        `may_use_web_login` is computed from the person's assignments, and the
+        same property decides which people the form offers, so there is one rule
+        rather than two that could disagree. A person who holds only an
+        instructor or a student assignment is refused here for the reason the
+        ticket gives: web login is not their door. A subject nobody seeded is
+        refused too, and from outside the two look identical — E0-16 forbids
+        seeding either launch-only role, so this provider has no way to tell a
+        launch-only person it has never heard of from anybody else it has never
+        heard of, and both answers are the same one.
+
+        `access_denied` for both, and the two are deliberately written the same
+        way: from the client's side they are one event, and a provider that
+        distinguished them in the redirect would be telling an unauthenticated
+        caller which subjects it knows.
+        """
+        subject = required(parameters, "sub", "login")
+        person = directory.person(subject)
+        if person is None:
+            raise AuthorizationRequestError(
+                ACCESS_DENIED,
+                f"No seeded identity {subject!r}. This provider signs in the people it was "
+                "seeded with and nobody else; `GET /mock/registration` lists them. SPEC §2 keeps "
+                "web login for the leadership, Care and Admin roles — an instructor or a student "
+                "enters by LTI launch, which is the mock LMS's door and not this one.",
+            )
+        if not person.may_use_web_login:
+            raise AuthorizationRequestError(
+                ACCESS_DENIED,
+                f"{subject!r} holds {[role.value for role in person.launch_only_roles]} and "
+                "nothing that opens this door. SPEC §2: entry doors are a property of the "
+                "assignment, and instructor and student assignments enter by LTI launch only.",
+            )
+        return person
 
     # -- the token endpoint -------------------------------------------------
 
@@ -754,17 +959,26 @@ class Flows:
     # -- housekeeping -------------------------------------------------------
 
     def _spend_pending(self, request_id: str) -> PendingAuthorization:
-        """Take the pending request this login answers, and forget it."""
+        """Take the pending request this login answers, and forget it.
+
+        Both refusals are pages, and for the reason the two in `begin` are: the
+        pending request is where the checked redirect URI lives, so a login that
+        names none has named no address to be refused at. `invalid_request` all
+        the same, so that every raise site carries the code it would be delivered
+        under if this check ever moved below one that established an address.
+        """
         if not request_id:
             raise AuthorizationRequestError(
+                INVALID_REQUEST,
                 "The login carries no `request`, so there is no authorization request for it to "
-                "answer. Start at the authorization endpoint."
+                "answer. Start at the authorization endpoint.",
             )
         pending = self._pending.pop(request_id, None)
         if pending is None or pending.expires_at <= now():
             raise AuthorizationRequestError(
+                INVALID_REQUEST,
                 "That login page has expired or has already been used. A login page is good once "
-                f"and for {PENDING_REQUEST_LIFETIME_SECONDS}s; start a new authorization request."
+                f"and for {PENDING_REQUEST_LIFETIME_SECONDS}s; start a new authorization request.",
             )
         return pending
 
@@ -813,6 +1027,31 @@ def discovery_document(settings: ProviderSettings) -> dict[str, Any]:
     }
 
 
+def added_to_query(url: str, parameters: Sequence[tuple[str, str]]) -> str:
+    """`url` with `parameters` **added to** its query rather than substituted for it.
+
+    A registered redirect URI may legitimately carry a query of its own — a
+    tenant, a locale, a return path — and `ProviderSettings.validate` refuses
+    only one already holding `code` or `state`, which are the names the success
+    response appends. So the parameters are joined onto whatever is there with
+    `&`, and a deployment that registered a query gets it back.
+
+    The query is built by hand rather than with `urlencode` over a mapping so
+    that the order is fixed and readable in a log, and `quote` is applied to
+    every value with nothing left safe, so that an unusual `state` cannot add a
+    parameter of its own.
+
+    One function for both responses this provider sends to that address, because
+    the `&`-or-nothing rule is a rule: two copies of it could come to differ, and
+    the copy that was wrong would be the one nobody had a registration with a
+    query to test.
+    """
+    added = "&".join(f"{name}={quote(value, safe='')}" for name, value in parameters)
+    split = urlsplit(url)
+    query = f"{split.query}&{added}" if split.query else added
+    return urlunsplit((split.scheme, split.netloc, split.path, query, split.fragment))
+
+
 def authorization_response(pending: PendingAuthorization, issued: AuthorizationCode) -> str:
     """Where the browser goes next: the registered redirect, carrying code and state.
 
@@ -820,14 +1059,24 @@ def authorization_response(pending: PendingAuthorization, issued: AuthorizationC
     obligation to it — the value is the client's, and a provider that re-encoded
     it would break the client's cross-site-request-forgery check in a way that
     reads as a bug in the client.
-
-    The query is built by hand rather than with `urlencode` over a dict so that
-    the order is fixed and readable in a log; both values are drawn from
-    `secrets.token_urlsafe` or echoed from a request that has already been
-    checked, and `quote` is applied to each so that an unusual `state` cannot
-    add a parameter of its own.
     """
-    split = urlsplit(pending.redirect_uri)
-    added = f"code={quote(issued.code, safe='')}&state={quote(pending.state, safe='')}"
-    query = f"{split.query}&{added}" if split.query else added
-    return urlunsplit((split.scheme, split.netloc, split.path, query, split.fragment))
+    return added_to_query(pending.redirect_uri, [("code", issued.code), ("state", pending.state)])
+
+
+def error_response(refusal: AuthorizationRedirectError) -> str:
+    """Where the browser goes when a request is refused after its target validated.
+
+    RFC 6749 §4.1.2.1: the error is added to the redirection URI's query and the
+    user agent is sent there, carrying the code a client branches on and the
+    description a person reads. `state` goes back "if present in the client
+    authorization request" — so a refusal whose subject *is* a missing `state`
+    carries none rather than an empty one, because a client that receives a
+    `state` it never generated has been handed a value it must refuse to match.
+    """
+    parameters: list[tuple[str, str]] = [
+        ("error", refusal.error),
+        ("error_description", refusal.description),
+    ]
+    if refusal.state is not None:
+        parameters.append(("state", refusal.state))
+    return added_to_query(refusal.redirect_uri, parameters)
