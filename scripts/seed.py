@@ -85,6 +85,13 @@ rather than per institution (ADR 0017), and `MATH` is a name a real institution
 uses too. Matching there would adopt a real prefix rather than create one, and
 carry every course under it along — so `seed_containment` refuses instead, naming
 the code and the department that holds it. ADR 0064 carries the measurement.
+
+**Since E0-22 the database refuses it first.** SPEC §8 says a deployment serves
+exactly one institution and `uq_institution_one_row` holds that, so a database
+already holding somebody else's institution refuses this run at its own
+institution insert, before any key above is matched. The prefix guard still does
+its job — inside the one institution, where a real department can hold `MATH`
+and this file would otherwise adopt it.
 """
 
 import os

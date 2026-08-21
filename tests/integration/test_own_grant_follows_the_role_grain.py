@@ -52,9 +52,9 @@ does not go quietly green when a level nobody thought about is populated.
 
 **Where the sets are exact and where they are not.** Everything a test seeds under
 its own department or college is private to it, so those comparisons are exact.
-The institution is not: `SupervisionGraph` deliberately never writes a second one
-— whether a deployment holds one institution or many is an open spec question
-([E0-22](../../docs/tickets/e0/E0-22-spec-questions-from-e0-05.md)) — so the VP
+The institution is not: `SupervisionGraph` never writes a second one, because a
+deployment holds exactly one (SPEC §8, held by `uq_institution_one_row` since
+[E0-22](../../docs/tickets/e0/E0-22-spec-questions-from-e0-05.md)) — so the VP
 test asserts containment of what it seeded rather than equality with it, and says
 so where it does.
 """
@@ -279,9 +279,9 @@ def test_a_vp_of_academics_own_grant_reaches_the_whole_institution(
 ) -> None:
     """§2's table: the VP of Academics is scoped to the institution.
 
-    **Containment rather than equality, and the reason is the fixture and not the
-    rule.** `SupervisionGraph` refuses to write a second institution, because
-    whether a deployment holds one or many is an open spec question (E0-22), so
+    **Containment rather than equality, and the reason is the schema.**
+    `SupervisionGraph` never writes a second institution, because a deployment
+    holds exactly one (SPEC §8, held by `uq_institution_one_row` since E0-22), so
     every row any test in this session seeds is under the one institution this
     test's VP holds. Asserting equality would make this test fail whenever another
     test's rows outlive it, which is a flake rather than a finding. What it can

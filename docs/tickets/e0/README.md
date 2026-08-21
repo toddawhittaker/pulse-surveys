@@ -39,7 +39,7 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | **Batch G.** Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. Already one coherent batch; nothing moved. |
 | 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | **Redistributed — not built as written.** Its measurements stay here and its items are now 33, 36 and 37. Read it for the mutation tables, not for the work. |
 | 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | **Redistributed — not built as written.** Item 1 is now 35, item 2 is now 37. Keeps the record of Todd's `course.lms_title` decision and its three-part cost. |
-| 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | **Both decided and both spec edits landed 2026-08-18.** Now a small build ticket: the constraint enforcing one institution per deployment. **Scheduled 2026-08-20 as its own short branch**, deliberately not folded into Batch H — it is a schema change and the rest of that batch is not. §4.1 item 7's test is E4's. |
+| 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | **Done 2026-08-20.** Both spec edits landed 2026-08-18 and the constraint is built: `uq_institution_one_row`, a unique index on `(true)` (ADR 0072). It reached 41 tests that built an institution per containment chain and both of the demo seed's foreign-institution scenarios. §4.1 item 7's test is E4's. |
 | 23 | [A spec question for E1: what triggers the first roster pull](E0-23-spec-question-first-roster-pull.md) | none | **Closed 2026-08-18.** SPEC §7.3 carries the answer. The column that stores the service address is E1's, built with the sync that reads it. |
 | 24 | [Review debt from E0-07 and E0-08](E0-24-review-debt-from-e0-07-and-e0-08.md) | 07, 08 | Item 2 is now 35. Item 4 is Todd's. Items 1 and 3 leave the epic — see the carried-out table. |
 | 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Item 1 is now 36; items 2 and 3 are now 37; items 4 and 6 are **closed**. Item 5 leaves the epic. Keeps the complete index of what the three reviews produced. |
@@ -122,9 +122,10 @@ objects that implement it — they are both cheap, and B is the smaller half of 
 hole A does not reach. Then **31 item 1 and then 18**, which is the only path to
 the epic actually exiting. Everything after that can land in any order.
 
-**A, B, C, D, 38 and 31 item 1 are done as of 2026-08-20.** The order from here was
-settled on 2026-08-20: **E0-26 item 1, then E0-22's constraint, then 18**, and
-then E, F, G and H in any order. **All four batches land before the epic merges
+**A, B, C, D, 38, 31 item 1 and 22 are done as of 2026-08-20.** The order from
+here was settled on 2026-08-20: **E0-26 item 1, then E0-22's constraint, then
+18**, and then E, F, G and H in any order. The first two are done, so **18 is
+next**. **All four batches land before the epic merges
 to `main`** — the review debt E0 generated ends with E0 rather than being handed
 on.
 
@@ -214,7 +215,7 @@ says which answers needed one and where it went.
 | E0-30 item 1 | Does the mock identity provider learn RFC 6749 §4.1.2.1 error redirects? | **Yes, implement them.** About 40 lines plus tests, at the split point that already exists in `begin()` after `redirect_uri` validates. A refusal must arrive as a redirect carrying `error` and the `state` that was sent, and a test must fail if it reverts to a page. | no |
 | E0-28 item 6 | Does the mock LMS learn to authenticate now? | **Not now.** Its four moving parts go into E1's ticket so whoever builds the roster sync meets them before writing the client rather than after. E0-28's other eight items proceed without it. | no |
 | E0-22 q1 | Benchmark minimum — every figure, or only drawn lines? | **Every figure computed from a comparison set**, not only a drawn line. | **landed** — §4.1 item 7, §5.1 rewritten to point at it. Its *test* is E4's. |
-| E0-22 q2 | Does one deployment serve exactly one institution? | **Yes, and enforce it.** A constraint permitting at most one `institution` row, which makes global and institution-scoped uniqueness the same rule. | **landed** — §8, with ADR 0017 amended. The *constraint* is E0-22's own remaining work. |
+| E0-22 q2 | Does one deployment serve exactly one institution? | **Yes, and enforce it.** A constraint permitting at most one `institution` row, which makes global and institution-scoped uniqueness the same rule. | **landed** — §8, with ADR 0017 amended. The constraint was built 2026-08-20 (ADR 0072). |
 | E0-23 | What triggers the first roster pull? | **Any instructor or leadership launch**, and the roster service address is stored from that launch. A student launch does not trigger one. Every later scheduled sync works from the stored address, and a never-synced section is visible as such. | **landed** — §7.3, §2.1 points at it. The column and its sync are E1's. |
 | E0-26 item 1 | Which mechanism closes the rollback that keeps a name and leaves no audit row? | **Restructure the reveal so it returns nothing until a separately committed record exists.** Not `dblink`, not a loopback `postgres_fdw` — both put a database credential inside a `SECURITY DEFINER` function, which is a new privilege surface. Its ADR — [0071](../../adr/0071-the-reveal-answers-only-a-committed-record.md), written with the change — says what the chosen shape costs in both directions: a row records an access that was *authorised* rather than one that happened, and a committed record can be spent more than once, so the log under-records too — that half carried to E10. | no |
 | E0-29 item 1a | Is cleartext to an off-machine model endpoint acceptable? | **No — refuse it.** Require an encrypted transport whenever the model is on another host, with or without a credential. A cluster deployment terminates TLS at the model or runs it alongside the app. `README.md` and `.env.example` change wherever they document the current allowance. | no |
@@ -226,8 +227,9 @@ says which answers needed one and where it went.
 **All four spec edits have landed**, so no answer here is waiting on a document.
 What two of them left behind is *code*, and it is owned:
 
-- **The single-institution constraint is E0-22's**, and it is that ticket's whole
-  remaining scope. §8 states the rule; nothing yet enforces it.
+- **The single-institution constraint was E0-22's**, and it landed on 2026-08-20
+  as `uq_institution_one_row` (ADR 0072). §8 states the rule and the database now
+  holds it.
 - **§4.1 item 7's test is E4's**, because the reports carrying comparison-set
   figures do not exist yet. §4.1's preamble now names item 7 and item 1 as the
   two invariants that carry no assertion, rather than claiming all seven do.
@@ -246,7 +248,7 @@ home and no date, which is the state a decision decays in. Todd settled that on
 
 | # | Question | Decision |
 |---|---|---|
-| E0-22 q2 | When is the single-institution constraint built, and does it batch? | **Its own short branch, soon, and it does not batch.** One migration, one test that a second `institution` row is refused, and the test proved by mutation. It was deliberately kept out of Batch H: a schema change riding along with text corrections is the one item in that batch that could break something. |
+| E0-22 q2 | When is the single-institution constraint built, and does it batch? | **Its own short branch, soon, and it does not batch.** One migration, one test that a second `institution` row is refused, and the test proved by mutation. It was deliberately kept out of Batch H: a schema change riding along with text corrections is the one item in that batch that could break something. **Built 2026-08-20**, and keeping it separate proved right — it also moved a seeding fixture every integration test uses. |
 | E0-26 item 1 | Is the reveal rewritten inside E0, or carried to E10? | **Built inside E0, before ticket 18.** Everything the fix needs exists today, and this is the only open item whose subject is a measured hole in a guarantee the spec states rather than a missing assertion. It gets the **full review treatment: the gated reviewer agents, both security passes, and a session with no prior context** — on E0-38 the cleared-context pass was the one that found what the other two missed. |
 | E0-26 item 5 | Who writes the line handing §4.1 item 1 to E2? | **Claude drafts it, Todd approves it before it is committed.** Spec edits are Todd's per `CLAUDE.md`; the draft wording is in E0-26 item 5 and nothing has been written to `docs/SPEC.md`. |
 | E0-29 items 1a, 1b | Where does the transport refusal land, and where does the fail-open reasoning get written down? | **Both in Batch H**, as items 12 and 13. Item 12 is the code change plus the `README.md` and `.env.example` edits; item 13 is the ADR 0056 amendment. If item 12 grows past its description, E0-37's own rule applies and it comes out into a ticket of its own. |

@@ -28,8 +28,9 @@ a guarantee the spec states rather than a missing assertion. It blocks nothing i
 E0 and it is not hardening — and that is exactly why it was at risk of being
 carried indefinitely, which is why on **2026-08-20** it was scheduled here
 instead: everything the fix needs exists at this revision, and E10 is a long way
-off. It is the next thing built in this epic, ahead of E0-22's constraint and
-ahead of ticket 18.
+off. It was the next thing built in this epic, ahead of E0-22's constraint and
+ahead of ticket 18; item 1 merged on 2026-08-20 and E0-22's constraint followed
+it the same day.
 
 **It gets the full review treatment**, decided the same day: the gated reviewer
 agents that fire on its diff, both security passes — the specialist and the
