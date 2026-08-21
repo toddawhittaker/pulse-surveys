@@ -574,9 +574,25 @@ jobs:
           path: coverage.xml
           if-no-files-found: warn
 
+  # Enforcing since E0-18: the first §9.2 Playwright specs exist, so this gate
+  # runs the suite on every non-inert diff. There is no `detect.outputs.e2e`
+  # find-and-skip any more — an empty `tests/e2e` fails loudly rather than
+  # switching the gate off (E0-38's inert-diff skip is the only tolerance left).
+  #
+  # The `detect` job still probes for e2e specs and a test pins that probe to the
+  # files this job runs, but this job no longer reads the answer: with specs
+  # committed the gate is unconditional on their presence, exactly as §9.2 wants.
+  #
+  # The stack is brought up here and the database is migrated and seeded
+  # host-side, mirroring the `migration-drift` job: the runtime image carries
+  # neither `scripts/` nor the migrations, so exec-in-container is not an option,
+  # and the override publishes Postgres on localhost:5432 for the host to reach.
+  # The seed registers the mock platform in `lti_platform` behind its development
+  # guard, and the launch door resolves `iss` against that row — so a launch spec
+  # fails without it.
   e2e:
     name: Test · Playwright e2e
-    needs: [changed, detect, fast-gate]
+    needs: [changed, fast-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -585,34 +601,60 @@ jobs:
         if: needs.changed.outputs.inert == 'true'
         run: echo "::notice::Every changed path is inert documentation (E0-38), so no e2e path was exercised."
 
-      - name: No e2e specs yet
-        if: needs.detect.outputs.e2e != 'true' && needs.changed.outputs.inert != 'true'
-        run: echo "::notice::No tests/e2e specs yet. Enforcing in E0-18, which writes the first specs over the mock LMS (E0-14, landed) and the mock IdP (E0-16) — §9.2 requires both doors exercised in every run."
-
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - uses: actions/setup-python@v5
+        if: needs.changed.outputs.inert != 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The dev closure plus the app itself, from the committed lockfile with
+      # hashes — the shape every other Python job here uses. The dev lock rather
+      # than the runtime one because `pip install -e . --no-build-isolation`
+      # needs the setuptools build backend present, and that ships in the dev
+      # extra, not the runtime closure. alembic and the seed's own dependencies
+      # are a subset of both.
+      - name: Install backend to migrate and seed (locked)
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
+
       - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp)
-        if: needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.changed.outputs.inert != 'true'
         run: |
           cp .env.example .env
           docker compose up -d --build
           ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
 
-      - name: Run Playwright
-        if: needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
+      # Host-side, against the published port. `.env` supplies the superuser
+      # credentials `migrations/env.py` connects as and the ENVIRONMENT the seed
+      # requires; only DATABASE_URL's host is rewritten to localhost, the same
+      # incantation the README documents for running alembic from the host.
+      - name: Migrate and seed the stack's database
+        if: needs.changed.outputs.inert != 'true'
         run: |
-          npx --yes playwright install --with-deps chromium
+          set -a; . ./.env; set +a
+          export DATABASE_URL="$(printf '%s' "$DATABASE_URL" | sed 's/@db:/@localhost:/')"
+          (cd backend && alembic upgrade head)
+          python scripts/seed.py
+
+      - name: Run Playwright
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
           npx playwright test
 
       - name: Compose logs on failure
-        if: failure() && needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
+        if: failure() && needs.changed.outputs.inert != 'true'
         run: docker compose logs --no-color --tail=200
 
       - uses: actions/upload-artifact@v4
-        if: failure() && needs.detect.outputs.e2e == 'true' && needs.changed.outputs.inert != 'true'
+        if: failure() && needs.changed.outputs.inert != 'true'
         with:
           name: playwright-report
           path: playwright-report/
@@ -892,6 +934,15 @@ jobs:
           npm ci
           npm audit --audit-level=high
 
+      # The npm licence scanner is a pinned devDependency in the root
+      # package-lock.json now, not an `npx --yes` fetch resolving latest at run
+      # time (CLAUDE.md's pin rule). Install the root closure so its binary is on
+      # disk before the scan below resolves it; gated with the scan, since the
+      # scan only runs when there is a frontend tree to read.
+      - name: Install the licence scanner (locked)
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        run: npm ci
+
       # pip-licenses reads installed distributions, so the runtime closure has
       # to be on disk. The runtime lock and not the dev one: test dependencies
       # are not distributed, and §10 is about what we ship. The audit tools
@@ -911,7 +962,7 @@ jobs:
           pip-licenses --format=json --with-urls > reports/py-licenses.json
           ARGS="--python-json reports/py-licenses.json"
           if [ "${{ needs.detect.outputs.frontend }}" = "true" ]; then
-            (cd frontend && npx --yes license-checker-rseidelsohn@4.3.0 --json > ../reports/npm-licenses.json)
+            (cd frontend && npx license-checker-rseidelsohn --json > ../reports/npm-licenses.json)
             ARGS="$ARGS --npm-json reports/npm-licenses.json"
           fi
           python scripts/ci/check_licenses.py $ARGS

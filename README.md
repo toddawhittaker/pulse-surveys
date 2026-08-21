@@ -570,6 +570,48 @@ above.
 here should mean a green run there. Where the two disagree, the workflow is
 right and the `Makefile` is the bug.
 
+## Running the e2e suite locally
+
+The end-to-end suite (`tests/e2e/`) drives a real browser through both entry
+doors — an LTI launch from the mock LMS, and a web login through the mock IdP —
+against the running Compose stack (SPEC §9.2). It needs the stack up, the
+database migrated and seeded, and the Playwright browser installed.
+
+```sh
+# 1. Bring the stack up (Postgres is published on localhost:5432 by the override).
+cp .env.example .env
+make up
+./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+
+# 2. Migrate and seed host-side, with DATABASE_URL pointed at localhost. The seed
+#    registers the mock platform the launch door resolves against.
+set -a; . ./.env; set +a
+export DATABASE_URL="$(printf '%s' "$DATABASE_URL" | sed 's/@db:/@localhost:/')"
+make migrate
+make seed
+
+# 3. Install the pinned Playwright browser (once per checkout), then run the suite.
+npm ci
+npx playwright install chromium
+make e2e            # or: npx playwright test
+```
+
+The Node tooling — Playwright and the licence scanner — is pinned in the root
+`package.json`, so `npm ci` installs from the committed `package-lock.json`; do
+not `npx --yes playwright` (that resolves the latest version at run time).
+
+To watch a flow in a real window while debugging, run it headed:
+
+```sh
+npx playwright test --headed                       # every spec, visibly
+npx playwright test tests/e2e/web-login.spec.ts    # one spec
+npx playwright test --debug                         # step through with the inspector
+```
+
+A failing run writes an HTML report to `playwright-report/`; open it with
+`npx playwright show-report`. CI uploads that same report as an artifact when the
+suite fails.
+
 ## How to create a migration
 
 Every table in the schema is created by a migration, and the models are the

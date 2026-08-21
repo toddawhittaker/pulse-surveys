@@ -1,6 +1,6 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 2**
+**Caught: 3**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -112,6 +112,25 @@ something. The three E0-09 failures print a `CheckViolation` from the new rule, 
 the natural reading is that the rule is too strict rather than that two correct
 specifications disagree. Six red tests, no defect in any of them, no defect in the
 implementation.
+
+*(In E0-18 PR 2 the trigger was a dispatch brief, not a new test rule, and the
+sweep caught it before any code changed. The brief said to "remove the `e2e` probe
+from the `detect` job" as cleanup, on the true premise that the `e2e` job was its
+only consumer. But `tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py`
+(E0-36) executes every `run:` script in the `detect` job over planted trees and
+asserts the emitted output **equals** a three-key dict including `e2e` — so dropping
+the probe makes `emitted != expected` on every case, and that test is read-only.
+The repair is on the other side of the wall: only the test author may drop the
+`e2e` key from those expectations. Nothing was removed. The probe stays — harmless,
+still emitted, simply no longer read by the `e2e` job — and only the *skip* half of
+the ticket's "find-and-skip" went. `grep -rln 'e2e' tests/` and one read of the
+module found it before a single edit. This is the entry working the way it should:
+not a red-suite surprise and not a dispute, just a brief instruction quietly
+declined because a correct test forbids it, and reported as a deviation. The lesson
+generalizes past "a ticket's new rule": **any instruction that removes or renames a
+thing — a workflow output, a function, a fixture — is a claim that nothing asserts
+on it, and the cheap way to check the claim is to grep the read-only suite before
+acting, not after the runner goes red.**)*
 
 **Rule.** **Before specifying a rule that changes what the database will store,
 grep the existing suite for the rows it forbids.** `grep -rn 'reports_to='
