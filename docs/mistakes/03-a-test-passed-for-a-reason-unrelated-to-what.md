@@ -1,17 +1,34 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 48**
+**Caught: 49**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*27 instances recorded; the 3 below are the most recent, newest first. The
-earlier 24 are in this file's git history and in the pull requests they cite.*
+*28 instances recorded; the 3 below are the most recent, newest first. The
+earlier 25 are in this file's git history and in the pull requests they cite.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
 were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
+
+*(The dev-only test console, and it is the shape where **the page under test can
+be empty and the assertion still passes.** The console fetches the mock provider's
+roster and lists the web-login people as sign-in links; the obvious integration
+test renders `/dev` and asserts the dean's subject appears in the body. Against a
+roster that came back empty — a fetch the seam refused, a provider seeded with
+nobody — the page says nothing and "the subject is absent" is trivially true, so
+the test would go green over a console that lists no one. It now asserts the
+provider's own published roster really holds the two named subjects before
+looking for them on the page. The same round has two HTML parsers, one reading
+which `<option>` carries `selected` for the mock IdP's `login_hint` pre-select
+and one reading which `<a>` carries `target="_blank"`, and each is the pattern
+this entry warns of: each ships a control test run against markup it must flag and
+markup it must let past, because a parser blind to the attribute makes "the right
+option is selected" and "nothing is selected" both pass. And the login-form
+pre-select carries its near miss — an unknown or absent `login_hint` must select
+**nothing** — so the feature cannot pass by always selecting the first option.)*
 
 *(E0-18 PR 1's third round, and it is the shape where **a refusal is the right
 answer for a reason the test did not name.** The new rule is that each door reads
@@ -43,26 +60,6 @@ is posed by re-posing the code exchange as the registered client rather than by
 editing the token, so the signature survives, and it reads the delivered token's
 `aud` back and requires it to name the other client — without which the 4xx is
 just as easily a flow that failed at the exchange.)*
-
-*(Writing E0-18's door tests, before any door existed, and it is the shape where
-**the only obvious way to pose a case breaks something else at the same time.**
-The launch and web doors both have to refuse a token whose `exp` has passed, and
-the natural test edits `exp` in the payload and re-encodes it — which invalidates
-the signature. That test is refused by a tool that checks nothing but the
-signature, and by a tool that checks nothing at all if the decoder trips first, so
-it would have gone green over an implementation with no expiry check in it. What
-stands instead winds `time.time` back for the length of the mint, so the mock
-issues a token that is genuinely expired and genuinely signed, and beside it a
-near miss that winds the clock back thirty seconds and requires the launch to be
-**accepted** — without which the refusal is evidence that winding the clock breaks
-a launch rather than evidence that anything reads `exp`. The same shape decided
-three other things in the same batch: the wrong-`aud` and unknown-`deployment_id`
-cases move the registration rather than the token, so each refusal differs from
-the happy path in exactly one value; the `/docs` gate's closed direction carries a
-`/healthz` control, because "both routes answer 404" is also true of an
-application serving nothing; and the two empty-landing-page tests assert the
-landing testid is present before reporting that no other person's address is on
-it, with the scan shown finding those addresses in a sample built out of them.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

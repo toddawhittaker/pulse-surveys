@@ -44,7 +44,8 @@ launch-only assignment, she holds Care and nothing else, and signing in **as her
 yields Care without it. Selecting her is what makes her deletion a failure.
 """
 
-from typing import Any
+from html.parser import HTMLParser
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -659,4 +660,202 @@ def test_the_login_form_can_be_addressed_without_a_brittle_selector(mock_idp: An
         f"The login form declares no submit control (it declares {form['controls']}). A form a "
         "person cannot submit is one only a script can send, which is the opposite of what "
         "E0-18 needs to click through."
+    )
+
+
+# ---------------------------------------------------------------------------
+# `login_hint` pre-selects a person on the login form. The developer test console
+# links to the tool's web door with a `login_hint`, the tool forwards it to this
+# provider's authorization request (OIDC Core 1.0 §3.1.2.1), and the form marks
+# the matching option `selected` so a developer lands on the person they clicked.
+# It is presentational only: the `data-testid`s do not move, every option is still
+# present, and an unknown or absent hint selects nothing — the form as it renders
+# today.
+# ---------------------------------------------------------------------------
+
+# The subject nobody is seeded under, used for the "unknown hint selects nothing"
+# half. It says what it is in the value, so one appearing in a form or a log is
+# traceable to this file.
+UNSEEDED_SUBJECT = "mock-idp-user-nobody-e0-dev-console"
+
+
+class Option(NamedTuple):
+    """One `<option>`: the value it would submit and whether it is pre-selected."""
+
+    value: str
+    selected: bool
+
+
+class OptionReader(HTMLParser):
+    """Every `<option>` on a page, as a value/selected pair.
+
+    A parser rather than a regular expression because the property under test is
+    exactly which `<option>` carries the `selected` attribute, and a pattern over
+    markup answers a question that only looks the same (`docs/MISTAKES.md` entry 3).
+    `selected` is a boolean attribute, so it is read as present-or-absent —
+    catching `selected`, `selected=""` and `selected="selected"` alike — because a
+    check for one spelling would pass a form using another. Its own control test is
+    below.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.options: list[Option] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "option":
+            return
+        names = {name.lower() for name, _ in attrs}
+        value = next((value or "" for name, value in attrs if name.lower() == "value"), "")
+        self.options.append(Option(value=value, selected="selected" in names))
+
+
+def options_in(markup: str) -> list[Option]:
+    """Parse `markup` and hand back every option it declares."""
+    reader = OptionReader()
+    reader.feed(markup)
+    reader.close()
+    return reader.options
+
+
+def selected_values(markup: str) -> list[str]:
+    """The values of the pre-selected options on a page, in document order."""
+    return [option.value for option in options_in(markup) if option.selected]
+
+
+def web_subject(mock_idp: Any, role: str) -> str:
+    """The subject the provider publishes for the one web-login person holding `role`."""
+    holders = [
+        str(user["sub"])
+        for user in mock_idp.published_users()
+        if role in (user.get("roles") or []) and user.get("web_login") and user.get("sub")
+    ]
+    assert len(holders) == 1, (
+        f"The registration document publishes {len(holders)} web-login people holding {role!r}; "
+        "this test names one so the pre-selection is asserted about a known subject."
+    )
+    return holders[0]
+
+
+def offered_subjects(mock_idp: Any) -> list[str]:
+    """Every subject the provider publishes as a web-login identity (ADR 0058)."""
+    return [
+        str(user["sub"])
+        for user in mock_idp.published_users()
+        if user.get("web_login") and user.get("sub")
+    ]
+
+
+def test_the_option_reader_reads_the_selected_attribute_in_every_spelling() -> None:
+    """The control on the pre-selection assertions (`docs/MISTAKES.md` entry 3).
+
+    Those assertions turn on one `<option>` carrying `selected` and the rest not; a
+    reader that saw the attribute on nothing would make "the right one is selected"
+    and "nothing is selected" both pass, and both would read as the provider being
+    correct. So it is shown reading a bare `selected`, both quoted spellings, and an
+    option with none — before it is trusted about the form.
+    """
+    markup = (
+        '<select>'
+        '<option value="a">A</option>'
+        '<option value="b" selected>B</option>'
+        '<option value="c" selected="">C</option>'
+        '<option value="d" selected="selected">D</option>'
+        '</select>'
+    )
+
+    parsed = options_in(markup)
+
+    assert parsed == [
+        Option("a", False),
+        Option("b", True),
+        Option("c", True),
+        Option("d", True),
+    ], (
+        f"The option reader parsed {parsed}. Every pre-selection assertion below is made with it, "
+        "and it has to recognise a bare boolean attribute and both quoted spellings — a form is "
+        "free to use any of them — while leaving an option with none unselected."
+    )
+
+
+def test_a_login_hint_pre_selects_that_persons_option_and_no_other(mock_idp: Any) -> None:
+    """**Dies if the hint pre-selects nothing**, and dies if it selects more than one.
+
+    A `login_hint` naming a seeded web subject renders a form whose selected option
+    is that subject and whose every other option is present and unselected. That is
+    the whole of the console's convenience: a developer clicks a person, the form
+    opens with that person chosen, and one submit signs them in.
+
+    Two near-misses are ruled out. A form that pre-selected the hinted person and
+    dropped the others would make the wrong developer unable to switch — so the full
+    offered set is required present. A form that marked several options — the hinted
+    one and whatever a browser defaults to — would submit ambiguously, so exactly
+    one selection is required. The `data-testid`s are asserted intact, because the
+    console and the Playwright specs address the form by them and a pre-selection
+    that renamed a control would break the click it exists to serve.
+    """
+    hint = web_subject(mock_idp, "DEAN")
+    attempt = mock_idp.begin(login_hint=hint)
+    mock_idp.require_login_form(attempt)
+    body = attempt.response.text
+
+    selected = selected_values(body)
+    assert selected == [hint], (
+        f"A login form rendered for `login_hint={hint!r}` marks {selected} selected; it must mark "
+        f"exactly {[hint]}. A hint that selects nothing is the feature missing, and one that selects "
+        "several submits an ambiguous choice."
+    )
+
+    present = {option.value for option in options_in(body)}
+    missing = [subject for subject in offered_subjects(mock_idp) if subject not in present]
+    assert not missing, (
+        f"The form rendered for `login_hint={hint!r}` no longer offers {missing}. Pre-selecting one "
+        "person must not remove the others — a developer has to be able to pick somebody else."
+    )
+
+    for testid in ("mock-idp-identity", "mock-idp-submit"):
+        assert testid in body, (
+            f"The form rendered for a `login_hint` no longer carries `data-testid={testid!r}`. The "
+            "console and E0-18's Playwright specs address the form by these, and pre-selection is "
+            "presentational — it does not move the hooks."
+        )
+
+
+@pytest.mark.parametrize(
+    "case,login_hint",
+    [
+        ("an unknown subject", UNSEEDED_SUBJECT),
+        ("no login_hint at all", None),
+    ],
+)
+def test_an_unknown_or_absent_login_hint_selects_nothing(
+    mock_idp: Any, case: str, login_hint: str | None
+) -> None:
+    """The pair for the pre-selection test: the form renders as today when it cannot pre-select.
+
+    **Dies if the provider marks an option `selected` for a hint it cannot place**,
+    or if it defaults a selection when none was hinted. A `login_hint` naming nobody
+    seeded, and no hint at all, both leave the form exactly as it renders now — no
+    option pre-selected — so a developer sees the plain list. Without this, a
+    provider that always selected its first option would satisfy the test above for
+    the wrong reason and pre-select the wrong person on every unhinted login.
+
+    The premise is guarded: the form still has to offer options, so a form that
+    selected nothing because it rendered nothing would fail here rather than pass.
+    """
+    attempt = (
+        mock_idp.begin() if login_hint is None else mock_idp.begin(login_hint=login_hint)
+    )
+    mock_idp.require_login_form(attempt)
+    body = attempt.response.text
+
+    assert options_in(body), (
+        f"The login form for {case} offers no options at all, so 'nothing is selected' is a fact "
+        "about an empty form rather than about pre-selection."
+    )
+    selected = selected_values(body)
+    assert selected == [], (
+        f"The login form for {case} pre-selects {selected}. A hint the provider cannot place — and "
+        "the absence of one — leaves the form as it renders today, with nothing chosen; a default "
+        "selection would sign in whoever happened to be first."
     )
