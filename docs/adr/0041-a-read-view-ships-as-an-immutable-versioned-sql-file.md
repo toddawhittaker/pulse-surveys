@@ -73,6 +73,25 @@ replaces v001's grant list and that the count is four. Nothing outside
 describing the *current* schema is a live claim and is repaired
 (`docs/MISTAKES.md` entry 1).
 
+**The freeze covers the statements a revision executes, not the header prose
+above them.** Stated here because E0-26 hit it and the rule as written did not
+answer it. The property this record protects is that two databases at the same
+revision must not hold different objects, and the header comment block above a
+file's first `CREATE` is not part of any object: Postgres discards it at parse
+time and `pg_proc` never sees it. So correcting a *false* statement in that block
+is permitted after the push, and correcting one inside a `$$ … $$` body is not —
+that text is the function's stored source, and editing it makes two databases at
+the same revision differ, which is exactly what the rule forbids. The line is the
+file's first executed statement, and it is a narrow permission rather than a
+softening: it exists because a header comment beside a `SECURITY DEFINER` body
+describing the *current* schema is a live claim by the test three paragraphs
+above, and the alternative was shipping a migration whose only purpose is prose.
+An accurate statement that has merely been *superseded* is still history and
+still must not be edited; this permits repairing what was never true, not
+updating what has stopped being true. PR #53 used it once, for a sentence that
+told a maintainer the safety log errs only in the safe direction when review had
+measured that it errs both ways.
+
 **The boundary is the push and not the first `alembic upgrade head`**, and the
 distinction is not a softening — it is where the property the rule protects
 starts to matter. What must never be true is that two databases at the same
