@@ -5,6 +5,11 @@ is one function that maps a verified token to a landing role, called from both
 doors, so E1 edits one place". `landing_role_for` is that function, and the four
 routes in `app/api/lti.py` and `app/api/auth.py` reach it and nothing else.
 
+**The seam is one function taking which door called it**, rather than one
+function that works the same for both — the third review round moved it there and
+the paragraph below on vocabularies says why. E1 still edits one place; what it
+edits now has two branches, one per door.
+
 **The role comes from the verified token and never from the database.** E0 has no
 identity resolution on either door — no `user` row is written for a mock subject,
 no purview is computed, and `app.services.authz.transitive_purview` raises by
@@ -13,13 +18,23 @@ statement about what the issuer said; a view labelled by a claim nobody checked
 would not be. E1 replaces this with the app-owned assignment model, which is the
 whole reason the mapping is one function rather than a branch in each router.
 
-**The two doors read two different vocabularies, and neither is this file's
-choice.** A launch carries the LIS v2 membership URIs LTI 1.3 draws roles from; a
-web login carries SPEC §2's own role names under the claim
-`mock-idp/app/flow.py` publishes and ADR 0058 documents. So the function
-dispatches on which claim the verified token carries, rather than on which router
-called it — a router that had to say which door it was would be a second place
-the two vocabularies are known.
+**Each door reads exactly one vocabulary, and never the other one.** A launch
+carries the LIS v2 membership URIs LTI 1.3 draws roles from; a web login carries
+SPEC §2's own role names under the claim `mock-idp/app/flow.py` publishes and ADR
+0058 documents. `landing_role_for` takes a `Door` and reads that door's claim
+alone: a foreign claim beside a valid one is ignored, and a token carrying only
+the foreign one is refused exactly as a token carrying no roles at all is.
+
+**Why it is not "whichever claim the token carries", which is what this was.**
+The security review of E0-18 named the consequence: the person who administers an
+LMS writes what its `id_token` says, so a launch door that fell through to the
+web door's claim would let that administrator put themselves on the Care screen by
+adding one claim to a launch. SPEC §2 gives Care, leadership and admin the web
+door *precisely so* the LMS cannot name those roles, and a dispatch that read
+whichever vocabulary turned up handed the LMS both. The mirror image is just as
+wrong: a web door reading the LTI claim would take role names from the vocabulary
+the LMS controls. So the caller says which door it is, and that is one branch in
+each router rather than a second place the vocabularies are known.
 
 **Every page is empty, and that is the design rather than a stub.** SPEC §4.1's
 visibility invariants and §6.2's Care surface both say what these screens may
@@ -28,27 +43,23 @@ line saying nothing is here yet, and no identifier of any kind — not even the
 signed-in person's own, which would be legitimate and which nothing needs. Two
 `@pytest.mark.invariant` tests hold the leadership and Care pages to it.
 
-**UNRESOLVED, and this module is the whole of the disagreement.** E0-09 criterion
-10 says no LTI claim and no OIDC claim may ever produce a Care assignment, and
+**This module is a named exception to E0-09's Care tripwire, and it was
+arbitrated rather than assumed.** E0-09 criterion 10 says no LTI claim and no
+OIDC claim may ever produce a Care assignment, and
 `tests/unit/test_care_is_not_reachable_from_a_claim.py` enforces it by failing any
 module under `app/` that both reads a claim and names the role in code.
 `landing_role_for` does both, because E0-18 specifies the web door as landing a
-verified `CARE` roles claim on the Care empty view. That test is red on this
-branch and the isolated invariant pass fails with it.
+verified `CARE` roles claim on the Care empty view. The collision was ruled on
+2026-08-21 in favour of E0-18, and the reasoning lives in that file's
+`EXCEPTIONS` entry for this path rather than here, so there is one copy of it.
 
-No implementation satisfies both: the sweep matches the bare name, the attribute
-and the string alike, so the only way past it is to move the literal into a second
-module — which leaves the composition unchanged and turns a gate green, and is
-exactly the evasion the test's own docstring says it cannot see. Deriving the
-view from the database instead is what E0-18 rules out ("E0 does not build: any
-database identity resolution on either door").
-
-What is *not* in dispute is the property: nothing here writes a
-`role_assignment`, the Care queue does not exist, and the reveal is gated twice
+The property the ruling rests on is behavioural, not argued: nothing here writes
+a `role_assignment`, the Care queue does not exist, and the reveal is gated twice
 on a live assignment in the database — `app.services.safety` before it calls, and
 `reveal_student_identity` again inside its own body. A `CARE` claim buys an empty
-page in E0. Whether that makes the tripwire too wide or this door wrong is not
-the implementer's call; the objection is filed and an arbitrator rules.
+page in E0, and after the third review round it buys even that only at the web
+door. E1 replaces claim-derived landing roles with the assignment model, and the
+exception goes with them.
 
 The markup follows `docs/DESIGN_BRIEF.md` and `design/tokens.css`: chalk ground,
 spruce ink, Literata for the heading and Schibsted Grotesk for the body, the flat
@@ -59,11 +70,11 @@ are already there, and E1's frontend is where the real loading strategy belongs.
 """
 
 from collections.abc import Mapping, Sequence
-from enum import StrEnum
+from enum import Enum, StrEnum, auto
 from html import escape
 from typing import Any
 
-__all__ = ["LandingRole", "landing_page", "landing_role_for", "refusal_page"]
+__all__ = ["Door", "LandingRole", "landing_page", "landing_role_for", "refusal_page"]
 
 # What a refused entry says. Deliberately one sentence and a reason, with no
 # retry link: there is nowhere for a browser to go from here that is not the
@@ -89,6 +100,20 @@ LEARNER_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Learner"
 # screen: a roll-up over whatever the holder supervises. The scope differs per
 # role and E9 is where that becomes visible; nothing here computes it.
 LEADERSHIP_ROLES = ("VP_ACADEMICS", "DEAN", "ASSISTANT_DEAN", "CHAIR", "LEAD_FACULTY")
+
+
+class Door(Enum):
+    """Which entry door a verified token arrived at, and so which claim it may state.
+
+    A two-member enum rather than a boolean or a claim name, so that a router
+    cannot ask for a vocabulary that does not exist and cannot pass the other
+    door's claim by getting an argument the wrong way round. `app/api/lti.py`
+    passes `LAUNCH` and `app/api/auth.py` passes `WEB`, and those two lines are
+    the whole of what either router knows about roles.
+    """
+
+    LAUNCH = auto()
+    WEB = auto()
 
 
 class LandingRole(StrEnum):
@@ -187,23 +212,27 @@ def web_login_landing(roles: Sequence[str]) -> LandingRole | None:
     return None
 
 
-def landing_role_for(claims: Mapping[str, Any]) -> LandingRole | None:
-    """The view a verified token's roles claim names, or `None` if none does.
+def landing_role_for(claims: Mapping[str, Any], *, door: Door) -> LandingRole | None:
+    """The view `door`'s roles claim names in a verified token, or `None` if none does.
 
     **The one seam E1 edits.** Both doors call this and neither has a role rule
     of its own, so replacing "the token says so" with "the assignment model says
     so" is a change in this function.
+
+    **One claim is read and the other is not looked at**, which is the rule the
+    module docstring argues for: a launch is judged on its LIS roles alone and a
+    web login on SPEC §2's roles alone. `claims.get` rather than `in`, so a claim
+    that is absent, empty, or full of roles this door serves no view for all reach
+    the same answer — there is no third case for a fall-through to hide in.
 
     `None` is a refusal, not a default: a verified token stating a role this
     system has no screen for is a real state — an LMS sends `Mentor`, a provider
     sends a role a later spec adds — and the honest answer is to refuse rather
     than to pick the least-privileged view and look like it worked.
     """
-    if LTI_ROLES_CLAIM in claims:
-        return launch_landing(stated_roles(claims[LTI_ROLES_CLAIM]))
-    if WEB_ROLES_CLAIM in claims:
-        return web_login_landing(stated_roles(claims[WEB_ROLES_CLAIM]))
-    return None
+    if door is Door.LAUNCH:
+        return launch_landing(stated_roles(claims.get(LTI_ROLES_CLAIM)))
+    return web_login_landing(stated_roles(claims.get(WEB_ROLES_CLAIM)))
 
 
 # The page, as one f-string rather than a template engine: there is one layout,

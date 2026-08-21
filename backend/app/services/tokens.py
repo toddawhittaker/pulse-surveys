@@ -28,6 +28,26 @@ Three rules the implementation holds, each of which is a real defect if dropped:
   this application sets. E0-18's whole seam is that one client makes every
   outbound call.
 
+**`state` and `nonce` are compared here too**, by `same_opaque_value`, and that
+is a deliberate widening of what this module is about. Deciding whether a token
+is one this tool asked for has two halves — the signature says who wrote it, and
+the echoed opaque values say this tool started the flow it came back from — and
+both doors do both. Four call sites compared them with `secrets.compare_digest`
+on `str`, which **raises `TypeError` rather than answering `False`** as soon as
+either side holds a character outside ASCII, and a caller can put one there. That
+hazard living in four places, fixed in one of them, is `docs/MISTAKES.md` entry
+13; so the comparison is a function, and it takes bytes.
+
+**No refusal message names an address this tool fetched.** A key set URL is a
+server-side address — a Compose service name in this stack — and the browser that
+receives a refusal page is the one that provoked the fetch. Naming it there hands
+whoever asked a piece of the network map behind the tool, so the messages below
+say what failed and not where. Nothing logs it either: `backend/app` has no
+logging yet, and inventing a logger in an authentication change is a bigger
+decision than this one. The address is not lost — it is the `jwks_url` on the
+platform's registration row and the `OIDC_JWKS_URL` setting, which is where
+somebody debugging a failed fetch already has to look.
+
 **No key set is cached.** A launch fetches the platform's JWKS every time, which
 is one extra request per launch and no correctness question at all: a cache has
 to decide what happens when a platform rotates a key, and E0-18 has no launch
@@ -35,13 +55,14 @@ volume to justify answering that. `lti_platform.jwks_fetched_at` is the column
 that would record such a fetch, and nothing writes it — see `app.lti.launch`.
 """
 
+import secrets
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
 import jwt
 
-__all__ = ["TokenVerificationError", "verified_claims"]
+__all__ = ["TokenVerificationError", "same_opaque_value", "verified_claims"]
 
 # The only signature algorithm either door accepts. RS256 is what the IMS
 # security framework specifies for an LTI 1.3 launch and what E0-16's provider
@@ -70,35 +91,61 @@ class TokenVerificationError(Exception):
     """
 
 
+def same_opaque_value(delivered: str, issued: str) -> bool:
+    """Is the `state` or `nonce` that came back the one this tool sent?
+
+    **Compared as bytes.** `secrets.compare_digest` accepts two `str` only while
+    both are ASCII, and raises `TypeError` on anything else — so a caller who puts
+    `é` in a `state` takes a door that compares text out through the error handler
+    instead of through its refusal. That is fail-closed, and it is still a defect:
+    the request gets no page, and everything the refusal path does on the way out
+    does not happen. On both doors that includes clearing the single-use cookie,
+    which leaves a browser holding a `state` an attacker may keep trying against.
+
+    Encoding first is the whole fix. `str.encode` has an answer for every string,
+    the comparison then has an answer for every pair, and the caller's refusal is
+    reached the ordinary way.
+
+    Still constant-time, which is the reason `compare_digest` is here at all: an
+    equality that returns early tells a caller how much of a guessed `state` was
+    right, one character at a time.
+    """
+    return secrets.compare_digest(delivered.encode("utf-8"), issued.encode("utf-8"))
+
+
 def key_set(http: httpx.Client, jwks_url: str) -> Mapping[str, Any]:
-    """Fetch a published JWK Set, or refuse saying which address failed.
+    """Fetch a published JWK Set, or refuse saying what about it failed.
 
     The URL is one this tool stored or was configured with, never one read out
     of the token being checked: a verifier that fetched the key set an unverified
     token named would verify every forgery against its forger's own key.
+
+    **No refusal below names `jwks_url`.** These messages reach `refusal_page`,
+    and the caller reading that page is the one who provoked the fetch — see the
+    module docstring for where the address is instead.
     """
     try:
         response = http.get(jwks_url, timeout=KEY_SET_TIMEOUT_SECONDS)
     except httpx.HTTPError as failure:
         raise TokenVerificationError(
-            f"The issuer's key set at {jwks_url} could not be fetched ({type(failure).__name__}), "
+            f"The issuer's published key set could not be fetched ({type(failure).__name__}), "
             "so the signature could not be checked."
         ) from failure
     if response.status_code != 200:
         raise TokenVerificationError(
-            f"The issuer's key set at {jwks_url} answered {response.status_code}, so there is no "
+            f"The issuer's published key set answered {response.status_code}, so there is no "
             "key to check the signature against."
         )
     try:
         document = response.json()
     except ValueError as failure:
         raise TokenVerificationError(
-            f"The issuer's key set at {jwks_url} is not JSON, so it is not a JWK Set (RFC 7517)."
+            "The issuer's published key set is not JSON, so it is not a JWK Set (RFC 7517)."
         ) from failure
     if not isinstance(document, dict) or not isinstance(document.get("keys"), list):
         raise TokenVerificationError(
-            f"The document at {jwks_url} carries no `keys` array, so it is not a JWK Set "
-            "(RFC 7517)."
+            "The document the issuer publishes as its key set carries no `keys` array, so it is "
+            "not a JWK Set (RFC 7517)."
         )
     return document
 

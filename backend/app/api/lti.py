@@ -49,7 +49,7 @@ from app.lti.launch import (
     begin_a_launch,
     verified_launch,
 )
-from app.services.landing import landing_page, landing_role_for, refusal_page
+from app.services.landing import Door, landing_page, landing_role_for, refusal_page
 
 router = APIRouter(tags=["lti"])
 
@@ -104,6 +104,7 @@ async def login(request: Request, session: Session = Depends(get_session)) -> Re
         LTI_LOGIN_COOKIE,
         request.app.state.login_secret,
         {"state": initiation.state, "nonce": initiation.nonce},
+        settings,
     )
     return response
 
@@ -132,7 +133,7 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
         clear_carried(answer, LTI_LOGIN_COOKIE)
         return answer
 
-    role = landing_role_for(claims)
+    role = landing_role_for(claims, door=Door.LAUNCH)
     if role is None:
         answer = refused(
             "The launch states no role this tool has a view for, so there is nothing to show you."

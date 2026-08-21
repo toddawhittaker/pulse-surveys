@@ -49,8 +49,8 @@ from app.api.deps import (
     with_query,
 )
 from app.config import Settings
-from app.services.landing import landing_page, landing_role_for, refusal_page
-from app.services.tokens import TokenVerificationError, verified_claims
+from app.services.landing import Door, landing_page, landing_role_for, refusal_page
+from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
 router = APIRouter(tags=["auth"])
 
@@ -183,7 +183,7 @@ def verified_session(
         raise SessionRefusedError(
             "The callback carries no `state`, which every callback must return."
         )
-    if not secrets.compare_digest(state, expected_state):
+    if not same_opaque_value(state, expected_state):
         raise SessionRefusedError("The callback returns a `state` this tool did not issue.")
 
     if not code:
@@ -210,7 +210,7 @@ def verified_session(
         raise SessionRefusedError(
             "The session carries no `nonce`, which every session must return."
         )
-    if not secrets.compare_digest(delivered_nonce, expected_nonce):
+    if not same_opaque_value(delivered_nonce, expected_nonce):
         raise SessionRefusedError("The session returns a `nonce` this tool did not send.")
 
     return claims
@@ -259,6 +259,7 @@ def begin_web_login(request: Request) -> Response:
         OIDC_LOGIN_COOKIE,
         request.app.state.login_secret,
         {"state": state, "nonce": nonce, "verifier": verifier},
+        settings,
     )
     return response
 
@@ -291,7 +292,7 @@ async def finish_web_login(request: Request) -> Response:
         clear_carried(answer, OIDC_LOGIN_COOKIE)
         return answer
 
-    role = landing_role_for(claims)
+    role = landing_role_for(claims, door=Door.WEB)
     if role is None:
         answer = refused(
             "That sign-in states no role this tool has a view for, so there is nothing to show "

@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models.lti import LtiDeployment, LtiPlatform
-from app.services.tokens import TokenVerificationError, verified_claims
+from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
 __all__ = [
     "LAUNCH_PATH",
@@ -228,7 +228,7 @@ def verified_launch(
     expected_state = str(carried.get("state") or "")
     if not delivered_state or not expected_state:
         raise LaunchRefusedError("The launch carries no `state`, which every launch must return.")
-    if not secrets.compare_digest(delivered_state, expected_state):
+    if not same_opaque_value(delivered_state, expected_state):
         raise LaunchRefusedError("The launch returns a `state` this tool did not issue.")
 
     token = form.get("id_token") or ""
@@ -263,7 +263,7 @@ def verified_launch(
     delivered_nonce = str(claims.get("nonce") or "")
     if not delivered_nonce or not expected_nonce:
         raise LaunchRefusedError("The launch carries no `nonce`, which every launch must return.")
-    if not secrets.compare_digest(delivered_nonce, expected_nonce):
+    if not same_opaque_value(delivered_nonce, expected_nonce):
         raise LaunchRefusedError("The launch returns a `nonce` this tool did not send.")
 
     registered_deployment(session, platform, claims.get(DEPLOYMENT_ID_CLAIM))

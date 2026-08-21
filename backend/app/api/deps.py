@@ -37,6 +37,20 @@ unified session model replaces this mechanism outright. What is deliberately
 *not* done is to add a configured secret for it — an `.env.example` entry is a
 promise that a value is worth setting, and this one has a two-ticket life.
 
+**`Secure` everywhere except development.** The cookie holds the `state` and
+`nonce` a launch is judged against, and on the web door the PKCE verifier as
+well — which is the whole of what binds an authorization code to this client,
+since it is a public one with no secret. A browser sends a cookie without
+`Secure` over plain HTTP, so anyone on the path reads all three. The flag cannot
+simply be on, either: a `Secure` cookie is not sent to `http://localhost`, and
+E0-18 exists to make `docker compose up` launchable-into on a laptop, so an
+unconditional flag would refuse every development flow for a `state` mismatch and
+look like a broken door. So it is on unless `ENVIRONMENT` is exactly
+`development`, which is the same comparison `app/main.py` makes before it serves
+`/docs` and the same constant, `app.config.DEVELOPMENT_ENVIRONMENT`. The
+comparison is made once, here, rather than at each door: two copies of it is
+`docs/MISTAKES.md` entry 13, and one door left insecure is invisible.
+
 **`SameSite=Lax`, not `None`.** An LTI launch is posted back to the tool from
 the platform's authorization endpoint, which is a cross-*site* POST in a real
 deployment and would need `SameSite=None; Secure` for the cookie to ride along —
@@ -53,6 +67,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
 from starlette.responses import Response
+
+from app.config import DEVELOPMENT_ENVIRONMENT, Settings
 
 __all__ = [
     "LOGIN_COOKIE_LIFETIME_SECONDS",
@@ -104,8 +120,19 @@ def with_query(url: str, parameters: Mapping[str, str]) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, merged, split.fragment))
 
 
-def carry_across(response: Response, name: str, secret: bytes, values: Mapping[str, str]) -> None:
-    """Put `values` on `response` as a signed, short-lived cookie called `name`."""
+def carry_across(
+    response: Response,
+    name: str,
+    secret: bytes,
+    values: Mapping[str, str],
+    settings: Settings,
+) -> None:
+    """Put `values` on `response` as a signed, short-lived cookie called `name`.
+
+    `settings` is here for one attribute — `Secure`, which is set unless this is a
+    development environment. See the module docstring for why it is conditional
+    and why the condition is read here rather than at each door.
+    """
     payload: dict[str, Any] = dict(values)
     payload["exp"] = int(time.time()) + LOGIN_COOKIE_LIFETIME_SECONDS
     response.set_cookie(
@@ -113,6 +140,7 @@ def carry_across(response: Response, name: str, secret: bytes, values: Mapping[s
         jwt.encode(payload, secret, algorithm=COOKIE_ALGORITHM),
         max_age=LOGIN_COOKIE_LIFETIME_SECONDS,
         httponly=True,
+        secure=settings.environment != DEVELOPMENT_ENVIRONMENT,
         samesite="lax",
         path="/",
     )
