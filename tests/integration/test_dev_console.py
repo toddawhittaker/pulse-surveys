@@ -308,7 +308,7 @@ def test_the_dev_console_links_open_in_a_new_tab(dev_console: Any) -> None:
     )
     stuck_signin = [anchor for anchor in sign_in if anchor.target != NEW_TAB]
     assert not stuck_signin, (
-        f"These sign-in links do not open in a new tab: {stuck_signin}. Without `target=\"{NEW_TAB}\"`"
+        f'These sign-in links do not open in a new tab: {stuck_signin}. Without `target="{NEW_TAB}"`'
         " a click navigates the console away, and the developer loses the menu they were working "
         "through."
     )

@@ -1500,7 +1500,9 @@ def subject_of(person: Any) -> str:
 def begin_with_hint(tool: Any, contract: Any, login_hint: str) -> dict[str, str]:
     """Start a web login carrying `login_hint`, and read the request the tool built."""
     response = tool.get(contract.oidc_login, params={"login_hint": login_hint})
-    return query_of(redirect_target(response, f"a web login was started with login_hint {login_hint!r}"))
+    return query_of(
+        redirect_target(response, f"a web login was started with login_hint {login_hint!r}")
+    )
 
 
 def logged_in_with_hint(

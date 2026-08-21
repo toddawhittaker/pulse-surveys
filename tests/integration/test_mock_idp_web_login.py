@@ -756,12 +756,12 @@ def test_the_option_reader_reads_the_selected_attribute_in_every_spelling() -> N
     option with none — before it is trusted about the form.
     """
     markup = (
-        '<select>'
+        "<select>"
         '<option value="a">A</option>'
         '<option value="b" selected>B</option>'
         '<option value="c" selected="">C</option>'
         '<option value="d" selected="selected">D</option>'
-        '</select>'
+        "</select>"
     )
 
     parsed = options_in(markup)
@@ -843,9 +843,7 @@ def test_an_unknown_or_absent_login_hint_selects_nothing(
     The premise is guarded: the form still has to offer options, so a form that
     selected nothing because it rendered nothing would fail here rather than pass.
     """
-    attempt = (
-        mock_idp.begin() if login_hint is None else mock_idp.begin(login_hint=login_hint)
-    )
+    attempt = mock_idp.begin() if login_hint is None else mock_idp.begin(login_hint=login_hint)
     mock_idp.require_login_form(attempt)
     body = attempt.response.text
 
