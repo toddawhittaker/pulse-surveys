@@ -1476,3 +1476,120 @@ def test_a_refusal_does_not_name_the_key_set_address_the_tool_could_not_reach(
         "Compose service name: useless to the browser that received it, and the network map to "
         "anyone else."
     )
+
+
+# ---------------------------------------------------------------------------
+# `login_hint` on `GET /auth/oidc/login`. The developer test console links here
+# with a `login_hint` so the mock provider's form pre-selects a person; the tool
+# forwards it as OIDC Core 1.0 §3.1.2.1's presentational hint and nothing more.
+# It must reach the authorization request, and it must never decide identity —
+# which the `id_token` alone does.
+# ---------------------------------------------------------------------------
+
+
+def subject_of(person: Any) -> str:
+    """The `sub` a seeded person signs in under, or a failure saying there is none."""
+    subject = person.get("sub")
+    assert isinstance(subject, str) and subject, (
+        f"The published person {person!r} carries no `sub`, so there is no value to send as a "
+        "`login_hint` or to reason about."
+    )
+    return subject
+
+
+def begin_with_hint(tool: Any, contract: Any, login_hint: str) -> dict[str, str]:
+    """Start a web login carrying `login_hint`, and read the request the tool built."""
+    response = tool.get(contract.oidc_login, params={"login_hint": login_hint})
+    return query_of(
+        redirect_target(response, f"a web login was started with login_hint {login_hint!r}")
+    )
+
+
+def logged_in_with_hint(
+    tool: Any, contract: Any, provider: Any, login_hint: str, person: Any
+) -> Any:
+    """One whole web login begun with `login_hint`, signed in as `person`.
+
+    The hint and the person are chosen separately on purpose: the security test
+    below starts the flow hinting one identity and signs in as another, which is
+    the whole question of whether the hint decides who is signed in.
+    """
+    parameters = begin_with_hint(tool, contract, login_hint)
+    return complete(tool, contract, sign_in(provider, parameters, person))
+
+
+def test_the_login_endpoint_forwards_login_hint_to_the_authorization_request(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion: `login_hint` is passed through to the provider's authorization request.
+
+    **Dies if the hint is dropped**, and its pair — a login begun without one —
+    **dies if the tool injects a constant `login_hint` of its own.** Both directions
+    matter: the console sends the hint so the provider's form can pre-select a
+    person, and a tool that forwarded a fixed value instead would pre-select the
+    wrong one for every developer. OIDC Core 1.0 §3.1.2.1 spells it `login_hint`.
+    """
+    hint = subject_of(person_holding(provider, "DEAN"))
+
+    with_hint = begin_with_hint(tool, door_contract, hint)
+    assert with_hint.get("login_hint") == hint, (
+        f"A web login started with `login_hint={hint!r}` built an authorization request carrying "
+        f"`login_hint` {with_hint.get('login_hint')!r}. E0's console links here with the subject to "
+        "pre-select, and the tool forwards it verbatim as OIDC Core 1.0 §3.1.2.1's `login_hint`."
+    )
+
+    without_hint = begin(tool, door_contract)
+    assert not without_hint.get("login_hint"), (
+        f"A web login started with no `login_hint` still carried `login_hint` "
+        f"{without_hint.get('login_hint')!r} to the provider. The hint is the caller's when it is "
+        "sent and nothing when it is not — a constant here would pre-select somebody the developer "
+        "never named."
+    )
+
+
+def test_a_login_hint_is_inert_to_the_landing_a_correct_login_reaches(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion: a login started with a `login_hint` behaves exactly as one without.
+
+    **Dies if the hint changes the outcome of an otherwise identical flow.** The
+    dean signs in both ways — hinted as herself and with no hint at all — and lands
+    on the leadership view each time. The hint is presentational: it may change what
+    the provider's form pre-selects, and nothing about the session the tool ends up
+    with. This is the boundary pair for the security test below: that one proves the
+    hint cannot override a *different* identity, and this proves it does not disturb
+    the matching one.
+    """
+    dean = person_holding(provider, "DEAN")
+    hint = subject_of(dean)
+
+    hinted = logged_in_with_hint(tool, door_contract, provider, hint, dean)
+    lands_on(hinted, door_contract, LEADERSHIP_VIEW)
+
+    plain = logged_in(tool, door_contract, provider, dean)
+    lands_on(plain, door_contract, LEADERSHIP_VIEW)
+
+
+def test_a_login_hint_does_not_decide_which_identity_is_signed_in(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """**Dies if `login_hint` is trusted as the identity** rather than the `id_token`.
+
+    The flow is begun hinting the dean and then signed in, at the provider, as the
+    administrator. The session that comes back is the administrator's, so the tool
+    must land on the admin view — the hint named the dean and it counts for nothing.
+    A tool that read `login_hint` into any security decision would land on the
+    leadership view here, granting a caller whatever they wrote in a query
+    parameter. Identity is the verified `id_token`'s to state and the hint's never
+    (§4.1, and E0-09 criterion 10 for why a caller-chosen role must not stick).
+
+    The two views are distinct testids, and `lands_on` requires the admin one
+    present *and* every other absent, so a page that carried both — the hint's and
+    the token's — is wrong about the one it named.
+    """
+    dean_hint = subject_of(person_holding(provider, "DEAN"))
+    administrator = person_holding(provider, "ADMIN")
+
+    response = logged_in_with_hint(tool, door_contract, provider, dean_hint, administrator)
+
+    lands_on(response, door_contract, ADMIN_VIEW)

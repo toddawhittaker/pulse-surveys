@@ -54,6 +54,12 @@ at `/docs`, the captured mail is at <http://localhost:8025>, the mock LMS is at
 <http://localhost:8080>, the mock IdP is at <http://localhost:8081>, and Postgres
 and Redis are on their usual ports. All of them bind to `127.0.0.1` only.
 
+The developer test console is at <http://localhost:8000/dev>. It lists the mock
+IdP's web-login people as one-click "sign in as" links and links to the mock LMS
+launcher, so both of Pulse's entry doors (SPEC §2) can be walked without typing
+URLs. Like `/docs`, it is served **only** when `ENVIRONMENT` is `development` and
+404s everywhere else.
+
 `docker compose up` merges [`docker-compose.override.yml`](docker-compose.override.yml)
 over the base file automatically, and that override is what publishes those
 ports, mounts your checkout into the three application containers — `api`,

@@ -217,7 +217,14 @@ def create_app() -> FastAPI:
             return RedirectResponse(error_response(refusal), status_code=SEE_OTHER)
         except AuthorizationRequestError as refusal:
             return HTMLResponse(refusal_page(str(refusal)), status_code=REFUSED)
-        return HTMLResponse(login_page(settings, pending, directory))
+        # `login_hint` (OIDC Core 1.0 §3.1.2.1) is read from the request and handed
+        # to the form as a presentational preselect. It is not stored on the
+        # pending authorization and decides nothing about the login — the form
+        # marks the matching option, and the identity is still whichever one is
+        # posted back.
+        return HTMLResponse(
+            login_page(settings, pending, directory, request.query_params.get("login_hint"))
+        )
 
     @app.post(LOGIN_PATH, summary="The login form's submission: issues an authorization code")
     async def login(request: Request) -> Response:

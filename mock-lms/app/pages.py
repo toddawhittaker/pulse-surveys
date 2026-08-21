@@ -42,6 +42,130 @@ USER_CONTROL_TESTID = "mock-lms-login-hint"
 PLACEMENT_CONTROL_TESTID = "mock-lms-message-hint"
 SUBMIT_CONTROL_TESTID = "mock-lms-launch"
 
+# Static CSS, no interpolation. This is code, not a value a caller supplied, so
+# it never goes through `escape` and it never sits next to a value that does —
+# nothing from a request is ever written into this string. The slate/blue accent
+# is this service's own: the mock identity provider is a warmer indigo, so the
+# two are never mistaken for one another, and neither is Pulse's own palette
+# (`design/tokens.css` is deliberately not referenced here — this stands in for
+# Canvas, not for Pulse).
+STYLE = """
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2.5rem 1rem;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #eef2f7;
+      color: #18181b;
+    }
+    .card {
+      width: 100%;
+      max-width: 640px;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
+      padding: 2rem 2.25rem 2.25rem;
+      height: fit-content;
+    }
+    h1 { font-size: 1.375rem; margin: 0 0 0.5rem; color: #1d4ed8; }
+    h2 {
+      font-size: 1rem;
+      margin: 2rem 0 0.75rem;
+      color: #1d4ed8;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 1.25rem;
+    }
+    p { line-height: 1.5; color: #3f3f46; margin: 0.5rem 0 1rem; }
+    .banner {
+      display: flex;
+      gap: 0.6rem;
+      align-items: flex-start;
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      color: #9a3412;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      line-height: 1.4;
+      margin-bottom: 1.5rem;
+    }
+    .banner strong { font-weight: 600; }
+    label { display: block; font-weight: 600; font-size: 0.875rem; margin-bottom: 0.35rem; color: #27272a; }
+    form p { margin: 0 0 1rem; }
+    select {
+      width: 100%;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid #d4d4d8;
+      border-radius: 8px;
+      font-size: 0.9375rem;
+      background: #ffffff;
+      color: #18181b;
+    }
+    select:focus { outline: 2px solid #2563eb; outline-offset: 1px; border-color: #2563eb; }
+    button[type="submit"] {
+      appearance: none;
+      border: none;
+      background: #2563eb;
+      color: #ffffff;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      padding: 0.65rem 1.25rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button[type="submit"]:hover { background: #1d4ed8; }
+    dl {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.4rem 1rem;
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 1rem;
+      font-size: 0.875rem;
+    }
+    dt { color: #52525b; font-weight: 600; }
+    dd { margin: 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.85em;
+      background: rgba(0, 0, 0, 0.05);
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+    a { color: #2563eb; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0f172a; color: #e4e4e7; }
+      .card { background: #18181b; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+      h1, h2 { color: #60a5fa; }
+      h2 { border-top-color: #3f3f46; }
+      p { color: #a1a1aa; }
+      label { color: #d4d4d8; }
+      select { background: #27272a; border-color: #3f3f46; color: #f4f4f5; }
+      dl { background: #27272a; border-color: #3f3f46; }
+      dt { color: #a1a1aa; }
+      code { background: rgba(255, 255, 255, 0.08); }
+      a { color: #60a5fa; }
+      .banner { background: #451a03; border-color: #c2410c; color: #fed7aa; }
+    }
+"""
+
+# Static banner markup, no interpolation: it names what the service is and
+# nothing a caller supplied.
+BANNER = """
+    <div class="banner">
+      <span>&#9888;&#65039;</span>
+      <span>
+        <strong>Development-only mock LTI platform.</strong>
+        It mints signed launches for any seeded user with no authentication.
+        Never point a real deployment at this service.
+      </span>
+    </div>"""
+
 
 def hidden(name: str, value: str) -> str:
     """One hidden form field, both halves escaped."""
@@ -93,47 +217,51 @@ def launch_page(settings: PlatformSettings, platform: SeededPlatform) -> str:
   <head>
     <meta charset="utf-8">
     <title>{escape(LAUNCH_PAGE_TITLE)}</title>
+    <style>{STYLE}</style>
   </head>
   <body>
-    <h1>{escape(LAUNCH_PAGE_TITLE)}</h1>
-    <p>
-      A development-only LTI 1.3 platform. Pick a user and a placement, and this
-      posts a third-party-initiated login request to the tool.
-    </p>
-
-    <form method="post" action="{escape(settings.tool_login_url, quote=True)}">
-      {hidden("iss", settings.issuer)}
-      {hidden("client_id", settings.client_id)}
-      {hidden("lti_deployment_id", settings.deployment_id)}
-      {hidden("target_link_uri", settings.tool_launch_url)}
-
+    <div class="card">
+      {BANNER}
+      <h1>{escape(LAUNCH_PAGE_TITLE)}</h1>
       <p>
-        <label for="login_hint">Launch as</label>
-        <select id="login_hint" name="login_hint"
-                data-testid="{escape(USER_CONTROL_TESTID, quote=True)}">
-          {users}
-        </select>
+        A development-only LTI 1.3 platform. Pick a user and a placement, and this
+        posts a third-party-initiated login request to the tool.
       </p>
-      <p>
-        <label for="lti_message_hint">Placement</label>
-        <select id="lti_message_hint" name="lti_message_hint"
-                data-testid="{escape(PLACEMENT_CONTROL_TESTID, quote=True)}">
-          {placements}
-        </select>
-      </p>
-      <p><button type="submit"
-                 data-testid="{escape(SUBMIT_CONTROL_TESTID, quote=True)}">Launch</button></p>
-    </form>
 
-    <h2>Registration</h2>
-    <p>
-      Paste these into <code>lti_platform</code> and <code>lti_deployment</code>,
-      or fetch the same values as JSON from
-      <a href="/registration"><code>/registration</code></a>.
-    </p>
-    <dl>
-      {registration}
-    </dl>
+      <form method="post" action="{escape(settings.tool_login_url, quote=True)}">
+        {hidden("iss", settings.issuer)}
+        {hidden("client_id", settings.client_id)}
+        {hidden("lti_deployment_id", settings.deployment_id)}
+        {hidden("target_link_uri", settings.tool_launch_url)}
+
+        <p>
+          <label for="login_hint">Launch as</label>
+          <select id="login_hint" name="login_hint"
+                  data-testid="{escape(USER_CONTROL_TESTID, quote=True)}">
+            {users}
+          </select>
+        </p>
+        <p>
+          <label for="lti_message_hint">Placement</label>
+          <select id="lti_message_hint" name="lti_message_hint"
+                  data-testid="{escape(PLACEMENT_CONTROL_TESTID, quote=True)}">
+            {placements}
+          </select>
+        </p>
+        <p><button type="submit"
+                   data-testid="{escape(SUBMIT_CONTROL_TESTID, quote=True)}">Launch</button></p>
+      </form>
+
+      <h2>Registration</h2>
+      <p>
+        Paste these into <code>lti_platform</code> and <code>lti_deployment</code>,
+        or fetch the same values as JSON from
+        <a href="/registration"><code>/registration</code></a>.
+      </p>
+      <dl>
+        {registration}
+      </dl>
+    </div>
   </body>
 </html>
 """
@@ -180,13 +308,19 @@ def authorization_response_page(id_token: str, state: str, redirect_uri: str) ->
   <head>
     <meta charset="utf-8">
     <title>Signing you in…</title>
+    <style>{STYLE}</style>
   </head>
   <body onload="document.forms[0].submit()">
-    <form method="post" action="{escape(redirect_uri, quote=True)}">
-      {hidden("id_token", id_token)}
-      {hidden("state", state)}
-      <noscript><button type="submit">Continue to the tool</button></noscript>
-    </form>
+    <div class="card">
+      {BANNER}
+      <h1>Signing you in…</h1>
+      <p>Completing the launch and redirecting to the tool.</p>
+      <form method="post" action="{escape(redirect_uri, quote=True)}">
+        {hidden("id_token", id_token)}
+        {hidden("state", state)}
+        <noscript><p><button type="submit">Continue to the tool</button></p></noscript>
+      </form>
+    </div>
   </body>
 </html>
 """
