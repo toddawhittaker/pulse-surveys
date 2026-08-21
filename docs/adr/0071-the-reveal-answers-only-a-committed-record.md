@@ -215,6 +215,19 @@ since that is where a reveal has a case and a disposition to be spent against. T
 practical bound today is that obtaining a second name still needs a second
 committed record.
 
+**The recording call's foreign keys are an unaudited existence oracle**, found by
+the independent review of PR #53 and not previously filed.
+`record_identity_reveal` inserts into `audit_log`, whose foreign keys point at
+`public.user` and `public.person` — tables `pulse_care` holds no privilege on at
+all. Calling it with a subject that does not exist returns Postgres's own
+violation message, naming the constraint and the missing key, so the caller
+learns whether a uuid it already holds is known to Pulse; the aborted insert
+writes no row, so nothing records the question. It answers only about ids the
+caller already has, which is why it is a LOW and why it is deferred rather than
+fixed here — it is the same class as the reveal's refusal messages interpolating
+`audit_log` columns, which PR #53 also declined, and both want the same decision
+about how much a refusal may say. Recorded so the pair is carried together.
+
 **Two of E0-10's three review findings are untouched and both are E10's.** The
 acting person is still a parameter rather than a property of the connection
 (E0-26 item 3), so a holder of the `pulse_care` credential can record a reveal in
@@ -230,6 +243,19 @@ record (`no_data_found`), the record is not an `IDENTITY_REVEAL`
 (`insufficient_privilege`). `services/safety.py` does not yet distinguish them —
 they all surface as a database error — and E10's queue is where a caller has a
 screen to show them on.
+
+**It is four in the normal régime and three across a transaction-id wraparound**,
+which the independent review of PR #53 measured rather than reasoned. The epoch
+fed to `pg_xact_status` is taken from the current snapshot's `xmax`, so where the
+visible window straddles a wraparound the reconstruction yields a *future*
+`xid8`, and Postgres raises `22023` — `invalid_parameter_value`, the same code
+this record assigns above to "the record is not an `IDENTITY_REVEAL`". The
+direction is safe: it refuses instead of answering, which is the property that
+matters. What it costs is distinguishability, so a caller in that régime cannot
+tell "I could not determine whether this is committed" from "this record is not a
+reveal". Reachability on any database this project will run is effectively nil,
+and it is recorded because the sentence above is otherwise the reason nobody
+would look.
 
 **`downgrade()` puts the defect back**, because that is what a downgrade is: the
 database ends at revision `7b41d2c9e6af`, where the reveal is E0-10's
