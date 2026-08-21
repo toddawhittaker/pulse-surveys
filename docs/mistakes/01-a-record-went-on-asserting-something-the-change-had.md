@@ -67,7 +67,18 @@ per-ticket index, which had to gain a sentence for a fixture that signs tokens,
 and the claim-to-Care sweep's exception reason — a record that argued the Care
 claim is harmless *from the web door alone*, which stopped being the whole
 argument the moment the launch door gained a rule of its own about the same
-claim.)*
+claim.
+
+The implementer's half of the same round found one the test author could not
+see, and it is the more expensive shape: `backend/app/services/landing.py`'s
+module docstring still carried three paragraphs of **"UNRESOLVED, and this
+module is the whole of the disagreement"** — a dispute that had been arbitrated
+one round earlier, in a change to a different file. Nothing in the source
+pointed at it: the arbitration was recorded where the ruling belonged, in the
+sweep's `EXCEPTIONS` reason, and the module that had been arguing its own case
+went on arguing it. A record made false by a change to *another* file is the one
+no author's diff-reading catches, because it is not in the diff — only asking
+"what else asserts something about this" does.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`

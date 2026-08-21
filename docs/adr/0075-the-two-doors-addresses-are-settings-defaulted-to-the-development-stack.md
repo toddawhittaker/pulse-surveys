@@ -105,3 +105,10 @@ addresses of one provider are different hosts.
   holds the paths in one place for the same reason.
 - E1 supersedes the first two fields when service addresses become registration
   columns. The OIDC block outlives that: it is not per-platform.
+- **`LTI_PLATFORM_AUTHORIZATION_ENDPOINT` is process-wide while platforms
+  resolve per `iss`**, so a second registered platform would have its launches
+  redirected to the first one's authorization endpoint — which is why E1's
+  registration columns have to make that address per-platform rather than
+  defaulting to this setting; the security review of E0-18 raised it and
+  [E1's carried-forward notes](../tickets/e1/carried-from-e0.md) carry the
+  "done when".

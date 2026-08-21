@@ -47,6 +47,29 @@ rule stated as a future need — and the launch driver still cannot mint one, so
 the platform side of the repository is in the same position today. A hazard named
 in a docstring is a note; nothing turns it into coverage.
 
+**And then it happened again, on the tool side, in the next ticket.** E0-18's two
+entry doors compared `state` and `nonce` with `secrets.compare_digest` on `str` —
+the same function, the same `TypeError`, one ticket after this entry was written.
+Nothing in the suite could reach it, for exactly the reason above: a `state` is
+minted by the tool from `secrets.token_urlsafe` and handed back by a mock that
+echoes it untouched, so every value any test could deliver was drawn from the
+unreserved alphabet by construction. Both doors had a refusal test for a `state`
+that did not match, and neither could send one that could not be compared. It was
+found by a security review reading the code, not by the suite and not by anyone
+applying this rule — which had been written down, with `secrets` named as the
+signal to search for, and was one ticket old.
+
+Two lessons rather than one. **The entry was about a mock and the recurrence was
+in the application**, so "which of our services is the polite driver" is the wrong
+question: the rule is about any value a test cannot malform, wherever the guard
+that reads it lives. And **the rule needs to be run, not known** — the search it
+describes takes minutes (every `secrets.*`, `uuid4` and formatter-built value the
+suite hands the system under test), and nobody ran it on the door ticket. The fix
+this round was both halves of the rule: the tests write the bad constant out by
+hand (`NON_ASCII_STATE = "é"`), and the fixture gained a way to say something
+malformed — a signing key of the suite's own, so a test can deliver a genuinely
+signed token stating claims no seeded person produces.
+
 **Consequence.** Two crashes reachable by any client, in the service whose stated
 job is to teach E1's client what a strict provider does. E0-16's definition of
 done says "an identity provider that is lenient in the wrong place teaches the
