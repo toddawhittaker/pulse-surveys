@@ -27,6 +27,11 @@ build/
 .vite/
 *.tsbuildinfo
 
+# Playwright (the e2e run's local output; the CI report is uploaded, not committed)
+playwright-report/
+test-results/
+/playwright/.cache/
+
 # Editors and OS
 .DS_Store
 .idea/

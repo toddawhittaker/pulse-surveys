@@ -1,0 +1,14 @@
+{
+  "name": "pulse-surveys",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Root dev tooling for Pulse Surveys: the Playwright end-to-end suite (SPEC §9.2) and the npm license scanner. Ships in no image; §10 is about what we distribute.",
+  "license": "MIT",
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "license-checker-rseidelsohn": "4.3.0"
+  }
+}
