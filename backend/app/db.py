@@ -37,26 +37,63 @@ and `tests/unit/test_db_engine_configuration.py` holds each of them:
   free-text comments, so an echoing engine in a deployed environment copies the
   confidential material §4 protects into the one place §4.1's views and grants
   do not reach.
+
+  **`echo` is not what keeps those parameters out of the log, and E0-37 item 1
+  is that correction.** `Connection.__init__` takes `self._echo` from
+  `logger.isEnabledFor(INFO)` on `sqlalchemy.engine.Engine`, not from the flag —
+  so a deployment whose logging configuration names `sqlalchemy` or
+  `sqlalchemy.engine`, which a `dictConfig` plausibly does, gets every statement
+  and every bound parameter written with `echo=False`. Measured on the pinned
+  SQLAlchemy 2.0.52. The two things that do close it are here: the `WARNING`
+  pin `pin_sqlalchemy_logging` applies outside development, which is the pin
+  `backend/alembic.ini` has always applied on the migration side, and
+  `hide_parameters=True` in `engine_options`, which holds when a later
+  configuration turns the logger back up. `_echoes_sql` is correct as written
+  and is not what changed.
 """
 
+import logging
 from collections.abc import Iterator
+from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import Settings
+from app.config import DEVELOPMENT_ENVIRONMENT, Settings
 from app.models import Base
 
-__all__ = ["Base", "SessionLocal", "engine", "get_session"]
+__all__ = [
+    "Base",
+    "SessionLocal",
+    "engine",
+    "engine_options",
+    "get_session",
+    "pin_sqlalchemy_logging",
+]
 
-# The only environment name that may see SQL in the log. Free-form — but **not by
-# SPEC §6.3**, which is where an earlier version of this comment sent the reader.
-# That section is the admin console's configuration surface and names no
-# environment variable; `ENVIRONMENT` and `healthz` each appear zero times in the
-# spec. The vocabulary is documented in `.env.example` and the field is E0-01's.
-# So this is a comparison against a convention rather than against an enumeration
-# `Settings` enforces; anything that is not this string gets no echo.
-DEVELOPMENT_ENVIRONMENT = "development"
+# The logger `backend/alembic.ini` pins on the migration side, and the one whose
+# effective level decides whether a `Connection` writes a statement and its
+# parameters at all. Pinning the parent covers `sqlalchemy.engine` and everything
+# else the library logs under it.
+SQLALCHEMY_LOGGER = "sqlalchemy"
+
+# Which environment may see SQL in the log is `app.config`'s to say: the constant
+# is declared beside the `environment` field it describes and imported here
+# (E0-37 item 2). This module used to carry its own copy, which is two spellings
+# of one convention with nothing comparing them — `docs/MISTAKES.md` entry 3.
+
+
+def _is_development(settings: Settings) -> bool:
+    """Whether this process is running on a developer's machine.
+
+    A comparison against a convention rather than against an enumeration
+    `Settings` enforces: `ENVIRONMENT` is free-form — **not by SPEC §6.3**, which
+    is the admin console's configuration surface and names no environment
+    variable — and `.env.example` documents the vocabulary. Anything that is not
+    that exact string is a deployment, which is the safe direction for both of
+    the rules below.
+    """
+    return settings.environment == DEVELOPMENT_ENVIRONMENT
 
 
 def _echoes_sql(settings: Settings) -> bool:
@@ -69,22 +106,76 @@ def _echoes_sql(settings: Settings) -> bool:
     is exactly when the log is being read by the most people and shipped to
     whatever aggregates it.
     """
-    return settings.environment == DEVELOPMENT_ENVIRONMENT and settings.log_level.upper() == "DEBUG"
+    return _is_development(settings) and settings.log_level.upper() == "DEBUG"
+
+
+def engine_options(settings: Settings) -> dict[str, Any]:
+    """The keyword arguments the engine is built with, apart from the URL.
+
+    A function rather than a literal in the `create_engine` call because two of
+    the three answers depend on the environment, and because a test can then hold
+    the options to what they must be without building the application's engine.
+    The URL is not here: it is a secret, and the one place it is unwrapped stays
+    the call below.
+
+    `hide_parameters=True` outside development is the guard on bound parameters,
+    and it is not the same guard as `echo`. It survives a logging configuration
+    that names `sqlalchemy.engine` and turns it up to INFO, where `echo=False`
+    hides nothing — the module docstring has the mechanism. In development it
+    stays off, because a developer who asked for the echo asked for the values in
+    it and nothing there is a real student's.
+    """
+    return {
+        "echo": _echoes_sql(settings),
+        # From E0-05 a bound parameter is a survey answer or a free-text comment
+        # (SPEC §4, §10). Outside development, SQLAlchemy writes the placeholder
+        # instead of the value.
+        "hide_parameters": not _is_development(settings),
+        # A pooled connection can be dead before it is handed out — Postgres
+        # restarts, a network drops an idle socket — and without this the first
+        # statement of a request fails instead of the pool quietly replacing it.
+        # The cost is one round trip per checkout.
+        "pool_pre_ping": True,
+    }
+
+
+def pin_sqlalchemy_logging(settings: Settings) -> None:
+    """Outside development, hold the `sqlalchemy` logger at WARNING.
+
+    The same pin `backend/alembic.ini` carries as `[logger_sqlalchemy] level =
+    WARNING`, applied on the side that serves requests. Without it the two halves
+    of one deployment disagree: the parameters of a migration statement are
+    withheld and the parameters of an application statement — a survey answer, a
+    free-text comment — are written.
+
+    **In development this does nothing at all**, deliberately. `echo` is a
+    debugging tool there, and a pin applied unconditionally would take the
+    library's own logger down to WARNING for a developer who had just turned it
+    up, with no indication of what had done it.
+
+    **What it cannot promise.** A logging configuration read *after* this module
+    is imported wins, because the last writer does. This closes the ordinary case
+    — a configuration applied at startup before the application package is
+    imported — and `hide_parameters` in `engine_options` above is what holds the
+    property when it does not.
+    """
+    if _is_development(settings):
+        return
+    logging.getLogger(SQLALCHEMY_LOGGER).setLevel(logging.WARNING)
 
 
 _settings = Settings()
+
+# Before the engine, so that anything SQLAlchemy logs while building one is
+# already covered.
+pin_sqlalchemy_logging(_settings)
 
 engine = create_engine(
     # `get_secret_value()` is the explicit act ADR 0008's `SecretStr` choice
     # exists to make searchable. It goes no further than this call: the URL is
     # held inside the engine, whose own `repr` masks the password.
     _settings.database_url.get_secret_value(),
-    echo=_echoes_sql(_settings),
-    # A pooled connection can be dead before it is handed out — Postgres
-    # restarts, a network drops an idle socket — and without this the first
-    # statement of a request fails instead of the pool quietly replacing it.
-    # The cost is one round trip per checkout.
-    pool_pre_ping=True,
+    **engine_options(_settings),
 )
 
 # The factory, not a session. A session is per unit of work: sharing one across

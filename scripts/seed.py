@@ -111,6 +111,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
+from app.config import DEVELOPMENT_ENVIRONMENT
 from app.models.base import Base
 from app.models.identity import (
     AssignmentRole,
@@ -137,18 +138,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # once, by `main`.
 DOTENV_PATH = REPO_ROOT / ".env"
 
-# The environment name this script will run under, and the only one. **Free-form,
-# and not by SPEC §6.3** — that section is three bullets on the admin console's
+# The environment name this script will run under, and the only one, imported
+# above from the module that declares it (E0-37 item 2). **Free-form, and not by
+# SPEC §6.3** — that section is three bullets on the admin console's
 # configuration surface and names no environment variable, and `ENVIRONMENT`
-# appears nowhere in the spec at all. The source is E0-01's
-# `app.config.Settings.environment`, and `.env.example` documents the vocabulary,
+# appears nowhere in the spec at all. `.env.example` documents the vocabulary,
 # naming `development`, `staging` and `production` as conventions and enforcing
-# none. So this is a comparison against a convention rather than against an
-# enumeration `Settings` enforces — the same convention and the same literal
-# `app/db.py` compares against before it lets the engine echo SQL. Two copies of
-# one string today; consolidating them crosses a module boundary and is proposed
-# in E0-17's pull request rather than done here.
-DEVELOPMENT_ENVIRONMENT = "development"
+# none, so the check below is a comparison against a convention rather than
+# against an enumeration `Settings` enforces.
+#
+# It used to be spelled here as well as in `app/db.py`, each file internally
+# consistent and nothing anywhere comparing the two — `docs/MISTAKES.md` entry 3.
+# There is one of it now, beside the `environment` field it describes.
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
 # Where the database is, and who is allowed to write this much of it. The same

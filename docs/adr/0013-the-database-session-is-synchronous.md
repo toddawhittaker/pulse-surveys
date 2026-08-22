@@ -98,6 +98,16 @@ raised after its first statement. A handler that means to write says so.
   applications to have two databases.
 - **`echo` is derived, not configured.** It is on only when `ENVIRONMENT` is
   `development` *and* `LOG_LEVEL` is `DEBUG`, so turning a production deployment
-  up to debug an incident does not start copying survey answers into the log
-  (§4, §10). There is no separate knob, and adding one would be adding a way to
-  get this wrong.
+  up to debug an incident does not turn the statement stream on. There is no
+  separate knob, and adding one would be adding a way to get this wrong.
+- **`echo` is not what keeps survey answers out of the log**, and the bullet
+  above used to say that it was. `Connection.__init__` takes `self._echo` from
+  `logger.isEnabledFor(INFO)` on `sqlalchemy.engine.Engine` rather than from the
+  flag, so a deployment whose logging configuration names `sqlalchemy` or
+  `sqlalchemy.engine` — which a `dictConfig` plausibly does — gets every
+  statement and every bound parameter written with `echo=False`. E0-37 item 1
+  measured that on the pinned SQLAlchemy 2.0.52 and added the two things that do
+  hold §4 and §10 here: `pin_sqlalchemy_logging`, which applies outside
+  development the same `WARNING` pin `backend/alembic.ini` already had on the
+  migration side, and `hide_parameters=True` in `engine_options`, which still
+  holds if a later configuration turns that logger back up.

@@ -85,14 +85,16 @@ _PROBLEM_EXPLANATIONS = {
 # `.env.example` documents. Anything that is not this exact string is treated as
 # a deployment.
 #
-# It lives here rather than beside its readers because there are now three of
-# them and each held its own copy: `app/db.py` before it lets the engine echo
-# SQL, `scripts/seed.py` before it will run at all (ADR 0063), and from E0-18
-# `app/main.py` before it serves `/docs` and `/openapi.json` (ADR 0074). Three
-# copies of one string is `docs/MISTAKES.md` entry 13, and the module every one
-# of them already imports is this one. **E0-18 does not edit the other two**:
-# E0-37 item 2 is the ticket that migrates them onto this constant, and doing it
-# here would put an unrelated change in an auth pull request.
+# It lives here rather than beside its readers because there are three of them
+# and each used to hold its own copy: `app/db.py` before it lets the engine echo
+# SQL and before it hides bound parameters (E0-37 item 1), `scripts/seed.py`
+# before it will run at all (ADR 0063), and from E0-18 `app/main.py` before it
+# serves `/docs` and `/openapi.json` (ADR 0074). Three copies of one string is
+# `docs/MISTAKES.md` entry 13, and the module every one of them already imports
+# is this one. E0-18 added the constant and migrated only its own reader onto
+# it; **E0-37 item 2 migrated the other two**, so this is the one definition and
+# `tests/unit/test_development_environment_has_one_definition.py` sweeps
+# `backend/app` and `scripts` for a second.
 DEVELOPMENT_ENVIRONMENT = "development"
 
 

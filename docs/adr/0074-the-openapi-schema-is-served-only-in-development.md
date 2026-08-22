@@ -34,8 +34,9 @@ The value compared against is `app.config.DEVELOPMENT_ENVIRONMENT`, a constant
 this ticket adds to `config.py` because there are now three readers of it —
 `app/db.py` before it lets the engine echo SQL, `scripts/seed.py` before it will
 run at all ([ADR 0063](0063-the-seed-refuses-outside-development.md)), and this.
-E0-18 migrates neither of the other two onto it; E0-37 item 2 is the ticket for
-that, and doing it here would put an unrelated change in an auth pull request.
+E0-18 migrated neither of the other two onto it, because doing it there would
+have put an unrelated change in an auth pull request; **E0-37 item 2 did**, so
+all three readers import this constant now.
 
 **The schema stays producible either way**, and that is the half that is easy to
 get wrong: `openapi_url=None` removes the *route*, not the generation.
