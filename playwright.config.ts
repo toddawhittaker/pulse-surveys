@@ -19,10 +19,13 @@ export default defineConfig({
   // suite to one case — into a failure rather than a green run over one test.
   forbidOnly: !!process.env.CI,
 
-  // One retry so `trace: 'on-first-retry'` has a retry to capture; a flaky
-  // network hiccup against the local stack gets one more chance, a real failure
-  // still fails.
-  retries: process.env.CI ? 1 : 0,
+  // No retries, anywhere (E0-40 decision 3). A spec that failed once and passed
+  // on a second attempt exited zero, so the e2e gate reported success over a
+  // test that failed — CLAUDE.md's rule against marking a test flaky to make CI
+  // pass, reached through a configuration option instead of a marker and applied
+  // to every spec at once. The debugging artifact the retry was buying is kept
+  // by the trace setting below, which no longer needs one.
+  retries: 0,
 
   // The whole run and each expectation get finite, generous budgets. A hung
   // door fails loudly instead of holding the pipeline open.
@@ -34,7 +37,10 @@ export default defineConfig({
 
   use: {
     baseURL: 'http://localhost:8000',
-    trace: 'on-first-retry',
+    // Kept for the run that failed rather than for a second attempt: with no
+    // retries there is never a second attempt, so a mode that waits for one
+    // would quietly stop producing traces altogether.
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
 

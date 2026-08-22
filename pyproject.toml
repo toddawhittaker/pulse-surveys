@@ -252,7 +252,15 @@ extra_checks = true
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests/unit", "tests/integration"]
+# The whole test tree, not a list of the directories that hold Python today
+# (E0-40 decision 4). The §4.1 invariant pass runs `pytest -m invariant` with no
+# path, so this setting is the whole of what that half of the gate collects,
+# while `scripts/ci/check_invariant_assertions.py` is handed `tests`. A narrower
+# `testpaths` is an invariant that can be written, counted, approved and never
+# run, with both halves exiting 0. Collection is identical today — `tests/e2e`
+# holds TypeScript, which pytest does not collect — and a directory nobody has
+# added yet is included instead of silently dropped.
+testpaths = ["tests"]
 asyncio_mode = "auto"
 # Async fixtures get a fresh event loop each test. Set explicitly because
 # pytest-asyncio warns when it is left implicit, and `filterwarnings` below
