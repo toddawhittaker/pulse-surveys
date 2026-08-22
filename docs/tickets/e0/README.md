@@ -432,7 +432,14 @@ break collection, and `pytests` goes back to `false` with a green check. Ticket
 unconditionally, and the `detect` job no longer probes for either.
 
 The frontend gates (`tsc`, `eslint`, production build, bundle budget) stay
-tolerant through all of E0. No frontend exists until E1.
+tolerant through all of E0, because the application frontend arrives in E1.
+**That is not the same as there being no TypeScript**, and the difference is
+what E0-40 exists to fix: PR #61 committed the repository's first `package.json`,
+`package-lock.json` and `playwright.config.ts` — at the repository root, with the
+three Playwright specs beside the Python suite — while every Node-facing gate
+still asks about `frontend/`, a directory that does not exist, and answers that
+there is nothing to check. A tolerant gate and a gate looking in the wrong place print
+the same green line, which is `docs/MISTAKES.md` entry 36.
 
 ## Notes on the decomposition
 

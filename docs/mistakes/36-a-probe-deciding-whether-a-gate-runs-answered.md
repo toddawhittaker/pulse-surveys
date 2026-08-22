@@ -11,8 +11,8 @@ and the file's own rule is that a detection is not a bump.*
 *(**Found again 2026-08-22**, by the epic-boundary exit review, in a different set
 of probes over a different tree — found while building E0-40 (Batch I), which has
 not merged. PR #61 committed the repository's first `package.json`,
-`package-lock.json` and TypeScript at the **repository root**, while every
-Node-facing gate still asks about `frontend/`: the `detect` job's probe, the `npm
+`package-lock.json` and `playwright.config.ts` at the **repository root**, while
+every Node-facing gate still asks about `frontend/`, which does not exist: the `detect` job's probe, the `npm
 audit` job, the licence scan, `tsc`, `eslint`, and the matching `Makefile`
 branches. All of them answer "no Node here" over a tree that has Node in it, and
 all of them report green. That is the same failure as the one below with the glob
