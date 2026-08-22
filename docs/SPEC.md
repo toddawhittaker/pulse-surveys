@@ -501,7 +501,7 @@ pulse-surveys/
     └── ci.yml                      # lint, typecheck, unit+integration+e2e, eval gates
 ```
 
-Two structural choices worth calling out. First, `api/` routers stay thin and all real behavior lives in `services/`, so the same logic backs the HTTP API, the Celery jobs, and the future MCP server without duplication — and the authz scoping in `services/authz.py` is the single chokepoint every entry point passes through. Second, the identity-separated read views (`views_sql/`) are shipped as migrations, not just ORM conventions, so the confidentiality guarantee holds at the database level even against a future careless query.
+Three structural choices worth calling out. First, `api/` routers stay thin and all real behavior lives in `services/`, so the same logic backs the HTTP API, the Celery jobs, and the future MCP server without duplication — and the authz scoping in `services/authz.py` is the single chokepoint every entry point passes through. Second, the identity-separated read views (`views_sql/`) are shipped as migrations, not just ORM conventions, so the confidentiality guarantee holds at the database level even against a future careless query. Third, the tree above is the list of module homes rather than a suggestion: **use an existing module; add one only when nothing fits**, and the pull request that adds a module says why nothing did. The comment beside a module here is what that module is for, so code the comment already describes belongs in it — and work that fits nowhere is usually work that spans two modules and should be split before it is placed.
 
 ## 14. Development plan
 
