@@ -88,7 +88,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -281,10 +281,28 @@ MAKEFILE_NODE_TARGETS = {
 # proves the reader below can see a qualified path at all.
 MAKEFILE_FRONTEND_TARGET = "frontend-build"
 
-# A target line: a name at the start of a line, then a colon that is not `:=`.
-# `.PHONY` and the variable assignments above the targets are excluded by the
-# leading character class.
-MAKE_TARGET = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*:(?!=)")
+# A target line: a name at the start of a line, then a colon that is not `:=`,
+# then its prerequisites. `.PHONY` and the variable assignments above the targets
+# are excluded by the leading character class.
+MAKE_TARGET = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*:(?!=)(?P<prerequisites>[^#]*)")
+
+# ---------------------------------------------------------------------------
+# The security review's MEDIUM, one class out from the probe split.
+#
+# `npx eslint` on a clean clone does not fail. npm 10's npx downloads the package
+# and runs it, so a Makefile target that calls `npx` without installing the
+# lockfile first executes `eslint@latest` and `typescript@latest` — resolved at
+# run time, unpinned, with no integrity check — which is CLAUDE.md's pin rule
+# defeated by a tool being helpful. `node_modules` is gitignored, so the clean
+# clone is the ordinary case rather than the edge one.
+#
+# `.github/workflows/ci.yml` runs `npm ci` before every `npx` under the same
+# condition. The Makefile's copies of those gates did not, which is
+# `docs/MISTAKES.md` entry 13 again in the same pair of files this module already
+# guards for the probe itself.
+# ---------------------------------------------------------------------------
+NPX_CALL = re.compile(r"\bnpx\b")
+NPM_INSTALL = "npm ci"
 
 # Any mention of the manifest, with whatever path leads to it. The prefix is
 # captured rather than the whole path matched, because what is asserted is that
@@ -415,24 +433,93 @@ def configuration_lines(source: str) -> list[str]:
     return found
 
 
-def makefile_recipes(source: str) -> dict[str, str]:
-    """Every target in the Makefile and the recipe lines under it, joined.
+class MakefileTarget(NamedTuple):
+    """One target: what make runs first, and the lines it then runs, in order."""
+
+    prerequisites: list[str]
+    recipe: list[str]
+
+    @property
+    def script(self) -> str:
+        """The recipe as one block, for the assertions that do not care about order."""
+        return "\n".join(self.recipe)
+
+
+def makefile_targets(source: str) -> dict[str, MakefileTarget]:
+    """Every target in the Makefile, with its prerequisites and its recipe lines.
 
     Recipe lines are the tab-indented ones, which is make's own rule rather than
     this module's convention. Everything else closes whichever target was open, so
     a comment or a `.PHONY` between two targets cannot carry one target's lines
     into another.
+
+    One walk producing both halves rather than two functions asking the same
+    question of the same text (`docs/MISTAKES.md` entry 13): the rule below needs
+    the recipe *in order* and the prerequisite chain, and two readers would be
+    free to disagree about where a target ends.
     """
-    lines: dict[str, list[str]] = {}
+    found: dict[str, MakefileTarget] = {}
     current: str | None = None
     for raw in source.splitlines():
         if raw.startswith("\t"):
             if current is not None:
-                lines.setdefault(current, []).append(raw.strip())
+                found[current].recipe.append(raw.strip())
             continue
         match = MAKE_TARGET.match(raw)
-        current = match.group("name") if match else None
-    return {name: "\n".join(recipe) for name, recipe in lines.items()}
+        if match is None:
+            current = None
+            continue
+        current = match.group("name")
+        if current not in found:
+            found[current] = MakefileTarget(match.group("prerequisites").split(), [])
+    return found
+
+
+def installs_before_running(recipe: list[str]) -> list[str]:
+    """The `npx` lines in this recipe that no `npm ci` precedes.
+
+    Walked in order, because "the closure is installed" is a fact about the lines
+    above this one rather than about the recipe as a set. A single line that does
+    both — `npm ci && npx eslint .` — counts, and is checked by position within
+    the line rather than assumed either way.
+    """
+    installed = False
+    offenders: list[str] = []
+    for line in recipe:
+        install_at = line.find(NPM_INSTALL)
+        call = NPX_CALL.search(line)
+        if call and not (installed or (0 <= install_at < call.start())):
+            offenders.append(line)
+        if install_at != -1:
+            installed = True
+    return offenders
+
+
+def installed_by_a_prerequisite(
+    name: str, targets: dict[str, MakefileTarget], seen: frozenset[str] = frozenset()
+) -> str | None:
+    """The prerequisite of `name` that runs `npm ci`, if the chain reaches one.
+
+    make runs a target's prerequisites to completion before its own recipe, so
+    `lint: node-modules` is a real precondition and a legitimate way to satisfy the
+    rule below. It is followed rather than assumed: the ancestor's recipe has to
+    contain the install, and a name that is not a target in this file — a real file
+    on disk, a target in an included makefile — reaches nothing and is reported as
+    reaching nothing. `seen` keeps a cyclic or diamond graph from being walked
+    twice.
+    """
+    for prerequisite in targets.get(name, MakefileTarget([], [])).prerequisites:
+        if prerequisite in seen:
+            continue
+        ancestor = targets.get(prerequisite)
+        if ancestor is None:
+            continue
+        if NPM_INSTALL in ancestor.script:
+            return prerequisite
+        deeper = installed_by_a_prerequisite(prerequisite, targets, seen | {name, prerequisite})
+        if deeper is not None:
+            return deeper
+    return None
 
 
 def qualified_manifests(recipe: str) -> list[str]:
@@ -1184,7 +1271,8 @@ def test_the_makefile_node_targets_probe_the_root_manifest_too() -> None:
         "'run `make ci` before pushing' names a target that is gone."
     )
 
-    recipes = makefile_recipes(MAKEFILE.read_text(encoding="utf-8"))
+    targets = makefile_targets(MAKEFILE.read_text(encoding="utf-8"))
+    recipes = {name: target.script for name, target in targets.items()}
     assert recipes, (
         f"No target in {MAKEFILE.name} was read as having a recipe. Every assertion below is over "
         "that mapping, and an empty one satisfies all of them — the reader has gone blind rather "
@@ -1260,6 +1348,128 @@ def test_the_makefile_node_targets_probe_the_root_manifest_too() -> None:
             "`.github/workflows/ci.yml` the workflow is right and the Makefile is the bug. A "
             "Makefile that silently skips what CI runs is that disagreement in the direction "
             "nobody sees until CI is red on somebody else's branch.",
+        ]
+    )
+
+
+def test_every_makefile_recipe_that_runs_npx_installs_the_pinned_closure_first() -> None:
+    """The security review's MEDIUM: `npx` on a clean clone fetches and runs whatever is latest.
+
+    `npx eslint` does not fail when nothing is installed. npm 10 downloads the
+    package and executes it, so a target that calls `npx` without `npm ci` above it
+    runs `eslint@latest` and `typescript@latest` — resolved at run time from the
+    registry, unpinned, with no lockfile integrity behind them. `node_modules` is
+    gitignored, so every fresh clone takes that path; the measurement is the
+    reviewer's, not an inference from the text.
+
+    CLAUDE.md pins dependency versions and commits lockfiles, and no exception is
+    written anywhere for a tool that resolves its own. `.github/workflows/ci.yml`
+    runs `npm ci` before every `npx` under an identical condition. The Makefile's
+    copies of those same gates did not, which is `docs/MISTAKES.md` entry 13 in
+    the pair of files this module already guards for the probe itself — and it is
+    the second time in this ticket that the Makefile copy was the one nobody read.
+
+    **The rule.** Every recipe line that invokes `npx` must have `npm ci` above it
+    in the same recipe, or the target must have a prerequisite whose recipe does.
+    The prerequisite form is followed rather than credited: make runs prerequisites
+    to completion first, so `lint: node-modules` is a genuine precondition, but
+    only if `node-modules` is a target in this file that actually installs. A name
+    the chain cannot resolve reaches nothing and is reported as reaching nothing.
+
+    **`e2e` fails this rule, and it is not carved out.** `@npx playwright test`
+    states its `npm ci` precondition in a comment above the target — and a comment
+    is not a prerequisite. Make will not run it, README's instructions are not a
+    guarantee, and this is the worst of the three: a downloaded test runner
+    executed against a stack that is up, migrated and seeded. It needs the
+    implementer's hand like the other two, and reading the recipe's actual shape is
+    the only way to see that, since the comment says the right thing.
+
+    **The mutation this kills:** delete the `npm ci` line from a node target while
+    its `npx` call stays. Nothing else in this repository would notice: the target
+    still exits 0, on a developer's machine it uses whatever is in `node_modules`
+    already, and only a clean clone reveals it.
+
+    **The near miss that must stay green:** `npm ci && npx eslint .` on one line,
+    which satisfies the rule by position within the line — and the prerequisite
+    form, which satisfies it through the chain rather than the recipe.
+    """
+    assert MAKEFILE.is_file(), (
+        f"{MAKEFILE} does not exist, so CLAUDE.md's 'run `make ci` before pushing' names a file "
+        "that is gone."
+    )
+
+    targets = makefile_targets(MAKEFILE.read_text(encoding="utf-8"))
+    assert targets, (
+        f"No target in {MAKEFILE.name} was read at all, so the sweep below looked at nothing. The "
+        "reader has gone blind rather than the Makefile having been emptied."
+    )
+
+    calling = {
+        name: target
+        for name, target in sorted(targets.items())
+        if any(NPX_CALL.search(line) for line in target.recipe)
+    }
+    assert calling, "\n".join(
+        [
+            f"No recipe in {MAKEFILE.name} was read as calling `npx`, so this test passed having "
+            "found nothing to judge.",
+            "",
+            "That is the failure this assertion exists to name rather than a clean Makefile: the "
+            "targets that lint, type-check, scan licences and run Playwright all reach for a Node "
+            "tool, and a reader that cannot see those calls reports every one of them compliant.",
+        ]
+    )
+
+    offenders: list[str] = []
+    compliant: list[str] = []
+    for name, target in calling.items():
+        uninstalled = installs_before_running(target.recipe)
+        chain = installed_by_a_prerequisite(name, targets)
+        if not uninstalled:
+            compliant.append(f"{name} (installs in its own recipe)")
+        elif chain is not None:
+            compliant.append(f"{name} (installs through the `{chain}` prerequisite)")
+        else:
+            for line in uninstalled:
+                offenders.append(
+                    f"  {name}: {line}\n" f"    prerequisites: {target.prerequisites or 'none'}"
+                )
+
+    assert compliant, "\n".join(
+        [
+            f"Every `npx` recipe in {MAKEFILE.name} was read as uninstalled, including the ones "
+            "that install:",
+            *(f"  {line}" for line in sorted(calling)),
+            "",
+            f"This reads `{NPM_INSTALL}` as the install, so a repository that has moved to another "
+            "one — `npm install --frozen-lockfile`, a target of its own — needs this told about "
+            "it. Reported here rather than in the list below, because a reader that recognises no "
+            "install at all reports every recipe as an offender and the fix looks like a Makefile "
+            "problem instead of a test problem.",
+        ]
+    )
+
+    assert not offenders, "\n".join(
+        [
+            f"These {MAKEFILE.name} recipes run `npx` with nothing having installed the pinned "
+            "closure first:",
+            *offenders,
+            f"  compliant: {compliant}",
+            "",
+            "On a clean clone — `node_modules` is gitignored, so that is the ordinary case — npm "
+            "10's npx downloads the package and runs it. `npx eslint` becomes `eslint@latest`, "
+            "`npx tsc` becomes `typescript@latest`, and `npx playwright test` becomes a test "
+            "runner fetched at run time and pointed at a stack that is up and seeded. No pin, no "
+            "lockfile integrity, no failure to notice.",
+            "",
+            "CLAUDE.md pins dependency versions and commits lockfiles, with no exception for a "
+            "tool that resolves its own. `.github/workflows/ci.yml` runs `npm ci` before every "
+            "`npx` under the same condition; these are the copies of those gates that did not "
+            "follow.",
+            "",
+            "A comment above the target saying `npm ci` is a precondition does not satisfy this, "
+            "and that is deliberate: make does not run comments. Either put the install in the "
+            "recipe or give the target a prerequisite that does one.",
         ]
     )
 
