@@ -73,6 +73,7 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
+from app.db import engine_options
 from app.models.identity import AssignmentRole
 
 __all__ = [
@@ -183,11 +184,16 @@ def _care_engine() -> Engine:
         # searchable. It goes no further than this call: the URL lives inside the
         # engine, whose own `repr` masks the password.
         care_database_url.get_secret_value(),
-        # Same reasoning as `app.db`: a pooled connection can be dead before it
-        # is handed out, and this pool is checked out rarely enough that an idle
-        # socket dropped by the network is the ordinary case rather than the rare
-        # one.
-        pool_pre_ping=True,
+        # The same options `app.db` builds its engine with, from the same
+        # function, so that one place decides what either connection may write to
+        # a log. `engine_options` already carries `pool_pre_ping=True`; the
+        # sharper reason it is routed through here is `hide_parameters=True`
+        # outside development. The security review of Batch H found this engine
+        # built with `pool_pre_ping` alone, so with `sqlalchemy.engine` configured
+        # at INFO by name it logged every bound parameter — and the parameters on
+        # this connection are a reveal's arguments and the rows are the identity
+        # itself (SPEC §4.1, §6.2, §10).
+        **engine_options(settings),
     )
 
 
