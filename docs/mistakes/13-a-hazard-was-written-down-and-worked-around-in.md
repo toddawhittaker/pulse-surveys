@@ -18,8 +18,9 @@ The answer: the index bump was the implementer's, in `fcebebe`, and it was
 reflexive — this entry's rule is "grep every place that asks the same question and
 route them through **one helper**", and E0-26 does the opposite on purpose, because
 the `CARE` check is duplicated across the service and both halves of the door by
-design (SPEC §8, and `CLAUDE.md`'s carve-out that duplication in
-confidentiality-critical paths is the guarantee). Nothing was stopped, so there is
+design (SPEC §8; the carve-out that duplication in confidentiality-critical
+paths is the guarantee lives in the agent definitions since the process-only
+restructure of `CLAUDE.md` — citation corrected 2026-08-22, E0-42). Nothing was stopped, so there is
 no instance behind it. It has been withdrawn, which leaves 20 + the test round's
 genuine catch = **21**; the paragraph that counted as the twenty-first was
 E0-33's, which has since been trimmed out of the four shown and is in this file's
