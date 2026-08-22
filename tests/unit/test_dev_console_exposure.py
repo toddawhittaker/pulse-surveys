@@ -96,9 +96,13 @@ def test_the_dev_console_is_not_served_outside_development(
     production it hands whoever asks a menu of identities to enter the product as,
     so the gate is the whole safety of the feature: `/dev` must 404 anywhere
     `ENVIRONMENT` is not exactly `"development"`, the way `/docs` does (E0-18, ADR
-    0074). The mutation this kills is the missing or reversed gate — a route
-    registered unconditionally, or one whose condition is written the wrong way
-    round.
+    0074). **The route is registered unconditionally and the gate is the
+    environment check inside the handler**, which answers 404 outside development
+    — ADR 0079, written in E0-42's batch, records that mechanism. So the mutation
+    this kills is that check going missing or being written the wrong way round,
+    and *not* a conditional registration: this route has none, and a docstring
+    naming a mechanism the code does not use sends the next reader looking in the
+    wrong place (found by E0-42's security pass).
 
     The `/healthz` control is what stops this passing on emptiness: an application
     answering 404 to everything — a `create_app()` that failed halfway, a client on
