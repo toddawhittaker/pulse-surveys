@@ -39,8 +39,9 @@ trusted it by default.
 
 ## Decision
 
-**The five `OIDC_*` settings are required, and a mock address is refused outside
-development.** Two layers, both in `backend/app/config.py`:
+**The five `OIDC_*` settings are required, and outside development a
+configuration may not reach the mock's outcome by any of four routes.** All of it
+in `backend/app/config.py`:
 
 1. `oidc_issuer`, `oidc_authorization_endpoint`, `oidc_token_endpoint`,
    `oidc_jwks_url` and `oidc_client_id` lose their defaults and join the required
@@ -52,19 +53,74 @@ development.** Two layers, both in `backend/app/config.py`:
    equal to the mock's registered `mock-idp-client` is refused. The refusal names
    the field and quotes no value: it reaches the container startup log (SPEC
    §10).
+3. **`oidc_authorization_endpoint` may not name a loopback host outside
+   development**, refused as a class: `localhost`, or any IP literal that
+   `ipaddress` calls loopback — the whole of `127.0.0.0/8`, `::1`, and the
+   IPv4-mapped `::ffff:127.0.0.1`.
+4. **No `oidc_*` URL may be plain `http` to another host outside development**,
+   with the same on-this-machine exemption `ai_provider_base_url` already has.
 
-The catalog is those two spellings and nothing else — the name a container on
+Rules 3 and 4 are the security review's, and each closes a route to this
+ticket's own finding that never spells `mock-idp`.
+
+**Why rule 3 is one field and not five.** The other four URLs are resolved by
+this container, where a loopback host is a provider sidecar — an ordinary
+deployment that reaches nothing an attacker controls. `oidc_authorization_endpoint`
+is never resolved here at all: it is a string handed to a browser and resolved on
+the machine that browser runs on. The same host name therefore means "this API
+process" in four settings and "whoever's laptop is reading this" in the fifth.
+Since the development value is `http://localhost:8081/oidc/authorize` and names
+no mock, a deployment that set the other four and forgot this one started
+cleanly and answered every web login with a redirect to a port on the browsing
+user's own computer — where anything listening receives an institution-issued
+link arriving from a Pulse URL and can render a login page of its own.
+
+Refused as a *class* because the review's finding arrived with a fourth spelling
+already in it: a catalog of `localhost`, `127.0.0.1` and `::1` is walked past by
+`127.0.0.2` and by the IPv4-mapped form. A non-loopback IP literal stays
+accepted — an institution reaching its provider at an address rather than a name
+is an ordinary deployment.
+
+**Why rule 4 is conditioned on the environment** when the model provider's
+version of the same rule is absolute: every address on the development stack is
+cleartext to *another container* (`http://mock-idp:8000`), so an unconditional
+rule refuses the configuration `.env.example` ships and CI copies to `.env`, and
+takes SPEC §14.3's exit criterion with it. What it buys is that
+`http://idp.example.edu/…` stops being a legal production configuration: anyone
+on the path can answer the key-set fetch with a key set of their own, and every
+token signed with the matching private key then verifies correctly. The issuer is
+included although nothing fetches it, because OpenID Connect Discovery requires
+an Issuer Identifier to use `https`.
+
+**One trailing dot is stripped from the parsed host before every comparison.**
+`mock-idp.` reaches the mock and `localhost.` reaches the loopback interface, so
+a catalog comparing strings is defeated by a one-character edit. Exactly one dot:
+stripping more, or comparing by prefix afterwards, would turn
+`mock-idp.example.edu.` into a refusal.
+
+**The mock catalog is two spellings and nothing else** — the name a container on
 this stack reaches the mock by, and the name a configuration calls it by without
 addressing it. The host is compared as a parsed component, so the port, the
 scheme and the path do not excuse it and `https://mock-idp.example.edu` is not
 caught; the client id is compared whole.
 
-**`localhost` and the loopback addresses are deliberately outside the catalog.**
-Inside a deployed container `localhost` is that container, so it cannot reach the
-mock: refusing it would protect nothing while refusing a provider running
-alongside the application, which is a supported deployment. It is also the
-development stack's own `OIDC_AUTHORIZATION_ENDPOINT`, because a browser on the
-host reaches the mock on a published port.
+**`localhost` and the loopback addresses are deliberately outside *that*
+catalog**, which is a different question from rule 3. Inside a deployed container
+`localhost` is that container, so it cannot reach the mock: reading it as the
+mock would refuse a provider running alongside the application while protecting
+nothing. Rule 3 refuses it on one field for an unrelated reason — where the
+browser is sent — and the two must not be merged into one list.
+
+**The three host tests are three sets, and the code keeps them apart.** The mock
+catalog, the loopback *refusal* class, and the on-this-machine *exemption* answer
+differently for the same host: `localhost` is not the mock, is refused on the
+browser-facing field, and exempts cleartext everywhere else. Merging the refusal
+class into the exemption would mean a future widening moved both — one permitting
+more cleartext, the other refusing more addresses — so they are separate helpers
+with the reason written at each. The rules also compose rather than
+short-circuit: `http://localhost:8081/oidc/authorize` in production is exempt
+from rule 4 and refused by rule 3, which is the exact configuration the review
+found.
 
 The clean-checkout property ADR 0075 bought is kept without the default.
 `docker-compose.yml` gives all three `Settings`-building services the five as
@@ -101,10 +157,27 @@ pass that runs what actually ships. Refusing to *trust* the mock is the property
 that matters; the container existing on a network buys an attacker nothing while
 no configuration names it.
 
-**Refusing `localhost` too.** Would catch an operator who deploys with the
-development file's browser-facing authorize URL. Rejected above: it refuses a
-legitimate deployment shape and protects nothing, since a container's own
-`localhost` is not the mock.
+**Adding `localhost` to the mock catalog.** The shape this record first
+considered and rejected, and the rejection stands: on the four container-resolved
+settings a loopback host is a provider sidecar, so treating it as the mock
+refuses a legitimate deployment while protecting nothing. What the security
+review showed is that the *field* mattered and the catalog was the wrong place to
+ask. Rule 3 refuses loopback on the browser-facing endpoint only, and for a
+different reason — not "this might be the mock" but "this is the reader's own
+machine" — which is why it is a second rule rather than a longer list.
+
+**A single host helper serving both the refusal and the exemption.** Fewer moving
+parts, and it is the obvious tidy-up a later reader will propose. Rejected
+because the two sets differ today — the refusal covers the IPv4-mapped loopback
+form and the exemption does not — and because they move in opposite directions of
+safety: widening the exemption permits more cleartext, widening the refusal
+refuses more addresses. One helper makes every future widening do both at once.
+
+**A `RESTRICT_LOOPBACK` or `ALLOW_HTTP` escape hatch** for an operator whose
+deployment needs one. Rejected: neither has a correct value other than "no"
+outside development, and a knob with one correct answer is a knob that gets set
+wrong once and never audited. The development environment is the escape hatch,
+and it is already named in every refusal message.
 
 ## Consequences
 
@@ -124,6 +197,19 @@ legitimate deployment shape and protects nothing, since a container's own
   refusing a name nothing runs under reports every configuration clean
   (`docs/MISTAKES.md` entry 35). Two tests hold it against the Compose service
   and against what `.env.example` configures.
+- **A provider running beside the application is still deployable, and that is
+  the shape most likely to be broken by a later tightening.** Its token endpoint
+  and key set may be `https://localhost:8443/…` in production, and may be plain
+  `http` there too. Only the browser-facing endpoint is closed to it — a sidecar
+  still has to publish an address a browser can reach.
+- **Rule 4 makes a cleartext deployment impossible except on this machine**, so
+  an institution terminating TLS at a proxy in front of its provider has to name
+  the proxy rather than the backend. That is the same bill
+  `ai_provider_base_url` already presents, and the same answer.
+- `is_loopback` on an IPv4-mapped IPv6 address answers `True` on Python 3.13 and
+  did not on every earlier version, so the loopback check unwraps `ipv4_mapped`
+  itself rather than resting on that. Measured on the pinned interpreter; the
+  test that would catch a regression is the `::ffff:127.0.0.1` row.
 - Tests whose subject is something else and which build a non-development
   `Settings` now have to name a non-mock provider. `tests/conftest.py` gained one
   fixture for it rather than each module inventing placeholders.
