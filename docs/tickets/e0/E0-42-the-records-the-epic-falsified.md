@@ -68,11 +68,16 @@ Documentation only. No file under `backend/`, `tests/`, `scripts/`,
    replicas cannot serve one login flow — scaling past one replica requires
    a shared or configured secret first.
 9. **ADR 0079 — the dev console** (number reserved): `GET /dev` exists (PR
-   #62, no ticket, no ADR), signs a session as any seeded identity, and its
-   gate is a handler-level 404 keyed on `ENVIRONMENT` — deliberately a
+   #62, no ticket, no ADR), lists the mock provider's web-login people and
+   offers each as a one-click sign-in link through the ordinary web door, and
+   its gate is a handler-level 404 keyed on `ENVIRONMENT` — deliberately a
    different mechanism from ADR 0074's route-removal. Record context,
    decision, the 0074 contrast (so a future route-gating refactor does not
-   miss it), and consequences.
+   miss it), and consequences. *(Corrected 2026-08-22 during this ticket's
+   security review: this item said the console "signs a session as any seeded
+   identity", which `backend/app/api/dev.py` does not do — it mints nothing and
+   renders links. The overstatement had been copied into ADR 0079's index row
+   before it was caught.)*
 10. **`docs/tickets/e1/carried-from-e0.md`**, new entries, each with a "done
     when", from the threat-model and coverage reviews (source wording is in
     the PR-body notes I will attach to the dispatch):

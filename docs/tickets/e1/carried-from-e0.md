@@ -272,9 +272,23 @@ that a deployment's environment name is not a secret. The third is defensible �
 orchestrator's health check is the field's only consumer today, and the value is
 `production` in production, which surprises nobody.
 
+**The `/dev` console leaks the same fact through a second door.** `GET /dev`
+answers `404` outside development, but the route is registered for `GET` in every
+environment and only the handler is gated, so `POST /dev` answers `405` with
+`Allow: GET` while any unregistered path answers `404` — measured against the
+pinned Starlette 1.6.0. One unauthenticated request therefore confirms both that
+this build ships the console and that `ENVIRONMENT` is not `development`, which is
+this entry's disclosure arriving by another route; ADR 0079 records it in its
+decision section. The code-side fix is to register the route for every method, or
+to gate at registration, and it belongs to whichever decision closes this entry
+rather than to the documentation ticket that found it.
+
 **Done when** one of the three is chosen in E1 and written down: the field is
 gone, the field is gated, or a record says it stays and why the list of
-environment-keyed guards above is acceptable to publish.
+environment-keyed guards above is acceptable to publish — **and the same verdict
+reaches `/dev`'s method mismatch**, because a decision that the environment name
+may be published makes the `405` acceptable too, while a decision that it may not
+leaves that route still answering the question.
 
 ## §4.1 items 4 and 5 are enforced by review only
 
