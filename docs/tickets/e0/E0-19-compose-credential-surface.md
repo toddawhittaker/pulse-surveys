@@ -21,7 +21,9 @@ the sensitive check and the rule about what privilege a service may hold. A
 service's named volumes are resolved through the top-level `volumes:` section by
 `named_volume_source`, which treats a bind-shaped `driver_opts` as a host path
 and **refuses** a volume shape it cannot classify rather than reading it as
-harmless. Route 3 is in `test_env_example_resolves.py`, where the delivered set
+harmless. That section is read **merged across both files** by
+`merged_volume_bodies`, not one file at a time — see the second review pass
+below. Route 3 is in `test_env_example_resolves.py`, where the delivered set
 is computed from the Compose files rather than hand-listed, and accounted in
 each variable's exact spelling.
 
@@ -30,9 +32,12 @@ each variable's exact spelling.
 allowed `volumes:` section may *carry* is bounded by `READABLE_VOLUME_KEYS`
 beside it.
 
-**The security review then changed five things, and this paragraph is what a
-reader should hold the module against.** It ran the attacks rather than reading,
-and it found the ticket's own strategy applied one level short.
+**Two security passes then changed the module, each one level further in, and
+this paragraph is what a reader should hold it against.** Both ran the attacks
+rather than reading, and each found the ticket's own strategy applied one level
+short of where it needed to be.
+
+The first pass changed five things:
 
 - `ALLOWED_SERVICE_KEYS` closes the **service** level the way
   `ALLOWED_TOP_LEVEL_KEYS` closes the top: ten keys enumerated from the two
@@ -55,13 +60,32 @@ and it found the ticket's own strategy applied one level short.
   `labels:` and `build.args` all reach a container and none is an
   `environment:` entry.
 
+The second pass found that even those closed sets read the wrong object — each
+file on its own — and changed three more:
+
+- The top-level `volumes:` section is read **merged across both files**
+  (`merged_volume_bodies`), because Docker merges it before anything mounts.
+  `beat-schedule`, declared empty in the base file and mounted by `beat`, became
+  a host bind the moment the override redefined its body — through the
+  `name:`/`driver:` refusal the first pass had just added, measured with the
+  container reading the host's `.env`.
+- Every published port must bind a loopback address (`LOOPBACK_HOST_IPS`).
+  `ports` was an allowed service key whose *value* no rule read, so dropping the
+  `127.0.0.1:` prefix published Postgres on every interface.
+- `ALLOWED_BUILD_KEYS` closes the `build:` sub-keys to `context` and
+  `dockerfile`. `additional_contexts:` reaches a second host directory a
+  `COPY --from` reads, and `build.privileged` runs the build with host
+  privileges; `build.args` is deliberately excluded, since nothing declares one
+  and the string walk already covers it.
+
 Item 5 landed as
 [ADR 0076](../../adr/0076-what-a-compose-file-may-say-is-a-closed-set.md), which
-records E0-03's three closed-set rules and four of this ticket's in one record,
+records E0-03's three closed-set rules and six of this ticket's in one record,
 with the read-everything alternative and why it lost. It was **amended before
-merge by the review above**: its central claim — that every surface the guards
-read is a closed set — was measured wrong at the service level, and the
-privilege comparison it had recorded as the decision was overruled.
+merge by both passes above**: its central claim — that every surface the guards
+read is a closed set — was measured wrong first at the service level and then at
+the file boundary, and two decisions it had recorded (the privilege comparison
+against `api`, and reading each volume body in its own file) were overruled.
 
 ## Context
 

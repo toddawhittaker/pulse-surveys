@@ -1,13 +1,18 @@
 # 0076 — What a Compose file may say is a closed set
 
-**Status:** Accepted, and **amended before merge on 2026-08-21 by E0-19's own
-security review**, which measured the decision below wrong in one direction: it
-claimed every surface the guards read is a closed set, and the *service* level —
-where nearly every host-reaching Compose key lives — was not one at all. Five
-rules are seven, one of them reverses a decision this record made, and the
-review's measurements are in the consequences.
+**Status:** Accepted, and **amended before merge on 2026-08-21 by two of E0-19's
+own security passes**, each measuring the decision below wrong one level further
+in. The first found the *service* body was not a closed set at all — where
+nearly every host-reaching Compose key lives. The second found that even the
+closed sets read the wrong thing: they read each file on its own, and Docker
+merges the top-level `volumes:` across files before any service mounts, so a
+volume the base file mounts could be redefined into a host bind by the override
+and nothing looked. The correction that holds is **merge first, then apply every
+rule** — a closed set is a claim about the merged configuration, not about a
+file. Five rules are nine; two reverse decisions this record made; the
+measurements are in the consequences.
 **Date:** 2026-08-21
-**Tickets:** E0-03 (rules 1 to 3, decided there), E0-19 (recorded here, and rules 4 to 7)
+**Tickets:** E0-03 (rules 1 to 3, decided there), E0-19 (recorded here, and rules 4 to 9)
 
 ## Context
 
@@ -31,13 +36,30 @@ directory, which hands a container the whole `.env` the `environment:` block
 just took two variables out of, and the identical mount hidden behind a named
 volume's `driver_opts`.
 
-E0-19's own security review then found it a sixth time, one level in. The
-closed top-level key set bounds which *sections* may appear and says nothing
-about what a service body may carry, so `volumes_from: - db` on `worker` — every
-mount `db` has, which is the whole Postgres data directory — passed the entire
-suite green. Four more service keys were measured going past just as quietly.
-That is the finding this record is amended for, and it is the same lesson at a
-smaller radius: a closed set is a claim about exactly one level.
+E0-19's first security pass found it a sixth time, one level in. The closed
+top-level key set bounds which *sections* may appear and says nothing about what
+a service body may carry, so `volumes_from: - db` on `worker` — every mount `db`
+has, which is the whole Postgres data directory — passed the entire suite green.
+Four more service keys were measured going past just as quietly.
+
+A second pass found it a seventh time, and this one was subtler because the
+guards it defeated were the ones the first pass had just added. Every mount rule
+resolved a named volume in the *same file* as the service that mounts it, on the
+sound-sounding reasoning that this module reads the two files one at a time and
+will not model Compose's merge. That reasoning is right about services and wrong
+about the top-level `volumes:` section: `docker compose up` merges that section
+across both files before anything is mounted. `beat` mounts `beat-schedule`,
+declared empty in the base file; redefining it in the override with
+`driver_opts: {type: none, device: /, o: bind}` — or `{name: precreated-host-root}`
+— gives that container the host root. Measured: suite green, and the running
+container read the host's `.env`. It walked straight through rule 6, the
+`name:`/`driver:` refusal the first pass added, by declaring the volume one file
+over from where it is mounted. Two more keys whose *values* no rule read —
+`ports` and `build` — were found the same way.
+
+The lesson is the same each time and this record kept learning it one radius too
+late: **a closed set is a claim about the fully merged configuration, and a
+guard that reads a file at a time is closed over the wrong object.**
 
 SPEC §7.2 names the services the stack runs and says nothing about which Compose
 features a file may use, so the choice is this record's. It needs to exist
@@ -50,9 +72,9 @@ touch; so does an author renaming `docker-compose.yml` to Docker's preferred
 
 ## Decision
 
-**Every surface the guards read is a closed set — at every level, not just the
-outermost — and a shape the module cannot read is refused rather than ignored.**
-Seven rules, all the same move:
+**Every surface the guards read is a closed set — at every level, over the
+merged configuration rather than one file at a time — and a shape the module
+cannot read is refused rather than ignored.** Nine rules, all the same move:
 
 | # | The set that is closed | What that refuses |
 |---|---|---|
@@ -61,8 +83,14 @@ Seven rules, all the same move:
 | 3 | `COMPOSE_FILE_NAMES` — the root holds exactly the two files this suite reads | Docker prefers `compose.yaml` over `docker-compose.yml`, so a third file replaces the stack every rule here describes while every test stays green |
 | 4 | `ALLOWED_SERVICE_KEYS` — the ten keys a *service body* may declare | `volumes_from:`, which grants one container every mount another has; `cgroup:`, `uts:`, `runtime:` and `develop:`, each measured passing the pre-amendment guards; and the sixth nobody has thought of |
 | 5 | `ALLOWED_BIND_MOUNTS` — the host paths a service may bind, keyed by `(file, service)` | `- ./:/app/repo:ro`, which mounts the directory `.env` lives in, and every other mount nobody enumerated |
-| 6 | `READABLE_VOLUME_KEYS` — `driver_opts` and `labels` — and the bind-`driver_opts` shapes | The docker socket declared as `driver_opts: {type: none, device: /var/run/docker.sock, o: bind}`; any shape this module cannot classify; and, separately, the three keys that say *defined elsewhere* — `external:`, `name:` and `driver:` |
+| 6 | `READABLE_VOLUME_KEYS` — `driver_opts` and `labels` — and the bind-`driver_opts` shapes, read over the **merged** `volumes:` section (`merged_volume_bodies`) | The docker socket declared as `driver_opts: {type: none, device: /var/run/docker.sock, o: bind}`; any shape this module cannot classify; the three keys that say *defined elsewhere* — `external:`, `name:` and `driver:`; and any of these declared in the override for a volume the base file mounts |
 | 7 | `PRIVILEGE_KEYS` with `ALLOWED_PRIVILEGE_GRANTS` — no service declares a privilege key, absolutely, unless an entry names the file, the service and the key | `privileged: true`, `pid: host`, `network_mode: host`, `userns_mode: host`, `devices:` and `cap_add:` on any service in either file |
+| 8 | `LOOPBACK_HOST_IPS` — every published port binds `127.0.0.1` or `::1` | `5432:5432` with the `127.0.0.1:` prefix dropped, which publishes Postgres on every interface — the laptop on a conference network serving its database to the room |
+| 9 | `ALLOWED_BUILD_KEYS` — the two sub-keys a `build:` section may declare, `context` and `dockerfile` | `additional_contexts:`, a second host directory a `COPY --from` reads around every mount rule at build time, and `build.privileged`, which is not the service-level `privileged` rule 7 refuses |
+
+Rules 8 and 9 are the values behind two keys rule 4 admits: `ports` and `build`
+are legitimate service keys, but a closed key set says nothing about what the key
+*carries*, which is the same gap one level down.
 
 **Where a set cannot be closed, the walk is exhaustive instead.** The credential
 rules follow `${...}` references, so a credential *typed out* rather than
@@ -73,8 +101,19 @@ routes above, so every string anywhere in a service body is walked, keys as well
 as values, at any depth, on every service including `db`. The rule is the same
 one stated the other way round: never a list of the places somebody thought of.
 
-Four properties of rules 4 to 7 are part of the decision rather than of the
+Five properties of rules 4 to 9 are part of the decision rather than of the
 implementation.
+
+**The top-level `volumes:` section is merged before any rule reads it.**
+`merged_volume_bodies` assembles it across every Compose file — later file wins,
+a null body leaves the earlier standing — and every consumer reads that one
+table: the allowlist, the sensitive check, the `name:`/`driver:` refusal and the
+unreadable-declaration check. No call site assembles it per file. This is the
+single exception to the module's "one file at a time" rule, and it is exact:
+what a service may *mount* stays keyed by the file that declares the mount,
+because that is per-file configuration; a volume *body* is not, because Docker
+merges it before mounting, so reading it per file reads a body the daemon never
+uses.
 
 **Normalisation is the entry condition for the comparison, on both sides.** One
 helper normalises the sources read out of a file, the entries of
@@ -107,16 +146,23 @@ does not actually declare — so a permission cannot outlive its grant.
 
 `SENSITIVE_BIND_SOURCES` stays behind rule 5 as defence in depth: a path that
 somehow enters the allowlist should still fail by name. It is absolute over both
-files rather than a comparison against `api`, for the reason recorded below. The
-full reasoning for all seven rules, including the measurements, is in the module
-docstring and the comment above each constant in
+files rather than a comparison against `api`, for the reason recorded below.
+
+**`build.args` is deliberately excluded from `ALLOWED_BUILD_KEYS`.** Nothing
+declares one, and admitting it because a build "usually" has arguments is exactly
+how `networks` first got onto `ALLOWED_TOP_LEVEL_KEYS`. A build argument is also
+a place a credential travels — the exhaustive string walk covers `build.args`
+for that reason — so it comes back in the change that first needs it, not before.
+
+The full reasoning for all nine rules, including the measurements, is in the
+module docstring and the comment above each constant in
 `tests/unit/test_compose_stack.py`; this record does not repeat it.
 
 ## Alternatives rejected
 
 **Read whichever Compose-named files and sections exist, and run every rule
 against all of them.** The genuine competitor, and it is the same one for all
-seven rules: it needs no ban, it never fails a legitimate change, and it is what
+nine rules: it needs no ban, it never fails a legitimate change, and it is what
 anyone proposes first. It lost on two counts.
 
 *A feature the module cannot read would fail silently instead of loudly.*
@@ -156,14 +202,26 @@ whatever both of them inherit. The absolute rule costs the exception structure
 above, which is the price of not having that hole.
 
 **Admitting `name:` and `driver:` on a named volume as inert metadata** (rule 6).
-What this record shipped in the morning, and the review took it apart with the
-record's own sentence. `external: true` is refused because the volume is created
-somewhere this file cannot see — and that is true of all three. A `name:`
+What this record shipped in the morning, and the first review pass took it apart
+with the record's own sentence. `external: true` is refused because the volume is
+created somewhere this file cannot see — and that is true of all three. A `name:`
 attaches the volume to a **pre-created** Docker volume under exactly that name
 with no project prefix, and `docker volume create --opt device=/ --opt o=bind
 --opt type=none` is one command away; a `driver:` hands the mount to a plugin
 that decides what it is. Both are refused now, with the message the third one
 gets.
+
+**Resolving a mounted volume's body in the file that mounts it** (rule 6, again).
+What the *first* fix round shipped, and the second pass defeated by moving the
+declaration one file over. It closed the service level correctly and still read
+each volume body per file, on the reasoning — right for services, wrong here —
+that this module never models Compose's merge. The daemon merges the top-level
+`volumes:` before mounting, so `beat-schedule`, declared empty in the base file
+and mounted by `beat`, becomes a host bind the moment the override redefines its
+body, and the per-file read saw only the base file's empty body. `merge first,
+then apply every rule` is the shape that holds, and it is the correction that
+generalises past the specific keys: any rule reading a section Docker merges must
+read the merged section, or it is closed over an object the daemon does not use.
 
 ## Consequences
 
@@ -179,6 +237,20 @@ has, which is the entire Postgres data directory. The mount rules read
 a closed set is not whether it is closed but **what a member of it carries that
 nothing reads** — and the answer has to be re-asked at each level down.
 
+**A closed set read one file at a time is closed over the wrong object, and this
+record made that mistake too.** The first fix round closed the service level but
+still resolved each volume body in the file that mounts it. Docker merges the
+top-level `volumes:` across files before mounting, so redefining `beat-schedule`
+— empty in the base file, mounted by `beat` — in the override with a
+bind-carrying `driver_opts` or a `name:` gives that container the host root, and
+the running container read the host's `.env` with the suite green. It walked
+through rule 6, the refusal added one round earlier, by declaring the volume one
+file over from where it is mounted. The class is *merge-blindness*: a guard that
+reads raw YAML file by file is correct only for the sections Docker does **not**
+merge. Every consumer of a merged section must read the merged section
+(`merged_volume_bodies`), and the next reviewer's question is which other
+sections Docker merges that a rule here still reads per file.
+
 **A red test arrives from a module the author did not touch, and rule 4 makes
 that routine.** Adding `secrets:`, renaming the base file, mounting a new host
 path, or giving a service an ordinary key like `restart:` or `deploy:` fails
@@ -191,19 +263,37 @@ rules exist to impose, and this record is what the author should be pointed at.
 the same pull request**, and says beside the new entry why the credential rules
 still hold over it. Adding the key alone is not the change.
 
-**Three limits are accepted rather than closed.** Normalisation is textual, so a
-`~` or `${HOST_DIR}` source normalises to something no allowlist entry matches
-and is refused — the safe direction, and not a resolution. `COMPOSE_FILE_NAMES`
-is a claim about Docker's behaviour, not about this repository: it is the one
-thing here that can go stale with nobody touching the tree, so a Compose release
-recognising a ninth name makes rule 3 wrong silently — re-check it against the
-Compose release notes, not against the tests. And the string walk searches for
-the credential's *documented* value, the placeholder `.env.example` resolves to,
-so it catches the committed placeholder and cannot see a real deployment
-password typed into a Compose file. Nothing in this repository knows that value,
-which is why the limit is stated rather than fixed.
+**Four limits are accepted rather than closed.** Normalisation over-refuses in
+the safe direction: a `~` or `${HOST_DIR}` source normalises to something no
+allowlist entry matches and is refused, which is not a resolution but is safe.
+`COMPOSE_FILE_NAMES` is a claim about Docker's behaviour, not about this
+repository: it is the one thing here that can go stale with nobody touching the
+tree, so a Compose release recognising a ninth name makes rule 3 wrong silently —
+re-check it against the Compose release notes, not against the tests. The string
+walk searches for the credential's *documented* value, the placeholder
+`.env.example` resolves to, so it catches the committed placeholder and cannot
+see a real deployment password typed into a Compose file; nothing in this
+repository knows that value, which is why the limit is stated rather than fixed.
 
-**None of this sees a merged document.** The suite parses raw YAML, one file at
-a time, never merged, which is what makes the base-file/override asymmetry
-visible at all. Anything that exists only after Compose merges the two files is
-outside every rule above.
+The fourth is the one limit that fails in the **unsafe** direction, and it is
+recorded rather than closed by decision. `normalised_bind_source` is purely
+textual — it never touches the filesystem — so an allowlisted *relative* source
+that is a **symlink on disk** is compared as the literal path while Docker
+follows the link to wherever it points. An allowlist entry like `./backend`
+would clear a `./backend` that is symlinked to `/`. Closing it needs a
+filesystem read, which would make the suite's verdict depend on the checkout it
+runs against — a mount would pass on one developer's tree and fail on another's,
+and the property under test is a property of the Compose file, not of the disk.
+So the textual comparison stands, and the residual is a symlinked allowlist
+entry: it needs a mount already on the allowlist to be redirected, which is a
+narrower surface than an arbitrary mount, and it is left open on the same
+reasoning that keeps `Path.resolve()` out of the normaliser.
+
+**Only the top-level `volumes:` section is read merged; everything else is read
+one file at a time.** That per-file reading is what makes the base-file/override
+asymmetry visible — a blank in the base file survives every deployment, a blank
+in the override does not — and rules 5 and 7 depend on it. The single exception
+is the volume-body merge above, made because a volume body is not per-file
+configuration in the first place. Anything else that exists only in Compose's
+merged view, and that this module reads per file, is the next merge-blindness
+finding waiting to happen.
