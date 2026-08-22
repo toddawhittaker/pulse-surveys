@@ -30,12 +30,16 @@ are worth knowing before using them:
     names this fixture as the owner of its own provisioning. Without it, tests
     pass under privileges no deployment has.
   - **The environment a migration runs under is assembled in one function**,
-    `migration_environment` below, and the name it invents for the Alembic
-    superuser URL is **this suite's choice** rather than the ticket's — E0-04
-    leaves the mechanism open between a `Settings` field, an Alembic-only
-    variable, and something `env.py` assembles. So the function supplies the
-    container's coordinates under every spelling those three could read, and
-    changing the name is one constant.
+    `migration_environment` below, and it supplies what `migrations/env.py`
+    reads and nothing besides: `DATABASE_URL` for the address, `DB_SUPERUSER`
+    and `DB_SUPERUSER_PASSWORD` for the identity. It used to supply the
+    container's coordinates under every spelling E0-04 left open, because that
+    ticket named three candidate mechanisms and this file could not choose among
+    them.
+    [ADR 0012](../docs/adr/0012-the-migration-environment-builds-its-own-superuser-connection.md)
+    chose, and E0-37 item 7 deleted the rest: a fixture still setting
+    `ALEMBIC_DATABASE_URL` would let an `env.py` written the rejected way pass
+    this whole suite.
 
 E0-07 adds one more, `section_codes`, at the very bottom. It is here rather than
 in a test module because two modules ask the same question of it — the parsing
@@ -560,16 +564,6 @@ DATABASE_URL_VARIABLE = "DATABASE_URL"
 # `app.services.safety` and by nothing else".
 CARE_DATABASE_URL_VARIABLE = "CARE_DATABASE_URL"
 
-# **This suite's choice**, and the one name in this file that a construction
-# decision could displace. E0-04 settles *which identity* runs migrations —
-# `DB_SUPERUSER`, never `Settings.database_url` (ADR 0009) — and deliberately
-# leaves the mechanism open: a new `Settings` field, an Alembic-only variable,
-# or something `env.py` assembles from the parts. `migration_environment` below
-# therefore sets this *and* the parts *and* `DATABASE_URL`, so an `env.py`
-# written any of those three ways finds the container. If the implementation
-# spells the variable differently, change this constant; nothing else moves.
-ALEMBIC_SUPERUSER_URL_VARIABLE = "ALEMBIC_DATABASE_URL"
-
 
 class DatabaseUnderTest(NamedTuple):
     """One database in the test container, addressed as each of the three roles.
@@ -596,39 +590,50 @@ def container_url(container: Any, *, username: str, credential: str, database: s
 
 
 def migration_environment(database: DatabaseUnderTest) -> dict[str, str]:
-    """Every environment variable an `env.py` could need to reach `database`.
+    """Exactly what `migrations/env.py` reads to reach `database`, and nothing besides.
 
-    Deliberately over-supplies. E0-04 leaves it open whether Alembic learns the
-    superuser connection from a whole URL or assembles one from the parts
-    `.env.example` already declares, and a fixture that supplied only one of
-    those would make that choice for the implementer — quietly, by failing the
-    other option. So the parts and the URL are both set, and they agree: same
-    host, same port, same database.
+    **It used to be four entries wider, and E0-37 item 7 is why they are gone.**
+    E0-04 left the mechanism open between a `Settings` field, an Alembic-only
+    variable and something `env.py` assembles from the parts, so this function
+    set the container's coordinates under every spelling those three could
+    read — `ALEMBIC_DATABASE_URL`, and `DB_APP_USER`, `DB_APP_PASSWORD` and
+    `DB_NAME` for a connection assembled by hand.
+    [ADR 0012](../docs/adr/0012-the-migration-environment-builds-its-own-superuser-connection.md)
+    then chose: the address comes from `DATABASE_URL` and the identity from
+    `DB_SUPERUSER` and `DB_SUPERUSER_PASSWORD`, and no new variable is
+    introduced anywhere.
+
+    **Keeping the hedge after that decision is what made it a hedge.** An
+    `env.py` rewritten to read `ALEMBIC_DATABASE_URL` would pass this entire
+    integration suite while being a variable `.env.example` cannot document:
+    [ADR 0008](../docs/adr/0008-env-has-two-readers-and-the-database-credential-is-split.md)
+    accepts an entry only where a `Settings` field resolves it or a Compose file
+    interpolates it, and `env.py` is neither reader. That is the alternative ADR
+    0012 rejected by name, and this fixture was the last thing still making it
+    look workable.
 
     `DATABASE_URL` is set to the *application* role, exactly as it is in
     production. An `env.py` that uses it to connect will fail to create a table,
     which is the failure ADR 0009 exists to keep visible.
     """
     superuser = urlsplit(database.superuser_url)
-    application = urlsplit(database.application_url)
     return {
-        ALEMBIC_SUPERUSER_URL_VARIABLE: database.superuser_url,
         DATABASE_URL_VARIABLE: database.application_url,
         "DB_SUPERUSER": superuser.username or "",
         "DB_SUPERUSER_PASSWORD": superuser.password or "",
-        "DB_APP_USER": application.username or "",
-        "DB_APP_PASSWORD": application.password or "",
-        "DB_NAME": superuser.path.lstrip("/"),
     }
 
 
 def application_environment(database: DatabaseUnderTest) -> dict[str, str]:
     """Every variable an `app.*` module could need to reach `database` at run time.
 
-    The same over-supply `migration_environment` above makes, for the same reason
-    and one ticket later. `.env.example` gives the Care connection a URL of its
-    own *and* a user/password pair, and `app.services.safety` could reasonably
-    read either — a whole `CARE_DATABASE_URL`, or the pair against the address in
+    An over-supply, and since E0-37 item 7 the only one left in this file.
+    `migration_environment` above made the same choice for the same reason one
+    ticket earlier, until ADR 0012 settled which variables Alembic reads and the
+    other spellings were deleted; the question *this* one is hedging against is
+    still open. `.env.example` gives the Care connection a URL of its own *and* a
+    user/password pair, and `app.services.safety` could reasonably read either —
+    a whole `CARE_DATABASE_URL`, or the pair against the address in
     `DATABASE_URL`, which is the shape ADR 0012 chose for Alembic. Supplying only
     one would make that choice for the implementer by failing the other, so both
     are set and they agree.
@@ -5586,7 +5591,7 @@ class SeedRun(NamedTuple):
 def seed_environment(database: DatabaseUnderTest) -> dict[str, str]:
     """Every variable `scripts/seed.py` could need to reach `database`.
 
-    Three layers, and the over-supply is the same choice `migration_environment`
+    Three layers, and the over-supply is the same choice `application_environment`
     above makes for the same reason. E0-17 says the script "runs as the superuser
     identity (ADR 0009)" and spells no variable for it, so the layers are:
 
@@ -5600,8 +5605,10 @@ def seed_environment(database: DatabaseUnderTest) -> dict[str, str]:
       - `migration_environment`, which is how everything else in this repository
         addresses a database as the bootstrap identity: `DATABASE_URL` for the
         address plus `DB_SUPERUSER`/`DB_SUPERUSER_PASSWORD` for the identity
-        (ADR 0012, and `backend/migrations/env.py` reads exactly those three),
-        with a whole superuser URL beside them in case the script prefers one.
+        (ADR 0012, and `backend/migrations/env.py` reads exactly those three).
+        It set a whole `ALEMBIC_DATABASE_URL` beside them until E0-37 item 7:
+        that spelling is the one ADR 0012 rejected, so a seed preferring it
+        would be reading a variable `.env.example` cannot document.
       - `application_environment`, so a script that connects as the application
         role, or that opens the Care connection, finds those too. It sets
         `DATABASE_URL` to the same value the layer above does, so the two agree.

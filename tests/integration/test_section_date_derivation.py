@@ -402,13 +402,90 @@ def invented_section_code() -> str:
     return f"{letters(1)}3{ONLINE_SUFFIX}"
 
 
+# The band a generated course number is drawn from: three digits, `100`-`799`,
+# which SPEC §8 splits into UG, UGGR and GR. Staying inside a band matters more
+# than which band, because the bands are not enforced by a `CHECK`: `course.level`
+# is a stored generated column (ADR 0015) and an out-of-band number derives
+# `NULL::course_level`, so the row is refused by that column's `NOT NULL` and the
+# error names the level rather than the number. `000`-`099` is left out only
+# because it needs zero padding to stay three digits, which is a case E0-05's own
+# tests own rather than this walker's.
+COURSE_NUMBER_FIRST = 100
+COURSE_NUMBER_LAST = 799
+
+# Cleared before every test, so the numbers only have to be distinct within one:
+# `db_session` rolls every write back at the end of a test, so no course this
+# module seeds outlives the test that asked for it. The same mechanism and the
+# same reasoning as `_GRAPH_INTEGER_COUNTERS` in `tests/conftest.py`.
+_COURSE_NUMBERS: dict[str, Any] = {}
+
+
+@pytest.fixture(autouse=True)
+def _course_numbers_start_again_for_each_test() -> None:
+    """Hand the first number in the band to every test, rather than the whole session one each.
+
+    Without it the generator is a session-wide supply of 700 numbers, and this
+    module's property tests run twenty-five and forty examples inside one test —
+    so a session-wide supply is the shape that runs out. Failing loudly, but
+    inside its own seeding and for a reason that has nothing to do with what the
+    property asserts, which is exactly what this generator replaced.
+    """
+    _COURSE_NUMBERS.clear()
+
+
+def course_number() -> str:
+    """A course number no other course in this test carries, inside SPEC §8's bands.
+
+    **Distinct per call, and that is E0-09's repair arriving here.** This entry
+    was the constant `"150"` — well inside a band, and a unique violation the
+    moment one test seeds a second course under the same prefix, because E0-05's
+    `uq_course_prefix_id_lms_number` is per prefix. No test in this module builds
+    two courses today, so the trap was set and not sprung; E0-09 sprang the
+    identical one, blocked three tests before any assertion ran, and took a
+    dispute to settle (`docs/disputes/E0-09-01.md`).
+
+    **Counting up rather than wrapping** is the whole of it. A generator that
+    wrapped would hand out a duplicate once a test asked for enough courses, and
+    the failure would look exactly like the one this replaces — a unique violation
+    raised inside a fixture, from a statement naming no column this ticket owns.
+
+    **Not `letters()`, which is what the section code beside it uses.** That draws
+    one letter from a session-wide counter, so it repeats every 26 calls; a course
+    number built the same way would reintroduce a rarer and order-dependent
+    version of the same defect, and rarer is worse — it would surface as a flake
+    in somebody else's ticket.
+
+    A fourth copy of one generator, and deliberately so: this module carries its
+    own copy of the whole seeding walker for the reason its docstring gives, and
+    importing `tests/conftest.py` as a module rather than letting pytest load it
+    as a plugin loads it twice.
+    """
+    counter = _COURSE_NUMBERS.setdefault(COURSE_NUMBER_COLUMN, count(COURSE_NUMBER_FIRST))
+    number = next(counter)
+    if number > COURSE_NUMBER_LAST:
+        available = COURSE_NUMBER_LAST - COURSE_NUMBER_FIRST + 1
+        pytest.fail(
+            f"This test asked for more than {available} courses, so the seeding walker has run "
+            "out of three-digit numbers inside SPEC §8's bands. It stops here rather than "
+            f"starting again at {COURSE_NUMBER_FIRST}: reusing a number would write a second "
+            "course with the same number under the same prefix, which E0-05's "
+            "`uq_course_prefix_id_lms_number` refuses — and that failure would be a unique "
+            "violation raised inside a fixture rather than a message naming its cause, which is "
+            "the shape this generator exists to leave behind. If a test genuinely needs this "
+            "many courses, widen the band above: `000`-`099` is available with zero padding."
+        )
+    return str(number)
+
+
 # Values keyed to a column that a type alone cannot answer for. Both are schema
 # rules E0-05 already enforces, so a value the walker invented freely would be
 # refused by a constraint that has nothing to do with E0-07: SPEC §8's
 # course-number bands, and §2.2's section-code shape. The same two entries, for
-# the same reason, as in `tests/integration/test_term_calendar_schema.py`.
+# the same reason, as in `tests/integration/test_term_calendar_schema.py`. Both
+# are drawn fresh per call, because both rules have a uniqueness half as well as
+# a shape half.
 COLUMN_VALUES: dict[tuple[str, str], Callable[[], Any]] = {
-    ("course", COURSE_NUMBER_COLUMN): lambda: "150",
+    ("course", COURSE_NUMBER_COLUMN): course_number,
     ("section", SECTION_CODE_COLUMN): invented_section_code,
 }
 

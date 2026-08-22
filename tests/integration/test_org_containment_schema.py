@@ -408,6 +408,80 @@ def test_deleting_a_department_that_has_prefixes_is_refused(
         db_session.execute(delete(department).where(matching_primary_key(department, parent)))
 
 
+def test_a_prefix_cannot_sit_outside_a_department(org_tables: dict[str, Table]) -> None:
+    """Criterion 6's other half: a department groups one or more prefixes, so a prefix has one.
+
+    E0-05's scope says a department groups one or more prefixes and asks for it as
+    a database constraint. The column is non-nullable and does enforce it — and
+    until E0-37 item 3 nothing asserted so, which left only the course-to-prefix
+    half of that sentence tested.
+
+    **`ON DELETE RESTRICT` does not cover this**, and that is the whole reason
+    this test is worth its lines.
+    `test_deleting_a_department_that_has_prefixes_is_refused` says nothing about
+    nullability in either direction: a nullable foreign key still refuses the
+    delete of a department that a prefix points at. So the property could be lost
+    with that test reporting nothing about it, and a prefix belonging to no
+    department becomes writable — a subtree with no parent, in the hierarchy every
+    purview computation in SPEC §2.1 walks.
+
+    **What the mutation actually does to that test was measured, and it is not
+    what this docstring first said.** The first version claimed the delete-restrict
+    test "stays green" under a nullable `department_id`. It does not: with
+    `nullable=True` in the model and the migration it dies inside its own seeding
+    with `KeyError: 'department'`, because `seed_row` in this file — and the three
+    copies of that walker elsewhere in the suite — builds an ancestor row only for
+    a foreign key that is NOT NULL, so a nullable column drops `department` out of
+    the chain the test then reads. That is an error in a fixture rather than a
+    failed assertion about the schema (`docs/MISTAKES.md` entry 13's closing line:
+    when a test fails inside its own fixture, suspect the fixture), and it names
+    neither the column nor the rule. The argument for this test is unchanged and
+    slightly stronger — the one thing that fails *on the property*, naming the
+    nullable columns, is the assertion below.
+
+    Read out of the catalog rather than probed with an insert. Both would work;
+    the catalog is what says the rule *exists*, and `docs/MISTAKES.md` entry 3's
+    closing note is that where two rules could refuse the same row, the catalog
+    test and the behavioural test see different things and are worth having as
+    different tests. Reflection is the catalog: SQLAlchemy reads `attnotnull` for
+    it, so what is asserted is what Postgres holds rather than what
+    `app/models/org.py` declares.
+
+    **The mutation this test exists for:** `ALTER TABLE prefix ALTER COLUMN
+    department_id DROP NOT NULL`, or `nullable=True` on the model and in the
+    migration. It turns exactly this red, with the column named; the
+    delete-restrict test above stops running rather than staying green, for the
+    reason given above. **The near miss that must stay green:** renaming the
+    column, or reaching the department through a composite key, since the columns
+    are found by following the foreign key rather than by name.
+    """
+    prefix = require_table(org_tables, "prefix")
+    department = require_table(org_tables, "department")
+
+    to_department = [key for key in prefix.foreign_keys if key.column.table.name == department.name]
+    assert to_department, (
+        f"`prefix` has no foreign key into `department` — it references "
+        f"{sorted({key.column.table.name for key in prefix.foreign_keys})}. SPEC §2.1's "
+        "containment order puts a prefix under a department, and the assertion below is about "
+        "columns this found: with none, it would report a schema with no containment at all as "
+        "correctly constrained."
+    )
+
+    nullable = sorted({key.parent.name for key in to_department if key.parent.nullable})
+    assert not nullable, (
+        f"The prefix columns {nullable} reference `department` and are nullable, so a prefix can "
+        "sit under no department at all.\n"
+        "\n"
+        "E0-05: 'a department groups one or more prefixes', enforced as a database constraint. "
+        "The foreign key gives the 'one department' half; this is the half it does not give, and "
+        "`ON DELETE RESTRICT` does not give it either — that rule refuses the delete of a "
+        "department a prefix points at, and says nothing about a prefix that points at none.\n"
+        "\n"
+        "An orphaned prefix is a subtree with no parent in the hierarchy §2.1 walks to compute "
+        "purview, so nobody's scope reaches it and its courses answer to no chair."
+    )
+
+
 def test_the_containment_foreign_keys_walked_by_parent_are_indexed(
     migrated_engine: Any, org_tables: dict[str, Table]
 ) -> None:

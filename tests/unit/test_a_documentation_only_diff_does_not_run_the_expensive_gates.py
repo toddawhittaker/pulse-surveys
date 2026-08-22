@@ -89,6 +89,20 @@ workflow cannot shrink. Hence a written-down floor beside it — `docs/SPEC.md`
 gets its own case, asserted whether or not the sweep can still see it, and the
 sweep is required to find it before its verdict about anything else is believed.
 
+**Two corrections from E0-37, both to these guards rather than to the gate they
+protect.** Item 10: "asserts about a file the classifier calls inert" was enforced
+only for a sweep rooted at the repository, so a module walking `REPO_ROOT /
+"docs" / "adr"` fell between both halves — it opens no file, and its root is a
+`/` chain rather than a root receiver. A walk rooted inside the inert set now
+counts, and which directories those are is asked of the classifier one invented
+Markdown file at a time rather than restated here. Item 11: `EXPENSIVE_GATES` was
+hand-kept in the module that says an inventory must come from somewhere the
+guarded structure cannot shrink, so the candidates are now derived from the
+workflow — any job whose steps run one of `EXPENSIVE_COMMANDS` must be
+inventoried or exempted with a reason, and the exception set is validated the way
+the sweep's already was. Neither had a live instance; both were how the next one
+would have arrived unseen.
+
 **One module rather than two**, unlike the split between the `detect` probe
 battery and the aggregate verdict. Both halves here depend on the same guessed
 name for the same script, and splitting them would write that guess down twice —
@@ -102,7 +116,8 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -267,33 +282,66 @@ DOCSTRING_ONLY_EDIT = "backend/app/services/authz.py"
 # ---------------------------------------------------------------------------
 AGGREGATE_JOB = "ci"
 
-# The five jobs E0-38's scope names, each with a search for the work the ticket
-# says must not run on a documentation-only diff. The pattern is a floor rather
-# than an inventory: a job may guard more steps than these, and it may not guard
-# fewer.
+# The commands that make a job expensive, as searches over a step's `run:` block.
+#
+# **This is a vocabulary and not an inventory, and the difference is E0-37 item
+# 11.** `EXPENSIVE_GATES` below says which *jobs* are known to be expensive, and
+# a hand-kept mapping like that shrinks silently: E0-38's second review pass found
+# `frontend-build` guarded and missing from it, so the one job just guarded was
+# the one job the coverage test did not check. Deriving the candidates from these
+# patterns instead means deleting a key from that dict does not delete the job
+# from the derivation — it turns the job into an expensive gate nobody has
+# triaged, which is a red.
 #
 # Anchored at the start of a line so a `pip install "pip-audit==…"` is not read as
 # an audit and a commented-out command is not read as a command.
+# `test_every_job_that_runs_an_expensive_command_is_inventoried_or_exempted`
+# requires each of these to still match something in the workflow, so a command
+# that has been renamed out of existence says so rather than quietly removing
+# every candidate it was the only way of recognising.
+EXPENSIVE_COMMANDS: dict[str, re.Pattern[str]] = {
+    "pytest": re.compile(r"^\s*pytest\b", re.MULTILINE),
+    "docker compose build or up": re.compile(
+        r"^\s*docker\s+compose\b[^\n]*\b(?:build|up)\b", re.MULTILINE
+    ),
+    "playwright": re.compile(r"^\s*npx\b[^\n]*\bplaywright\b", re.MULTILINE),
+    "the eval runner": re.compile(r"^\s*python\s+-m\s+tests\.evals\.runner\b", re.MULTILINE),
+    "the dependency audit or the licence scan": re.compile(
+        r"^\s*(?:pip-audit|pip-licenses)\b", re.MULTILINE
+    ),
+    "an npm install or production build": re.compile(
+        r"^\s*npm\s+(?:ci|run\s+build)\b", re.MULTILINE
+    ),
+}
+
+# The six jobs E0-38's scope names, each with the work the ticket says must not
+# run on a documentation-only diff. The pattern is a floor rather than an
+# inventory: a job may guard more steps than these, and it may not guard fewer.
+#
+# Every pattern here is one of the vocabulary above rather than a copy of it, so
+# that the derivation and the coverage check cannot come to disagree about what
+# counts as expensive (`docs/MISTAKES.md` entry 19 — a test holding its
+# expectation in a copy of the thing it is checking).
 EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
     "test": (
         "pytest, the §4.1 invariant pass included",
-        re.compile(r"^\s*pytest\b", re.MULTILINE),
+        EXPENSIVE_COMMANDS["pytest"],
     ),
     "docker": (
         "the image build and the Compose stack",
-        re.compile(r"^\s*docker\s+compose\b[^\n]*\b(?:build|up)\b", re.MULTILINE),
+        EXPENSIVE_COMMANDS["docker compose build or up"],
     ),
     "e2e": (
         "Playwright",
-        re.compile(r"^\s*npx\b[^\n]*\bplaywright\b", re.MULTILINE),
+        EXPENSIVE_COMMANDS["playwright"],
     ),
     "evals": (
         "the eval runner, and with it SPEC §9.3's threat and self-harm recall floor",
-        re.compile(r"^\s*python\s+-m\s+tests\.evals\.runner\b", re.MULTILINE),
+        EXPENSIVE_COMMANDS["the eval runner"],
     ),
     "supply-chain": (
         "the dependency audit and the licence scan",
-        re.compile(r"^\s*(?:pip-audit|pip-licenses)\b", re.MULTILINE),
+        EXPENSIVE_COMMANDS["the dependency audit or the licence scan"],
     ),
     # The sixth, and it was missing from this inventory until E0-38's second
     # review pass. The job was guarded and ADR 0070 was corrected to say six, but
@@ -301,13 +349,38 @@ EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
     # so `frontend-build` was the one expensive job the coverage test below did
     # not check, and a complete revert of its guard left the suite green. That is
     # docs/MISTAKES.md entry 35 again: the control's inventory has to name the
-    # thing the guarded structure cannot shrink.
+    # thing the guarded structure cannot shrink. E0-37 item 11 is what stops the
+    # seventh needing a third review pass to be noticed.
     #
     # It is free today only because `detect.outputs.frontend` is false. Once the
     # scaffold lands it is an `npm ci` and a production build.
     "frontend-build": (
         "the frontend production build and the bundle budget",
-        re.compile(r"^\s*npm\s+(?:ci|run\s+build)\b", re.MULTILINE),
+        EXPENSIVE_COMMANDS["an npm install or production build"],
+    ),
+}
+
+# Jobs that run one of the expensive commands and are deliberately *not* guarded
+# by the classification, each with the reason. A job that runs an expensive
+# command and appears in neither this set nor `EXPENSIVE_GATES` is a red — that
+# triage being forced is the whole of E0-37 item 11, and the pattern is
+# `SWEEPS_THAT_NEED_NO_PROTECTION` further down, which is validated the same way.
+#
+# **Adding a key here is a decision about the pipeline, not a way to quiet a
+# test.** The direction is safe — an uninventoried job runs rather than being
+# skipped — so an entry here costs runner time and never coverage; the entry that
+# would cost coverage is one moved *out* of `EXPENSIVE_GATES`, which the
+# derivation refuses.
+GATES_THAT_NEED_NO_SHORT_CIRCUIT: dict[str, str] = {
+    "lint-python": (
+        "E0-38 leaves it unconditional on purpose, and the pytest node ids it runs are the "
+        "repository-wide sweeps a documentation-only diff must not switch off — guarding this "
+        "job would undo the fix it carries"
+    ),
+    "lint-frontend": (
+        "its `npm ci` installs the closure that tsc and eslint read, and E0-38 leaves the fast "
+        "lint gates running whatever the diff touched; it is free today because "
+        "`detect.outputs.frontend` is false"
     ),
 }
 
@@ -458,6 +531,41 @@ def is_repository_root(node: ast.expr) -> bool:
     )
 
 
+def path_chain(
+    node: ast.expr,
+    resolved: Mapping[str, str],
+    is_base: Callable[[ast.expr], bool],
+) -> str | None:
+    """The repository-relative path a `/` chain builds, or `None` if this is not one.
+
+    `ROOT / "docs" / "SPEC.md"`, and a name `resolved` already holds a chain for.
+    Where the chain bottoms out is the caller's question rather than this
+    function's, which is why `is_base` is a parameter: the parsed-document sweep
+    below wants only the `…parents[N]` idiom, because it is reading modules that
+    compute the root the way every module in this suite computes it, and the
+    repository-wide sweep detector wants every spelling of the root it knows —
+    including the fixture names, which over-detect on purpose.
+
+    One function with two callers rather than two copies of the same walk
+    (`docs/MISTAKES.md` entry 13): E0-37 item 10 exists because these two halves
+    disagreed about what they could see, and a second copy is how they would come
+    to disagree again.
+    """
+    if is_base(node):
+        return ""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = path_chain(node.left, resolved, is_base)
+        if left is None:
+            return None
+        right = node.right
+        if not isinstance(right, ast.Constant) or not isinstance(right.value, str):
+            return None
+        return f"{left}/{right.value}".lstrip("/")
+    if isinstance(node, ast.Name):
+        return resolved.get(node.id)
+    return None
+
+
 def repository_paths_named_in(source: str) -> set[str]:
     """Every repository file `source` builds a path to, repository-relative.
 
@@ -467,24 +575,17 @@ def repository_paths_named_in(source: str) -> set[str]:
     the top of this module says why, and the short version is that `README.md` and
     `docs/MISTAKES.md` both appear as literals in this suite for reasons that have
     nothing to do with reading them.
+
+    **The `is_file()` filter is why this half cannot see a directory sweep**, and
+    that is E0-37 item 10's other half rather than a defect to fix here. A module
+    walking `REPO_ROOT / "docs" / "adr"` names no file, so it drops out of this
+    set correctly — it does not *open* an inert document, it *asserts about* a
+    directory of them, which is the question
+    `test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off`
+    asks and now answers.
     """
     tree = ast.parse(source)
     resolved: dict[str, str] = {}
-
-    def joined(node: ast.expr) -> str | None:
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            left = joined(node.left)
-            right = node.right
-            if left is None:
-                return None
-            if not isinstance(right, ast.Constant) or not isinstance(right.value, str):
-                return None
-            return f"{left}/{right.value}".lstrip("/")
-        if isinstance(node, ast.Name):
-            return resolved.get(node.id)
-        if is_repository_root(node):
-            return ""
-        return None
 
     for statement in tree.body:
         if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
@@ -492,14 +593,14 @@ def repository_paths_named_in(source: str) -> set[str]:
         target = statement.targets[0]
         if not isinstance(target, ast.Name):
             continue
-        built = joined(statement.value)
+        built = path_chain(statement.value, resolved, is_repository_root)
         if built is not None:
             resolved[target.id] = built
 
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            built = joined(node)
+            built = path_chain(node, resolved, is_repository_root)
             if built and (REPO_ROOT / built).is_file():
                 found.add(built)
     return found
@@ -627,6 +728,26 @@ def signature_steps(job: Any, pattern: re.Pattern[str]) -> list[tuple[str, dict[
         script = str(step.get("run") or "")
         if pattern.search(script):
             found.append((str(step.get("name") or f"step {index}"), step))
+    return found
+
+
+def expensive_commands_run_by(jobs: dict[str, Any]) -> dict[str, list[str]]:
+    """Every job that runs one of the expensive commands, and which ones it runs.
+
+    The candidate set E0-37 item 11 asks for: derived from the workflow, so a
+    seventh expensive job is a candidate the moment it is written rather than the
+    moment somebody remembers to add it to a dict.
+
+    A job's steps are searched together because the patterns are anchored per
+    line, and because "this job runs pytest" is a fact about the job rather than
+    about which of its steps does it.
+    """
+    found: dict[str, list[str]] = {}
+    for name, job in jobs.items():
+        script = "\n".join(str(step.get("run") or "") for step in steps_of(job))
+        matched = [label for label, pattern in EXPENSIVE_COMMANDS.items() if pattern.search(script)]
+        if matched:
+            found[name] = matched
     return found
 
 
@@ -995,8 +1116,9 @@ def test_every_expensive_gate_reaches_the_classification_and_conditions_its_work
     """E0-38's scope: the six expensive gates short-circuit, and nothing else changes shape.
 
     Each of `Test · pytest + invariants`, `Build · images + Compose health`,
-    `Test · Playwright e2e`, `Test · AI eval floors` and
-    `Supply chain · audit + licenses` has to reach the classification — its own
+    `Test · Playwright e2e`, `Test · AI eval floors`,
+    `Supply chain · audit + licenses` and `Build · frontend + bundle budget` has
+    to reach the classification — its own
     step, or a job it needs — and has to switch its real work off on the answer. A
     job that gained no such step is the failure this ticket would otherwise ship:
     the classification exists, something calls it, and the gate it was meant to
@@ -1027,12 +1149,12 @@ def test_every_expensive_gate_reaches_the_classification_and_conditions_its_work
     filter in place must still fail, and a documentation-only pull request must
     still report success. This module is what notices a gate with no guard at all.
 
-    **The mutation this survives:** drop the short-circuit from any one of the five
+    **The mutation this survives:** drop the short-circuit from any one of the six
     jobs — the `evals` job is the expensive one to lose, since SPEC §9.3's threat
     and self-harm recall floor stops running with `CI` green. **The near miss that
     must stay green:** moving the classification into `detect` and having each gate
     read `needs.detect.outputs.<name>`, which is one classification rather than
-    five and is the shape this file's tolerances already use.
+    six and is the shape this file's tolerances already use.
     """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
 
@@ -1116,6 +1238,158 @@ def test_every_expensive_gate_reaches_the_classification_and_conditions_its_work
     )
 
 
+def test_every_job_that_runs_an_expensive_command_is_inventoried_or_exempted(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any]
+) -> None:
+    """E0-37 item 11: the candidate set comes from the workflow, not from a hand-written dict.
+
+    `EXPENSIVE_GATES` is the inventory every coverage assertion in this module
+    iterates, and it was kept by hand. E0-38's second review pass found what that
+    costs — `frontend-build` was guarded and missing from it, so the one job just
+    guarded was the one job nothing checked, and a complete revert of its guard
+    left the suite green. Its third pass added a seventh job running pytest,
+    unguarded and wired into `ci`'s needs, and the suite stayed green again.
+
+    So the candidates are derived: every job whose steps run one of
+    `EXPENSIVE_COMMANDS` is one, and each must be either inventoried in
+    `EXPENSIVE_GATES` — where the guard tests hold it — or exempted in
+    `GATES_THAT_NEED_NO_SHORT_CIRCUIT` with a reason. That triage being forced is
+    the point; which way it goes is a decision about the pipeline.
+
+    **The direction is safe, which is why this is a low finding and not a hole.**
+    An uninventoried job runs rather than being skipped, so what is at stake is
+    runner time and the honesty of this module's coverage, not a gate that
+    silently does not run.
+
+    **Both directions are asserted**, because a set difference in one direction
+    is satisfied by an inventory that has grown stale in the other: an entry
+    naming a job that no longer runs anything expensive is a record that has gone
+    false (`docs/MISTAKES.md` entry 1), and it is also how a real finding would be
+    made to disappear — rename the job, leave the key.
+
+    **The canary is the vocabulary**, and it is not ceremony. If a pattern here
+    stops matching anything — a command renamed, a step rewritten — the
+    derivation loses candidates silently and reports a clean triage over a
+    workflow it can no longer read, which is `docs/MISTAKES.md` entry 3 exactly.
+
+    **The mutation this survives:** add a seventh job to `ci.yml` that runs
+    `pytest`, wire it into `ci`'s `needs`, and guard nothing. **The near miss that
+    must stay green:** a job that only *mentions* an expensive command in a
+    notice or installs the tool that runs it, since the patterns are anchored at
+    the start of a line.
+    """
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+    candidates = expensive_commands_run_by(jobs)
+
+    recognised = {label for commands in candidates.values() for label in commands}
+    unseen = sorted(label for label in EXPENSIVE_COMMANDS if label not in recognised)
+    assert not unseen, "\n".join(
+        [
+            f"These expensive commands match nothing in {ci_workflow_path}:",
+            *(f"  {label}" for label in unseen),
+            "",
+            "The candidate set below is derived from these patterns, so one that matches nothing "
+            "removes candidates rather than reporting them — and the triage then reads as clean "
+            "over a workflow this module can no longer see into. Either the pipeline stopped "
+            "running that work, which is a much larger finding than this ticket, or the pattern "
+            "needs pointing at how it is spelled now.",
+        ]
+    )
+
+    triaged = set(EXPENSIVE_GATES) | set(GATES_THAT_NEED_NO_SHORT_CIRCUIT)
+
+    untriaged = sorted(name for name in candidates if name not in triaged)
+    assert not untriaged, "\n".join(
+        [
+            "These jobs run an expensive command and are in neither the inventory nor the "
+            "exception set:",
+            *(f"  {name} — runs {', '.join(candidates[name])}" for name in untriaged),
+            "",
+            "E0-37 item 11: `EXPENSIVE_GATES` is the inventory every guard assertion in this "
+            "module iterates, and a job missing from it is a job whose short-circuit nothing "
+            "checks. E0-38's second review pass found exactly that for `frontend-build`, and its "
+            "third added an unguarded seventh job running pytest without anything going red.",
+            "",
+            "Two ways to resolve it, and they are different decisions. If the job should "
+            "short-circuit on a documentation-only diff, guard its steps and add it to "
+            "`EXPENSIVE_GATES` with the work it runs. If it should keep running whatever the diff "
+            "touched — as the fast lint gates do — add it to `GATES_THAT_NEED_NO_SHORT_CIRCUIT` "
+            "with the reason, which is then validated by the test below.",
+        ]
+    )
+
+    stale = sorted(name for name in triaged if name not in candidates)
+    assert not stale, "\n".join(
+        [
+            "These jobs are inventoried or exempted here and run none of the expensive commands:",
+            *(
+                f"  {name} — {'inventoried' if name in EXPENSIVE_GATES else 'exempted'}"
+                for name in stale
+            ),
+            f"  the derivation found: {sorted(candidates)}",
+            "",
+            "Each is a record that has stopped being true (`docs/MISTAKES.md` entry 1), and the "
+            "direction matters: an entry naming a job that has been renamed is also how a real "
+            "finding is made to disappear, since the renamed job is then a candidate nobody "
+            "triaged and the entry goes on excusing something that is not there.",
+            "",
+            "A job that has genuinely stopped running expensive work should lose its entry here "
+            "in the same change that stops it.",
+        ]
+    )
+
+
+def test_the_expensive_gate_exemptions_only_excuse_jobs_that_run_an_expensive_command(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any]
+) -> None:
+    """An exception nobody can reach is a place to put anything inconvenient.
+
+    The same rule `test_the_sweep_exception_set_only_holds_modules_the_detector_still_flags`
+    applies to the other exception set in this module, and for the same reason:
+    E0-38's second review pass put a key in that one for a module that does not
+    exist, with the reason "no reason at all", and exempted one of the two modules
+    the fix existed for with the reason "inconvenient". Both passed, because
+    nothing validated the set.
+
+    Three things are required of an entry: it names a job the workflow declares,
+    the derivation still flags that job as running expensive work, and it carries
+    a reason. And a job may not be both exempted and inventoried, since those are
+    contradictory claims about whether its work short-circuits.
+    """
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+    candidates = expensive_commands_run_by(jobs)
+
+    unreachable: list[str] = []
+    for name, reason in sorted(GATES_THAT_NEED_NO_SHORT_CIRCUIT.items()):
+        if name not in jobs:
+            unreachable.append(f"  {name}: not a job in {ci_workflow_path.name} ({reason})")
+        elif name not in candidates:
+            unreachable.append(
+                f"  {name}: runs no expensive command, so exempting it excuses nothing ({reason})"
+            )
+        elif not reason.strip():
+            unreachable.append(f"  {name}: exempted with no reason given")
+        elif name in EXPENSIVE_GATES:
+            unreachable.append(
+                f"  {name}: inventoried as an expensive gate and exempted from being one ({reason})"
+            )
+
+    assert not unreachable, "\n".join(
+        [
+            "GATES_THAT_NEED_NO_SHORT_CIRCUIT holds entries that excuse nothing:",
+            *unreachable,
+            "",
+            "Every key must name a job this workflow declares and that the derivation still sees "
+            "running expensive work. A key that no longer matches is either a job that stopped "
+            "running it — delete the entry — or a job the derivation has stopped seeing, which is "
+            "the failure the derivation exists to prevent and is worth knowing about.",
+            "",
+            "This set is the one place in E0-37 item 11 where a real finding can be made to "
+            "disappear by typing a job name, so it is the one that needs a check of its own.",
+        ]
+    )
+
+
 def test_the_expensive_gates_are_still_among_the_jobs_the_required_check_waits_on(
     ci_workflow_path: Path, ci_workflow: dict[str, Any]
 ) -> None:
@@ -1131,13 +1405,13 @@ def test_the_expensive_gates_are_still_among_the_jobs_the_required_check_waits_o
     not cover. That module walks whatever graph the file declares and asserts every
     job in it reaches the verdict; it has no opinion about which jobs ought to be
     in the graph, so deleting one from `ci`'s `needs` leaves it green. The two
-    together say: these five gates are in the graph, and everything in the graph is
+    together say: these gates are in the graph, and everything in the graph is
     seen.
 
     **The mutation this survives:** remove `evals` from `ci`'s `needs:` while
     leaving the job in the file. **The near miss that must stay green:** reaching a
     gate through another job rather than naming it directly, since the closure is
-    walked transitively — putting the five behind a `heavy-gates-passed` job the
+    walked transitively — putting them behind a `heavy-gates-passed` job the
     way `fast-gate` already works would keep every one of them visible.
     """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
@@ -2168,7 +2442,7 @@ def test_a_rename_out_of_a_code_directory_is_not_read_as_a_documentation_change(
 #   * the private-key sweep in `test_mock_lms_service.py` walks the tree from
 #     the root, so a key pasted into an ADR is its subject.
 #
-# Both live in `Test · pytest + invariants`, which is one of the five jobs an
+# Both live in `Test · pytest + invariants`, which is one of the jobs an
 # inert diff switches off. So a documentation-only pull request — the exact
 # shape that can introduce either — got a green required check from the job
 # that would have caught it.
@@ -2242,6 +2516,72 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
 }
 
 UNCONDITIONAL_SWEEP_JOB = "lint-python"
+
+# A file name no repository file has, used to ask the classifier what it makes of
+# a *directory*: if a Markdown file invented inside it would be classified inert,
+# then a documentation-only pull request can change what a test walking that
+# directory sees, and the sweep is repository-wide for this test's purpose even
+# though its root is not.
+#
+# **Invented rather than existing, and that is settled above rather than assumed
+# here**: `INERT_DIFFS` already asserts that the classifier answers about a path
+# that is not in the tree, because a diff shows a new file and a deleted one
+# exactly as it shows an edited one.
+INERT_PROBE_FILE = "a-file-this-test-invented.md"
+
+# How many times a chain of directory assignments is resolved. Two steps is the
+# obvious way to write one — a `docs` constant, then an `adr` under it — and the
+# second cannot be read until the first has been. Four is slack, not a limit
+# anybody should be near.
+NESTED_DIRECTORY_PASSES = 4
+
+
+@cache
+def is_inside_the_inert_set(directory: str) -> bool:
+    """Whether a pull request touching this directory is one the expensive gates may skip.
+
+    Asked of the classifier rather than answered out of a list of directory names
+    written here, and the reason is the same one that makes this whole section a
+    derivation: a copy of the inert set inside a test is a second definition of
+    it, and the two drift without anything noticing (`docs/MISTAKES.md` entry 19).
+    This asks the thing that decides.
+
+    The repository root itself answers `False` here, because it is not "inside"
+    anything and the existing root branch already reports it — two reports of one
+    sweep would only be noise.
+    """
+    if not directory:
+        return False
+    return classify([f"{directory}/{INERT_PROBE_FILE}"]) == INERT
+
+
+def directory_names_bound_in(tree: ast.Module, roots: set[str]) -> dict[str, str]:
+    """Every local name in `tree` bound to a directory inside the repository.
+
+    Resolved to a fixpoint rather than in one pass, because the two-step form is
+    the natural one and the second assignment cannot be read until the first has
+    been. Names holding the root itself are left out: `roots` already carries
+    them, and "" is not a directory anything is inside.
+    """
+
+    def base(node: ast.expr) -> bool:
+        return is_a_root_expression(node) or (isinstance(node, ast.Name) and node.id in roots)
+
+    bound: dict[str, str] = {}
+    for _ in range(NESTED_DIRECTORY_PASSES):
+        before = dict(bound)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            built = path_chain(node.value, bound, base)
+            if built:
+                bound[target.id] = built
+        if bound == before:
+            break
+    return bound
 
 
 def is_a_root_expression(node: ast.expr) -> bool:
@@ -2325,6 +2665,16 @@ def sweeps_the_repository(source: str) -> list[str]:
             if command in joined and f"a subprocess running `{command}`" not in used:
                 used.append(f"a subprocess running `{command}`")
 
+    directories = directory_names_bound_in(tree, roots)
+
+    def base(node: ast.expr) -> bool:
+        return is_a_root_expression(node) or (isinstance(node, ast.Name) and node.id in roots)
+
+    def inert_directory(node: ast.expr) -> str | None:
+        """The inert directory this expression walks, if it walks one."""
+        built = path_chain(node, directories, base)
+        return built if built and is_inside_the_inert_set(built) else None
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -2343,6 +2693,24 @@ def sweeps_the_repository(source: str) -> list[str]:
         )
         if receiver_is_root or argument_is_root:
             used.append(f".{function.attr}() from the repository root")
+            continue
+
+        # **A walk rooted *inside* the inert set counts too** — E0-37 item 10.
+        # `REPO_ROOT / "docs" / "adr"` is a `BinOp` rather than a root receiver,
+        # so it dropped out of the branch above by construction, and the likeliest
+        # arrival is a test asserting that every `docs/MISTAKES.md` entry links to
+        # a real file under `docs/mistakes/` — a reasonable thing to write, whose
+        # subject is a directory a documentation-only pull request changes and
+        # whose job that same pull request switches off.
+        #
+        # Both positions again, and the directory is named in the message: what a
+        # reader needs to decide between the two repairs is which directory it is.
+        for position in (function.value, *node.args[:1]):
+            inert = inert_directory(position)
+            if inert:
+                used.append(
+                    f".{function.attr}() from `{inert}`, which the classification calls inert"
+                )
     return sorted(set(used))
 
 
@@ -2368,7 +2736,23 @@ def modules_that_enumerate_the_repository() -> dict[str, list[str]]:
 def test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off(
     ci_workflow: dict[str, Any], ci_workflow_path: Path
 ) -> None:
-    """A sweep whose subject is `docs/` may not live in a job `docs/` switches off."""
+    """A sweep whose subject is `docs/` may not live in a job `docs/` switches off.
+
+    **A sweep rooted inside the inert set counts as one of these** — E0-37 item
+    10. The detector used to require the repository root itself, so a module
+    walking `REPO_ROOT / "docs" / "adr"` was invisible to both halves of E0-38's
+    protection: it opens no file, so the parsed-document sweep does not see it,
+    and its root is a `BinOp` rather than a root receiver, so this one did not
+    either. There was no live instance and the likeliest arrival was named in the
+    ticket — a test asserting that every `docs/MISTAKES.md` entry links to a real
+    file under `docs/mistakes/`, which is a reasonable thing to write and whose
+    subject is exactly what a documentation-only pull request changes.
+
+    Which directories count is asked of the classifier, one invented Markdown
+    file at a time, rather than answered from a list of names here. A directory
+    of Markdown that is not inert — `backend/app/ai/prompts` — must not fire, and
+    `test_the_sweep_detector_does_not_fire_on_an_ordinary_scoped_walk` carries it.
+    """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
 
     job = jobs.get(UNCONDITIONAL_SWEEP_JOB)
@@ -2411,8 +2795,9 @@ def test_every_repository_wide_sweep_runs_in_a_job_the_filter_cannot_switch_off(
 
     assert not unprotected, "\n".join(
         [
-            "These test modules enumerate the whole repository, so a file under `docs/` is their "
-            "subject, and they run only in a job that an inert diff switches off:",
+            "These test modules assert about files an inert diff can change — the whole "
+            "repository, or a directory the classification calls inert — and they run only in a "
+            "job that an inert diff switches off:",
             *unprotected,
             "",
             f"A documentation-only pull request is exactly when such a sweep has something new "
@@ -2687,6 +3072,44 @@ SWEEP_SPELLINGS: tuple[tuple[str, str], ...] = (
         "def test_x(project_tree: Path):\n"
         "    for path in project_tree.rglob('*'):\n        pass\n",
     ),
+    # The four E0-37 item 10 adds, and they are one shape in four spellings: a
+    # walk whose root is a directory *inside* the inert set. None of them is a
+    # root receiver, so every one dropped out of the branch above by
+    # construction rather than by oversight — and the module that arrives this
+    # way is an ordinary thing to write, a test asserting that every
+    # `docs/MISTAKES.md` entry links to a real file under `docs/mistakes/`.
+    (
+        "a walk rooted at a directory inside the inert set",
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def test_x():\n"
+        "    for path in (REPO_ROOT / 'docs' / 'adr').rglob('*.md'):\n        pass\n",
+    ),
+    (
+        "the same, through a name holding the directory, which is the two-step form",
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "DOCS = REPO_ROOT / 'docs'\n"
+        "ADR_DIR = DOCS / 'adr'\n"
+        "def test_x():\n"
+        "    for path in ADR_DIR.iterdir():\n        pass\n",
+    ),
+    (
+        "an inert directory one component below the root",
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "DESIGN = REPO_ROOT / 'design'\n"
+        "def test_x():\n"
+        "    for path in DESIGN.glob('*.css'):\n        pass\n",
+    ),
+    (
+        "os.walk over an inert directory, where it arrives as an argument",
+        "import os\nfrom pathlib import Path\n"
+        "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        "def test_x():\n"
+        "    for parent, dirs, names in os.walk(REPO_ROOT / 'docs' / 'mistakes'):\n"
+        "        pass\n",
+    ),
 )
 
 
@@ -2744,6 +3167,27 @@ def test_the_sweep_detector_does_not_fire_on_an_ordinary_scoped_walk() -> None:
             "    tree = ast.parse(source)\n"
             "    for node in ast.walk(tree):\n        pass\n",
         ),
+        # The two that keep E0-37 item 10's widening honest. Both are live in
+        # this suite today, and both are directories of files that are *not*
+        # inert — so the rule that now fires on `docs/adr` has to be about the
+        # classification's answer and not about "a directory below the root", or
+        # about "a directory full of Markdown", which the prompts are.
+        (
+            "a walk over the prompt directory, which is Markdown and is not inert",
+            "from pathlib import Path\n"
+            "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+            "PROMPTS_DIR = REPO_ROOT / 'backend' / 'app' / 'ai' / 'prompts'\n"
+            "def test_x():\n"
+            "    for path in PROMPTS_DIR.rglob('*'):\n        pass\n",
+        ),
+        (
+            "a walk over the test tree, which no diff can make inert",
+            "from pathlib import Path\n"
+            "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+            "TEST_TREE = REPO_ROOT / 'tests'\n"
+            "def test_x():\n"
+            "    for path in TEST_TREE.rglob('*.py'):\n        pass\n",
+        ),
     )
 
     fired = [
@@ -2762,6 +3206,58 @@ def test_the_sweep_detector_does_not_fire_on_an_ordinary_scoped_walk() -> None:
             "no protection. Each false match has to be triaged into "
             "SWEEPS_THAT_NEED_NO_PROTECTION by hand, and a set full of noise is one nobody reads "
             "— which is the failure the set is supposed to prevent.",
+        ]
+    )
+
+
+def test_the_inert_directory_probe_answers_for_a_documentation_directory_and_a_code_one() -> None:
+    """The probe the widened detector rests on, run against both answers.
+
+    `is_inside_the_inert_set` asks the classifier about an invented Markdown file
+    inside a directory, and every new case in `SWEEP_SPELLINGS` is downstream of
+    it. A probe that answered `True` to everything would report every scoped walk
+    in this suite as repository-wide and fill the exception set with noise; one
+    that answered `False` to everything would leave the widening doing nothing at
+    all, with the four new spellings failing for a reason that looks like a bad
+    detector rather than a broken probe.
+
+    `docs/MISTAKES.md` entry 35's rule is the one that applies: a guard that
+    enumerates mechanisms has to *find* each one on a subject that certainly has
+    it. So the directories that must answer yes are named, and so are the ones
+    that must answer no — and `backend/app/ai/prompts` is the sharp one, because
+    it is a directory of Markdown files that changes what every SPEC §9.3 eval
+    floor measures.
+    """
+    inert_directories = ("docs", "docs/adr", "docs/mistakes", "design")
+    live_directories = ("backend/app", "backend/app/ai/prompts", "tests/unit", "scripts")
+
+    wrong: list[str] = []
+    for directory, expected in (
+        *((name, True) for name in inert_directories),
+        *((name, False) for name in live_directories),
+    ):
+        answered = is_inside_the_inert_set(directory)
+        if answered is not expected:
+            wrong.append(
+                f"  {directory}: answered {'inert' if answered else 'not inert'}, "
+                f"want {'inert' if expected else 'not inert'}"
+            )
+
+    assert not wrong, "\n".join(
+        [
+            "The probe that decides whether a walk is rooted inside the inert set answered wrongly "
+            "for these directories:",
+            *wrong,
+            "",
+            f"It asks the classifier about `<directory>/{INERT_PROBE_FILE}`, a file that is in no "
+            "diff and no tree. Every case E0-37 item 10 added to `SWEEP_SPELLINGS` is downstream "
+            "of these answers: with all of them `False` the widening does nothing and those cases "
+            "fail as though the detector were blind, and with all of them `True` every scoped walk "
+            "in this suite is reported as repository-wide.",
+            "",
+            "`backend/app/ai/prompts` is the one to read twice. It is full of Markdown and it is "
+            "not documentation — a prompt is versioned in-repo under SPEC §7.4 and editing one "
+            "changes what every §9.3 eval floor measures.",
         ]
     )
 

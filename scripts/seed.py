@@ -86,6 +86,22 @@ uses too. Matching there would adopt a real prefix rather than create one, and
 carry every course under it along — so `seed_containment` refuses instead, naming
 the code and the department that holds it. ADR 0064 carries the measurement.
 
+**`Institution.name` relies on the second half of that rule, and only on it.**
+It is matched unscoped — nothing sits above the root to scope it to — so what
+keeps the match safe is that `Pulse Demo University` is a value this file
+invented rather than a name a real institution uses. That is the whole of the
+protection, and it is worth saying where the loader is edited: a collision would
+be **adopted** rather than refused, and the blast radius would be larger than the
+`prefix.code` case, because three role assignments are scoped to
+`("institution", INSTITUTION_NAME)` and demo leadership would gain purview over
+the whole of somebody's real tree. Changing that name to something plausible —
+a real university's — is the way to make this reachable.
+
+The refusal described next does not cover that case. It refuses an institution
+carrying a **different** name; one carrying this name is this seed's own row from
+an earlier run, which is what keeps a second run idempotent, and there is nothing
+in the database that could tell the two apart.
+
 **Since E0-22 it refuses on the institution first.** SPEC §8 says a deployment
 serves exactly one institution and `uq_institution_one_row` holds that, so a
 database already holding somebody else's institution has no room for this one.
@@ -111,6 +127,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
+from app.config import DEVELOPMENT_ENVIRONMENT
 from app.models.base import Base
 from app.models.identity import (
     AssignmentRole,
@@ -137,18 +154,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # once, by `main`.
 DOTENV_PATH = REPO_ROOT / ".env"
 
-# The environment name this script will run under, and the only one. **Free-form,
-# and not by SPEC §6.3** — that section is three bullets on the admin console's
+# The environment name this script will run under, and the only one, imported
+# above from the module that declares it (E0-37 item 2). **Free-form, and not by
+# SPEC §6.3** — that section is three bullets on the admin console's
 # configuration surface and names no environment variable, and `ENVIRONMENT`
-# appears nowhere in the spec at all. The source is E0-01's
-# `app.config.Settings.environment`, and `.env.example` documents the vocabulary,
+# appears nowhere in the spec at all. `.env.example` documents the vocabulary,
 # naming `development`, `staging` and `production` as conventions and enforcing
-# none. So this is a comparison against a convention rather than against an
-# enumeration `Settings` enforces — the same convention and the same literal
-# `app/db.py` compares against before it lets the engine echo SQL. Two copies of
-# one string today; consolidating them crosses a module boundary and is proposed
-# in E0-17's pull request rather than done here.
-DEVELOPMENT_ENVIRONMENT = "development"
+# none, so the check below is a comparison against a convention rather than
+# against an enumeration `Settings` enforces.
+#
+# It used to be spelled here as well as in `app/db.py`, each file internally
+# consistent and nothing anywhere comparing the two — `docs/MISTAKES.md` entry 3.
+# There is one of it now, beside the `environment` field it describes.
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
 # Where the database is, and who is allowed to write this much of it. The same

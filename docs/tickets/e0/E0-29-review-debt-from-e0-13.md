@@ -12,8 +12,8 @@ Nothing here is waiting on an answer.
 
 | Item | Now |
 |---|---|
-| 1a — cleartext to an off-machine endpoint with no credential | **Decided 2026-08-18: refuse it.** Require an encrypted transport whenever the model is on another host, credential or not. **Built as [E0-37](E0-37-small-corrections.md) item 12** (scheduled 2026-08-20). |
-| 1b — HTTP 429 and 500 outside the fail-open set | **Decided 2026-08-18: affirmed as built.** Both stay out of the fail-open set; the reasoning goes into ADR 0056. **Written up as [E0-37](E0-37-small-corrections.md) item 13** (scheduled 2026-08-20). |
+| 1a — cleartext to an off-machine endpoint with no credential | **Decided 2026-08-18: refuse it.** Require an encrypted transport whenever the model is on another host, credential or not. **Built 2026-08-21 as [E0-37](E0-37-small-corrections.md) item 12**: the validator, its name, `README.md`, `.env.example` and ADR 0056 all carry the new rule, and the allowance is gone. |
+| 1b — HTTP 429 and 500 outside the fail-open set | **Decided 2026-08-18: affirmed as built.** Both stay out of the fail-open set; the reasoning goes into ADR 0056. **Written up 2026-08-21 as [E0-37](E0-37-small-corrections.md) item 13**, in ADR 0056's decision section beside the rule that puts them there. |
 | 2 — three taxonomy rows nothing asserts | **Carried out of E0** — none is producible from a loopback stub |
 | 3 — `MISTAKES` entry 26 presents a superseded resolution | **Closed** |
 | 4a — `tiktoken` reaches the network at first use | **This ticket**, as a recorded decision — it cannot be dropped without dropping the `[openai]` extra |
@@ -50,7 +50,7 @@ Read first: [ADR 0053](../../adr/0053-the-gateway-speaks-openai-through-pydantic
 
 ### 1. Two decisions that are Todd's, not an implementer's
 
-**Both settled 2026-08-18, and both have a home as of 2026-08-20**: 1a is
+**Both settled 2026-08-18, and both built on 2026-08-21**: 1a is
 [E0-37](E0-37-small-corrections.md) item 12 and 1b is its item 13. 1a is
 **refused**: an encrypted transport is required
 whenever the model is on another host, with or without a credential. The vLLM
@@ -62,13 +62,16 @@ set, for the implementer's stated reason. Both answers land in ADR 0056.
 The reasoning each was decided against is kept below, because a record of what
 was weighed is what stops it being re-litigated.
 
-**1a. Cleartext to an off-machine endpoint with no credential is permitted.**
-E0-13's transport rule refuses `http://` to another host when a credential is
-present — in the key variable or in the URL's userinfo, both now covered. It
-permits plain `http://` off-machine when there is no credential at all, because
-that is the vLLM-in-a-cluster case `README.md` and `.env.example` both document as
-supported. Student comment text still crosses that link in the clear. Refusing it
-outright is a deployment policy decision, not a build fix.
+**1a. Cleartext to an off-machine endpoint with no credential was permitted.**
+Written in the present tense of the tree as E0-13 left it; **E0-37 item 12
+refused it on 2026-08-21**, and no wording in the repository offers it now.
+E0-13's transport rule refused `http://` to another host when a credential was
+present — in the key variable or in the URL's userinfo, both covered — and
+permitted plain `http://` off-machine when there was no credential at all,
+because that was the vLLM-in-a-cluster case `README.md` and `.env.example` both
+documented as supported. Student comment text crossed that link in the clear.
+Refusing it outright was a deployment policy decision rather than a build fix,
+which is why it waited for Todd.
 
 **1b. HTTP 429 and 500 are deliberately outside the fail-open set.** ADR 0056's
 taxonomy floors on a read or write timeout and on 408/502/503/504, and raises on

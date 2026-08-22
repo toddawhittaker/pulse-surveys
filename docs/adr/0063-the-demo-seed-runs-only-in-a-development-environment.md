@@ -135,11 +135,12 @@ properly is a check on the *address*, which this record rejects below for reason
 that still hold. **Anyone reaching for this gap later should reopen the address
 question, not this one.**
 
-`app/db.py` compares against the same literal before it lets the engine echo SQL,
-so the string `"development"` now appears twice. Consolidating the two crosses a
-module boundary that E0-17 does not otherwise touch, so it is **proposed in
-E0-17's pull request rather than done**: `DEVELOPMENT_ENVIRONMENT` belongs beside
-the field in `app/config.py`, imported by both readers.
+`app/db.py` compares against the same value before it lets the engine echo SQL,
+so the string `"development"` appeared twice when this was written.
+Consolidating the two crossed a module boundary E0-17 did not otherwise touch,
+so it was proposed in E0-17's pull request rather than done. **E0-37 item 2 did
+it**: `DEVELOPMENT_ENVIRONMENT` is declared beside the field in `app/config.py`,
+and this script imports it as `app/db.py` and `app/main.py` do.
 
 ## Alternatives rejected
 
