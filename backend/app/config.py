@@ -58,7 +58,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, ValidationError, ValidationInfo, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -310,9 +310,9 @@ class Settings(BaseSettings):
         description=(
             "OpenAI-compatible API base URL (§7.4). It carries no credential of its own — no "
             "user:password@ prefix; the key belongs in AI_PROVIDER_API_KEY. And it must be "
-            "https when that key is set, unless it names this machine: plain http off this "
-            "machine would put the credential and the comment being classified on the wire in "
-            "the clear (§10)."
+            "https unless it names this machine, with or without a key: plain http off this "
+            "machine would put the comment being classified, and any credential sent with it, "
+            "on the wire in the clear (§10)."
         )
     )
     ai_model_name: str = Field(description="Model identifier passed to that provider.")
@@ -493,42 +493,39 @@ class Settings(BaseSettings):
 
     @field_validator("ai_provider_base_url")
     @classmethod
-    def a_credentialled_endpoint_is_encrypted(cls, value: str, info: ValidationInfo) -> str:
-        """Refuse to carry the provider key, or a student's comment, in cleartext.
+    def an_off_machine_endpoint_is_encrypted(cls, value: str) -> str:
+        """Refuse to carry a student's comment, or the provider key, in cleartext.
 
         SPEC §10 makes transport encryption a requirement, and this is the one
-        configuration in the surface that can quietly break it: `http://` with a
-        key configured puts the bearer token *and* the comment being classified on
-        the wire in the clear, and nothing else in the system would object.
+        configuration in the surface that can quietly break it: `http://` to
+        another host puts the comment being classified — and the bearer token, if
+        one is configured — on the wire in the clear, and nothing else in the
+        system would object.
 
-        The rule is narrow on purpose. An endpoint **on this machine** may be
-        plain `http`, because nothing leaves the host — that is how a local vLLM
-        or Ollama is reached, which `.env.example` and `README.md` both document.
-        Anything else, with a credential configured, must be `https`.
+        The rule is short. **Off this machine means `https`**, credential or not.
+        An endpoint **on this machine** may be plain `http`, because nothing
+        leaves the host — that is how a local vLLM or Ollama is reached, which
+        `.env.example` and `README.md` both document.
 
-        Reading `ai_provider_api_key` out of `info.data` is sound because the
-        field is declared above this one and pydantic validates in declaration
-        order; a key that failed its own validation is absent here, and the
-        failure it caused is reported beside this one. The validator above is what
-        makes "no key configured" mean "no credential at all".
-
-        **What this deliberately does not refuse**: cleartext to an off-machine
-        endpoint with *no* credential, which is a service inside a private
-        network — a vLLM pod reached over `http://` in the same cluster. That case
-        still puts comment text on a network, and whether it is acceptable is the
-        operator's call rather than this file's (ADR 0056).
+        The key is not the thing this protects. Every request the gateway makes
+        carries a student's free-text comment in its body; §4 confines that text
+        to the surfaces it names and §10 keeps it off the wire in the clear, and
+        that is true whether or not the endpoint asks for a credential. So the
+        rule does not read `ai_provider_api_key` at all, and a keyless
+        `http://vllm.internal/v1` — a model pod reached over plain HTTP inside a
+        cluster — is refused (Todd, 2026-08-18). That deployment is served by
+        terminating TLS at the model, or by running the model alongside the
+        application, where the on-this-machine case above already permits it.
 
         No value is quoted, as in every validator here.
         """
-        if info.data.get("ai_provider_api_key") is None:
-            return value
         parsed = urlsplit(value)
         if parsed.scheme == "https" or _is_on_this_machine(parsed.hostname):
             return value
         raise ValueError(
-            "would send the configured provider credential, and the comment being classified, "
-            "in cleartext to an address off this machine — use https, or plain http only for an "
-            "endpoint on this machine"
+            "would send the comment being classified, and any provider credential configured "
+            "with it, in cleartext to an address off this machine — use https, or plain http "
+            "only for an endpoint on this machine"
         )
 
     @field_validator("care_database_url", mode="before")

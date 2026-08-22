@@ -138,9 +138,12 @@ AI_MODEL_NAME=llama3.1
 AI_PROVIDER_API_KEY=
 ```
 
-Set a real key and the base URL becomes a TLS matter: it must be `https` unless
-it names this machine, and startup refuses anything else rather than putting the
-key and a student's comment on the wire in the clear.
+**Off this machine means `https`, key or no key.** The base URL may be plain
+`http` only when it names this machine, as the example above does; anywhere else
+startup refuses it rather than put a student's comment — and any key sent with
+it — on the wire in the clear. A model reached over plain `http` inside a private
+network or a cluster is not an exception: terminate TLS at the model, or run the
+model alongside this application, where the local case above already covers it.
 
 The test suite never reaches a real endpoint whatever those hold: it points the
 base URL at a stub on `127.0.0.1` and asserts, with a guard under the call, that
