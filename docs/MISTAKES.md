@@ -160,7 +160,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports

@@ -9,7 +9,7 @@ not double-schedule, and a worker that goes unhealthy when Redis stops all need
 a daemon. None of them are restated here.
 
 What is here is the small set of properties that go green in every dynamic
-check and are still wrong. There are three kinds:
+check and are still wrong. There are four kinds:
 
 1.  **Host port publishing belongs to the dev override, not the base file.**
     The definition of done names an exposed port in the base Compose file as a
@@ -64,8 +64,22 @@ check and are still wrong. There are three kinds:
     the address, so blanking the URL alone leaves the credential in the container
     in three pieces and reads as a complete fix in review.
 
-E0-03 adds `worker` and `beat`, and they fall into the same three kinds rather
-than into a fourth:
+4.  **What a container can reach through the host filesystem.** A bind mount
+    changes nothing about whether the stack comes up, so no dynamic gate sees
+    one. `- ./:/app/repo:ro` on `worker` — the edit someone makes to get
+    `alembic/` or `scripts/` into the job container — hands that container the
+    whole of `.env`, superuser pair included, which is the file the
+    `environment:` block above it exists to take two variables back out of.
+    Blanking two variables is worth nothing when the file they came from is
+    mounted, and the same host path can be spelled several ways or hidden
+    behind a named volume's `driver_opts`. So this kind is answered by an
+    allowlist over normalised sources — `ALLOWED_BIND_MOUNTS` — rather than by
+    a list of paths nobody may mount: a spelling nobody anticipated must fail
+    closed, and only a closed set does that. E0-19 added it, and the routes it
+    closed are recorded there.
+
+E0-03 adds `worker` and `beat`, and they fall into the first three kinds rather
+than into one of their own:
 
   - Their health checks are declared *in the base file*, which is item 2 again.
     `wait_for_health.sh` fails a service that declares no health check, so the
@@ -160,15 +174,19 @@ strategy changed, on Todd's ruling, and the shape below is the result:
     `docker-compose.yml`. One added file redirects the entire stack away from
     everything this module describes, without a single assertion changing.
 
-The asymmetry between the two files is load-bearing in one rule and stated
-there: a blank in the base file survives into every deployment, and a blank in
-the override exists only where the override is read.
+The asymmetry between the two files is load-bearing in two rules and stated in
+both: a blank in the base file survives into every deployment, and a blank in
+the override exists only where the override is read. The mount allowlist turns
+on the same thing — `./backend` mounted over the installed wheel is a
+development convenience in one file and a defect in the other — and states it
+on `ALLOWED_BIND_MOUNTS`.
 """
 
+import posixpath
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -378,6 +396,108 @@ PRIVILEGE_KEYS = (
 # than `api` has, whatever its `user:` says.
 SENSITIVE_BIND_SOURCES = frozenset(
     {"/", "/dev", "/etc", "/proc", "/run/docker.sock", "/sys", "/var/run/docker.sock"}
+)
+
+# Every host path a service may bind-mount, keyed by the file that declares the
+# mount and the service it is declared on. E0-19.
+#
+# **Why an allowlist and not a longer denylist.** The list above names paths
+# whose contents are the host, and it was the whole rule until E0-19. It says
+# nothing about `- ./:/app/repo:ro`, which is the mount someone adds to get
+# `alembic/` or `scripts/` into the job container: `.env` sits beside
+# `docker-compose.yml` in every deployment, because `env_file: - .env` requires
+# it, so that one line hands the container the superuser pair the
+# `environment:` block two hundred lines above took back out. Any denylist is a
+# list of the spellings somebody thought of, and the four reviewer passes
+# recorded at the top of this module are what that costs. This is the same move
+# as `ALLOWED_TOP_LEVEL_KEYS` and `COMPOSE_FILE_NAMES`: close the set, and a
+# mount nobody anticipated fails rather than passes.
+#
+# **Keyed by file, because the two files are not symmetric**, and it is the same
+# asymmetry the blanking rule turns on. `docker-compose.override.yml` is merged
+# on a laptop and in CI and is read by no other deployment, so `./backend`
+# mounted read-only over the installed wheel is a development convenience there
+# (ADR 0011) and would be a defect in `docker-compose.yml`, where every
+# deployment reads it. A rule phrased over sources alone would have to permit
+# that mount in both files; keyed this way, moving it into the base file is a
+# failure that names the file it moved to.
+#
+# **Sources are written the way a Compose file spells them** and go through
+# `normalised_bind_source` against the project directory before any comparison,
+# exactly as a source read out of a file does — one helper on both sides, so the
+# allowlist cannot be compared against a form it is not written in.
+#
+# **Enumerated, never speculative.** These four entries are what the two files
+# declare today and nothing else: `db` needs `scripts/db-init` mounted at
+# `/docker-entrypoint-initdb.d` to create the application and Care roles at
+# `initdb` (ADR 0009), and the override's three application services mount the
+# checkout in place of the copy the image installed. A fifth entry is a
+# deliberate edit here, reviewed as one, and `ALLOWED_BIND_MOUNTS` holding an
+# entry no file uses is itself a failure — a permission nobody exercises is one
+# nobody re-reads.
+ALLOWED_BIND_MOUNTS: dict[tuple[str, str], frozenset[str]] = {
+    ("docker-compose.yml", "db"): frozenset({"./scripts/db-init"}),
+    ("docker-compose.override.yml", "api"): frozenset({"./backend"}),
+    ("docker-compose.override.yml", "worker"): frozenset({"./backend"}),
+    ("docker-compose.override.yml", "beat"): frozenset({"./backend"}),
+}
+
+# What a top-level `volumes:` entry may say, so that a named volume can be
+# resolved to the host path it actually mounts. E0-19's second route: the docker
+# socket declared as `- /var/run/docker.sock:/var/run/docker.sock` is caught by
+# the rules below, and the identical mount declared as
+#
+#     volumes:
+#       host-root:
+#         driver_opts: {type: none, device: /, o: bind}
+#
+# is the same mount under a name — the service entry names a volume rather than
+# a path, so nothing that reads service entries alone can see it. Any `device:`
+# works, the project directory included, which makes this a second spelling of
+# the allowlist route rather than a separate hazard.
+#
+# Anything outside this set is **refused rather than ignored**, which is the
+# strategy the rest of the module already uses. `external: true` says the volume
+# is created somewhere this file cannot see; an `nfs` device is a path on
+# another host. Neither is modelled, because neither is used here, and a shape
+# this module cannot classify has to fail loudly instead of resolving to "not a
+# bind" — that is exactly how a mount slips past a closed set.
+READABLE_VOLUME_KEYS = ("driver", "driver_opts", "name", "labels")
+
+# What makes a `driver_opts` a bind. `type: none` with a `device:` is the local
+# driver's spelling for "mount this host path"; the flags in `o:` are the mount
+# options, and `bind` there says the same thing. Either one qualifies, because
+# both are written in the wild and Docker accepts both.
+BIND_DEVICE_TYPES = ("none",)
+BIND_DEVICE_FLAG = "bind"
+
+# The long-form `type:` values a service-level volume entry may carry. `bind`
+# names a host path; `volume` names an entry in the top-level section; `tmpfs`
+# is memory and touches no host path at all. Anything else — `npipe`, `cluster`,
+# `image` — is refused for the same reason an unreadable `driver_opts` is.
+BIND_MOUNT_TYPE = "bind"
+VOLUME_MOUNT_TYPE = "volume"
+HOSTLESS_MOUNT_TYPES = ("tmpfs",)
+
+# What a short-form source has to start with to be a host path rather than a
+# volume name, which is Compose's own rule.
+HOST_PATH_PREFIXES = ("/", ".", "~")
+
+# Every currency a host bind can be declared in, one per line, so that disabling
+# one is a single edit that still parses. `docs/MISTAKES.md` entry 35: a guard
+# that enumerates mechanisms has to be required to *find* each one on a subject
+# that certainly has it, or a green run cannot tell "nothing mounts the socket"
+# from "nothing mounts the socket the one way I looked". The samples proving
+# each of these is found live in `BIND_CURRENCY_SAMPLES`, and this tuple is
+# deliberately not derived from that table — a control that iterates the thing
+# under test cannot notice a deletion.
+BIND_DECLARATION_CURRENCIES = (
+    "short form, relative source",
+    "short form, absolute source",
+    "long form, type bind",
+    "long form, no type",
+    "named volume, driver_opts type none",
+    "named volume, driver_opts o flags",
 )
 
 
@@ -1641,27 +1761,336 @@ def dropped_capabilities(service: dict[str, Any]) -> frozenset[str]:
     return frozenset()
 
 
-def bind_sources(service: dict[str, Any]) -> set[str]:
-    """Host paths this service bind-mounts, in either of Compose's spellings.
+def normalised_bind_source(source: str, project_directory: Path | str) -> str:
+    """One host path, in the one form every comparison in this module is made in.
 
-    A named volume is not a bind mount and contributes nothing: it is a Docker
-    volume, not a piece of the host filesystem, and `beat` may well want one for
-    its schedule file. Only a source that starts with `/`, `.` or `~` names a
-    host path.
+    **Both sides of every comparison go through here** — the sources read out of
+    a Compose file, the entries of `ALLOWED_BIND_MOUNTS`, and
+    `SENSITIVE_BIND_SOURCES` — because a comparison is only as good as the
+    agreement between its two sides, and a rule that normalises one of them
+    rejects a mount that reaches nothing and clears one that reaches the host.
+
+    Two rules, and each was measured rather than reasoned about.
+
+    **A relative source resolves against the project directory**, which is the
+    directory the Compose file is in, and never against the service's
+    `working_dir`. Measured during E0-03's review with `working_dir: /opt/app`
+    on the service: no effect on where the mount came from.
+
+    **Alternate spellings survive into the daemon.** Measured against the local
+    Docker daemon on 2026-08-21, by the orchestrating session and not by the
+    author of this test. A Compose file declared four spellings of one host
+    directory — `./host/./sub`, `//<abs>//host/sub`, `../bindprobe/host/sub`,
+    and `<abs>/host//sub`. In `docker compose config` output the `.`-segment
+    relative source came back resolved and collapsed and the `..` source
+    resolved against the project directory, while `///<abs>//host/sub` and
+    `<abs>/host//sub` survived with their doubled separators verbatim. All four
+    mounted, and the container read the host's marker file through every one. So
+    the alternate spellings reach the host, and because this module parses the
+    raw YAML rather than `docker compose config` output, the collapsing has to
+    happen here.
+
+    **Purely textual: no filesystem access, no symlink resolution, no `~`
+    expansion.** `Path.resolve()` would answer differently depending on what
+    happens to exist on the machine running the tests, which is not a property
+    of the Compose file, and it would make the test's answer depend on a
+    developer's checkout. A `~` source and a `${HOST_DIR}` source therefore
+    normalise to something no allowlist entry matches, and are refused — the
+    safe direction, and the reason nothing here tries to be clever about them.
+
+    The leading-double-slash case is explicit and is not decoration:
+    `posixpath.normpath` preserves *exactly two* leading slashes, because POSIX
+    leaves their meaning implementation-defined, so `//var/run/docker.sock`
+    comes back out of `normpath` unchanged and compares unequal to
+    `/var/run/docker.sock`. That is one of the two spellings measured above.
+    """
+    text = str(source).strip()
+    if not text:
+        return ""
+    if not text.startswith("/"):
+        text = f"{str(project_directory).rstrip('/')}/{text}"
+    collapsed = posixpath.normpath(text)
+    # `normpath` keeps exactly two leading slashes and collapses three or more,
+    # so this is the one case it will not do for us.
+    if collapsed.startswith("/"):
+        return "/" + collapsed.lstrip("/")
+    return collapsed
+
+
+class BindMounts(NamedTuple):
+    """What a service reaches on the host, and what this module could not read.
+
+    `unreadable` is the half that makes the closed set closed. A declaration
+    this module cannot classify contributes no source, and a rule phrased over
+    sources alone would read that as a service mounting nothing — which is the
+    outcome the whole strategy exists to prevent. Carried separately so that it
+    can be a failure rather than a silence.
+    """
+
+    sources: frozenset[str]
+    unreadable: tuple[str, ...]
+
+
+def top_level_volumes(document: dict[str, Any]) -> dict[str, Any]:
+    """The `volumes:` section of a Compose file, keyed by name.
+
+    A section that is not a mapping yields nothing, which makes every named
+    volume in the file unresolvable and therefore refused below. That is the
+    safe direction: a `volumes:` section this module cannot read is not a file
+    whose named volumes are all harmless.
+    """
+    declared = document.get("volumes")
+    if not isinstance(declared, dict):
+        return {}
+    return {str(name): body for name, body in declared.items()}
+
+
+def named_volume_source(
+    name: str,
+    document: dict[str, Any],
+    project_directory: Path | str,
+) -> tuple[str | None, str | None]:
+    """What host path a named volume resolves to, or why this module cannot say.
+
+    Returns a `(source, refusal)` pair with at most one of them set. A volume
+    that is genuinely not a bind — the ordinary local volume `beat-schedule` and
+    `postgres-data` are both this — sets neither: it names no host path, and
+    saying so is not a refusal.
+
+    E0-19's second route. `driver_opts: {type: none, device: /var/run/docker.sock,
+    o: bind}` is a bind mount with a name in front of it, and the service entry
+    that mounts it says only `- host-root:/host`. The docker socket is root on
+    the host, and `worker` is the container E0-13 runs untrusted comment text
+    through.
+
+    Everything this module has not been taught to read is refused rather than
+    treated as harmless — an `external: true` volume is created somewhere this
+    file cannot see, and an `nfs` device is a path on another machine. Both are
+    features this repository does not use, and the ticket's own rule is that a
+    feature stays refused rather than modelled.
+    """
+    volumes = top_level_volumes(document)
+    if name not in volumes:
+        return None, (
+            f"names the volume `{name}`, which the top-level `volumes:` section does not "
+            "declare, so what it mounts cannot be read here"
+        )
+
+    body = volumes[name]
+    if body is None or body == {}:
+        return None, None
+    if not isinstance(body, dict):
+        return None, f"declares the volume `{name}` as {body!r}, which this module cannot read"
+
+    unknown = sorted(str(key) for key in body if str(key) not in READABLE_VOLUME_KEYS)
+    if unknown:
+        return None, (
+            f"declares the volume `{name}` with {unknown}, which this module has not been "
+            f"taught to read (it reads {list(READABLE_VOLUME_KEYS)})"
+        )
+
+    options = body.get("driver_opts")
+    if options is None:
+        return None, None
+    if not isinstance(options, dict):
+        return (
+            None,
+            f"declares the volume `{name}` with driver_opts {options!r}, which is not a mapping",
+        )
+
+    device = options.get("device")
+    if device is None:
+        return None, (
+            f"declares the volume `{name}` with driver_opts {dict(options)!r} and no `device:`, "
+            "so this module cannot say what it mounts"
+        )
+
+    declared_type = str(options.get("type") or "").strip().lower()
+    flags = {flag.strip().lower() for flag in str(options.get("o") or "").split(",")}
+    if declared_type in BIND_DEVICE_TYPES or BIND_DEVICE_FLAG in flags:
+        return normalised_bind_source(str(device), project_directory), None
+
+    return None, (
+        f"declares the volume `{name}` with driver_opts {dict(options)!r}, a `device:` this "
+        "module cannot classify as a bind or as anything else"
+    )
+
+
+def bind_mounts_of(
+    service: dict[str, Any],
+    document: dict[str, Any],
+    project_directory: Path | str,
+) -> BindMounts:
+    """Every host path this service reaches, in every spelling Compose allows.
+
+    Supersedes the E0-03 reader that looked only at service-level entries whose
+    source began with `/`, `.` or `~`. Three things changed and all three were
+    routes past it: sources are normalised (see `normalised_bind_source`), a
+    named volume is resolved through the top-level `volumes:` section rather
+    than assumed harmless, and a declaration this module cannot classify is
+    carried out as a refusal instead of contributing nothing.
+
+    The document is a parameter because a named volume is resolved in the file
+    that declares it. The two Compose files are read one at a time and never
+    merged, which is the property the whole module rests on, so a volume named
+    in one file and declared in the other is unresolvable *here* and refused —
+    correctly: Compose would refuse it too when the base file is run alone.
     """
     sources: set[str] = set()
+    unreadable: list[str] = []
+
     for entry in service.get("volumes") or []:
+        declared_type: Any = None
         source: Any = None
+
         if isinstance(entry, dict):
-            if entry.get("type") in (None, "bind"):
-                source = entry.get("source")
+            declared_type = entry.get("type")
+            source = entry.get("source")
         elif isinstance(entry, str):
             parts = entry.split(":")
-            if len(parts) >= 2:
-                source = parts[0]
-        if isinstance(source, str) and source.startswith(("/", ".", "~")):
-            sources.add(source.rstrip("/") or "/")
-    return sources
+            if len(parts) == 1:
+                # An anonymous volume: a container path and no host path at all.
+                continue
+            source = parts[0]
+        else:
+            unreadable.append(f"declares the volume entry {entry!r}, which this module cannot read")
+            continue
+
+        kind = None if declared_type is None else str(declared_type).strip().lower()
+        if kind is not None and kind not in (
+            BIND_MOUNT_TYPE,
+            VOLUME_MOUNT_TYPE,
+            *HOSTLESS_MOUNT_TYPES,
+        ):
+            unreadable.append(
+                f"declares a volume of type {declared_type!r}, which this module has not been "
+                "taught to read"
+            )
+            continue
+        if kind in HOSTLESS_MOUNT_TYPES:
+            continue
+
+        if not isinstance(source, str) or not source.strip():
+            if kind == VOLUME_MOUNT_TYPE:
+                # An anonymous volume in the long form. No host path exists.
+                continue
+            unreadable.append(
+                f"declares the volume entry {entry!r}, which names no source this module can read"
+            )
+            continue
+
+        source = source.strip()
+        if kind == BIND_MOUNT_TYPE or (kind is None and source.startswith(HOST_PATH_PREFIXES)):
+            sources.add(normalised_bind_source(source, project_directory))
+            continue
+
+        resolved, refusal = named_volume_source(source, document, project_directory)
+        if refusal is not None:
+            unreadable.append(refusal)
+        elif resolved:
+            sources.add(resolved)
+
+    return BindMounts(sources=frozenset(sources), unreadable=tuple(unreadable))
+
+
+def bind_sources(
+    service: dict[str, Any],
+    document: dict[str, Any],
+    project_directory: Path | str,
+) -> set[str]:
+    """The resolved, normalised host paths this service reaches.
+
+    The signature gained two parameters in E0-19 and that is deliberate rather
+    than incidental: a named volume cannot be resolved without the document that
+    declares it, and a relative source cannot be normalised without the project
+    directory. Every rule that consumes bind sources consumes this — the
+    allowlist, the sensitive check, and the privilege comparison against `api` —
+    so none of them can be left reading the unresolved set while the others
+    move.
+    """
+    return set(bind_mounts_of(service, document, project_directory).sources)
+
+
+def declared_bind_mounts(path: Path, document: dict[str, Any]) -> dict[str, BindMounts]:
+    """Every service's resolved host mounts in one file, keyed by service name.
+
+    The project directory is `path.parent` and is derived here rather than
+    passed in, so that the directory a source is resolved against is always the
+    directory of the file the source was read from — which is what Compose does
+    and what a caller supplying its own could get wrong in either direction.
+    """
+    return {
+        name: bind_mounts_of(body, document, path.parent)
+        for name, body in services_of(document).items()
+    }
+
+
+def unallowlisted_bind_mounts(path: Path, document: dict[str, Any]) -> list[str]:
+    """Mounts in this file that `ALLOWED_BIND_MOUNTS` does not permit, one per line.
+
+    A mount of the project directory, or of any ancestor of it, carries the
+    reason that particular one is fatal: `.env` lives beside the Compose file,
+    because `env_file: - .env` requires it, so mounting the directory hands the
+    container the superuser credential the `environment:` block blanked.
+    """
+    project = normalised_bind_source(".", path.parent)
+    problems: list[str] = []
+
+    for name, mounts in sorted(declared_bind_mounts(path, document).items()):
+        allowed = {
+            normalised_bind_source(entry, path.parent)
+            for entry in ALLOWED_BIND_MOUNTS.get((path.name, name), frozenset())
+        }
+        for source in sorted(mounts.sources - allowed):
+            note = ""
+            # `rstrip` so that the root is an ancestor of everything: `/` and `/`
+            # concatenated is `//`, which nothing starts with.
+            if source == project or project.startswith(f"{source.rstrip('/')}/"):
+                note = (
+                    " — and .env lives in the project directory, so this mount hands the "
+                    "container the whole file that the `environment:` block blanks the "
+                    "superuser pair out of"
+                )
+            permitted = sorted(allowed) or "nothing"
+            problems.append(
+                f"{path.name}: `{name}` bind-mounts {source}, which is not in its allowlist "
+                f"({permitted}){note}"
+            )
+
+    return problems
+
+
+def sensitive_bind_mounts(path: Path, document: dict[str, Any]) -> list[str]:
+    """Mounts in this file whose source is on `SENSITIVE_BIND_SOURCES`, one per line.
+
+    Defence in depth behind the allowlist rather than a second copy of it: a
+    path that somehow enters the allowlist — a fifth entry added in a hurry,
+    a review that read the entry and not the path — still fails here by name.
+    Both checks read the same resolved, normalised set, so neither can be true
+    of a spelling the other misses.
+    """
+    forbidden = {
+        normalised_bind_source(entry, path.parent): entry for entry in SENSITIVE_BIND_SOURCES
+    }
+    problems: list[str] = []
+
+    for name, mounts in sorted(declared_bind_mounts(path, document).items()):
+        for source in sorted(mounts.sources & set(forbidden)):
+            problems.append(
+                f"{path.name}: `{name}` bind-mounts {source}, which is "
+                f"{forbidden[source]!r} on the sensitive list"
+            )
+
+    return problems
+
+
+def unreadable_volume_declarations(path: Path, document: dict[str, Any]) -> list[str]:
+    """Volume declarations in this file that the reader above could not classify."""
+    return [
+        f"{path.name}: `{name}` {note}"
+        for name, mounts in sorted(declared_bind_mounts(path, document).items())
+        for note in mounts.unreadable
+    ]
 
 
 @pytest.mark.parametrize("service_name", JOB_SERVICES)
@@ -2022,6 +2451,61 @@ def test_the_beat_health_check_reads_the_schedule_file(
     )
 
 
+def privilege_problems(
+    path: Path,
+    document: dict[str, Any],
+    service_name: str,
+    reference_name: str,
+) -> list[str]:
+    """How `service_name` is granted more than `reference_name` is, one line each.
+
+    Factored out of the test below so that a document written in a test can go
+    through the same path a real Compose file does. `docs/MISTAKES.md` entry 35's
+    corollary is the reason it is this function and not a smaller one: a control
+    that exercises a sub-step demonstrates the sub-step, and the mount half of
+    this rule is exactly where a resolution step could be skipped.
+
+    The bind comparison reads resolved sources (E0-19), so a socket handed to
+    `worker` as a named volume with a bind `driver_opts` is compared against
+    what `api` holds under the same resolution rather than passing as a volume
+    name `api` happens not to name.
+    """
+    services = services_of(document)
+    reference = services.get(reference_name) or {}
+    service = services.get(service_name) or {}
+
+    reference_grants = privilege_declarations(reference)
+    job_grants = privilege_declarations(service)
+
+    problems: list[str] = []
+    for key, value in sorted(job_grants.items()):
+        allowed = reference_grants.get(key)
+        if isinstance(value, frozenset) and isinstance(allowed, frozenset):
+            extra = sorted(value - allowed)
+            if extra:
+                problems.append(f"`{key}` adds {extra}, which `{reference_name}` does not have")
+        elif value != allowed:
+            problems.append(f"`{key}` is {value!r}; `{reference_name}` declares {allowed!r}")
+
+    missing_drops = dropped_capabilities(reference) - dropped_capabilities(service)
+    if missing_drops:
+        problems.append(
+            f"`cap_drop` keeps {sorted(missing_drops)}, which `{reference_name}` drops — dropping "
+            "fewer capabilities is holding more"
+        )
+
+    reachable = (
+        bind_sources(service, document, path.parent)
+        - bind_sources(reference, document, path.parent)
+    ) & {normalised_bind_source(entry, path.parent) for entry in SENSITIVE_BIND_SOURCES}
+    if reachable:
+        problems.append(
+            f"bind-mounts {sorted(reachable)} from the host, which `{reference_name}` does not"
+        )
+
+    return problems
+
+
 @pytest.mark.parametrize("service_name", JOB_SERVICES)
 def test_job_service_takes_no_privilege_the_api_service_does_not(
     service_name: str,
@@ -2068,29 +2552,7 @@ def test_job_service_takes_no_privilege_the_api_service_does_not(
         "`beat` (SPEC §7.2)."
     )
 
-    api_grants = privilege_declarations(api)
-    job_grants = privilege_declarations(service)
-
-    problems: list[str] = []
-    for key, value in sorted(job_grants.items()):
-        allowed = api_grants.get(key)
-        if isinstance(value, frozenset) and isinstance(allowed, frozenset):
-            extra = sorted(value - allowed)
-            if extra:
-                problems.append(f"`{key}` adds {extra}, which `api` does not have")
-        elif value != allowed:
-            problems.append(f"`{key}` is {value!r}; `api` declares {allowed!r}")
-
-    missing_drops = dropped_capabilities(api) - dropped_capabilities(service)
-    if missing_drops:
-        problems.append(
-            f"`cap_drop` keeps {sorted(missing_drops)}, which `api` drops — dropping fewer "
-            "capabilities is holding more"
-        )
-
-    reachable = (bind_sources(service) - bind_sources(api)) & SENSITIVE_BIND_SOURCES
-    if reachable:
-        problems.append(f"bind-mounts {sorted(reachable)} from the host, which `api` does not")
+    problems = privilege_problems(base_compose_path, base_compose, service_name, API_SERVICE)
 
     assert not problems, "\n".join(
         [
@@ -2103,4 +2565,1104 @@ def test_job_service_takes_no_privilege_the_api_service_does_not(
             "change this test deliberately — do not add it to `api` to make the comparison "
             "pass, because that widens the blast radius rather than narrowing it.",
         ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# What a container reaches on the host — ticket E0-19.
+#
+# Four routes to ADR 0009's bound, all of them green against the whole suite
+# when they were found in E0-03's fifth reviewer pass, and all four answered by
+# one shape: an allowlist of normalised sources, keyed by file and service, with
+# the denylist kept behind it.
+#
+# The rules below come in pairs on purpose. A rule that only ever refuses can be
+# satisfied by a reader that finds nothing, and a reader that finds everything
+# can be satisfied by a rule that refuses nothing, so each rule is written
+# against a document that must fail it *and* a document that must pass — and the
+# reader itself is required to find a mount in every currency one can be
+# declared in (`docs/MISTAKES.md` entry 35).
+#
+# The documents these boundary tests use are written here rather than read from
+# the repository, because the property under test is what the rule does with a
+# mount the repository does not contain. They go through the same functions the
+# real files do, from the file-level entry point down, so a resolution step that
+# stops being called fails these too.
+# ---------------------------------------------------------------------------
+
+# Where the sample documents below pretend to live. Nothing on disk: these paths
+# are textual, and the normaliser reads no filesystem. The file *names* matter
+# and are checked against the real ones by a test below, because
+# `ALLOWED_BIND_MOUNTS` is keyed by them — a sample keyed to a name the project
+# no longer uses would find an empty allowlist and pass every refusal test for
+# the wrong reason.
+SAMPLE_PROJECT_DIRECTORY = Path("/srv/pulse")
+SAMPLE_BASE_PATH = SAMPLE_PROJECT_DIRECTORY / "docker-compose.yml"
+SAMPLE_OVERRIDE_PATH = SAMPLE_PROJECT_DIRECTORY / "docker-compose.override.yml"
+
+
+def sample_document(
+    service_name: str,
+    volumes: list[Any],
+    top_level: dict[str, Any] | None = None,
+    extra_services: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A Compose document with one service mounting `volumes`, and nothing else in it."""
+    services: dict[str, Any] = {service_name: {"volumes": volumes}}
+    services.update(extra_services or {})
+    document: dict[str, Any] = {"services": services}
+    if top_level is not None:
+        document["volumes"] = top_level
+    return document
+
+
+class BindCurrencySample(NamedTuple):
+    """One way of declaring a host mount, and the host path it must resolve to."""
+
+    currency: str
+    entry: Any
+    volumes: dict[str, Any]
+    expected: str
+
+
+# One sample per currency in `BIND_DECLARATION_CURRENCIES`, each written so that
+# **only its own mechanism can catch it** — the `type: none` volume carries an
+# `o:` with no `bind` in it, and the `o: bind` volume declares no `type:` at all.
+# Written that way because a sample two mechanisms both catch keeps the control
+# green when one of them is deleted, which is the shape E0-34's review found
+# (`docs/MISTAKES.md` entry 35).
+BIND_CURRENCY_SAMPLES = (
+    BindCurrencySample(
+        currency="short form, relative source",
+        entry="./scripts/db-init:/docker-entrypoint-initdb.d:ro",
+        volumes={},
+        expected="/srv/pulse/scripts/db-init",
+    ),
+    BindCurrencySample(
+        currency="short form, absolute source",
+        entry="/var/run/docker.sock:/var/run/docker.sock",
+        volumes={},
+        expected="/var/run/docker.sock",
+    ),
+    BindCurrencySample(
+        currency="long form, type bind",
+        entry={"type": "bind", "source": "/etc", "target": "/host/etc", "read_only": True},
+        volumes={},
+        expected="/etc",
+    ),
+    BindCurrencySample(
+        currency="long form, no type",
+        entry={"source": "./backend", "target": "/app/backend"},
+        volumes={},
+        expected="/srv/pulse/backend",
+    ),
+    BindCurrencySample(
+        currency="named volume, driver_opts type none",
+        entry="host-state:/state",
+        volumes={
+            "host-state": {
+                "driver": "local",
+                "driver_opts": {"type": "none", "device": "/var/lib/pulse", "o": "rw"},
+            }
+        },
+        expected="/var/lib/pulse",
+    ),
+    BindCurrencySample(
+        currency="named volume, driver_opts o flags",
+        entry="host-socket:/var/run/docker.sock",
+        volumes={
+            "host-socket": {
+                "driver_opts": {"device": "/var/run/docker.sock", "o": "rw,bind"},
+            }
+        },
+        expected="/var/run/docker.sock",
+    ),
+)
+
+
+def test_no_service_bind_mounts_a_host_path_outside_the_allowlist(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """E0-19 route 1: what each service may mount is a closed set, per file.
+
+    The mutation this must kill is one line — `- ./:/app/repo:ro` on `worker`,
+    `beat` or `api` in either file, which is what someone writes to get
+    `alembic/` or `scripts/` into the job container. It passed every test in
+    this module before E0-19 while handing that container the whole of `.env`:
+    the file sits beside `docker-compose.yml` in every deployment because
+    `env_file: - .env` requires it, so the two blanking lines the anchor writes
+    are undone by a mount of the directory they live in.
+
+    The near misses matter more than that one, and each is a test below: a mount
+    one path segment away from an allowed source (`./backend2` where `./backend`
+    is allowed, `./scripts` where `./scripts/db-init` is), an allowed source
+    mounted by a service that has no entry, the same host path spelled with a
+    `.` segment or a doubled separator, and the same host path reached through a
+    named volume's `driver_opts`.
+
+    Both files, because a mount in either is a mount some container gets — the
+    same reason the absolute credential rules read both. Which file is not
+    incidental: `ALLOWED_BIND_MOUNTS` is keyed by it, and the asymmetry is
+    stated there.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. A file that did not parse declares no "
+            "services and no mounts, and a rule about what is mounted reports every file clean."
+        )
+
+    problems = [
+        problem
+        for path, document in documents
+        for problem in unallowlisted_bind_mounts(path, document)
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A service bind-mounts a host path its allowlist does not permit (ADR 0009, E0-19):",
+            *problems,
+            "",
+            "A bind mount is not covered by blanking a variable: `env_file: - .env` requires "
+            "`.env` to sit beside the Compose file, so a mount of the project directory — or "
+            "of anything above it — hands the container the superuser credential whatever the "
+            "`environment:` block says. `db:5432` is reachable from every service on this "
+            "network and accepts that role over scram, which makes it a working route to a "
+            "role that bypasses every grant and every row-level security policy. If the mount "
+            "is genuinely needed, add it to `ALLOWED_BIND_MOUNTS` under the file and service "
+            "that declare it, in a reviewed diff, and say in the pull request what the "
+            "container can now read.",
+        ]
+    )
+
+
+def test_the_allowlist_permits_no_mount_the_compose_files_do_not_declare(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """`ALLOWED_BIND_MOUNTS` is an inventory of what exists, not a set of permissions.
+
+    The other direction of the rule above, and it is what keeps the allowlist
+    from growing. An entry nothing exercises is a permission nobody re-reads:
+    the mount it was written for is deleted, the entry stays, and the next
+    service to be given that name inherits a permission granted for a reason
+    that no longer applies. That is `docs/MISTAKES.md` entry 1 in the shape a
+    security control takes it.
+
+    The mutation it must kill is an entry added speculatively — a fifth key, or
+    a second source under an existing key — for a mount no Compose file makes.
+    It also fails if a legitimate mount is *removed* from a Compose file without
+    the entry going with it, which is the same fact from the other side and is
+    the answer someone wants when they ask what the allowlist is for.
+    """
+    documents = {
+        base_compose_path.name: (base_compose_path, base_compose),
+        override_compose_path.name: (override_compose_path, override_compose),
+    }
+    for path, document in documents.values():
+        assert document, (
+            f"{path} does not exist or declares nothing, so every allowlist entry would look "
+            "unused and this test would report the allowlist as speculative when the file is "
+            "what went missing."
+        )
+    assert ALLOWED_BIND_MOUNTS, (
+        "ALLOWED_BIND_MOUNTS is empty, so the rule above forbids every mount and this one "
+        "checks nothing. An empty allowlist is a real possibility — it is what a stack with no "
+        "bind mounts at all would have — but the two Compose files declare two today, so an "
+        "empty one means the constant went rather than the mounts."
+    )
+
+    problems: list[str] = []
+    for (file_name, service_name), allowed in sorted(ALLOWED_BIND_MOUNTS.items()):
+        if file_name not in documents:
+            problems.append(
+                f"({file_name}, {service_name}) names a Compose file this suite does not read"
+            )
+            continue
+        path, document = documents[file_name]
+        declared = declared_bind_mounts(path, document).get(service_name)
+        if declared is None:
+            problems.append(f"{file_name} declares no `{service_name}` service to mount anything")
+            continue
+        for entry in sorted(allowed):
+            source = normalised_bind_source(entry, path.parent)
+            if source not in declared.sources:
+                problems.append(
+                    f"{file_name}: `{service_name}` is permitted {entry} ({source}) and mounts "
+                    f"{sorted(declared.sources) or 'nothing'}"
+                )
+
+    assert not problems, "\n".join(
+        [
+            "ALLOWED_BIND_MOUNTS permits a mount no Compose file declares:",
+            *problems,
+            "",
+            "The allowlist enumerates what exists rather than what would be acceptable. A "
+            "permission left behind by a deleted mount is granted to whatever is written under "
+            "that name next, and nobody re-reads it — so an entry goes in the same change as "
+            "the mount it describes and comes out in the same change as its removal.",
+        ]
+    )
+
+
+def test_no_service_bind_mounts_a_sensitive_host_path(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """`SENSITIVE_BIND_SOURCES` still refuses by name, behind the allowlist.
+
+    Kept rather than replaced, and E0-19's decision says why: a socket path that
+    somehow enters the allowlist should still fail here. The mutation is an
+    `ALLOWED_BIND_MOUNTS` entry naming `/var/run/docker.sock` — which makes the
+    rule above pass and this one fail, and that combination is the whole point
+    of keeping two checks over one resolved set.
+
+    It is wider than the E0-03 rule it grew out of in one way worth naming: that
+    one compared `worker` and `beat` against `api`, so the docker socket mounted
+    into *every* application service, `api` included, satisfied it. This asks
+    the question absolutely. The relative comparison stays where it is, because
+    a privilege `api` legitimately gains later should not have to be granted
+    twice.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing, so it declares no mounts and a search "
+            "for a sensitive one reports it clean."
+        )
+    assert SENSITIVE_BIND_SOURCES, (
+        "SENSITIVE_BIND_SOURCES is empty, so this rule forbids nothing and passes over any "
+        "file at all. The list is the test's choice and is meant to grow, never to empty."
+    )
+
+    problems = [
+        problem for path, document in documents for problem in sensitive_bind_mounts(path, document)
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A service bind-mounts a host path whose contents are, in practice, the host:",
+            *problems,
+            "",
+            "The docker socket is root on the host, /proc and /sys are the kernel, and /etc "
+            "holds the shadow file. `worker` is the container E0-13 runs untrusted comment "
+            "text through. This check sits behind the allowlist deliberately: if the mount "
+            "reached the allowlist, the allowlist entry is the thing to argue about.",
+        ]
+    )
+
+
+def test_no_compose_file_declares_a_volume_this_module_cannot_resolve(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """A volume shape the reader cannot classify is a red, never a silence.
+
+    The same move as `ALLOWED_TOP_LEVEL_KEYS` one level down. The rules above
+    are complete over the volume shapes this module reads and blind to any
+    other, so a shape it cannot classify has to fail loudly — `external: true`
+    puts the volume's definition somewhere this file cannot see, an `nfs`
+    `device:` is a path on another machine, and a service naming a volume the
+    top-level section does not declare cannot be resolved at all.
+
+    The mutation this must kill is the tempting one: treating an unclassifiable
+    `driver_opts` as "not a bind" and moving on, which is how a mount enters
+    through the one shape nobody modelled. Read `named_volume_source` for what
+    is refused and why.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing, so it declares no volumes and there "
+            "is nothing here to fail to classify."
+        )
+
+    problems = [
+        problem
+        for path, document in documents
+        for problem in unreadable_volume_declarations(path, document)
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A Compose file declares a volume this module has not been taught to read:",
+            *problems,
+            "",
+            "The mount rules above resolve a named volume through the top-level `volumes:` "
+            "section and treat a bind-type `device:` as a host path. A shape they cannot "
+            "classify is refused rather than passed over, because passing it over is how the "
+            "docker socket arrives under a name nobody looks at. Teach this module the shape "
+            "in the same change that adds it, and say here why the mount rules still hold.",
+        ]
+    )
+
+
+def test_the_bind_reader_finds_the_mounts_the_compose_files_declare_today(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """A control: the reader finds the two real mounts, and it is not blind.
+
+    **A red here means these tests are broken, not that the Compose files are.**
+    Every rule in this section is phrased as "nothing is mounted that should not
+    be", and every one of them passes over a reader that finds nothing at all —
+    a normaliser that returns the empty string, a `volumes:` key read under the
+    wrong name, a walk that stops at the first entry. `docs/MISTAKES.md`
+    entry 35: require the reader to *find* what is certainly there.
+
+    The expected paths are built with `pathlib` from the fixture, deliberately
+    not by calling `normalised_bind_source` — an expectation computed by the
+    thing under test agrees with it however wrong both are (entry 19).
+    """
+    assert base_compose and override_compose, (
+        "One of the Compose files does not exist or declares nothing, so the reader has "
+        "nothing to find and this control cannot tell a blind reader from an absent file."
+    )
+
+    root = base_compose_path.parent
+    base_mounts = declared_bind_mounts(base_compose_path, base_compose)
+    override_mounts = declared_bind_mounts(override_compose_path, override_compose)
+
+    assert base_mounts.get(CREDENTIAL_OWNING_SERVICE, BindMounts(frozenset(), ())).sources == {
+        str(root / "scripts" / "db-init")
+    }, (
+        f"The reader says `{CREDENTIAL_OWNING_SERVICE}` mounts "
+        f"{sorted(base_mounts.get(CREDENTIAL_OWNING_SERVICE, BindMounts(frozenset(), ())).sources)} "
+        f"from {base_compose_path.name}. It mounts `./scripts/db-init` at "
+        "/docker-entrypoint-initdb.d, which is where scripts/db-init creates the application "
+        "and Care roles at initdb (ADR 0009), and a reader that cannot see that mount cannot "
+        "see any of them."
+    )
+
+    reloaded = {
+        name: sorted(mounts.sources)
+        for name, mounts in override_mounts.items()
+        if str(root / "backend") in mounts.sources
+    }
+    assert set(reloaded) == {API_SERVICE, *JOB_SERVICES}, (
+        f"The reader finds the development reload mount on {sorted(reloaded)} in "
+        f"{override_compose_path.name}, and the override merges `x-development-source` into "
+        f"{sorted({API_SERVICE, *JOB_SERVICES})}. The anchor is resolved by the YAML parser, so "
+        "a reader that misses it is reading service bodies wrongly rather than reading a file "
+        "that changed."
+    )
+
+
+def test_the_sample_documents_are_keyed_by_the_names_the_real_compose_files_use(
+    base_compose_path: Path,
+    override_compose_path: Path,
+) -> None:
+    """A control: the boundary tests below use the file names the allowlist is keyed by.
+
+    **A red here means these tests are broken, not the Compose files.** Every
+    refusal test below asserts that a mount is refused, and a sample keyed to a
+    file name `ALLOWED_BIND_MOUNTS` does not know would be refused for the
+    trivial reason that its allowlist is empty — including the samples that
+    exist to prove a *legitimate* mount is allowed, which would then fail and
+    say so. This is the half that would not: the near-miss and project-root
+    tests would stay green through a rename with nothing checking them.
+    """
+    assert SAMPLE_BASE_PATH.name == base_compose_path.name, (
+        f"The samples below are keyed to {SAMPLE_BASE_PATH.name} and the suite reads "
+        f"{base_compose_path.name}. `ALLOWED_BIND_MOUNTS` is keyed by file name, so the two "
+        "have to be the same name or the boundary tests are asserting against an empty "
+        "allowlist."
+    )
+    assert SAMPLE_OVERRIDE_PATH.name == override_compose_path.name, (
+        f"The samples below are keyed to {SAMPLE_OVERRIDE_PATH.name} and the suite reads "
+        f"{override_compose_path.name}."
+    )
+    assert {name for name, _ in ALLOWED_BIND_MOUNTS} == {
+        base_compose_path.name,
+        override_compose_path.name,
+    }, (
+        "ALLOWED_BIND_MOUNTS is keyed by file names other than the two this suite reads: "
+        f"{sorted({name for name, _ in ALLOWED_BIND_MOUNTS})}. An entry under a name nothing "
+        "opens permits a mount in a file nothing checks."
+    )
+
+
+def test_mounting_the_project_directory_is_refused_and_the_message_names_the_env_file() -> None:
+    """E0-19 criterion 1: the message says which mount, and why *that* directory.
+
+    `- ./:/app/repo:ro` on `worker` is the exact edit the ticket names, and a
+    refusal that says only "not in the allowlist" leaves its reader adding an
+    allowlist entry. The project directory is not one host path among many: it
+    is where `.env` is, because `env_file: - .env` resolves against it, so this
+    mount undoes the blanking that ADR 0009's second bound is made of.
+
+    The mutation this kills is a message that names neither — a rule that fails
+    with a count, or with the service name alone. The near miss is a message
+    that names the mount and stops there, which is why `.env` is asserted as
+    well.
+    """
+    document = sample_document("worker", ["./:/app/repo:ro"])
+    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+
+    assert len(problems) == 1, (
+        f"Mounting the project directory on `worker` produced {problems!r}. It is one mount and "
+        "it is not in the allowlist, so it is exactly one problem."
+    )
+    message = problems[0]
+
+    assert str(SAMPLE_PROJECT_DIRECTORY) in message, (
+        f"The refusal does not name the mount: {message!r}. A reader who cannot see which path "
+        "was refused cannot tell a deliberate mount from a typo."
+    )
+    assert "worker" in message, f"The refusal does not name the service: {message!r}."
+    assert ".env" in message, (
+        f"The refusal does not say that .env lives in the project directory: {message!r}. That "
+        "sentence is the whole reason this mount is fatal rather than untidy — `env_file: - "
+        ".env` resolves against this directory, so the mount hands over the superuser pair the "
+        "`environment:` block blanked."
+    )
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "./:/app/repo:ro",
+        ".:/app/repo:ro",
+        "/srv/pulse:/app/repo:ro",
+        "//srv/pulse:/app/repo:ro",
+        "/srv/pulse/./:/app/repo:ro",
+        "/srv//pulse:/app/repo:ro",
+        "../pulse:/app/repo:ro",
+    ],
+)
+def test_an_unallowlisted_mount_is_refused_however_its_host_path_is_spelled(
+    spelling: str,
+) -> None:
+    """E0-19 route 4: the comparison is over normalised paths, not over spellings.
+
+    Measured against the local Docker daemon on 2026-08-21 by the orchestrating
+    session — not by the author of this test, and recorded here as somebody
+    else's measurement for that reason. A Compose file declared four spellings
+    of one host directory: a relative source with a `.` segment, a source with
+    doubled leading and internal separators, a relative source through `..`, and
+    an absolute source with an internal doubled separator. In
+    `docker compose config` the `.`-segment source came back collapsed and the
+    `..` source resolved against the project directory, while the doubled
+    separators survived verbatim. **All four mounted**, and the container read
+    the host's marker file through every one.
+
+    So the spellings are not equivalent to the daemon's *renderer* and are
+    entirely equivalent to its *mounts*, and this module reads raw YAML rather
+    than rendered output. Every one of these is `- ./:/app/repo:ro` written
+    differently, and every one has to be refused the same way.
+
+    The mutation this kills is a comparison against the source as spelled, which
+    is what the E0-03 reader did — it only stripped a trailing slash. The near
+    miss is a normaliser that handles the ordinary cases and leaves
+    `//srv/pulse` alone, because `posixpath.normpath` preserves exactly two
+    leading slashes; that spelling is in this list for that reason and has a
+    test of its own below.
+    """
+    document = sample_document("worker", [spelling])
+
+    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        f"`- {spelling}` on `worker` was not refused. It resolves to "
+        f"{normalised_bind_source(spelling.split(':')[0], SAMPLE_PROJECT_DIRECTORY)!r}, which is "
+        "the project directory — the directory `.env` lives in — and no service has it in its "
+        "allowlist. A spelling nobody anticipated has to fail closed; that is the whole reason "
+        "the rule is an allowlist over normalised sources."
+    )
+
+
+def test_the_development_reload_mount_is_allowed_in_the_override() -> None:
+    """The legitimate mount passes where it is declared, which is half the rule.
+
+    Without this half, `ALLOWED_BIND_MOUNTS` could be empty and every refusal
+    test in this section would still pass — a rule that forbids everything is
+    not a rule, it is a stop. The override mounts the checkout read-only over
+    the copy the image installed, on all three application services, and ADR
+    0011 is where that is argued.
+
+    The mutation this kills is deleting the override's entries from the
+    allowlist, or narrowing them to `api` — the reading someone reaches for when
+    they see three entries that look duplicated.
+    """
+    document = sample_document(
+        "worker",
+        ["./backend:/app/backend:ro"],
+        extra_services={
+            "api": {"volumes": ["./backend:/app/backend:ro"]},
+            "beat": {"volumes": ["./backend:/app/backend:ro"]},
+        },
+    )
+
+    problems = unallowlisted_bind_mounts(SAMPLE_OVERRIDE_PATH, document)
+
+    assert not problems, "\n".join(
+        [
+            "The development reload mount was refused in the file that is allowed to declare it:",
+            *problems,
+            "",
+            "`./backend` mounted read-only into `api`, `worker` and `beat` is what the "
+            "development override is for (ADR 0011), and all three get it because an edit that "
+            "reaches the API and not the worker leaves two containers running different code. "
+            "If it is genuinely no longer wanted, the entries come out of ALLOWED_BIND_MOUNTS "
+            "in the same change as the mount.",
+        ]
+    )
+
+
+def test_the_development_reload_mount_is_refused_in_the_base_file() -> None:
+    """The same mount in the base file is a different thing, and fails.
+
+    The other direction of the pair above, and the reason `ALLOWED_BIND_MOUNTS`
+    is keyed by file at all. `docker-compose.override.yml` is read on a laptop
+    and in CI and by no deployment; `docker-compose.yml` is read by all of them.
+    A source mount in the base file puts a writable-in-principle checkout into
+    production containers and takes the installed wheel out of the import path —
+    the packaging regression ADR 0011's base-file-only pass exists to catch,
+    arriving as a Compose edit rather than as a Dockerfile one.
+
+    The mutation this kills is an allowlist keyed by service name alone, which
+    is the simplification anyone would try: it makes this document pass, and it
+    is exactly the asymmetry the blanking rule above was broken by in reviewer
+    pass 4.
+    """
+    document = sample_document("worker", ["./backend:/app/backend:ro"])
+
+    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        "`- ./backend:/app/backend:ro` on `worker` in docker-compose.yml was not refused. That "
+        "mount is allowed in docker-compose.override.yml, which no deployment reads, and it is "
+        "a different thing in the file every deployment runs. If the allowlist has stopped "
+        "being keyed by file, every development-only mount is now permitted in production."
+    )
+
+
+@pytest.mark.parametrize(
+    ("path_name", "service_name", "spelling", "allowed"),
+    [
+        ("override", "api", "./backend2:/app/backend:ro", "./backend"),
+        ("override", "api", "./backend/../backend2:/app/backend:ro", "./backend"),
+        ("base", "db", "./scripts:/docker-entrypoint-initdb.d:ro", "./scripts/db-init"),
+        ("base", "db", "./scripts/db-init2:/docker-entrypoint-initdb.d:ro", "./scripts/db-init"),
+    ],
+)
+def test_a_mount_one_path_segment_from_an_allowed_source_is_refused(
+    path_name: str,
+    service_name: str,
+    spelling: str,
+    allowed: str,
+) -> None:
+    """The nearest passing case, which is the one a mutation battery has to include.
+
+    `./scripts` is the parent of an allowed source and `./backend2` is a sibling
+    of one; both are a single character away from a mount that passes, and both
+    reach files no container is meant to read — `scripts/` holds `db-init` and
+    `seed.py`, and a sibling directory is whatever somebody puts there next.
+
+    The mutation this kills is a comparison by prefix or by `startswith`, which
+    is the natural way to write "is this under something allowed" and which
+    admits `./backend2` for `./backend` outright. The pair's other direction is
+    the test above: the exactly-allowed source passes.
+    """
+    path = {"base": SAMPLE_BASE_PATH, "override": SAMPLE_OVERRIDE_PATH}[path_name]
+    document = sample_document(service_name, [spelling])
+
+    problems = unallowlisted_bind_mounts(path, document)
+
+    assert problems, (
+        f"`- {spelling}` on `{service_name}` was not refused in {path.name}, where the allowlist "
+        f"permits {allowed!r} and nothing else. It resolves to "
+        f"{normalised_bind_source(spelling.split(':')[0], SAMPLE_PROJECT_DIRECTORY)!r}, which is "
+        "not that path. A comparison that admits a neighbour of an allowed source is a prefix "
+        "test wearing an allowlist's name."
+    )
+
+
+def test_a_service_with_no_allowlist_entry_may_not_mount_an_allowed_source() -> None:
+    """The allowlist is keyed by service as well as by file, and this is that half.
+
+    `./scripts/db-init` is permitted — to `db`, in the base file, because that
+    is the directory Postgres runs at `initdb` to create the application and
+    Care roles. Mounted into `redis`, or into `worker`, it is a container
+    reading the SQL and shell that provision the cluster.
+
+    The mutation this kills is a rule that flattens the allowlist to a set of
+    sources and asks only whether the path appears in it. That version passes
+    this document, and it turns every legitimate mount into a permission the
+    whole stack holds.
+    """
+    document = sample_document("redis", ["./scripts/db-init:/docker-entrypoint-initdb.d:ro"])
+
+    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        "`- ./scripts/db-init:...` on `redis` was not refused. That source is allowed to `db` "
+        "and to nothing else: the allowlist is keyed by (file, service), and a rule that reads "
+        "only the sources grants every service what any one of them may mount."
+    )
+
+
+def test_a_bind_source_built_from_an_interpolation_is_refused() -> None:
+    """A source this module cannot evaluate is refused by one rule or the other.
+
+    `- ${HOST_TOOLS}:/tools:ro` names a path that depends on the environment
+    Compose was run with, and no static reading of the file can say what it is —
+    or even whether it is a path at all rather than a volume name, since neither
+    shape can be told from the other before expansion.
+
+    **Which rule catches it is not the property under test**, so both refusal
+    channels are read: a source that looks like a volume name lands in the
+    unreadable-declaration rule and one that looks like a path lands in the
+    allowlist. What matters is that a spelling this module cannot evaluate
+    produces a red rather than a silence, and asserting only the channel that
+    happens to fire today would make a later, equally correct classification
+    look like a regression.
+
+    The mutation this kills is an implementation that expands interpolations
+    against `.env.example`, or against `os.environ`, and then compares: the
+    first makes the answer depend on a documentation file, the second on the
+    machine running the tests, and both can resolve to an allowed path while the
+    deployment mounts something else entirely.
+    """
+    document = sample_document("worker", ["${HOST_TOOLS}:/tools:ro"])
+
+    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document) + (
+        unreadable_volume_declarations(SAMPLE_BASE_PATH, document)
+    )
+
+    assert problems, (
+        "`- ${HOST_TOOLS}:/tools:ro` on `worker` was refused by neither rule. What it mounts "
+        "depends on the environment Compose reads, so it cannot be checked here and must not "
+        "be assumed harmless."
+    )
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "/var/run/docker.sock",
+        "/var/run/./docker.sock",
+        "//var/run/docker.sock",
+        "/var//run/docker.sock",
+        "/var/run/../run/docker.sock",
+    ],
+)
+def test_a_sensitive_host_path_is_refused_however_it_is_spelled(spelling: str) -> None:
+    """The denylist behind the allowlist reads the same normalised set. E0-19 route 4.
+
+    `/var/run/./docker.sock` and `//var/run/docker.sock` both survive verbatim
+    into `docker compose config`, so the E0-03 comparison — a set membership
+    test against the source as spelled — missed both while the socket mounted
+    exactly as it always does. The daemon measurement recorded on the allowlist
+    test above covers the reachability half of this.
+
+    The mutation this kills is normalising the read sources and not
+    `SENSITIVE_BIND_SOURCES`, or the reverse: a comparison is only as good as
+    the agreement of its two sides, and either half alone passes every spelling
+    in this list.
+    """
+    document = sample_document("worker", [f"{spelling}:/var/run/docker.sock"])
+
+    problems = sensitive_bind_mounts(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        f"`- {spelling}:...` on `worker` did not fail the sensitive check. It resolves to "
+        f"{normalised_bind_source(spelling, SAMPLE_PROJECT_DIRECTORY)!r}, which is the docker "
+        "socket — root on the host, for the container E0-13 runs untrusted comment text "
+        "through."
+    )
+
+
+def test_a_named_volume_carrying_a_bind_device_fails_the_allowlist() -> None:
+    """E0-19 route 2: a `driver_opts` bind is a bind, under the allowlist too.
+
+    The service entry says `- host-root:/host`, which reads as a Docker volume
+    and is a mount of `/` with a name in front of it. Any `device:` works, the
+    project directory included, which is why this is a second spelling of route
+    1 rather than a hazard of its own.
+
+    The mutation this kills is a reader that treats a source without a leading
+    `/`, `.` or `~` as a named volume and stops there — which is what the E0-03
+    reader did, and its docstring said a named volume "contributes nothing".
+    """
+    document = sample_document(
+        "worker",
+        ["host-root:/host"],
+        top_level={
+            "host-root": {
+                "driver": "local",
+                "driver_opts": {"type": "none", "device": "/", "o": "bind"},
+            }
+        },
+    )
+
+    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        "A named volume whose driver_opts bind `/` was not refused by the allowlist. The "
+        "service entry names a volume rather than a path, so a reader that looks only at the "
+        "entry sees a Docker volume — and the container gets the host's root filesystem, `.env` "
+        "and all."
+    )
+    assert any(".env" in problem for problem in problems), (
+        f"The refusal does not say that .env is inside what was mounted: {problems!r}. `/` is an "
+        "ancestor of the project directory, so this mount carries the same consequence as "
+        "mounting the project directory itself and the message has to say so."
+    )
+
+
+def test_a_named_volume_carrying_a_bind_device_fails_the_sensitive_check() -> None:
+    """The same declaration, against the check that names the socket. E0-19 criterion 2.
+
+    "Fails the same tests that catch it as a direct bind" is three tests, and
+    this is the second of them. The mutation is the same one — a named volume
+    resolved by the allowlist rule and not by the sensitive one, which is what
+    happens if the resolution is done inside the allowlist's own function
+    instead of in the reader both share.
+    """
+    document = sample_document(
+        "worker",
+        ["host-socket:/var/run/docker.sock"],
+        top_level={
+            "host-socket": {"driver_opts": {"type": "none", "device": "/var/run/docker.sock"}}
+        },
+    )
+
+    problems = sensitive_bind_mounts(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        "The docker socket declared as a named volume with a bind `driver_opts` did not fail "
+        "the sensitive check. It is the identical mount to `- /var/run/docker.sock:...`, which "
+        "does fail it, and the difference is only where the path is written."
+    )
+
+
+def test_a_named_volume_carrying_a_bind_device_fails_the_privilege_comparison() -> None:
+    """The third of the three, and the one the E0-03 rule owns. E0-19 criterion 2.
+
+    `test_job_service_takes_no_privilege_the_api_service_does_not` compares what
+    `worker` reaches against what `api` reaches. Both readings have to be the
+    resolved ones or the comparison is between a resolved set and an unresolved
+    one: `worker` mounting `host-socket` while `api` mounts nothing is a
+    difference only a reader that resolves the volume can see.
+
+    The mutation this kills is leaving that rule reading the old
+    service-level-only reader while the allowlist gets the new one — the split
+    `docs/MISTAKES.md` entry 13 is about, where a hazard is closed in one of the
+    two places facing it.
+    """
+    document = sample_document(
+        "worker",
+        ["host-socket:/var/run/docker.sock"],
+        top_level={"host-socket": {"driver_opts": {"device": "/var/run/docker.sock", "o": "bind"}}},
+        extra_services={"api": {"image": "pulse/api"}},
+    )
+
+    problems = privilege_problems(SAMPLE_BASE_PATH, document, "worker", "api")
+
+    assert problems, (
+        "`worker` reaching the docker socket through a named volume was not reported as more "
+        "privilege than `api` holds. The socket is root on the host and `api` mounts nothing; "
+        "if this comparison still reads unresolved sources, it is comparing a volume name "
+        "against a set of paths."
+    )
+
+
+def test_an_ordinary_named_volume_is_not_a_bind_source() -> None:
+    """The other direction: `beat-schedule` and `postgres-data` are not host paths.
+
+    A rule that called every named volume a bind would fail the base file on the
+    two volumes it legitimately declares, and the fix somebody would reach for
+    is an allowlist entry — which is a permission granted for a mount that does
+    not exist. A local volume with no `driver_opts` names no host path, and
+    saying so is not the same as failing to look.
+
+    The mutation this kills is a resolver that returns the volume's *name* as a
+    source when it cannot find a device, which is the shape a `dict.get` with a
+    fallback takes.
+    """
+    document = sample_document(
+        "beat",
+        ["beat-schedule:/var/lib/celery"],
+        top_level={"beat-schedule": None, "postgres-data": None},
+    )
+
+    mounts = bind_mounts_of(document["services"]["beat"], document, SAMPLE_PROJECT_DIRECTORY)
+
+    assert mounts.sources == frozenset(), (
+        f"An ordinary named volume resolved to {sorted(mounts.sources)}. `beat-schedule` is a "
+        "Docker volume: it survives `docker compose restart beat` and it is not a piece of the "
+        "host filesystem."
+    )
+    assert mounts.unreadable == (), (
+        f"An ordinary named volume was refused as unreadable: {list(mounts.unreadable)}. A "
+        "local volume with no driver_opts is the ordinary case, and refusing it would fail the "
+        "base file on `postgres-data` and `beat-schedule` both."
+    )
+
+
+@pytest.mark.parametrize(
+    ("shape", "volumes"),
+    [
+        ("a volume the top-level section does not declare", {}),
+        ("an external volume", {"host-data": {"external": True}}),
+        (
+            "an nfs device",
+            {
+                "host-data": {
+                    "driver_opts": {"type": "nfs", "device": ":/export", "o": "addr=10.0.0.1"}
+                }
+            },
+        ),
+        ("driver_opts with no device", {"host-data": {"driver_opts": {"type": "none"}}}),
+    ],
+)
+def test_a_volume_declaration_this_module_cannot_classify_is_refused(
+    shape: str,
+    volumes: dict[str, Any],
+) -> None:
+    """Fail closed: an unclassifiable shape is a refusal, not a "not a bind".
+
+    Each of these could be a host path and none of them can be read as one here.
+    An external volume is defined outside this file; an `nfs` device is a path
+    somewhere else; `driver_opts` with no `device:` is a shape this module has
+    not been taught. The closed-set strategy the credential rules already use
+    says the same thing about all four: refuse, and be taught in the change that
+    needs it.
+
+    The mutation this kills is the fallback branch — returning "no source" for
+    anything the classifier does not recognise — which makes every one of these
+    pass the allowlist silently. That is precisely how `include:` and top-level
+    `secrets:` got past the credential rules in two earlier reviewer passes.
+    """
+    document = sample_document("worker", ["host-data:/data"], top_level=volumes)
+
+    refusals = unreadable_volume_declarations(SAMPLE_BASE_PATH, document)
+
+    assert refusals, (
+        f"{shape} was not refused. This module cannot say what it mounts, and a shape it cannot "
+        "read has to fail loudly — a silent 'not a bind' is how the docker socket arrives under "
+        "a name nobody looks at."
+    )
+    assert all("host-data" in refusal for refusal in refusals), (
+        f"A refusal for {shape} does not name the volume it is about: {refusals!r}. The service "
+        "name is in every one of these messages by construction, so naming the volume is what "
+        "tells a reader which declaration to go and look at."
+    )
+
+
+@pytest.mark.parametrize(
+    ("spelling", "canonical"),
+    [
+        ("./scripts/db-init", "/srv/pulse/scripts/db-init"),
+        ("scripts/db-init", "/srv/pulse/scripts/db-init"),
+        ("./scripts/./db-init", "/srv/pulse/scripts/db-init"),
+        ("./scripts//db-init", "/srv/pulse/scripts/db-init"),
+        ("/srv/pulse/scripts//db-init", "/srv/pulse/scripts/db-init"),
+        ("//srv/pulse/scripts/db-init", "/srv/pulse/scripts/db-init"),
+        ("../pulse/scripts/db-init", "/srv/pulse/scripts/db-init"),
+        ("./scripts/db-init/", "/srv/pulse/scripts/db-init"),
+        ("/var/run/./docker.sock", "/var/run/docker.sock"),
+    ],
+)
+def test_an_alternate_spelling_normalises_to_the_canonical_host_path(
+    spelling: str,
+    canonical: str,
+) -> None:
+    """One host path, one string, whichever way the Compose file spells it.
+
+    The five spellings the ticket names are all here — a `.` segment, a doubled
+    internal separator, a leading `//`, a plain relative source, and a relative
+    source through `..` — plus the trailing slash the E0-03 reader handled and
+    the bare relative source that has no `./` in front of it. A relative source
+    resolves against the **project directory**, which was measured during
+    E0-03's review to be what Compose does regardless of the service's
+    `working_dir`.
+
+    The mutation this kills is each of the collapsing steps in turn. The near
+    miss lives in the test below it: two paths that are genuinely different must
+    stay different, so "return the project directory for everything" does not
+    pass.
+    """
+    assert normalised_bind_source(spelling, SAMPLE_PROJECT_DIRECTORY) == canonical, (
+        f"{spelling!r} normalised to "
+        f"{normalised_bind_source(spelling, SAMPLE_PROJECT_DIRECTORY)!r} rather than to "
+        f"{canonical!r}. Both spellings mount the same host directory — measured against the "
+        "daemon on 2026-08-21 — so a comparison that tells them apart clears a mount that "
+        "reaches the host."
+    )
+
+
+def test_a_leading_double_slash_is_collapsed_although_posixpath_preserves_it() -> None:
+    """The one case `posixpath.normpath` will not do, asserted against `normpath` itself.
+
+    POSIX leaves the meaning of a path beginning with exactly two slashes
+    implementation-defined, so `normpath` keeps them — and collapses three or
+    more. `//var/run/docker.sock` therefore survives a naive normalisation and
+    compares unequal to `/var/run/docker.sock`, while mounting exactly the same
+    socket; the orchestrator's 2026-08-21 daemon measurement covers the mounting
+    half.
+
+    Both halves are asserted here on purpose. The first says the helper
+    collapses it. The second says `normpath` alone does not — which is what
+    makes the first assertion evidence rather than a restatement of the
+    implementation, and which will fail loudly if a future Python changes the
+    rule out from under this comment.
+    """
+    assert normalised_bind_source("//var/run/docker.sock", SAMPLE_PROJECT_DIRECTORY) == (
+        "/var/run/docker.sock"
+    ), (
+        "A leading `//` was not collapsed. `posixpath.normpath` preserves exactly two leading "
+        "slashes, so this has to be done explicitly; without it the docker socket has a "
+        "spelling that mounts and does not match."
+    )
+    assert posixpath.normpath("//var/run/docker.sock") == "//var/run/docker.sock", (
+        "posixpath.normpath has stopped preserving two leading slashes. That is the premise "
+        "this collapsing step exists for; if it is no longer true, read the change before "
+        "deleting the step — the step is still correct, and this assertion is what says why it "
+        "is there."
+    )
+
+
+@pytest.mark.parametrize(
+    ("one", "other"),
+    [
+        ("./backend", "./backend2"),
+        ("./scripts/db-init", "./scripts"),
+        ("/var/run/docker.sock", "/var/run/docker.sock.bak"),
+        ("../secret", "./secret"),
+        ("./backend", "/backend"),
+    ],
+)
+def test_two_different_host_paths_do_not_normalise_together(one: str, other: str) -> None:
+    """The other direction of normalisation: it collapses spellings, never paths.
+
+    A normaliser that returned a constant, or that truncated to the project
+    directory, would pass every equality test above and make the allowlist
+    permit everything under one entry. `../secret` and `./secret` are the pair
+    worth reading twice: one leaves the project directory and the other does
+    not, and a `..` handled by deletion rather than by resolution makes them the
+    same string.
+    """
+    assert normalised_bind_source(one, SAMPLE_PROJECT_DIRECTORY) != normalised_bind_source(
+        other, SAMPLE_PROJECT_DIRECTORY
+    ), (
+        f"{one!r} and {other!r} both normalised to "
+        f"{normalised_bind_source(one, SAMPLE_PROJECT_DIRECTORY)!r}. They are different host "
+        "paths, and an allowlist compared over a normaliser that conflates them permits the "
+        "one it was not given."
+    )
+
+
+def test_the_normaliser_reads_nothing_from_the_filesystem(tmp_path: Path) -> None:
+    """Textual, deliberately: no symlink resolution, no existence check.
+
+    `Path.resolve()` is the obvious implementation and it makes the answer
+    depend on what happens to exist on the machine running the tests, which is
+    not a property of the Compose file at all. A developer with a symlinked
+    checkout would get a different verdict from CI, and a source naming a path
+    that does not exist yet — which is most of them, since the allowlist is
+    compared before anything is created — would resolve to something else again.
+
+    The mutation this kills is exactly that: `Path(...).resolve()` in place of
+    the textual collapse. The symlink half fails under it immediately; the
+    missing-directory half is the near miss, since `resolve(strict=False)`
+    tolerates a path that is not there.
+    """
+    target = tmp_path / "real"
+    target.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(target)
+
+    assert normalised_bind_source("./link", tmp_path) == str(link), (
+        "The normaliser followed a symlink. What a Compose file says it mounts is the path it "
+        "wrote, and resolving it makes this suite's answer depend on the checkout it runs in."
+    )
+
+    missing = tmp_path / "nowhere"
+    assert normalised_bind_source("./backend", missing) == f"{missing}/backend", (
+        "The normaliser did not handle a project directory that does not exist. It is compared "
+        "against paths nothing has created yet, so it cannot depend on the filesystem."
+    )
+
+
+@pytest.mark.parametrize("sample", BIND_CURRENCY_SAMPLES, ids=lambda sample: sample.currency)
+def test_the_bind_reader_finds_a_mount_in_every_currency_it_claims(
+    sample: BindCurrencySample,
+) -> None:
+    """A control: each way of declaring a host mount is found, one at a time.
+
+    **A red here means these tests are broken, not the Compose files.** Every
+    rule in this section reports absence, and absence is what a reader that
+    cannot see a currency reports too — `docs/MISTAKES.md` entry 35, whose
+    sharper half is that the currency a design deliberately uses is the one a
+    guard is most likely to miss. Here that is the named volume: it is the
+    spelling that looks like a Docker volume and mounts the host.
+
+    Each sample is written so that only its own mechanism can catch it — the
+    `type: none` volume carries an `o:` with no `bind` in it, and the `o: bind`
+    volume declares no `type:` — so deleting either half of the classifier turns
+    exactly one of these red while the refusal rules stay green.
+
+    The whole path is exercised, from `bind_mounts_of` down, rather than the
+    classifier alone: a resolution step that stops being called is the defect
+    this is guarding, and a control that calls it directly cannot see that.
+    """
+    document = sample_document("worker", [sample.entry], top_level=sample.volumes)
+
+    mounts = bind_mounts_of(document["services"]["worker"], document, SAMPLE_PROJECT_DIRECTORY)
+
+    assert mounts.unreadable == (), (
+        f"The reader refused the {sample.currency} sample as unclassifiable: "
+        f"{list(mounts.unreadable)}. It is a shape this module claims to read."
+    )
+    assert mounts.sources == frozenset({sample.expected}), (
+        f"The reader resolved the {sample.currency} sample to {sorted(mounts.sources)} rather "
+        f"than to {[sample.expected]}. A currency the reader cannot see makes every rule above "
+        "report a clean file over a mount it never looked at."
+    )
+
+
+def test_the_currency_samples_cover_every_currency_in_the_inventory() -> None:
+    """A control over the control: the sample table matches the written-down inventory.
+
+    **A red here means these tests are broken, not the Compose files.** The
+    control above is parametrised over `BIND_CURRENCY_SAMPLES`, so deleting a
+    sample deletes its own case and the remaining ones pass at the smaller size
+    — four tests where there were six, with a currency going unread and nothing
+    saying so. That is the failure E0-34's review found one level above this
+    entry's rule, and the repair is an inventory the sample table cannot shrink:
+    `BIND_DECLARATION_CURRENCIES` is written separately and compared here.
+    """
+    covered = [sample.currency for sample in BIND_CURRENCY_SAMPLES]
+
+    assert sorted(covered) == sorted(BIND_DECLARATION_CURRENCIES), (
+        f"The samples cover {sorted(covered)} and the inventory names "
+        f"{sorted(BIND_DECLARATION_CURRENCIES)}. A currency in the inventory with no sample is "
+        "a mechanism nothing proves the reader can see; a sample with no inventory entry is a "
+        "mechanism nothing would notice the deletion of."
+    )
+    assert len(covered) == len(set(covered)), (
+        f"Two samples claim the same currency: {covered}. A duplicate makes the comparison "
+        "above pass with a currency missing."
     )

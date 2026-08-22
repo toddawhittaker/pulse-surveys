@@ -1,10 +1,31 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 2**
+**Caught: 3**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*7 occurrences recorded; two of them are catches.*
+*8 occurrences recorded; three of them are catches.*
+
+*(**A catch**, writing E0-19's tests — the Compose credential surface, two readers
+at once. The first enumerates the currencies a host bind mount can be declared
+in, and the rule turned it into a table of six with a sample for each, written so
+that **only its own mechanism** can resolve it: the `driver_opts` sample with
+`type: none` carries an `o:` with no `bind` in it, and the `o: bind` sample
+declares no `type:` at all, so deleting either half of the classifier turns
+exactly one control red while every refusal rule stays green. The inventory is a
+separate constant the sample table cannot shrink, which is the corollary the
+E0-34 instance below bought. The second reader is the one the entry's sharper
+half actually changed. Route 3 asks which variables a Compose file delivers to a
+container, and the natural shape — documented `.env.example` names checked
+against documented values — is blind to `db`, the one service that legitimately
+receives the superuser credential: it takes the pair by explicit interpolation
+into `POSTGRES_USER` and `POSTGRES_PASSWORD`, which are Postgres's names and are
+documented nowhere. So the design changed before it was written: the reader
+resolves the *value* a service is handed rather than matching documented names,
+and the control asserts it **finds** the credential arriving at `db`. Without the
+entry, that control could not have been written at all — the rule would have
+reported every application service clean while being unable to see a delivery
+anywhere, which is exactly "no role can do this *the one way I looked*".)*
 
 *(**An occurrence, not a catch**, in E0-36 item 3, by the orchestrating session,
 and the currency was a pytest marker. The question "which tests are marked
