@@ -45,11 +45,25 @@ and `tests/unit/test_db_engine_configuration.py` holds each of them:
   `sqlalchemy.engine`, which a `dictConfig` plausibly does, gets every statement
   and every bound parameter written with `echo=False`. Measured on the pinned
   SQLAlchemy 2.0.52. The two things that do close it are here: the `WARNING`
-  pin `pin_sqlalchemy_logging` applies outside development, which is the pin
-  `backend/alembic.ini` has always applied on the migration side, and
-  `hide_parameters=True` in `engine_options`, which holds when a later
-  configuration turns the logger back up. `_echoes_sql` is correct as written
-  and is not what changed.
+  pin `pin_sqlalchemy_logging` applies outside development, which is the same pin
+  `backend/alembic.ini` applies on the migration side — on the child
+  `sqlalchemy.engine` (its `qualname`), so `pin_sqlalchemy_logging` pins both the
+  parent and that child — and `hide_parameters=True` in `engine_options`, which
+  covers bound parameters even when a later configuration turns that logger back
+  up. `_echoes_sql` is correct as written and is not what changed.
+
+  **A returned row is the other half, and the security review of Batch H is where
+  it was measured.** `hide_parameters` covers what goes *to* the database;
+  SQLAlchemy's cursor logs `Row %r` for every row it hands *back*, at DEBUG, with
+  no `hide_parameters` check on that path. Pinning the parent alone left a
+  `sqlalchemy.engine` set to DEBUG by name exactly where a `dictConfig` had put
+  it, so the parameters of a statement were hidden and its answers written in
+  full — from E0-05 a survey answer or a free-text comment (§4, §10). The pin
+  covers both loggers now. One residual is left open deliberately and written
+  down rather than implied away: a configuration applied *after* this module is
+  imported wins, and nothing in the engine's options covers returned rows against
+  it. That is an operator action with the same standing as `echo=True`, recorded
+  here, in `pin_sqlalchemy_logging`, and in ADR 0013.
 """
 
 import logging
@@ -71,11 +85,22 @@ __all__ = [
     "pin_sqlalchemy_logging",
 ]
 
-# The logger `backend/alembic.ini` pins on the migration side, and the one whose
-# effective level decides whether a `Connection` writes a statement and its
-# parameters at all. Pinning the parent covers `sqlalchemy.engine` and everything
-# else the library logs under it.
+# The two loggers this module pins, and both of them matter. `sqlalchemy` is the
+# parent, whose effective level decides whether a `Connection` writes a statement
+# and its parameters for as long as its child has no level of its own.
+# `sqlalchemy.engine` is that child — the logger whose level decides whether the
+# cursor logs the rows it returns — and an explicit level on it is not something a
+# pin on the parent can override, so pinning the parent alone leaves the returned
+# rows going out.
+#
+# **`backend/alembic.ini` pins the child.** Its section is called
+# `[logger_sqlalchemy]`, but its `qualname` is `sqlalchemy.engine`. An earlier
+# version of this comment read the section name and said the migration side
+# pinned the parent (`docs/MISTAKES.md` entry 1); it mattered, because the parent
+# is the one a pin can apply and still leave the rows the cursor returns written
+# out in full.
 SQLALCHEMY_LOGGER = "sqlalchemy"
+SQLALCHEMY_ENGINE_LOGGER = "sqlalchemy.engine"
 
 # Which environment may see SQL in the log is `app.config`'s to say: the constant
 # is declared beside the `environment` field it describes and imported here
@@ -140,28 +165,38 @@ def engine_options(settings: Settings) -> dict[str, Any]:
 
 
 def pin_sqlalchemy_logging(settings: Settings) -> None:
-    """Outside development, hold the `sqlalchemy` logger at WARNING.
+    """Outside development, hold `sqlalchemy` and `sqlalchemy.engine` at WARNING.
 
-    The same pin `backend/alembic.ini` carries as `[logger_sqlalchemy] level =
-    WARNING`, applied on the side that serves requests. Without it the two halves
-    of one deployment disagree: the parameters of a migration statement are
-    withheld and the parameters of an application statement — a survey answer, a
-    free-text comment — are written.
+    Both loggers, and pinning the parent alone is not enough. `sqlalchemy.engine`
+    is the logger a `dictConfig` naming the child sets directly, and a child with
+    a level of its own does not defer to its parent's. At DEBUG that child logs
+    `Row %r` for every row the cursor returns, with no `hide_parameters` check
+    anywhere on that path — so a pin on the parent alone leaves the parameters of
+    a statement hidden and its answers written in full. `backend/alembic.ini`
+    pins `qualname = sqlalchemy.engine`, the child, on the migration side already;
+    this applies the same `WARNING` on the side that serves requests. Without it
+    the two halves of one deployment disagree about whether a survey answer or a
+    free-text comment may be written down.
 
     **In development this does nothing at all**, deliberately. `echo` is a
     debugging tool there, and a pin applied unconditionally would take the
-    library's own logger down to WARNING for a developer who had just turned it
+    library's own loggers down to WARNING for a developer who had just turned one
     up, with no indication of what had done it.
 
-    **What it cannot promise.** A logging configuration read *after* this module
-    is imported wins, because the last writer does. This closes the ordinary case
-    — a configuration applied at startup before the application package is
-    imported — and `hide_parameters` in `engine_options` above is what holds the
-    property when it does not.
+    **What it cannot promise, and it is a residual rather than a gap.** A logging
+    configuration read *after* this module is imported wins, because the last
+    writer does. This closes the ordinary case — a configuration applied at
+    startup before the application package is imported. After it, a `dictConfig`
+    that turns `sqlalchemy.engine` back up to DEBUG logs result rows again, and
+    nothing in the engine's options covers returned rows the way `hide_parameters`
+    covers bound parameters. That is an operator action with the same standing as
+    setting `echo=True` in a deployment; it is recorded here and in ADR 0013
+    rather than implied away.
     """
     if _is_development(settings):
         return
-    logging.getLogger(SQLALCHEMY_LOGGER).setLevel(logging.WARNING)
+    for name in (SQLALCHEMY_LOGGER, SQLALCHEMY_ENGINE_LOGGER):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 _settings = Settings()

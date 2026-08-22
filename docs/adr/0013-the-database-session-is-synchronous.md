@@ -1,7 +1,9 @@
 # 0013 — The database session is synchronous, and the engine is built at import
 
 **Status:** Accepted. Argument corrected 2026-08-21 (E0-37 item 8) — the decision
-is unchanged; what changed is what this record claims in support of it.
+is unchanged; what changed is what this record claims in support of it. Logging
+consequence extended 2026-08-21 (Batch H security review) with the returned-row
+half.
 **Date:** 2026-08-13
 **Tickets:** E0-04, E0-37
 
@@ -137,8 +139,20 @@ raised after its first statement. A handler that means to write says so.
   flag, so a deployment whose logging configuration names `sqlalchemy` or
   `sqlalchemy.engine` — which a `dictConfig` plausibly does — gets every
   statement and every bound parameter written with `echo=False`. E0-37 item 1
-  measured that on the pinned SQLAlchemy 2.0.52 and added the two things that do
-  hold §4 and §10 here: `pin_sqlalchemy_logging`, which applies outside
+  measured that on the pinned SQLAlchemy 2.0.52 and added the two things that
+  keep bound parameters out here: `pin_sqlalchemy_logging`, which applies outside
   development the same `WARNING` pin `backend/alembic.ini` already had on the
-  migration side, and `hide_parameters=True` in `engine_options`, which still
-  holds if a later configuration turns that logger back up.
+  migration side — where its `qualname` is the child `sqlalchemy.engine` — and
+  `hide_parameters=True` in `engine_options`, which covers bound parameters even
+  when a later configuration turns that logger back up.
+- **A returned row is not a bound parameter, and `pin_sqlalchemy_logging` pins
+  both loggers because of it (Batch H security review).** `hide_parameters`
+  covers what goes *to* the database; SQLAlchemy's cursor logs each row it hands
+  *back* at DEBUG on `sqlalchemy.engine`, with no such check. The pin above named
+  only the parent `sqlalchemy`, and a child `sqlalchemy.engine` set to DEBUG by
+  name does not defer to it — so the review found the answers of a statement
+  written out while its parameters were hidden. `pin_sqlalchemy_logging` now pins
+  the child too, matching the `qualname = sqlalchemy.engine` `backend/alembic.ini`
+  has always pinned. The residual is the same shape as `echo`'s: a configuration
+  applied *after* import wins, and nothing in the engine's options covers returned
+  rows against it — an operator action with the same standing as `echo=True`.
