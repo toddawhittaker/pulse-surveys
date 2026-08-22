@@ -45,17 +45,31 @@ records those. All three are values this platform invented or was handed by a
 test; none is a person. Measured against the running container rather than
 assumed.
 
-**One Advantage route does add to that surface, and this paragraph used to deny
-it.** Most of them carry only a context identifier, which is this platform's own
+**Two Advantage surfaces do add to that, and this paragraph used to name only
+one.** Most routes carry only a context identifier, which is this platform's own
 invention, and a member's address appears in a response body where no log
-follows. The per-user result route is different: `<lineitem>/results/<userId>`
-puts an LTI `sub` in a request path, and uvicorn's access log records every path.
-On this platform that is a seeded identifier describing nobody, so nothing here
-is at risk — but it is a shape E1 must not copy, because on a real deployment the
-same route would write a student's LMS user ID into an access log, which SPEC
-§10 forbids. The route is served because AGS makes a `Result`'s `id` a URL and a
-platform that composes one it will not answer is worse; a real platform would put
-an opaque per-result identifier there rather than the user's.
+follows. These two are different, and uvicorn's access log records the path *and*
+the query string of every request:
+
+  - `<lineitem>/results/<userId>` puts an LTI `sub` in a **request path**. The
+    route is served because AGS makes a `Result`'s `id` a URL and a platform that
+    composes one it will not answer is worse; a real platform would put an opaque
+    per-result identifier there rather than the user's.
+  - `<lineitem>/results?user_id=<sub>` puts the same `sub` in a **query string**.
+    That is AGS 2.0's own filter on the Result container and it is honoured here,
+    because a tool asking for one student's result and receiving the class is
+    holding grades it did not ask for. Since E0-28 item 4 the container is also
+    paged, which makes this the route a tool reads results through rather than an
+    occasional one — and the `Link` relations this platform builds carry the
+    request's query, so **the platform hands the tool a `sub`-bearing URL for
+    every page** and a conformant walk re-issues one per page.
+
+On this platform every one of those identifiers is a seeded value describing
+nobody, so nothing here is at risk. **Both are shapes E1 must not copy**: on a
+real deployment either would write a student's LMS user ID into an access log,
+which SPEC §10 forbids, and avoiding the per-user route while walking the
+filtered container avoids nothing. Whatever E1 does about this has to cover the
+filter and the paging as well as the path.
 """
 
 import json
