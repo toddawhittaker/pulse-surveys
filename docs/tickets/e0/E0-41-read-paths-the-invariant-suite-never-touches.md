@@ -83,6 +83,25 @@ report it, do not adjust the test.
    `tokens.py` line ~9 cites a CLAUDE.md duplication rule that does not
    exist (attribute to what actually holds the rule, or drop the citation).
 
+## Arbitrations (2026-08-22, orchestrator, on the test author's report)
+
+- A "comparison figure" assertion is untestable in E0 — nothing computes one
+  and §4.1 item 7 assigns it to E4. The roster count is the numeric half
+  posed here. Accepted.
+- The org-view sweep polices the three named views, verified against the
+  directory-derived inventory (a rename fails loudly; a fourth org view is
+  one `ORG_VIEWS` line); the import half is the structural guard. The
+  `views_sql/` directory itself is exempt as a rule, since the module holding
+  the statements cannot avoid naming them. Accepted.
+- Log-capture controls are marked `invariant` beside their guards: the
+  isolated pass collects marked tests only, and a guard whose control is not
+  collected is vacuous there. Capabilities stay unmarked. Accepted as the
+  marking principle.
+- Known safe overlaps with the E0-39 worktree: `test_db_engine_configuration.py`
+  and `test_lti_launch_door.py` receive markers/cross-references here and
+  fixture-value repairs there — different hunks, semantically independent;
+  the second PR to merge re-runs CI over the combination.
+
 ## Acceptance
 
 - The isolated invariant pass grows from 54 collected; every addition
