@@ -12,10 +12,13 @@
 #
 # `backend/**/*.pem` and `backend/**/*.key` reach that directory the same way and
 # are covered here too. They are not a fifth and sixth suffix of the same kind:
-# they are the two lines whose deletion ships a private key rather than a stray
-# note, and they had nothing watching them until E0-36's review measured it.
+# they are lines whose deletion ships a private key rather than a stray note, and
+# they had nothing watching them until E0-36's review measured it.
+# `backend/**/*.pfx` and `backend/**/*.secret` are two more of that kind, added
+# by E0-37 item 9 — which measured both suffixes *reaching* the image, since
+# until that item no line excluded them.
 #
-# **Deleting any of those six lines leaves every other gate green.** That is
+# **Deleting any of those eight lines leaves every other gate green.** That is
 # what this exists for. It is not a test of `.dockerignore`'s text, and E0-36
 # says why: a text assertion passes against a typo'd pattern, which carries the
 # file just as surely. So this plants one file per pattern, builds the image, and
@@ -53,25 +56,31 @@ PROMPTS_SOURCE_DIRECTORY="backend/app/ai/prompts"
 CONTROL_FILE="validity.v1.md"
 
 # One file per re-exclusion this covers, so that a deleted line names itself in
-# the failure rather than being one of six candidates. The stem says what they
+# the failure rather than being one of eight candidates. The stem says what they
 # are and where they came from, because a build that dies between the plant and
 # the cleanup leaves them in somebody's working tree.
 #
-# The last two are the point of the whole check and were the two it missed. They
-# are in this list on a measurement rather than on symmetry: planting a `.pem`
-# and a `.key` in the prompts directory and listing the installed directory
-# inside a built image showed both excluded — by the two lines below, reached
-# through the same `pyproject.toml` package-data glob that carries the other
-# four. So those are the only two lines in `.dockerignore` whose deletion ships
-# a private key into the runtime image, and until E0-36's review nothing watched
-# them.
+# The `.pem` and `.key` are the point of the whole check and were the two it
+# missed. They are in this list on a measurement rather than on symmetry:
+# planting one of each in the prompts directory and listing the installed
+# directory inside a built image showed both excluded — by the two lines in
+# `.dockerignore` that name them, reached through the same `pyproject.toml`
+# package-data glob that carries the four above.
+#
+# The `.pfx` and `.secret` arrived with E0-37 item 9, on the same kind of
+# measurement with the opposite answer: planted the same way, both **reached**
+# the image, because nothing in `.dockerignore` matched them. That item added the
+# two lines and these two plants together, so the four suffixes whose deletion
+# ships key material now all have something watching them.
 PLANTED_FILES=(
-  "e0-36-image-content-check.md~"    # backend/**/*~
-  "e0-36-image-content-check.orig"   # backend/**/*.orig
-  "e0-36-image-content-check.rej"    # backend/**/*.rej
-  "e0-36-image-content-check.bak"    # backend/**/*.bak
-  "e0-36-image-content-check.pem"    # backend/**/*.pem
-  "e0-36-image-content-check.key"    # backend/**/*.key
+  "e0-36-image-content-check.md~"     # backend/**/*~
+  "e0-36-image-content-check.orig"    # backend/**/*.orig
+  "e0-36-image-content-check.rej"     # backend/**/*.rej
+  "e0-36-image-content-check.bak"     # backend/**/*.bak
+  "e0-36-image-content-check.pem"     # backend/**/*.pem
+  "e0-36-image-content-check.key"     # backend/**/*.key
+  "e0-37-image-content-check.pfx"     # backend/**/*.pfx
+  "e0-37-image-content-check.secret"  # backend/**/*.secret
 )
 
 # Its own tag, so a build that does carry a planted file cannot be left behind as
@@ -219,10 +228,11 @@ if [ "${#carried[@]}" -gt 0 ]; then
   echo "FAIL: these planted files reached the runtime image: ${carried[*]}" >&2
   cat >&2 <<'EXPLANATION'
 
-      `.dockerignore`'s last four lines re-exclude `backend/**/*~`, `*.orig`,
-      `*.rej` and `*.bak` from the build context. Each planted file above matches
-      exactly one of them, so each name says which line is gone or no longer
-      matches what it used to.
+      `.dockerignore` re-excludes eight patterns under `backend/`: `*~`,
+      `*.orig`, `*.rej` and `*.bak` at the end of the file, and `*.pem`, `*.key`,
+      `*.pfx` and `*.secret` in the block with the `.env` patterns. Each planted
+      file above matches exactly one of them, so each name says which line is
+      gone or no longer matches what it used to.
 
       This is not cosmetic. `pyproject.toml` ships `prompts/**/*` as `app.ai`
       package data, so anything left in `backend/app/ai/prompts/` is packaged
