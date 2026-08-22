@@ -33,7 +33,8 @@ as `None` for any other value.
 The value compared against is `app.config.DEVELOPMENT_ENVIRONMENT`, a constant
 this ticket adds to `config.py` because there are now three readers of it —
 `app/db.py` before it lets the engine echo SQL, `scripts/seed.py` before it will
-run at all ([ADR 0063](0063-the-seed-refuses-outside-development.md)), and this.
+run at all ([ADR 0063](0063-the-demo-seed-runs-only-in-a-development-environment.md)),
+and this.
 E0-18 migrated neither of the other two onto it, because doing it there would
 have put an unrelated change in an auth pull request; **E0-37 item 2 did**, so
 all three readers import this constant now.
@@ -61,10 +62,12 @@ so building it would mean building the session model this ticket's boundary
 section explicitly gives to E1. It remains the right answer later, and this
 record is not an argument against it.
 
-**Gate on a separate `SERVE_API_DOCS` flag.** Rejected on `CLAUDE.md`'s rule
-about knobs: there is one correct answer per environment, the environment is
-already a variable, and a second flag is a way for a deployment to be documented
-as gated while being open.
+**Gate on a separate `SERVE_API_DOCS` flag.** Rejected on the rule against knobs
+— "no configuration knob for something with one correct answer", stated in
+[`docs/AGENTS_INTENT.md`](../AGENTS_INTENT.md) (attribution corrected 2026-08-22:
+this cited `CLAUDE.md`, which holds process only). There is one correct answer per
+environment, the environment is already a variable, and a second flag is a way for
+a deployment to be documented as gated while being open.
 
 ## Consequences
 
