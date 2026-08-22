@@ -4,7 +4,7 @@
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*1 instance recorded.*
+*2 instances recorded, oldest first.*
 
 *(E0-38, and it was found by an audit written after the build was green. The
 `changed` job's classification step was extracted from the parsed workflow and
@@ -28,10 +28,34 @@ real behaviour of the real artifact under a shell the runtime never uses. And th
 correct pattern was already in the repository: `test_the_detect_probes_see_the_files_their_jobs_run.py`
 invokes probes with `bash -e`, in the same workflow, written the round before.)*
 
-**What happened.** A harness executed the genuine artifact and reported measured
-results, and the results were about a configuration that does not occur. The
-defect it hid was not subtle once seen — it was the difference between `bash` and
-`bash -e` on one line.
+*(E0-28 item 9, and this one runs the other way: the harness did not hide a
+defect, it **manufactured one**, and the harness was the repository's own. The
+mock platform hands out a per-user result URL with the identifier percent-encoded
+whole, so a `sub` of `a/b` becomes `…/results/a%2Fb` and a `sub` of `a%2Fb` — an
+ordinary identifier that happens to look like an encoding — becomes
+`…/results/a%252Fb`. Two students, one decode each, distinct. The route was given
+Starlette's `:path` converter and the second URL came back with the *first*
+student's grade, at 200. Measured both ways on one throwaway route with one
+`:path` parameter: **uvicorn** decodes the path once and hands the route `a%2Fb`,
+which is right; **`fastapi.testclient.TestClient`** (starlette 1.6.0, httpx
+0.28.1) decodes it twice and hands the route `a/b`, because its transport builds
+the ASGI scope with `"path": unquote(path)` where `path` is httpx's `URL.path`,
+already decoded. So the platform was correct in deployment and wrong in the suite
+— and, worse in the other direction, a platform that added a decode of its own
+would have passed in-process and served one student's grade to a request about
+another in production. The fix was to stop trusting the router's count: read
+`scope["raw_path"]` and decode it once. The entry-37 shape is exact — a real
+artifact measured under conditions the runtime does not use — with one addition
+worth the words: the offending harness was not one anybody wrote for the
+occasion, it was the standard client every test in the repository drives these
+mocks through.)*
+
+**What happened.** Twice, a harness executed the genuine artifact and reported
+measured results, and the results were about a configuration that does not occur.
+The first hid a defect and the second invented one, which are the two directions
+of the same error. Neither was subtle once seen — one was the difference between
+`bash` and `bash -e` on one line, the other one `unquote` too many inside a test
+client.
 
 **Why it is not entry 12 or entry 20.** Entry 12 is a stale build of the thing
 under test: the harness ran something other than the current artifact. Entry 20 is
@@ -43,5 +67,9 @@ than in production. That is a third way for a measurement to be true and useless
 the body: the shell and its flags, the interpreter, the environment, the working
 directory. Prefer a harness that already exists in the repository to one you
 write, and when you write one, state which properties of the runtime it
-reproduces and which it does not. A measured result is only as good as the
+reproduces and which it does not. **A harness the repository already uses is not
+exempt** — it diverges from the runtime too, and because everything is measured
+through it the divergence reads as a fact about the artifact. When a result
+surprises you, reproduce it once against the real runtime before believing
+either the green or the red. A measured result is only as good as the
 conditions it was measured under, and those conditions are part of the artifact.

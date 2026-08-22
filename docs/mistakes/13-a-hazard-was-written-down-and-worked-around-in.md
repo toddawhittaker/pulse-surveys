@@ -1,10 +1,10 @@
 # Entry 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 23**
+**Caught: 24**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*17 instances recorded; the 4 below are the most recent, newest first.*
+*18 instances recorded; the 4 below are the most recent, newest first.*
 
 *The trim this file asked for has been done, without a shell, by ticket order
 rather than by `git log`: the two **E0-16** paragraphs went, because E0-16 precedes
@@ -21,10 +21,29 @@ the `CARE` check is duplicated across the service and both halves of the door by
 design (SPEC §8, and `CLAUDE.md`'s carve-out that duplication in
 confidentiality-critical paths is the guarantee). Nothing was stopped, so there is
 no instance behind it. It has been withdrawn, which leaves 20 + the test round's
-genuine catch = **21**, and the fourth paragraph below is what the twenty-first
-counts. The lesson is the one the note was already reaching for: a bump with no
+genuine catch = **21**; the paragraph that counted as the twenty-first was
+E0-33's, which has since been trimmed out of the four shown and is in this file's
+git history. The lesson is the one the note was already reaching for: a bump with no
 instance paragraph is unfalsifiable a week later, so write the paragraph in the
 same change or do not move the number.*
+
+*(E0-28 item 3, and the hazard is **one identifier a platform mints and then has
+to recognise.** Every line item id this mock hands out now carries
+`?type_id=<ordinal>`, because a bare id lets a tool build its Score URL as
+`id + "/scores"` and be right here forever. The dispatch brief spelled the change
+as two sentences — `create_line_item` mints
+`f"{line_item_url(...)}?type_id={ordinal}"`, and `GradeBook.line_item`
+"reconstructs the same string for lookup" — which is literally two copies of one
+format string, in one class, thirty lines apart. The half that would have rotted
+is not the mint: it is the lookup, which nothing calls until a tool follows an id
+the platform gave it, so a divergence surfaces as a 404 on the platform's own URL
+in whichever job followed the link. It went in as one method,
+`GradeBook.line_item_identifier`, called from both. The same round had the
+matching case one layer up and got it for free: `result_url` composes both the
+`resultUrl` a score post answers with and the `id` a `Result` gives itself,
+because `result_document` calls it — a passback follows the first and a
+reconciliation follows the second, and a fix reaching one of them leaves half a
+defect wearing a correct-looking URL.)*
 
 *(Building E0-18 PR 1, the two doors themselves, and the hazard is **one URL a
 platform compares exactly.** The launch door's `redirect_uri` is
@@ -76,20 +95,6 @@ and escapes the `except`, and an `invariant`-marked confidentiality test would h
 **errored instead of reporting a forgeable audit log**. Fixing only the failure the
 runner named would have left that. The check is now in both copies of the helper,
 in two modules, rather than in one with a comment in the other.)*
-
-*(Writing E0-33's tests. Its item 3 wants the view *set* compared
-with what the migrations wrote, which is the direction
-`test_identity_separated_views.py` does not have — it asks whether every view in
-the catalog is created by a file under `views_sql/`, and never whether every view
-a file creates is in the catalog. Writing that second direction in the new catalog
-module meant a second copy of the `CREATE VIEW` regex, and that regex is not
-incidental: its word boundary is the subject of an incident under entry 3, where
-a sweep for a view's bare *name* was satisfied by the `GRANT` beside it. So the
-name extractor was factored out of `creates_view`, which is now one line over it,
-the new test went into that module beside it, and the `DROP VIEW` sweep the new
-direction needs was added to the same self-test that already runs the create
-sweep against what it must catch and what it must allow. **A regex whose
-correctness took an incident to establish is the last thing to copy.**)*
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose

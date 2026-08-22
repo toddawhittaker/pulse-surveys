@@ -45,22 +45,36 @@ records those. All three are values this platform invented or was handed by a
 test; none is a person. Measured against the running container rather than
 assumed.
 
-**One Advantage route does add to that surface, and this paragraph used to deny
-it.** Most of them carry only a context identifier, which is this platform's own
+**Two Advantage surfaces do add to that, and this paragraph used to name only
+one.** Most routes carry only a context identifier, which is this platform's own
 invention, and a member's address appears in a response body where no log
-follows. The per-user result route is different: `<lineitem>/results/<userId>`
-puts an LTI `sub` in a request path, and uvicorn's access log records every path.
-On this platform that is a seeded identifier describing nobody, so nothing here
-is at risk — but it is a shape E1 must not copy, because on a real deployment the
-same route would write a student's LMS user ID into an access log, which SPEC
-§10 forbids. The route is served because AGS makes a `Result`'s `id` a URL and a
-platform that composes one it will not answer is worse; a real platform would put
-an opaque per-result identifier there rather than the user's.
+follows. These two are different, and uvicorn's access log records the path *and*
+the query string of every request:
+
+  - `<lineitem>/results/<userId>` puts an LTI `sub` in a **request path**. The
+    route is served because AGS makes a `Result`'s `id` a URL and a platform that
+    composes one it will not answer is worse; a real platform would put an opaque
+    per-result identifier there rather than the user's.
+  - `<lineitem>/results?user_id=<sub>` puts the same `sub` in a **query string**.
+    That is AGS 2.0's own filter on the Result container and it is honoured here,
+    because a tool asking for one student's result and receiving the class is
+    holding grades it did not ask for. Since E0-28 item 4 the container is also
+    paged, which makes this the route a tool reads results through rather than an
+    occasional one — and the `Link` relations this platform builds carry the
+    request's query, so **the platform hands the tool a `sub`-bearing URL for
+    every page** and a conformant walk re-issues one per page.
+
+On this platform every one of those identifiers is a seeded value describing
+nobody, so nothing here is at risk. **Both are shapes E1 must not copy**: on a
+real deployment either would write a student's LMS user ID into an access log,
+which SPEC §10 forbids, and avoiding the per-user route while walking the
+filtered container avoids nothing. Whatever E1 does about this has to cover the
+filter and the paging as well as the path.
 """
 
 import json
 from typing import Annotated, Any
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, unquote
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -70,8 +84,10 @@ from app.ags import (
     LINE_ITEM_MEDIA_TYPE,
     LINE_ITEM_PAGE_SIZE,
     MAX_LINE_ITEM_LIMIT,
+    MAX_RESULT_LIMIT,
     RESULT_CONTAINER_MEDIA_TYPE,
     RESULT_MEDIA_TYPE,
+    RESULT_PAGE_SIZE,
     GradeBook,
     GradeServiceError,
     LineItem,
@@ -101,7 +117,14 @@ from app.launch import (
 )
 from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, membership_page
 from app.pages import authorization_response_page, launch_page, registration_values
-from app.paging import PAGE_PARAMETER, PageOutOfRangeError, link_header, page_count, window
+from app.paging import (
+    PAGE_PARAMETER,
+    PageOutOfRangeError,
+    link_header,
+    page_count,
+    page_size,
+    window,
+)
 from app.seed import MockContext, seeded_platform
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
 
@@ -111,6 +134,11 @@ SUMMARY = "A development-only LTI 1.3 platform to launch Pulse from (SPEC §9.2)
 
 # How an OIDC authorization request arrives when a tool posts it.
 FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+
+# How many path segments come before the user identifier in `RESULT_PATH`.
+# Counted off `RESULTS_PATH` rather than written as a number, so that moving
+# the Advantage paths moves this with them. See `addressed_user_id`.
+RESULT_PATH_SEGMENTS_BEFORE_THE_USER = len(RESULTS_PATH.strip("/").split("/"))
 
 
 def advertised(base: str, query: str) -> str:
@@ -128,6 +156,46 @@ def advertised(base: str, query: str) -> str:
     host it reached, and `request.url` carries whatever `Host` header arrived.
     """
     return f"{base}?{query}" if query else base
+
+
+def addressed_user_id(request: Request) -> str:
+    """The `userId` a per-user result request addressed, decoded exactly once.
+
+    **Read off the wire rather than off the route parameter, and that is not
+    fussiness.** `ags.result_url` percent-encodes the whole identifier with
+    `safe=""`, so a `sub` of `a/b` is handed out as `…/results/a%2Fb` and a `sub`
+    of `a%2Fb` — an ordinary identifier that happens to look like an encoding —
+    is handed out as `…/results/a%252Fb`. They are two students, and one decode
+    of each keeps them two. A second decode makes them one, and the platform then
+    serves one student's grade to a request about the other, with a 200 (E0-28
+    item 9's near miss).
+
+    How many times the path has already been decoded when a route parameter
+    reaches this application depends on the server, which is exactly why this
+    does not trust it. Measured on 2026-08-21, on one route with one `:path`
+    parameter:
+
+      - **uvicorn** decodes once. `a%252Fb` arrives as `a%2Fb`. Correct.
+      - **`fastapi.testclient.TestClient`** (starlette 1.6.0, httpx 0.28.1)
+        decodes twice: its transport builds the scope with `unquote(path)` where
+        `path` is httpx's `URL.path`, which is already decoded. `a%252Fb` arrives
+        as `a/b` — the collision above, in the harness every test in this
+        repository drives this platform through.
+
+    `raw_path` is the request as it was received, so decoding it here once is
+    the same answer under both. ASGI makes `raw_path` optional; where a server
+    omits it there is nothing better to fall back on than the route parameter,
+    and that fallback is this platform's behaviour under such a server rather
+    than a case anything here can fix.
+
+    The number of segments to skip is derived from `RESULTS_PATH` rather than
+    written as `6`, so moving the Advantage paths moves this with them.
+    """
+    raw = request.scope.get("raw_path")
+    if not isinstance(raw, bytes):
+        return str(request.path_params.get("user_id", ""))
+    segments = raw.decode("utf-8", errors="replace").strip("/").split("/")
+    return unquote("/".join(segments[RESULT_PATH_SEGMENTS_BEFORE_THE_USER:]))
 
 
 async def json_object(request: Request, subject: str) -> dict[str, Any]:
@@ -351,13 +419,53 @@ def create_app() -> FastAPI:
     def memberships(
         context_id: str,
         page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        role: Annotated[str | None, Query()] = None,
+        limit: Annotated[str | None, Query()] = None,
+        rlid: Annotated[str | None, Query()] = None,
     ) -> JSONResponse:
         """One page of a membership container, and a `Link` header to the next.
 
         The header is the only place paging is expressed. A next URL in the body
         would read correctly to anyone looking at the response and would leave a
         conformant client syncing page one and calling it the class.
+
+        **NRPS's own three filters are declared here in order to be refused**
+        (E0-28 item 2). They were not parameters at all, so FastAPI dropped them
+        and the container answered 200 with the whole page: a tool asking for
+        `role=…#Instructor` was handed every member and could not tell that from
+        a section where everyone teaches. Accepted-and-disregarded is the one
+        state a client cannot detect, and it is what lets a reliance on
+        server-side filtering ship — a reliance no platform guarantees, because
+        NRPS permits a platform to ignore these.
+
+        Refusing rather than implementing `role` is E0-28's ruling, on E0-30 item
+        4's strictness argument: a 400 naming the parameter is a sentence the
+        tool's author reads once and acts on. They are typed `str` rather than
+        `int` for `limit` so that *any* value is refused with this 400 rather
+        than some values with FastAPI's own 422 — the fact being reported is that
+        the parameter is not implemented, not that its value was unreadable.
+
+        `page` keeps working. It is the cursor the roster walk moves by, and a
+        container that refused every query parameter would turn every seeded
+        roster into its first page.
         """
+        refused = [
+            name
+            for name, value in (("role", role), ("limit", limit), ("rlid", rlid))
+            if value is not None
+        ]
+        if refused:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This membership container does not implement NRPS query filtering, and "
+                    f"{refused} asks it to. NRPS 2.0 defines `role`, `limit` and `rlid` and "
+                    "permits a platform to ignore them, so a tool must filter client-side "
+                    "whatever a platform accepts — and this one refuses rather than accepting "
+                    f"and disregarding, which a tool cannot tell from a filter that worked. "
+                    f"`{PAGE_PARAMETER}` is the one parameter this container implements."
+                ),
+            )
         context = require_context(context_id)
         try:
             served = membership_page(platform, settings, context, page)
@@ -366,7 +474,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             served.document,
             media_type=MEMBERSHIP_CONTAINER_MEDIA_TYPE,
-            headers={"link": served.link_header} if served.link_header else None,
+            headers={"link": served.link_header},
         )
 
     @app.post(LINE_ITEMS_PATH, summary="AGS 2.0: create a line item in a section")
@@ -408,11 +516,7 @@ def create_app() -> FastAPI:
             context_id,
             LineItemFilters(resource_link_id=resource_link_id, resource_id=resource_id, tag=tag),
         )
-        # An over-large `limit` is **clamped, not refused**. A tool has no way to
-        # discover the cap, so the only thing it can do with "your page size is
-        # too large" is guess a smaller one — and a platform that clamps has
-        # already answered the question. Canvas clamps.
-        size = min(limit, MAX_LINE_ITEM_LIMIT) if limit else LINE_ITEM_PAGE_SIZE
+        size = page_size(limit, LINE_ITEM_PAGE_SIZE, MAX_LINE_ITEM_LIMIT)
         try:
             shown = window(found, page, size)
         except PageOutOfRangeError as refusal:
@@ -422,12 +526,27 @@ def create_app() -> FastAPI:
         return JSONResponse(
             [line_item.document for line_item in shown],
             media_type=LINE_ITEM_CONTAINER_MEDIA_TYPE,
-            headers={"link": header} if header else None,
+            headers={"link": header},
         )
 
     @app.get(LINE_ITEM_PATH, summary="AGS 2.0: one line item")
     def read_line_item(context_id: str, line_item_id: str) -> JSONResponse:
-        """The line item at its own `id`, which is what makes that `id` a URL."""
+        """The line item at its own `id`, which is what makes that `id` a URL.
+
+        **What this route is for**, because it arrived in E0-15 without a
+        criterion and E0-28 item 7 asked for one or for its deletion. AGS 2.0
+        defines it, and E3's line-item reconciliation reads it: a tool holding an
+        id from a previous term needs to ask whether that line item still exists
+        and still carries the maximum it was created with, without listing a
+        container and searching it. Keeping it is the ruling — deleting a
+        conformant route to re-add it one epic later is churn.
+
+        It also carries item 3's round trip. The platform mints ids with a query
+        (`…/3?type_id=3`) and this is where "the platform serves the exact id it
+        minted" is asked; a platform that minted one and routed only `…/3` would
+        have handed a tool an id it cannot use, and E3 would meet that as a 404
+        on a URL the platform itself composed.
+        """
         return JSONResponse(
             require_line_item(context_id, line_item_id).document,
             media_type=LINE_ITEM_MEDIA_TYPE,
@@ -452,11 +571,14 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=refusal.status_code, detail=str(refusal)) from refusal
         return JSONResponse({"resultUrl": result_url(line_item, str(payload["userId"]))})
 
-    @app.get(RESULTS_PATH, summary="AGS 2.0: the results for one line item")
+    @app.get(RESULTS_PATH, summary="AGS 2.0: the results for one line item, filtered and paged")
     def read_results(
+        request: Request,
         context_id: str,
         line_item_id: str,
         user_id: str | None = None,
+        limit: Annotated[int | None, Query(ge=1)] = None,
+        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
     ) -> JSONResponse:
         """The conformant `Result` container: the current grade, and nothing else.
 
@@ -466,18 +588,39 @@ def create_app() -> FastAPI:
 
         `user_id` is AGS's own filter and is honoured, because a tool asking a
         platform for one student's result and receiving the class is holding
-        grades it did not ask for. The container does **not** page and does not
-        take a `limit`; that is
-        [E0-28](../../docs/tickets/e0/E0-28-review-debt-from-e0-15.md) item 4,
-        deliberately left rather than forgotten.
+        grades it did not ask for.
+
+        **The container pages, exactly as the roster and the line-item container
+        do** — same module, same `Link` header, same rule that `next` appears
+        only where a next page exists (E0-28 item 4). It used to answer
+        everything in one response, which is a mock smoother than the platforms
+        it stands in for: a 200-student section on a platform paging at 50 reads
+        back 50 results and 150 apparent non-submitters, and E3 re-posts those
+        150 grades every week without ever converging.
+
+        The `Link` URLs are built from the query this request carried, so the
+        filter survives into every relation. A container that filtered correctly
+        and advertised an unfiltered `first`, `last` or `current` hands a tool
+        the whole class the moment it follows one — and it fails open, which is
+        the paging defect that looks most like working.
         """
+        line_item = require_line_item(context_id, line_item_id)
+        found = grades.results(line_item, user_id=user_id)
+        size = page_size(limit, RESULT_PAGE_SIZE, MAX_RESULT_LIMIT)
+        try:
+            shown = window(found, page, size)
+        except PageOutOfRangeError as refusal:
+            raise HTTPException(status_code=404, detail=str(refusal)) from refusal
+        base = advertised(settings.results_url(context_id, line_item_id), request.url.query)
+        header = link_header(base, page, page_count(len(found), size))
         return JSONResponse(
-            grades.results(require_line_item(context_id, line_item_id), user_id=user_id),
+            list(shown),
             media_type=RESULT_CONTAINER_MEDIA_TYPE,
+            headers={"link": header},
         )
 
     @app.get(RESULT_PATH, summary="AGS 2.0: one user's result on one line item")
-    def read_result(context_id: str, line_item_id: str, user_id: str) -> JSONResponse:
+    def read_result(request: Request, context_id: str, line_item_id: str) -> JSONResponse:
         """The result at the URL the platform hands out for it.
 
         This is the URL a score post answers with as `resultUrl` and the URL
@@ -489,8 +632,13 @@ def create_app() -> FastAPI:
         A user with no current result is a 404 rather than an empty document —
         "no grade" and "a grade of nothing" are different answers, and a score
         posted with no `scoreGiven` means the first.
+
+        The identifier comes from `addressed_user_id` rather than from the route
+        parameter, for the reason that function gives at length: one decode of
+        what the wire carried, whatever the server did to the path on the way in.
         """
         line_item = require_line_item(context_id, line_item_id)
+        user_id = addressed_user_id(request)
         found = grades.result(line_item, user_id)
         if found is None:
             raise HTTPException(

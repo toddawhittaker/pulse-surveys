@@ -11,10 +11,13 @@ RFC 8288 is how a platform tells a client where the next page is, and it is what
 a conformant client reads. A next URL carried in a response body reads perfectly
 to a person and leaves a tool syncing page one and calling it the collection.
 
-Three rules are worth stating because each is a defect somebody ships:
+Four rules are worth stating because each is a defect somebody ships:
 
   - **`next` appears only where a next page exists.** Advertising one whenever
     the page just served was full sends a client for a page with nothing on it.
+  - **Every other relation appears always, one-page collections included.** A
+    collection that answered with no header at all is telling a client nothing
+    about its own extent, and a tool sizing a sync before it starts has to guess.
   - **Page one is the collection's own URL**, with no page parameter added. A
     tool following a service claim and a tool following a `first` relation then
     arrive at the same string rather than at two spellings of one page.
@@ -76,27 +79,54 @@ def page_url(base: str, page: int) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 
 
-def link_header(base: str, page: int, pages: int) -> str | None:
-    """The RFC 8288 header for one page, or `None` for a collection that fits on one.
+def link_header(base: str, page: int, pages: int) -> str:
+    """The RFC 8288 header for one page. Always a header, never `None`.
 
-    `first`, `prev` and `last` ride along with `next` because a real header
-    carries several relations, and a client written against a header that only
-    ever holds one passes here and breaks on the first platform that sends two.
+    Five relations, and which of them apply is the whole of the rule.
+    `first`, `last` and `current` are on every page including the only page of a
+    one-page collection; `prev` appears from page two; `next` appears only where
+    a next page exists. That is the set Canvas sends, and a client written
+    against a header that only ever holds one relation passes here and breaks on
+    the first platform that sends five.
 
-    `None` for a single page is deliberate about `next` and under-realistic about
-    the rest — real platforms still send `first` and `last` on a one-page
-    container. That is [E0-28](../../docs/tickets/e0/E0-28-review-debt-from-e0-15.md)
-    item 5 rather than an oversight here.
+    **A single page used to answer with no header at all** — right about `next`
+    and under-realistic about the rest, since real platforms still say `first`,
+    `last` and `current` for a collection that fits on one page. A client written
+    against "read `last` to learn the extent", which is how a tool sizes a sync
+    before it starts, found nothing here and had to guess. E0-28 item 5 closed
+    that; the `next` half of the old rule is unchanged, and the seeded five-member
+    section is still the fixture that catches a header advertising a next page
+    whenever the page it is on is full.
+
+    `current` is the page's own URL. A resumable sync records it and starts again
+    there, so a `current` pointing at the first page from every page — or at the
+    next one — resumes somewhere plausible and wrong.
     """
-    if pages <= 1:
-        return None
     entries = [f'<{page_url(base, 1)}>; rel="first"']
     if page > 1:
         entries.append(f'<{page_url(base, page - 1)}>; rel="prev"')
     if page < pages:
         entries.append(f'<{page_url(base, page + 1)}>; rel="next"')
     entries.append(f'<{page_url(base, pages)}>; rel="last"')
+    entries.append(f'<{page_url(base, page)}>; rel="current"')
     return ", ".join(entries)
+
+
+def page_size(limit: int | None, default: int, cap: int) -> int:
+    """How many items a page carries: what the tool asked for, bounded by `cap`.
+
+    **An over-large `limit` is clamped, not refused.** A tool has no way to
+    discover the cap, so the only thing it can do with "your page size is too
+    large" is guess a smaller one — and a platform that clamps has already
+    answered the question. Canvas clamps.
+
+    One function rather than the same `min(...)` at each container
+    (`docs/MISTAKES.md` entry 13). Both AGS containers page, both have a cap, and
+    two copies of this rule would be two places for one of them to drift — which
+    is how a container ends up serving an institution's whole gradebook in one
+    response because nobody noticed its clamp was missing.
+    """
+    return min(limit, cap) if limit else default
 
 
 def window(items: Sequence[T], page: int, size: int) -> Sequence[T]:

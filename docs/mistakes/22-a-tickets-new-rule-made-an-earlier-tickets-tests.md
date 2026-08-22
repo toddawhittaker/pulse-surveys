@@ -1,8 +1,24 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 3**
+**Caught: 4**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
+
+*4 instances recorded; the 3 most recent are below. The earliest is in this file's git history and in the pull request it cites.*
+
+*(Writing E0-28's tests, and the collision was found by asking this entry's
+question of an *assertion* rather than of a row. E0-28 item 1 makes exactly one
+seeded NRPS member carry no enrollment extension at all, and E0-15's
+`test_the_enrollment_window_ends_the_dropped_member_and_nobody_else` builds its
+`keyless` list as `"end" not in (enrollment_of(member) or {})` — which is true of
+a member with no window, so the new seed turns that test red inside its own
+reading of the roster, in a module the ticket is not otherwise editing. `grep -n
+'enrollment_of' tests/` found it before anything was written. It is amended in the
+same change as the seed test that requires the new member, which the implementer
+could not have done: the repair is inside `tests/`, and the person who meets the
+red is the one agent forbidden to touch it. The amendment is narrow and says so —
+a member that carries a window and no `end` key still fails, which is the mutation
+the assertion exists for.)*
 
 *(Writing E0-26 item 1's tests, and this time the sweep was run before the tests
 were, so the collision is a paragraph in a report rather than a dispute round.
@@ -35,25 +51,6 @@ exists nowhere else and had to be rewritten to aim at both halves of the split
 door. **Count the failures, then look for what the first one is standing in front
 of**: a helper that raises in setup suppresses every assertion in the test behind
 it, and an exact-set assertion is the kind whose silence looks like agreement.)*
-
-*(In E0-15's tests, and it stopped a test being written rather than
-repaired one. E0-15's scope says "every seeded course needs a title"; E0-14's scope
-requires at least one seeded context carrying `id` alone, no title, so that E1's
-ingestion meets the empty case in a test rather than in a deployment — and
-`test_mock_lms_launch.py::test_a_seeded_context_carries_no_title` asserts exactly
-that today. A test of E0-15's sentence would have turned that one red, on a seed
-satisfying both tickets read separately. This entry's rule is about rows a new
-write-time rule forbids; the same question asked of an existing *assertion* found
-this one in a minute. It is reported as a disagreement between two tickets rather
-than resolved in a test file, and the course-number half of the same sentence — which
-collides with nothing — is asserted. **The ruling then went the way this entry's title
-does not lead you to expect**: rather than the new ticket bending, Todd withdrew the
-earlier requirement, `test_a_seeded_context_carries_no_title` was deleted in its own
-commit, and E0-14's scope now records what the project gave up — the only fixture in
-the repository that exercised a titleless course. Worth keeping, because the entry's
-own thesis is that these collisions are repaired on the other side of the test wall,
-and this one was repaired on the other side of the *product*: neither test was wrong,
-and no amount of care inside `tests/` could have settled which requirement to keep.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix

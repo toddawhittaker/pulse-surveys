@@ -6,7 +6,8 @@ This is a hand-off note, not a ticket: E1's breakdown is what schedules the work
 and an entry here is what that breakdown has to have read first.
 
 Created by E0-18. `docs/tickets/e0/E0-28-review-debt-from-e0-15.md` item 6 asks
-for this file by name and adds the last section below.
+for this file by name; it wrote "The client-credentials grant, and the four
+things that move with it" on 2026-08-21, and the pointer to E0-35 inside it.
 
 ## The two doors do not yet resolve to one person, and E0 says so on purpose
 
@@ -94,15 +95,61 @@ column falls back to.
 
 ## The client-credentials grant, and the four things that move with it
 
-**E0-28 item 6 writes this section; E0-18 leaves the heading.** It is not
-E0-18's paragraph to write: the four parts that move together — the token
-endpoint in discovery, the AGS and NRPS scopes in `scopes_supported`,
-`auth_token_url` in `/registration` and in `lti_platform`, and somewhere for the
-platform to fetch the tool's key set — belong to the ticket that reviewed the
-deferral. E0-28's acceptance criteria require them to land here.
+E0-15 left NRPS and AGS unauthenticated on the mock platform, deliberately, and
+`app-security` reviewed that deferral and agreed it is safe for this mock as
+deployed. **The problem is not risk. It is that E1 cannot build a conformant
+service client against the current surface at all**, so it would build an
+unauthenticated one against the mock and rewrite it against the first real LMS.
 
-E0-28 also adds a pointer to E0-35's sanctioned-writer question, on the same
-terms: a pointer, not a copy.
+`pylti1p3`'s `ServiceConnector` issues no NRPS request and no AGS request
+without two things: an `auth_token_url` to ask for an access token, and a
+tool-signed `client_assertion` to ask with. It obtains a token first and attaches
+it to every service call. There is no mode in which it calls a roster URL
+unauthenticated, so the tool-side code for a mock that needs no token and the
+tool-side code for a platform that does are not the same code.
+
+Four parts therefore move together, and a surface carrying some of them cannot
+be built against any better than a surface carrying none:
+
+1. **A `token_endpoint` in the mock's OIDC discovery document.** Today
+   `/.well-known/openid-configuration` advertises none, because E0-14 built none
+   and a discovery document that advertised an endpoint answering nothing would
+   be a record asserting something untrue.
+2. **The AGS and NRPS scopes in `scopes_supported`.** Today it is `["openid"]`.
+   A tool asks its token endpoint for the exact scope strings the service
+   claims name (`app.ags::ADVERTISED_SCOPES` and NRPS's own), so a platform that
+   advertises only `openid` is one no service token can be requested from.
+3. **`auth_token_url` in `/registration` and a column for it in
+   `lti_platform`.** The registration document is what a developer pastes into
+   the table in one step, and its keys are the column names — so the endpoint
+   has to exist on both sides or the "one step" stops being literal. Note this
+   lands beside the authorization-endpoint column the section above already
+   requires, and for the same reason: it is a property of a registration, not of
+   the process.
+4. **Somewhere for the platform to fetch the tool's key set.** The
+   `client_assertion` is signed by the *tool*, and the platform verifies it — so
+   the platform needs the tool's public JWKS, and `lti_platform` today has no
+   column for the tool's key pair and the tool publishes no key set for a
+   platform to fetch.
+
+**Done when** the grant lands as **one change covering all four parts**, before
+the first conformant service client is written. Partial is worse than absent
+here: a token endpoint with no scopes, or scopes with no `auth_token_url`, still
+leaves `ServiceConnector` unable to make a single call, and it looks finished
+from a discovery document. The test that says it is done is a roster read
+performed the way `pylti1p3` performs one — token requested with a tool-signed
+assertion, token attached, container returned — rather than an unauthenticated
+`GET` that happens to answer.
+
+**Also read E0-35 before writing the roster sync** — a pointer rather than a
+copy, because that ticket owns the question and restating it here would give it
+two homes.
+[`docs/tickets/e0/E0-35-the-writer-and-the-marker-nobody-routed.md`](../e0/E0-35-the-writer-and-the-marker-nobody-routed.md)
+item 3 is "a writer nobody routed": `services/authz.py::guard_write` is called by
+nothing today, and E1's roster sync is the first code that writes `course`,
+`section`, `enrollment` and the `INSTRUCTOR` `role_assignment` row — every
+relation the guard names, in one module. E0-35 names E1 as its deadline for
+exactly that reason, and it records what its static sweep cannot see.
 
 ## The §4.1 view sweep is blind to an aliased identity column and to join keys
 

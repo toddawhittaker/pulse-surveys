@@ -1630,6 +1630,32 @@ def url_with_query(url: str, query: Mapping[str, Any]) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(merged), split.fragment))
 
 
+def path_appended(url: str, segment: str) -> str:
+    """`url` with `segment` added to its path, **before** any query it carries.
+
+    **The hazard this exists for is Moodle's.** AGS 2.0 derives the Score and
+    Result services from a line item's own `id` by appending `/scores` or
+    `/results` to it, and every worked example in the specification shows an id
+    that is a bare path — so `id + "/scores"` is right, forever, against a
+    platform whose ids carry no query. Moodle's line item ids carry one:
+    `…/lineitems/3/lineitem?type_id=1`, and the segment belongs *before* it.
+    Concatenation there produces `…/lineitem?type_id=1/scores`, which is a
+    request to the line item itself carrying a nonsense query — a URL that is
+    well-formed, that some platform will answer with something, and that posts
+    no score anywhere.
+
+    This is the client E0-28 item 3 says a test must model, so it lives in one
+    place and both service URLs are built from it (`docs/MISTAKES.md` entry 13:
+    a hazard written down and worked around in only one of the two places facing
+    it is not worked around). It is correct for a bare id too — that is what
+    lets it land before the platform mints a querified one, without a single
+    existing assertion moving.
+    """
+    split = urlsplit(url)
+    path = f"{split.path.rstrip('/')}/{segment.strip('/')}"
+    return urlunsplit((split.scheme, split.netloc, path, split.query, split.fragment))
+
+
 def declared_paths(application: Any, method: str = "GET") -> list[str]:
     """Every path `application` declares that answers `method` and takes no parameter.
 
@@ -1935,6 +1961,23 @@ class MembershipPage(NamedTuple):
     relations: dict[str, str]
     members: list[dict[str, Any]]
     next_url: str | None
+
+
+class ResultPage(NamedTuple):
+    """One page of an AGS Result container, with the header that pages it.
+
+    The twin of `MembershipPage` above, and it exists for the same reason: E0-28
+    item 4 makes the results container page like the roster, so a test asks it
+    the same questions — which relations the page advertises, and what the page
+    itself carries. Keeping the raw header beside the parsed relations is what
+    lets a failure print what the platform actually sent.
+    """
+
+    url: str
+    status_code: int
+    results: list[dict[str, Any]]
+    link_header: str | None
+    relations: dict[str, str]
 
 
 class SeededContext(NamedTuple):
@@ -2571,16 +2614,28 @@ class MockPlatform:
             )
         ]
 
-    def post_score(self, line_item: Mapping[str, Any], payload: Mapping[str, Any]) -> Any:
-        """POST one score against a line item, to the URL AGS derives from its `id`.
+    def scores_url(self, line_item: Mapping[str, Any]) -> str:
+        """Where AGS puts one line item's Score service.
 
         `{lineitem}/scores` is the specification's own construction rather than
         this file's guess: AGS 2.0 defines the Score service as the line item URL
         with `/scores` appended, which is why criterion 3 can speak of an
         identifier "that score posting accepts" without naming a second URL.
+
+        The *appending* is `path_appended`'s, not a concatenation, because a line
+        item id may carry a query and the segment goes before it. See that
+        function for the platform this is true of and what concatenation does
+        there; E0-28 item 3 makes this helper the client a test models.
         """
-        identifier = self.line_item_id(line_item)
-        return self.service_post(f"{identifier.rstrip('/')}/scores", payload, SCORE_MEDIA_TYPE)
+        return path_appended(self.line_item_id(line_item), "scores")
+
+    def results_url(self, line_item: Mapping[str, Any]) -> str:
+        """Where AGS puts one line item's Result container. Same insertion rule."""
+        return path_appended(self.line_item_id(line_item), "results")
+
+    def post_score(self, line_item: Mapping[str, Any], payload: Mapping[str, Any]) -> Any:
+        """POST one score against a line item, to the URL AGS derives from its `id`."""
+        return self.service_post(self.scores_url(line_item), payload, SCORE_MEDIA_TYPE)
 
     def line_item_id(self, line_item: Mapping[str, Any]) -> str:
         """A line item's own URL, or a failure saying it has none."""
@@ -2629,7 +2684,7 @@ class MockPlatform:
         return [entry for entry in self.posted_scores() if entry.get("lineItem") == identifier]
 
     def results(self, line_item: Mapping[str, Any], **query: Any) -> list[dict[str, Any]]:
-        """The conformant AGS Result container for one line item.
+        """The conformant AGS Result container for one line item, **one page of it**.
 
         The other half of E0-15's readback, and the one E3 is built against. AGS
         2.0 puts the Result service at the line item URL with `/results`
@@ -2637,25 +2692,65 @@ class MockPlatform:
         `resultMaximum` and `scoreOf` — no timestamp, no progress. That absence
         is a criterion of its own, which is why this is reached separately from
         `posted_scores` rather than folded into it.
+
+        One page, said in the summary line rather than in a footnote, because
+        E0-28 item 4 makes this container page: every caller here posts a handful
+        of scores and reads them off the first page, and a caller that posts more
+        than a page's worth wants `result_pages` below. A test comparing "the
+        container before" with "the container after" through this method is
+        comparing two page-sized windows, which is `docs/MISTAKES.md` entry 3
+        with a bound instead of a zero.
         """
-        identifier = self.line_item_id(line_item)
-        response = self.service_get(
-            self.with_query(f"{identifier.rstrip('/')}/results", query),
-            accept=RESULT_CONTAINER_MEDIA_TYPE,
-        )
+        return self.result_page(self.with_query(self.results_url(line_item), query)).results
+
+    def result_page(self, url: str) -> ResultPage:
+        """Fetch one page of a result container and read its paging header."""
+        response = self.service_get(url, accept=RESULT_CONTAINER_MEDIA_TYPE)
         assert response.status_code == 200, (
-            f"The AGS Result service answered {response.status_code} for line item "
-            f"`{identifier}`. E0-15: 'The conformant AGS Results endpoint answers for the same "
-            f"line item.' Body begins {response.text[:200]!r}."
+            f"The AGS Result service answered {response.status_code} for `{url}`. E0-15: 'The "
+            "conformant AGS Results endpoint answers for the same line item.' Body begins "
+            f"{response.text[:200]!r}."
         )
+        return self.result_page_of(url, response)
+
+    def result_page_of(self, url: str, response: Any) -> ResultPage:
+        """Read one already-fetched result page, header and all.
+
+        Split from the fetch for the reason `membership_page_of` is: the walk and
+        a caller asking for a single page build a page from one place.
+        """
         listed = response.json()
         if isinstance(listed, dict):
             listed = listed.get("results")
         assert isinstance(listed, list), (
-            f"The AGS Result service served {response.json()!r}, which is not a result container. "
-            "AGS 2.0 serves an array of results."
+            f"The AGS Result service served {response.json()!r} for `{url}`, which is not a "
+            "result container. AGS 2.0 serves an array of results."
         )
-        return [result for result in listed if isinstance(result, dict)]
+        header = response.headers.get("link")
+        return ResultPage(
+            url=url,
+            status_code=response.status_code,
+            results=[result for result in listed if isinstance(result, dict)],
+            link_header=header,
+            relations=link_relations(header),
+        )
+
+    def result_pages(self, line_item: Mapping[str, Any], **query: Any) -> list[ResultPage]:
+        """Every page of one line item's result container, walked by `Link`.
+
+        The same walk the roster and the line-item container use, which is E0-28
+        item 4's own requirement — "a test walks it the way the roster walk does"
+        — and the reason it is the same `link_walk` rather than a second one is
+        that the two ways of not terminating are already named there.
+        """
+        return [
+            self.result_page_of(page_url, response)
+            for page_url, response in self.link_walk(
+                self.with_query(self.results_url(line_item), query),
+                RESULT_CONTAINER_MEDIA_TYPE,
+                "result container",
+            )
+        ]
 
 
 @pytest.fixture
@@ -2753,6 +2848,18 @@ def link_relations_in() -> Callable[[str | None], dict[str, str]]:
     you claim it catches *and* the text you claim it allows).
     """
     return link_relations
+
+
+@pytest.fixture
+def path_appended_to() -> Callable[[str, str], str]:
+    """Hand `path_appended` to the control test that checks the insertion itself.
+
+    `MockPlatform.scores_url` and `MockPlatform.results_url` build every AGS
+    service URL with this same function, so the control and the thing it controls
+    cannot disagree about where a path segment goes — which is the whole value of
+    a control (`docs/MISTAKES.md` entry 3).
+    """
+    return path_appended
 
 
 @pytest.fixture

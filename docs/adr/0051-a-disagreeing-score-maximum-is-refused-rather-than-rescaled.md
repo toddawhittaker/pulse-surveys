@@ -85,4 +85,8 @@ where the reason lives.
 [E0-28](../tickets/e0/E0-28-review-debt-from-e0-15.md) item 3 is related and is
 not this: a Moodle line item id carries a query string, so `id + "/scores"` is
 wrong there. Both are "the mock is smoother than reality" findings; this one was
-closable in place and that one needs a seeded line item shaped differently.
+closable in place and that one was not. Item 3 landed on 2026-08-21, and not as
+the "seeded line item shaped differently" this paragraph guessed at — **every**
+line item this platform mints now carries `?type_id=<n>`, because one querified
+id beside bare ones leaves the naive concatenation right for everything E3
+actually reads out of a container.

@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import count
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from app.config import PlatformSettings
 
@@ -54,6 +54,31 @@ LINE_ITEM_PAGE_SIZE = 5
 # platform caps what a client requests, and a mock that did not would let E3
 # ship a sync that asks for everything and works only here.
 MAX_LINE_ITEM_LIMIT = 100
+
+# The same two numbers for the Result container, which pages on the same terms
+# (E0-28 item 4). A real platform pages results: a 200-student section on a
+# platform paging at 50 reads back 50 results and 150 apparent non-submitters,
+# and E3 would then re-post 150 grades every week and never converge.
+#
+# Separate constants from the line-item pair rather than one shared page size,
+# because they are two containers whose sizes are two decisions — a gradebook
+# holds one line item per section and a result per student, so nothing says the
+# two must move together. They happen to agree today.
+RESULT_PAGE_SIZE = 5
+MAX_RESULT_LIMIT = 100
+
+# The query parameter every line item id this platform mints carries, and it is
+# **Moodle's own name** rather than one invented here (E0-28 item 3). Moodle's
+# ids look like `…/lineitems/3/lineitem?type_id=1`, and the `/scores` segment
+# goes *before* the query.
+#
+# Every id carries it, not one minted for a test to find. That is the whole
+# point: while ids are bare paths, `id + "/scores"` is right here forever and E3
+# can ship the concatenation with a green suite — correct and naive are the same
+# string, so no assertion can tell them apart. E3 also reads ids out of the
+# container rather than out of a creation response, so a single querified id
+# would leave the hazard in place for the path that matters.
+LINE_ITEM_ID_QUERY_PARAMETER = "type_id"
 
 # The scopes AGS 2.0 names for the two things §3.4 does, plus the two read-only
 # scopes a platform advertises beside them. A tool asks its token endpoint for
@@ -422,6 +447,21 @@ class GradeBook:
 
     # -- line items ----------------------------------------------------------
 
+    def line_item_identifier(self, context_id: str, line_item_id: str) -> str:
+        """The `id` this platform gives the line item at `line_item_id` in `context_id`.
+
+        One builder for both directions, which is the point: the id is minted
+        here when a line item is created and rebuilt here when one is looked up,
+        so a platform that mints `…/3?type_id=3` cannot route only `…/3` and hand
+        a tool an id it cannot use (`docs/MISTAKES.md` entry 13). The query is
+        what E0-28 item 3 adds; the path is the same URL `line_item_url` has
+        always built.
+        """
+        return (
+            f"{self.settings.line_item_url(context_id, line_item_id)}"
+            f"?{LINE_ITEM_ID_QUERY_PARAMETER}={line_item_id}"
+        )
+
     def create_line_item(self, context_id: str, payload: dict[str, Any]) -> LineItem:
         """Store one line item and give it a URL of its own.
 
@@ -429,6 +469,10 @@ class GradeBook:
         the tool spelled one: AGS makes the `id` the platform's, and a platform
         that accepted a tool's would let one section's passback address another
         section's column.
+
+        **The id carries a query string** (E0-28 item 3), because a real
+        platform's does and a tool has to survive it. See
+        `LINE_ITEM_ID_QUERY_PARAMETER` for why every id rather than one.
         """
         required_members(payload, REQUIRED_LINE_ITEM_MEMBERS, "line item")
         if not numeric(payload["scoreMaximum"]) or payload["scoreMaximum"] <= 0:
@@ -437,7 +481,7 @@ class GradeBook:
                 "a positive number; §3.4 posts a participation score as a percentage of it."
             )
         ordinal = next(self._next_ordinal)
-        identifier = self.settings.line_item_url(context_id, str(ordinal))
+        identifier = self.line_item_identifier(context_id, str(ordinal))
         document = {key: value for key, value in payload.items() if key != "id"}
         document["id"] = identifier
         line_item = LineItem(identifier=identifier, context_id=context_id, document=document)
@@ -472,8 +516,15 @@ class GradeBook:
 
         Addressed through its context as well as its own identifier, so a line
         item cannot be reached from a section it does not belong to.
+
+        The key is rebuilt by `line_item_identifier`, the same function that
+        minted it, so the platform serves the exact id it handed out — query
+        included. A tool sending the id with the query stripped still reaches the
+        line item, because the query is not part of the route's path; that
+        tolerance is wider than a real platform's and is named residue rather
+        than something E0-28 closes.
         """
-        found = self._line_items.get(self.settings.line_item_url(context_id, line_item_id))
+        found = self._line_items.get(self.line_item_identifier(context_id, line_item_id))
         return found if found is not None and found.context_id == context_id else None
 
     # -- scores --------------------------------------------------------------
@@ -582,14 +633,16 @@ class GradeBook:
         number in front of a student that the platform has just said does not
         exist.
 
-        **What happens when an ungraded score arrives after a graded one is not
-        settled here.** This fold takes the newest, so an ungraded score retracts
-        the grade before it; Canvas instead ignores the score and leaves the
-        earlier grade standing. Those are opposite behaviours, AGS settles
-        neither, and no test pins one — it is
-        [E0-28](../../docs/tickets/e0/E0-28-review-debt-from-e0-15.md)'s to
-        decide. What is written here is the continuation of the existing rule
-        rather than an answer to that question.
+        **What happens when an ungraded score arrives after a graded one is open
+        by decision, and stays open.** This fold takes the newest, so an ungraded
+        score retracts the grade before it; Canvas instead ignores the score and
+        leaves the earlier grade standing. Those are opposite behaviours and AGS
+        settles neither, so no test pins one. E0-28 looked at this and
+        deliberately did not carry it — an earlier version of this paragraph said
+        the question was E0-28's to decide, and that was never true of the
+        ticket's scope. It belongs to whoever builds E3's passback, which is the
+        first code with a reason to care which way it goes. What is written here
+        is the continuation of the existing rule rather than an answer.
 
         **Newest by timestamp, with arrival order breaking a tie**, and not by
         arrival order alone. The 409 above already makes the log monotonic per
@@ -642,14 +695,50 @@ class GradeBook:
         return found[0] if found else None
 
 
+def path_appended(url: str, suffix: str) -> str:
+    """`url` with `suffix` added to its path, **before** any query it carries.
+
+    AGS 2.0 derives the Score and Result services from a line item's own `id` by
+    appending a segment to it, and every worked example in the specification
+    shows an id that is a bare path — so `id + "/scores"` is right, forever,
+    against a platform whose ids carry no query. This platform's ids carry one
+    (see `LINE_ITEM_ID_QUERY_PARAMETER`), and concatenation there produces
+    `…/lineitem?type_id=1/scores`: a request to the line item itself with a
+    nonsense query, well-formed, answerable, and posting no score anywhere.
+
+    So the platform composes its own service URLs the way it requires a tool to
+    compose them. `result_url` below used to be an f-string concatenation, which
+    is itself the naive assembly — it was correct only because no id this
+    platform minted carried a query, and it would have broken in the same commit
+    that made one.
+
+    A trailing slash on `url` does not become a doubled one, because a platform
+    is free to mint either spelling and a `//` in a path is a different path.
+    """
+    split = urlsplit(url)
+    path = f"{split.path.rstrip('/')}/{suffix.strip('/')}"
+    return urlunsplit((split.scheme, split.netloc, path, split.query, split.fragment))
+
+
 def result_url(line_item: LineItem, user_id: str) -> str:
     """Where one user's result on one line item is addressed.
 
     AGS answers a score post with the URL of the result it produced, and serves
     the same URL inside the result itself. One builder, so the two cannot
-    disagree about how a user identifier is encoded into a path.
+    disagree about how a user identifier is encoded into a path — a passback
+    follows the first and a reconciliation follows the second, so a fix reaching
+    only one of them leaves half a defect in place (`docs/MISTAKES.md` entry 13).
+
+    **`safe=""` on the encoding, and no decode anywhere** (E0-28 item 9). An LTI
+    `sub` may contain a slash, and encoding it whole is what keeps `a/b` a single
+    path segment rather than two. The route registered at `RESULT_PATH` uses
+    Starlette's `:path` converter so the decoded path reaches it intact; see the
+    comment on that constant. A `sub` of `a%2Fb` — an ordinary identifier that
+    happens to look like an encoding — quotes to `a%252Fb` and stays a different
+    student, which an extra `unquote` anywhere would silently merge into the
+    first. One student's grade served to a request about another, with a 200.
     """
-    return f"{line_item.identifier}/results/{quote(user_id, safe='')}"
+    return path_appended(line_item.identifier, f"results/{quote(user_id, safe='')}")
 
 
 def result_document(line_item: LineItem, user_id: str, score: dict[str, Any]) -> dict[str, Any]:

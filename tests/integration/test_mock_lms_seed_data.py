@@ -18,6 +18,18 @@ rather than quietly enjoying — a test that discovers a field by the shape of i
 value is satisfied by a field carrying a date for an unrelated reason, and this
 one cannot be.
 
+**One member carries no window, and that is a criterion rather than a gap**
+(E0-28 item 1). E0-15 requires the extension on every member, which is the case
+no mainstream platform actually presents: NRPS 2.0 carries no dates, so a
+platform supplying them supplies a vendor extension and most supply nothing. A
+seed where every member has one lets E1 write `member[EXTENSION]["start"]` and
+pass every test here. So exactly one seeded member — a student in
+`NURS-8100-Q2FF`, a section away from the add-and-drop assertions, `Active`, and
+not one of the two users the launch page signs launches for — is served with the
+extension key **absent**. Three tests hold that shape: the count, the absence of
+the key itself rather than a null value, and the placement. The rule E0-15
+states is not withdrawn; a single case is added beside it.
+
 **On titles, and what asserting them cost.** E0-15's scope says "every seeded
 course needs a title"; E0-14's asked this mock to seed one context carrying `id`
 alone, so that E1's ingestion met a titleless course in a test rather than in a
@@ -115,6 +127,25 @@ MEMBER_ID = "user_id"
 # the namespace that enrollment dates are per-platform rather than core.
 ENROLLMENT_EXTENSION = "https://mock-lms.invalid/spec/nrps/enrollment"
 
+# How many seeded members carry no enrollment window at all. **E0-28 item 1's
+# number, and it is exactly one** — the ticket amends E0-15's "every member"
+# criterion by adding a single case rather than withdrawing the rule. One,
+# rather than "at least one", because both directions are the criterion: no
+# seeded roster shows E1 the platform that supplies no dates unless one member
+# lacks the extension, and E3's denominator loses its input if the rest do.
+MEMBERS_WITHOUT_AN_ENROLLMENT_WINDOW = 1
+
+# The section E0-28 item 1 puts that member in, written as the three tokens the
+# platform publishes about it rather than as one string. **The ticket's choice,
+# not this suite's**: the member sits in `NURS-8100-Q2FF` so that it is a section
+# away from the add-and-drop assertions below, which read one section's windows
+# against each other and would be answered differently by a member carrying
+# none. Tokenised because the seed is free to spell the section
+# `NURS-8100-Q2FF`, `NURS 8100 Q2FF`, or inside a course title, and none of those
+# is a decision this suite should pin — what the ticket names is which course,
+# which number and which section code.
+WINDOWLESS_SECTION_TOKENS = ("NURS", "8100", "Q2FF")
+
 # An RFC 3339 timestamp that carries an offset. The ticket's requirement is the
 # offset — "never a bare date" — because E0-06 made the calendar timezone-aware
 # throughout and a naive stamp hands E1 a value it has to guess a zone for.
@@ -160,9 +191,74 @@ def strings_in(node: Any) -> list[str]:
 
 
 def enrollment_of(member: dict[str, Any]) -> dict[str, Any] | None:
-    """A member's enrollment window, or `None` where it carries none."""
+    """A member's enrollment window, or `None` where it carries none.
+
+    `None` covers three different members — one with no extension key, one whose
+    key is `null`, and one whose key holds something that is not an object — and
+    E0-28 item 1 makes the first of those the seeded case and the other two
+    wrong. So a test about *which* of them the platform serves asks the member
+    directly rather than through this; see
+    `test_the_windowless_member_carries_no_enrollment_extension_key_at_all`.
+    """
     window = member.get(ENROLLMENT_EXTENSION)
     return window if isinstance(window, dict) else None
+
+
+def windowless_members(rosters: list[tuple[Any, list[dict[str, Any]]]]) -> list[tuple[Any, Any]]:
+    """Every seeded member carrying no enrollment window, with the section it is in.
+
+    Kept as pairs because E0-28 item 1 is as much about *where* the member is as
+    about what it lacks: "in a section away from the add-and-drop assertions" is
+    half the criterion, and a member found without its context cannot answer it.
+    """
+    return [
+        (context, member)
+        for context, members in rosters
+        for member in members
+        if enrollment_of(member) is None
+    ]
+
+
+def the_windowless_member(platform: Any) -> tuple[Any, dict[str, Any]]:
+    """The one seeded member with no enrollment window, or a failure saying what was found.
+
+    Fails rather than answering the first of several, because every assertion
+    that reads this member is about a member the ticket describes in the
+    singular — and two of them would mean the tests below were describing
+    whichever one the walk happened to reach first.
+    """
+    found = windowless_members(seeded_rosters(platform))
+    assert len(found) == MEMBERS_WITHOUT_AN_ENROLLMENT_WINDOW, (
+        f"{len(found)} seeded members carry no enrollment window and E0-28 item 1 seeds exactly "
+        f"{MEMBERS_WITHOUT_AN_ENROLLMENT_WINDOW} — the ones found are "
+        f"{[(context.context_id, member.get(MEMBER_ID)) for context, member in found]}. With none, "
+        "no seeded roster shows E1 the platform that supplies no enrollment dates at all, which is "
+        "every mainstream platform; with more than one, the seed has stopped being a single "
+        "deliberate case beside the rule E0-15 states."
+    )
+    return found[0]
+
+
+def tokens_published_about(platform: Any, context: Any) -> set[str]:
+    """Every alphanumeric token the platform publishes about one section, upper-cased.
+
+    The three places a section names itself to a tool — the launch's context
+    claim, its resource link claim, and the `context` object on the membership
+    container — split on everything that is not a letter or a digit. Tokens
+    rather than a substring search, so `NURS-8100-Q2FF`, `NURS 8100 Q2FF` and a
+    title carrying the same three words all answer the same question, and so
+    that `Q2FF` cannot be found inside a longer opaque identifier.
+    """
+    strings = [
+        value
+        for claim in (CONTEXT_CLAIM, RESOURCE_LINK_CLAIM)
+        for value in strings_in(context.launches[0].claims.get(claim))
+    ]
+    page = platform.membership_page(context.memberships_url)
+    strings += strings_in(page.document.get("context"))
+    return {
+        token.upper() for value in strings for token in re.split(r"[^A-Za-z0-9]+", value) if token
+    }
 
 
 def carries_an_offset(value: Any) -> bool:
@@ -545,35 +641,49 @@ def test_the_offset_check_reads_an_rfc_3339_stamp_and_refuses_a_bare_date() -> N
         )
 
 
-def test_every_roster_member_carries_an_enrollment_start_with_an_offset(
+def test_every_roster_member_but_one_carries_an_enrollment_start_with_an_offset(
     mock_platform: Any,
 ) -> None:
-    """Criterion 6's first half, on the member extension E0-15 names.
+    """Criterion 6's first half, as E0-28 item 1 amends it: every member but exactly one.
 
-    Two mutations, and the second is the near miss. The first is the extension
-    absent altogether, or present on the students and not on the instructor:
-    SPEC §3.4 starts a late add's denominator at the student's first enrolled
-    week "from NRPS enrollment data", so a member with no window is a member E3
-    cannot compute a denominator for.
+    **Both directions are the criterion, which is why this test counts rather
+    than checks for absence.** E0-15 requires the extension on every member and
+    E0-28 item 1 adds one deliberate exception; a seed answering "none of them
+    carry it" satisfies "not every member carries it" perfectly, and leaves E3
+    with no denominator anywhere. So the windowless members are required to
+    number exactly one, and every other member is required to carry an
+    offset-bearing `start`.
 
-    The second is `"start": "2026-09-08"`. It is a date, it parses, it reads
-    correctly in a response body, and it is what the requirement was written
-    against — E0-06 made the calendar timezone-aware throughout, so a naive stamp
-    is a value E1 has to pick a zone for, and whichever it picks is right for
-    half the year.
+    Three mutations. The first is the extension dropped altogether, or dropped
+    from the instructors: SPEC §3.4 starts a late add's denominator at the
+    student's first enrolled week "from NRPS enrollment data". The second is the
+    exception spreading — a second member losing its window is the seed drifting
+    away from the single case the ticket sanctions, and every add-and-drop
+    assertion in this file quietly loses an input.
+
+    The third is the near miss on the value: `"start": "2026-09-08"`. It is a
+    date, it parses, it reads correctly in a response body, and it is what the
+    requirement was written against — E0-06 made the calendar timezone-aware
+    throughout, so a naive stamp is a value E1 has to pick a zone for, and
+    whichever it picks is right for half the year.
     """
-    members = seeded_members(mock_platform)
-    windowless = [member for member in members if enrollment_of(member) is None]
-    assert not windowless, (
+    rosters = seeded_rosters(mock_platform)
+    members = [member for _, members in rosters for member in members]
+    windowless = windowless_members(rosters)
+    assert len(windowless) == MEMBERS_WITHOUT_AN_ENROLLMENT_WINDOW, (
         f"{len(windowless)} of {len(members)} roster members carry no `{ENROLLMENT_EXTENSION}` "
-        f"object — the first carries {sorted(windowless[0])}. E0-15: 'Every NRPS member carries "
-        "the enrollment extension named in the scope', and SPEC §3.4 takes a late add's "
-        "denominator from it."
+        f"object: {[(context.context_id, member.get(MEMBER_ID)) for context, member in windowless]}"
+        f". E0-28 item 1 seeds exactly {MEMBERS_WITHOUT_AN_ENROLLMENT_WINDOW} such member — one, so "
+        "E1 meets the platform that supplies no enrollment dates in a test, and only one, because "
+        "E0-15's rule that the rest carry the extension is not reopened and SPEC §3.4 takes a late "
+        "add's denominator from it."
     )
+    exception = {id(member) for _, member in windowless}
     naive = [
         (member.get(MEMBER_ID), (enrollment_of(member) or {}).get("start"))
         for member in members
-        if not carries_an_offset((enrollment_of(member) or {}).get("start"))
+        if id(member) not in exception
+        and not carries_an_offset((enrollment_of(member) or {}).get("start"))
     ]
     assert not naive, (
         f"{len(naive)} enrollment windows carry a `start` that is missing or has no offset: "
@@ -581,6 +691,93 @@ def test_every_roster_member_carries_an_enrollment_start_with_an_offset(
         "an offset, never a bare date.' A bare date parses perfectly and lands at midnight in "
         "whatever zone the reader assumes, which is the failure the requirement is written "
         "against rather than a stricter spelling of it."
+    )
+
+
+def test_the_windowless_member_carries_no_enrollment_extension_key_at_all(
+    mock_platform: Any,
+) -> None:
+    """E0-28 item 1: absent, not `null`, and not an object with a `null` `start`.
+
+    **The three shapes are three different facts to a tool**, and only one of
+    them is what a platform supplying no enrollment dates actually serves.
+    `{"…/enrollment": null}` and `{"…/enrollment": {"start": null}}` are both a
+    platform that *has* this extension and is telling you something about this
+    member with it; an absent key is a platform that does not have it. E1 will
+    write a `PlatformProfile` adapter (§7.3) that asks whether the extension is
+    there at all, and a seed serving a null-valued key hands that adapter a
+    member it reads as "this platform supplies windows and this student has
+    none", which is the wrong branch.
+
+    So this is asserted against the member's own keys rather than through
+    `enrollment_of`, which cannot tell the three apart — and the near miss is
+    exactly the tidy thing an implementer writes when the seed's `opened_at`
+    becomes `str | None` and the serialiser keeps emitting the member.
+    """
+    context, member = the_windowless_member(mock_platform)
+    assert ENROLLMENT_EXTENSION not in member, (
+        f"The member with no enrollment window ({member.get(MEMBER_ID)} in {context.context_id}) "
+        f"carries `{ENROLLMENT_EXTENSION}` = {member.get(ENROLLMENT_EXTENSION)!r}. E0-28 item 1 "
+        "omits the key entirely, because an extension present and empty says 'this platform "
+        "supplies enrollment windows and this student has none' while an absent one says 'this "
+        "platform supplies none at all' — and those send a roster sync down different branches. "
+        f"The member's keys are {sorted(member)}."
+    )
+
+
+def test_the_windowless_member_is_an_active_student_away_from_the_add_and_drop_section(
+    mock_platform: Any,
+) -> None:
+    """E0-28 item 1's placement, which is half of what the item asks for.
+
+    "In a section away from the add-and-drop assertions" is a requirement about
+    the *seed*, and it is checkable: the member sits in `NURS-8100-Q2FF`, which
+    is not the section whose windows
+    `test_a_seeded_section_holds_one_member_who_enrolled_after_a_cohort` and
+    `test_the_enrollment_window_ends_the_dropped_member_and_nobody_else` read
+    against each other. Put the windowless member in that section instead and
+    those two tests are reading a section with a member whose `start` is
+    unknown — they would still pass, on one fewer input, which is the quiet
+    version of this going wrong.
+
+    Two more mutations, and both are seeds that read as reasonable. Making the
+    windowless member the *dropped* one folds two edge cases into one person, so
+    a tool that mishandles either is only ever seen failing once, and it puts a
+    member with a `status` of `Inactive` and no window in front of E3 — a state
+    the ticket does not ask for. Making it one of the two users the launch page
+    signs launches for puts it in front of every other suite in this repository:
+    E0-14's launch tests, the roster walk's lower bound and E3's future passback
+    fixtures all reach for those users by name, and none of them is about a
+    member with no enrollment window.
+
+    The section is named by the tokens it publishes rather than by a string, for
+    the reason `WINDOWLESS_SECTION_TOKENS` gives. If the seed has renamed the
+    section, this test goes red and the message says so rather than leaving the
+    next reader to wonder whether a defect was found.
+    """
+    context, member = the_windowless_member(mock_platform)
+
+    published = tokens_published_about(mock_platform, context)
+    missing = [token for token in WINDOWLESS_SECTION_TOKENS if token not in published]
+    assert not missing, (
+        f"The member with no enrollment window ({member.get(MEMBER_ID)}) is in context "
+        f"{context.context_id}, which publishes {sorted(published)} and does not name {missing}. "
+        "E0-28 item 1 places it in `NURS-8100-Q2FF`, a section away from the add-and-drop "
+        "assertions in this file — those read one section's enrollment windows against each "
+        "other, and a member carrying none is an input they silently lose."
+    )
+    assert member.get("status") == "Active", (
+        f"The member with no enrollment window carries `status` {member.get('status')!r}. E0-28 "
+        "item 1 makes it `Active`: a member that is both departed and windowless folds two edge "
+        "cases into one person, so E3 never meets either on its own, and this file's `end` "
+        "correspondence has a departed member it cannot read a window from."
+    )
+    assert str(member.get(MEMBER_ID)) not in context.subjects, (
+        f"The member with no enrollment window is {member.get(MEMBER_ID)}, which is one of the "
+        f"users the launch page signs launches for in {context.context_id} ({sorted(context.subjects)}"
+        "). Those two users are reached by name from E0-14's launch suite, from the roster walk's "
+        "lower bound and from every AGS fixture that posts a score, none of which is about a "
+        "member with no enrollment window."
     )
 
 
@@ -610,11 +807,30 @@ def test_the_enrollment_window_ends_the_dropped_member_and_nobody_else(
     absent key cannot tell "still enrolled" from "this platform supplies no end
     date", and those want different behaviour from a sync that has to decide
     whether a student has gone.
+
+    **Amended for E0-28 item 1**, and the amendment is narrow on purpose. One
+    seeded member now carries no enrollment extension at all, so the `end` rule
+    is asked of the members that carry a window rather than of every member —
+    `"end" not in (enrollment_of(member) or {})` was true of the windowless one
+    and would have failed this test inside its own reading of the seed
+    (`docs/MISTAKES.md` entry 22: a new rule making an earlier ticket's test
+    unrunnable, with the repair on the far side of the test wall). What is *not*
+    weakened: a member carrying a window and no `end` key still fails, which is
+    the mutation this assertion exists for, and the windowless member is required
+    elsewhere to be exactly one and to be `Active`.
     """
     members = seeded_members(mock_platform)
-    keyless = [
-        member.get(MEMBER_ID) for member in members if "end" not in (enrollment_of(member) or {})
+    windowed = [
+        (member.get(MEMBER_ID), enrollment_of(member))
+        for member in members
+        if enrollment_of(member) is not None
     ]
+    assert windowed, (
+        "No seeded member carries an enrollment window at all, so every assertion below is about "
+        "an empty set. E0-28 item 1 exempts exactly one member; the rest carry the extension "
+        "E0-15 requires."
+    )
+    keyless = [name for name, window in windowed if "end" not in (window or {})]
     assert not keyless, (
         f"{len(keyless)} enrollment windows carry no `end` key at all — {keyless[:5]}. ADR 0048 "
         "makes `end` present and `null` for a member still enrolled: an absent key reads as "

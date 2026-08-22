@@ -1,17 +1,33 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 49**
+**Caught: 50**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*28 instances recorded; the 3 below are the most recent, newest first. The
-earlier 25 are in this file's git history and in the pull requests they cite.*
+*29 instances recorded; the 3 below are the most recent, newest first. The
+earlier 26 are in this file's git history and in the pull requests they cite.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
 were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
+
+*(Writing E0-28's tests, and it is the shape where **the walk cannot fail the
+assertion it is walking for.** Item 5 asks that a paged container carry `next`
+only where a next page exists, and the obvious test walks a multi-page roster and
+requires `next` absent on the last page and present on the others. Both are true
+of any walk by construction — `link_walk` stops when a page advertises no `next`,
+so the assertion is a restatement of the loop condition and would pass against a
+container that advertised one page too many. What can see that defect is a
+container that fits on a single page, and only if "single page" is defined as
+*the first page holds every member the container has* rather than as "the walk
+returned one page": under the very mutation it is written against, the walk
+returns two. The same round moved item 4's fail-open test off `limit=1` — with
+one filtered result and a page size of one, the filtered and unfiltered pages are
+the same page and a lost filter is invisible — and made it follow the relations
+the platform advertises with no limit at all, over a container the test first
+proves carries more than one student.)*
 
 *(The dev-only test console, and it is the shape where **the page under test can
 be empty and the assertion still passes.** The console fetches the mock provider's
@@ -45,21 +61,6 @@ of the suite's own with the registration pointed at it — and every refusal in 
 set would be satisfied by a door that simply could not verify the new signature,
 so both doors carry a control that re-signs the claims **unchanged** and requires
 the landing page to appear.)*
-
-*(E0-18 PR 1's second round, and it is the shape where **the reader cannot see
-the write it is asserting did not happen.** The new test drives a whole web login
-as the Care person and requires `role_assignment`, `user` and `person` to hold
-the same number of rows afterwards — and the tool commits on a connection of its
-own, so a counter that held one transaction open across the flow would answer out
-of the snapshot it started in and report "unchanged" whatever the door did. It
-opens a connection per count instead, and is shown reading a table the migration
-filled (`alembic_version`) before it reports any table empty, because "nothing was
-written" and "this connection is looking at the wrong database" are otherwise the
-same observation. The wrong-`aud` refusal on the same door is the other face: it
-is posed by re-posing the code exchange as the registered client rather than by
-editing the token, so the signature survives, and it reads the delivered token's
-`aud` back and requires it to name the other client — without which the 4xx is
-just as easily a flow that failed at the exchange.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
