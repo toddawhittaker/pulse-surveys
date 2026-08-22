@@ -24,9 +24,8 @@ rather than leaving it as a weak green assertion.
 > item 1.** Everything below stands for every member that *carries* the
 > extension, and one seeded member now carries none — a student in
 > `NURS-8100-Q2FF`, whose member document omits the key entirely rather than
-> emitting it empty. The reason is in the consequences section already: what a
-> platform supplying no window at all should do is E1's question, and no seeded
-> roster let E1 ask it. The decision is not reversed and no alternative above is
+> emitting it empty. The reason is in the consequences section: the tool will meet
+> platforms that supply no window, and no seeded roster let E1 meet one. The decision is not reversed and no alternative above is
 > reopened; one case is added beside the rule.
 
 Every NRPS member carries one extension member, under a namespace that cannot be
@@ -83,14 +82,16 @@ something the tool already derives, and the two would drift.
 
 E1 learns the right lesson from the mock: enrollment dates arrive per platform
 rather than as core NRPS, so reading them belongs in a `PlatformProfile` adapter
-(§7.3) rather than in the sync. **What a platform that supplies no window at all
-should do is E1's question, not this ticket's**, and it is a real one — the tool
-will meet platforms with no such extension. Since 2026-08-21 E1 can meet one
-here: E0-28 item 1 seeds a single member with no extension key, so the branch
-exists in a fixture rather than only in this paragraph. What the *fallback*
-should be — what denominator §3.4's participation formula uses when there is no
-window — is still open, and E0-28's pull request raises it rather than answering
-it.
+(§7.3) rather than in the sync. The tool will meet platforms with no such
+extension, and since 2026-08-21 E1 can meet one here: E0-28 item 1 seeds a
+single member with no extension key, so the branch exists in a fixture rather
+than only in this paragraph. What the *fallback* should be — what denominator
+§3.4's participation formula uses when there is no window — was raised in
+E0-28's pull request and **settled by Todd on 2026-08-21, in the spec rather
+than here**: §3.4 now says a student with no dates counts as enrolled from the
+section's start, except one who first appears in a roster sync later than the
+section's first sync, who counts from that sync's week. The under-credit for a
+late add the first sync already contained is accepted there in as many words.
 
 The namespace is a string in two places that must agree: `app.nrps` writes it and
 `tests/integration/test_mock_lms_seed_data.py` reads it. That is deliberate — the

@@ -58,8 +58,10 @@ member carries one lets E1 write `member[EXTENSION]["start"]`, pass every test
 here, and meet a `KeyError` or a denominator of zero against a real platform. The
 one exception is a student in `NURS-8100-Q2FF` — a section away from the
 add-and-drop assertions, `Active`, still enrolled — and `app.nrps` omits the
-extension key entirely for it. What the tool should do with a member that carries
-none is E1's question; see the pull request for E0-28.
+extension key entirely for it. What the tool does with a member that carries none
+is SPEC §3.4's rule (settled 2026-08-21): enrolled from the section's start,
+except a member first seen in a sync later than the section's first, who counts
+from that sync's week.
 """
 
 from dataclasses import dataclass, field

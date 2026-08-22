@@ -113,7 +113,8 @@ Participation credit requires a *complete, reasonable* submission:
 - One AGS line item per section: **"Pulse Participation"**, created by the tool on first launch.
 - Score = valid weeks completed ÷ weeks elapsed to date, posted as a percentage of the line item's max score (default 100).
 - Recomputed and re-posted after each week closes; fully automatic, no instructor action or override.
-- Late adds: denominator starts at the student's first enrolled week (from NRPS enrollment data). Drops: scores stop updating; the LMS owns what happens to the column.
+- Late adds: denominator starts at the student's first enrolled week (from NRPS enrollment data). Where the platform supplies no enrollment dates — most supply none — a student counts as enrolled from the section's start date, except that a student who first appears in a roster sync later than their section's first sync counts from the week of that sync. A late add the platform never dated and the first sync already contained cannot be told from a day-one student; that under-credit is accepted, because no rule can recover data the platform never supplied.
+- Drops: scores stop updating; the LMS owns what happens to the column.
 
 ## 4. Confidentiality model
 
