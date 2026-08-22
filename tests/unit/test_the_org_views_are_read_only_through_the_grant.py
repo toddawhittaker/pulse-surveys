@@ -58,12 +58,26 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
     that module comes to hold.
   - **A relation name assembled at run time**, and a read that reaches the views
     through a helper in a package this sweep does not walk.
+  - **A name that reaches the planner with no introducer in front of it.** After
+    E0-42's security pass the introducers are `FROM`, `JOIN`, `INTO`, `UPDATE`,
+    `TABLE`, `USING`, each with an optional `ONLY`, and the bare comma of a
+    `FROM`/`USING` list — which covers `DELETE … USING`, `MERGE … USING`,
+    `INSERT INTO` and the comma-separated join the first version missed. What is
+    left outside is a relation named as a value rather than as a target:
+    `'public.assignment_scope'::regclass` in a lock, or a `TRUNCATE`. Neither
+    reads a row, which is why they are named here rather than added.
   - **`from app import views_sql` followed by attribute access.** The import half
     matches an import that names the `queries` module; reaching the package and
     walking to it is a route this does not follow, and closing it would mean
     flagging every legitimate use of the package's directory.
   - **Migrations.** `backend/alembic.ini`'s revisions live outside
     `backend/app/`, and creating these views is exactly what they are for.
+
+**And one thing it sees that it need not**, recorded so it reads as a decision
+rather than a bug: the comma introducer fires on a *string* that lists these
+views after a comma. Docstrings are subtracted from the tree, so prose belongs in
+one; an executable string that has to name them is a fair thing to be asked
+about. The alternative — no comma — is the hole the security pass walked through.
 """
 
 import ast
@@ -115,17 +129,41 @@ CREATES_A_VIEW = re.compile(
     re.IGNORECASE,
 )
 
-# A relation reference in SQL: the name in the position a statement reads or
-# writes it from, optionally schema-qualified and optionally quoted. The keyword
-# is what keeps a column called `assignment_scope_id` out, and what keeps a
-# `GRANT … ON public.assignment_scope` from reading as a query.
-RELATION_KEYWORDS = r"\b(?:from|join|into|update|delete\s+from|table)"
+# What can introduce a relation in SQL. **The first version enumerated join
+# syntaxes and missed the oldest one there is** — the comma-separated `FROM` list,
+# `FROM public.role_assignment ra, public.assignment_scope s` — which E0-42's
+# security pass ran through `reference_to` and watched pass both halves of this
+# sweep. The repair closes the class rather than that instance, which is this
+# repository's recorded lesson about widening a guard a second time:
+#
+#   - `from`, `join`, `into`, `update` and `table` — the keyword forms, with
+#     `DELETE FROM` and `INSERT INTO` falling out of the first two;
+#   - `using`, which is how `DELETE … USING` and `MERGE … USING` name a second
+#     relation, and which the keyword list had no member for at all;
+#   - `only` after any of them: `FROM ONLY public.assignment_scope`;
+#   - a bare comma, which is the list form — every relation after the first in a
+#     `FROM` or `USING` list is introduced by nothing else.
+#
+# **What the comma costs, stated here rather than discovered later.** A comma
+# appears in a select list too, so an executable *string* naming one of these
+# views after one is flagged: an error message reading "reads role_assignment,
+# assignment_scope", or a column somewhere genuinely named after a view.
+# Docstrings are subtracted from the tree, so prose belongs in one — and a
+# running statement that has to list these views is a fair thing for this sweep
+# to ask about.
+RELATION_INTRODUCERS = r"(?:\b(?:from|join|into|update|table|using)\b(?:\s+only\b)?\s+|,\s*)"
+
+# An optional schema in front of the name, quoted on either part or neither:
+# `public.x`, `"public".x`, `public."x"`, `PUBLIC . X`. The first version spelled
+# `public` literally and unquoted, so `"public".assignment_scope` — which is what
+# a generated statement writes — went unseen.
+SCHEMA_QUALIFIER = r"(?:\"?\w+\"?\s*\.\s*)?"
 
 
 def reference_to(names: tuple[str, ...]) -> re.Pattern[str]:
-    """A pattern matching any of `names` in the position a statement reads it from."""
+    """A pattern matching any of `names` in a position that reads or writes it."""
     return re.compile(
-        RELATION_KEYWORDS + r"\s+(?:public\s*\.\s*)?\"?(" + "|".join(names) + r")\"?\b",
+        RELATION_INTRODUCERS + SCHEMA_QUALIFIER + r"\"?(" + "|".join(names) + r")\"?\b",
         re.IGNORECASE,
     )
 
@@ -248,24 +286,48 @@ def imported_targets(tree: ast.AST, path: Path) -> set[str]:
 # that fired on a column named after a view, or on a `GRANT` naming one, would be
 # red against a correct implementation and would be deleted rather than fixed.
 def sql_must_catch(view: str) -> tuple[str, ...]:
-    """SQL that reads one of the org views, in the shapes a module would write it."""
+    """SQL that reads one of the org views, in every shape that names a relation.
+
+    The last five arrived from E0-42's security pass, which measured the first
+    version against the syntaxes Postgres accepts. The comma-separated list is the
+    one it found passing this whole sweep; the rest of that class is added in the
+    same change rather than one incident at a time.
+    """
     return (
         f"SELECT * FROM {view} WHERE person_id = :person_id",  # noqa: S608
         f'SELECT 1 FROM public."{view}"',  # noqa: S608
         f"SELECT 1 FROM course JOIN {view} ON true",  # noqa: S608
         f"select 1 from PUBLIC . {view.upper()}",  # noqa: S608
         f"UPDATE {view} SET course_id = :course_id",  # noqa: S608
+        # The comma-separated FROM list — the finding.
+        f"SELECT 1 FROM public.role_assignment ra, public.{view} s WHERE ra.id = s.id",  # noqa: S608
+        f"SELECT 1 FROM role_assignment,{view}",  # noqa: S608
+        # Inheritance, and the two statements that name a second relation with USING.
+        f"SELECT 1 FROM ONLY public.{view}",  # noqa: S608
+        f"DELETE FROM course USING {view} WHERE true",  # noqa: S608
+        f"MERGE INTO course c USING public.{view} s ON true",
+        # The quoted schema a generated statement writes.
+        f'SELECT 1 FROM "public".{view}',  # noqa: S608
     )
 
 
 def sql_must_allow(view: str) -> tuple[str, ...]:
-    """Text that names an org view without reading one, and text that names none."""
+    """Text that names an org view without reading one, and text that names none.
+
+    The `_totals` near miss is the load-bearing one: widening what may *introduce*
+    a relation must not widen the **name**, or every relation sharing a prefix
+    with a view becomes a false positive. The two select lists are the comma form
+    asserted from the other side — a comma before a column, and a comma between
+    two relations nobody polices, both still have to pass.
+    """
     return (
         f"SELECT * FROM {view}_totals",  # noqa: S608
         f"SELECT {view}_id FROM role_assignment WHERE person_id = :person_id",  # noqa: S608
         f"GRANT SELECT ON public.{view} TO pulse_app",
         f"-- {view} is reached through the grant functions in `services/authz.py`",
         "SELECT role, person_id FROM role_assignment WHERE person_id = :person_id",
+        f"SELECT person_id, course_id FROM role_assignment JOIN {view}_totals ON true",  # noqa: S608
+        "SELECT a.id, b.id FROM course a, course b WHERE a.id = b.id",
     )
 
 

@@ -159,25 +159,39 @@ SMALLEST_TELLABLE_COUNT = 2
 # something else, and the two are told apart by seeing the text it sat in.
 CONTEXT_CHARACTERS = 60
 
-# Elements whose contents a browser does not render as words on the page. **This
-# is the repair E0-41's verification round forced**: the first version of the
-# roster-count test scanned `response.text` whole and reported 4, 5, 6 and 7 as
-# leaked roster sizes, every one of them out of the inline stylesheet and the
-# decorative SVG in `landing.py`'s page template — hex colours (`#F6F8F4`,
-# `#5B7269`), spacing tokens (`--space-4`), a `line-height: 1.5`, a
-# `stroke-width="2.5"`. No count was rendered anywhere.
-SKIPPED_ELEMENTS = frozenset({"style", "script", "svg"})
+# Elements whose contents a browser never renders as words. **This is the repair
+# E0-41's verification round forced**: the first version of the roster-count test
+# scanned `response.text` whole and reported 4, 5, 6 and 7 as leaked roster sizes,
+# every one of them out of the inline stylesheet and the decorative SVG in
+# `landing.py`'s page template — hex colours (`#F6F8F4`, `#5B7269`), spacing
+# tokens (`--space-4`), a `line-height: 1.5`, a `stroke-width="2.5"`. No count was
+# rendered anywhere. `HTMLParser` treats their contents as raw text, so no tag
+# inside them is parsed either.
+RAW_ELEMENTS = frozenset({"style", "script"})
 
-# …with one exception inside the SVG, because narrowing a scan is how a guard
-# goes blind. Text *drawn* in a graphic is text a reader reads, so `<text>` and
-# its neighbours are collected even inside a skipped `<svg>`: a count rendered
-# there is a count on the page, and a scan that stopped at the `<svg>` boundary
-# would be the mutation this test's own control exists to catch.
-SVG_TEXT_ELEMENTS = frozenset({"text", "tspan", "title", "desc"})
+# The graphic, whose drawing instructions are numbers and whose text is text.
+GRAPHIC_ELEMENT = "svg"
+
+# What is read or spoken from inside a graphic. `<text>` and `<tspan>` are drawn;
+# `<title>` and `<desc>` are the SVG accessibility pair a screen reader announces;
+# `<foreignObject>` holds ordinary HTML rendered inside the graphic (spelled in
+# lower case because `HTMLParser` folds tag names). A count in any of them is a
+# count on the page, and a reader that stopped at the `<svg>` boundary would be
+# the mutation the planted control below exists to catch.
+SPOKEN_INSIDE_A_GRAPHIC = frozenset({"text", "tspan", "title", "desc", "foreignobject"})
+
+# Where a graphic certainly ends, whatever the markup says. An unclosed `<svg>`
+# would otherwise swallow every text node after it — measured by the security pass
+# over this reader — so the document's own closing tags reset the state: a graphic
+# cannot outlive the body it is drawn in.
+DOCUMENT_BOUNDARIES = frozenset({"body", "html"})
 
 # Attributes a screen reader speaks. SPEC §4.1 item 1 names aria labels in the
-# same breath as charts, text and tooltips, so dropping every attribute along
-# with the stylesheet would narrow this scan past the rule it enforces.
+# same breath as charts, text and tooltips. **Collected from every element,
+# including the ones whose contents are skipped**: `<svg aria-label="18 students
+# in your section">` is the standard accessible-chart pattern, so an attribute
+# scan that stopped where the text scan stops would miss the first shape §4.1
+# item 1 names — which is what it did until the security pass ran it.
 READABLE_ATTRIBUTES = ("aria-label", "aria-description", "aria-valuetext", "title", "alt")
 
 # A number a reader would read as a number. The lookarounds are what tell `23` in
@@ -451,48 +465,68 @@ class RenderedText(HTMLParser):
     the first version of the test below did. So the numbers are counted over what
     a browser would show and what a screen reader would say, and nothing else.
 
-    **Three decisions, each of which could have made this blind:**
+    **Four decisions, each of which could have made this blind. The third and the
+    fourth are repairs from E0-42's security pass, which ran this reader over the
+    shapes below and watched it miss them.**
 
       - `style` and `script` contents are dropped. Neither can put a word on the
         page, and both are full of numbers. `HTMLParser` treats their contents as
         raw text, so no tag inside them is parsed either.
-      - `svg` contents are dropped **except** `<text>`, `<tspan>`, `<title>` and
-        `<desc>`, which are drawn or announced. A count rendered inside the
-        decorative graphic is still a count on the page.
-      - Readable attributes are kept. §4.1 item 1 names aria labels beside charts
-        and tooltips; a scan of text nodes alone would miss "23 students" spoken
-        and not shown.
+      - `svg` contents are dropped **except** `<text>`, `<tspan>`, `<title>`,
+        `<desc>` and `<foreignObject>`, which are drawn, announced, or ordinary
+        HTML laid out inside the graphic. A count rendered in any of them is a
+        count on the page.
+      - **Readable attributes are collected from every element, skipped ones
+        included.** An `aria-label` is spoken whatever it is attached to, and
+        `<svg aria-label="18 students in your section">` is *the* accessible-chart
+        pattern — so is `<g aria-label="…">` on a group inside one. The first
+        version collected attributes only after the skip check, which made the one
+        shape §4.1 item 1 names first invisible while the docstring claimed to
+        cover it.
+      - **A graphic cannot outlive the document.** `</body>` and `</html>` reset
+        every state, because an unclosed `<svg>` otherwise swallows every text
+        node to the end of the input. What an unclosed graphic still costs is the
+        text between it and the end of the body: that text is genuinely
+        unreachable to a parser that cannot know where the author meant the
+        graphic to stop, and it is a bounded loss rather than the whole page. The
+        planted control appends its content after `</html>`, so the reader is
+        proved alive even on a page whose graphic never closes.
 
-    Skipping is tracked by tag name rather than by depth, so an unclosed void
-    element inside a graphic cannot swallow the rest of the document.
+    Nesting is counted rather than name-matched, so a `<title>` inside a
+    `<foreignObject>` inside an `<svg>` resolves in the right order.
     """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.skipping: list[str] = []
-        self.drawn = 0
+        self.raw = 0
+        self.graphic = 0
+        self.spoken = 0
         self.readable: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if self.skipping and tag in SVG_TEXT_ELEMENTS:
-            self.drawn += 1
-            return
-        if tag in SKIPPED_ELEMENTS:
-            self.skipping.append(tag)
-            return
-        if self.skipping:
-            return
+        # Before any skip decision: an attribute is spoken wherever it sits.
         self.readable += [value for name, value in attrs if name in READABLE_ATTRIBUTES and value]
+        if tag in RAW_ELEMENTS:
+            self.raw += 1
+        elif tag == GRAPHIC_ELEMENT:
+            self.graphic += 1
+        elif self.graphic and tag in SPOKEN_INSIDE_A_GRAPHIC:
+            self.spoken += 1
 
     def handle_endtag(self, tag: str) -> None:
-        if self.skipping and tag in SVG_TEXT_ELEMENTS and self.drawn:
-            self.drawn -= 1
-            return
-        if self.skipping and tag == self.skipping[-1]:
-            self.skipping.pop()
+        if tag in DOCUMENT_BOUNDARIES:
+            self.raw = self.graphic = self.spoken = 0
+        elif tag in RAW_ELEMENTS:
+            self.raw = max(0, self.raw - 1)
+        elif tag == GRAPHIC_ELEMENT:
+            self.graphic = max(0, self.graphic - 1)
+            if not self.graphic:
+                self.spoken = 0
+        elif self.graphic and tag in SPOKEN_INSIDE_A_GRAPHIC:
+            self.spoken = max(0, self.spoken - 1)
 
     def handle_data(self, data: str) -> None:
-        if not self.skipping or self.drawn:
+        if not self.raw and (not self.graphic or self.spoken):
             self.readable.append(data)
 
 
@@ -665,9 +699,10 @@ def test_a_launch_landing_page_carries_no_section_code_or_course_number(
     assert planted in numbers_read_from(response.text + f"<p>XYZ {planted}</p>"), (
         f"The scan cannot find the course number {planted} planted into this page's rendered "
         "content, so its silence about the real page says nothing (`docs/MISTAKES.md` entry 3). "
-        "`RenderedText` drops `style`, `script` and `svg` contents — keeping `<text>`, `<tspan>`, "
-        "`<title>` and `<desc>` — and `STANDALONE_NUMBER` rejects a digit run touching a letter, "
-        "digit, hyphen, dot or hash; if either has gone one step too far, this is where it shows."
+        "`RenderedText` drops `style` and `script` contents and a graphic's drawing instructions — "
+        "keeping the text it draws or announces, and keeping readable attributes wherever they sit "
+        "— and `STANDALONE_NUMBER` rejects a digit run touching a letter, digit, hyphen, dot or "
+        "hash; if either has gone one step too far, this is where it shows."
     )
 
     body = response.text
@@ -721,9 +756,17 @@ def test_a_launch_landing_page_carries_no_roster_count(
     dropped attributes, or stopped at the `<svg>` boundary, or a number pattern
     that rejected too much, would report a clean page just as confidently as the
     old one reported a dirty one. That is the mutation the control below exists
-    for — it plants a real roster size into this very page's content and into an
-    aria label and requires the narrowed scan to find both. A word boundary alone
-    would not have been the fix either: `\\b4\\b` matches inside `--space-4`.
+    for — it plants a real roster size into this very page four ways and requires
+    the narrowed scan to find all four. A word boundary alone would not have been
+    the fix either: `\\b4\\b` matches inside `--space-4`.
+
+    **Two of those four plants are E0-42's security pass**, which ran the reader
+    over the accessible-chart pattern and watched it miss: `<svg aria-label="18
+    students in your section">` and a `<g aria-label="…">` inside the graphic were
+    both invisible, because attributes were collected only after the skip check.
+    The control went green over that hole, which is the whole reason a control
+    plants the shapes an implementer would actually write rather than the shape
+    the test's author had in mind.
 
     SPEC §4.1 item 7's comparison figures are **not** asserted here and this is
     the ticket's own boundary: nothing in E0 computes one, and the spec assigns
@@ -742,26 +785,39 @@ def test_a_launch_landing_page_carries_no_roster_count(
         "asserted."
     )
 
-    # The control, run against the page under test rather than against a sample
-    # of this file's own making: a real roster size is planted into the rendered
-    # content and into an aria label, and the narrowed scan has to find both. A
-    # reader that skips too much is the failure this catches, and it is the
-    # failure a scan reporting "no numbers on the page" cannot be told from.
+    # The control, run against the page under test rather than against a sample of
+    # this file's own making: a real roster size is planted four ways and the
+    # narrowed scan has to find every one. The last two are the shapes E0-42's
+    # security pass caught this reader missing — a count on a chart is written as
+    # an `aria-label` on the `<svg>` itself or on a `<g>` inside it far more often
+    # than it is written as a paragraph — and the control was green over that hole
+    # until they were added. A reader that skips too much is the failure this
+    # catches, and it is the failure a scan reporting "no numbers" cannot be told
+    # from.
     planted = sorted(counts)[0]
-    shown = response.text + f"<p>{planted} students enrolled</p>"
-    spoken = response.text + f'<span aria-label="{planted} learners">roster</span>'
+    plants = (
+        ("rendered content", f"<p>{planted} students enrolled</p>"),
+        ("an aria label", f'<span aria-label="{planted} learners">roster</span>'),
+        ("an aria label on the graphic itself", f'<svg aria-label="{planted} students"></svg>'),
+        (
+            "an aria label inside the graphic",
+            f'<svg><g aria-label="{planted} learners"></g></svg>',
+        ),
+    )
     unseen = [
         shape
-        for shape, page in (("rendered content", shown), ("an aria label", spoken))
-        if str(planted) not in numbers_read_from(page)
+        for shape, plant in plants
+        if str(planted) not in numbers_read_from(response.text + plant)
     ]
     assert not unseen, (
         f"The scan cannot find {planted} planted into this page as {unseen}, so its silence about "
-        "the real page says nothing (`docs/MISTAKES.md` entry 3). This reader drops `style`, "
-        "`script` and `svg` contents — keeping `<text>`, `<tspan>`, `<title>` and `<desc>` — and "
-        "keeps the attributes a screen reader speaks; if the narrowing has gone one element too "
-        "far, or `STANDALONE_NUMBER` now rejects a number in prose, this is where it shows, and "
-        f"what the reader made of the planted page was {readable_text(shown)[:400]!r}."
+        "the real page says nothing (`docs/MISTAKES.md` entry 3). This reader drops `style` and "
+        "`script` contents and a graphic's drawing instructions — keeping `<text>`, `<tspan>`, "
+        "`<title>`, `<desc>` and `<foreignObject>` — and keeps the attributes a screen reader "
+        "speaks **wherever they sit, the graphic included**. If the narrowing has gone one element "
+        "too far, or `STANDALONE_NUMBER` now rejects a number in prose, this is where it shows, "
+        f"and what the reader made of the first planted page was "
+        f"{readable_text(response.text + plants[0][1])[:400]!r}."
     )
 
     read = numbers_read_from(response.text)
@@ -774,8 +830,9 @@ def test_a_launch_landing_page_carries_no_roster_count(
         "E0 syncs no roster — §7.3's names-and-role sync is E1's — so a count on this page was "
         "fetched from the platform at render time, and on the student page it is a fact about "
         "classmates.\n"
-        "The scan reads text nodes, drawn SVG text and readable attributes only, so a number from "
-        "the stylesheet cannot reach it. If this number is still not a roster count — a year, a "
-        "version — the rendered text printed above is what says so, and the defect is then in this "
-        "test rather than in the door."
+        "The scan reads text nodes, text drawn or announced inside a graphic, and the attributes a "
+        "screen reader speaks wherever they sit — so a number from the stylesheet cannot reach it, "
+        "and an `aria-label` on a chart can. If this number is still not a roster count — a year, "
+        "a version — the rendered text printed above is what says so, and the defect is then in "
+        "this test rather than in the door."
     )
