@@ -1,36 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 42**
+**Caught: 43**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*25 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 22 are in this file's git history and in the pull requests they cite.*
-
-*(E0-18 PR 1's third round, where the false records would have been **the "what
-is deliberately not here" paragraphs at the top of two test modules**. Both door
-suites open by enumerating what they cover and what they leave to E1 — one says
-"what *is* here is the set E0-18's own acceptance criteria name" and lists the
-seven, the other says "two of the three refusals cannot be posed on the wire" —
-and the round adds four sections to each. Appending tests without touching those
-paragraphs leaves an index that undercounts its own file, in the highest-risk
-shape this entry names: written once, three hundred lines above the tests anyone
-opens the file for. The same round's other repair was `tests/conftest.py`'s
-per-ticket index, which had to gain a sentence for a fixture that signs tokens,
-and the claim-to-Care sweep's exception reason — a record that argued the Care
-claim is harmless *from the web door alone*, which stopped being the whole
-argument the moment the launch door gained a rule of its own about the same
-claim.
-
-The implementer's half of the same round found one the test author could not
-see, and it is the more expensive shape: `backend/app/services/landing.py`'s
-module docstring still carried three paragraphs of **"UNRESOLVED, and this
-module is the whole of the disagreement"** — a dispute that had been arbitrated
-one round earlier, in a change to a different file. Nothing in the source
-pointed at it: the arbitration was recorded where the ruling belonged, in the
-sweep's `EXCEPTIONS` reason, and the module that had been arguing its own case
-went on arguing it. A record made false by a change to *another* file is the one
-no author's diff-reading catches, because it is not in the diff — only asking
-"what else asserts something about this" does.)*
+*26 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 23 are in this file's git history and in the pull requests they cite.*
 
 *(E0-28, Batch E, and the three false records were **made false by code in a
 different file, a different ticket's guess, and a count in prose**. The batch
@@ -70,6 +44,25 @@ the ADR index all saying item 2's consolidation was "proposed rather than done";
 and two rows of `docs/tickets/e0/E0-29-…` in the present tense of a tree that no
 longer exists. Every one of those was in a file the change did not otherwise
 touch.)*
+
+*(E0-39, Batch I, where the record the ticket did not name was **the module
+docstring that defines the split the change moved five fields across**.
+`backend/app/config.py` opens by saying its fields fall into two groups and
+listing the required one — "a database URL, a Redis URL, an AI provider base URL
+and model name, the institution timezone, and the environment name". The ticket
+named three false records to correct, all of them elsewhere: `.env.example`, ADR
+0075's Decision, and the `mock-idp` comment in `docker-compose.yml`. Nothing in
+the diff points at a docstring three hundred and eighty lines above the fields
+being edited, and the fields' own block comment — "Seven values, and every one of
+them is an address… They are defaulted" — would have described a block that now
+holds two. Both were found by asking what else states the group each field is in,
+rather than by re-reading near the edit. The sweep also found one that could not
+be repaired from this seat: the ADR index's row for 0075 still says "Seven fields
+… these are defaulted because none of them can resolve off this stack", which is
+now false in both halves, and `docs/adr/README.md` belongs to a sibling ticket in
+another worktree — so it was reported to the coordinator rather than left
+unnoticed. An index row nobody owns is exactly the shape this entry calls the
+highest risk.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
