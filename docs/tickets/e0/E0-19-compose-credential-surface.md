@@ -17,22 +17,51 @@ comparison, including the entries of `ALLOWED_BIND_MOUNTS` and of
 `SENSITIVE_BIND_SOURCES`, which stays as defence in depth behind the allowlist.
 `bind_sources` takes the document and the project directory as well as the
 service, and every rule that consumes host mounts consumes it — the allowlist,
-the sensitive check and the privilege comparison against `api`. A service's
-named volumes are resolved through the top-level `volumes:` section by
+the sensitive check and the rule about what privilege a service may hold. A
+service's named volumes are resolved through the top-level `volumes:` section by
 `named_volume_source`, which treats a bind-shaped `driver_opts` as a host path
 and **refuses** a volume shape it cannot classify rather than reading it as
 harmless. Route 3 is in `test_env_example_resolves.py`, where the delivered set
-is computed from the Compose files rather than hand-listed.
+is computed from the Compose files rather than hand-listed, and accounted in
+each variable's exact spelling.
 
 `ALLOWED_TOP_LEVEL_KEYS` is unchanged — `("name", "services", "volumes")`, plus
 `x-` extension fields — and still bounds which sections may appear; what an
-allowed `volumes:` section may *carry* is now bounded by `READABLE_VOLUME_KEYS`
+allowed `volumes:` section may *carry* is bounded by `READABLE_VOLUME_KEYS`
 beside it.
+
+**The security review then changed five things, and this paragraph is what a
+reader should hold the module against.** It ran the attacks rather than reading,
+and it found the ticket's own strategy applied one level short.
+
+- `ALLOWED_SERVICE_KEYS` closes the **service** level the way
+  `ALLOWED_TOP_LEVEL_KEYS` closes the top: ten keys enumerated from the two
+  documents as the parser sees them, and a red naming any other.
+  `volumes_from: - db` on `worker` passed the whole suite before it, and it
+  hands that container every mount `db` has.
+- The privilege rule is **absolute over both files**, not a comparison against
+  `api`: one line on the override's `x-development-source` anchor grants all
+  three application services at once, measured. Exceptions live in
+  `ALLOWED_PRIVILEGE_GRANTS`, which is empty and validated — an entry for a key
+  the named service does not declare is itself a failure.
+- `READABLE_VOLUME_KEYS` narrowed to `("driver_opts", "labels")`. `name:` and
+  `driver:` are refused where `external:` is, because all three mean the thing
+  being mounted is defined somewhere this file cannot see.
+- Route 3's delivery accounting is **case-sensitive**. A lower-case
+  `alembic_database_url: ''` was withdrawing the upper-case delivery; Compose
+  folds neither, and the container receives both.
+- Every string anywhere in a service body is walked, keys included, for a
+  credential written out as a **literal** — `command:`, `healthcheck.test`,
+  `labels:` and `build.args` all reach a container and none is an
+  `environment:` entry.
 
 Item 5 landed as
 [ADR 0076](../../adr/0076-what-a-compose-file-may-say-is-a-closed-set.md), which
-records E0-03's three closed-set rules and this ticket's two in one record, with
-the read-everything alternative and why it lost.
+records E0-03's three closed-set rules and four of this ticket's in one record,
+with the read-everything alternative and why it lost. It was **amended before
+merge by the review above**: its central claim — that every surface the guards
+read is a closed set — was measured wrong at the service level, and the
+privilege comparison it had recorded as the decision was overruled.
 
 ## Context
 
