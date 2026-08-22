@@ -81,8 +81,32 @@ build-gates: docker-build frontend-build ## Build gates: images, Compose health,
 # Fast gates
 # ---------------------------------------------------------------------------
 
+# The pinned Node closure. Every target below that reaches for `npx` names this
+# one as a prerequisite, and none of them installs for itself.
+#
+# **`npx` does not fail when nothing is installed**, which is what makes this a
+# gate rather than a convenience. npm 10 downloads the package and runs it, so
+# `npx eslint` on a clean clone is `eslint@latest` resolved from the registry at
+# run time — unpinned, no lockfile integrity, and green. `node_modules` is
+# gitignored, so the clean clone is the ordinary case and not the edge one.
+# CLAUDE.md pins versions and commits lockfiles and writes no exception for a
+# tool that resolves its own; `.github/workflows/ci.yml` runs `npm ci` before
+# every `npx` it calls, and this is the Makefile's copy of that rule.
+#
+# **A prerequisite rather than a line in each recipe**, because make builds a
+# phony prerequisite once per invocation: `make ci` installs once here where
+# four inline copies would install four times.
+.PHONY: node-deps
+node-deps: ## Install the pinned Node closure — prerequisite of every npx gate
+	$(call banner,npm ci)
+	@if [ -f package.json ]; then \
+		npm ci; \
+	else \
+		$(call skip,no package.json at the repository root); \
+	fi
+
 .PHONY: lint
-lint: ## ruff check + ruff format --check, eslint
+lint: node-deps ## ruff check + ruff format --check, eslint
 	$(call banner,ruff)
 	@ruff check . && ruff format --check .
 	$(call banner,eslint)
@@ -99,7 +123,7 @@ lint: ## ruff check + ruff format --check, eslint
 # same three in the same order. See
 # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
 .PHONY: typecheck
-typecheck: ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit
+typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit
 	$(call banner,mypy)
 	@mypy
 	$(call banner,mypy mock-lms/app)
@@ -162,10 +186,17 @@ test: invariants ## pytest unit + integration with coverage
 # Enforcing since E0-18: the specs exist, so this runs the suite unconditionally
 # — an empty tests/e2e fails loudly rather than skipping. It assumes the Compose
 # stack is already up (`make up`) and the database migrated and seeded
-# (`make migrate seed`), and that `npm ci && npx playwright install chromium` has
-# put the browser on disk; it does not bring Docker up itself. README.md's
+# (`make migrate seed`); it does not bring Docker up itself. README.md's
 # "Running the e2e suite locally" walks the full sequence.
-e2e: ## Playwright against the Compose stack (stack must be up and seeded)
+#
+# `node-deps` installs the runner rather than a comment asking you to. This
+# recipe said `npm ci` was a precondition in the sentence above and then ran
+# `@npx playwright test`, which on a clean clone downloads a test runner at run
+# time and points it at a stack that is up, migrated and seeded — the worst of
+# the three instances the E0-40 security review found, because make does not
+# run comments. The browser itself is still a separate step
+# (`npx playwright install chromium`), since it lands outside the repository.
+e2e: node-deps ## Playwright against the Compose stack (stack must be up and seeded)
 	$(call banner,Playwright e2e)
 	@npx playwright test
 
@@ -267,13 +298,17 @@ audit: ## Fail on high/critical dependency vulnerabilities
 # that is the runtime lock plus pip-audit and pip-licenses themselves; locally
 # it is your whole virtual environment, dev dependencies included. So this can
 # report more packages than CI does, and never fewer.
-licenses: ## Fail on dependencies incompatible with MIT distribution
+#
+# The `npm ci` this recipe used to run inline moved to `node-deps`, which is now
+# its prerequisite. The behaviour is the same and `make ci` installs once rather
+# than twice — this target was the only one that had the install right, and the
+# other three reaching it through a prerequisite is what let it stop repeating.
+licenses: node-deps ## Fail on dependencies incompatible with MIT distribution
 	$(call banner,license compatibility)
 	@mkdir -p reports
 	@pip-licenses --format=json --with-urls > reports/py-licenses.json
 	@args="--python-json reports/py-licenses.json"; \
 	if [ -f package.json ]; then \
-		npm ci; \
 		npx license-checker-rseidelsohn --json > reports/npm-licenses.json; \
 		args="$$args --npm-json reports/npm-licenses.json"; \
 	fi; \
