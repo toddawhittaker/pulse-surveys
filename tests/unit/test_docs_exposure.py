@@ -25,6 +25,13 @@ Three tests, because the property has three halves and each fails differently:
 value rather than a nonsense string on purpose: it is the one an operator will
 actually set, so a gate that special-cased some other name would be caught by the
 other direction rather than by this one.
+
+The two production tests request `deployed_identity_provider` (E0-39). Setting
+`ENVIRONMENT` to a deployment's value leaves `.env.example`'s `mock-idp` addresses
+in place, which that ticket refuses at startup — so without it `create_app()` would
+raise inside the setup of a test about a 404, and the runner would report this gate
+as broken. The fixture configures a provider that is not the mock and changes
+nothing else; no assertion here moved.
 """
 
 from typing import Any
@@ -98,7 +105,9 @@ def test_the_schema_and_its_documentation_are_served_in_development(
 
 
 def test_the_schema_and_its_documentation_are_not_served_outside_development(
-    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """**Dies if the gate is dropped**, which is the state of `main` today.
 
@@ -130,7 +139,9 @@ def test_the_schema_and_its_documentation_are_not_served_outside_development(
 
 
 def test_the_schema_is_still_produced_in_process_outside_development(
-    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """**Dies if the gate suppresses the schema rather than the route that serves it.**
 

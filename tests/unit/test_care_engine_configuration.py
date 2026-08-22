@@ -54,6 +54,14 @@ takes its options from the same function the main one does, and the two tests
 below say so: one absolutely, outside development, and one as an agreement, so
 that the two engines cannot drift apart without something going red.
 
+**One fixture below is E0-39's repair round rather than this module's subject.**
+The three non-development rows build a `Settings` with `.env.example`'s values in
+place, and that ticket refuses its `mock-idp` addresses outside development — so the
+row would stop in its own setup, on a rule about an identity provider, in a test
+about what a database connection writes to a log. `deployed_identity_provider`
+configures a provider that is not the mock and changes nothing else. No assertion
+here moved.
+
 **What is asserted here and what is asserted in `test_db_engine_configuration.py`.**
 That module owns what the options *mean* — it builds a SQLite engine from them,
 runs a statement carrying a marker, and reads the captured log. This one owns
@@ -481,6 +489,7 @@ def test_a_reveal_in_a_process_without_the_credential_refuses_naming_the_variabl
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_the_care_engine_hides_its_bound_parameters_outside_development(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     import_app_module: Callable[[str], ModuleType | None],
     environment: str,

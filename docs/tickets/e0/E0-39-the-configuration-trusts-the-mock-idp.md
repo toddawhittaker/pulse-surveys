@@ -83,7 +83,11 @@ recorded in `docs/tickets/e1/carried-from-e0.md`.
    `test_lti_launch_door.py`, `test_demo_seed_script.py`,
    `tests/unit/test_docs_exposure.py`, `test_dev_console_exposure.py`,
    `test_care_engine_configuration.py`, `test_db_engine_configuration.py`,
-   and `tests/conftest.py` if the fixture is shared. The repair: where a
+   `tests/unit/test_healthz.py` (its environment-echo test builds under a
+   deliberately non-development environment — same collision, found and
+   repaired in the round, ratified 2026-08-22), and `tests/conftest.py` if
+   the fixture is shared. `test_demo_seed_script.py` was examined and needs
+   nothing: the seed deliberately builds no `Settings`. The repair: where a
    test's subject is something other than the OIDC refusal (a cookie flag, a
    404, an engine rule, the seed's own refusal), its non-development
    configuration uses non-mock placeholder values

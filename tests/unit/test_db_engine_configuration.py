@@ -67,6 +67,16 @@ nothing about what `app.db` chose.
 The engine is found rather than named, in the spirit of `celery_application_in`
 in `tests/conftest.py`: E0-04 says `db.py` holds "a SQLAlchemy 2.0 engine and
 session factory" and does not say what either is called.
+
+**Every non-development test here requests `deployed_identity_provider`, and that
+is E0-39's repair round rather than anything this module is about.** Each of those
+rows builds a `Settings` with `.env.example`'s values in place, and that ticket
+refuses its `mock-idp` addresses outside development — so the row would stop inside
+its own setup, on a rule about the web login door, in a test about what a database
+connection writes to a log. The fixture configures a provider that is not the mock
+and changes nothing else; no assertion here moved. The development row below is
+deliberately left alone, since that combination stays legal and is what a developer
+actually runs.
 """
 
 import logging
@@ -418,6 +428,7 @@ def restored_sqlalchemy_logging() -> Iterator[None]:
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_the_engine_does_not_turn_on_sql_echo_outside_development(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     import_app_module: Callable[[str], ModuleType | None],
     environment: str,
@@ -510,6 +521,7 @@ def test_the_log_capture_sees_a_bound_parameter_when_nothing_is_hiding_it(
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_no_bound_parameter_reaches_the_log_outside_development(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     restored_sqlalchemy_logging: None,
@@ -629,6 +641,7 @@ def test_the_log_capture_sees_a_result_row_that_hide_parameters_does_not_cover(
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_no_result_row_reaches_the_log_outside_development(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     restored_sqlalchemy_logging: None,
@@ -730,6 +743,7 @@ def hidden_parameters_of(engine: Any) -> Any:
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_the_engine_the_module_builds_hides_its_bound_parameters_outside_development(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     import_app_module: Callable[[str], ModuleType | None],
     environment: str,
@@ -789,6 +803,7 @@ def test_the_engine_the_module_builds_hides_its_bound_parameters_outside_develop
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_importing_the_database_module_pins_the_sqlalchemy_logger_outside_development(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     restored_sqlalchemy_logging: None,
     import_app_module: Callable[[str], ModuleType | None],
