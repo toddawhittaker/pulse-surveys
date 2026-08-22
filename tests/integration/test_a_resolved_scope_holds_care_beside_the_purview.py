@@ -62,6 +62,22 @@ SPEC_DEFAULT_N_THRESHOLD = 5
 # used, because an override that happens to equal the default proves nothing.
 EXPLICIT_N_THRESHOLD = 3
 
+# The variable `.env.example` documents for the threshold, and the module E0-11
+# puts the resolver in. Both are spelled by records rather than chosen here: the
+# variable by `.env.example` (and by this file's own failure message below), the
+# module by E0-11's scope and SPEC §13.
+N_THRESHOLD_VARIABLE = "N_THRESHOLD_DEFAULT"
+AUTHZ_MODULE = "app.services.authz"
+
+# An institution's threshold, set for the configuration test and **chosen not to
+# be SPEC §4's default**. That is the whole repair: with the environment carrying
+# 5, "the configured value" and "the spec's default" are the same number, and a
+# resolver that answered a hard-coded 5 satisfied both. E0-41's mutation battery
+# measured exactly that — `threshold = 5` in place of the `Settings` lookup
+# survived. Any non-default number would do; 7 is asserted to differ before it is
+# used.
+INSTITUTIONS_OWN_N_THRESHOLD = 7
+
 
 def written(graph: Any, action: Any, what: str) -> Any:
     """Perform a write that has to succeed, and fail naming it when it does not.
@@ -274,7 +290,12 @@ def test_a_person_with_no_care_assignment_does_not_hold_care(
 
 @pytest.mark.invariant
 def test_a_resolved_scope_takes_its_n_threshold_from_configuration(
-    authz: Any, committed_rows: Any, application_session: Any
+    committed_rows: Any,
+    application_session: Any,
+    configured_env: dict[str, str],
+    documented_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    import_app_module: Any,
 ) -> None:
     """E0-11's scope: "the threshold read from `Settings`".
 
@@ -295,28 +316,88 @@ def test_a_resolved_scope_takes_its_n_threshold_from_configuration(
 
     The spec's own default is asserted alongside, because the two failures need
     different fixes: a scope carrying a number that is not the configured one is a
-    resolver defect, and a configured default that is not 5 is a configuration
+    resolver defect, and a documented default that is not 5 is a configuration
     defect, and a single assertion would report either as the other.
+
+    **The configuration this test resolves under is deliberately not the
+    default**, and that is E0-41's repair rather than decoration. Read against an
+    environment carrying 5, "the configured value" and "SPEC §4's default" are the
+    same number, so `threshold = 5` in place of the `Settings` lookup satisfies
+    both — and E0-41's mutation battery measured exactly that survivor at
+    `services/authz.py`. Two constraints satisfied by one number is
+    `docs/MISTAKES.md` entry 3 in the shape that reads as thoroughness. So the
+    environment is given `INSTITUTIONS_OWN_N_THRESHOLD`, which is asserted to
+    differ from the spec's default before it is used; the documented default is
+    asserted from `.env.example` rather than from the patched `Settings`; and the
+    only way for the scope to carry the institution's number is to have read it.
+
+    **Why the module is re-imported.** A module that builds something out of
+    `Settings` may read the environment once, at import time — `import_app_module`
+    in `tests/conftest.py` exists for exactly that and says so — and E0-11 leaves
+    the choice open. Re-importing after the override makes this test true of a
+    resolver that reads `Settings` per call *and* of one that holds a `Settings`
+    from import, so it asserts the criterion rather than an implementation of it.
+
+    **The mutation this now kills:** `threshold = 5`, or any other literal, in
+    place of the lookup. **The near miss that must stay green:** a resolver that
+    reads the value once at import — legitimate, and the reason for the re-import
+    above rather than a bare `monkeypatch.setenv`.
     """
+    documented = documented_env.get(N_THRESHOLD_VARIABLE)
+    assert documented is not None, (
+        f"`.env.example` documents no `{N_THRESHOLD_VARIABLE}`, so there is no institution-facing "
+        "default to compare against SPEC §4's. E0-11 reads the threshold from `Settings` because "
+        "§4 makes it configuration, and a variable nobody documents is not configuration."
+    )
+    assert int(documented) == SPEC_DEFAULT_N_THRESHOLD, (
+        f"`.env.example` documents `{N_THRESHOLD_VARIABLE}` as {documented!r} and SPEC §4's default "
+        f"is {SPEC_DEFAULT_N_THRESHOLD}: 'Small-N handling (n < 5 responses in a reporting week)… "
+        "Threshold value is configurable (default 5).' This is a configuration defect rather than "
+        "a resolver one."
+    )
+    assert INSTITUTIONS_OWN_N_THRESHOLD != SPEC_DEFAULT_N_THRESHOLD, (
+        f"This test resolves under a threshold of {INSTITUTIONS_OWN_N_THRESHOLD}, which is SPEC "
+        "§4's default, so a resolver answering the default without reading anything would pass it. "
+        "Change `INSTITUTIONS_OWN_N_THRESHOLD` at the top of this file."
+    )
+
     rows = committed_rows
     graph = rows.graph
     chair_of = graph.person()
     written(graph, lambda: graph.assign("CHAIR", person=chair_of), "A chair assignment")
     rows.commit()
 
-    configured = configured_threshold()
-    scope = authz.resolve_scope(application_session, person_id=chair_of)
-
-    assert configured == SPEC_DEFAULT_N_THRESHOLD, (
-        f"`Settings.n_threshold_default` is {configured} and SPEC §4's default is "
-        f"{SPEC_DEFAULT_N_THRESHOLD}: 'Small-N handling (n < 5 responses in a reporting week)… "
-        "Threshold value is configurable (default 5).' This is a configuration defect rather than "
-        "a resolver one — `.env.example` is where the documented default lives."
+    monkeypatch.setenv(N_THRESHOLD_VARIABLE, str(INSTITUTIONS_OWN_N_THRESHOLD))
+    module = import_app_module(AUTHZ_MODULE)
+    assert module is not None, (
+        f"There is no `{AUTHZ_MODULE}` module. E0-11's scope puts the authorization chokepoint in "
+        "`backend/app/services/authz.py` (SPEC §13)."
     )
+    resolve_scope = getattr(module, "resolve_scope", None)
+    assert resolve_scope is not None, (
+        f"`{AUTHZ_MODULE}` defines no `resolve_scope`; it defines "
+        f"{sorted(name for name in vars(module) if not name.startswith('_'))}. That name is part "
+        "of the interface E0-11 settled before any of it was written."
+    )
+
+    configured = configured_threshold()
+    assert configured == INSTITUTIONS_OWN_N_THRESHOLD, (
+        f"`Settings.n_threshold_default` reads {configured} after `{N_THRESHOLD_VARIABLE}` was set "
+        f"to {INSTITUTIONS_OWN_N_THRESHOLD}, so the override did not reach configuration and this "
+        "test cannot ask its question — whatever the scope carries below would be compared against "
+        "a number nobody changed. This is a failure of this test's setup rather than of the "
+        "resolver: `Settings` reads the environment when it is constructed, and `configured_env` "
+        "has already put every documented variable in place."
+    )
+
+    scope = resolve_scope(application_session, person_id=chair_of)
+
     assert scope.n_threshold == configured, (
         f"The resolved scope carries an n-threshold of {scope.n_threshold} and configuration says "
-        f"{configured}. A hard-coded threshold is a rule that stops being the institution's the "
-        "day they change it, and §4 makes it theirs to change."
+        f"{configured} — SPEC §4's default is {SPEC_DEFAULT_N_THRESHOLD}, and this institution's "
+        "configuration deliberately is not. A hard-coded threshold is a rule that stops being the "
+        "institution's the day they change it, and §4 makes it theirs to change. A scope carrying "
+        f"{SPEC_DEFAULT_N_THRESHOLD} here is a literal at the call site rather than a lookup."
     )
 
 
