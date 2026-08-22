@@ -210,6 +210,29 @@ and it is already named in every refusal message.
   did not on every earlier version, so the loopback check unwraps `ipv4_mapped`
   itself rather than resting on that. Measured on the pinned interpreter; the
   test that would catch a regression is the `::ffff:127.0.0.1` row.
+- **These four rules guard against a mistake, not against whoever writes the
+  configuration**, and the distinction is worth stating because the rules read
+  like an attacker boundary and are not one. Someone who can set `OIDC_ISSUER`
+  can also set `ENVIRONMENT=development`, which switches all four off by design —
+  and can set `DATABASE_URL`, which is the whole system. So the threat these
+  close is the operator who copies the development stack forward, or who sets
+  four values and forgets the fifth. That is the finding, and it is worth closing
+  on its own terms.
+
+  Read that way, the residual parser divergences are limits rather than holes,
+  and they were measured rather than assumed: `urlsplit` reads
+  `https:/\localhost:8081/…` as having no host at all while a browser following
+  WHATWG resolves it to `localhost`, and `ipaddress` rejects the legacy
+  `0x7f.0.0.1` and `2130706433` spellings of loopback that some resolvers still
+  accept. Each needs a deliberately obfuscated value, which is not a mistake
+  anybody makes — and against someone willing to write one, `ENVIRONMENT` is the
+  easier door. A second URL parser fighting the first would buy nothing here.
+- **A malformed URL is refused, by accident of the same code path.** `urlsplit`
+  raises `ValueError` on a bracketed host it cannot parse (`https://[::1].:8081`),
+  pydantic turns that into the ordinary field error, and the operator gets the
+  usual refusal naming the field with no value in it. Only outside development,
+  because that is where these validators run at all; a malformed value in
+  development still fails at first use, as it did before this record.
 - Tests whose subject is something else and which build a non-development
   `Settings` now have to name a non-mock provider. `tests/conftest.py` gained one
   fixture for it rather than each module inventing placeholders.
