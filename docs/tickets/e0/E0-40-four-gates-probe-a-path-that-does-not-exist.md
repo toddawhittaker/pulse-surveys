@@ -59,6 +59,21 @@ Three smaller findings ride along because they are the same subject:
    two halves of the gate can no longer disagree by a number nobody compares.
 5. **The unconsumed `e2e` probe is removed**, with its fidelity test updated
    in the same change (test-author does the test side).
+6. **The node gates join the documentation-only short-circuit.** Their E0-38
+   exemption was justified by being free (the probe never fired); this ticket
+   makes them cost an `npm ci` plus tsc and eslint, so a documentation-only
+   diff — which by definition changes no TypeScript and no package manifest —
+   short-circuits them exactly as it does the other expensive gates. The
+   fidelity test asserts the short-circuit rather than the exemption.
+7. **The tsc/eslint job keeps its id and display name** ("Fast · tsc +
+   eslint") in this ticket. The display names are what branch protection's
+   required-checks list keys on; renaming is deliberately out of scope and
+   noted here so nobody reads the stale "frontend" wording as an oversight.
+8. **Decisions 3 and 4 get text-level guards**: one test asserting
+   `playwright.config.ts` contains `retries: 0` and
+   `trace: 'retain-on-failure'`, one asserting `pyproject.toml`'s
+   `testpaths` is exactly `["tests"]` — cheap, honest anchors so neither
+   silently reverts.
 
 ## Scope and acceptance
 
