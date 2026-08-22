@@ -211,6 +211,68 @@ def _is_on_this_machine(host: str | None) -> bool:
         return False
 
 
+def _url_host(value: str) -> str | None:
+    """A URL's host, read the way a resolver reads it, for every comparison below.
+
+    `urlsplit(...).hostname` already does most of it: it strips an IPv6 literal's
+    brackets and lower-cases the name, which is what makes `MOCK-IDP` and
+    `mock-idp` one host (RFC 4343).
+
+    What it leaves is the **one trailing dot** that makes a name fully qualified.
+    `mock-idp.` and `mock-idp` reach the same container, and `localhost.` and
+    `localhost` reach the same interface, so a catalog that compares strings is
+    defeated by a one-character edit. Exactly one dot comes off: stripping every
+    trailing dot, or stripping and then comparing by prefix, would turn
+    `mock-idp.example.edu.` — a real institutional address — into a refusal.
+
+    Written once and called by all three rules below rather than at each
+    comparison, because a normalisation applied at one site and not another
+    closes half of the hole it was written for (`docs/MISTAKES.md` entry 13).
+    """
+    host = urlsplit(value).hostname
+    if host is None:
+        return None
+    return host[:-1] if host.endswith(".") else host
+
+
+def _is_a_loopback_host(host: str | None) -> bool:
+    """Whether this host names the machine the *reader* of the URL is sitting at.
+
+    A class, not a list of spellings, and that is the whole point: a three-entry
+    catalog of `localhost`, `127.0.0.1` and `::1` is defeated by `127.0.0.2`,
+    which is an ordinary address in `127.0.0.0/8`, and by `::ffff:127.0.0.1`.
+    Both send a browser to a listener on the user's own machine.
+
+    **The IPv4-mapped form is unwrapped first, deliberately, and not because
+    `is_loopback` gets it wrong.** Measured on the interpreter this project pins:
+    on 3.13 `ip_address("::ffff:127.0.0.1").is_loopback` is already `True`,
+    because that version reads the mapped address through. So a check written as
+    "`is_loopback`, and failing that `ipv4_mapped.is_loopback`" has a second half
+    that never runs here — a guard nobody has executed, which is a comment
+    (`docs/MISTAKES.md` entry 9). Asking `ipv4_mapped` first gives the same
+    answer for every address, keeps both halves live, and stops the rule
+    depending on a library behaviour that has moved between versions.
+
+    **This is a wider set than `_is_on_this_machine` above, and the two are
+    deliberately not merged.** That one governs an *exemption* — cleartext is
+    permitted because nothing crosses a network — and widening an exemption
+    permits more; this one governs a *refusal*, and widening it refuses more. A
+    single helper would mean every future widening moved both, in opposite
+    directions of safety.
+    """
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped.is_loopback
+    return address.is_loopback
+
+
 def _is_a_deployment(environment: object) -> bool:
     """Whether this process is running anywhere other than a development stack.
 
@@ -426,28 +488,33 @@ class Settings(BaseSettings):
             "The `iss` a web login's `id_token` must state (OIDC Core 1.0 §3.1.3.7). Not "
             "browser-facing: it is compared against a claim, never redirected to. Outside "
             "ENVIRONMENT=development it may not address the mock provider this repository "
-            "ships, the Compose service mock-idp."
+            "ships, the Compose service mock-idp, and it must be https unless it names a "
+            "provider on this machine."
         )
     )
     oidc_authorization_endpoint: str = Field(
         description=(
             "Browser-facing OIDC authorization endpoint of the identity provider. Outside "
             "ENVIRONMENT=development it may not address the mock provider this repository "
-            "ships, the Compose service mock-idp."
+            "ships, the Compose service mock-idp; it must be https; and it may not name this "
+            "machine at all — localhost or any loopback address — because a browser, not this "
+            "container, is what resolves it, so loopback there is the end user's own computer."
         )
     )
     oidc_token_endpoint: str = Field(
         description=(
             "Server-facing OIDC token endpoint, where this tool redeems a code. Outside "
             "ENVIRONMENT=development it may not address the mock provider this repository "
-            "ships, the Compose service mock-idp."
+            "ships, the Compose service mock-idp, and it must be https unless it names a "
+            "provider on this machine."
         )
     )
     oidc_jwks_url: str = Field(
         description=(
             "Server-facing key set a web login's `id_token` is verified against. Outside "
             "ENVIRONMENT=development it may not address the mock provider this repository "
-            "ships, the Compose service mock-idp."
+            "ships, the Compose service mock-idp, and it must be https unless it names a "
+            "provider on this machine."
         )
     )
     oidc_client_id: str = Field(
@@ -696,12 +763,11 @@ class Settings(BaseSettings):
         where a real browser is sent, so a mock there is the login page a person
         is asked to trust.
 
-        **The host component, compared exactly.** `urlsplit(...).hostname` is the
-        parsed host, so the port, the scheme and the path are not part of the
-        question — a container reaching `mock-idp` on any port reaches the mock —
-        and it is lower-cased on the way out, which is what makes `MOCK-IDP` the
-        same host as `mock-idp` (RFC 4343). A substring search for the service
-        name would read as the same rule and would refuse
+        **The host component, compared exactly**, and normalised once by
+        `_url_host` — the port, the scheme and the path are not part of the
+        question, since a container reaching `mock-idp` on any port reaches the
+        mock, and neither is the case nor a trailing dot. A substring search for
+        the service name would read as the same rule and would refuse
         `https://mock-idp.example.edu/oidc/token`, an ordinary institutional
         address that resolves nowhere near this stack.
 
@@ -712,7 +778,7 @@ class Settings(BaseSettings):
         """
         if not _is_a_deployment(info.data.get("environment")):
             return value
-        if urlsplit(value).hostname == MOCK_IDENTITY_PROVIDER_HOST:
+        if _url_host(value) == MOCK_IDENTITY_PROVIDER_HOST:
             raise ValueError(
                 "addresses the mock identity provider this repository ships for development — "
                 f"the Compose service {MOCK_IDENTITY_PROVIDER_HOST}, which signs an id_token for "
@@ -720,6 +786,108 @@ class Settings(BaseSettings):
                 f"own provider, or run with ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
             )
         return value
+
+    @field_validator("oidc_authorization_endpoint")
+    @classmethod
+    def the_login_page_is_not_on_the_users_own_machine_outside_development(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        """Refuse to send a browser to a listener on the machine reading the link.
+
+        **This field alone, and the asymmetry is the reason the rule exists.**
+        The other four `oidc_*` URLs are resolved by this container, where a
+        loopback host is the container itself — a provider sidecar, which is an
+        ordinary deployment that reaches nothing an attacker controls. This one
+        is never resolved here at all: it is a string handed to a browser and
+        resolved on the machine that browser runs on. So `localhost` means "this
+        API process" in four settings and "whoever's laptop is reading this" in
+        the fifth, and only the fifth is a finding.
+
+        What it costs to get wrong: the development value is
+        `http://localhost:8081/oidc/authorize`, which names no mock, so a
+        deployment that sets the other four and forgets this one starts cleanly
+        and then answers every web login with a redirect to a port on the
+        browsing user's own computer. Whatever is listening there receives an
+        institution-issued link that arrived from a Pulse URL and can render a
+        login page asking for the credentials the real provider would have asked
+        for.
+
+        **A class, not a catalog** — `_is_a_loopback_host` carries why. The
+        `127.0.0.0/8` and IPv4-mapped spellings are the ones a list of three
+        misses, and the review that raised this arrived with a fourth spelling
+        already in it.
+
+        **It runs before the transport rule below and does not defer to it.**
+        `http://localhost:8081/oidc/authorize` is exempt from that rule — there
+        is no network between a process and itself — and is refused here anyway,
+        because what is wrong with it is where the browser is sent rather than
+        what it is sent over. An exemption that returned early would leave the
+        finding open with every other row green.
+        """
+        if not _is_a_deployment(info.data.get("environment")):
+            return value
+        if _is_a_loopback_host(_url_host(value)):
+            raise ValueError(
+                "sends the browser to the machine it is running on rather than to an identity "
+                "provider — this value is resolved by the end user's computer, never by this "
+                "container, so a loopback host here is whatever that person happens to be "
+                "running. Name the provider's browser-facing address, or run with "
+                f"ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
+            )
+        return value
+
+    @field_validator(
+        "oidc_issuer",
+        "oidc_authorization_endpoint",
+        "oidc_token_endpoint",
+        "oidc_jwks_url",
+    )
+    @classmethod
+    def a_provider_url_is_encrypted_off_this_machine_outside_development(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        """Refuse cleartext to another host, which is the mock's hole reached anonymously.
+
+        The same rule `an_off_machine_endpoint_is_encrypted` applies to the model
+        provider, and it is here for a sharper reason. `http://idp.example.edu/…`
+        names no mock and would otherwise be a legal production configuration —
+        and anyone on the path between this container and that host can answer
+        the key-set fetch with a key set of their own, after which every token
+        signed with the matching private key verifies correctly. That is the
+        signing oracle this whole ticket exists to close, reached without ever
+        naming `mock-idp`.
+
+        All four, though only two are fetched. The authorization endpoint carries
+        the request and its `state` past whoever is on the path; the issuer is
+        fetched by nothing at all — it is compared against the `iss` claim as a
+        string — and is included because OpenID Connect Discovery requires an
+        Issuer Identifier to use `https`, so an `http` issuer is not an identity
+        any conformant provider has.
+
+        **Conditioned on the environment, unlike the model provider's copy of
+        this rule**, and that is not an oversight to tidy up later: every address
+        on the development stack is cleartext to *another container*
+        (`http://mock-idp:8000`), so an unconditional version refuses the
+        configuration `.env.example` ships and CI copies to `.env`, and takes
+        SPEC §14.3's exit criterion with it.
+
+        **The exemption is `_is_on_this_machine`, not the wider loopback class.**
+        A provider beside the application is reached over the loopback interface
+        where there is no wire to read, so refusing it would turn away a
+        deployment while protecting nothing. Widening *that* set permits more
+        cleartext; widening the refusal above refuses more addresses. They are
+        two catalogs on purpose.
+        """
+        if not _is_a_deployment(info.data.get("environment")):
+            return value
+        if urlsplit(value).scheme == "https" or _is_on_this_machine(_url_host(value)):
+            return value
+        raise ValueError(
+            "would fetch or redirect over plain http to an address off this machine, where "
+            "anyone on the path can answer with a key set of their own and mint identities this "
+            "application then verifies correctly — use https, or plain http only for a provider "
+            f"on this machine, or run with ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
+        )
 
     @field_validator("oidc_client_id")
     @classmethod
