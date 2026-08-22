@@ -221,9 +221,16 @@ def _url_host(value: str) -> str | None:
     What it leaves is the **one trailing dot** that makes a name fully qualified.
     `mock-idp.` and `mock-idp` reach the same container, and `localhost.` and
     `localhost` reach the same interface, so a catalog that compares strings is
-    defeated by a one-character edit. Exactly one dot comes off: stripping every
-    trailing dot, or stripping and then comparing by prefix, would turn
-    `mock-idp.example.edu.` — a real institutional address — into a refusal.
+    defeated by a one-character edit.
+
+    **What must not follow the strip is a loose comparison.**
+    `mock-idp.example.edu.` normalises to `mock-idp.example.edu`, which is not the
+    mock however many trailing dots come off — but a rule that went on to compare
+    by *prefix* would refuse it, and it is a perfectly ordinary institutional
+    address. The comparison stays exact for that reason. Removing more than one
+    dot is a smaller matter and is declined for a smaller reason: it would refuse
+    `mock-idp..`, a name with an empty label that resolves nowhere, which is more
+    than normalising and buys nothing.
 
     Written once and called by all three rules below rather than at each
     comparison, because a normalisation applied at one site and not another

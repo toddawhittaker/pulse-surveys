@@ -206,6 +206,17 @@ and it is already named in every refusal message.
   an institution terminating TLS at a proxy in front of its provider has to name
   the proxy rather than the backend. That is the same bill
   `ai_provider_base_url` already presents, and the same answer.
+- **The named deployability cost, and it is a real one: an `http` provider
+  sidecar addressed by service name is refused.** `http://idp-sidecar:8000/token`
+  in production fails rule 4, because a container on a bridge network is not on
+  this machine — `_is_on_this_machine` answers on the host in the URL, not on
+  whether the packet leaves the physical box, and a service name on a shared
+  network is reachable by every other container on it. Measured, not assumed. The
+  exemption above covers the same sidecar addressed as `http://localhost:8000` or
+  `http://127.0.0.1:8000`, which is the shape a same-pod sidecar actually takes.
+  So the operator's answer is one of two: terminate TLS at the sidecar, or address
+  it by a loopback address rather than by name. This is the cost that will be
+  reported as a bug, so it is written down here as a decision.
 - `is_loopback` on an IPv4-mapped IPv6 address answers `True` on Python 3.13 and
   did not on every earlier version, so the loopback check unwraps `ipv4_mapped`
   itself rather than resting on that. Measured on the pinned interpreter; the
@@ -219,14 +230,32 @@ and it is already named in every refusal message.
   four values and forgets the fifth. That is the finding, and it is worth closing
   on its own terms.
 
-  Read that way, the residual parser divergences are limits rather than holes,
-  and they were measured rather than assumed: `urlsplit` reads
-  `https:/\localhost:8081/…` as having no host at all while a browser following
-  WHATWG resolves it to `localhost`, and `ipaddress` rejects the legacy
-  `0x7f.0.0.1` and `2130706433` spellings of loopback that some resolvers still
-  accept. Each needs a deliberately obfuscated value, which is not a mistake
-  anybody makes — and against someone willing to write one, `ENVIRONMENT` is the
-  easier door. A second URL parser fighting the first would buy nothing here.
+  Read that way, the residue below is a limit rather than a hole. All of it was
+  measured rather than assumed, and it divides in two.
+
+  **Spellings that need a crafted value.** `ipaddress` rejects the legacy
+  `0x7f.0.0.1` and `2130706433` forms of `127.0.0.1` that some resolvers still
+  accept. And **the backslash family, which has two members and not one**:
+  `urlsplit` reads `https:/\localhost:8081/…` as having no host at all, and reads
+  `https://localhost\.evil.example/a` as the ordinary non-loopback host
+  `localhost\.evil.example` — so all four rules pass it — while a browser
+  following WHATWG turns the backslash into a slash in both, resolving `localhost`
+  and treating the rest as a path. The second is the more interesting one, because
+  nothing about it looks malformed to this process. Neither is a mistake anybody
+  makes, and against someone willing to write one `ENVIRONMENT=development` is the
+  easier door, so a second URL parser fighting the first would buy nothing.
+
+  **Spellings a mistaken operator could plausibly write**, which is the same
+  threat rule 3 exists for, and this is the honest cost of a class defined by
+  `ipaddress`: `https://0.0.0.0:8081/…` — the bind address, which several browsers
+  resolve to the local machine — and `https://127.1:8081/…`, a shortened dotted
+  quad that `inet_aton` expands to `127.0.0.1`. Both are accepted today, because
+  `ipaddress` calls the first not-loopback and refuses to parse the second at all.
+  They are recorded as accepted residue rather than repaired here: closing them
+  means modelling what a resolver accepts rather than what a library parses, and
+  that is a wider decision than this record should make on its own. A later
+  tightening is a reviewed change with its own pairs, not a quiet widening of the
+  class.
 - **A malformed URL is refused, by accident of the same code path.** `urlsplit`
   raises `ValueError` on a bracketed host it cannot parse (`https://[::1].:8081`),
   pydantic turns that into the ordinary field error, and the operator gets the
