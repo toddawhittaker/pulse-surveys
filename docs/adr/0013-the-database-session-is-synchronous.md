@@ -1,8 +1,9 @@
 # 0013 — The database session is synchronous, and the engine is built at import
 
-**Status:** Accepted
+**Status:** Accepted. Argument corrected 2026-08-21 (E0-37 item 8) — the decision
+is unchanged; what changed is what this record claims in support of it.
 **Date:** 2026-08-13
-**Tickets:** E0-04
+**Tickets:** E0-04, E0-37
 
 ## Context
 
@@ -35,11 +36,23 @@ touch the database are written `def` rather than `async def`, and FastAPI runs
 them in its threadpool.
 
 **The engine and the session factory are module-level, built when `app.db` is
-imported**, from a `Settings()` of that module's own — the same shape ADR 0010
-chose for Celery, for a related reason: there is no application object for a
+imported**, from a `Settings()` of that module's own. The reason is that the
+database is reached from both entry points: there is no application object for a
 Celery task or an Alembic-adjacent script to read `app.state` from, and a
 per-request engine would build a connection pool per request, which is the one
 thing a pool exists to prevent.
+
+**Argument corrected 2026-08-21 (E0-37 item 8).** This paragraph used to call
+that "the same shape [ADR 0010](0010-the-celery-application-is-built-at-import-time.md)
+chose for Celery, for a related reason", and the architecture review was right
+that it does not carry the weight it looks like it carries. Celery's case is
+**forced by a mechanical constraint**: `celery -A app.celery_app` resolves the
+application by attribute lookup on an imported module, and no form of that
+invocation calls a factory, so there is nothing to decide. FastAPI's case is
+not forced at all — `create_app()` exists precisely so that a configuration
+failure lands in one startup — so ADR 0010 is a record of a constraint rather
+than a precedent for a choice. The reason above stands on its own; the citation
+was doing no work and made the decision look better supported than it was.
 
 Committing is the caller's job. The dependency opens a session, yields it, and
 closes it; it does not commit, and it does not roll back on its own beyond what
@@ -66,13 +79,31 @@ keeping identity-separated paths apart, not about writing every query twice.
 
 **A lazily-built engine behind an accessor**, so nothing is constructed at
 import. It answers ADR 0006's objection, and it is what a strict reading of that
-record would ask for. Rejected on two counts: `tests/unit/
-test_db_engine_configuration.py` asserts properties of the engine `app.db`
-exposes, which requires one to exist on the module; and a lazy engine moves a
-configuration failure from process start to the first request that needs a
-database, which is a worse place to find out. The failure this trades away is
-already covered — a missing `DATABASE_URL` raises `ConfigurationError` naming the
-variable, whether that happens in `create_app()` or at import.
+record would ask for. Rejected because a lazy engine moves a configuration
+failure from process start to the first request that needs a database, which is
+a worse place to find out. The failure this trades away is already covered — a
+missing `DATABASE_URL` raises `ConfigurationError` naming the variable, whether
+that happens in `create_app()` or at import.
+
+> **Argument corrected 2026-08-21 (E0-37 item 8).** This rejection used to give a
+> second reason first: that `tests/unit/test_db_engine_configuration.py` asserts
+> properties of the engine `app.db` exposes, which requires one to exist on the
+> module. That test was written in this same ticket, to this same decision, so it
+> is this record citing its own consequence as its own support. It is gone. The
+> reason left is the one that would still be true with no test in the repository.
+
+**The engine inside `create_app()`, on `app.state`, with Celery keeping its
+module-level engine for its own reason.** Never weighed when this was written,
+and named here because a reasonable engineer would ask for it: it is what ADR
+0006 does with `Settings`, it moves the API's configuration failure into the one
+startup `create_app()` exists to hold, and it leaves Celery — which has no
+application object to hang anything on — exactly as it is. What it costs is one
+engine and one pool per process becoming two shapes of "where the engine lives",
+and a dependency that has to reach `request.app.state` rather than a module
+attribute, which every synchronous helper called outside a request then has to be
+handed. **This record acknowledges it rather than adopting it.** The decision
+above is unchanged, and it is not re-argued here: if it should change, that is a
+ticket and a new ADR, not an amendment to this one.
 
 **A session that commits at teardown.** Common, and rejected because it makes
 every read handler a write and commits the half-finished work of a handler that

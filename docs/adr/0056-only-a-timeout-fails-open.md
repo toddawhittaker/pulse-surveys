@@ -2,9 +2,11 @@
 
 **Status:** Accepted. Rewritten after E0-13's second review pass measured two of
 its rows wrong; the decision that the fail-open is narrower than "any failure"
-stands, and where the line sits has moved.
+stands, and where the line sits has moved. Amended 2026-08-21 (E0-37): item 12
+closed the keyless-cleartext allowance this record used to name, and item 13
+recorded why HTTP 429 and 500 sit outside the floor. The taxonomy is unchanged.
 **Date:** 2026-08-18
-**Tickets:** E0-13
+**Tickets:** E0-13, E0-37
 
 ## Context
 
@@ -75,6 +77,23 @@ model that does not exist, a schema the endpoint will not accept. None of these
 resolves on its own, and flooring on them would hide a permanent misconfiguration
 one comment at a time.
 
+**Why 429 and 500 in particular are outside the floor**, since they are the two
+rows in that group a reader is most likely to argue with — E0-13's implementer
+named them as the ones expecting an argument, and Todd affirmed them as built on
+2026-08-18. They are both cases where the endpoint answered, so the classifier
+knows the provider is there; what it also knows is that the answer was about our
+own request. **A 429 is a capacity decision an operator has to see**: the account
+is over its limit, and flooring turns a bill or a plan that needs changing into
+silently degraded classification that nobody is told about. E2's queue owns the
+backoff, so absorbing it here would take the decision away from the layer that
+can act on it. **A 500 means our request is the problem** far more often than it
+means the provider is having an outage — a payload the model cannot parse
+returns exactly this — and the outage shape has its own statuses in the floor
+above. Flooring on either hides a condition that never resolves on its own, one
+comment at a time, for as long as it takes somebody to notice that no comment has
+been classified since Tuesday. The cost of raising is the opposite and much
+louder: E2 sees the error on the submit path and answers for it.
+
 **The classification is made on the exception chain, never on a message.** The
 library flattens all of these into one class carrying a sentence — "Request timed
 out." against "Connection error." — and a rule that reads either breaks when the
@@ -85,8 +104,16 @@ unreachable**, so an unrecognised failure surfaces rather than being absorbed.
 
 **`AI_PROVIDER_BASE_URL` carries no credential of its own**, and is refused at
 startup if it does — over https as well as http, and on loopback as well as off
-it, because the problem is not only the wire. And when `AI_PROVIDER_API_KEY` *is*
-set, the URL must be `https` or name this machine.
+it, because the problem is not only the wire. And the URL must be `https` unless
+it names this machine.
+
+> **Amended 2026-08-21 (E0-37 item 12).** That last sentence used to read "when
+> `AI_PROVIDER_API_KEY` *is* set, the URL must be `https` or name this machine",
+> and the validator returned early when no key was configured. Todd decided on
+> 2026-08-18 that off this machine means `https` with or without a credential:
+> the key is not the only secret on that connection, and the student comment in
+> the body of every request is the one SPEC §4 and §10 protect. The rule no
+> longer reads `AI_PROVIDER_API_KEY` at all.
 
 ## Alternatives rejected
 
@@ -114,9 +141,11 @@ report outages with status codes, not with hanging sockets.
 leak through `model_dump()`. Rejected because §6.3 specifies an admin view showing
 "AI provider (base URL, model, masked key)" — the base URL is meant to be
 *visible*, and masking it to defend against a credential that should not be there
-solves the wrong half. Refusing the credential keeps the field displayable and
-makes the transport rule's question ("is a credential configured?") answerable
-from one place.
+solves the wrong half. Refusing the credential keeps the field displayable, which
+is what §6.3 asks for. (It also used to make the transport rule's question — "is
+a credential configured?" — answerable from one place; since E0-37 item 12 that
+rule asks no such question, so this alternative loses one of its two reasons and
+keeps the one the spec gives.)
 
 **Asking whether a credential is configured *anywhere*, including the URL, and
 then requiring TLS.** The narrower fix, and it leaves the password in
@@ -124,12 +153,17 @@ then requiring TLS.** The narrower fix, and it leaves the password in
 
 ## Consequences
 
-**Cleartext to an off-machine endpoint with no credential is still permitted**,
-and this record names it rather than closing it: student comment text would cross
-a network unencrypted, and whether the network is private enough for that is the
-operator's judgement. **That sentence is now true as written**, which it was not
-before — with userinfo refused, "no `AI_PROVIDER_API_KEY`" does mean "no
-credential", so the hole is exactly as wide as it says and no wider.
+**Cleartext to an off-machine endpoint with no credential was permitted, and is
+not any more.** This record used to name that hole rather than close it: student
+comment text would cross a network unencrypted, and whether the network was
+private enough for that was called the operator's judgement. **E0-37 item 12
+closed it on 2026-08-21**, to a decision Todd made on 2026-08-18 — the comment is
+in the body of every request whether or not a credential is configured, §10 does
+not allow it on the wire in the clear, and a deployment that wants a model in its
+own cluster terminates TLS at the model or runs it alongside the application.
+Nothing here still offers the keyless-cleartext case, and nothing in this record
+argues for it: the paragraph that did, in `app/config.py`'s validator docstring,
+cited this ADR and went with the same change.
 
 **A provider that is unreachable blocks the validity call.** With the availability
 statuses moved into the floor this is the narrower case it was meant to be — a

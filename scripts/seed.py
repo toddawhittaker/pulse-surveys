@@ -86,6 +86,22 @@ uses too. Matching there would adopt a real prefix rather than create one, and
 carry every course under it along — so `seed_containment` refuses instead, naming
 the code and the department that holds it. ADR 0064 carries the measurement.
 
+**`Institution.name` relies on the second half of that rule, and only on it.**
+It is matched unscoped — nothing sits above the root to scope it to — so what
+keeps the match safe is that `Pulse Demo University` is a value this file
+invented rather than a name a real institution uses. That is the whole of the
+protection, and it is worth saying where the loader is edited: a collision would
+be **adopted** rather than refused, and the blast radius would be larger than the
+`prefix.code` case, because three role assignments are scoped to
+`("institution", INSTITUTION_NAME)` and demo leadership would gain purview over
+the whole of somebody's real tree. Changing that name to something plausible —
+a real university's — is the way to make this reachable.
+
+The refusal described next does not cover that case. It refuses an institution
+carrying a **different** name; one carrying this name is this seed's own row from
+an earlier run, which is what keeps a second run idempotent, and there is nothing
+in the database that could tell the two apart.
+
 **Since E0-22 it refuses on the institution first.** SPEC §8 says a deployment
 serves exactly one institution and `uq_institution_one_row` holds that, so a
 database already holding somebody else's institution has no room for this one.

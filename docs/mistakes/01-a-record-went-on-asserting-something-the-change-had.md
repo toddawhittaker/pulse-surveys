@@ -1,26 +1,10 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 41**
+**Caught: 42**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*24 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 21 are in this file's git history and in the pull requests they cite.*
-
-*(E0-18 PR 1's second round, and this one is the entry applied **to the shape of
-an assertion rather than to a sentence**. The claim-to-Care sweep had to gain a
-named exception, and an exception is a record: it says "this module reads a claim
-and names Care, and here is why that is allowed". Written as a set the assertion
-merely subtracts, that record survives the module being deleted, renamed, or
-rewritten until it no longer reads a claim at all — and it goes on excusing
-something that is no longer there while the sweep quietly stops sweeping. So the
-assertion is an **equality** between the flagged set and the exception set's
-keys, and a stale exception fails as loudly as a new offender, with its own half
-of the message. The same round widened
-`tests/integration/test_identity_grants.py`'s hand-written privilege set by two
-entries, and the derivation comment above it was extended in the same edit as the
-constant — that constant exists precisely so a widening cannot justify itself, so
-an entry added without its paragraph would have made the whole block a record
-that no longer accounts for what it guards.)*
+*25 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 22 are in this file's git history and in the pull requests they cite.*
 
 *(E0-18 PR 1's third round, where the false records would have been **the "what
 is deliberately not here" paragraphs at the top of two test modules**. Both door
@@ -66,6 +50,26 @@ preamble said item 6 "adds the last section below" while a later section had bee
 appended after it by another ticket, so the sentence was already false before this
 batch touched the file and would have stayed false through a change that rewrote
 the section it describes.)*
+
+*(E0-37, Batch H, where the sharpest one was **the copy of the rule an operator
+actually reads**. Item 12 changed the model-endpoint transport rule from "https
+when a credential is set" to "https off this machine, credential or not", and the
+dispatch brief named three places to correct: the validator's docstring,
+`README.md` and `.env.example`. It did not name the fourth, because nothing in
+the validator points at it — `ai_provider_base_url`'s `Field(description=...)`,
+twenty lines above, held the old rule in a sentence. That string is not
+commentary: `_describe_invalid_settings` builds the startup report from the field
+name and its `description`, and a validator's own message never reaches the
+operator (ADR 0056 records why). So the refusal would have printed the rule it
+had just stopped enforcing, to the one reader who has to act on it. Found by
+grepping the *fact* — "when that key is set" — rather than the validator's name,
+which appears in none of the four. The same sweep found ADR 0013's `echo`
+consequence claiming that deriving `echo` is what keeps survey answers out of the
+log, which item 1 had just measured false; ADR 0063, ADR 0074 and 0074's row in
+the ADR index all saying item 2's consolidation was "proposed rather than done";
+and two rows of `docs/tickets/e0/E0-29-…` in the present tense of a tree that no
+longer exists. Every one of those was in a file the change did not otherwise
+touch.)*
 
 **What happened.** Nine times, across three tickets. `.dockerignore`'s header
 claimed it made secret leakage "impossible rather than unlikely" while `!backend`
