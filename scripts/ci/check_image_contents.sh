@@ -16,9 +16,13 @@
 # they had nothing watching them until E0-36's review measured it.
 # `backend/**/*.pfx` and `backend/**/*.secret` are two more of that kind, added
 # by E0-37 item 9 — which measured both suffixes *reaching* the image, since
-# until that item no line excluded them.
+# until that item no line excluded them. `backend/**/*.p12` and the extensionless
+# `backend/**/id_rsa` are two more again, added by the Batch H review, which found
+# the commonest names item 9 left uncovered — `.p12` is the same format as `.pfx`
+# under its commoner extension, and `id_rsa` is what OpenSSH writes a private key
+# as by default — still reaching the image.
 #
-# **Deleting any of those eight lines leaves every other gate green.** That is
+# **Deleting any of those ten lines leaves every other gate green.** That is
 # what this exists for. It is not a test of `.dockerignore`'s text, and E0-36
 # says why: a text assertion passes against a typo'd pattern, which carries the
 # file just as surely. So this plants one file per pattern, builds the image, and
@@ -56,7 +60,7 @@ PROMPTS_SOURCE_DIRECTORY="backend/app/ai/prompts"
 CONTROL_FILE="validity.v1.md"
 
 # One file per re-exclusion this covers, so that a deleted line names itself in
-# the failure rather than being one of eight candidates. The stem says what they
+# the failure rather than being one of ten candidates. The stem says what they
 # are and where they came from, because a build that dies between the plant and
 # the cleanup leaves them in somebody's working tree.
 #
@@ -70,8 +74,15 @@ CONTROL_FILE="validity.v1.md"
 # The `.pfx` and `.secret` arrived with E0-37 item 9, on the same kind of
 # measurement with the opposite answer: planted the same way, both **reached**
 # the image, because nothing in `.dockerignore` matched them. That item added the
-# two lines and these two plants together, so the four suffixes whose deletion
-# ships key material now all have something watching them.
+# two lines and these two plants together.
+#
+# The `.p12` and `id_rsa` arrived with the Batch H review, again the same
+# measurement with the same opposite answer — planted the same way and both
+# **reached** the image, because item 9's two lines did not match them. `id_rsa`
+# has no suffix, so its planted file is named by that literal basename rather than
+# with the shared stem, because `.dockerignore` matches it as `backend/**/id_rsa`.
+# So the six names whose deletion ships key material now all have something
+# watching them.
 PLANTED_FILES=(
   "e0-36-image-content-check.md~"     # backend/**/*~
   "e0-36-image-content-check.orig"    # backend/**/*.orig
@@ -81,6 +92,8 @@ PLANTED_FILES=(
   "e0-36-image-content-check.key"     # backend/**/*.key
   "e0-37-image-content-check.pfx"     # backend/**/*.pfx
   "e0-37-image-content-check.secret"  # backend/**/*.secret
+  "e0-37-image-content-check.p12"     # backend/**/*.p12
+  "id_rsa"                            # backend/**/id_rsa
 )
 
 # Its own tag, so a build that does carry a planted file cannot be left behind as
@@ -228,11 +241,12 @@ if [ "${#carried[@]}" -gt 0 ]; then
   echo "FAIL: these planted files reached the runtime image: ${carried[*]}" >&2
   cat >&2 <<'EXPLANATION'
 
-      `.dockerignore` re-excludes eight patterns under `backend/`: `*~`,
+      `.dockerignore` re-excludes ten patterns under `backend/`: `*~`,
       `*.orig`, `*.rej` and `*.bak` at the end of the file, and `*.pem`, `*.key`,
-      `*.pfx` and `*.secret` in the block with the `.env` patterns. Each planted
-      file above matches exactly one of them, so each name says which line is
-      gone or no longer matches what it used to.
+      `*.pfx`, `*.p12`, `*.secret` and the extensionless `id_rsa` in the block
+      with the `.env` patterns. Each planted file above matches exactly one of
+      them, so each name says which line is gone or no longer matches what it
+      used to.
 
       This is not cosmetic. `pyproject.toml` ships `prompts/**/*` as `app.ai`
       package data, so anything left in `backend/app/ai/prompts/` is packaged

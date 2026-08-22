@@ -44,22 +44,31 @@ backend/**/.env.*
 backend/**/*.pem
 backend/**/*.key
 
-# Two more secret-shaped suffixes, and these do **not** mirror .gitignore: git
-# tracks a `.pfx` or a `.secret` happily, so the sentence above does not cover
-# them. E0-37 item 9 planted one of each in `backend/app/ai/prompts/`, built the
-# runtime image and listed the installed directory inside it: both arrived,
-# where the `.pem` and `.key` lines above stop their own suffixes by exactly the
-# same route. So a `signing.pfx` parked beside a prompt while debugging was in
-# the image, untracked or not.
+# More secret-shaped names, and these do **not** mirror .gitignore: git tracks a
+# `.pfx`, a `.p12`, a `.secret`, or a private key called `id_rsa` happily, so the
+# sentence above does not cover them. E0-37 item 9 planted a `.pfx` and a
+# `.secret` in `backend/app/ai/prompts/`, built the runtime image and listed the
+# installed directory inside it: both arrived, where the `.pem` and `.key` lines
+# above stop their own suffixes by exactly the same route. The Batch H review
+# found the two commonest names that item missed still reaching the image —
+# `.p12`, the same format as `.pfx` under its commoner extension, and the
+# extensionless `id_rsa` an OpenSSH private key is written as by default. So a
+# `signing.p12` or an `id_rsa` parked beside a prompt while debugging was in the
+# image, untracked or not.
+#
+# `id_rsa` has no suffix to glob, so it is matched by its literal basename under
+# any directory rather than by an extension.
 #
 # Only `backend/` needs them. `mock-lms/` and `mock-idp/` hold the signing keys,
 # but neither ships package data, so nothing under either is a path into an
 # image the way `pyproject.toml`'s `prompts/**/*` glob is.
 #
 # `scripts/ci/check_image_contents.sh` plants one file per line here, so
-# deleting either of these fails the Docker gate naming the line that went.
+# deleting any of these fails the Docker gate naming the line that went.
 backend/**/*.pfx
+backend/**/*.p12
 backend/**/*.secret
+backend/**/id_rsa
 
 mock-lms/.env
 mock-lms/.env.*
@@ -105,10 +114,11 @@ mock-idp/**/*.py[cod]
 # production failure while missing a suffix costs a stray file.
 #
 # These four have a gate behind them, and so do `backend/**/*.pem`,
-# `backend/**/*.key`, `backend/**/*.pfx` and `backend/**/*.secret` above.
+# `backend/**/*.key`, `backend/**/*.pfx`, `backend/**/*.p12`,
+# `backend/**/*.secret` and `backend/**/id_rsa` above.
 # `scripts/ci/check_image_contents.sh` (E0-36 item 4) plants one file per covered
 # pattern, builds the runtime image and looks inside it, so deleting one of those
-# eight lines fails the Docker gate in both CI and `make docker-build`, and names
+# ten lines fails the Docker gate in both CI and `make docker-build`, and names
 # the line that went. Before that, deleting any of them left every gate green.
 #
 # An earlier version of this note said the four here were singled out because the
@@ -127,9 +137,11 @@ mock-idp/**/*.py[cod]
 # what the patterns cover rather than about whether the gate works, and it is not
 # answered in this file. **E0-37 item 9 answered two of it** — `.pfx` and
 # `.secret`, both measured reaching the image and both now excluded above — and
-# left the question itself open: this is still a denylist, and the allowlist for
-# this directory that would close it is ADR 0032's trade to reverse rather than a
-# line to add here.
+# **the Batch H review answered two more**, `.p12` and the extensionless `id_rsa`,
+# the commonest names item 9 left uncovered, measured reaching the image the same
+# way. It left the question itself open: this is still a denylist, and the
+# allowlist for this directory that would close it is ADR 0032's trade to reverse
+# rather than a line to add here.
 backend/**/*~
 backend/**/*.orig
 backend/**/*.rej
