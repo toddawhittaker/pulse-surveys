@@ -56,21 +56,44 @@ recorded in `docs/tickets/e1/carried-from-e0.md`.
 
 1. `backend/app/config.py`: the five fields required; the validator; both per
    the decision above.
-2. `docker-compose.yml`: the five variables on the api service (and any other
-   backend service that constructs `Settings`), values pointing at the dev
-   stack as today's defaults do. The mock-idp service comment corrected: it is
-   trusted wherever configuration names it, and the configuration now refuses
-   to name it outside development.
-3. `.env.example`: the five names added with the dev values, and the false
-   "None of them can resolve in a deployment" claim replaced with what is now
-   true.
+2. `docker-compose.yml`: the five variables on the api, worker, and beat
+   services (`Settings` is constructed identically in all three — ADR 0042),
+   in the interpolated form `${OIDC_ISSUER:-http://mock-idp:8000}` so a
+   deployment's `.env` still wins and only the un-set case falls back to the
+   dev value — where the layer-2 refusal then catches it outside
+   development. A plain `environment:` literal would beat `env_file:` and
+   make the base file undeployable; that is why the interpolated form is the
+   decision, not a style choice. The mock-idp service comment corrected: it
+   is trusted wherever configuration names it, and the configuration now
+   refuses to name it outside development.
+3. `.env.example`: the five entries already exist (lines ~209–218) under the
+   "Defaulted — optional" heading. Move them to the required section — do
+   not duplicate them — and replace the false "None of them can resolve in a
+   deployment" sentence (line ~183) with what is now true.
 4. **ADR 0077** (number reserved): supersedes ADR 0075 **in part** — the
    defaulted-address decision is reversed for the web door; keep 0075's
    rejected-alternatives reasoning visible as the price paid, per the
    ADR-reversal convention. Amend ADR 0075's body with a pointer line to 0077.
    Do **not** edit `docs/adr/README.md` — E0-42 owns the index and adds 0077's
    row.
-5. Tests (test-author): startup refusal and acceptance **in pairs** —
+5. **Repair round (test-author, partitioned before implementation per the
+   MISTAKES entry 22 pattern):** the new rule reddens merged test modules
+   whose fixtures construct non-development `Settings` against the mock's
+   addresses or client id — `tests/integration/test_web_login_door.py`,
+   `test_lti_launch_door.py`, `test_demo_seed_script.py`,
+   `tests/unit/test_docs_exposure.py`, `test_dev_console_exposure.py`,
+   `test_care_engine_configuration.py`, `test_db_engine_configuration.py`,
+   and `tests/conftest.py` if the fixture is shared. The repair: where a
+   test's subject is something other than the OIDC refusal (a cookie flag, a
+   404, an engine rule, the seed's own refusal), its non-development
+   configuration uses non-mock placeholder values
+   (`https://idp.example.edu/...`, client id `example-client`) so the guard
+   under test is the one that fires. No test's assertion weakens; only
+   fixture configuration moves. Known safe overlap: E0-41 adds one-line
+   markers to `test_docs_exposure.py` and `test_dev_console_exposure.py` in
+   a sibling worktree — different hunks, semantically independent; the
+   second PR to merge re-runs CI over the combination.
+6. Tests (test-author): startup refusal and acceptance **in pairs** —
    development + mock values accepted; non-development + mock issuer refused;
    non-development + mock client id refused; non-development + non-mock values
    accepted; missing field refused in any environment. Compose coverage: the
@@ -92,7 +115,9 @@ This ticket may touch only: `backend/app/config.py`, `docker-compose.yml`,
 `docker-compose.override.yml` (only if the merged config requires it),
 `.env.example`, `docs/adr/0075-*.md`, new `docs/adr/0077-*.md`, this ticket
 file, and under `tests/` only `tests/unit/test_compose_stack.py`,
-`tests/unit/test_env_example_resolves.py`, and a **new**
-`tests/unit/test_oidc_provider_configuration.py`. Never `docs/adr/README.md`,
+`tests/unit/test_env_example_resolves.py`, a **new**
+`tests/unit/test_oidc_provider_configuration.py`, and — for the scope-item-5
+repair round only, fixture configuration never assertions — the modules that
+item names plus `tests/conftest.py`. Never `docs/adr/README.md`,
 never `docs/tickets/e0/README.md`, never CI files, never any other test file —
 sibling tickets own those in parallel worktrees.
