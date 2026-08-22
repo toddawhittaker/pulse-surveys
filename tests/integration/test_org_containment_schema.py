@@ -418,12 +418,26 @@ def test_a_prefix_cannot_sit_outside_a_department(org_tables: dict[str, Table]) 
 
     **`ON DELETE RESTRICT` does not cover this**, and that is the whole reason
     this test is worth its lines.
-    `test_deleting_a_department_that_has_prefixes_is_refused` passes whether or
-    not the column is nullable: a nullable foreign key still refuses the delete of
-    a department that a prefix points at. So a later change making the column
-    nullable turns nothing red, and a prefix belonging to no department becomes
-    writable — a subtree with no parent, in the hierarchy every purview
-    computation in SPEC §2.1 walks.
+    `test_deleting_a_department_that_has_prefixes_is_refused` says nothing about
+    nullability in either direction: a nullable foreign key still refuses the
+    delete of a department that a prefix points at. So the property could be lost
+    with that test reporting nothing about it, and a prefix belonging to no
+    department becomes writable — a subtree with no parent, in the hierarchy every
+    purview computation in SPEC §2.1 walks.
+
+    **What the mutation actually does to that test was measured, and it is not
+    what this docstring first said.** The first version claimed the delete-restrict
+    test "stays green" under a nullable `department_id`. It does not: with
+    `nullable=True` in the model and the migration it dies inside its own seeding
+    with `KeyError: 'department'`, because `seed_row` in this file — and the three
+    copies of that walker elsewhere in the suite — builds an ancestor row only for
+    a foreign key that is NOT NULL, so a nullable column drops `department` out of
+    the chain the test then reads. That is an error in a fixture rather than a
+    failed assertion about the schema (`docs/MISTAKES.md` entry 13's closing line:
+    when a test fails inside its own fixture, suspect the fixture), and it names
+    neither the column nor the rule. The argument for this test is unchanged and
+    slightly stronger — the one thing that fails *on the property*, naming the
+    nullable columns, is the assertion below.
 
     Read out of the catalog rather than probed with an insert. Both would work;
     the catalog is what says the rule *exists*, and `docs/MISTAKES.md` entry 3's
@@ -434,10 +448,12 @@ def test_a_prefix_cannot_sit_outside_a_department(org_tables: dict[str, Table]) 
     `app/models/org.py` declares.
 
     **The mutation this test exists for:** `ALTER TABLE prefix ALTER COLUMN
-    department_id DROP NOT NULL`, which turns exactly this red and leaves the
-    delete-restrict test above green. **The near miss that must stay green:**
-    renaming the column, or reaching the department through a composite key,
-    since the columns are found by following the foreign key rather than by name.
+    department_id DROP NOT NULL`, or `nullable=True` on the model and in the
+    migration. It turns exactly this red, with the column named; the
+    delete-restrict test above stops running rather than staying green, for the
+    reason given above. **The near miss that must stay green:** renaming the
+    column, or reaching the department through a composite key, since the columns
+    are found by following the foreign key rather than by name.
     """
     prefix = require_table(org_tables, "prefix")
     department = require_table(org_tables, "department")

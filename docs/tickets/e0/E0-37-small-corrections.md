@@ -125,9 +125,14 @@ E0-05's scope says a department groups one or more prefixes and requires it
 enforced as a database constraint. The column is non-nullable and does enforce
 it; nothing asserts the non-nullability, so only the course-to-prefix half of
 that sentence is tested. `ON DELETE RESTRICT` does not cover it — the
-delete-restrict test passes whether or not the column is nullable, so a later
-change making it nullable turns nothing red and a prefix belonging to no
-department becomes writable.
+delete-restrict test asserts nothing about nullability, so the property could
+be lost with that test reporting nothing about it, and a prefix belonging to
+no department becomes writable. (The build measured what that test actually
+does under the mutation: it does not stay green — it dies inside its own
+seeding with `KeyError: 'department'`, because the suite's chain walkers build
+an ancestor row only for a non-nullable foreign key. An error in a fixture,
+naming neither the column nor the rule; the new test is what fails on the
+property.)
 
 One assertion against the catalog, in
 `tests/integration/test_org_containment_schema.py`, which already holds the
