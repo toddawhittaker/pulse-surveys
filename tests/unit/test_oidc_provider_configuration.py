@@ -461,7 +461,23 @@ def test_the_refusal_of_a_mock_url_names_the_field_without_quoting_the_value(
     Nothing else about the wording is pinned. The host may appear — it is what is
     being refused — and the sentence around it should stay improvable.
 
-    **The mutation this kills:** an f-string refusal built from the offending URL.
+    **The mutation this kills, corrected against a measurement.** This docstring
+    first named "an f-string refusal built from the offending URL", and that
+    mutation cannot leak. `_describe_invalid_settings` assembles what the operator
+    reads out of the field name, the field's static description and pydantic's error
+    code, and discards the validator's own message entirely — so a validator that
+    quoted the URL back would be green here against every implementation, and the
+    test would have been asserting a property nothing could violate.
+
+    What this actually guards is the **assembly**. Putting `detail.get("input")`
+    into the line that function builds writes the configured value into the
+    container startup log, for every refused setting at once, which is the surface
+    SPEC §10 keeps values out of. E0-39's verifier ran exactly that mutation as part
+    of the battery and exactly this test went red for it.
+
+    The measurement is the verifier's rather than this module's — a test author does
+    not read `app/config.py` — so the account above names the function rather than a
+    line number, which would go stale on the next edit to that file.
     """
     offending = f"http://{MOCK_SERVICE}:8000/oidc/token?tenant=e0-39"
     configure(
