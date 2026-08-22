@@ -139,6 +139,19 @@ The Compose files are parsed in `tests/conftest.py`, unmerged and one at a time,
 which is the whole point of item 1 — `docker compose config` would merge the
 override back in and hide it.
 
+**One section is read merged, and the exception is as load-bearing as the rule.**
+Reading the files separately is right for every question about a *service*: what
+a service publishes, mounts or blanks is per-file configuration, and which file
+says it is the difference between every deployment and a laptop. It is wrong for
+the top-level `volumes:` section, because Docker merges that before any service
+mounts anything — so the override can redefine a volume the base file mounts,
+and E0-19's second security review measured that giving `beat` the host root
+with the whole suite green. `merged_volume_bodies` does that one merge, every
+mount rule reads its result, and the rule to take from it is: *read the
+configuration Docker assembles, wherever Docker assembles one.* Today that is
+exactly one section. A second one is a change to this paragraph as well as to
+the code.
+
 Most tests below read the base file, because that is the one every deployment
 runs. The credential rules read both files, and the line between the two groups
 is worth stating precisely, because the original reason for leaving the override
@@ -194,6 +207,16 @@ strategy changed, on Todd's ruling, and the shape below is the result:
     anything else. `volumes_from`, `cgroup`, `uts`, `runtime` and `develop` were
     all measured going past the guards silently, and the point of a closed set
     is that the sixth one nobody has thought of does not.
+  - **And the sets close one level further in wherever an allowed key is itself
+    a container.** That sentence is the whole history of this module written
+    once: the top-level set admitted `volumes:` and said nothing about
+    `driver_opts`; the service set admitted `build:` and said nothing about
+    `additional_contexts`, which reads a directory outside the project at build
+    time, or `build.privileged`, which builds as root on the host; and it
+    admitted `ports:` while nothing read the value, so deleting a `127.0.0.1:`
+    prefix published Postgres on every interface. `ALLOWED_BUILD_KEYS` and the
+    loopback rule close those two. The question to ask of any new entry on any
+    of these lists is what it *contains*.
   - **The set of Compose files is closed too**, which is the same move one level
     out. Everything above reads two hand-picked files; Docker reads whichever of
     eight recognised names it finds, preferring `compose.yaml` over
@@ -328,6 +351,43 @@ ALLOWED_SERVICE_KEYS = (
     "ports",
     "volumes",
 )
+
+# The sub-keys a `build:` section may declare — the closed set one level further
+# in, and the second security review is what bought this one too.
+#
+# Admitting `build` admitted everything under it. Two measurements, both green
+# against the whole suite and both confirmed by reading a host file out of the
+# built image:
+#
+#   - `additional_contexts` names a second build context, which a
+#     `COPY --from=<name>` in the Dockerfile then reads. The context can be any
+#     directory on the host — or a git URL — and `.dockerignore` does not apply
+#     to it, so it is a route around every rule this module has about what a
+#     container may reach, taken at build time rather than at run time.
+#   - `privileged: true` under `build` runs the build itself with full host
+#     privileges. It is a different key from the service-level `privileged:` that
+#     `PRIVILEGE_KEYS` refuses, and it was outside every rule here.
+#
+# Enumerated from the two files, which use exactly these two on all five
+# services that build: `context: .` and a `dockerfile:` per image. **`args` is
+# deliberately not on this list.** Nothing declares one; admitting it because a
+# build "usually" has arguments is how `networks` got onto
+# `ALLOWED_TOP_LEVEL_KEYS`, and a build argument is also a place a credential
+# travels (`test_nothing_outside_the_database_service_reads_the_superuser_credential`
+# walks it for exactly that reason). It comes back in the change that first needs
+# one.
+ALLOWED_BUILD_KEYS = ("context", "dockerfile")
+
+# The host addresses a published port may bind. Two, both loopback: a port bound
+# here is reachable from the machine running the stack and from nothing else.
+#
+# The measurement is the omission rather than a wrong value: dropping the
+# `127.0.0.1:` prefix from `db`'s entry in the override publishes Postgres on
+# every interface — a laptop on a conference network serving its database to the
+# room, which is the sentence the override's own header comment already makes —
+# and the whole suite stayed green, because `ports` was an allowed service key
+# whose *value* no rule read.
+LOOPBACK_HOST_IPS = ("127.0.0.1", "::1")
 
 # Compose gives `x-…` no meaning of its own, so an extension field is inert
 # until something merges it — and it is walked like every other value, so its
@@ -1935,12 +1995,16 @@ class BindMounts(NamedTuple):
 
 
 def top_level_volumes(document: dict[str, Any]) -> dict[str, Any]:
-    """The `volumes:` section of a Compose file, keyed by name.
+    """The `volumes:` section of one Compose file, keyed by name.
 
     A section that is not a mapping yields nothing, which makes every named
     volume in the file unresolvable and therefore refused below. That is the
     safe direction: a `volumes:` section this module cannot read is not a file
     whose named volumes are all harmless.
+
+    One file, and this is not what the rules read — `merged_volume_bodies` is.
+    See its docstring for why reading one file was a hole rather than a
+    simplification.
     """
     declared = document.get("volumes")
     if not isinstance(declared, dict):
@@ -1948,9 +2012,70 @@ def top_level_volumes(document: dict[str, Any]) -> dict[str, Any]:
     return {str(name): body for name, body in declared.items()}
 
 
+def merged_body(under: Any, over: Any) -> Any:
+    """Two declarations of one thing, combined the way Compose combines them.
+
+    Mappings merge key by key and recursively; anything else is replaced by the
+    later file, and a later file that says nothing (`beat-schedule:` with an
+    empty body) leaves the earlier declaration standing. That is Compose's rule
+    for a mapping, and it is the rule that matters here because a volume body is
+    a mapping.
+
+    Where the merge is genuinely ambiguous the result lands in the
+    unclassifiable branch of `named_volume_source`, which refuses — so getting
+    an unusual combination slightly wrong fails closed rather than open.
+    """
+    if isinstance(under, dict) and isinstance(over, dict):
+        combined = dict(under)
+        for key, value in over.items():
+            combined[key] = merged_body(combined.get(key), value) if key in combined else value
+        return combined
+    return under if over is None else over
+
+
+def merged_volume_bodies(documents: ComposeDocuments) -> dict[str, Any]:
+    """The top-level `volumes:` section as Docker assembles it, across every file.
+
+    **This is the fix for E0-19's second security review, and the hole it closes
+    was measured against the daemon.** Every mount rule here used to resolve a
+    named volume in the *same document* as the service that mounts it, on the
+    reasoning that this module reads the two files one at a time and refuses to
+    model Compose's merge. That reasoning is right about services and wrong
+    about this section: `docker compose up` merges the top-level `volumes:`
+    across both files before any service mounts anything, so the override can
+    redefine a volume the base file mounts.
+
+    `beat` mounts `beat-schedule`, which the base file declares with an empty
+    body. Adding
+
+        volumes:
+          beat-schedule:
+            driver_opts: {type: none, device: /, o: bind}
+
+    to `docker-compose.override.yml` — or `beat-schedule: {name: precreated-host-root}`
+    — gives that container the host root. Measured: 460 tests green, and the
+    running container read the host's `.env` through the mount. Per-file
+    resolution saw the base file's empty body and called it an ordinary Docker
+    volume; nothing looked at the override, because nothing mounted anything
+    there.
+
+    So the merge is done here, once, and every rule that consumes a resolved
+    volume reads the result: the allowlist, the sensitive check, and the
+    `name:`/`driver:` refusal. The asymmetry between the two files is still
+    load-bearing everywhere else in this module — what a service may *mount* is
+    keyed by the file that declares the mount — and it is not load-bearing here,
+    because a volume body is not per-file configuration in the first place.
+    """
+    merged: dict[str, Any] = {}
+    for _, document in documents:
+        for name, body in top_level_volumes(document).items():
+            merged[name] = merged_body(merged.get(name), body) if name in merged else body
+    return merged
+
+
 def named_volume_source(
     name: str,
-    document: dict[str, Any],
+    volumes: dict[str, Any],
     project_directory: Path | str,
 ) -> tuple[str | None, str | None]:
     """What host path a named volume resolves to, or why this module cannot say.
@@ -1979,12 +2104,15 @@ def named_volume_source(
     project prefix, and one `docker volume create --opt device=/ --opt o=bind`
     beforehand makes the innocuous-looking entry a mount of the host root. See
     `VOLUME_KEYS_NAMING_SOMETHING_ELSE`.
+
+    `volumes` is the **merged** top-level section, across every Compose file —
+    never one document's. `merged_volume_bodies` says why, and the short version
+    is that a body read from one file is not the body the daemon uses.
     """
-    volumes = top_level_volumes(document)
     if name not in volumes:
         return None, (
-            f"names the volume `{name}`, which the top-level `volumes:` section does not "
-            "declare, so what it mounts cannot be read here"
+            f"names the volume `{name}`, which no Compose file's top-level `volumes:` section "
+            "declares, so what it mounts cannot be read here"
         )
 
     body = volumes[name]
@@ -2037,7 +2165,7 @@ def named_volume_source(
 
 def bind_mounts_of(
     service: dict[str, Any],
-    document: dict[str, Any],
+    volumes: dict[str, Any],
     project_directory: Path | str,
 ) -> BindMounts:
     """Every host path this service reaches, in every spelling Compose allows.
@@ -2049,11 +2177,14 @@ def bind_mounts_of(
     than assumed harmless, and a declaration this module cannot classify is
     carried out as a refusal instead of contributing nothing.
 
-    The document is a parameter because a named volume is resolved in the file
-    that declares it. The two Compose files are read one at a time and never
-    merged, which is the property the whole module rests on, so a volume named
-    in one file and declared in the other is unresolvable *here* and refused —
-    correctly: Compose would refuse it too when the base file is run alone.
+    **`volumes` is the merged top-level section across every Compose file**, and
+    this parameter used to be the one document the service was declared in. That
+    was a hole rather than a simplification, it was measured against the daemon,
+    and `merged_volume_bodies` carries the measurement: Docker merges this
+    section before any service mounts anything, so a volume body written in the
+    override is the body a base-file service gets. Nothing else in this module
+    merges anything, and the reason this section does is that a volume body was
+    never per-file configuration.
     """
     sources: set[str] = set()
     unreadable: list[str] = []
@@ -2103,7 +2234,7 @@ def bind_mounts_of(
             sources.add(normalised_bind_source(source, project_directory))
             continue
 
-        resolved, refusal = named_volume_source(source, document, project_directory)
+        resolved, refusal = named_volume_source(source, volumes, project_directory)
         if refusal is not None:
             unreadable.append(refusal)
         elif resolved:
@@ -2123,35 +2254,47 @@ def bind_mounts_of(
 # sibling it feeds" asks for.
 
 
-def declared_bind_mounts(path: Path, document: dict[str, Any]) -> dict[str, BindMounts]:
-    """Every service's resolved host mounts in one file, keyed by service name.
+def declared_bind_mounts(documents: ComposeDocuments) -> dict[tuple[str, str], BindMounts]:
+    """Every service's resolved host mounts, keyed by (file name, service name).
 
-    The project directory is `path.parent` and is derived here rather than
-    passed in, so that the directory a source is resolved against is always the
-    directory of the file the source was read from — which is what Compose does
-    and what a caller supplying its own could get wrong in either direction.
+    **Takes every Compose file rather than one**, and that is E0-19's second
+    security review in one signature. A service's mounts are still read from the
+    file that declares them — that asymmetry is what `ALLOWED_BIND_MOUNTS` is
+    keyed by — but the volume bodies those mounts resolve through are merged
+    across all of them, because Docker merges that section before a service
+    mounts anything. Passing one file used to be possible and was the hole; now
+    the merged table cannot be forgotten at a call site, because there is no call
+    site that assembles it.
+
+    The project directory is each file's own `path.parent`, so a relative source
+    resolves against the directory of the file it was written in — which is what
+    Compose does.
     """
+    volumes = merged_volume_bodies(documents)
     return {
-        name: bind_mounts_of(body, document, path.parent)
+        (path.name, name): bind_mounts_of(body, volumes, path.parent)
+        for path, document in documents
         for name, body in services_of(document).items()
     }
 
 
-def unallowlisted_bind_mounts(path: Path, document: dict[str, Any]) -> list[str]:
-    """Mounts in this file that `ALLOWED_BIND_MOUNTS` does not permit, one per line.
+def unallowlisted_bind_mounts(documents: ComposeDocuments) -> list[str]:
+    """Mounts that `ALLOWED_BIND_MOUNTS` does not permit, one per line.
 
     A mount of the project directory, or of any ancestor of it, carries the
     reason that particular one is fatal: `.env` lives beside the Compose file,
     because `env_file: - .env` requires it, so mounting the directory hands the
     container the superuser credential the `environment:` block blanked.
     """
-    project = normalised_bind_source(".", path.parent)
+    directories = {path.name: path.parent for path, _ in documents}
     problems: list[str] = []
 
-    for name, mounts in sorted(declared_bind_mounts(path, document).items()):
+    for (file_name, name), mounts in sorted(declared_bind_mounts(documents).items()):
+        directory = directories[file_name]
+        project = normalised_bind_source(".", directory)
         allowed = {
-            normalised_bind_source(entry, path.parent)
-            for entry in ALLOWED_BIND_MOUNTS.get((path.name, name), frozenset())
+            normalised_bind_source(entry, directory)
+            for entry in ALLOWED_BIND_MOUNTS.get((file_name, name), frozenset())
         }
         for source in sorted(mounts.sources - allowed):
             note = ""
@@ -2165,15 +2308,15 @@ def unallowlisted_bind_mounts(path: Path, document: dict[str, Any]) -> list[str]
                 )
             permitted = sorted(allowed) or "nothing"
             problems.append(
-                f"{path.name}: `{name}` bind-mounts {source}, which is not in its allowlist "
+                f"{file_name}: `{name}` bind-mounts {source}, which is not in its allowlist "
                 f"({permitted}){note}"
             )
 
     return problems
 
 
-def sensitive_bind_mounts(path: Path, document: dict[str, Any]) -> list[str]:
-    """Mounts in this file whose source is on `SENSITIVE_BIND_SOURCES`, one per line.
+def sensitive_bind_mounts(documents: ComposeDocuments) -> list[str]:
+    """Mounts whose source is on `SENSITIVE_BIND_SOURCES`, one per line.
 
     Defence in depth behind the allowlist rather than a second copy of it: a
     path that somehow enters the allowlist — a fifth entry added in a hurry,
@@ -2181,26 +2324,28 @@ def sensitive_bind_mounts(path: Path, document: dict[str, Any]) -> list[str]:
     Both checks read the same resolved, normalised set, so neither can be true
     of a spelling the other misses.
     """
-    forbidden = {
-        normalised_bind_source(entry, path.parent): entry for entry in SENSITIVE_BIND_SOURCES
-    }
     problems: list[str] = []
+    directories = {path.name: path.parent for path, _ in documents}
 
-    for name, mounts in sorted(declared_bind_mounts(path, document).items()):
+    for (file_name, name), mounts in sorted(declared_bind_mounts(documents).items()):
+        forbidden = {
+            normalised_bind_source(entry, directories[file_name]): entry
+            for entry in SENSITIVE_BIND_SOURCES
+        }
         for source in sorted(mounts.sources & set(forbidden)):
             problems.append(
-                f"{path.name}: `{name}` bind-mounts {source}, which is "
+                f"{file_name}: `{name}` bind-mounts {source}, which is "
                 f"{forbidden[source]!r} on the sensitive list"
             )
 
     return problems
 
 
-def unreadable_volume_declarations(path: Path, document: dict[str, Any]) -> list[str]:
-    """Volume declarations in this file that the reader above could not classify."""
+def unreadable_volume_declarations(documents: ComposeDocuments) -> list[str]:
+    """Volume declarations the reader above could not classify, one per line."""
     return [
-        f"{path.name}: `{name}` {note}"
-        for name, mounts in sorted(declared_bind_mounts(path, document).items())
+        f"{file_name}: `{name}` {note}"
+        for (file_name, name), mounts in sorted(declared_bind_mounts(documents).items())
         for note in mounts.unreadable
     ]
 
@@ -2235,6 +2380,113 @@ def unreadable_service_keys(path: Path, document: dict[str, Any]) -> list[str]:
         for key in keys:
             if key not in ALLOWED_SERVICE_KEYS:
                 problems.append(f"{path.name}: `{name}` declares `{key}:`")
+    return problems
+
+
+def build_keys_of(document: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    """What each service's `build:` section declares, keyed by service name.
+
+    A service that declares no `build:` is absent. A `build:` written as a bare
+    context string has no sub-keys and reports an empty tuple, which is not the
+    same as being absent and is why the two are distinguished: it is a build
+    this rule has nothing to object to, rather than no build.
+    """
+    found: dict[str, tuple[str, ...]] = {}
+    for name, body in services_of(document).items():
+        declared = body.get("build")
+        if isinstance(declared, dict):
+            found[name] = tuple(sorted(str(key) for key in declared))
+        elif isinstance(declared, str) and declared:
+            found[name] = ()
+    return found
+
+
+def unreadable_build_keys(path: Path, document: dict[str, Any]) -> list[str]:
+    """`build:` sub-keys outside `ALLOWED_BUILD_KEYS`, one per line.
+
+    The service-level closed set said which keys a service may declare and said
+    nothing about what an allowed key may carry — which is the same sentence the
+    top-level closed set earned when `volumes:` turned out to be a container for
+    `driver_opts`. `build:` is the second place that shape appeared, and
+    `additional_contexts` is the sharp one: a second context, outside the
+    project directory and outside `.dockerignore`, read by a `COPY --from` at
+    build time.
+    """
+    problems: list[str] = []
+    for name, keys in sorted(build_keys_of(document).items()):
+        for key in keys:
+            if key not in ALLOWED_BUILD_KEYS:
+                problems.append(f"{path.name}: `{name}` declares `build.{key}:`")
+    return problems
+
+
+class PublishedPort(NamedTuple):
+    """One `ports:` entry: the host address it binds, and how it was written."""
+
+    host_ip: str | None
+    spelling: str
+
+
+def published_ports(service: dict[str, Any]) -> list[PublishedPort]:
+    """Every port this service publishes to the host, with the address it binds.
+
+    `host_ports_published_by` above answers "is a fixed host port declared",
+    which is what the base file's no-publishing rule needs. This answers a
+    different question — *where* — and keeps the entry as written so a failure
+    can quote the line.
+
+    Every spelling Compose accepts:
+
+      - `"8000"`, which publishes on an ephemeral host port on **every**
+        interface, and so binds no address;
+      - `"8000:8000"`, the same for a fixed port;
+      - `"127.0.0.1:8000:8000"`, which binds one;
+      - `"[::1]:8000:8000"`, the same in IPv6, where the brackets are what stop
+        the address being split on its own colons;
+      - the long form `{target: 8000, published: 8000, host_ip: 127.0.0.1}`.
+
+    A `/tcp` or `/udp` suffix is stripped first; it says nothing about the
+    address. A long-form entry with no `published:` still publishes — the daemon
+    picks the host port — so it is returned rather than skipped, and its
+    `host_ip` decides it like every other.
+    """
+    found: list[PublishedPort] = []
+
+    for entry in service.get("ports") or []:
+        if isinstance(entry, dict):
+            declared_ip = entry.get("host_ip")
+            found.append(
+                PublishedPort(
+                    host_ip=None if declared_ip is None else str(declared_ip),
+                    spelling=repr(dict(entry)),
+                )
+            )
+            continue
+
+        text = str(entry).rsplit("/", 1)[0]
+        host_ip: str | None = None
+        if text.startswith("["):
+            closing = text.find("]")
+            if closing != -1:
+                host_ip = text[1:closing]
+                text = text[closing + 1 :].lstrip(":")
+        parts = text.split(":")
+        if host_ip is None and len(parts) >= 3:
+            host_ip = parts[0]
+        found.append(PublishedPort(host_ip=host_ip, spelling=str(entry)))
+
+    return found
+
+
+def non_loopback_publications(path: Path, document: dict[str, Any]) -> list[str]:
+    """Published ports that bind something other than loopback, one per line."""
+    problems: list[str] = []
+    for name, body in sorted(services_of(document).items()):
+        for port in published_ports(body):
+            if port.host_ip in LOOPBACK_HOST_IPS:
+                continue
+            where = f"on {port.host_ip}" if port.host_ip else "on every interface"
+            problems.append(f"{path.name}: `{name}` publishes {port.spelling} {where}")
     return problems
 
 
@@ -2861,6 +3113,18 @@ SAMPLE_SUPERUSER_LITERALS = (
 )
 
 
+def one_compose_file(path: Path, document: dict[str, Any]) -> ComposeDocuments:
+    """A stack of exactly one file, for a boundary test whose subject is in that file.
+
+    Spelled out at every call site rather than defaulted, because after E0-19's
+    second security review the number of files is part of what the mount rules
+    read: volume bodies are merged across all of them, and a test that hands
+    over one file is asserting about a stack that has one. The tests for the
+    cross-file merge hand over two.
+    """
+    return ((path, document),)
+
+
 def sample_document(
     service_name: str,
     volumes: list[Any],
@@ -2981,11 +3245,7 @@ def test_no_service_bind_mounts_a_host_path_outside_the_allowlist(
             "services and no mounts, and a rule about what is mounted reports every file clean."
         )
 
-    problems = [
-        problem
-        for path, document in documents
-        for problem in unallowlisted_bind_mounts(path, document)
-    ]
+    problems = unallowlisted_bind_mounts(documents)
 
     assert not problems, "\n".join(
         [
@@ -3026,11 +3286,11 @@ def test_the_allowlist_permits_no_mount_the_compose_files_do_not_declare(
     the entry going with it, which is the same fact from the other side and is
     the answer someone wants when they ask what the allowlist is for.
     """
-    documents = {
-        base_compose_path.name: (base_compose_path, base_compose),
-        override_compose_path.name: (override_compose_path, override_compose),
-    }
-    for path, document in documents.values():
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
         assert document, (
             f"{path} does not exist or declares nothing, so every allowlist entry would look "
             "unused and this test would report the allowlist as speculative when the file is "
@@ -3043,20 +3303,22 @@ def test_the_allowlist_permits_no_mount_the_compose_files_do_not_declare(
         "empty one means the constant went rather than the mounts."
     )
 
+    directories = {path.name: path.parent for path, _ in documents}
+    mounted = declared_bind_mounts(documents)
+
     problems: list[str] = []
     for (file_name, service_name), allowed in sorted(ALLOWED_BIND_MOUNTS.items()):
-        if file_name not in documents:
+        if file_name not in directories:
             problems.append(
                 f"({file_name}, {service_name}) names a Compose file this suite does not read"
             )
             continue
-        path, document = documents[file_name]
-        declared = declared_bind_mounts(path, document).get(service_name)
+        declared = mounted.get((file_name, service_name))
         if declared is None:
             problems.append(f"{file_name} declares no `{service_name}` service to mount anything")
             continue
         for entry in sorted(allowed):
-            source = normalised_bind_source(entry, path.parent)
+            source = normalised_bind_source(entry, directories[file_name])
             if source not in declared.sources:
                 problems.append(
                     f"{file_name}: `{service_name}` is permitted {entry} ({source}) and mounts "
@@ -3111,9 +3373,7 @@ def test_no_service_bind_mounts_a_sensitive_host_path(
         "file at all. The list is the test's choice and is meant to grow, never to empty."
     )
 
-    problems = [
-        problem for path, document in documents for problem in sensitive_bind_mounts(path, document)
-    ]
+    problems = sensitive_bind_mounts(documents)
 
     assert not problems, "\n".join(
         [
@@ -3158,11 +3418,7 @@ def test_no_compose_file_declares_a_volume_this_module_cannot_resolve(
             "is nothing here to fail to classify."
         )
 
-    problems = [
-        problem
-        for path, document in documents
-        for problem in unreadable_volume_declarations(path, document)
-    ]
+    problems = unreadable_volume_declarations(documents)
 
     assert not problems, "\n".join(
         [
@@ -3203,26 +3459,30 @@ def test_the_bind_reader_finds_the_mounts_the_compose_files_declare_today(
     )
 
     root = base_compose_path.parent
-    base_mounts = declared_bind_mounts(base_compose_path, base_compose)
-    override_mounts = declared_bind_mounts(override_compose_path, override_compose)
+    mounted = declared_bind_mounts(
+        (
+            (base_compose_path, base_compose),
+            (override_compose_path, override_compose),
+        )
+    )
 
-    assert base_mounts.get(CREDENTIAL_OWNING_SERVICE, BindMounts(frozenset(), ())).sources == {
-        str(root / "scripts" / "db-init")
-    }, (
-        f"The reader says `{CREDENTIAL_OWNING_SERVICE}` mounts "
-        f"{sorted(base_mounts.get(CREDENTIAL_OWNING_SERVICE, BindMounts(frozenset(), ())).sources)} "
-        f"from {base_compose_path.name}. It mounts `./scripts/db-init` at "
+    initdb = mounted.get(
+        (base_compose_path.name, CREDENTIAL_OWNING_SERVICE), BindMounts(frozenset(), ())
+    )
+    assert initdb.sources == {str(root / "scripts" / "db-init")}, (
+        f"The reader says `{CREDENTIAL_OWNING_SERVICE}` mounts {sorted(initdb.sources)} from "
+        f"{base_compose_path.name}. It mounts `./scripts/db-init` at "
         "/docker-entrypoint-initdb.d, which is where scripts/db-init creates the application "
         "and Care roles at initdb (ADR 0009), and a reader that cannot see that mount cannot "
         "see any of them."
     )
 
     reloaded = {
-        name: sorted(mounts.sources)
-        for name, mounts in override_mounts.items()
-        if str(root / "backend") in mounts.sources
+        name
+        for (file_name, name), mounts in mounted.items()
+        if file_name == override_compose_path.name and str(root / "backend") in mounts.sources
     }
-    assert set(reloaded) == {API_SERVICE, *JOB_SERVICES}, (
+    assert reloaded == {API_SERVICE, *JOB_SERVICES}, (
         f"The reader finds the development reload mount on {sorted(reloaded)} in "
         f"{override_compose_path.name}, and the override merges `x-development-source` into "
         f"{sorted({API_SERVICE, *JOB_SERVICES})}. The anchor is resolved by the YAML parser, so "
@@ -3280,7 +3540,7 @@ def test_mounting_the_project_directory_is_refused_and_the_message_names_the_env
     well.
     """
     document = sample_document("worker", ["./:/app/repo:ro"])
-    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+    problems = unallowlisted_bind_mounts(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert len(problems) == 1, (
         f"Mounting the project directory on `worker` produced {problems!r}. It is one mount and "
@@ -3343,7 +3603,7 @@ def test_an_unallowlisted_mount_is_refused_however_its_host_path_is_spelled(
     """
     document = sample_document("worker", [spelling])
 
-    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+    problems = unallowlisted_bind_mounts(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert problems, (
         f"`- {spelling}` on `worker` was not refused. It resolves to "
@@ -3376,7 +3636,7 @@ def test_the_development_reload_mount_is_allowed_in_the_override() -> None:
         },
     )
 
-    problems = unallowlisted_bind_mounts(SAMPLE_OVERRIDE_PATH, document)
+    problems = unallowlisted_bind_mounts(one_compose_file(SAMPLE_OVERRIDE_PATH, document))
 
     assert not problems, "\n".join(
         [
@@ -3410,7 +3670,7 @@ def test_the_development_reload_mount_is_refused_in_the_base_file() -> None:
     """
     document = sample_document("worker", ["./backend:/app/backend:ro"])
 
-    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+    problems = unallowlisted_bind_mounts(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert problems, (
         "`- ./backend:/app/backend:ro` on `worker` in docker-compose.yml was not refused. That "
@@ -3450,7 +3710,7 @@ def test_a_mount_one_path_segment_from_an_allowed_source_is_refused(
     path = {"base": SAMPLE_BASE_PATH, "override": SAMPLE_OVERRIDE_PATH}[path_name]
     document = sample_document(service_name, [spelling])
 
-    problems = unallowlisted_bind_mounts(path, document)
+    problems = unallowlisted_bind_mounts(one_compose_file(path, document))
 
     assert problems, (
         f"`- {spelling}` on `{service_name}` was not refused in {path.name}, where the allowlist "
@@ -3476,7 +3736,7 @@ def test_a_service_with_no_allowlist_entry_may_not_mount_an_allowed_source() -> 
     """
     document = sample_document("redis", ["./scripts/db-init:/docker-entrypoint-initdb.d:ro"])
 
-    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+    problems = unallowlisted_bind_mounts(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert problems, (
         "`- ./scripts/db-init:...` on `redis` was not refused. That source is allowed to `db` "
@@ -3509,9 +3769,8 @@ def test_a_bind_source_built_from_an_interpolation_is_refused() -> None:
     """
     document = sample_document("worker", ["${HOST_TOOLS}:/tools:ro"])
 
-    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document) + (
-        unreadable_volume_declarations(SAMPLE_BASE_PATH, document)
-    )
+    documents = one_compose_file(SAMPLE_BASE_PATH, document)
+    problems = unallowlisted_bind_mounts(documents) + unreadable_volume_declarations(documents)
 
     assert problems, (
         "`- ${HOST_TOOLS}:/tools:ro` on `worker` was refused by neither rule. What it mounts "
@@ -3546,7 +3805,7 @@ def test_a_sensitive_host_path_is_refused_however_it_is_spelled(spelling: str) -
     """
     document = sample_document("worker", [f"{spelling}:/var/run/docker.sock"])
 
-    problems = sensitive_bind_mounts(SAMPLE_BASE_PATH, document)
+    problems = sensitive_bind_mounts(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert problems, (
         f"`- {spelling}:...` on `worker` did not fail the sensitive check. It resolves to "
@@ -3574,7 +3833,7 @@ def test_a_named_volume_carrying_a_bind_device_fails_the_allowlist() -> None:
         top_level={"host-root": {"driver_opts": {"type": "none", "device": "/", "o": "bind"}}},
     )
 
-    problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
+    problems = unallowlisted_bind_mounts(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert problems, (
         "A named volume whose driver_opts bind `/` was not refused by the allowlist. The "
@@ -3607,7 +3866,7 @@ def test_a_named_volume_carrying_a_bind_device_fails_the_sensitive_check() -> No
         },
     )
 
-    problems = sensitive_bind_mounts(SAMPLE_BASE_PATH, document)
+    problems = sensitive_bind_mounts(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert problems, (
         "The docker socket declared as a named volume with a bind `driver_opts` did not fail "
@@ -3646,7 +3905,8 @@ def test_an_ordinary_named_volume_is_not_a_bind_source() -> None:
         top_level={"beat-schedule": None, "postgres-data": None},
     )
 
-    mounts = bind_mounts_of(document["services"]["beat"], document, SAMPLE_PROJECT_DIRECTORY)
+    documents = one_compose_file(SAMPLE_BASE_PATH, document)
+    mounts = declared_bind_mounts(documents)[(SAMPLE_BASE_PATH.name, "beat")]
 
     assert mounts.sources == frozenset(), (
         f"An ordinary named volume resolved to {sorted(mounts.sources)}. `beat-schedule` is a "
@@ -3696,7 +3956,7 @@ def test_a_volume_declaration_this_module_cannot_classify_is_refused(
     """
     document = sample_document("worker", ["host-data:/data"], top_level=volumes)
 
-    refusals = unreadable_volume_declarations(SAMPLE_BASE_PATH, document)
+    refusals = unreadable_volume_declarations(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert refusals, (
         f"{shape} was not refused. This module cannot say what it mounts, and a shape it cannot "
@@ -3869,7 +4129,8 @@ def test_the_bind_reader_finds_a_mount_in_every_currency_it_claims(
     """
     document = sample_document("worker", [sample.entry], top_level=sample.volumes)
 
-    mounts = bind_mounts_of(document["services"]["worker"], document, SAMPLE_PROJECT_DIRECTORY)
+    documents = one_compose_file(SAMPLE_BASE_PATH, document)
+    mounts = declared_bind_mounts(documents)[(SAMPLE_BASE_PATH.name, "worker")]
 
     assert mounts.unreadable == (), (
         f"The reader refused the {sample.currency} sample as unclassifiable: "
@@ -4162,7 +4423,7 @@ def test_a_named_volume_defined_outside_this_file_is_refused(
     """
     document = sample_document("worker", ["host-root:/host"], top_level={"host-root": body})
 
-    refusals = unreadable_volume_declarations(SAMPLE_BASE_PATH, document)
+    refusals = unreadable_volume_declarations(one_compose_file(SAMPLE_BASE_PATH, document))
 
     assert refusals, (
         f"{shape} was not refused. What that volume mounts is decided outside this file, so "
@@ -4525,4 +4786,591 @@ def test_the_string_walk_reaches_the_strings_a_real_service_nests(
     assert any("celery" in text for text in worker_strings), (
         "The walk did not find `worker`'s command, which is a list of arguments. That is the "
         "exact shape the measured attack used."
+    )
+
+
+# ---------------------------------------------------------------------------
+# What the second security review found: the configuration is not one file.
+#
+# Three more, all measured against the daemon. The first is the sharpest thing
+# either review produced, because it defeats a fix the first round had just
+# made: the guards read one document at a time, and Docker does not.
+#
+#   - A volume body written in the override redefines a volume the base file
+#     mounts. `beat-schedule: {driver_opts: {type: none, device: /, o: bind}}`
+#     added to the override's `volumes:` gives `beat` the host root, and the
+#     per-file resolution saw the base file's empty body and called it an
+#     ordinary Docker volume. 460 tests green, and the running container read
+#     the host's `.env` through the mount.
+#   - `ports` was an allowed service key whose value nothing read, so dropping
+#     the `127.0.0.1:` prefix published Postgres on every interface.
+#   - `build` was an allowed service key whose sub-keys nothing read, so
+#     `additional_contexts` reached a directory outside the project — outside
+#     `.dockerignore` too — and `build.privileged` ran the build as root on the
+#     host.
+#
+# The shape they share is the one this module keeps meeting: a set is closed at
+# one level and open at the next. The answer is the same each time, and the
+# first of them adds a second rule to it — **read the configuration Docker
+# assembles, not the file the line is written in**, wherever Docker assembles
+# one. That is exactly one section today, and `merged_volume_bodies` is it.
+# ---------------------------------------------------------------------------
+
+
+def base_file_mounting_beat_schedule() -> tuple[Path, dict[str, Any]]:
+    """The base file's real shape, reduced: `beat` mounts a volume declared empty."""
+    return (
+        SAMPLE_BASE_PATH,
+        {
+            "services": {"beat": {"volumes": ["beat-schedule:/var/lib/celery"]}},
+            "volumes": {"beat-schedule": None},
+        },
+    )
+
+
+def override_redefining(body: Any) -> tuple[Path, dict[str, Any]]:
+    """The override, declaring nothing but a body for the volume the base file mounts."""
+    return (SAMPLE_OVERRIDE_PATH, {"volumes": {"beat-schedule": body}})
+
+
+def test_a_bind_carrying_volume_body_added_in_the_override_is_refused() -> None:
+    """The second security review's HIGH: the two files are one configuration.
+
+    `beat` mounts `beat-schedule`, which the base file declares with an empty
+    body — an ordinary Docker volume, and the reason the base file passes every
+    mount rule. Adding
+
+        volumes:
+          beat-schedule:
+            driver_opts: {type: none, device: /, o: bind}
+
+    to `docker-compose.override.yml` gives that container the host root. Nothing
+    in the override mounts anything, so a rule that resolves a volume in the
+    document that *mounts* it never looks at the file where the body is; and the
+    base file's body is still empty, so a rule that resolves it there finds an
+    ordinary volume. Measured against the daemon: 460 tests green, and the
+    running container read the host's `.env` through the mount.
+
+    It defeats the `name:`/`driver:` refusal the first fix round added, which is
+    what makes it worth stating as a rule rather than a case: **a per-file read
+    of a section Docker merges is not a read of the configuration.** Volume
+    bodies are the one merged section this module reads, and
+    `merged_volume_bodies` is where that is done.
+
+    The mutation this must kill is the revert — `named_volume_source` looking up
+    `top_level_volumes(document)` instead of the merged table. Both channels are
+    asserted because the mount is both un-allowlisted and sensitive, and a
+    reader that resolves it will say so twice; the union is asserted first
+    because the property is that the attack does not pass, whichever rule
+    catches it.
+    """
+    documents = (
+        base_file_mounting_beat_schedule(),
+        override_redefining({"driver_opts": {"type": "none", "device": "/", "o": "bind"}}),
+    )
+
+    problems = (
+        unallowlisted_bind_mounts(documents)
+        + sensitive_bind_mounts(documents)
+        + unreadable_volume_declarations(documents)
+    )
+    assert problems, (
+        "A volume body written in the override redefined a volume the base file mounts, and no "
+        "rule objected. `docker compose up` merges the top-level `volumes:` section across both "
+        "files before any service mounts anything, so `beat` gets the host root — measured, "
+        "with the container reading the host's .env through it."
+    )
+
+    assert sensitive_bind_mounts(documents), (
+        "The merged body resolves to a mount of `/` and the sensitive check did not report it. "
+        "Both checks read the same resolved set, so a body the allowlist can see and the "
+        "denylist cannot means the resolution is being done twice in two places."
+    )
+    assert any(
+        "beat" in problem for problem in problems
+    ), f"The refusal does not name the service that mounts the volume: {problems!r}."
+
+
+def test_a_pre_created_volume_name_added_in_the_override_is_refused() -> None:
+    """The same attack in the spelling the first fix round closed per-file.
+
+    `beat-schedule: {name: precreated-host-root}` in the override attaches
+    `beat`'s volume to a Docker volume created outside this stack, with no
+    project prefix applied, and one `docker volume create --opt device=/` makes
+    that the host root. The refusal for `name:` exists — E0-19's first review
+    bought it — and it was reading the wrong document, which is the whole point
+    of this finding: a fix at one level does not survive being asked about the
+    wrong file.
+
+    The mutation is the same revert, and this case is the one that shows the
+    revert defeats an *existing* rule rather than only a new one.
+    """
+    documents = (
+        base_file_mounting_beat_schedule(),
+        override_redefining({"name": "precreated-host-root"}),
+    )
+
+    refusals = unreadable_volume_declarations(documents)
+
+    assert refusals, (
+        "A `name:` added to the override for a volume the base file mounts was not refused. "
+        "What that volume is, is decided by a `docker volume create` that ran before this "
+        "stack came up, and no reading of these files says what it mounts."
+    )
+    assert all(
+        "beat-schedule" in refusal for refusal in refusals
+    ), f"The refusal does not name the volume: {refusals!r}."
+
+
+@pytest.mark.parametrize(
+    ("shape", "body"),
+    [
+        ("a bind device", {"driver_opts": {"type": "none", "device": "/", "o": "bind"}}),
+        ("a pre-created name", {"name": "precreated-host-root"}),
+    ],
+)
+def test_the_same_volume_body_in_the_base_file_is_refused_too(shape: str, body: Any) -> None:
+    """The control for the pair above: the rule is about the body, not about the file.
+
+    **A red here means these tests are broken, not the Compose files.** Both
+    tests above assert that a body written in the *override* is refused. If the
+    merge were implemented as "the override always wins, and only the override
+    is read", both would pass and the base file would be unguarded — which is
+    the failure with the larger blast radius, since the base file is what every
+    deployment runs.
+
+    This was already green before the merge went in, and it has to stay green
+    after: the same body in the file that mounts the volume is refused for the
+    same reason.
+    """
+    path, document = base_file_mounting_beat_schedule()
+    document = {**document, "volumes": {"beat-schedule": body}}
+
+    documents = one_compose_file(path, document)
+    problems = (
+        unallowlisted_bind_mounts(documents)
+        + sensitive_bind_mounts(documents)
+        + unreadable_volume_declarations(documents)
+    )
+
+    assert problems, (
+        f"{shape} written in the base file itself was not refused. The merge added in the "
+        "second fix round must widen what is read, never move it: a body in the file that "
+        "mounts the volume is the case that was already covered."
+    )
+
+
+def test_an_empty_merged_volume_body_is_not_a_bind() -> None:
+    """The other direction: two files, both saying nothing, is still an ordinary volume.
+
+    `beat-schedule` and `postgres-data` are declared empty in the base file, and
+    the override says nothing about either. A merge that turned "no body" into
+    something — a name, a device, a refusal — would fail the real stack on the
+    two volumes it legitimately declares, and the repair somebody reaches for is
+    an allowlist entry, which is a permission granted for a mount that does not
+    exist.
+
+    The mutation this kills is a merge that substitutes the volume's *name* when
+    both bodies are empty, which is the shape a `dict.get` with a fallback
+    takes.
+    """
+    documents = (base_file_mounting_beat_schedule(), override_redefining(None))
+
+    mounts = declared_bind_mounts(documents)[(SAMPLE_BASE_PATH.name, "beat")]
+
+    assert mounts.sources == frozenset(), (
+        f"An empty merged body resolved to {sorted(mounts.sources)}. Neither file says anything "
+        "about `beat-schedule` beyond its name, which is an ordinary Docker volume — it "
+        "survives `docker compose restart beat` and it is not a piece of the host filesystem."
+    )
+    assert mounts.unreadable == (), (
+        f"An empty merged body was refused as unreadable: {list(mounts.unreadable)}. That fails "
+        "the real stack on `beat-schedule` and `postgres-data` both."
+    )
+
+
+def test_the_merged_volume_table_carries_what_each_file_declares(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """A control: the merge finds the real files' volumes, and the later body wins.
+
+    **A red here means these tests are broken, not the Compose files.** The
+    rules above report absence, and a merge that returned an empty table would
+    make every named volume unresolvable — which is a refusal, so it would fail
+    loudly rather than pass silently, but it would fail on the *wrong* thing and
+    the repair would be to loosen the refusal.
+
+    Two halves. The real files, where the table must carry both volumes the base
+    file declares. And a synthetic pair where the override supplies a body for a
+    name the base file declares empty, which is the case the finding is about
+    and the one an implementation keyed on "first file wins" gets backwards.
+    """
+    assert base_compose and override_compose, (
+        "A Compose file is missing or declares nothing, so the merged table is whatever "
+        "survived and this control cannot tell that from a merge that drops entries."
+    )
+
+    real = merged_volume_bodies(
+        (
+            (base_compose_path, base_compose),
+            (override_compose_path, override_compose),
+        )
+    )
+    assert {"postgres-data", "beat-schedule"} <= set(real), (
+        f"The merged table holds {sorted(real)}. The base file declares `postgres-data` and "
+        "`beat-schedule`, and a table that does not carry them cannot resolve the mounts that "
+        "name them."
+    )
+
+    merged = merged_volume_bodies(
+        (
+            base_file_mounting_beat_schedule(),
+            override_redefining({"name": "precreated-host-root"}),
+        )
+    )
+    assert merged.get("beat-schedule") == {"name": "precreated-host-root"}, (
+        f"The merged body for `beat-schedule` is {merged.get('beat-schedule')!r}. The base file "
+        "declares it empty and the override gives it a name, so the merged body is the "
+        "override's — a merge that keeps the first declaration reads the empty body and calls "
+        "the volume ordinary, which is the finding."
+    )
+
+
+def test_every_published_port_binds_a_loopback_address(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """A published port is reachable from this machine and from nothing else.
+
+    `ports` is an allowed service key and no rule read its *value*, which is the
+    same shape as `volumes:` being an allowed top-level section whose contents
+    nothing resolved. The measurement is an omission rather than a wrong value:
+    dropping the `127.0.0.1:` prefix from `db`'s entry in the override publishes
+    Postgres on every interface — the laptop on a conference network serving its
+    database to the room, which the override's own header comment already warns
+    about — and the whole suite stayed green.
+
+    **Both files**, although only the override publishes anything today. The
+    base file must publish nothing at all and
+    `test_base_compose_file_publishes_no_host_ports` says so; this rule is the
+    weaker one that still holds if a port ever legitimately arrives there, and
+    running it over both costs nothing while the base file publishes nothing.
+
+    The mutation this must kill is that missing prefix. The near miss is `::1`,
+    which is loopback in IPv6 and must pass — the address is bracketed in the
+    short form, and a parser that splits on `:` without reading the brackets
+    turns it into a host IP of `[`.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing, so it publishes nothing and a rule "
+            "about where ports bind reports it clean."
+        )
+
+    published = [
+        port
+        for _, document in documents
+        for body in services_of(document).values()
+        for port in published_ports(body)
+    ]
+    assert published, (
+        "No service in either Compose file publishes a port, so this rule has nothing to check "
+        "and passes trivially. The development override publishes seven — the API, Postgres, "
+        "Redis, two Mailpit ports and the two mock services — and a stack that publishes none "
+        "of them is one no developer can reach. If publishing has moved somewhere this module "
+        "does not read, point this rule at it rather than letting it pass over an empty list."
+    )
+
+    problems = [
+        problem
+        for path, document in documents
+        for problem in non_loopback_publications(path, document)
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A service publishes a port on something other than loopback:",
+            *problems,
+            "",
+            f"Allowed host addresses: {list(LOOPBACK_HOST_IPS)}. A `ports:` entry with no host "
+            "address binds every interface on the machine, so `5432:5432` on a laptop serves "
+            "the development database — superuser role included, since `.env` is the file the "
+            "stack starts from — to every other machine on the network. Write the address: "
+            "`127.0.0.1:5432:5432`.",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["5432:5432", "5432", "0.0.0.0:5432:5432", "192.168.1.10:5432:5432", "5432:5432/tcp"],
+)
+def test_a_port_published_off_loopback_is_refused(spelling: str) -> None:
+    """Each way of publishing to the world, refused and named.
+
+    `5432:5432` and a bare `5432` bind every interface — the second on a host
+    port the daemon picks, which is no less published for being unpredictable.
+    `0.0.0.0` says it out loud. A LAN address is the case someone writes on
+    purpose to reach the stack from another machine, and it is the one this rule
+    exists to make a decision rather than a habit. The `/tcp` suffix is there
+    because a parser that does not strip it reads the protocol as part of the
+    port.
+
+    The mutation this kills is the rule's removal, and — for the first two
+    cases — a check written as "if a host IP is present it must be loopback",
+    which passes everything that names no address at all. That is the reading
+    that makes the measured attack pass, because the attack is a *deleted*
+    prefix.
+    """
+    document = {"services": {"db": {"ports": [spelling]}}}
+
+    problems = non_loopback_publications(SAMPLE_OVERRIDE_PATH, document)
+
+    assert problems, (
+        f"`- {spelling}` on `db` was not refused. It binds an address this machine shares with "
+        "the network it is on, and the database behind it is initialised from `.env`."
+    )
+    assert all(
+        "db" in problem and spelling in problem for problem in problems
+    ), f"The refusal does not name the service and the entry as written: {problems!r}."
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "127.0.0.1:5432:5432",
+        "127.0.0.1:5432:5432/tcp",
+        "[::1]:5432:5432",
+        {"target": 5432, "published": 5432, "host_ip": "127.0.0.1"},
+        {"target": 5432, "published": 5432, "host_ip": "::1"},
+    ],
+)
+def test_a_port_published_on_loopback_is_allowed(entry: Any) -> None:
+    """The other direction, in every spelling — including the two the parser can break on.
+
+    Without this half the rule is satisfied by refusing every published port,
+    which would fail the real override on all seven of its entries and leave the
+    repair as "delete the rule". The IPv6 case is the one that needs the
+    bracket handling and the long form is the one that needs the `host_ip` key;
+    a parser that reads neither refuses a correct file, which is how a guard
+    gets deleted.
+    """
+    document = {"services": {"db": {"ports": [entry]}}}
+
+    problems = non_loopback_publications(SAMPLE_OVERRIDE_PATH, document)
+
+    assert not problems, "\n".join(
+        [
+            f"A port published on loopback was refused: {entry!r}",
+            *problems,
+            "",
+            "127.0.0.1 and ::1 are both loopback, in the short form and the long one. A rule "
+            "that refuses a correct entry is a rule someone deletes.",
+        ]
+    )
+
+
+def test_the_port_reader_finds_the_address_of_every_published_port(
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """A control: the reader sees the real override's ports and reads their addresses.
+
+    **A red here means these tests are broken, not the Compose files.** The rule
+    above reports absence, and a reader that returns an empty list for every
+    service reports the same absence. The override publishes seven ports and
+    every one of them names `127.0.0.1`, so a reader that finds fewer than seven,
+    or that reads the address as `None` on any of them, is not reading the file.
+    """
+    assert override_compose, f"{override_compose_path} does not exist or declares nothing."
+
+    found = [
+        (name, port)
+        for name, body in sorted(services_of(override_compose).items())
+        for port in published_ports(body)
+    ]
+
+    assert len(found) >= 7, (
+        f"The reader found {len(found)} published ports in {override_compose_path.name}: "
+        f"{found!r}. The override publishes the API, Postgres, Redis, two Mailpit ports and the "
+        "two mock services — seven — and a reader that sees fewer is missing a spelling."
+    )
+    unread = [(name, port.spelling) for name, port in found if port.host_ip is None]
+    assert not unread, (
+        f"The reader could not read a host address for {unread!r}. Every entry in that file "
+        "writes `127.0.0.1:` in front of the port, so an address read as `None` is a parser "
+        "that cannot see one — which would make the rule above report the file clean by "
+        "finding nothing rather than by finding loopback."
+    )
+
+
+def test_no_build_section_declares_a_key_this_module_cannot_read(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """The closed set one level inside `build:`, which was open. E0-19's second review.
+
+    Admitting `build` admitted everything under it, and two sub-keys were
+    measured going past every rule here with the suite green and a host file
+    read out of the built image. `additional_contexts` names a second build
+    context — any directory on the host, or a git URL — which a
+    `COPY --from=<name>` then reads, and `.dockerignore` does not apply to it.
+    `build.privileged` runs the build itself with host privileges, and it is a
+    different key from the service-level `privileged:` that `PRIVILEGE_KEYS`
+    refuses.
+
+    Same answer as every other level: enumerate what the files use, refuse the
+    rest. The mutation this must kill is either sub-key added to a `build:`
+    section in either file.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing, so it declares no build sections and "
+            "a rule about their keys reports it clean."
+        )
+
+    problems = [
+        problem for path, document in documents for problem in unreadable_build_keys(path, document)
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A `build:` section declares a sub-key this module has not been taught to read:",
+            *problems,
+            "",
+            f"Allowed today: {sorted(ALLOWED_BUILD_KEYS)}. A build reaches the host at image "
+            "build time, which is before any rule about what a *container* may reach applies: "
+            "`additional_contexts` reads a directory outside the project and outside "
+            "`.dockerignore`, and `build.privileged` builds as root on the host. Teach this "
+            "module the sub-key in the same change that adds it, and say why the rules above "
+            "still hold over it.",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("additional_contexts", {"host": "/"}),
+        ("privileged", True),
+        ("secrets", ["host-token"]),
+        ("ssh", ["default"]),
+    ],
+)
+def test_a_build_key_outside_the_closed_set_is_refused(key: str, value: Any) -> None:
+    """The two that were measured, and two more the same argument covers.
+
+    `additional_contexts: {host: /}` plus one `COPY --from=host` is the host
+    filesystem inside the image, which is a bind mount that leaves no `volumes:`
+    entry behind. `build.privileged` is the build running as root on the host.
+    `secrets:` and `ssh:` forward a credential and an agent socket into the
+    build; neither is used here and neither is read by anything in this module.
+
+    The mutation this kills is adding any of them to `ALLOWED_BUILD_KEYS`, which
+    is what a red here invites if the reason for the closed set is not written
+    down. It is written down on the constant.
+    """
+    document = {"services": {"api": {"build": {"context": ".", key: value}}}}
+
+    problems = unreadable_build_keys(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        f"`build.{key}:` on `api` was not refused. Nothing in this module reads it, so whatever "
+        "it reaches at build time is reached invisibly — and an image is where a container's "
+        "filesystem comes from."
+    )
+    assert all(
+        key in problem and "api" in problem for problem in problems
+    ), f"The refusal does not name the sub-key and the service: {problems!r}."
+
+
+def test_the_build_reader_finds_the_build_keys_the_compose_files_use(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+) -> None:
+    """A control: the reader sees real `build:` sections, anchor-merged ones included.
+
+    **A red here means these tests are broken, not the Compose files.** The rule
+    above reports absence, and a reader that finds no build sections reports the
+    same absence. `api`'s build comes from the `x-application` anchor and
+    `mock-lms`'s is written in its own block, so finding both says the reader is
+    reading the parsed document rather than the lines of the file — the same
+    property the service-key control asserts one level out, and the same anchor
+    that has twice been the route a finding took.
+    """
+    assert base_compose, f"{base_compose_path} does not exist or declares nothing."
+
+    builds = build_keys_of(base_compose)
+    assert builds, (
+        "The reader found no `build:` section at all in the base Compose file. Five services "
+        "build from a Dockerfile there, so an empty result is a reader that cannot see one."
+    )
+
+    assert set(builds.get(API_SERVICE, ())) == {"context", "dockerfile"}, (
+        f"The reader says `{API_SERVICE}` builds with {sorted(builds.get(API_SERVICE, ()))}. Its "
+        "build comes from the `x-application` anchor, so a reader that misses it is reading the "
+        "file rather than the parsed document — and everything the anchor carries is then "
+        "outside this rule."
+    )
+    assert set(builds.get("mock-lms", ())) == {"context", "dockerfile"}, (
+        f"The reader says `mock-lms` builds with {sorted(builds.get('mock-lms', ()))}. That one "
+        "is written in the service's own block, so finding the anchor's and missing this is a "
+        "reader that only resolves merges."
+    )
+
+
+def test_the_closed_build_key_set_holds_no_key_the_compose_files_do_not_use(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """The other direction: the build set enumerates what exists, `args` included.
+
+    `args` is the entry worth naming, because it is the one a reader assumes is
+    there: a build usually has arguments, and this one does not. Admitting it
+    for that reason is how `networks` got onto `ALLOWED_TOP_LEVEL_KEYS` — and a
+    build argument is also a place a credential travels, which
+    `test_nothing_outside_the_database_service_reads_the_superuser_credential`
+    walks the document for. It comes back in the change that first needs one.
+    """
+    for path, document in (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    ):
+        assert document, (
+            f"{path} does not exist or declares nothing, so every entry would look unused and "
+            "this test would report the constant as speculative when a file is what went."
+        )
+
+    declared = {
+        key
+        for document in (base_compose, override_compose)
+        for keys in build_keys_of(document).values()
+        for key in keys
+    }
+    unused = sorted(key for key in ALLOWED_BUILD_KEYS if key not in declared)
+
+    assert not unused, "\n".join(
+        [
+            f"ALLOWED_BUILD_KEYS admits sub-keys no `build:` section declares: {unused}.",
+            "",
+            "A closed set that admits a feature the repository does not use is not closed; it "
+            "is a smaller open one, with an entry nobody has had to think about.",
+        ]
     )
