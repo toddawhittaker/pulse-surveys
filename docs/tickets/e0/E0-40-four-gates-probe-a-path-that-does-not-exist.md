@@ -95,7 +95,9 @@ Three smaller findings ride along because they are the same subject:
 
 ## File ownership (parallel-build boundary — do not cross)
 
-This ticket may touch only: `.github/workflows/ci.yml`, `Makefile`,
+This ticket may touch only: `docs/adr/0070-*.md` (its standing gate counts go
+false with decision 6 — corrected here, where the falsifying change lives),
+`.github/workflows/ci.yml`, `Makefile`,
 `pyproject.toml` (the `[tool.pytest.ini_options]` block only),
 `playwright.config.ts`, `package.json`, `package-lock.json`, new
 `tsconfig.json` and eslint config, `scripts/ci/` only if a checker's own logic
