@@ -1423,14 +1423,24 @@ def test_a_trailing_dot_on_a_host_that_is_not_the_mock_is_accepted(
 
     `mock-idp.example.edu.` is a fully qualified name for a host that is not the
     Compose service, and it stays accepted — which is the same exact-host reading the
-    module already pins, asked again after a normaliser has touched the value. The
-    repair this refuses is the tempting one: strip *every* dot, or strip the dot and
-    then compare by prefix, either of which turns a real institutional address into a
-    refusal.
+    module already pins, asked again after a normaliser has touched the value.
 
-    **The mutation this kills:** a normaliser that removes more than one trailing
-    dot, or a comparison that goes back to `startswith` once the value is
-    normalised.
+    **The mutation this kills:** a comparison that goes back to `startswith`, or to
+    any prefix test, once the value is normalised. `mock-idp.example.edu` begins with
+    `mock-idp`, so a rule that stopped comparing whole hosts refuses a real
+    institutional address, and this row is what turns that red.
+
+    **What it does not kill, named rather than implied.** This docstring used to
+    claim a second mutation — a normaliser that strips *more* than one trailing dot —
+    and the implementer measured that false: `rstrip(".")` leaves
+    `mock-idp.example.edu.` as `mock-idp.example.edu`, which is still not
+    `mock-idp`, so the row stays green and the claim was one nothing could violate
+    (`docs/MISTAKES.md` entry 3). It is left unkilled deliberately rather than
+    covered by a new row, because the whole cost of a multi-dot strip is that
+    `mock-idp..` would be read as the mock and refused — and `mock-idp..` resolves
+    nowhere, so that refusal protects nothing and costs nothing. The implementation
+    records the same limit at `_url_host`; if it ever becomes worth guarding, the
+    row is `mock-idp..` and it belongs beside the refusals above rather than here.
     """
     configure(
         monkeypatch,
