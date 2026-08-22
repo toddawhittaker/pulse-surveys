@@ -36,14 +36,33 @@ on the migration side — so the assertion that carries the property is a captur
 log around a marker statement, and `not engine.echo` is kept below only as
 E0-04's own smaller criterion, labelled as such.
 
+**The way out is a second question, and the security review of this batch is
+where it was measured.** `hide_parameters` covers what goes *to* the database.
+SQLAlchemy's cursor logs `Row %r` for every row it hands *back*, at DEBUG, with
+no `hide_parameters` check on that path — and `pin_sqlalchemy_logging` pinned the
+parent logger `sqlalchemy`, which does not reach a child that a `dictConfig` has
+given an explicit level of its own. So `sqlalchemy.engine` at DEBUG, set before
+import, left the statements' parameters hidden and their answers written out in
+full. The pin covers both loggers now, `backend/alembic.ini` having pinned
+`qualname = sqlalchemy.engine` on the migration side all along, and
+`test_no_result_row_reaches_the_log_outside_development` is what holds it.
+
+**One residual is left open deliberately, and is written down rather than
+implied away.** A logging configuration applied *after* `app.db` is imported wins
+over the pin, because the last writer does, and nothing in the engine's options
+covers returned rows the way `hide_parameters` covers parameters. That is an
+operator action with the same standing as setting `echo=True` in a deployment; it
+is recorded here and in ADR 0013, and no test in this file claims otherwise.
+
 Nothing here asserts that the engine *does* echo in development, or that a bound
-parameter *is* visible there. The definition of done asks for one direction only,
-and an implementation that never echoes and never shows a parameter satisfies it;
-requiring the other direction would invent a feature no ticket asks for.
-`docs/MISTAKES.md` entry 2's rule applies as written — assert the forbidden
-state, not the permitted one. The one control that does assert a marker is
-*present* builds an engine with no options at all, so it says something about
-this file's log capture and nothing about `app.db`.
+parameter or a row *is* visible there. The definition of done asks for one
+direction only, and an implementation that never echoes and never shows either
+satisfies it; requiring the other direction would invent a feature no ticket asks
+for. `docs/MISTAKES.md` entry 2's rule applies as written — assert the forbidden
+state, not the permitted one. The two controls that do assert a marker is
+*present* build their own engines — one with no options at all, one with
+`hide_parameters=True` — so each says something about this file's log capture and
+nothing about what `app.db` chose.
 
 The engine is found rather than named, in the spirit of `celery_application_in`
 in `tests/conftest.py`: E0-04 says `db.py` holds "a SQLAlchemy 2.0 engine and
@@ -69,7 +88,8 @@ LOG_LEVEL_VARIABLE = "LOG_LEVEL"
 # every assertion about the SQL half goes through them.
 #
 #   engine_options(settings) -> dict   the `create_engine` keyword arguments
-#   pin_sqlalchemy_logging(settings)   pins `sqlalchemy` to WARNING outside
+#   pin_sqlalchemy_logging(settings)   pins `sqlalchemy` **and** its child
+#                                      `sqlalchemy.engine` to WARNING outside
 #                                      development, and is called where the
 #                                      engine is built
 #
@@ -86,10 +106,19 @@ LOGGING_PIN_FUNCTION = "pin_sqlalchemy_logging"
 # wearing a test's clothes.
 DEVELOPMENT_ENVIRONMENT_CONSTANT = "DEVELOPMENT_ENVIRONMENT"
 
-# The two loggers this module configures and restores. `sqlalchemy` is the one
-# `backend/alembic.ini` already pins on the migration side; `sqlalchemy.engine`
-# is the one whose effective level decides whether `Connection` logs a statement
-# and its parameters at all.
+# The two loggers this module configures and restores, and both of them matter.
+# `sqlalchemy.engine` is the one whose effective level decides whether
+# `Connection` logs a statement and its parameters, and whether the cursor logs
+# the rows it returns; `sqlalchemy` is its parent, which decides that too for as
+# long as the child has no level of its own.
+#
+# **`backend/alembic.ini` pins the child**, and it is worth reading its section
+# header twice: the section is called `[logger_sqlalchemy]`, and its `qualname`
+# is `sqlalchemy.engine`. An earlier version of this comment said the migration
+# side pinned the parent, from the section name — which is the record this batch
+# keeps citing (`docs/MISTAKES.md` entry 1) arriving in a test file, and it
+# mattered, because the parent is the one a pin can apply and still leave the
+# rows going out.
 SQLALCHEMY_LOGGER = "sqlalchemy"
 SQLALCHEMY_ENGINE_LOGGER = "sqlalchemy.engine"
 
@@ -112,6 +141,26 @@ IN_MEMORY_URL = "sqlite://"
 PARAMETER_MARKER = "marker-Qb7ZxLm4VtR9NsWd"
 PARAMETER_STATEMENT = "SELECT :probe"
 PARAMETER_NAME = "probe"
+
+# The second marker, and it travels a different way on purpose: in as a bound
+# parameter, and back out as a **result row**. `hide_parameters` covers what goes
+# in and says nothing about what comes back — SQLAlchemy's cursor logs `Row %r` at
+# DEBUG with no `hide_parameters` check at all — so a value hidden on the way to
+# the database is written in full on the way back.
+#
+# What comes back is the material §4 is about: from E0-05 a row read out of this
+# database is a survey answer or a student's free-text comment, and over the Care
+# connection it is a revealed identity (§6.2). The column below is called
+# `comment` because that is what it stands in for.
+#
+# None of the three statements contains the marker, so a log line holding it took
+# it from the parameter list or from a row — and both tests that use this hide
+# parameters, which leaves the row.
+ROW_MARKER = "row-marker-Wd5TnQx8Jm2VpLc"
+ROW_TABLE_STATEMENT = "CREATE TABLE probe (comment TEXT)"
+ROW_INSERT_STATEMENT = "INSERT INTO probe (comment) VALUES (:comment)"
+ROW_SELECT_STATEMENT = "SELECT comment FROM probe"
+ROW_PARAMETER_NAME = "comment"
 
 # Obvious fakes, long and unlikely-looking so that any fragment appearing in a
 # log line is unambiguously a leak and not a coincidence. Named `...CREDENTIAL`
@@ -302,6 +351,49 @@ def statement_log_of(
     return caplog.text
 
 
+def result_row_log_of(
+    options: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> str:
+    """What `sqlalchemy.engine` writes while a row carrying the marker is read back.
+
+    **This one sets no logger level, and that is the point of it.**
+    `caplog.set_level` configures the logger it is given, so a helper that called
+    it would overwrite the very pin under test — the assertion would then be
+    about a level this file had just set. The caller owns the levels here, and
+    `restored_sqlalchemy_logging` puts them back.
+
+    The marker goes in as a bound parameter and comes back as a result row.
+    Reading it back is what makes this a different question from the one
+    `statement_log_of` asks: the parameter is hidden by `hide_parameters` and the
+    row is not covered by anything, so what is left in the log is the row or
+    nothing.
+    """
+    from sqlalchemy import create_engine, text
+
+    try:
+        engine = create_engine(IN_MEMORY_URL, **options)
+    except TypeError as refused:
+        pytest.fail(
+            f"`create_engine` refused {options!r}: {refused}. See the same branch in "
+            "`statement_log_of` above — whatever `engine_options` answers has to be a mapping "
+            "`create_engine` accepts."
+        )
+
+    with engine.connect() as connection:
+        connection.execute(text(ROW_TABLE_STATEMENT))
+        connection.execute(text(ROW_INSERT_STATEMENT), {ROW_PARAMETER_NAME: ROW_MARKER})
+        rows = connection.execute(text(ROW_SELECT_STATEMENT)).all()
+
+    assert [tuple(row) for row in rows] == [(ROW_MARKER,)], (
+        f"The round trip did not read the marker back — it read {[tuple(r) for r in rows]}. "
+        "Nothing was logged about a row this test never received, so both assertions built on "
+        "this helper would be about an empty result rather than about row logging."
+    )
+
+    return caplog.text
+
+
 @pytest.fixture
 def restored_sqlalchemy_logging() -> Iterator[None]:
     """Put the level of every logger these tests configure back afterwards.
@@ -486,6 +578,138 @@ def test_no_bound_parameter_reaches_the_log_outside_development(
     )
 
 
+def test_the_log_capture_sees_a_result_row_that_hide_parameters_does_not_cover(
+    caplog: pytest.LogCaptureFixture,
+    restored_sqlalchemy_logging: None,
+) -> None:
+    """The control for the test below, and the premise of the finding it is written against.
+
+    Two things at once, and the second is why this is not only plumbing.
+
+    It establishes that the capture sees **row** logging: `sqlalchemy.engine` at
+    DEBUG really does write `Row %r` for every row read back, and this module's
+    row marker is findable in what it writes. Without that, a broken capture and
+    a correctly pinned logger report the same silence (`docs/MISTAKES.md` entry
+    3), and the assertion below passes against a log full of student comments.
+
+    And it establishes that **`hide_parameters` does not cover a returned row**.
+    The engine here is built with `hide_parameters=True` and nothing else, so the
+    value cannot have reached the log through the parameter list; none of the
+    three statements contains the marker either. What is left is the row. That is
+    the whole premise of the security finding this pair exists for — item 1 closed
+    the way in and left the way out open — and it is asserted here rather than
+    described, because a premise nobody executes is a comment.
+
+    **A red here is a broken test, not a finding.** It says SQLAlchemy's row
+    logging has changed shape, or the round trip stopped returning the marker, and
+    the assertion below means nothing until it is green again.
+    """
+    logging.getLogger(SQLALCHEMY_ENGINE_LOGGER).setLevel(logging.DEBUG)
+
+    written = result_row_log_of({"hide_parameters": True}, caplog)
+
+    assert written.strip(), (
+        f"`{SQLALCHEMY_ENGINE_LOGGER}` was set to DEBUG by name and a row was read back, and "
+        "nothing at all was captured. Every assertion about a row not appearing in this log is "
+        "therefore vacuous, whatever the logging pin does."
+    )
+    assert ROW_MARKER in written, (
+        "A value read back out of the database did not appear in the log of an engine with "
+        f"`{SQLALCHEMY_ENGINE_LOGGER}` at DEBUG and `hide_parameters=True`.\n"
+        f"  captured: {written}\n"
+        "\n"
+        "Either this file can no longer see row logging — in which case the test below would "
+        "pass against an engine that wrote every row — or `hide_parameters` has started covering "
+        "returned rows as well as bound parameters, which would make the finding this pair is "
+        "written against no longer true. They need different responses, so find out which before "
+        "changing anything."
+    )
+
+
+@pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
+def test_no_result_row_reaches_the_log_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    restored_sqlalchemy_logging: None,
+    import_app_module: Callable[[str], ModuleType | None],
+    environment: str,
+    log_level: str,
+) -> None:
+    """The child logger has to be pinned too, or the rows go out whatever the parameters do.
+
+    **The finding, measured.** `pin_sqlalchemy_logging` pins the *parent* logger,
+    `sqlalchemy`. A `dictConfig` that names the **child**, `sqlalchemy.engine`,
+    sets that logger's own level — and an explicit level on a child is not
+    something a parent's level can override, so the pin applied at import leaves
+    the child exactly where the configuration put it. At DEBUG, SQLAlchemy's
+    cursor logs `Row %r` for every row it hands back, with no `hide_parameters`
+    check anywhere on that path. So the parameters of a statement are hidden and
+    its *answers* are written in full: from E0-05 that is a survey answer or a
+    student's free-text comment (SPEC §10, §4.1).
+
+    The child is the logger that matters and there is a precedent for saying so:
+    `backend/alembic.ini` pins `qualname = sqlalchemy.engine`, not the parent. So
+    the fix pins both, and this test is the one that fails if either goes.
+
+    **The order is the test.** The child is set to DEBUG *before* `app.db` is
+    imported, which is the ordinary case the pin is for — a logging configuration
+    read at startup, before the application package is imported. A pin that ran
+    and pinned only the parent leaves the child at DEBUG and this goes red.
+
+    **What this deliberately does not cover, and it is a residual rather than an
+    oversight.** A configuration applied *after* `app.db` is imported wins,
+    because the last writer does: something that names `sqlalchemy.engine` at
+    DEBUG at that point logs result rows again, and nothing in the engine's
+    options covers rows the way `hide_parameters` covers parameters. There is no
+    fix for it on this side — it is an operator action equivalent to setting
+    `echo=True` in a deployment — and it is recorded as that in this module's
+    docstring and in ADR 0013 rather than being quietly implied away here.
+
+    The pair above is what makes this silence mean something: it proves the
+    capture sees row logging at all, and that `hide_parameters=True` does not
+    suppress it.
+
+    **The mutation this survives:** pin `sqlalchemy` alone, which is what the
+    function did when this was written. **The near miss that must stay green:**
+    pinning the child by any route — directly, or by pinning every logger under
+    `sqlalchemy` — since nothing here reads how the pin is applied.
+    """
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
+    monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)
+    logging.getLogger(SQLALCHEMY_ENGINE_LOGGER).setLevel(logging.DEBUG)
+
+    module = import_database_module(import_app_module)
+    build_options = named_function(
+        module,
+        ENGINE_OPTIONS_FUNCTION,
+        f"{ENGINE_OPTIONS_FUNCTION}(settings) answers the keyword arguments the engine is built "
+        "with, and outside development they include `hide_parameters=True`.",
+    )
+
+    settings = settings_now(import_app_module)
+    written = result_row_log_of(dict(build_options(settings)), caplog)
+
+    fragments = leaked_fragments(written, ROW_MARKER)
+    assert not fragments, (
+        f"A row read back out of the database reached the log with "
+        f"{ENVIRONMENT_VARIABLE}={environment!r} and {LOG_LEVEL_VARIABLE}={log_level!r}: "
+        f"{fragments}.\n"
+        f"  captured: {written}\n"
+        "\n"
+        f"`{SQLALCHEMY_ENGINE_LOGGER}` was set to DEBUG by name before `{DB_MODULE}` was "
+        "imported — a `dictConfig` read at startup does exactly that — and an explicit level on "
+        f"the child is not something a pin on `{SQLALCHEMY_LOGGER}` can override. At DEBUG the "
+        "cursor logs every row it returns, and no engine option covers that: `hide_parameters` "
+        "is about what goes in.\n"
+        "\n"
+        f"`backend/alembic.ini` pins `qualname = {SQLALCHEMY_ENGINE_LOGGER}` for the migration "
+        "side already. Pinning both is what closes this; from E0-05 the rows are survey answers "
+        "and free-text comments, and over the Care connection they are revealed identities "
+        "(SPEC §10, §4.1, §6.2)."
+    )
+
+
 def hidden_parameters_of(engine: Any) -> Any:
     """Whether this engine hides bound parameters, wherever SQLAlchemy keeps that flag.
 
@@ -573,11 +797,18 @@ def test_importing_the_database_module_pins_the_sqlalchemy_logger_outside_develo
 ) -> None:
     """The asymmetry E0-37 item 1 names: the migration side is pinned and the application side is not.
 
-    `backend/alembic.ini` already carries `[logger_sqlalchemy] level = WARNING`,
-    so a deployment that configures logging by name gets the parameters of every
-    migration statement withheld and the parameters of every application
-    statement written. Item 1's fix is the same pin, applied where the engine is
-    built.
+    `backend/alembic.ini` already carries `[logger_sqlalchemy] level = WARNING`
+    — a section whose `qualname` is `sqlalchemy.engine` — so a deployment that
+    configures logging by name gets the parameters of every migration statement
+    withheld and the parameters of every application statement written. Item 1's
+    fix is the same pin, applied where the engine is built.
+
+    **This test reads the parent, and it is not the whole of the pin.** The
+    child, `sqlalchemy.engine`, has to be pinned too, and
+    `test_no_result_row_reaches_the_log_outside_development` is what says so: a
+    child with a level of its own ignores its parent's, and at DEBUG the cursor
+    writes out every row it returns. Both are asserted because either one alone
+    can be satisfied while the other is missing.
 
     **The logger is turned up first, and that is the whole test.** SQLAlchemy
     pins `sqlalchemy` to `WARNING` itself at import when it is `NOTSET`, so
@@ -593,9 +824,9 @@ def test_importing_the_database_module_pins_the_sqlalchemy_logger_outside_develo
     holds the property when it does not.
 
     **The mutation this survives:** delete the call from the module body, or make
-    it a function nobody calls. **The near miss that must stay green:** pinning
-    something narrower as well, such as `sqlalchemy.engine`, which is more than
-    the ticket asks and takes nothing away.
+    it a function nobody calls, or pin the child alone and leave the parent
+    where it was. **The near miss that must stay green:** pinning more than these
+    two — every logger under `sqlalchemy`, say — which takes nothing away.
     """
     monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
     monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)
@@ -605,8 +836,9 @@ def test_importing_the_database_module_pins_the_sqlalchemy_logger_outside_develo
     named_function(
         module,
         LOGGING_PIN_FUNCTION,
-        f"{LOGGING_PIN_FUNCTION}(settings) pins the `{SQLALCHEMY_LOGGER}` logger to WARNING "
-        "outside development, and is called where the engine is built.",
+        f"{LOGGING_PIN_FUNCTION}(settings) pins `{SQLALCHEMY_LOGGER}` and its child "
+        f"`{SQLALCHEMY_ENGINE_LOGGER}` to WARNING outside development, and is called where the "
+        "engine is built.",
     )
 
     pinned = logging.getLogger(SQLALCHEMY_LOGGER).level
@@ -631,10 +863,13 @@ def test_importing_the_database_module_leaves_the_sqlalchemy_logger_alone_in_dev
     """In development the pin is a no-op, because `echo` is a debugging tool there.
 
     E0-37 item 1 is explicit that `_echoes_sql` is correct as written and is not
-    what changes. A pin applied unconditionally would take the level of the
-    library's own logger down to `WARNING` in development too, and a developer
-    who turned `sqlalchemy` up to see a query would get nothing back with no
-    indication why — the fix quietly removing the tool the ticket says to keep.
+    what changes. A pin applied unconditionally would take the library's own
+    loggers down to `WARNING` in development too, and a developer who turned
+    `sqlalchemy` or `sqlalchemy.engine` up to see a query would get nothing back
+    with no indication why — the fix quietly removing the tool the ticket says to
+    keep. Both loggers are checked, because the pin covers both since the
+    security review of this batch and an unconditional pin on either is the same
+    defect.
 
     **This passes on the tree as it stands**, which is what it is for: it is the
     near miss beside the pin above, and the two are only worth having together.
@@ -650,19 +885,28 @@ def test_importing_the_database_module_leaves_the_sqlalchemy_logger_alone_in_dev
     development = development_environment_name(import_app_module)
     forget_the_app_package()
     monkeypatch.setenv(ENVIRONMENT_VARIABLE, development)
-    logging.getLogger(SQLALCHEMY_LOGGER).setLevel(logging.DEBUG)
+    for name in (SQLALCHEMY_LOGGER, SQLALCHEMY_ENGINE_LOGGER):
+        logging.getLogger(name).setLevel(logging.DEBUG)
 
     import_database_module(import_app_module)
 
-    left = logging.getLogger(SQLALCHEMY_LOGGER).level
-    assert left == logging.DEBUG, (
-        f"Importing `{DB_MODULE}` with {ENVIRONMENT_VARIABLE}={development!r} moved the "
-        f"`{SQLALCHEMY_LOGGER}` logger from DEBUG to {logging.getLevelName(left)}.\n"
+    moved = {
+        name: logging.getLevelName(logging.getLogger(name).level)
+        for name in (SQLALCHEMY_LOGGER, SQLALCHEMY_ENGINE_LOGGER)
+        if logging.getLogger(name).level != logging.DEBUG
+    }
+    assert not moved, (
+        f"Importing `{DB_MODULE}` with {ENVIRONMENT_VARIABLE}={development!r} moved these "
+        f"loggers away from the DEBUG this test had set them to: {moved}.\n"
         "\n"
-        "E0-37 item 1 pins that logger *outside* development and says `_echoes_sql` is correct as "
+        "E0-37 item 1 pins them *outside* development and says `_echoes_sql` is correct as "
         "written. A pin that also fires in development takes away the echo the ticket keeps, and "
         "does it silently: the developer who turned the logger up sees nothing and has no way to "
-        "tell that the application turned it back down."
+        "tell that the application turned it back down.\n"
+        "\n"
+        "Both loggers, because the pin covers both — the parent and the child `sqlalchemy.engine` "
+        "the security review found unpinned — so a fix applied unconditionally to either one is "
+        "the same defect."
     )
 
 
