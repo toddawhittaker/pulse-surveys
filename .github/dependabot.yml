@@ -32,27 +32,32 @@ updates:
       - dependency-name: alembic
         update-types: [version-update:semver-major]
 
-  # ---- Frontend -----------------------------------------------------------
+  # ---- Node, at the repository root ---------------------------------------
+  # `/`, not `/frontend`. This entry watched a directory that has never existed
+  # while the repository's only `package-lock.json` — the Playwright runner, the
+  # TypeScript and eslint checkers, the licence scanner — sat at the root
+  # unwatched, which is E0-40's founding defect wearing different clothes: a
+  # control pointed at a path that is not there reports nothing and looks well.
+  #
+  # There is one entry rather than two because there is one lockfile. When the
+  # E1 scaffold lands it brings `frontend/package-lock.json`, and a second entry
+  # for `/frontend` — with its own React major-version ignores, which moved out
+  # of here with the directory they were about — goes in beside this one.
   - package-ecosystem: npm
-    directory: /frontend
+    directory: /
     schedule:
       interval: weekly
       day: monday
       time: '06:00'
       timezone: America/New_York
     open-pull-requests-limit: 5
-    labels: [dependencies, frontend]
+    labels: [dependencies, javascript]
     commit-message:
       prefix: 'deps(js)'
     groups:
       js-minor-and-patch:
         patterns: ['*']
         update-types: [minor, patch]
-    ignore:
-      - dependency-name: react
-        update-types: [version-update:semver-major]
-      - dependency-name: react-dom
-        update-types: [version-update:semver-major]
 
   # ---- Container images ---------------------------------------------------
   # Two ecosystems, because they read different files: `docker` reads the
@@ -94,8 +99,9 @@ updates:
         update-types: [version-update:semver-major]
 
   # ---- GitHub Actions -----------------------------------------------------
-  # The only ecosystem with anything to update today. Actions are pinned by
-  # major tag in ci.yml; this keeps them current.
+  # Actions are pinned by major tag in ci.yml; this keeps them current. It was
+  # the only ecosystem with anything to watch when this file was written; pip,
+  # npm and both image ecosystems have had something since.
   - package-ecosystem: github-actions
     directory: /
     schedule:
