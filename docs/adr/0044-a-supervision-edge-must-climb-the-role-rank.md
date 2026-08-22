@@ -1,6 +1,7 @@
 # 0044 — A supervision edge must climb the role rank, and the trigger is what refuses one that does not
 
-**Status:** Accepted
+**Status:** Accepted — **context amended 2026-08-22** (E0-42); the decision is
+unchanged, and the half of it the spec was silent on is silent no longer
 **Date:** 2026-08-17
 **Tickets:** E0-11
 
@@ -8,6 +9,26 @@ Extends [ADR 0027](0027-supervision-edges-are-policed-by-one-row-level-trigger.m
 which built the trigger this rule lands in.
 
 ## Context
+
+> **Amended 2026-08-22.** The paragraph ending "It says nothing about whether two
+> assignments in the same role may report to one another, and nothing about where
+> `ADMIN` sits" was true when it was written and was falsified the same week.
+> `fd703bb` (2026-08-17) added a paragraph to **SPEC §2.1** stating the rule
+> directly: an edge is legal only where the child's role sits below the parent's
+> in the canonical chain, two assignments in the same role never report to one
+> another, an edge never runs downward, Care and Admin sit outside the graph and
+> hold no edges in either direction, and the graph is therefore at most six
+> assignments deep. It also states that the rule reads the two assignments' roles
+> and never the person.
+>
+> So the *rule* below is now spec, and what stays this record's own is **where it
+> is enforced and how**: the trigger rather than the resolver, `array_position`
+> over one array holding the chain, `NULL` treated as a refusal, the mirror
+> enforced on an `UPDATE` that changes a parent's role, and the resolver's
+> matching fail-closed shape in `_OWN_GRANT_ROOT`. The dispute ruling on
+> [E0-11-01](../disputes/E0-11-01.md) is likewise superseded on its facts rather
+> than reversed in its outcome: it found the equal-rank refusal correct while the
+> spec was silent, and the spec now says the same thing.
 
 [SPEC §2.1](../SPEC.md) defines purview as "**Purview(assignment) = own grant
 union the purviews of all assignments transitively reporting to it**", and §4.1
