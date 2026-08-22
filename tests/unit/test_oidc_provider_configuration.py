@@ -193,7 +193,9 @@ NON_MOCK_CLIENT_IDS = {
 # So the rule pinned below is a class: the parsed host is `localhost` — case-folded,
 # one trailing dot stripped — **or** it is an IP literal that `ipaddress` calls
 # loopback, which is the whole of `127.0.0.0/8`, `::1`, and the IPv4-mapped
-# `::ffff:127.0.0.1` (loopback through `ipv4_mapped` rather than directly).
+# `::ffff:127.0.0.1` — measured on Python 3.13, this repository's floor, that last
+# one answers `is_loopback` directly, and `ipv4_mapped` is the version-portable
+# route to the same answer rather than the only one.
 #
 # Spelled as they appear in a URL: an IPv6 literal is bracketed there and bare in
 # `urlsplit(...).hostname`.
@@ -953,10 +955,10 @@ def test_a_loopback_authorization_endpoint_is_refused_outside_development(
     **Five spellings, because the rule is a class rather than a list.** `[::1]` is
     what a machine with IPv6 resolves `localhost` to first; `127.0.0.2` is an
     ordinary address in `127.0.0.0/8`, every one of which is the local machine; and
-    `::ffff:127.0.0.1` is the IPv4-mapped form, whose loopback-ness is one
-    `ipv4_mapped` away and invisible to a direct comparison. The reviewer's finding
-    arrived with a fourth spelling already in it, so a catalog was never going to be
-    the answer — the constant above records why.
+    `::ffff:127.0.0.1` is the IPv4-mapped form, which reads as loopback on this
+    interpreter and is invisible to any comparison against a spelling. The
+    reviewer's finding arrived with a fourth spelling already in it, so a catalog was
+    never going to be the answer — the constant above records why.
 
     **The one-level-out mutation this kills, which is the point of the extra rows:**
     a rule reverted to the three literal spellings `localhost`, `127.0.0.1` and
