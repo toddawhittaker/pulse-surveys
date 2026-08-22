@@ -57,7 +57,12 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
     The second half needs no such edit: it is about the query module, whatever
     that module comes to hold.
   - **A relation name assembled at run time**, and a read that reaches the views
-    through a helper in a package this sweep does not walk.
+    through a helper in a package this sweep does not walk. The concrete member
+    of that class, so it is not left abstract: `f"SELECT * FROM {SCHEMA}.
+    assignment_scope"` is missed, because the literal segments an f-string leaves
+    in the tree are `"SELECT * FROM "` and `".assignment_scope"` — and the segment
+    carrying the view's name carries no introducer in front of it. Anything that
+    interpolates between the keyword and the name has the same effect.
   - **A name that reaches the planner with no introducer in front of it.** After
     E0-42's security pass the introducers are `FROM`, `JOIN`, `INTO`, `UPDATE`,
     `TABLE`, `USING`, each with an optional `ONLY`, and the bare comma of a
@@ -75,9 +80,13 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
 
 **And one thing it sees that it need not**, recorded so it reads as a decision
 rather than a bug: the comma introducer fires on a *string* that lists these
-views after a comma. Docstrings are subtracted from the tree, so prose belongs in
-one; an executable string that has to name them is a fair thing to be asked
-about. The alternative — no comma — is the hole the security pass walked through.
+views after a comma — an exception message reading "reads role_assignment,
+assignment_scope" is the shape that will actually meet it. **Moving it into a
+docstring is not the remedy**, because a message a caller has to be handed cannot
+live in one. Reword it — "role_assignment and assignment_scope", or one view per
+line — or add the module to a written exemption here with the reason beside it.
+Either is a minute's work and leaves the guard closed; the alternative, dropping
+the comma, is the hole the security pass walked through.
 """
 
 import ast
@@ -146,11 +155,15 @@ CREATES_A_VIEW = re.compile(
 #
 # **What the comma costs, stated here rather than discovered later.** A comma
 # appears in a select list too, so an executable *string* naming one of these
-# views after one is flagged: an error message reading "reads role_assignment,
-# assignment_scope", or a column somewhere genuinely named after a view.
-# Docstrings are subtracted from the tree, so prose belongs in one — and a
-# running statement that has to list these views is a fair thing for this sweep
-# to ask about.
+# views after one is flagged. The shape that will really meet it is an exception
+# message listing them — "reads role_assignment, assignment_scope" — and **the
+# remedy for that is not "move it into a docstring"**: a message a caller has to
+# be handed cannot live in one, and sending the next person to try is sending them
+# to break their own error handling. Reword it, so the views are separated by
+# `and` or by a line rather than by a comma, or add the module to a written
+# exemption in this file with the reason beside it. Both take a minute and leave
+# the guard closed. Dropping the comma from the pattern does not: that is the hole
+# E0-42's security pass walked through.
 RELATION_INTRODUCERS = r"(?:\b(?:from|join|into|update|table|using)\b(?:\s+only\b)?\s+|,\s*)"
 
 # An optional schema in front of the name, quoted on either part or neither:
