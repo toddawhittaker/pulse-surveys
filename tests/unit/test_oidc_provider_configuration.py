@@ -9,7 +9,8 @@ oracle for fake CARE and ADMIN identities, which this tool then verifies correct
 and trusts. ADR 0075 chose those defaults deliberately; ADR 0077 reverses that half
 of them.
 
-Two layers, and the tests below are two matching halves of it.
+Three layers: the ticket's two, and a third the security review added. The tests
+below are in matching sections.
 
 **The five settings are required.** `oidc_issuer`, `oidc_authorization_endpoint`,
 `oidc_token_endpoint`, `oidc_jwks_url` and `oidc_client_id` lose their defaults, so
@@ -26,8 +27,9 @@ subject of the rule rather than an incidental pair, so they are named here the w
 Compose **service name** `mock-idp`, which is how a container on this stack reaches
 the mock, and the mock's **registered client id** `mock-idp-client`, which is how a
 configuration names the mock without addressing it. `localhost` is deliberately not
-in the set — inside a deployed container it cannot resolve to the mock — and that
-is ADR 0077's to justify, not this module's to widen.
+in *this* catalog — inside a deployed container it cannot resolve to the mock — and
+that is ADR 0077's to justify, not this module's to widen. It is refused on one
+field for an unrelated reason, which is the third layer below.
 
 **The host component, compared exactly.** The ticket says "any `oidc_*` URL whose
 host is `mock-idp`", and this module pins what "is" means: the URL's parsed host,
@@ -37,6 +39,18 @@ perfectly ordinary institutional address for a real provider — and would also 
 on a *path* segment, which addresses nothing. Both directions are asserted, in
 pairs, so neither reading can be satisfied by accident.
 
+**A configuration can reach the same outcome without naming the mock**, which is
+what the security review of this ticket went looking for and found three of. Each
+is a rule of its own in the last section: the browser-facing endpoint may not point
+at the end user's own machine (a local listener becomes a phishing page on an
+institution-issued link, and that rule closes over the loopback *class* rather than
+a list of spellings — the finding arrived with a fourth spelling already in it); an
+`oidc_*` URL may not be cleartext to another host
+outside development (an on-path answer to the key-set fetch is the same signing
+oracle, reached without the mock); and the parsed host is normalised for one
+trailing dot before every catalog comparison, because `mock-idp.` resolves exactly
+as `mock-idp` does. The first two are MEDIUM, the third LOW.
+
 **Every refusal is paired with an acceptance.** A validator that refuses
 everything outside development, or that refuses the development stack too, passes
 every refusal test here and closes both doors; the pairs are what stop that. The
@@ -45,12 +59,22 @@ sharpest of them is
 of E0's §14.3 exit criterion is that `docker compose up` from a clean checkout
 reaches a system a person can log in to.
 
-**Which failure a red here is.** Three tests are marked as controls in their
+**Which failure a red here is.** Several tests are marked as controls in their
 docstrings: they must be green today, before any of this is implemented, and a red
-one means the machinery below is broken rather than that the configuration is.
-Everything else in the first two sections is expected red until the ticket lands,
-on an assertion or on `DID NOT RAISE` — never on an import, since `Settings` and
-`ConfigurationError` both exist already.
+one means the machinery here is broken rather than that the configuration is. Every
+acceptance row is in the same position — it passes today because nothing refuses
+anything yet, and its whole value is that it must still pass afterwards. Everything
+else is expected red until the ticket lands, on an assertion or on `DID NOT RAISE`,
+never on an import: `Settings`, `ConfigurationError` and `DEVELOPMENT_ENVIRONMENT`
+all exist already.
+
+**Every refusal in the last section is written so that exactly one rule can be what
+fires** — the loopback and trailing-dot rows carry `https` so the transport rule
+cannot be the refusal — and where two rules genuinely overlap there is a test that
+says so by name. A refusal test that passes because some other rule fired is green
+for a reason unrelated to what it asserts (`docs/MISTAKES.md` entry 3), and with
+three rules over five fields that is the failure mode here rather than a
+hypothetical.
 """
 
 from collections.abc import Mapping
@@ -150,6 +174,62 @@ NON_MOCK_CLIENT_IDS = {
     "a longer id the mock's ends": f"pulse-{MOCK_CLIENT_ID}",
     "a longer id the mock's begins": f"{MOCK_CLIENT_ID}-2",
 }
+
+# ---------------------------------------------------------------------------
+# The security review's three findings. Constants here; the tests are in their own
+# section at the end of the module.
+# ---------------------------------------------------------------------------
+
+# **The loopback refusal is a class, not a list of spellings.**
+#
+# The first version of this constant was three literals — `localhost`, `127.0.0.1`,
+# `[::1]` — and the round that wrote it noticed a fourth spelling on the way past.
+# That is the shape this epic keeps meeting: a closed-set guard defeated one level
+# further out each round. A three-entry catalog does not invite the fifth spelling,
+# it waits for it. `http://127.0.0.2:8081/authorize` and
+# `http://[::ffff:127.0.0.1]:8081/authorize` each send a browser to a listener on the
+# user's own machine, and neither is in a three-entry list.
+#
+# So the rule pinned below is a class: the parsed host is `localhost` — case-folded,
+# one trailing dot stripped — **or** it is an IP literal that `ipaddress` calls
+# loopback, which is the whole of `127.0.0.0/8`, `::1`, and the IPv4-mapped
+# `::ffff:127.0.0.1` (loopback through `ipv4_mapped` rather than directly).
+#
+# Spelled as they appear in a URL: an IPv6 literal is bracketed there and bare in
+# `urlsplit(...).hostname`.
+LOOPBACK_URL_HOSTS = {
+    "the name": "localhost",
+    "the usual address": "127.0.0.1",
+    "another address in 127.0.0.0/8": "127.0.0.2",
+    "the IPv6 literal": "[::1]",
+    "the IPv4-mapped IPv6 literal": "[::ffff:127.0.0.1]",
+}
+
+# An IP literal that is emphatically not loopback, for the pair that keeps the class
+# honest. TEST-NET-3 (RFC 5737): reserved for documentation, routable nowhere, so
+# the row says "an address, and not a loopback one" without naming anybody's host.
+NON_LOOPBACK_IP_LITERAL = "203.0.113.10"
+
+# The three spellings the **transport rule's exemption** is asserted over. A
+# different question from the class above, and a separate constant on purpose: this
+# is `app.config`'s existing `_is_on_this_machine`, whose own pairs live in
+# `tests/unit/test_ai_provider_configuration.py`, and this ticket widens the refusal
+# rather than that exemption. Whether one helper ends up serving both is the
+# implementation's call — nothing here asserts that a cleartext `127.0.0.2` *token*
+# endpoint is accepted in a deployment, and nothing here asserts that it is refused.
+ON_THIS_MACHINE_URL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
+
+# A second real provider, distinct from `DEPLOYED_HOST`, so a transport failure
+# message reads as being about the row's own value rather than about one of the
+# background values having moved.
+ANOTHER_REAL_HOST = "sso.example.edu"
+
+# The environments the review's rules are parametrised over. Fewer rows than
+# `NON_DEVELOPMENT_ENVIRONMENTS` on purpose: *which* names count as a deployment is
+# settled once, by `test_a_url_addressing_the_mock_is_refused_outside_development`,
+# and repeating its four rows under every rule below would be four copies of one
+# assertion rather than four assertions.
+DEPLOYMENT_ENVIRONMENTS = ("production", "staging")
 
 
 def load_settings_class() -> type:
@@ -339,12 +419,19 @@ def test_a_url_addressing_the_mock_is_refused_outside_development(
     and a validator that reads one field, or one environment name. **The near miss
     that must stay green:** the same values with `ENVIRONMENT` set to the
     development name, which is the test below.
+
+    **The value carries TLS, so only the catalog can be what refuses it.** The
+    development stack spells this address `http://mock-idp:8000`, and that spelling
+    is a row in `MOCK_URL_SPELLINGS` below — but the security review added a
+    transport rule that refuses cleartext off this machine outside development, so
+    an `http` value here would be refused by either rule and this test could no
+    longer say which (`docs/MISTAKES.md` entry 3). `https` isolates it.
     """
     configure(
         monkeypatch,
         {
             ENVIRONMENT_VARIABLE: environment_named(environment),
-            **deployment(**{variable: f"http://{MOCK_SERVICE}:8000/oidc/token"}),
+            **deployment(**{variable: f"https://{MOCK_SERVICE}:8443/oidc/token"}),
         },
     )
 
@@ -368,6 +455,16 @@ def test_the_mock_host_is_refused_however_the_url_is_spelled(
 
     **The mutation this kills:** equality against the development stack's full URL,
     or against `host:port` rather than the host.
+
+    **Attribution, after the security review.** Four of these five rows are
+    cleartext, and the transport rule added by that review refuses cleartext off
+    this machine outside development as well — so those four are refused by either
+    rule and cannot on their own say which one fired. That is accepted here rather
+    than repaired, because the subject of this test is the *spelling of the address*
+    and the cleartext spellings are the ones that actually ship. The row that
+    isolates the catalog is "https on another port", and
+    `test_the_mock_host_is_refused_with_a_trailing_dot` isolates it again on a
+    different axis.
     """
     configure(
         monkeypatch,
@@ -388,23 +485,27 @@ def test_the_mock_host_is_refused_whatever_case_it_is_written_in(
     """`MOCK-IDP` is the same host as `mock-idp`, so the refusal has to read it as one.
 
     Host names are case-insensitive (RFC 4343), and Compose resolves a service name
-    without folding anything of its own — so `http://MOCK-IDP:8000/oidc/token` in a
-    container reaches the mock exactly as the lower-case spelling does. This is the
-    one row in the module that is a judgement rather than a transcription of the
-    ticket, and it is a narrow one: the ticket says the refusal is about the URL's
-    *host*, and this is that host.
+    without folding anything of its own — so `MOCK-IDP` in a container reaches the
+    mock exactly as the lower-case spelling does. This is the one row in the module
+    that is a judgement rather than a transcription of the ticket, and it is a narrow
+    one: the ticket says the refusal is about the URL's *host*, and this is that
+    host.
 
     **The mutation this kills:** `url.netloc.split(":")[0] == "mock-idp"`, which
     does not fold case, as against `urlsplit(url).hostname`, which does. Written as
     its own test rather than as a row above so that a dispute about the reading
     costs one test rather than five.
+
+    `https`, so the transport rule the security review added cannot be what refuses
+    this: the question is whether the catalog reads the host, and a cleartext value
+    would be refused either way.
     """
     configure(
         monkeypatch,
         {
             ENVIRONMENT_VARIABLE: "production",
             **deployment(
-                **{OIDC_TOKEN_ENDPOINT_VARIABLE: f"http://{MOCK_SERVICE.upper()}:8000/oidc/token"}
+                **{OIDC_TOKEN_ENDPOINT_VARIABLE: f"https://{MOCK_SERVICE.upper()}:8443/oidc/token"}
             ),
         },
     )
@@ -479,7 +580,10 @@ def test_the_refusal_of_a_mock_url_names_the_field_without_quoting_the_value(
     not read `app/config.py` — so the account above names the function rather than a
     line number, which would go stale on the next edit to that file.
     """
-    offending = f"http://{MOCK_SERVICE}:8000/oidc/token?tenant=e0-39"
+    # `https`, so the transport rule cannot be what refuses this: the assertions
+    # below are about what a *catalog* refusal says, and the two rules write their
+    # messages through the same assembly.
+    offending = f"https://{MOCK_SERVICE}:8443/oidc/token?tenant=e0-39"
     configure(
         monkeypatch,
         {
@@ -672,26 +776,33 @@ def test_a_client_id_that_merely_contains_the_mocks_is_accepted(
     )
 
 
-def test_a_localhost_provider_is_accepted_in_a_deployment(
+def test_a_localhost_provider_is_not_read_as_the_mock_in_a_deployment(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`localhost` is deliberately outside the catalog, and this is what says so.
+    """`localhost` is deliberately outside the **mock** catalog, and this is what says so.
 
     ADR 0077 has to justify the exclusion; this asserts it, so that a later widening
     is a red test and a reviewed decision rather than a quiet tightening. The
     reasoning is that inside a deployed container `localhost` cannot resolve to the
-    mock — it is that container itself — so refusing it would refuse a provider
-    running beside the application, which is a supported deployment, while
+    mock — it is that container itself — so treating it as the mock would refuse a
+    provider running beside the application, which is a supported deployment, while
     protecting nothing.
 
-    It is also the development stack's own `OIDC_AUTHORIZATION_ENDPOINT`
-    (`http://localhost:8081/oidc/authorize`), because the browser reaches the mock
-    on a published port. So a rule that swept `localhost` in would refuse the one
-    setting whose development value is *not* a service name, which is the shape a
-    reader of `.env.example` is most likely to add.
+    **Narrowed by the security review, and the narrowing is the point.** This test
+    used to set the browser-facing endpoint to `http://localhost:8081/oidc/authorize`
+    in production and require it accepted, which is the MEDIUM the review found: that
+    value is not resolved in the container at all, it is handed to a browser and
+    resolved on the end user's machine. The finding does not touch this test's
+    subject — `localhost` still is not the mock — so what changed is the field it
+    asks about, from a browser-facing one to the two that the container fetches.
+    `test_a_loopback_authorization_endpoint_is_refused_outside_development` now owns
+    the other field, and asserts the opposite of what this test used to.
 
-    **The mutation this kills:** `localhost` or `127.0.0.1` added to the catalog.
+    **The mutation this kills:** `localhost` or `127.0.0.1` added to the mock
+    catalog. **The near miss that must stay red:** the same host on
+    `oidc_authorization_endpoint`, which is refused — by a different rule, for a
+    different reason.
     """
     configure(
         monkeypatch,
@@ -699,8 +810,8 @@ def test_a_localhost_provider_is_accepted_in_a_deployment(
             ENVIRONMENT_VARIABLE: "production",
             **deployment(
                 **{
-                    OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: "http://localhost:8081/oidc/authorize",
-                    OIDC_TOKEN_ENDPOINT_VARIABLE: "http://127.0.0.1:8081/oidc/token",
+                    OIDC_TOKEN_ENDPOINT_VARIABLE: "https://localhost:8443/oidc/token",
+                    OIDC_JWKS_URL_VARIABLE: "https://127.0.0.1:8443/.well-known/jwks.json",
                 }
             ),
         },
@@ -709,9 +820,9 @@ def test_a_localhost_provider_is_accepted_in_a_deployment(
     settings = load_settings_class()()
 
     assert settings is not None, (
-        "`Settings()` refused a provider on this machine. Inside a deployed container `localhost` "
-        "is that container, so it cannot reach the mock and the refusal protects nothing while "
-        "refusing a provider running alongside the application (ADR 0077)."
+        "`Settings()` refused a provider on this machine as though it were the mock. Inside a "
+        "deployed container `localhost` is that container, so it cannot reach the mock, and "
+        "reading it as the mock refuses a provider running alongside the application (ADR 0077)."
     )
 
 
@@ -796,4 +907,544 @@ def test_the_deployed_sample_configuration_names_no_mock_anywhere() -> None:
     assert DEPLOYED_OIDC[OIDC_CLIENT_ID_VARIABLE] != MOCK_CLIENT_ID, (
         "The deployed sample client id is the mock's, so every test that leaves the client id "
         "alone is configured as the mock's client."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The security review's findings. Everything above refuses the mock by name; each
+# rule here refuses a configuration that reaches the same outcome without ever
+# spelling `mock-idp` — which is the shape a catalog rule invites, and the reason
+# the review looked for them.
+#
+# Every refusal below is written so that exactly one rule can be what fires. The
+# loopback rows carry `https`, so the transport rule cannot be the refusal; the
+# trailing-dot row carries `https` for the same reason. Where two rules genuinely
+# overlap there is a test that says so by name, rather than a row whose green
+# nobody can attribute (`docs/MISTAKES.md` entry 3).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
+@pytest.mark.parametrize("spelling", list(LOOPBACK_URL_HOSTS))
+def test_a_loopback_authorization_endpoint_is_refused_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    spelling: str,
+    environment: str,
+) -> None:
+    """The browser-facing endpoint may not point at the end user's own machine.
+
+    **The finding.** `OIDC_AUTHORIZATION_ENDPOINT`'s development value is
+    `http://localhost:8081/oidc/authorize`, and `localhost` is not the mock's name,
+    so a deployment that sets the other four and misses this one starts perfectly
+    cleanly — and then answers every web login with a 302 to a port on the browsing
+    user's own computer. Anything listening there receives an institution-issued
+    link that arrived at a Pulse URL, and renders whatever it likes: a login page,
+    asking for the credentials the real provider would have asked for.
+
+    **Why this field and not the other four.** The four server-side settings are
+    resolved by the container: `localhost` there is the container itself, which is
+    a supported deployment (a provider sidecar) and reaches nothing an attacker
+    controls. This one is never resolved in the container at all — it is a string
+    handed to a browser, resolved on the machine that browser is running on. So the
+    same host name means "this API process" in four settings and "whoever's laptop
+    is reading this" in the fifth, and only the fifth is a finding.
+
+    **Five spellings, because the rule is a class rather than a list.** `[::1]` is
+    what a machine with IPv6 resolves `localhost` to first; `127.0.0.2` is an
+    ordinary address in `127.0.0.0/8`, every one of which is the local machine; and
+    `::ffff:127.0.0.1` is the IPv4-mapped form, whose loopback-ness is one
+    `ipv4_mapped` away and invisible to a direct comparison. The reviewer's finding
+    arrived with a fourth spelling already in it, so a catalog was never going to be
+    the answer — the constant above records why.
+
+    **The one-level-out mutation this kills, which is the point of the extra rows:**
+    a rule reverted to the three literal spellings `localhost`, `127.0.0.1` and
+    `[::1]`. That passes the first, second and fourth rows here and must go red on
+    `127.0.0.2` and on `[::ffff:127.0.0.1]`. Anything narrower than "the host is
+    `localhost`, or `ipaddress` says this literal is loopback" fails one of those
+    two.
+
+    **https, deliberately.** The transport rule below also refuses cleartext off
+    this machine; carrying TLS here means the only thing wrong with this URL is its
+    host, so a green row cannot be the other rule firing.
+
+    **The other mutations this kills:** the loopback rule dropped, applied to all
+    five settings, or applied to none. **The near misses that must stay green:** the
+    same URLs in development, which is the pair below; a loopback *token* endpoint
+    outside development, which is a sidecar; and a non-loopback IP literal on this
+    same field, which is an institution that runs its provider at an address.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: environment,
+            **deployment(
+                **{
+                    OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: (
+                        f"https://{LOOPBACK_URL_HOSTS[spelling]}:8081/oidc/authorize"
+                    )
+                }
+            ),
+        },
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+@pytest.mark.parametrize("scheme", ("http", "https"))
+@pytest.mark.parametrize("spelling", list(LOOPBACK_URL_HOSTS))
+def test_a_loopback_authorization_endpoint_is_accepted_in_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    spelling: str,
+    scheme: str,
+) -> None:
+    """The exact pair: the same URLs, one environment different.
+
+    `http://localhost:8081/oidc/authorize` is what `.env.example` ships and what the
+    override publishes the mock on, because a browser on the developer's host
+    reaches it there. The rule above must not touch it, and this is the row that
+    says so — a loopback refusal written without the environment condition closes
+    the web door on every laptop and passes every refusal test in this module.
+
+    The same five spellings, so that widening the rule into a class cannot narrow
+    what development accepts: `127.0.0.2:8081` is refused in a deployment by the row
+    above and has to be accepted here, and a developer who runs the mock on a second
+    loopback address is doing nothing wrong.
+
+    Both schemes, since the development stack uses cleartext and the rule above is
+    written over TLS; neither may be refused here.
+
+    **The mutation this kills:** the loopback rule applied unconditionally — in
+    particular a class-based rule that forgot the environment condition the three
+    literal spellings had.
+    """
+    host = LOOPBACK_URL_HOSTS[spelling]
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: development_environment(),
+            **deployment(
+                **{OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: (f"{scheme}://{host}:8081/oidc/authorize")}
+            ),
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings()` refused {scheme}://{host}:8081/oidc/authorize in development. The first of "
+        "these is the address `.env.example` ships and the one a browser on the developer's host "
+        "reaches the mock at, so refusing it closes the web login door on every laptop."
+    )
+
+
+def test_a_non_loopback_ip_literal_authorization_endpoint_is_accepted_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pair that keeps the class honest: an address is not the same as loopback.
+
+    The refusal above closes over a class rather than a list, and the cheapest way to
+    satisfy a class-based rule is to widen it past the class — "the host is an IP
+    literal" instead of "the host is an IP literal that is loopback". An institution
+    that runs its identity provider at an address rather than a name is then
+    undeployable, and every refusal row above stays green.
+
+    TEST-NET-3 (RFC 5737), so the row is unambiguously an address and unambiguously
+    not loopback, and names nobody's real host.
+
+    **The mutation this kills:** `ipaddress.ip_address(host)` succeeding treated as
+    the refusal, rather than `.is_loopback` on the parsed result. **Its pair** is the
+    `127.0.0.2` row above, which the same broken rule also passes — the two together
+    are what require the loopback test rather than the parse.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(
+                **{
+                    OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: (
+                        f"https://{NON_LOOPBACK_IP_LITERAL}/oidc/authorize"
+                    )
+                }
+            ),
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings()` refused https://{NON_LOOPBACK_IP_LITERAL}/oidc/authorize in production. "
+        "That is a documentation address, routable nowhere near this process, and the rule is "
+        "about loopback rather than about IP literals: a provider reached at an address instead "
+        "of a name is an ordinary deployment."
+    )
+
+
+def test_a_real_authorization_endpoint_is_accepted_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other pair: a browser-facing endpoint at a real provider still deploys.
+
+    Without this, the rule above is satisfied by refusing every authorization
+    endpoint outside development, which is the web door closed in exactly the
+    deployments it exists for. A second real host rather than
+    `DEPLOYED_OIDC`'s own, so this row says something the whole-set acceptance test
+    does not: that the field is judged on its host rather than on being left at the
+    value this module happens to use as a background.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(
+                **{
+                    OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: (
+                        f"https://{ANOTHER_REAL_HOST}/oidc/authorize"
+                    )
+                }
+            ),
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings()` refused https://{ANOTHER_REAL_HOST}/oidc/authorize in production. It is "
+        "neither the mock nor this machine, which is what an institution's own provider looks "
+        "like — and a rule that refuses it leaves the web door undeployable."
+    )
+
+
+def test_a_loopback_token_endpoint_is_accepted_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The composition, stated from the side where the two rules do not agree.
+
+    The loopback refusal is about one field, and this is what says so. A provider
+    running beside the application — a sidecar in the same pod, or on the same host
+    — is reached by the container at `localhost`, and the four server-side settings
+    may point there in any environment. Sweeping loopback out of all five would
+    refuse that deployment while protecting nothing, because none of those four is
+    ever handed to a browser.
+
+    **The mutation this kills:** the loopback catalog applied to every `oidc_*` URL
+    rather than to the browser-facing one. **Its pair** is the first test in this
+    section, where the identical host under the identical environment is refused
+    because the field is the one a browser reads.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(
+                **{
+                    OIDC_TOKEN_ENDPOINT_VARIABLE: "https://localhost:8443/oidc/token",
+                    OIDC_JWKS_URL_VARIABLE: "https://localhost:8443/.well-known/jwks.json",
+                }
+            ),
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        "`Settings()` refused a token endpoint and key set on this machine in production. Those "
+        "two are fetched by the container, where `localhost` is the container itself — a provider "
+        "sidecar, which is a deployment rather than a defect. The browser-facing endpoint is the "
+        "one the loopback rule is about."
+    )
+
+
+def test_a_cleartext_loopback_authorization_endpoint_is_refused_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Where the two rules overlap, the exemption must not be the one that wins.
+
+    `http://localhost:8081/oidc/authorize` in a deployment is the finding's own
+    value. The transport rule *exempts* cleartext to this machine; the loopback rule
+    *refuses* this field pointed at this machine. Written as an early return — "on
+    this machine, nothing more to check" — the exemption answers first and the
+    finding is still open, with every other row in this section green.
+
+    So this row is not a duplicate of the first test with a different scheme. It is
+    the one that says the rules compose rather than short-circuit, and it is the
+    exact configuration the review found.
+
+    **The mutation this kills:** an on-this-machine check that returns early instead
+    of continuing to the field-specific rule.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(
+                **{OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: "http://localhost:8081/oidc/authorize"}
+            ),
+        },
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+@pytest.mark.parametrize("environment", DEPLOYMENT_ENVIRONMENTS)
+@pytest.mark.parametrize("variable", OIDC_URL_VARIABLES)
+def test_a_cleartext_endpoint_off_this_machine_is_refused_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    environment: str,
+) -> None:
+    """Cleartext to another host is refused, which is the same rule `app.config`
+    already applies to the model provider.
+
+    **The finding.** With no transport rule, `http://idp.example.edu/...` is a legal
+    production configuration. Anyone on the path between the container and that host
+    can answer the key-set fetch with a key set of their own, and every token signed
+    with the matching private key then verifies — which is the signing oracle this
+    whole ticket exists to close, reached without ever naming the mock.
+
+    All four settings. The key set and the token endpoint are fetched, so the
+    argument is direct. The authorization endpoint is a URL a browser is sent to, and
+    cleartext there puts the authorization request and its `state` on the wire. The
+    issuer is fetched by nothing at all — it is compared against the `iss` claim as a
+    string — and it is included because OpenID Connect Discovery requires an Issuer
+    Identifier to use the `https` scheme, so an `http` issuer is not a provider
+    identity that any conformant deployment has.
+
+    `app.config` already holds exactly this rule for `ai_provider_base_url`;
+    `tests/unit/test_ai_provider_configuration.py` is where its pairs live, and the
+    on-this-machine exemption below is that rule's, spelled the same way.
+
+    **The mutation this kills:** no transport rule; a transport rule on the fetched
+    endpoints only. **The near misses that must stay green:** cleartext in
+    development, which is the whole development stack, and cleartext to this
+    machine, which is a sidecar.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: environment,
+            **deployment(**{variable: f"http://{ANOTHER_REAL_HOST}/oidc/endpoint"}),
+        },
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+@pytest.mark.parametrize(
+    "variable",
+    (OIDC_ISSUER_VARIABLE, OIDC_TOKEN_ENDPOINT_VARIABLE, OIDC_JWKS_URL_VARIABLE),
+)
+def test_a_cleartext_server_side_endpoint_on_this_machine_is_accepted_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+) -> None:
+    """The transport rule's exemption: there is no network between a process and itself.
+
+    A provider running beside the application is reached over the loopback interface,
+    where nothing can be read off the wire, and refusing it would turn away a
+    deployment while protecting nothing — the same reasoning, in the same words, that
+    `tests/unit/test_ai_provider_configuration.py` records for a local model server.
+
+    The browser-facing endpoint is deliberately not a row here: for that field this
+    same URL is *refused*, by the rule above it, and the test that says so by name is
+    `test_a_cleartext_loopback_authorization_endpoint_is_refused_outside_development`.
+
+    **The mutation this kills:** a transport rule written as "outside development,
+    https or nothing".
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(**{variable: "http://localhost:8443/oidc/endpoint"}),
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings()` refused a cleartext {variable} on this machine in production. There is no "
+        "network between the process and a provider on the same machine, so there is nothing for "
+        "a transport rule to protect — and `app.config` already makes this exemption for the "
+        "model provider."
+    )
+
+
+@pytest.mark.parametrize("host", ON_THIS_MACHINE_URL_HOSTS)
+def test_the_transport_exemption_covers_every_spelling_of_this_machine(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
+) -> None:
+    """Three spellings of one permission, on the field that is fetched most often.
+
+    The pair to the exemption above, asked the other way round: that one varies the
+    field and holds the host, this one holds the field and varies the host. A rule
+    written against `localhost` alone refuses the address, and one written against
+    the address alone refuses the name; `[::1]` is what a machine with IPv6 resolves
+    the name to first, so it is the spelling a rule is likeliest to miss.
+
+    **The mutation this kills:** an on-this-machine check that knows one or two of
+    the three spellings.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(**{OIDC_JWKS_URL_VARIABLE: f"http://{host}:8443/jwks.json"}),
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings()` refused http://{host}:8443/jwks.json in production, which is this machine "
+        "written a third way. All three spellings are one permission."
+    )
+
+
+def test_the_development_stack_is_reached_over_cleartext_and_that_stays_legal(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The transport rule is conditioned on the environment, and this is why.
+
+    Every address on the development stack is cleartext to a host that is *not* this
+    machine: `http://mock-idp:8000` is another container. So the model provider's
+    version of this rule — which is absolute, because a model provider has no
+    equivalent of a development stack — would refuse the configuration
+    `.env.example` ships and CI copies to `.env`, and E0's §14.3 exit criterion with
+    it.
+
+    **The mutation this kills:** the transport rule written without its environment
+    condition, copied across from `ai_provider_base_url` where it does not need one.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: development_environment(),
+            OIDC_ISSUER_VARIABLE: f"http://{MOCK_SERVICE}:8000",
+            OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: "http://localhost:8081/oidc/authorize",
+            OIDC_TOKEN_ENDPOINT_VARIABLE: f"http://{MOCK_SERVICE}:8000/oidc/token",
+            OIDC_JWKS_URL_VARIABLE: f"http://{MOCK_SERVICE}:8000/.well-known/jwks.json",
+            OIDC_CLIENT_ID_VARIABLE: MOCK_CLIENT_ID,
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        "`Settings()` refused the development stack's own configuration, written out here rather "
+        "than taken from `.env.example` so that this row keeps saying what it says if that file "
+        "changes. Every address on it is cleartext to another container, so a transport rule "
+        "without an environment condition takes the whole stack down."
+    )
+
+
+def test_the_mock_host_is_refused_with_a_trailing_dot(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`mock-idp.` and `mock-idp` are the same host to every resolver.
+
+    A trailing dot makes a name fully qualified and is otherwise inert: a container
+    given `https://mock-idp.:8443/oidc/token` reaches the mock exactly as it would
+    without it. The catalog compares strings, so the dot walks straight through — and
+    it is a one-character edit to a value copied out of the development stack.
+
+    **https, so the transport rule cannot be what refuses it**, which is what makes
+    a green here attributable to the catalog and nothing else.
+
+    **The mutation this kills:** the catalog compared against `urlsplit(...).hostname`
+    with no normalisation. **The near miss that must stay green:** the test below —
+    a trailing dot on a host that is not the mock, which must not become refused by
+    a normaliser that strips more than the dot.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(**{OIDC_TOKEN_ENDPOINT_VARIABLE: f"https://{MOCK_SERVICE}.:8443/token"}),
+        },
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+def test_a_loopback_authorization_endpoint_with_a_trailing_dot_is_refused(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same normalisation, on the other catalog.
+
+    `localhost.` resolves to the loopback interface exactly as `localhost` does, so
+    a browser sent there is sent to the user's own machine — the first finding in
+    this section, reached by the third one's route. Two catalogs and one
+    normalisation: a fix that strips the dot before the mock comparison and not
+    before the loopback comparison closes half of this.
+
+    **The mutation this kills:** trailing-dot stripping applied at one comparison
+    site rather than to the parsed host once, before every comparison.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(
+                **{OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: "https://localhost.:8081/authorize"}
+            ),
+        },
+    )
+
+    with pytest.raises(load_configuration_error()):
+        load_settings_class()()
+
+
+def test_a_trailing_dot_on_a_host_that_is_not_the_mock_is_accepted(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pair: normalising the dot must not widen what the catalog matches.
+
+    `mock-idp.example.edu.` is a fully qualified name for a host that is not the
+    Compose service, and it stays accepted — which is the same exact-host reading the
+    module already pins, asked again after a normaliser has touched the value. The
+    repair this refuses is the tempting one: strip *every* dot, or strip the dot and
+    then compare by prefix, either of which turns a real institutional address into a
+    refusal.
+
+    **The mutation this kills:** a normaliser that removes more than one trailing
+    dot, or a comparison that goes back to `startswith` once the value is
+    normalised.
+    """
+    configure(
+        monkeypatch,
+        {
+            ENVIRONMENT_VARIABLE: "production",
+            **deployment(
+                **{OIDC_TOKEN_ENDPOINT_VARIABLE: f"https://{MOCK_SERVICE}.example.edu./token"}
+            ),
+        },
+    )
+
+    settings = load_settings_class()()
+
+    assert settings is not None, (
+        f"`Settings()` refused https://{MOCK_SERVICE}.example.edu./token, whose host is a fully "
+        f"qualified name ending in `.example.edu.` and is not the Compose service {MOCK_SERVICE!r}. "
+        "Stripping a trailing dot is normalisation; matching more hosts because of it is a wider "
+        "catalog."
     )
