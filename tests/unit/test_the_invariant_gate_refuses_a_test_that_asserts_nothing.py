@@ -24,23 +24,34 @@ allows it, and that checker would also allow the planted fixture the item came
 from if a helper happened to sit above it.
 
 The rule was chosen for what it permits next, not to accommodate anything already
-here. All **24** `invariant`-marked tests in the tree carry an `assert` in their
-own body, none inside a nested function, and every one that uses `pytest.raises`
-also asserts directly — so the rule is green on the suite as it stands and no
-existing test moves to satisfy it.
+here. **When E0-36 landed it**, all 24 `invariant`-marked tests in the tree
+carried an `assert` in their own body, none inside a nested function, and every
+one that used `pytest.raises` also asserted directly — so the rule was green on
+the suite as it stood and no existing test moved to satisfy it. Those numbers are
+that day's measurement rather than a standing claim: E0-41 marked further tests,
+among them one whose body is a `with pytest.raises(NotImplementedError)` block and
+nothing else
+(`tests/unit/test_deferred_authz_seams_fail_closed.py::test_the_raw_comment_seam_raises_rather_than_answering`).
+The rule admits it in as many words — a `pytest.raises` block is one of the three
+shapes — and the `ALLOWED` sample named "a pytest.raises block" below is that
+shape, so nothing here changes except the count and the incidental observation
+about how the marked set happened to be written.
 
 **Trust `pytest -m invariant --collect-only` for that count, and nothing that
-reads decorators.** It collects 24 functions and 42 parametrized cases, and the
-checker agrees with it. The first measurement taken for this ticket said 20,
+reads decorators.** At E0-36 it collected 24 functions and 42 parametrized cases,
+and the checker agreed with it. The first measurement taken for that ticket said 20,
 because it walked `decorator_list` — which misses a test marked by a module-level
-`pytestmark = pytest.mark.invariant`, and four are: three in
+`pytestmark = pytest.mark.invariant`. Four were at E0-36: three in
 `tests/unit/test_no_service_reads_an_identity_table_directly.py` and one in
-`tests/unit/test_care_is_not_reachable_from_a_claim.py`. **There are two ways to
+`tests/unit/test_care_is_not_reachable_from_a_claim.py`; E0-41 added
+`tests/unit/test_the_org_views_are_read_only_through_the_grant.py`, which is
+marked the same way, so the form is used by more modules now rather than fewer.
+**There are two ways to
 mark a test and a decorator is one of them**, which is why no sample below stands
 for "the marked set" and why the count above is quoted from the collector rather
-than from a walk. The mutation that disables the checker's `pytestmark` path makes
-it report exactly 20 — a clean scan over four real §4.1 invariants it never looked
-at, which is this item's own subject one level up.
+than from a walk. The mutation that disables the checker's `pytestmark` path made
+it report exactly 20 at E0-36 — a clean scan over every §4.1 invariant marked that
+way, which it never looked at, and which is this item's own subject one level up.
 
 **The interface this test assumes, said out loud because the ticket names the
 checker and not its arguments.** `scripts/ci/check_invariant_assertions.py` takes
@@ -53,13 +64,13 @@ therefore a message about the contract rather than about the rule, and it says s
 **Both marking forms are planted, and it takes two samples rather than one.** The
 criterion is about an `invariant`-marked test, and a `pytestmark`-marked test is
 one: covering the decorator alone would be a partial criterion rather than a
-smaller one, and the four tests in the tree that use the module-level form live in
-modules that are wholly §4.1. So the module-level form appears twice below, once
+smaller one, and every test in the tree that uses the module-level form lives in a
+module that is wholly §4.1 (four such tests at E0-36, more since). So the module-level form appears twice below, once
 refused and once allowed, and neither is redundant.
 
 - **The refusal alone is not enough.** A checker that refused every
   `pytestmark`-marked module whatever its body would pass it, and would be red
-  against those four invariants on the day it landed. The allowance is what makes
+  against every invariant marked that way on the day it landed. The allowance is what makes
   the refusal mean "this body has no assertion" rather than "this file has a
   `pytestmark` in it".
 - **The allowance alone is not enough**, for the ordinary reason the catch half
@@ -108,7 +119,7 @@ PLANTED_TEST = re.compile(r"^def (?P<name>test_\w+)", re.MULTILINE)
 # The sixth is the second way a test can be marked, and it is here for the reason
 # the allow half always exists: without it, a checker that refused every
 # `pytestmark`-marked module whatever its body would pass the refusal below and be
-# red against the four §4.1 invariants in the tree that are marked that way. Both
+# red against the §4.1 invariants in the tree that are marked that way. Both
 # `pytestmark` samples use the single-mark form. The list form,
 # `pytestmark = [pytest.mark.invariant, …]`, appears nowhere in this repository and
 # is not covered here — named rather than left implied, because an enumeration
@@ -183,7 +194,7 @@ def test_no_module_that_reads_a_claim_names_the_care_role(sources):
 # see this as a marked test.
 #
 # The fourth is the other way a checker can fail to recognise a marking, and it is
-# the one that actually happened: a module-level `pytestmark`, which four §4.1
+# the one that actually happened: a module-level `pytestmark`, which several §4.1
 # invariants in this repository use and which a walk over `decorator_list` cannot
 # see. **Its refusal has to be attributed, not merely counted.** A checker whose
 # `pytestmark` path has regressed finds no marked test in this sample at all, and
@@ -352,7 +363,7 @@ def test_the_assertion_checker_refuses_the_shapes_the_rule_names_and_allows_thei
             "an `if` is allowed** — `tests/integration/test_identity_grants.py` writes every "
             "refusal that way, so a checker reading only the top level of a body is red against "
             "the suite it guards. **A module-level `pytestmark` marks a test as surely as a "
-            "decorator does** — four §4.1 invariants in this repository are marked that way, in "
+            "decorator does** — several §4.1 invariants in this repository are marked that way, in "
             "modules where every test is one, so a checker that reads `decorator_list` alone "
             "scans none of them and reports a clean run over the files that are wholly "
             "confidential.",

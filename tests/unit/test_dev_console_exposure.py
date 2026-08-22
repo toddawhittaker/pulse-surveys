@@ -76,10 +76,21 @@ def client_for(application: Any) -> Any:
     return TestClient(application)
 
 
+@pytest.mark.invariant
 def test_the_dev_console_is_not_served_outside_development(
     configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """**Dies if the `/dev` gate is dropped or inverted** — the become-any-user guard.
+
+    **Marked `invariant` by E0-41.** Served in production this page walks past §4
+    and §6.2 together: whoever asks becomes the Care role, and the Care role is the
+    one that can re-identify a student. The gate was already asserted and already
+    correct; what it was not was unskippable, and the isolated pass is what makes a
+    §4.1 assertion that.
+
+    The development-serves direction stays unmarked in
+    `tests/integration/test_dev_console.py`: it asserts a capability rather than a
+    denial, and the §4.1 pass is for the denials.
 
     The console lists every web-login person as a one-click sign-in link. Served in
     production it hands whoever asks a menu of identities to enter the product as,

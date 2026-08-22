@@ -97,10 +97,19 @@ def test_the_schema_and_its_documentation_are_served_in_development(
         )
 
 
+@pytest.mark.invariant
 def test_the_schema_and_its_documentation_are_not_served_outside_development(
     configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """**Dies if the gate is dropped**, which is the state of `main` today.
+
+    **Marked `invariant` by E0-41, and it is the one of the three that is.** This
+    is the direction §6.2 and §5.5 are about: a launched browser reading the whole
+    route list of a system that holds student comment text, including the reveal
+    surface. The other two tests here assert that the schema is *served* in
+    development and *producible* in process — capabilities, not denials — and the
+    isolated §4.1 pass is for the denials, so marking them would put a developer
+    convenience behind a gate CLAUDE.md says may never be skipped.
 
     `create_app()` builds `FastAPI(...)` with neither `docs_url` nor `openapi_url`
     passed, so both are served to anyone who asks. E0-18 adds the first routes worth

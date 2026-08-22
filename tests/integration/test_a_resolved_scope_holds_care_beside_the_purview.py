@@ -272,10 +272,20 @@ def test_a_person_with_no_care_assignment_does_not_hold_care(
     )
 
 
+@pytest.mark.invariant
 def test_a_resolved_scope_takes_its_n_threshold_from_configuration(
     authz: Any, committed_rows: Any, application_session: Any
 ) -> None:
     """E0-11's scope: "the threshold read from `Settings`".
+
+    **Marked `invariant` by E0-41, and only the two n-threshold tests in this
+    module are.** SPEC §4.1 item 3 is the rule this number gates, and the number
+    is the whole of what E0 ships of it: E4 writes the suppression against
+    whatever `scope.n_threshold` says. A hard-coded 5 — or a 0 — suppresses at a
+    threshold nobody chose, and the isolated §4.1 pass is where a skipped
+    assertion and a passing one stop looking alike. The other tests here are
+    about Care and the purview seam and are marked where their own rules live,
+    which is why this is a decorator rather than a module-level `pytestmark`.
 
     SPEC §4 makes the value institution configuration — "Threshold value is
     configurable (default 5)" — and §4.1 item 3 makes what it gates an invariant:
@@ -310,10 +320,18 @@ def test_a_resolved_scope_takes_its_n_threshold_from_configuration(
     )
 
 
+@pytest.mark.invariant
 def test_an_explicit_n_threshold_overrides_the_configured_default(
     authz: Any, committed_rows: Any, application_session: Any
 ) -> None:
     """The parameter half of E0-11's "the parameter and the call site".
+
+    **Marked `invariant` beside its pair (E0-41), and the pair is why.** With only
+    the configured-value test in the isolated pass, a resolver that answered the
+    configured number to every caller — dropping the argument entirely — would run
+    that pass clean while E4's recomputations silently suppressed at the wrong
+    threshold. Neither test says much alone: one says the number is not a literal,
+    this one says the caller's number is not ignored.
 
     The threshold has to be overridable for the callers E4 will write — a
     recomputation over a past week, a job that answers for an institution other

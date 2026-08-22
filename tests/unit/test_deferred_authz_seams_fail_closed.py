@@ -30,6 +30,19 @@ oversight. The pointer is what makes it a seam.
 before it reads anything, so a session is never opened; `None` is passed where one
 belongs, and the raise has to arrive anyway. A seam that connects first, walks a
 graph, and only then declines is a seam that can be reached by half.
+
+**Two of the four are marked `invariant` (E0-41), and two are not.** The marked
+pair is the pair that *refuses*: the union raising rather than answering with a
+purview, and the n-threshold seam raising rather than answering a caller. Those
+are SPEC §4.1 held open — item 2's sibling isolation is a rule about a union
+nothing has computed yet, and item 3's "below the n-threshold, raw comments are
+hidden from instructors and students alike" is a rule whose only enforcement
+today is that nothing answers the question. A skipped assertion and a passing one
+are the same green checkmark, and the isolated pass exists to tell them apart.
+The two epic-pointer tests stay unmarked deliberately: they assert that a raise
+is documented, which keeps the seam alive but widens nobody's visibility if it
+regresses, and the §4.1 pass is for the refusals rather than for everything near
+them.
 """
 
 from typing import Any
@@ -55,10 +68,18 @@ DOCSTRING_RAISES_FRAGMENTS = ("raise", "notimplementederror")
 DOCSTRING_SUBJECT_FRAGMENTS = ("union", "purview")
 
 
+@pytest.mark.invariant
 def test_the_deferred_transitive_union_raises_rather_than_returning_a_purview(
     authz: Any,
 ) -> None:
     """The criterion, and the one value ADR 0003 refuses above all others.
+
+    **Marked `invariant` by E0-41.** SPEC §4.1 item 2 — "a Lead Faculty assignment
+    never grants sibling leads' courses, at any point in the purview union
+    computation" — is a rule about a computation E0 does not have, and the only
+    thing standing where that computation will be is this raise. Unmarked, the
+    assertion sat outside the isolated §4.1 pass, where a skip and a pass look the
+    same.
 
     An empty `Purview` here reads as "this assignment supervises nothing", which
     is a state the product genuinely has. A partial one — the own grant alone,
@@ -156,6 +177,7 @@ def test_the_module_docstring_says_why_the_union_raises_and_which_epic_lands_it(
     )
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize(
     ("response_count", "n_threshold"),
     [
@@ -168,6 +190,13 @@ def test_the_raw_comment_seam_raises_rather_than_answering(
     authz: Any, response_count: int, n_threshold: int
 ) -> None:
     """ADR 0003 generalised: "any deferred authorization seam fails closed by raising".
+
+    **Marked `invariant` by E0-41**, and it is the assertion SPEC §4.1 item 3 has
+    today: "below the n-threshold, raw comments are hidden from instructors and
+    students alike". E4 writes the suppression; until then the enforcement *is*
+    the refusal to answer, and a seam that starts returning `True` hides no
+    comment from anybody. The `invariant` marker composes with `parametrize` —
+    every one of the three cases runs in the isolated pass.
 
     E0-11's scope carries the interface and not the rule — "The n-threshold guard
     *interface* — the parameter and the call site — with the threshold read from

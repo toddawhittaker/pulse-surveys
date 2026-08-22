@@ -41,6 +41,13 @@ not carry it inside. A `state` or a `nonce` that is not ASCII is refused rather
 than crashed, and the refusal still burns the single-use cookie. And no refusal
 page repeats the server-side key set address the tool failed to reach.
 
+**What the two landing pages *carry* is asserted next door**, in
+`tests/integration/test_the_launch_views_name_nobody.py` (E0-41): the tests here
+say which page a launch lands on, and those say that neither page names a seeded
+person, identifies a section or reports a roster count. They are the §4.1
+invariants of this door and are marked `invariant`; nothing in this module is,
+because landing on the right page is a routing rule rather than a visibility one.
+
 **Where the values come from.** Nothing about the mock platform is transcribed
 here. The issuer, client ID and deployment ID are read out of the OIDC
 third-party-initiated login request its launch page publishes — the same source
