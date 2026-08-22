@@ -2,8 +2,12 @@
 #
 # `make ci` runs the same gates as .github/workflows/ci.yml, in the same order,
 # with the same tolerance for parts of the tree that do not exist yet — the
-# frontend, the e2e specs, and the eval sets. The migration and test gates lost
-# theirs in E0-04 and now run unconditionally in both places. If it passes here
+# frontend and the eval sets. The migration and test gates lost theirs in E0-04,
+# and E0-18 committed the e2e specs, so all three now run unconditionally in
+# both places. The Node checkers read the root `package.json`, which E0-40 split
+# from `frontend/package.json`: eslint, tsc and `npm audit` run over the
+# TypeScript this repository holds today, and the production build and bundle
+# budget still wait for the E1 scaffold. If it passes here
 # it should pass there; when the two drift, the workflow is the source of truth
 # and this file is the bug.
 #
@@ -82,10 +86,10 @@ lint: ## ruff check + ruff format --check, eslint
 	$(call banner,ruff)
 	@ruff check . && ruff format --check .
 	$(call banner,eslint)
-	@if [ -f frontend/package.json ]; then \
-		cd frontend && npx eslint . --max-warnings=0; \
+	@if [ -f package.json ]; then \
+		npx eslint . --max-warnings=0; \
 	else \
-		$(call skip,no frontend/package.json yet); \
+		$(call skip,no package.json at the repository root); \
 	fi
 
 # mypy runs three times, and it has to: `backend/app`, `mock-lms/app` and
@@ -103,10 +107,10 @@ typecheck: ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit
 	$(call banner,mypy mock-idp/app)
 	@mypy mock-idp/app
 	$(call banner,tsc --noEmit)
-	@if [ -f frontend/package.json ]; then \
-		cd frontend && npx tsc --noEmit; \
+	@if [ -f package.json ]; then \
+		npx tsc --noEmit; \
 	else \
-		$(call skip,no frontend/package.json yet); \
+		$(call skip,no package.json at the repository root); \
 	fi
 
 # Needs a database to migrate: `make up` first. CI has its own Postgres service
@@ -252,10 +256,10 @@ audit: ## Fail on high/critical dependency vulnerabilities
 	$(call banner,pip-audit)
 	@pip-audit --strict --desc -r requirements.txt -r requirements-dev.txt
 	$(call banner,npm audit)
-	@if [ -f frontend/package.json ]; then \
-		cd frontend && npm audit --audit-level=high; \
+	@if [ -f package.json ]; then \
+		npm audit --audit-level=high; \
 	else \
-		$(call skip,no frontend/package.json yet); \
+		$(call skip,no package.json at the repository root); \
 	fi
 
 .PHONY: licenses
@@ -268,9 +272,9 @@ licenses: ## Fail on dependencies incompatible with MIT distribution
 	@mkdir -p reports
 	@pip-licenses --format=json --with-urls > reports/py-licenses.json
 	@args="--python-json reports/py-licenses.json"; \
-	if [ -f frontend/package.json ]; then \
+	if [ -f package.json ]; then \
 		npm ci; \
-		(cd frontend && npx license-checker-rseidelsohn --json > ../reports/npm-licenses.json); \
+		npx license-checker-rseidelsohn --json > reports/npm-licenses.json; \
 		args="$$args --npm-json reports/npm-licenses.json"; \
 	fi; \
 	$(PYTHON) scripts/ci/check_licenses.py $$args
