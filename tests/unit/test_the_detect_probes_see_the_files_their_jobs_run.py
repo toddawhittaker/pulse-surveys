@@ -59,6 +59,22 @@ allows one new test file and it is spent on the invariant-gate guard, and of the
 files this ticket may touch, this is the one whose subject is a gate reporting
 success over a check that did not honestly pass.
 
+**The probe has a second copy, and the mutation battery found it unguarded.** The
+`Makefile` carries the same condition for `lint`, `typecheck`, `audit` and
+`licenses`, so that `make ci` and the workflow agree; reverting either copy to
+`frontend/package.json` while the other holds the root left the whole suite green.
+That is `docs/MISTAKES.md` entry 13 — a hazard worked around in one of the two
+places facing it — and the guard for it is here rather than in
+`test_the_docker_gate_and_the_makefile_run_the_same_checks.py`, whose subject is
+the image gate and `.dockerignore` rather than the node probe.
+
+**And `tsconfig.json`, which is the founding defect one file over.** `tsc
+--noEmit` over a config whose `include` does not reach the specs exits 0 having
+read nothing — the same green-over-unread-work shape as a probe answering false,
+proved by the battery, and caught today only as a side effect of eslint's typed
+project service. So the include list is asserted to cover the files the checker
+exists to read.
+
 This is a separate module from `test_the_aggregate_ci_check_sees_an_upstream_failure.py`
 even though both execute a `run:` block out of the same workflow, because shared
 machinery is not a shared subject: that module's argument is about GitHub's
@@ -66,6 +82,7 @@ machinery is not a shared subject: that module's argument is about GitHub's
 docstring answer two questions at once.
 """
 
+import json
 import os
 import re
 import shutil
@@ -240,6 +257,73 @@ RETRY_LINE_AFTER = "  retries: 0,"
 TRACE_LINE_BEFORE = "    trace: 'on-first-retry',"
 TRACE_LINE_AFTER = "    trace: 'retain-on-failure',"
 
+# ---------------------------------------------------------------------------
+# The probe's second copy. CLAUDE.md: run `make ci` before pushing, and where it
+# disagrees with the workflow the workflow is right and the Makefile is the bug.
+# A Makefile that probes a directory which does not exist does not report a bug —
+# it prints its skip notice and exits 0, so `make ci` is green over four checks it
+# never ran and the disagreement surfaces on someone else's pull request.
+# ---------------------------------------------------------------------------
+MAKEFILE = REPO_ROOT / "Makefile"
+
+# The four node-facing targets, each with the tool that makes it one. The tool
+# patterns are the same objects the workflow half uses rather than copies of them,
+# so the two halves of this module cannot come to disagree about what counts as a
+# node gate (`docs/MISTAKES.md` entry 19).
+MAKEFILE_NODE_TARGETS = {
+    "lint": "eslint",
+    "typecheck": "tsc",
+    "audit": "npm audit",
+    "licenses": "the npm licence scan",
+}
+
+# The target that must go on naming the other manifest, and the control that
+# proves the reader below can see a qualified path at all.
+MAKEFILE_FRONTEND_TARGET = "frontend-build"
+
+# A target line: a name at the start of a line, then a colon that is not `:=`.
+# `.PHONY` and the variable assignments above the targets are excluded by the
+# leading character class.
+MAKE_TARGET = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*:(?!=)")
+
+# Any mention of the manifest, with whatever path leads to it. The prefix is
+# captured rather than the whole path matched, because what is asserted is that
+# every mention is the root one — an assertion about the absence of a prefix
+# cannot be written as a search for a spelling.
+MANIFEST_MENTION = re.compile(r"(?P<prefix>[A-Za-z0-9_./-]*)package\.json")
+
+# ---------------------------------------------------------------------------
+# E0-40 decision 2: the committed TypeScript gets a toolchain that reads it.
+#
+# `tsc --noEmit` over a config whose `include` reaches nothing exits 0. It is this
+# ticket's own defect in another file — a checker reporting success over a tree it
+# never read — and it is quieter, because there is no probe to inspect and no
+# notice printed in place of the work.
+# ---------------------------------------------------------------------------
+TSCONFIG = REPO_ROOT / "tsconfig.json"
+E2E_TREE = REPO_ROOT / "tests" / "e2e"
+PLAYWRIGHT_CONFIG_NAME = "playwright.config.ts"
+
+# A whole-line `//` comment. `tsconfig.json` is JSONC — TypeScript accepts
+# comments and the file carries a nine-line one explaining what it covers — and
+# `json` does not, so those lines are blanked before the parse. Blanked rather
+# than removed, so a parse error still names the line it is on.
+LINE_COMMENT = re.compile(r"^\s*//")
+
+# What the matcher below must accept and must refuse, run before it is trusted
+# against the real config. The third case is the one worth reading: a flat glob
+# does not descend, which is the shape E0-36 found in the `e2e` probe and the
+# shape a tsconfig `include` can have just as easily.
+COVERAGE_CASES = (
+    ("tests/e2e/**/*.ts", "tests/e2e/lms/launch.spec.ts", True),
+    ("tests/e2e/**/*.ts", "tests/e2e/launch.spec.ts", True),
+    ("tests/e2e/*.ts", "tests/e2e/lms/launch.spec.ts", False),
+    ("tests/e2e", "tests/e2e/lms/launch.spec.ts", True),
+    (PLAYWRIGHT_CONFIG_NAME, PLAYWRIGHT_CONFIG_NAME, True),
+    (PLAYWRIGHT_CONFIG_NAME, "tests/e2e/launch.spec.ts", False),
+    ("tests/unit/**/*.ts", "tests/e2e/launch.spec.ts", False),
+)
+
 # A line whose first word is one of these runs nothing. The tolerance notices in
 # this workflow name the tools they are standing in for — "No frontend/package.json
 # yet — tsc and eslint have nothing to check" — so a search that read every line as
@@ -329,6 +413,96 @@ def configuration_lines(source: str) -> list[str]:
             continue
         found.append(line)
     return found
+
+
+def makefile_recipes(source: str) -> dict[str, str]:
+    """Every target in the Makefile and the recipe lines under it, joined.
+
+    Recipe lines are the tab-indented ones, which is make's own rule rather than
+    this module's convention. Everything else closes whichever target was open, so
+    a comment or a `.PHONY` between two targets cannot carry one target's lines
+    into another.
+    """
+    lines: dict[str, list[str]] = {}
+    current: str | None = None
+    for raw in source.splitlines():
+        if raw.startswith("\t"):
+            if current is not None:
+                lines.setdefault(current, []).append(raw.strip())
+            continue
+        match = MAKE_TARGET.match(raw)
+        current = match.group("name") if match else None
+    return {name: "\n".join(recipe) for name, recipe in lines.items()}
+
+
+def qualified_manifests(recipe: str) -> list[str]:
+    """Every `package.json` in this recipe that is reached through a directory."""
+    return [
+        f"{match.group('prefix')}package.json"
+        for match in MANIFEST_MENTION.finditer(recipe)
+        if match.group("prefix")
+    ]
+
+
+def tsconfig_document(source: str) -> Any:
+    """`tsconfig.json` parsed, with whole-line comments blanked first."""
+    blanked = "\n".join("" if LINE_COMMENT.match(line) else line for line in source.splitlines())
+    try:
+        return json.loads(blanked)
+    except json.JSONDecodeError as error:
+        pytest.fail(
+            f"{TSCONFIG.name} did not parse after whole-line comments were blanked: {error}\n"
+            "\n"
+            "It is JSONC — TypeScript accepts comments there and the file carries one — and this "
+            "reader drops only the lines that are entirely a comment. A trailing comma, a block "
+            "comment or a comment at the end of a line of settings will land here.\n"
+            "\n"
+            "This fails rather than skipping. A config this cannot read is a config whose "
+            "`include` it has not checked, and reporting a clean scan over one is the failure the "
+            "test exists to prevent."
+        )
+
+
+def include_matcher(pattern: str) -> re.Pattern[str]:
+    """A tsconfig `include` glob as a regex over repository-relative paths.
+
+    `**/` spans any number of directories including none, `**` spans anything,
+    `*` and `?` stop at a separator. Written out rather than handed to `fnmatch`,
+    whose `*` crosses `/` — which would make the flat-glob case in `COVERAGE_CASES`
+    pass and erase the distinction this whole module is about.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(pattern):
+        if pattern.startswith("**/", index):
+            out.append(r"(?:[^/]+/)*")
+            index += 3
+        elif pattern.startswith("**", index):
+            out.append(r".*")
+            index += 2
+        elif pattern[index] == "*":
+            out.append(r"[^/]*")
+            index += 1
+        elif pattern[index] == "?":
+            out.append(r"[^/]")
+            index += 1
+        else:
+            out.append(re.escape(pattern[index]))
+            index += 1
+    joined = "".join(out)
+    return re.compile(f"^{joined}$")
+
+
+def covers(pattern: str, relative: str) -> bool:
+    """Whether one `include` entry reaches this repository-relative file.
+
+    An entry with no wildcard that names a directory covers everything under it,
+    which is TypeScript's documented behaviour and a legitimate way to write this
+    list; refusing it would be this test insisting on a spelling.
+    """
+    if not any(character in pattern for character in "*?") and (REPO_ROOT / pattern).is_dir():
+        return relative.startswith(f"{pattern}/")
+    return bool(include_matcher(pattern).match(relative))
 
 
 def steps_running(jobs: dict[str, Any], pattern: re.Pattern[str]) -> list[tuple[str, str, Any]]:
@@ -969,5 +1143,242 @@ def test_the_e2e_gate_does_not_pass_over_a_spec_that_failed_once() -> None:
             "",
             "This is the half of decision 3 that fails quietly. Nothing turns red — the gate just "
             "stops producing the file somebody will look for the next time a spec fails on CI.",
+        ]
+    )
+
+
+def test_the_makefile_node_targets_probe_the_root_manifest_too() -> None:
+    """The probe's second copy, which the mutation battery found guarded by nothing.
+
+    `lint`, `typecheck`, `audit` and `licenses` each carry their own copy of the
+    condition the `detect` job emits, because CLAUDE.md requires `make ci` to run
+    the same gates the workflow does. Reverting either copy to
+    `frontend/package.json` while the other holds the root left the whole suite
+    green: the tests above read `ci.yml` and nothing read the Makefile. That is
+    `docs/MISTAKES.md` entry 13 exactly — a hazard worked around in one of the two
+    places facing it — and it is the reason the rule is asserted of both files in
+    one module rather than of one file in two.
+
+    **The consequence is asymmetric, and the Makefile is the worse half to lose.**
+    A workflow probing a directory that does not exist prints a notice and reports
+    success; so does the Makefile, which means `make ci` — the thing CLAUDE.md
+    tells you to run before pushing — goes green over four checks it never ran. The
+    person who would have caught the disagreement is the person the disagreement is
+    hidden from.
+
+    **What is asserted is the absence of a prefix, not the presence of a
+    spelling.** Every `package.json` these four recipes name must be the root one.
+    `[ -f package.json ]`, `test -f package.json` and a shell function that takes
+    the path as an argument all pass; only a directory in front of the name fails.
+
+    **The mutation this kills:** put `frontend/` back in front of the manifest in
+    any one of the four recipes while `ci.yml` keeps the root probe. **The near
+    miss that must stay green:** `frontend-build`, which must go on naming
+    `frontend/package.json` — and which is also this test's control, because a
+    reader that could not see a qualified path would report all four targets clean
+    without having read anything (`docs/MISTAKES.md` entry 35: require the guard to
+    find the thing on a subject that certainly has it).
+    """
+    assert MAKEFILE.is_file(), (
+        f"{MAKEFILE} does not exist, so nothing runs the pipeline's gates locally and CLAUDE.md's "
+        "'run `make ci` before pushing' names a target that is gone."
+    )
+
+    recipes = makefile_recipes(MAKEFILE.read_text(encoding="utf-8"))
+    assert recipes, (
+        f"No target in {MAKEFILE.name} was read as having a recipe. Every assertion below is over "
+        "that mapping, and an empty one satisfies all of them — the reader has gone blind rather "
+        "than the Makefile having been emptied."
+    )
+
+    control = recipes.get(MAKEFILE_FRONTEND_TARGET, "")
+    assert qualified_manifests(control), (
+        f"The `{MAKEFILE_FRONTEND_TARGET}` recipe names no manifest reached through a directory, "
+        "and it is supposed to name `frontend/package.json` — E0-40 leaves the production build "
+        "and the bundle budget waiting for the E1 scaffold.\n"
+        f"  read: {control or 'no recipe at all'}\n"
+        "\n"
+        "This is the control for the assertions below rather than a criterion of its own. They "
+        "say the four node targets name no qualified manifest, and a reader that cannot see a "
+        "qualified manifest anywhere satisfies them over a Makefile that is entirely wrong."
+    )
+
+    unfindable: list[str] = []
+    unprobed: list[str] = []
+    wrong_manifest: list[str] = []
+    for target, tool in sorted(MAKEFILE_NODE_TARGETS.items()):
+        recipe = recipes.get(target)
+        if recipe is None:
+            unfindable.append(f"  {target} — no such target in {MAKEFILE.name} ({tool})")
+            continue
+        if not RUNS_AT_THE_ROOT[tool].search(recipe):
+            unfindable.append(f"  {target} — nothing in it runs {tool}")
+            continue
+        if "package.json" not in recipe:
+            unprobed.append(f"  {target} — runs {tool} and probes for no manifest at all")
+            continue
+        qualified = qualified_manifests(recipe)
+        if qualified:
+            wrong_manifest.append(f"  {target} — runs {tool} and probes {qualified}")
+
+    assert not unfindable, "\n".join(
+        [
+            f"These node-facing targets could not be found in {MAKEFILE.name}:",
+            *unfindable,
+            "",
+            "The assertions below are about which manifest each of them probes, and a target that "
+            "is not there — or that no longer runs the tool it is named for — satisfies them "
+            "having been looked at and not read. Either `make ci` stopped running that check, "
+            "which is a larger finding than this ticket, or it is spelled a new way.",
+        ]
+    )
+
+    assert not unprobed, "\n".join(
+        [
+            "These targets run a node tool and probe for no manifest:",
+            *unprobed,
+            "",
+            "Read twice before repairing. Running the tool unconditionally is not obviously wrong "
+            "at the root — the manifest is committed — but it makes `make ci` fail on a checkout "
+            "with no `node_modules` where the workflow would have installed first, and it is a "
+            "different shape from the workflow, which is the thing this test exists to keep in "
+            "step. It is reported rather than accepted so the choice is made deliberately.",
+        ]
+    )
+
+    assert not wrong_manifest, "\n".join(
+        [
+            "These targets probe a manifest inside a directory instead of the root one:",
+            *wrong_manifest,
+            "",
+            "E0-40 decision 1: the `Makefile` `lint`/`typecheck`/`audit` branches follow the same "
+            "split as the workflow so `make ci` and the workflow agree. `frontend/` does not "
+            "exist and is not due until E1, so a target probing it prints its skip notice and "
+            "exits 0.",
+            "",
+            "CLAUDE.md: run `make ci` before pushing, and where it disagrees with "
+            "`.github/workflows/ci.yml` the workflow is right and the Makefile is the bug. A "
+            "Makefile that silently skips what CI runs is that disagreement in the direction "
+            "nobody sees until CI is red on somebody else's branch.",
+        ]
+    )
+
+
+def test_the_typescript_checker_reads_the_typescript_this_repository_holds() -> None:
+    """E0-40 decision 2: `tsc --noEmit` over an include list that reaches the committed specs.
+
+    This ticket's founding defect, one file over. A gate that probes a path which
+    does not exist reports success having run nothing; a `tsc --noEmit` whose
+    `include` reaches nothing **exits 0 having read nothing**, and it is the
+    quieter of the two — there is no probe to inspect, no `::notice::` printed in
+    its place, and the job log shows a checker that ran and was happy. The battery
+    proved it: dropping `tests/e2e/**/*.ts` from the include list left `tsc`
+    exiting 0, caught only as a side effect of eslint's typed project service,
+    which is not a guarantee anybody wrote down.
+
+    So what is asserted is coverage of the real files rather than the shape of the
+    list: every `.ts` this repository holds under `tests/e2e`, plus the Playwright
+    config, must be reached by some entry. A respelling — `["**/*.ts"]`, or the
+    directory form `["tests/e2e", "playwright.config.ts"]` — passes, because it is
+    the same answer to the same question.
+
+    **The reader's limits, said out loud.** `tsconfig.json` is JSONC and carries a
+    comment; whole-line comments are blanked before the parse and nothing else is,
+    so a trailing comma or a comment at the end of a settings line fails the parse.
+    That failure is loud and says what it could not read, which is the right
+    direction: a config this cannot parse is one whose include list it has not
+    checked. `exclude` and `files` are not modelled — an `exclude` that removes
+    `tests/e2e` again would pass here, and the honest floor is that the include
+    list reaches the specs.
+
+    **The matcher is exercised before it is trusted.** Seven pattern-and-path pairs
+    run first, three of which must be refused. The flat `tests/e2e/*.ts` against a
+    spec one directory down is the case worth reading: it is E0-36's finding in a
+    different file format, and a matcher built on `fnmatch` — whose `*` crosses `/`
+    — would accept it and erase the distinction.
+
+    **The mutation this kills:** drop `tests/e2e/**/*.ts` from `include`, or
+    narrow it to a flat glob. **The near miss that must stay green:** any
+    respelling that still reaches the files, and adding entries for TypeScript
+    somebody commits later.
+    """
+    assert TSCONFIG.is_file(), (
+        f"{TSCONFIG} does not exist. E0-40 decision 2 puts a root `tsconfig.json` over "
+        f"`{PLAYWRIGHT_CONFIG_NAME}` and `tests/e2e/`, and without one `npx tsc --noEmit` at the "
+        "root has nothing to read — which is a gate reporting success over an unchecked tree, "
+        "this ticket's own subject."
+    )
+
+    misjudged = [
+        f"  {pattern!r} vs {relative!r}: answered {covers(pattern, relative)}, want {expected}"
+        for pattern, relative, expected in COVERAGE_CASES
+        if covers(pattern, relative) is not expected
+    ]
+    assert not misjudged, "\n".join(
+        [
+            "The include matcher in this test answered wrongly about a pattern:",
+            *misjudged,
+            "",
+            "Every verdict below is downstream of these. A matcher that accepted everything would "
+            "report the config compliant whatever it says; one that accepted nothing would fail "
+            "the config no matter what it says, and the failure would read as an unbuilt ticket "
+            "rather than a broken test.",
+        ]
+    )
+
+    document = tsconfig_document(TSCONFIG.read_text(encoding="utf-8"))
+    include = document.get("include")
+    assert isinstance(include, list) and include, (
+        f"{TSCONFIG.name} has no non-empty `include`, so `tsc` decides for itself what to read.\n"
+        f"  found: {include!r}\n"
+        "\n"
+        "The default is every TypeScript file under the config's directory, which would happen to "
+        "cover the specs today and would also drag in whatever `node_modules` and a future "
+        "`frontend/` bring. E0-40 decision 2 asks for a list that names what this checker is for."
+    )
+
+    required = [PLAYWRIGHT_CONFIG_NAME]
+    if E2E_TREE.is_dir():
+        required.extend(
+            sorted(
+                str(path.relative_to(REPO_ROOT))
+                for path in E2E_TREE.rglob("*.ts")
+                if path.is_file()
+            )
+        )
+
+    assert (REPO_ROOT / PLAYWRIGHT_CONFIG_NAME).is_file() and len(required) > 1, "\n".join(
+        [
+            "This test found no TypeScript for the checker to be pointed at:",
+            f"  {PLAYWRIGHT_CONFIG_NAME}: "
+            f"{'present' if (REPO_ROOT / PLAYWRIGHT_CONFIG_NAME).is_file() else 'missing'}",
+            f"  under {E2E_TREE.relative_to(REPO_ROOT)}: {len(required) - 1} file(s)",
+            "",
+            "The assertion below is 'every file the checker must read is covered', and an empty "
+            "list of files satisfies it perfectly — which is the same shape as the defect it is "
+            "guarding against. E0-18 committed four §9.2 specs and the Playwright config; if they "
+            "have moved, this test needs pointing at where they went.",
+        ]
+    )
+
+    uncovered = [
+        relative
+        for relative in required
+        if not any(covers(str(pattern), relative) for pattern in include)
+    ]
+    assert not uncovered, "\n".join(
+        [
+            f"{TSCONFIG.name} does not reach TypeScript that `tsc --noEmit` is supposed to check:",
+            *(f"  {relative}" for relative in uncovered),
+            f"  include: {include!r}",
+            "",
+            "A `tsc` run whose include list misses these exits 0 having read nothing. Nothing in "
+            "the pipeline is red, the job log shows a checker that ran, and the only thing still "
+            "looking at those files is eslint's typed project service — which is a side effect "
+            "rather than a guarantee, and which the next eslint configuration change may remove.",
+            "",
+            "This is the same failure as a probe that answers false over a tree that has the "
+            "thing, which is what E0-40 exists to fix, arriving through a file the probe split "
+            "does not touch.",
         ]
     )
