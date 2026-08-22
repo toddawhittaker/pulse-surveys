@@ -7,12 +7,18 @@ directions.
 The fields split into two groups, and the split is the point:
 
 * **Deployment wiring** has no default. A database URL, a Redis URL, an AI
-  provider base URL and model name, the institution timezone, and the
-  environment name all differ per deployment, and a working literal default for
+  provider base URL and model name, the institution timezone, the environment
+  name, and the five settings that name the identity provider a web login is
+  verified against all differ per deployment, and a working literal default for
   any of them is a misconfiguration that starts successfully and is wrong in
   production. The institution timezone is in this group because survey windows
   are timezone-bound (§3.1): a baked-in `America/New_York` opens the window at
-  the wrong hour elsewhere and nothing says so.
+  the wrong hour elsewhere and nothing says so. The identity provider is in it
+  because its default was worse than wrong: `http://mock-idp:8000` is a service
+  the base Compose file starts in *every* deployment, so a deployment that set
+  none of the five trusted a provider that signs an `id_token` for any identity
+  it is asked for, CARE and ADMIN included. ADR 0077 reverses that half of
+  ADR 0075.
 * **Everything else carries a default** and is therefore optional.
 
 Why a particular setting has a default is written at the field and nowhere
@@ -58,7 +64,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, ValidationInfo, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -96,6 +102,31 @@ _PROBLEM_EXPLANATIONS = {
 # `tests/unit/test_development_environment_has_one_definition.py` sweeps
 # `backend/app` and `scripts` for a second.
 DEVELOPMENT_ENVIRONMENT = "development"
+
+# The two spellings by which a configuration can reach or name the mock identity
+# provider `docker-compose.yml` starts, refused outside development by the two
+# validators at the foot of `Settings` (ADR 0077).
+#
+# The first is the Compose service name, which is how a container on this stack
+# reaches the mock. The second is the client the mock is registered with, which
+# is how a configuration names the mock without addressing it — the case a rule
+# about URLs cannot see, since a deployment carrying it is configured to be the
+# mock's client whatever its addresses say.
+#
+# Written out here rather than derived from anything: it is a catalog of two, and
+# a third spelling should cost a reviewed diff on these lines.
+# `tests/unit/test_oidc_provider_configuration.py` holds each of them against the
+# thing it names — the service in `docker-compose.yml`, and the client id
+# `.env.example` configures — because a catalog that has gone stale refuses
+# nothing and reports every configuration clean, exactly as a correct one does
+# (`docs/MISTAKES.md` entry 35).
+#
+# `localhost` and the loopback addresses are deliberately *not* here. Inside a
+# deployed container `localhost` is that container, so it cannot resolve to the
+# mock; refusing it would refuse a provider running alongside the application,
+# which is a supported deployment, and would protect nothing. ADR 0077 argues it.
+MOCK_IDENTITY_PROVIDER_HOST = "mock-idp"
+MOCK_IDENTITY_PROVIDER_CLIENT_ID = "mock-idp-client"
 
 
 class ConfigurationError(Exception):
@@ -178,6 +209,22 @@ def _is_on_this_machine(host: str | None) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def _is_a_deployment(environment: object) -> bool:
+    """Whether this process is running anywhere other than a development stack.
+
+    An exact comparison against the one development name, so `staging`,
+    `production`, `development-blue` and `pre-development` are all deployments.
+    A substring test would read as the same rule and would hand the mock to every
+    environment named after development.
+
+    A value that is not a string is not treated as a deployment, and that cannot
+    let a mock address through: `environment` is required, so a `Settings` whose
+    `ENVIRONMENT` never validated is already being refused for that variable and
+    the process stops either way.
+    """
+    return isinstance(environment, str) and environment != DEVELOPMENT_ENVIRONMENT
 
 
 def _configuration_error(problems: Iterable[str]) -> ConfigurationError:
@@ -333,37 +380,90 @@ class Settings(BaseSettings):
     # `/openapi.json` (ADR 0074).
     environment: str = Field(description="Deployment name, reported by /healthz. Free-form.")
 
+    # --- the web door's identity provider (E0-18, ADR 0077) -------------------
+    #
+    # Five values, none of them a credential — the client is public and PKCE is
+    # what binds a code to it (RFC 7636) — and all five required. ADR 0075
+    # defaulted them to this repository's own development stack, and the
+    # epic-boundary threat model measured what that meant: `docker-compose.yml`
+    # starts `mock-idp` in every deployment, so an operator who deployed per
+    # §7.2 and set none of these had a signing oracle for fake CARE and ADMIN
+    # identities, which this application then verified correctly and trusted.
+    # ADR 0077 reverses that half of ADR 0075; `PUBLIC_BASE_URL` and
+    # `LTI_PLATFORM_AUTHORIZATION_ENDPOINT` keep their defaults for the reasons
+    # at their own block below.
+    #
+    # The development values did not disappear, they moved: `docker-compose.yml`
+    # gives all three `Settings`-building services `${OIDC_ISSUER:-...}` and the
+    # four beside it, and `.env.example` documents them. So `docker compose up`
+    # from a clean checkout still reaches a system a person can log in to (SPEC
+    # §14.3), and a deployment's own `.env` still wins.
+    #
+    # **Two horizons, decided per value rather than per service.** A browser on
+    # the host reaches these services on published ports at `localhost`; the
+    # application's container reaches them by Compose service name. A value a
+    # browser is redirected to is `localhost`; a value this tool fetches
+    # server-side is the service name. Getting this backwards produces a stack
+    # that passes every in-process test and sends a real browser to a name it
+    # cannot resolve.
+    #
+    # **These five are declared after `environment` deliberately.** The two
+    # validators at the foot of this class read `ENVIRONMENT` out of the fields
+    # pydantic has already validated, and pydantic validates in declaration
+    # order — so a `Settings` that declared `environment` below them would
+    # accept a mock address everywhere.
+    oidc_issuer: str = Field(
+        description=(
+            "The `iss` a web login's `id_token` must state (OIDC Core 1.0 §3.1.3.7). Not "
+            "browser-facing: it is compared against a claim, never redirected to."
+        )
+    )
+    oidc_authorization_endpoint: str = Field(
+        description="Browser-facing OIDC authorization endpoint of the identity provider."
+    )
+    oidc_token_endpoint: str = Field(
+        description="Server-facing OIDC token endpoint, where this tool redeems a code."
+    )
+    oidc_jwks_url: str = Field(
+        description="Server-facing key set a web login's `id_token` is verified against."
+    )
+    oidc_client_id: str = Field(
+        description=(
+            "This tool's registered client at the identity provider. The client is public: "
+            "it holds no secret, and PKCE is what binds a code to it (RFC 7636)."
+        )
+    )
+
     # --- defaulted: optional, each for its own reason -------------------------
     #
     # The reason is on the field. It is not the same reason twice, and no
     # heading here summarizes it — see the module docstring for why not.
 
-    # --- the two entry doors' addresses (E0-18) -------------------------------
+    # --- the launch door's addresses (E0-18) ----------------------------------
     #
-    # Seven values, and every one of them is an address. They are defaulted, and
-    # the reason is the third of the three this module keeps apart: **the spec
-    # never spoke to them.** §6.3's configuration surface names no LTI or OIDC
-    # endpoint, §7.3 leaves the platform's addresses to the registration, and
-    # E0-23 decided that `lti_platform` gains service-address columns in E1,
+    # Two values, both of them addresses a browser is sent to. They are
+    # defaulted, and the reason is the third of the three this module keeps
+    # apart: **the spec never spoke to them.** §6.3's configuration surface names
+    # no LTI endpoint, §7.3 leaves the platform's addresses to the registration,
+    # and E0-23 decided that `lti_platform` gains service-address columns in E1,
     # with the code that reads them. So the values below are E0's stand-in and
     # the ADR says so (docs/adr/0075).
     #
     # **Each default is this repository's own development stack**, spelled the
-    # way `docker-compose.override.yml` publishes it. That is deliberate and it
-    # is not the "working literal default" the module docstring refuses: none of
-    # these addresses can resolve in a deployment, so a deployment that forgets
-    # one gets a launch that fails at its first hop rather than a system that is
+    # way `docker-compose.override.yml` publishes it — a browser-facing horizon
+    # in both cases, per the note at the identity provider above. That is
+    # deliberate and it is not the "working literal default" the module docstring
+    # refuses: neither address can resolve in a deployment, and neither names
+    # anything the base Compose file starts, so a deployment that forgets one
+    # gets a launch that fails at its first hop rather than a system that is
     # quietly wrong. What a required field would buy instead is a startup
     # refusal, and what it would cost is that `docker compose up` from a clean
     # checkout — E0's own exit criterion (§14.3) — stops working without an
     # `.env` nobody has written yet.
     #
-    # **Two horizons, decided per value rather than per service.** A browser on
-    # the host reaches these services on published ports at `localhost`; the API
-    # container reaches them by Compose service name. A value a browser is
-    # redirected to is `localhost`; a value the tool fetches server-side is the
-    # service name. Getting this backwards produces a stack that passes every
-    # in-process test and sends a real browser to a name it cannot resolve.
+    # **The five `oidc_*` settings used to be in this block and are not any
+    # more** (ADR 0077). The argument above did not hold for them: `mock-idp` is
+    # a service every deployment starts, so their default *did* resolve.
     public_base_url: str = Field(
         default="http://localhost:8000",
         description=(
@@ -379,33 +479,6 @@ class Settings(BaseSettings):
             "field because `lti_platform` has no column for it until E1 (E0-23)."
         ),
     )
-    oidc_issuer: str = Field(
-        default="http://mock-idp:8000",
-        description=(
-            "The `iss` a web login's `id_token` must state (OIDC Core 1.0 §3.1.3.7). Not "
-            "browser-facing: it is compared against a claim, never redirected to."
-        ),
-    )
-    oidc_authorization_endpoint: str = Field(
-        default="http://localhost:8081/oidc/authorize",
-        description="Browser-facing OIDC authorization endpoint of the identity provider.",
-    )
-    oidc_token_endpoint: str = Field(
-        default="http://mock-idp:8000/oidc/token",
-        description="Server-facing OIDC token endpoint, where this tool redeems a code.",
-    )
-    oidc_jwks_url: str = Field(
-        default="http://mock-idp:8000/.well-known/jwks.json",
-        description="Server-facing key set a web login's `id_token` is verified against.",
-    )
-    oidc_client_id: str = Field(
-        default="mock-idp-client",
-        description=(
-            "This tool's registered client at the identity provider. The client is public: "
-            "it holds no secret, and PKCE is what binds a code to it (RFC 7636)."
-        ),
-    )
-
     # The spec never spoke to this one. §6.3 enumerates the configuration
     # surface and no log level is in it; no other section mentions one. INFO is
     # this project's choice, defaulted because a log level is not
@@ -569,4 +642,87 @@ class Settings(BaseSettings):
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise ValueError("not an IANA timezone name, such as America/New_York") from exc
+        return value
+
+    @field_validator(
+        "oidc_issuer",
+        "oidc_authorization_endpoint",
+        "oidc_token_endpoint",
+        "oidc_jwks_url",
+    )
+    @classmethod
+    def no_provider_url_addresses_the_mock_outside_development(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        """Refuse an identity provider URL that addresses the mock, in a deployment.
+
+        The layer that makes the required fields above worth requiring. Making
+        them required stops the deployment that configures *nothing*; this stops
+        the one that configures the mock — by copying the development stack's
+        values forward, which is the ordinary way a wrong value gets into a
+        deployment's `.env`.
+
+        All four URLs, because they fail differently and a rule covering some of
+        them would read as covering the door. `oidc_jwks_url` and
+        `oidc_token_endpoint` are fetched, so a mock there mints the session;
+        `oidc_issuer` is never fetched at all — it is compared against the `iss`
+        claim as a string (OIDC Core 1.0 §3.1.3.7) — so a mock there is what
+        makes the mock's tokens acceptable; and `oidc_authorization_endpoint` is
+        where a real browser is sent, so a mock there is the login page a person
+        is asked to trust.
+
+        **The host component, compared exactly.** `urlsplit(...).hostname` is the
+        parsed host, so the port, the scheme and the path are not part of the
+        question — a container reaching `mock-idp` on any port reaches the mock —
+        and it is lower-cased on the way out, which is what makes `MOCK-IDP` the
+        same host as `mock-idp` (RFC 4343). A substring search for the service
+        name would read as the same rule and would refuse
+        `https://mock-idp.example.edu/oidc/token`, an ordinary institutional
+        address that resolves nowhere near this stack.
+
+        No value is quoted, as in every validator here: this message reaches the
+        startup log. The field's name and description reach the operator through
+        `_describe_invalid_settings`, which is what says *which* of the five is
+        wrong without echoing what it holds.
+        """
+        if not _is_a_deployment(info.data.get("environment")):
+            return value
+        if urlsplit(value).hostname == MOCK_IDENTITY_PROVIDER_HOST:
+            raise ValueError(
+                "addresses the mock identity provider this repository ships for development — "
+                f"the Compose service {MOCK_IDENTITY_PROVIDER_HOST}, which signs an id_token for "
+                "any identity it is asked for, including CARE and ADMIN. Name the deployment's "
+                f"own provider, or run with ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
+            )
+        return value
+
+    @field_validator("oidc_client_id")
+    @classmethod
+    def the_client_registration_is_not_the_mocks_outside_development(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        """Refuse the mock's registered client id, in a deployment.
+
+        The same rule on the setting that is not a URL, and its own validator
+        because it is its own code path: this compares a whole value, the one
+        above reads a parsed host. A rule phrased over "every `oidc_*` URL whose
+        host is the mock" covers four of the five settings and reads as covering
+        the surface, and the one it misses is the one that says *which
+        registration* this tool is.
+
+        Compared whole, not searched for. `mock-idp-client-2` at a real provider
+        is a real client id, and an institution that named its own registration
+        after the tool it replaced is not this rule's business.
+
+        No value is quoted, for the reason the validator above gives.
+        """
+        if _is_a_deployment(info.data.get("environment")) and value == (
+            MOCK_IDENTITY_PROVIDER_CLIENT_ID
+        ):
+            raise ValueError(
+                "names the client the mock identity provider this repository ships for "
+                "development is registered with, so this deployment is configured to be the "
+                "mock's client. Register this tool at the deployment's own provider and name "
+                f"that registration, or run with ENVIRONMENT={DEVELOPMENT_ENVIRONMENT}"
+            )
         return value
