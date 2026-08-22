@@ -314,9 +314,10 @@ EXPENSIVE_COMMANDS: dict[str, re.Pattern[str]] = {
     ),
 }
 
-# The six jobs E0-38's scope names, each with the work the ticket says must not
-# run on a documentation-only diff. The pattern is a floor rather than an
-# inventory: a job may guard more steps than these, and it may not guard fewer.
+# The six jobs E0-38's scope names plus the one E0-40 adds, each with the work
+# the ticket says must not run on a documentation-only diff. The pattern is a
+# floor rather than an inventory: a job may guard more steps than these, and it
+# may not guard fewer.
 #
 # Every pattern here is one of the vocabulary above rather than a copy of it, so
 # that the derivation and the coverage check cannot come to disagree about what
@@ -358,6 +359,22 @@ EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
         "the frontend production build and the bundle budget",
         EXPENSIVE_COMMANDS["an npm install or production build"],
     ),
+    # The seventh, moved here from `GATES_THAT_NEED_NO_SHORT_CIRCUIT` by E0-40
+    # decision 6. E0-38 exempted it because its work never ran: with
+    # `detect.outputs.frontend` false, the `npm ci`, the `tsc` and the `eslint`
+    # steps all switched themselves off and the exemption cost nothing. PR #61
+    # committed a `package.json` at the repository root, so E0-40's `node` probe
+    # answers true and this job becomes a dependency install plus two checkers on
+    # every pull request. A documentation-only diff changes no TypeScript and no
+    # manifest, so it is precisely the diff those checkers have nothing to read.
+    #
+    # The exemption is the entry that costs coverage when it is wrong — a job in
+    # that set is a job no guard test iterates — so moving it here is the
+    # direction that adds a control rather than removing one.
+    "lint-frontend": (
+        "the Node dependency install, tsc and eslint",
+        EXPENSIVE_COMMANDS["an npm install or production build"],
+    ),
 }
 
 # Jobs that run one of the expensive commands and are deliberately *not* guarded
@@ -376,11 +393,6 @@ GATES_THAT_NEED_NO_SHORT_CIRCUIT: dict[str, str] = {
         "E0-38 leaves it unconditional on purpose, and the pytest node ids it runs are the "
         "repository-wide sweeps a documentation-only diff must not switch off — guarding this "
         "job would undo the fix it carries"
-    ),
-    "lint-frontend": (
-        "its `npm ci` installs the closure that tsc and eslint read, and E0-38 leaves the fast "
-        "lint gates running whatever the diff touched; it is free today because "
-        "`detect.outputs.frontend` is false"
     ),
 }
 
@@ -1113,11 +1125,14 @@ def test_nothing_the_test_suite_opens_by_path_is_classified_inert() -> None:
 def test_every_expensive_gate_reaches_the_classification_and_conditions_its_work_on_it(
     ci_workflow_path: Path, ci_workflow: dict[str, Any]
 ) -> None:
-    """E0-38's scope: the six expensive gates short-circuit, and nothing else changes shape.
+    """Every expensive gate short-circuits, and nothing else changes shape.
+
+    E0-38's scope, plus the seventh gate E0-40 decision 6 adds to it.
 
     Each of `Test · pytest + invariants`, `Build · images + Compose health`,
     `Test · Playwright e2e`, `Test · AI eval floors`,
-    `Supply chain · audit + licenses` and `Build · frontend + bundle budget` has
+    `Supply chain · audit + licenses`, `Build · frontend + bundle budget` and —
+    since E0-40 decision 6 — `Fast · tsc + eslint` has
     to reach the classification — its own
     step, or a job it needs — and has to switch its real work off on the answer. A
     job that gained no such step is the failure this ticket would otherwise ship:
@@ -1149,12 +1164,13 @@ def test_every_expensive_gate_reaches_the_classification_and_conditions_its_work
     filter in place must still fail, and a documentation-only pull request must
     still report success. This module is what notices a gate with no guard at all.
 
-    **The mutation this survives:** drop the short-circuit from any one of the six
-    jobs — the `evals` job is the expensive one to lose, since SPEC §9.3's threat
-    and self-harm recall floor stops running with `CI` green. **The near miss that
-    must stay green:** moving the classification into `detect` and having each gate
-    read `needs.detect.outputs.<name>`, which is one classification rather than
-    six and is the shape this file's tolerances already use.
+    **The mutation this survives:** drop the short-circuit from any one of the
+    inventoried jobs — the `evals` job is the expensive one to lose, since SPEC
+    §9.3's threat and self-harm recall floor stops running with `CI` green. **The
+    near miss that must stay green:** moving the classification into `detect` and
+    having each gate read `needs.detect.outputs.<name>`, which is one
+    classification rather than one per gate and is the shape this file's
+    tolerances already use.
     """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
 
@@ -1470,10 +1486,17 @@ def test_the_fast_gates_run_whatever_the_diff_touched(
     exactly the run in which the job that would have caught it must not be skipped
     by the classification.
 
+    **`Fast · tsc + eslint` is not a fourth.** It was never in this set; it was
+    exempted in `GATES_THAT_NEED_NO_SHORT_CIRCUIT`, on the grounds that its work
+    never ran while `detect.outputs.frontend` was false. E0-40 decision 6 moves it
+    into `EXPENSIVE_GATES` instead, where the coverage test above requires the very
+    guard this test forbids for the three below — which is why no job may sit in
+    both sets, and why the exemption set is the one validated hardest.
+
     **The mutation this survives:** add the same short-circuit step to
     `lint-python` on the grounds that Markdown cannot fail ruff. **The near miss
-    that must stay green:** anything at all happening in the six expensive jobs,
-    since this looks only at these three.
+    that must stay green:** anything at all happening in the inventoried expensive
+    jobs, since this looks only at these three.
     """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
 
