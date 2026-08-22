@@ -1,9 +1,9 @@
 """The one chokepoint every entry point passes through to read anything (SPEC §13).
 
-`CLAUDE.md` and SPEC §13 put it here: "`api/` routers stay thin and all real
-behavior lives in `services/`", with this module the single place an actor is
-turned into a scope and a scope is turned into a read. HTTP requests, Celery jobs
-and E9's MCP server all come through here or they do not read data.
+SPEC §13 puts it here: "`api/` routers stay thin and all real behavior lives in
+`services/`", with this module the single place an actor is turned into a scope
+and a scope is turned into a read. HTTP requests, Celery jobs and E9's MCP server
+all come through here or they do not read data.
 
 **SPEC §2.1 defines purview as a union, and this module builds only half of it.**
 "Purview(assignment) = own grant union the purviews of all assignments
