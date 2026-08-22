@@ -1,17 +1,32 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 50**
+**Caught: 51**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*29 instances recorded; the 3 below are the most recent, newest first. The
-earlier 26 are in this file's git history and in the pull requests they cite.*
+*30 instances recorded; the 3 below are the most recent, newest first. The
+earlier 27 are in this file's git history and in the pull requests they cite.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
 were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
+
+*(Writing E0-40's tests (Batch I, 2026-08-22, found while building that ticket —
+it has not merged), and this one is the entry working rather than the entry
+catching: the prescriptions were applied deliberately, before anything was green.
+The ticket's subject is gates that probe for a path nothing writes, so the tests
+are searches over workflow and `Makefile` text — the exact instrument this entry
+warns reads as coverage. Each search carries a canary: **a pattern must be shown
+to match something before its non-match means anything**, and two of them exist
+only to say so. The counts are asserted non-zero rather than merely equal, so a
+search that has gone blind cannot agree with an expectation of nothing. And the
+equality that matters — what a collector reports against what a scan of the tree
+finds — carries a planted-divergence control, a tree deliberately made to disagree,
+which is what turns "the two agree" from a sentence into a measurement. That
+control is the part worth copying: an equality assertion between two derivations
+of the same fact is worthless until somebody proves it can fail.)*
 
 *(Writing E0-28's tests, and it is the shape where **the walk cannot fail the
 assertion it is walking for.** Item 5 asks that a paged container carry `next`
@@ -45,22 +60,6 @@ markup it must let past, because a parser blind to the attribute makes "the righ
 option is selected" and "nothing is selected" both pass. And the login-form
 pre-select carries its near miss — an unknown or absent `login_hint` must select
 **nothing** — so the feature cannot pass by always selecting the first option.)*
-
-*(E0-18 PR 1's third round, and it is the shape where **a refusal is the right
-answer for a reason the test did not name.** The new rule is that each door reads
-one roles vocabulary, and the obvious test smuggles `https://pulse.example/claims/
-roles: ["CARE"]` into a launch with an empty LIS roles claim and requires a 4xx.
-Written with that claim name transcribed from the ticket, it goes green against a
-door that reads the web vocabulary happily — because a claim name nobody reads is
-a launch carrying no role at all, which is refused anyway. So the claim name and
-the three role spellings are read off the provider's own published registration
-document (ADR 0058), and each is asserted to be a role that document really
-publishes before it is smuggled anywhere. The same round has the other face too:
-these launches carry claims no mock will mint, so they are re-signed by a key set
-of the suite's own with the registration pointed at it — and every refusal in that
-set would be satisfied by a door that simply could not verify the new signature,
-so both doors carry a control that re-signs the claims **unchanged** and requires
-the landing page to appear.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables
