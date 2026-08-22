@@ -192,9 +192,10 @@ def delivered_values(
         where the real credential lives, and the documented placeholder is the
         best evidence available here of what arrives.
       - an `environment:` entry with an **empty value delivers nothing** for
-        that name. That is what the blanking lines in `x-application-environment`
-        are, and treating them as a delivery would report every application
-        service as holding the superuser pair.
+        that name, spelled exactly as the entry spells it. That is what the
+        blanking lines in `x-application-environment` are, and treating them as
+        a delivery would report every application service as holding the
+        superuser pair.
 
     Which file a name is delivered in is kept in the key rather than merged
     away, for the reason the rest of this suite reads the two files separately:
@@ -206,9 +207,29 @@ def delivered_values(
     nothing, which is how the control below asks what `db` receives; a reader
     that cannot find the credential arriving *there* cannot tell an absence from
     a blindness anywhere else.
+
+    **Names are case-sensitive here, and that is a repair rather than a
+    preference.** This function upper-cased every name it saw until E0-19's
+    security review, on the reasonable-looking ground that `.env.example` writes
+    them all in capitals. Environment variables are not case-insensitive and
+    Compose does not fold them: measured, a lower-case `alembic_database_url: ''`
+    withdrew the upper-case `ALEMBIC_DATABASE_URL` from this accounting while the
+    container went on receiving it from `env_file:` — a blanking line that blanks
+    nothing, reading here as a withheld credential. A blank now withdraws exactly
+    the spelling it is written in, and an `environment:` entry is its own
+    delivery under its own exact name: two variables differing only in case are
+    two variables, in the container and here.
+
+    The second map below is the one concession to case and it is not about
+    delivery. `interpolated_variables` upper-cases the names it returns, by its
+    own contract in `conftest.py`, so resolving a `${...}` reference has to look
+    up a folded key. Delivery is accounted in the exact spelling; references are
+    resolved through the folded copy. Keeping the two apart is what stops the
+    folding leaking back into the accounting.
     """
     compose = compose_stack_module()
-    values = {name.upper(): text or "" for name, text in resolved.items()}
+    values = {name: text or "" for name, text in resolved.items()}
+    referenced = {name.upper(): text for name, text in values.items()}
     delivered: dict[tuple[str, str, str], str] = {}
 
     for path, document in documents:
@@ -220,20 +241,19 @@ def delivered_values(
                 for name, text in values.items():
                     delivered[(path.name, service, name)] = text
 
-            for spelled, declared in compose.service_environment(body).items():
-                name = spelled.upper()
+            for name, declared in compose.service_environment(body).items():
                 if declared is not None and not declared.strip():
                     delivered.pop((path.name, service, name), None)
                     continue
 
                 literal = "" if declared is None else declared
-                read = compose.transitively_read(literal, walker, values)
+                read = compose.transitively_read(literal, walker, referenced)
                 if declared is None:
                     # Passed through from the host environment: the name itself
                     # is what arrives, and the documented value stands in for it.
-                    read = read | {name}
+                    read = read | {name.upper()}
                 delivered[(path.name, service, name)] = "\n".join(
-                    [literal, *(values.get(other, "") for other in sorted(read))]
+                    [literal, *(referenced.get(other, "") for other in sorted(read))]
                 )
 
     return delivered
@@ -553,7 +573,10 @@ def test_no_documented_value_carries_the_superuser_credential_to_an_application_
             "genuinely gone, that is an amendment to ADR 0009 and a deliberate edit here."
         )
 
-    resolved = {name.upper(): text or "" for name, text in resolved_env_example.items()}
+    # Names as `.env.example` spells them. Nothing folds case on the way in:
+    # `delivered_values` accounts deliveries in the exact spelling, and folding
+    # here would put back the defect that function's docstring records.
+    resolved = {name: text or "" for name, text in resolved_env_example.items()}
     problems = credential_deliveries(
         documents,
         resolved,
@@ -610,7 +633,10 @@ def test_the_delivery_reader_finds_the_superuser_credential_reaching_the_databas
     )
 
     compose = compose_stack_module()
-    resolved = {name.upper(): text or "" for name, text in resolved_env_example.items()}
+    # Names as `.env.example` spells them. Nothing folds case on the way in:
+    # `delivered_values` accounts deliveries in the exact spelling, and folding
+    # here would put back the defect that function's docstring records.
+    resolved = {name: text or "" for name, text in resolved_env_example.items()}
     credentials = superuser_credentials(resolved_env_example)
     for label, value in credentials:
         assert value, f".env.example does not resolve {label} to anything."
@@ -667,7 +693,10 @@ def test_the_delivery_reader_sees_what_the_env_file_hands_the_api_service(
         "has nothing to read."
     )
 
-    resolved = {name.upper(): text or "" for name, text in resolved_env_example.items()}
+    # Names as `.env.example` spells them. Nothing folds case on the way in:
+    # `delivered_values` accounts deliveries in the exact spelling, and folding
+    # here would put back the defect that function's docstring records.
+    resolved = {name: text or "" for name, text in resolved_env_example.items()}
     delivered = delivered_values(
         ((base_compose_path, base_compose),),
         resolved,
@@ -724,7 +753,10 @@ def test_a_blanked_variable_is_not_delivered_to_the_service_that_blanks_it(
         "that name and its absence below would mean nothing at all."
     )
 
-    resolved = {name.upper(): text or "" for name, text in resolved_env_example.items()}
+    # Names as `.env.example` spells them. Nothing folds case on the way in:
+    # `delivered_values` accounts deliveries in the exact spelling, and folding
+    # here would put back the defect that function's docstring records.
+    resolved = {name: text or "" for name, text in resolved_env_example.items()}
     delivered = delivered_values(
         ((base_compose_path, base_compose),),
         resolved,
@@ -777,50 +809,13 @@ def test_a_documented_value_carrying_the_credential_is_caught_when_a_service_inh
     ), f"The report does not name the variable that carries the credential: {problems!r}."
 
 
-def test_a_documented_value_carrying_the_credential_is_not_reported_when_it_is_blanked(
-    interpolated_variables_in: Callable[[Any], set[str]],
-) -> None:
-    """The near miss: the same file, the same service, one blanking line.
-
-    The other direction of the pair above, and it is what stops the rule being
-    "any documented value carrying the credential fails". `.env` legitimately
-    holds the superuser pair — `db` needs it — so a rule that ignored the
-    blanking would fail the stack as it stands and the fix would be to weaken
-    it. A blanked variable is not delivered, and this is the assertion that says
-    so out of the same function the rule uses.
-    """
-    documents = (
-        (
-            SAMPLE_COMPOSE_PATH,
-            {
-                "services": {
-                    "worker": {
-                        "env_file": [".env"],
-                        "environment": {"ALEMBIC_DATABASE_URL": ""},
-                    }
-                }
-            },
-        ),
-    )
-    resolved = {
-        "ALEMBIC_DATABASE_URL": "postgresql+psycopg://pulse_admin:replace-me-admin@db:5432/pulse"
-    }
-
-    problems = credential_deliveries(
-        documents, resolved, interpolated_variables_in, SAMPLE_CREDENTIALS, exempt="db"
-    )
-
-    assert not problems, "\n".join(
-        [
-            "A variable the service blanks was reported as delivered:",
-            *problems,
-            "",
-            "`environment:` beats `env_file:` and an empty value is what removes what the file "
-            "set. Counting a blank as a delivery makes this rule fail on the stack doing "
-            "exactly what ADR 0009 asks of it, and the repair somebody reaches for is to "
-            "weaken the rule.",
-        ]
-    )
+# The near miss for the test above — the same document with the variable blanked,
+# which must stay green — is
+# `test_an_exact_case_blank_withdraws_the_delivery` at the end of this module. It
+# was a test of its own here until E0-19's security review found the
+# case-sensitivity defect, which needed the same document under two spellings;
+# keeping both would have been the identical assertion written twice, and the
+# pair reads better where the spelling that defeats it is beside it.
 
 
 def test_a_literal_credential_written_into_a_compose_environment_entry_is_caught(
@@ -864,4 +859,104 @@ def test_a_literal_credential_written_into_a_compose_environment_entry_is_caught
         "literal was not reported. Nothing in that line interpolates anything, so every "
         "reference-following rule in this repository passes it, and the container holds a "
         "working superuser connection."
+    )
+
+
+# The blanking line and the delivery it is meant to withdraw, spelled two ways.
+# `.env.example` writes every name in capitals, and a Compose `environment:`
+# block may write anything at all — Compose folds neither, and neither does the
+# container.
+BLANKED_VARIABLE = "ALEMBIC_DATABASE_URL"
+CREDENTIAL_BEARING_VALUE = "postgresql+psycopg://pulse_admin:replace-me-admin@db:5432/pulse"
+
+
+def env_file_service_blanking(spelling: str) -> tuple[tuple[Path, dict[str, Any]], ...]:
+    """A one-service document: the whole of `.env`, with `spelling` blanked."""
+    return (
+        (
+            SAMPLE_COMPOSE_PATH,
+            {
+                "services": {
+                    "worker": {
+                        "env_file": [".env"],
+                        "environment": {spelling: ""},
+                    }
+                }
+            },
+        ),
+    )
+
+
+def test_a_lower_case_blank_does_not_withdraw_the_upper_case_delivery(
+    interpolated_variables_in: Callable[[Any], set[str]],
+) -> None:
+    """E0-19's security review: environment variable names are case-sensitive.
+
+    Measured against the guard rather than read out of it. `env_file: - .env`
+    delivers `ALEMBIC_DATABASE_URL`; a blanking line spelled
+    `alembic_database_url: ''` beside it withdraws nothing — the container
+    receives both, the upper-case one with the credential in it — and this rule
+    reported the service clean, because the accounting folded the two names
+    together and let the lower-case blank cancel the upper-case delivery.
+
+    That is worse than a missed route. It is a line that *looks* like the fix
+    ADR 0009 asks for, and reads as one in review, while delivering the
+    credential; the blanking lines in `x-application-environment` are exactly
+    this shape, so a reader that folds case cannot tell one of them from a
+    typo that undoes it.
+
+    The mutation this kills is the fold itself — `name = spelled.upper()` in
+    `delivered_values`, which is what the code said before this round. The pair
+    to it is the test below: an exact-case blank must still withdraw, or the
+    repair would be "stop treating blanks as withdrawals", which fails the real
+    stack on the anchor doing its job.
+    """
+    documents = env_file_service_blanking(BLANKED_VARIABLE.lower())
+    resolved = {BLANKED_VARIABLE: CREDENTIAL_BEARING_VALUE}
+
+    problems = credential_deliveries(
+        documents, resolved, interpolated_variables_in, SAMPLE_CREDENTIALS, exempt="db"
+    )
+
+    assert problems, (
+        f"`{BLANKED_VARIABLE.lower()}: ''` was read as withdrawing {BLANKED_VARIABLE}. They are "
+        "two different variables: Compose passes both to the container, `env_file:` supplies "
+        "the upper-case one with the credential in it, and the blank cancels a delivery nobody "
+        "made. A blanking line that blanks nothing must not read as a withheld credential."
+    )
+    assert any(
+        BLANKED_VARIABLE in problem for problem in problems
+    ), f"The report does not name the variable that was delivered: {problems!r}."
+
+
+def test_an_exact_case_blank_withdraws_the_delivery(
+    interpolated_variables_in: Callable[[Any], set[str]],
+) -> None:
+    """The pair: a blank spelled the way the file spells it does withdraw. A control.
+
+    **A red here means these tests are broken, not the Compose files.** The test
+    above says a blank in the wrong case withdraws nothing; without this half,
+    the cheapest way to satisfy it is to stop treating any blank as a
+    withdrawal — which fails the real stack, where
+    `x-application-environment` blanks four variables on three services and
+    every one of those lines is doing exactly what ADR 0009 asks.
+
+    Same document, same delivery, one spelling different.
+    """
+    documents = env_file_service_blanking(BLANKED_VARIABLE)
+    resolved = {BLANKED_VARIABLE: CREDENTIAL_BEARING_VALUE}
+
+    problems = credential_deliveries(
+        documents, resolved, interpolated_variables_in, SAMPLE_CREDENTIALS, exempt="db"
+    )
+
+    assert not problems, "\n".join(
+        [
+            "A variable blanked under its own exact name was still reported as delivered:",
+            *problems,
+            "",
+            "`environment:` beats `env_file:` and an empty value is what removes what the file "
+            "set. If this has stopped being true, the blanking lines in the real stack are all "
+            "reported as deliveries and the rule fails on the stack doing the right thing.",
+        ]
     )

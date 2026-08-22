@@ -91,11 +91,26 @@ than into one of their own:
     stayed green, because a health gate can only ever exercise the direction
     where the answer is yes. A check nobody has seen say no is a check nobody
     has seen.
-  - Neither takes privilege the `api` service does not, which is the E0-03
+  - Neither takes privilege the API image does not, which is the E0-03
     security-review item. Nothing dynamic looks at it: a `privileged: true` or a
     `user: root` on the worker makes the stack come up exactly as before, and
     the containers concerned are the ones that will run E0-13's gateway over
     untrusted comment text.
+
+    **This was written as a comparison against `api` and is not one any more.**
+    E0-19's security review defeated the relative form in one line: the
+    override's `x-development-source` anchor is merged into all three
+    application services, so `privileged: true` written there grants all three
+    at once and a rule that asks "does `worker` have more than `api`" sees
+    nothing. Measured, with the whole suite green: `privileged: true`,
+    `pid: host`, `network_mode: host`, `userns_mode: host`, `devices`, and
+    `cap_add: SYS_ADMIN`, every one of them invisible to the comparison. The
+    rule is absolute now — no service carries a privilege key at all, unless an
+    entry in `ALLOWED_PRIVILEGE_GRANTS` says which file, which service and which
+    key. The argument the relative form rested on is recorded with the new rule
+    rather than deleted, because it is a good argument that turned out to have a
+    hole in it, and the next person to want the comparison back should read why
+    it went.
   - Both run the API image rather than an image of their own, which the ticket
     asks for and which no gate can see: a second build of the same Dockerfile
     passes every check and then drifts.
@@ -168,6 +183,17 @@ strategy changed, on Todd's ruling, and the shape below is the result:
     interpolating it, and `extends: {service: db}` makes the one exemption
     transitive. Each is now a red that says "extend this module first" rather
     than a spelling that slips past.
+  - **The set of *service* keys is closed too**, which is the same move one
+    level in, and E0-19's security review is what bought it. The top-level set
+    bounds which sections may appear and says nothing about what a service body
+    may carry, so `volumes_from: - db` on `worker` passed every rule in this
+    module while granting that container every mount `db` has — the whole
+    Postgres data directory, measured with the suite green. Enumerating the
+    routes would have been the fourth round of the mistake above, so the answer
+    is `ALLOWED_SERVICE_KEYS`: what the two files use today, and a red for
+    anything else. `volumes_from`, `cgroup`, `uts`, `runtime` and `develop` were
+    all measured going past the guards silently, and the point of a closed set
+    is that the sixth one nobody has thought of does not.
   - **The set of Compose files is closed too**, which is the same move one level
     out. Everything above reads two hand-picked files; Docker reads whichever of
     eight recognised names it finds, preferring `compose.yaml` over
@@ -265,6 +291,43 @@ CARE_VARIABLE_OWNERS = {
 # that adds it, and whoever adds it says here why the rules above still hold
 # over it — which is the cost this list exists to impose.
 ALLOWED_TOP_LEVEL_KEYS = ("name", "services", "volumes")
+
+# The keys a *service body* may declare — the same closed set one level in, and
+# E0-19's security review is what bought it.
+#
+# The list above bounds which sections may appear and says nothing about what an
+# allowed section may carry, so every rule in this module that reads a service
+# reads the parts of it somebody thought of. `volumes_from: - db` on `worker` is
+# the measurement: it grants that container every mount `db` has, which is the
+# entire Postgres data directory, and it passed the whole suite green — the
+# mount rules read `volumes:` and there is nothing named there to read.
+# `cgroup`, `uts`, `runtime` and `develop` were measured going past just as
+# quietly. Adding four denials would have been the fourth round of the mistake
+# recorded in this module's docstring, so the answer is the strategy that
+# already works here: enumerate what the two files use, refuse the rest.
+#
+# **Enumerated from the two files as the parser sees them**, which is after
+# PyYAML has resolved the `<<:` merges — `api` carries `build`, `env_file` and
+# `environment` from `x-application` and they are service keys by the time any
+# rule here looks. A list written from the visible lines of the file would be
+# three keys short and would fail the base file on its own anchor.
+#
+# `ports` is on this list because the override declares it; the base file must
+# not, and that is a different rule with its own test rather than an absence
+# here. No service uses an `x-` extension field, so none is admitted — unlike
+# the top level, where the anchors live.
+ALLOWED_SERVICE_KEYS = (
+    "build",
+    "command",
+    "depends_on",
+    "env_file",
+    "environment",
+    "expose",
+    "healthcheck",
+    "image",
+    "ports",
+    "volumes",
+)
 
 # Compose gives `x-…` no meaning of its own, so an extension field is inert
 # until something merges it — and it is walked like every other value, so its
@@ -388,12 +451,33 @@ PRIVILEGE_KEYS = (
     "network_mode",
 )
 
+# Which service, in which file, may declare which of those keys — and why.
+#
+# **Empty, and that is the rule rather than a starting point.** No service in
+# either Compose file declares any of the keys above: the API image fixes a
+# non-root user, and nothing in this stack needs a capability, a namespace or a
+# device from the host.
+#
+# The structure exists because the alternative to an exception structure is an
+# exception, and an exception written into a rule is one nobody has to justify.
+# An entry here names the file, the service and the key, carries the reason as
+# its value, and is checked by a test that refuses one for a key the named
+# service does not actually declare — so a permission cannot outlive the grant
+# it was written for. It is the same shape as `ALLOWED_BIND_MOUNTS`, for the
+# same reason and with the same cost.
+ALLOWED_PRIVILEGE_GRANTS: dict[tuple[str, str, str], str] = {}
+
 # Host paths whose contents are, in practice, the host. **This list is the
 # test's choice**, not the ticket's: the ticket says "no extra privilege beyond
 # the API image", and a bind mount is the everyday way one arrives. The docker
 # socket is root on the host; /proc and /sys are the kernel; /etc holds the
-# shadow file. A worker that mounts one of these while `api` does not has more
-# than `api` has, whatever its `user:` says.
+# shadow file. A service that mounts one of these has the host, whatever its
+# `user:` says.
+#
+# This comment used to end "…while `api` does not", because the rule that read
+# it was a comparison. It is not one now: E0-19's security review defeated the
+# relative form through the shared anchor, and the mount rules are absolute over
+# both files. Mounting the socket into `api` too is not a way to pass.
 SENSITIVE_BIND_SOURCES = frozenset(
     {"/", "/dev", "/etc", "/proc", "/run/docker.sock", "/sys", "/var/run/docker.sock"}
 )
@@ -462,7 +546,24 @@ ALLOWED_BIND_MOUNTS: dict[tuple[str, str], frozenset[str]] = {
 # another host. Neither is modelled, because neither is used here, and a shape
 # this module cannot classify has to fail loudly instead of resolving to "not a
 # bind" — that is exactly how a mount slips past a closed set.
-READABLE_VOLUME_KEYS = ("driver", "driver_opts", "name", "labels")
+#
+# `name` and `driver` were on this list until E0-19's security review, admitted
+# as inert metadata and read as neither a bind nor a refusal. Both are the
+# `external: true` argument word for word. A `name:` attaches the volume to a
+# **pre-created** Docker volume under exactly that name, with no project prefix
+# applied, and `docker volume create --opt device=/ --opt o=bind --opt type=none`
+# is one command: the volume this file describes as ordinary is then the host
+# root, and nothing in the file says so. A `driver:` hands the mount to a plugin
+# that decides what it is. Both are now refused where `external:` is refused,
+# for the reason all three share — the thing being mounted is defined somewhere
+# this file cannot see.
+READABLE_VOLUME_KEYS = ("driver_opts", "labels")
+
+# The three keys that say "defined elsewhere", refused with their own message,
+# because "this module has not been taught to read it" is the wrong sentence for
+# them: it is not that the shape is unfamiliar, it is that the answer is not in
+# this file at all and no amount of teaching puts it there.
+VOLUME_KEYS_NAMING_SOMETHING_ELSE = ("external", "name", "driver")
 
 # What makes a `driver_opts` a bind. `type: none` with a `device:` is the local
 # driver's spelling for "mount this host path"; the flags in `o:` are the mount
@@ -1753,12 +1854,14 @@ def privilege_declarations(service: dict[str, Any]) -> dict[str, Any]:
     return declared
 
 
-def dropped_capabilities(service: dict[str, Any]) -> frozenset[str]:
-    """`cap_drop`, which runs the other way: more here is less privilege."""
-    declared = service.get("cap_drop") or []
-    if isinstance(declared, list):
-        return frozenset(str(item).upper() for item in declared)
-    return frozenset()
+# `dropped_capabilities` used to live here, reading `cap_drop` for the rule that
+# compared `worker` and `beat` against `api`: a service dropping fewer
+# capabilities than `api` holds more. It went with that comparison in E0-19 —
+# see `test_no_service_is_granted_a_privilege_its_image_does_not_carry` for why
+# the relative form went, and note that `cap_drop` has no meaning under an
+# absolute rule, because there is no baseline to drop fewer than. `cap_drop` is
+# not a privilege key and is not refused: dropping capabilities is the safe
+# direction, and a service that wants to drop more may.
 
 
 def normalised_bind_source(source: str, project_directory: Path | str) -> str:
@@ -1868,6 +1971,14 @@ def named_volume_source(
     file cannot see, and an `nfs` device is a path on another machine. Both are
     features this repository does not use, and the ticket's own rule is that a
     feature stays refused rather than modelled.
+
+    `name:` and `driver:` join `external:` in that refusal, and E0-19's security
+    review is why. They were admitted here as metadata and returned "not a bind,
+    not a refusal", which is the worst of the three answers: a `name:` attaches
+    the volume to a pre-created Docker volume under that exact name with no
+    project prefix, and one `docker volume create --opt device=/ --opt o=bind`
+    beforehand makes the innocuous-looking entry a mount of the host root. See
+    `VOLUME_KEYS_NAMING_SOMETHING_ELSE`.
     """
     volumes = top_level_volumes(document)
     if name not in volumes:
@@ -1881,6 +1992,14 @@ def named_volume_source(
         return None, None
     if not isinstance(body, dict):
         return None, f"declares the volume `{name}` as {body!r}, which this module cannot read"
+
+    elsewhere = sorted(str(key) for key in body if str(key) in VOLUME_KEYS_NAMING_SOMETHING_ELSE)
+    if elsewhere:
+        return None, (
+            f"declares the volume `{name}` with {elsewhere}, which says the volume is defined "
+            "somewhere this file cannot see — a pre-created Docker volume under that exact "
+            "name, or a plugin that decides what it is — so what it mounts cannot be read here"
+        )
 
     unknown = sorted(str(key) for key in body if str(key) not in READABLE_VOLUME_KEYS)
     if unknown:
@@ -1993,22 +2112,15 @@ def bind_mounts_of(
     return BindMounts(sources=frozenset(sources), unreadable=tuple(unreadable))
 
 
-def bind_sources(
-    service: dict[str, Any],
-    document: dict[str, Any],
-    project_directory: Path | str,
-) -> set[str]:
-    """The resolved, normalised host paths this service reaches.
-
-    The signature gained two parameters in E0-19 and that is deliberate rather
-    than incidental: a named volume cannot be resolved without the document that
-    declares it, and a relative source cannot be normalised without the project
-    directory. Every rule that consumes bind sources consumes this — the
-    allowlist, the sensitive check, and the privilege comparison against `api` —
-    so none of them can be left reading the unresolved set while the others
-    move.
-    """
-    return set(bind_mounts_of(service, document, project_directory).sources)
+# `bind_sources` used to sit here — the E0-03 reader, kept through E0-19 as a
+# one-line wrapper over `bind_mounts_of` so that the privilege comparison could
+# go on calling it by its old name. That comparison went absolute in E0-19's fix
+# round and stopped reading mounts at all, which left this with no caller. It is
+# gone rather than kept: a helper nothing calls is a helper nothing notices
+# breaking, and its docstring had already begun claiming a set of consumers that
+# was one rule out of date. Everything reads `bind_mounts_of` through
+# `declared_bind_mounts` now, which is the single reader the ticket's "or a
+# sibling it feeds" asks for.
 
 
 def declared_bind_mounts(path: Path, document: dict[str, Any]) -> dict[str, BindMounts]:
@@ -2091,6 +2203,117 @@ def unreadable_volume_declarations(path: Path, document: dict[str, Any]) -> list
         for name, mounts in sorted(declared_bind_mounts(path, document).items())
         for note in mounts.unreadable
     ]
+
+
+def service_keys_of(document: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    """What each service in this file declares, keyed by service name.
+
+    The keys as the parser hands them over, which is **after** PyYAML has
+    resolved the `<<:` merges: `api` declares `build`, `env_file` and
+    `environment` here although none of the three is written in its block, and
+    that is the form every rule in this module reads. A reader built from the
+    lines visible in the file would be blind to exactly the anchor that has
+    twice been the route a credential took.
+    """
+    return {
+        name: tuple(sorted(str(key) for key in body))
+        for name, body in services_of(document).items()
+    }
+
+
+def unreadable_service_keys(path: Path, document: dict[str, Any]) -> list[str]:
+    """Service keys in this file that are not in `ALLOWED_SERVICE_KEYS`, one per line.
+
+    The closed set one level in from `ALLOWED_TOP_LEVEL_KEYS`, and it exists
+    because that one bounds the *sections* a file may declare and says nothing
+    about what a service body may carry. `volumes_from: - db` is the
+    measurement: every mount `db` has, granted to `worker`, with the whole suite
+    green because the mount rules read `volumes:` and there is nothing to read.
+    """
+    problems: list[str] = []
+    for name, keys in sorted(service_keys_of(document).items()):
+        for key in keys:
+            if key not in ALLOWED_SERVICE_KEYS:
+                problems.append(f"{path.name}: `{name}` declares `{key}:`")
+    return problems
+
+
+def privilege_grants(path: Path, document: dict[str, Any]) -> list[str]:
+    """Privilege keys declared in this file that no exception excuses, one per line.
+
+    Absolute rather than relative, and `ALLOWED_PRIVILEGE_GRANTS` carries the
+    exceptions. The reason the comparison against `api` went is recorded on the
+    test below and in this module's docstring: the shared anchor grants all
+    three application services at once, so the relative form compares a service
+    with itself.
+
+    `privilege_declarations` still does the normalising, so `privileged: false`
+    and an empty `cap_add` are not grants — a key that hands over nothing is not
+    a key to argue about.
+    """
+    problems: list[str] = []
+    for name, body in sorted(services_of(document).items()):
+        for key, value in sorted(privilege_declarations(body).items()):
+            if (path.name, name, key) in ALLOWED_PRIVILEGE_GRANTS:
+                continue
+            problems.append(f"{path.name}: `{name}` declares `{key}: {value!r}`")
+    return problems
+
+
+def service_strings(node: Any) -> list[str]:
+    """Every string anywhere inside a parsed service body, keys included.
+
+    Recursive because the value being looked for does not care how deeply it is
+    nested: `healthcheck.test` is a list, `build.args` is a mapping inside a
+    mapping, and `labels` can be either. Keys are walked as well as values,
+    because a mapping key is a string somebody can write a credential into and
+    reading only values would be the same enumeration mistake one layer down.
+    """
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [
+            text
+            for key, value in node.items()
+            for text in [*service_strings(key), *service_strings(value)]
+        ]
+    if isinstance(node, list):
+        return [text for item in node for text in service_strings(item)]
+    return []
+
+
+def credential_literals(
+    path: Path,
+    document: dict[str, Any],
+    credentials: tuple[tuple[str, str], ...],
+) -> list[str]:
+    """Services in this file with a credential written into a string, one per line.
+
+    The rules above this one follow `${...}` references, so they see
+    `${DB_SUPERUSER}` wherever it is written and see nothing at all when the
+    value is typed out instead. E0-19's security review measured that: the
+    superuser URL spelled out in `worker`'s `command:`, suite green.
+    `command:`, `entrypoint:`, `healthcheck.test`, `labels:` and `build.args`
+    are all strings that reach a container, and none of them is an
+    `environment:` entry.
+
+    **Every service, `db` included.** The exemption `db` holds is from *reading*
+    the credential — it takes it by interpolation, which is how a deployment's
+    real `.env` reaches Postgres. A literal is a different thing: it is the
+    placeholder from `.env.example` committed into a Compose file, which is a
+    credential in the repository whatever service it is on.
+
+    A `${...}` reference is a name rather than a value and stays green here,
+    which is why this searches for the resolved value and never for the
+    variable's name.
+    """
+    problems: list[str] = []
+    for name, body in sorted(services_of(document).items()):
+        for text in service_strings(body):
+            for label, secret in credentials:
+                if secret and secret in text:
+                    problems.append(f"{path.name}: `{name}` writes {label} into {text!r}")
+    return problems
 
 
 @pytest.mark.parametrize("service_name", JOB_SERVICES)
@@ -2451,119 +2674,145 @@ def test_the_beat_health_check_reads_the_schedule_file(
     )
 
 
-def privilege_problems(
-    path: Path,
-    document: dict[str, Any],
-    service_name: str,
-    reference_name: str,
-) -> list[str]:
-    """How `service_name` is granted more than `reference_name` is, one line each.
-
-    Factored out of the test below so that a document written in a test can go
-    through the same path a real Compose file does. `docs/MISTAKES.md` entry 35's
-    corollary is the reason it is this function and not a smaller one: a control
-    that exercises a sub-step demonstrates the sub-step, and the mount half of
-    this rule is exactly where a resolution step could be skipped.
-
-    The bind comparison reads resolved sources (E0-19), so a socket handed to
-    `worker` as a named volume with a bind `driver_opts` is compared against
-    what `api` holds under the same resolution rather than passing as a volume
-    name `api` happens not to name.
-    """
-    services = services_of(document)
-    reference = services.get(reference_name) or {}
-    service = services.get(service_name) or {}
-
-    reference_grants = privilege_declarations(reference)
-    job_grants = privilege_declarations(service)
-
-    problems: list[str] = []
-    for key, value in sorted(job_grants.items()):
-        allowed = reference_grants.get(key)
-        if isinstance(value, frozenset) and isinstance(allowed, frozenset):
-            extra = sorted(value - allowed)
-            if extra:
-                problems.append(f"`{key}` adds {extra}, which `{reference_name}` does not have")
-        elif value != allowed:
-            problems.append(f"`{key}` is {value!r}; `{reference_name}` declares {allowed!r}")
-
-    missing_drops = dropped_capabilities(reference) - dropped_capabilities(service)
-    if missing_drops:
-        problems.append(
-            f"`cap_drop` keeps {sorted(missing_drops)}, which `{reference_name}` drops — dropping "
-            "fewer capabilities is holding more"
-        )
-
-    reachable = (
-        bind_sources(service, document, path.parent)
-        - bind_sources(reference, document, path.parent)
-    ) & {normalised_bind_source(entry, path.parent) for entry in SENSITIVE_BIND_SOURCES}
-    if reachable:
-        problems.append(
-            f"bind-mounts {sorted(reachable)} from the host, which `{reference_name}` does not"
-        )
-
-    return problems
-
-
-@pytest.mark.parametrize("service_name", JOB_SERVICES)
-def test_job_service_takes_no_privilege_the_api_service_does_not(
-    service_name: str,
+def test_no_service_is_granted_a_privilege_its_image_does_not_carry(
     base_compose_path: Path,
     base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
 ) -> None:
-    """E0-03's security review: "no extra privilege beyond the API image".
+    """E0-03's security review, restated absolutely after E0-19's defeated the old form.
 
     Sharing the image settles what is *inside* the container. It settles nothing
     about what Compose grants around it, and that is where privilege is actually
     handed out: `privileged: true`, a `user: root` that overrides the image's
     non-root user, an added capability, a relaxed seccomp profile, the host PID
-    namespace, or the docker socket mounted in. Each of those makes the stack
-    come up exactly as it did before, so criterion 1, the health gate and the
-    round-trip test all stay green — this is `docs/MISTAKES.md` entry 2, where
-    the guard is the thing with nothing asserting it.
+    namespace. Each of those makes the stack come up exactly as it did before,
+    so criterion 1, the health gate and the round-trip test all stay green —
+    `docs/MISTAKES.md` entry 2, where the guard is the thing with nothing
+    asserting it.
 
-    It is a real risk rather than a theoretical one on these two services
-    specifically. The worker is where the beat schedule file gets written and
-    where a permissions problem is met, and `user: root` is the first thing that
-    makes such a problem go away. It is also the container that will run E0-13's
-    AI gateway over untrusted comment text.
+    **This was a comparison against `api` until E0-19, and the reason it is not
+    one now is a measurement rather than a preference.** The argument for the
+    relative form was good: a privilege the whole stack legitimately gains later
+    should not have to be granted twice, and a rule phrased as "no more than
+    `api`" cannot be satisfied by granting it to `api` quietly, since `api` is
+    the service E0-02 checks the uid of on the running container. What it missed
+    is that "granting it to `api` quietly" is *one line*. The override's
+    `x-development-source` anchor is merged into `api`, `worker` and `beat`, so
+    a privilege written there is held by all three and the comparison is between
+    a service and itself. E0-19's security review ran it: `privileged: true`,
+    `pid: host`, `network_mode: host`, `userns_mode: host`, a `devices` entry
+    and `cap_add: [SYS_ADMIN]`, each added to that anchor, each granting all
+    three application services the host, and every one of them green against the
+    whole suite. The same anchor was the route reviewer pass 2 used to put the
+    superuser password into three containers, which is the second time one line
+    in a shared anchor has defeated a rule phrased per service.
 
-    Asserted as a comparison against `api` rather than as a fixed list of
-    forbidden keys, so that a privilege the whole stack legitimately gains later
-    does not have to be granted twice in two places — and so that the rule
-    cannot be satisfied by granting it to `api` quietly, since `api` is the
-    service E0-02 already checks the uid of on the running container.
+    So the rule is absolute: **no service declares a privilege key at all**,
+    unless `ALLOWED_PRIVILEGE_GRANTS` names the file, the service and the key
+    and says why. That structure is empty today, and the exception it would hold
+    has to be argued in a diff rather than inherited from an anchor.
+
+    Both files, because the anchor that defeated the old rule lives in the
+    override and a grant in either file is a grant some container holds.
+
+    Two things the old comparison did that this does not, said plainly rather
+    than dropped in silence. It compared `cap_drop` — a service dropping fewer
+    capabilities than `api` holds more — which is a comparison between two
+    services that both drop nothing today, and under an absolute rule there is
+    no baseline to drop fewer than. And it compared bind mounts, which moved to
+    `test_no_service_bind_mounts_a_sensitive_host_path` and
+    `test_no_service_bind_mounts_a_host_path_outside_the_allowlist`: both are
+    absolute, both read the resolved sources, and both are strictly stronger
+    than "more than `api` has".
     """
-    assert base_compose, (
-        f"{base_compose_path} does not exist or declares nothing. E0-02 ships the base "
-        "Compose file at the repository root (SPEC §13)."
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. A file that did not parse declares no "
+            "services, and a rule about what services declare reports it clean."
+        )
+    assert PRIVILEGE_KEYS, (
+        "PRIVILEGE_KEYS is empty, so this rule forbids nothing and passes over any file at "
+        "all. The list is the test's choice and is meant to grow."
     )
 
-    services = services_of(base_compose)
-    api = services.get(API_SERVICE)
-    assert api is not None, (
-        f"docker-compose.yml declares no `{API_SERVICE}` service, so there is nothing to "
-        "compare privilege against and this test would compare two empty sets."
-    )
-    service = services.get(service_name)
-    assert service is not None, (
-        f"docker-compose.yml declares no `{service_name}` service. E0-03 adds `worker` and "
-        "`beat` (SPEC §7.2)."
-    )
-
-    problems = privilege_problems(base_compose_path, base_compose, service_name, API_SERVICE)
+    problems = [
+        problem for path, document in documents for problem in privilege_grants(path, document)
+    ]
 
     assert not problems, "\n".join(
         [
-            f"`{service_name}` is granted more than `{API_SERVICE}` is:",
+            "A service is granted privilege beyond what its image carries:",
             *problems,
             "",
-            "E0-03's security review is that the job services carry no extra privilege "
-            "beyond the API image. Nothing dynamic checks this: the stack comes up healthy "
-            "either way. If the grant is genuinely needed, say why in the pull request and "
-            "change this test deliberately — do not add it to `api` to make the comparison "
-            "pass, because that widens the blast radius rather than narrowing it.",
+            "Nothing dynamic checks this: the stack comes up healthy either way, and a grant "
+            "written on the shared `x-development-source` anchor reaches `api`, `worker` and "
+            "`beat` at once — which is how the comparison this rule replaced was defeated. "
+            "`worker` is the container that will run E0-13's gateway over untrusted comment "
+            "text. If the grant is genuinely needed, add an entry to ALLOWED_PRIVILEGE_GRANTS "
+            "naming the file, the service and the key, with the reason as its value, and say "
+            "in the pull request what the container can now reach.",
+        ]
+    )
+
+
+def test_the_privilege_exceptions_excuse_only_grants_that_exist(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """An exception outlives the grant it was written for unless something says otherwise.
+
+    The pair to the rule above, and the same shape as
+    `test_the_allowlist_permits_no_mount_the_compose_files_do_not_declare`: a
+    permission left behind by a removed grant is inherited by whatever is
+    written under that name next, and nobody re-reads it.
+
+    **Vacuous today, deliberately and visibly.** `ALLOWED_PRIVILEGE_GRANTS` is
+    empty, so this iterates nothing; its value arrives with the first entry, and
+    it is here now so that the first entry cannot be added without it. That is
+    the opposite of the usual reason to distrust an empty assertion — the rule
+    above is the one that would go quiet on an empty subject, and it asserts
+    `PRIVILEGE_KEYS` is non-empty for exactly that reason.
+    """
+    documents = {
+        base_compose_path.name: base_compose,
+        override_compose_path.name: override_compose,
+    }
+
+    problems: list[str] = []
+    for (file_name, service_name, key), reason in sorted(ALLOWED_PRIVILEGE_GRANTS.items()):
+        if not str(reason).strip():
+            problems.append(f"({file_name}, {service_name}, {key}) carries no reason")
+        if file_name not in documents:
+            problems.append(
+                f"({file_name}, {service_name}, {key}) names a Compose file this suite does "
+                "not read"
+            )
+            continue
+        body = services_of(documents[file_name]).get(service_name)
+        if body is None:
+            problems.append(f"{file_name} declares no `{service_name}` service")
+            continue
+        if key not in privilege_declarations(body):
+            problems.append(
+                f"{file_name}: `{service_name}` does not declare `{key}:`, so the exception "
+                "excuses nothing and is a standing permission"
+            )
+
+    assert not problems, "\n".join(
+        [
+            "ALLOWED_PRIVILEGE_GRANTS excuses a grant that is not there:",
+            *problems,
+            "",
+            "An exception is written for a grant, in the change that adds the grant, and comes "
+            "out in the change that removes it. One that outlives its grant is a permission "
+            "waiting for the next service to be given that name.",
         ]
     )
 
@@ -2599,6 +2848,17 @@ def test_job_service_takes_no_privilege_the_api_service_does_not(
 SAMPLE_PROJECT_DIRECTORY = Path("/srv/pulse")
 SAMPLE_BASE_PATH = SAMPLE_PROJECT_DIRECTORY / "docker-compose.yml"
 SAMPLE_OVERRIDE_PATH = SAMPLE_PROJECT_DIRECTORY / "docker-compose.override.yml"
+
+# The two credential values as literals, for the sample documents below only.
+# The rule over the real files reads them out of `.env.example` — that is the
+# file CI copies to `.env`, so the placeholder there is the string that must not
+# appear in a Compose file. A sample doing the same would assert against
+# whatever the placeholder happens to be and would go quiet the day somebody
+# changed it, which is the opposite of what a sample is for.
+SAMPLE_SUPERUSER_LITERALS = (
+    ("the superuser role name", "pulse_admin"),
+    ("the superuser password", "replace-me-admin"),
+)
 
 
 def sample_document(
@@ -2660,8 +2920,11 @@ BIND_CURRENCY_SAMPLES = (
         currency="named volume, driver_opts type none",
         entry="host-state:/state",
         volumes={
+            # No `driver: local` beside it, although that is how the shape is
+            # usually written: E0-19's security review moved `driver:` into the
+            # refused set, so a sample carrying one would be refused before it
+            # reached the classifier this sample exists to exercise.
             "host-state": {
-                "driver": "local",
                 "driver_opts": {"type": "none", "device": "/var/lib/pulse", "o": "rw"},
             }
         },
@@ -3308,12 +3571,7 @@ def test_a_named_volume_carrying_a_bind_device_fails_the_allowlist() -> None:
     document = sample_document(
         "worker",
         ["host-root:/host"],
-        top_level={
-            "host-root": {
-                "driver": "local",
-                "driver_opts": {"type": "none", "device": "/", "o": "bind"},
-            }
-        },
+        top_level={"host-root": {"driver_opts": {"type": "none", "device": "/", "o": "bind"}}},
     )
 
     problems = unallowlisted_bind_mounts(SAMPLE_BASE_PATH, document)
@@ -3334,11 +3592,12 @@ def test_a_named_volume_carrying_a_bind_device_fails_the_allowlist() -> None:
 def test_a_named_volume_carrying_a_bind_device_fails_the_sensitive_check() -> None:
     """The same declaration, against the check that names the socket. E0-19 criterion 2.
 
-    "Fails the same tests that catch it as a direct bind" is three tests, and
-    this is the second of them. The mutation is the same one — a named volume
-    resolved by the allowlist rule and not by the sensitive one, which is what
-    happens if the resolution is done inside the allowlist's own function
-    instead of in the reader both share.
+    "Fails the same tests that catch it as a direct bind" is two tests — this
+    one and the allowlist above it — and the note below this test says why it is
+    not three any more. The mutation is the same one: a named volume resolved by
+    the allowlist rule and not by the sensitive one, which is what happens if the
+    resolution is done inside the allowlist's own function instead of in the
+    reader both share.
     """
     document = sample_document(
         "worker",
@@ -3357,35 +3616,15 @@ def test_a_named_volume_carrying_a_bind_device_fails_the_sensitive_check() -> No
     )
 
 
-def test_a_named_volume_carrying_a_bind_device_fails_the_privilege_comparison() -> None:
-    """The third of the three, and the one the E0-03 rule owns. E0-19 criterion 2.
-
-    `test_job_service_takes_no_privilege_the_api_service_does_not` compares what
-    `worker` reaches against what `api` reaches. Both readings have to be the
-    resolved ones or the comparison is between a resolved set and an unresolved
-    one: `worker` mounting `host-socket` while `api` mounts nothing is a
-    difference only a reader that resolves the volume can see.
-
-    The mutation this kills is leaving that rule reading the old
-    service-level-only reader while the allowlist gets the new one — the split
-    `docs/MISTAKES.md` entry 13 is about, where a hazard is closed in one of the
-    two places facing it.
-    """
-    document = sample_document(
-        "worker",
-        ["host-socket:/var/run/docker.sock"],
-        top_level={"host-socket": {"driver_opts": {"device": "/var/run/docker.sock", "o": "bind"}}},
-        extra_services={"api": {"image": "pulse/api"}},
-    )
-
-    problems = privilege_problems(SAMPLE_BASE_PATH, document, "worker", "api")
-
-    assert problems, (
-        "`worker` reaching the docker socket through a named volume was not reported as more "
-        "privilege than `api` holds. The socket is root on the host and `api` mounts nothing; "
-        "if this comparison still reads unresolved sources, it is comparing a volume name "
-        "against a set of paths."
-    )
+# A third test used to sit here: the same named volume put through the
+# privilege comparison, because "fails the same tests that catch it as a direct
+# bind" was three tests while that rule read bind mounts. E0-19's security
+# review made the privilege rule absolute over `PRIVILEGE_KEYS` alone (see
+# `test_no_service_is_granted_a_privilege_its_image_does_not_carry`), so the
+# tests that catch a direct bind are now the two above — the allowlist and the
+# sensitive check — and both catch this shape. The criterion is met by those
+# two; a third test asserting a rule that no longer reads mounts would have
+# asserted nothing and stayed green forever.
 
 
 def test_an_ordinary_named_volume_is_not_a_bind_source() -> None:
@@ -3665,4 +3904,625 @@ def test_the_currency_samples_cover_every_currency_in_the_inventory() -> None:
     assert len(covered) == len(set(covered)), (
         f"Two samples claim the same currency: {covered}. A duplicate makes the comparison "
         "above pass with a currency missing."
+    )
+
+
+# ---------------------------------------------------------------------------
+# What E0-19's own security review found, and what it moved.
+#
+# Five findings, every one of them established by running the attack against the
+# guards above rather than by reading them, and every one green against the full
+# suite when it was found. Three are the same shape as the four routes E0-19
+# started from — a spelling just outside a rule that was phrased over the
+# spellings somebody thought of — which is the shape this module's docstring
+# says the closed-set strategy exists to stop, arriving one level in from where
+# the strategy had been applied.
+#
+#   - A service key nothing read: `volumes_from: - db` grants `worker` every
+#     mount `db` has, which is the whole Postgres data directory.
+#   - A volume key read as inert: `name:` attaches the entry to a pre-created
+#     host volume, and one `docker volume create --opt device=/` makes it the
+#     host root.
+#   - A privilege comparison defeated by the anchor it was written beside.
+#   - A credential typed out as a literal in `command:`, which every
+#     reference-following rule in this module passes.
+#
+# The fourth of those reversed a decision recorded in this module rather than
+# extending it, and the reversal is written where the decision was.
+# ---------------------------------------------------------------------------
+
+
+def test_no_service_declares_a_key_this_module_cannot_read(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """The closed set of service keys, which is `ALLOWED_TOP_LEVEL_KEYS` one level in.
+
+    The top-level rule bounds which *sections* a Compose file may declare and
+    says nothing about what a service body may carry, so every rule in this
+    module reads the parts of a service somebody thought to read.
+    `volumes_from: - db` is the measurement E0-19's review made: it gives
+    `worker` every mount `db` has — `/var/lib/postgresql/data`, the whole
+    cluster on disk — and it passed the entire suite, because the mount rules
+    read `volumes:` and `volumes_from` is not a volume.
+
+    The mutation this must kill is that line, added to `worker` in
+    `docker-compose.yml`. Four more were measured going past just as quietly and
+    each is a case in the refusal test below: `cgroup: host`, `uts: host`,
+    `runtime`, and `develop`. Enumerating them would have been a fourth round of
+    the mistake this module's docstring records; what closes the set is refusing
+    the sixth one nobody has thought of.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing. A file that did not parse declares no "
+            "services, and a rule about the keys a service declares reports it clean."
+        )
+
+    problems = [
+        problem
+        for path, document in documents
+        for problem in unreadable_service_keys(path, document)
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A service declares a key this module has not been taught to read:",
+            *problems,
+            "",
+            f"Allowed today: {sorted(ALLOWED_SERVICE_KEYS)}. This is not a style rule. Every "
+            "rule in this module reads a service body through a key it knows the name of, so a "
+            "key outside this set is configuration nothing here inspects — `volumes_from:` "
+            "grants every mount another service has, `cgroup:` and `uts:` and `runtime:` each "
+            "change what the container is isolated by. Teach this module the key in the same "
+            "change that adds it, say here why the rules above still hold over it, and then "
+            "add it to the list.",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("volumes_from", ["db"]),
+        ("cgroup", "host"),
+        ("uts", "host"),
+        ("runtime", "sysbox-runc"),
+        ("develop", {"watch": [{"action": "sync", "path": ".", "target": "/app"}]}),
+    ],
+)
+def test_a_service_key_outside_the_closed_set_is_refused(key: str, value: Any) -> None:
+    """Each of the five the reviewer ran past the guards, refused by name.
+
+    `volumes_from: - db` is the sharp one and the rest are the argument for a
+    closed set rather than five denials: `cgroup: host` puts the container in
+    the host's cgroup namespace, `uts: host` gives it the host's hostname
+    namespace, `runtime:` replaces the runtime that enforces any of it, and
+    `develop.watch` syncs a host directory into the container by a route that
+    is not `volumes:` at all. Not one of them is read by any rule in this
+    module, and every one of them passed the whole suite.
+
+    The mutation this kills is the removal of any single refusal — which,
+    because the rule is a closed set rather than a list of denials, is the
+    removal of the rule itself. The near miss is the key that *is* allowed:
+    `volumes:` on the same service is read, resolved and checked, and the test
+    above passes the real files that use it.
+    """
+    document = {"services": {"worker": {key: value}}}
+
+    problems = unreadable_service_keys(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        f"`{key}:` on `worker` was not refused. Nothing in this module reads it, so whatever it "
+        "grants is granted invisibly — which is the whole reason the set of service keys is "
+        "closed rather than enumerated."
+    )
+    assert all(key in problem and "worker" in problem for problem in problems), (
+        f"The refusal does not name the key and the service: {problems!r}. A reader who cannot "
+        "see which line to look at cannot tell a deliberate addition from a paste."
+    )
+
+
+def test_the_service_key_reader_finds_the_keys_the_compose_files_declare(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+) -> None:
+    """A control: the reader sees service keys, anchor-merged ones included.
+
+    **A red here means these tests are broken, not the Compose files.** The rule
+    above reports absence, and a reader that finds no keys at all reports the
+    same absence. `docs/MISTAKES.md` entry 35: require it to find each thing on
+    a subject that certainly has it.
+
+    The anchor half is the one that matters. `api` writes `environment:` and
+    `depends_on:` in its own block and gets `build`, `env_file` and
+    `environment` from `x-application`; PyYAML resolves the merge before any
+    rule here looks, so those three are service keys by the time this reads
+    them. A reader built from the lines visible in the file would report a
+    smaller set and the refusal rule would be blind to anything added to the
+    anchor — which is precisely where two earlier findings put their payload.
+    """
+    assert base_compose, f"{base_compose_path} does not exist or declares nothing."
+
+    keys = service_keys_of(base_compose)
+    assert keys, "The reader found no services at all in the base Compose file."
+
+    empty = sorted(name for name, declared in keys.items() if not declared)
+    assert not empty, (
+        f"The reader says {empty} declare no keys at all. Every service in this file declares "
+        "at least an image or a build, so a service with an empty key set is a reader that "
+        "cannot see a service body rather than a service that is empty."
+    )
+
+    merged = {"build", "env_file", "environment"}
+    assert merged <= set(keys.get(API_SERVICE, ())), (
+        f"The reader says `{API_SERVICE}` declares {sorted(keys.get(API_SERVICE, ()))}, which "
+        f"does not include all of {sorted(merged)}. Those three come from the `x-application` "
+        "anchor rather than from `api`'s own block, and a reader that misses them is reading "
+        "the file rather than the parsed document — which leaves everything the anchor carries "
+        "outside every rule in this module."
+    )
+
+    assert {"image", "volumes", "healthcheck"} <= set(keys.get(CREDENTIAL_OWNING_SERVICE, ())), (
+        f"The reader says `{CREDENTIAL_OWNING_SERVICE}` declares "
+        f"{sorted(keys.get(CREDENTIAL_OWNING_SERVICE, ()))}. It runs a pinned image, mounts two "
+        "volumes and declares a health check, so a reader that sees fewer than three kinds of "
+        "key here is not reading service bodies."
+    )
+
+
+def test_the_closed_service_key_set_holds_no_key_the_compose_files_do_not_use(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+) -> None:
+    """The other direction: the set enumerates what exists, not what would be fine.
+
+    The same rule as `ALLOWED_BIND_MOUNTS` holding no unused entry, and it is
+    what keeps a closed set closed. An entry admitted for a key nothing declares
+    is a key nobody has had to think about — which is exactly the sentence the
+    `networks` entry earned when it was taken off `ALLOWED_TOP_LEVEL_KEYS`.
+
+    The mutation this kills is an entry added on the way past: `volumes_from` or
+    `privileged` written into `ALLOWED_SERVICE_KEYS` to make a red go away.
+    """
+    for path, document in (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    ):
+        assert document, (
+            f"{path} does not exist or declares nothing, so every entry would look unused and "
+            "this test would report the constant as speculative when a file is what went."
+        )
+
+    declared = {
+        key
+        for document in (base_compose, override_compose)
+        for keys in service_keys_of(document).values()
+        for key in keys
+    }
+    unused = sorted(key for key in ALLOWED_SERVICE_KEYS if key not in declared)
+
+    assert not unused, "\n".join(
+        [
+            f"ALLOWED_SERVICE_KEYS admits keys no service declares: {unused}.",
+            "",
+            "A closed set that admits a feature the repository does not use is not closed; it "
+            "is a smaller open one. The entry comes back in the change that first needs it, "
+            "with a sentence saying why the rules in this module still hold over it.",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("shape", "body"),
+    [
+        ("a pre-created volume named directly", {"name": "pre-created-host-root"}),
+        ("a driver this file does not describe", {"driver": "foo"}),
+        (
+            "a pre-created volume with driver_opts beside it",
+            {
+                "name": "pre-created-host-root",
+                "driver_opts": {"type": "none", "device": "/var/lib/probe"},
+            },
+        ),
+    ],
+)
+def test_a_named_volume_defined_outside_this_file_is_refused(
+    shape: str, body: dict[str, Any]
+) -> None:
+    """`name:` and `driver:` are `external:` under other spellings. E0-19's review.
+
+    Both were on `READABLE_VOLUME_KEYS` and both resolved to "not a bind, not a
+    refusal", which is the worst of the three answers a closed set can give.
+    A `name:` attaches the volume to a **pre-created** Docker volume under
+    exactly that name — no project prefix, so it is not namespaced to this stack
+    — and
+
+        docker volume create --opt type=none --opt device=/ --opt o=bind pre-created-host-root
+
+    run once beforehand makes the innocuous-looking entry a mount of the host
+    root, with nothing in the Compose file saying so. A `driver:` hands the
+    decision to a plugin. The reason `external: true` is refused is true of both
+    word for word: the thing being mounted is defined somewhere this file cannot
+    see, and no amount of reading this file will say what it is.
+
+    The mutation this kills is re-admitting either key to
+    `READABLE_VOLUME_KEYS`. The third case is the near miss: a `name:` beside a
+    `driver_opts` that *is* readable must still be refused, because the `name:`
+    is what decides which volume is attached and the `driver_opts` is then only
+    what would be used if it had to be created.
+    """
+    document = sample_document("worker", ["host-root:/host"], top_level={"host-root": body})
+
+    refusals = unreadable_volume_declarations(SAMPLE_BASE_PATH, document)
+
+    assert refusals, (
+        f"{shape} was not refused. What that volume mounts is decided outside this file, so "
+        "reading it as an ordinary Docker volume is reading an assumption rather than the "
+        "configuration."
+    )
+    assert all(
+        "host-root" in refusal for refusal in refusals
+    ), f"A refusal for {shape} does not name the volume: {refusals!r}."
+
+
+def test_a_privilege_granted_through_the_shared_anchor_is_refused() -> None:
+    """The measurement that reversed the relative rule, written as a test.
+
+    One line on `x-development-source` in the override reaches `api`, `worker`
+    and `beat`, because all three merge it — so the parsed document has
+    `privileged: true` on all three, which is the shape below. The rule this
+    replaced asked whether `worker` held more than `api` and the answer was no:
+    they held the same thing, and the thing was the host.
+
+    Every service is named in the failure, not just the two job services, and
+    that is the reversal in one assertion: under the old rule `api` was the
+    baseline and could not fail at all.
+
+    The mutation this kills is a return to the comparison — any rule phrased as
+    a difference between two services passes this document.
+    """
+    granted = {"privileged": True}
+    document = {
+        "services": {
+            "api": dict(granted),
+            "worker": dict(granted),
+            "beat": dict(granted),
+        }
+    }
+
+    problems = privilege_grants(SAMPLE_OVERRIDE_PATH, document)
+
+    named = {name for name in ("api", "worker", "beat") if any(name in p for p in problems)}
+    assert named == {"api", "worker", "beat"}, (
+        f"A privilege written on the shared anchor was reported for {sorted(named)} rather than "
+        "for all three services that merge it. `api` is not a baseline: the anchor grants it "
+        "the same thing, which is how the comparison this rule replaced was defeated with the "
+        "whole suite green."
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("privileged", True),
+        ("pid", "host"),
+        ("network_mode", "host"),
+        ("userns_mode", "host"),
+        ("cap_add", ["SYS_ADMIN"]),
+        ("devices", ["/dev/kmsg:/dev/kmsg"]),
+        ("user", "root"),
+    ],
+)
+def test_each_privilege_key_is_refused_on_its_own(key: str, value: Any) -> None:
+    """Every key on the list, one at a time, so a deletion from it turns one test red.
+
+    Six of these seven were run past the guards in E0-19's review, one per run,
+    each granting the three application services something of the host and each
+    green against the whole suite. `user: root` is the seventh and is the oldest
+    of them: the API image fixes a non-root user and a service-level `user:`
+    overrides it, which E0-02 checks on the running container and nothing
+    checked in the file.
+
+    Parametrised one key per case rather than all seven in one document,
+    deliberately: a single document containing all of them stays red when six of
+    the seven stop being read, and the failure would name the rule rather than
+    the key.
+    """
+    document = {"services": {"worker": {key: value}}}
+
+    problems = privilege_grants(SAMPLE_BASE_PATH, document)
+
+    assert problems, (
+        f"`{key}: {value!r}` on `worker` was not reported as a grant. It is on PRIVILEGE_KEYS "
+        "because it hands the container something the image does not carry, and nothing "
+        "dynamic notices: the stack comes up healthy either way."
+    )
+    assert all(
+        key in problem for problem in problems
+    ), f"The report does not name the key: {problems!r}."
+
+
+def test_a_privilege_key_that_declares_nothing_is_not_a_grant() -> None:
+    """The other direction: `privileged: false` and an empty `cap_add` grant nothing.
+
+    A rule that reported every appearance of a key on the list would fail a file
+    that says `privileged: false` — which is a statement that the container is
+    *not* privileged — and the repair someone reaches for is to weaken the rule
+    rather than to read the value. `privilege_declarations` drops falsy values
+    for that reason, and this is the assertion that says so through the whole
+    path.
+    """
+    document = {
+        "services": {
+            "worker": {"privileged": False, "cap_add": [], "security_opt": None},
+        }
+    }
+
+    problems = privilege_grants(SAMPLE_BASE_PATH, document)
+
+    assert not problems, "\n".join(
+        [
+            "A privilege key that grants nothing was reported as a grant:",
+            *problems,
+            "",
+            "`privileged: false` is the absence of the privilege written down. Reporting it "
+            "makes the rule fail on a file being explicit, and the fix that follows is a "
+            "weaker rule.",
+        ]
+    )
+
+
+def superuser_literals(documented: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    """The two credential values, labelled, as `.env.example` writes them.
+
+    Taken from the file rather than written down here, because CI does
+    `cp .env.example .env` and starts the stack from it: the placeholder in that
+    file *is* the value in the pipeline, so it is the string that must not be
+    typed into a Compose file.
+    """
+    return tuple(
+        (f"the superuser {label} ({variable})", documented.get(variable, ""))
+        for variable, label in (
+            ("DB_SUPERUSER", "role name"),
+            ("DB_SUPERUSER_PASSWORD", "password"),
+        )
+    )
+
+
+def test_no_service_writes_the_superuser_credential_into_a_string(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    override_compose_path: Path,
+    override_compose: dict[str, Any],
+    documented_env: dict[str, str],
+) -> None:
+    """The credential typed out, anywhere in a service body. E0-19's security review.
+
+    Every credential rule above this one follows `${...}` references, so each of
+    them sees `${DB_SUPERUSER}` wherever it is written and none of them sees
+    anything at all when the value is typed out instead. The review measured it:
+    the superuser URL spelled into `worker`'s `command:`, suite green. There is
+    no `environment:` entry to read, no interpolation to resolve, and the
+    container gets a working superuser connection from its own command line.
+
+    The mutation this must kill is that line — a `command:` entry containing
+    `postgresql://pulse_admin:replace-me-admin@db:5432/pulse`. The same string
+    in `entrypoint:`, in `healthcheck.test`, in a label or in `build.args`
+    reaches a container too, and the walk is recursive rather than a list of
+    those five keys for the reason this module keeps relearning: a list of keys
+    is a list of the ones somebody thought of.
+
+    **Every service, `db` included.** `db`'s exemption is from *reading* the
+    credential by interpolation, which is how a deployment's real `.env` reaches
+    Postgres. A literal is the `.env.example` placeholder committed into a
+    Compose file, which is a credential in the repository wherever it sits.
+    """
+    documents = (
+        (base_compose_path, base_compose),
+        (override_compose_path, override_compose),
+    )
+    for path, document in documents:
+        assert document, (
+            f"{path} does not exist or declares nothing, so it declares no strings and a search "
+            "through them reports it clean."
+        )
+
+    credentials = superuser_literals(documented_env)
+    for label, value in credentials:
+        assert value, (
+            f".env.example does not document {label}, so this rule has nothing to search for "
+            "and would report every file clean."
+        )
+        assert "${" not in value, (
+            f"{label} is documented as {value!r}, which is itself an interpolation. This rule "
+            "compares against the value as written; if `.env.example` starts assembling the "
+            "superuser credential from other entries, it needs the resolved value instead — "
+            "which is what `test_env_example_resolves.py` reads."
+        )
+
+    problems = [
+        problem
+        for path, document in documents
+        for problem in credential_literals(path, document, credentials)
+    ]
+
+    assert not problems, "\n".join(
+        [
+            "A Compose file writes the superuser credential out as a literal (ADR 0009):",
+            *problems,
+            "",
+            "No `${...}` is involved, so every rule above this one passes it: they follow "
+            "references, and there is no reference here. The container holds the credential "
+            "the moment the string reaches it, and `db:5432` is reachable from every service "
+            "on this network over scram. Interpolate the variable instead — and if the value "
+            "genuinely belongs in the repository, it is not a credential and `.env.example` "
+            "should stop calling it one.",
+        ]
+    )
+
+
+def test_a_credential_literal_in_a_service_command_is_caught() -> None:
+    """The reviewer's measured case: the URL typed into `worker`'s `command:`.
+
+    Nothing in the line interpolates anything, so the transitive walkers see no
+    variable to follow and the `environment:` rules see no key to check. The
+    string reaches the container as an argument, which is a superuser connection
+    on the command line of the process that ships comment text to a third-party
+    model provider.
+
+    The mutation this kills is a rule that reads `environment:` only, which is
+    where every other credential rule in this module looks.
+    """
+    document = {
+        "services": {
+            "worker": {
+                "command": [
+                    "alembic",
+                    "-x",
+                    "url=postgresql+psycopg://pulse_admin:replace-me-admin@db:5432/pulse",
+                    "upgrade",
+                    "head",
+                ]
+            }
+        }
+    }
+
+    problems = credential_literals(SAMPLE_BASE_PATH, document, SAMPLE_SUPERUSER_LITERALS)
+
+    assert problems, (
+        "The superuser credential typed into `worker`'s command was not reported. It is not an "
+        "`environment:` entry and it interpolates nothing, so it is invisible to every other "
+        "credential rule in this module."
+    )
+    assert any(
+        "worker" in problem for problem in problems
+    ), f"The report does not name the service: {problems!r}."
+
+
+def test_a_credential_literal_inside_a_health_check_list_is_caught() -> None:
+    """The same string, four levels down, in the list `healthcheck.test` is.
+
+    `healthcheck:` is a mapping, `test:` is a list, and the credential is inside
+    one of its items — which is a shape no flat read of a service body reaches.
+    `db`'s real health check has exactly this structure, and the control below
+    proves the walk reaches into it on the real file rather than only on this
+    one.
+
+    The mutation this kills is a walk that descends into mappings and not into
+    lists, which passes every test written against an `environment:` block and
+    fails here.
+    """
+    document = {
+        "services": {
+            "worker": {
+                "healthcheck": {
+                    "test": [
+                        "CMD-SHELL",
+                        "psql postgresql://pulse_admin:replace-me-admin@db:5432/pulse -c 'select 1'",
+                    ],
+                    "interval": "30s",
+                }
+            }
+        }
+    }
+
+    problems = credential_literals(SAMPLE_BASE_PATH, document, SAMPLE_SUPERUSER_LITERALS)
+
+    assert problems, (
+        "A credential nested inside `healthcheck.test` was not reported. The walk has to "
+        "descend into lists as well as mappings: a health check command is a list, and so is "
+        "every `command:` in the base file."
+    )
+
+
+def test_a_reference_to_the_credential_variable_is_not_reported_as_a_literal() -> None:
+    """The other direction: `${DB_SUPERUSER}` is a name, and this rule reads values.
+
+    Without this half, the obvious repair — searching for the variable *names* —
+    would satisfy every assertion above while missing the literal that has no
+    name in it, and it would fail `db`, which reads both variables by
+    interpolation because that is how a deployment's real credential reaches
+    Postgres.
+
+    The reference route is not unguarded: it is
+    `test_nothing_outside_the_database_service_reads_the_superuser_credential`,
+    which follows `${...}` through `.env.example` transitively. The two rules
+    read different things on purpose, and neither is the other's near miss.
+    """
+    document = {
+        "services": {
+            "db": {
+                "environment": {
+                    "POSTGRES_USER": "${DB_SUPERUSER:?DB_SUPERUSER is not set}",
+                    "POSTGRES_PASSWORD": "${DB_SUPERUSER_PASSWORD:?not set}",
+                }
+            }
+        }
+    }
+
+    problems = credential_literals(SAMPLE_BASE_PATH, document, SAMPLE_SUPERUSER_LITERALS)
+
+    assert not problems, "\n".join(
+        [
+            "An interpolation was reported as a literal credential:",
+            *problems,
+            "",
+            "`${DB_SUPERUSER}` is the name of a variable, not its value. `db` reads it that way "
+            "in the real file, so a rule that flags it fails the stack doing exactly what "
+            "ADR 0009 asks — and the repair somebody reaches for is to exempt `db`, which is "
+            "how the literal route would then reopen on the one service nobody re-reads.",
+        ]
+    )
+
+
+def test_the_string_walk_reaches_the_strings_a_real_service_nests(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+) -> None:
+    """A control: the walk finds strings at every depth the real file uses.
+
+    **A red here means these tests are broken, not the Compose files.** The rule
+    above reports absence, and a walk that returns nothing reports the same
+    absence — one that never descends into a list would pass over `db`'s health
+    check and every `command:` in the file while reporting a clean stack.
+
+    Three depths on real bodies, each a different nesting: a scalar directly
+    under a service key, an item inside a list, and a value inside a mapping
+    inside a mapping. `docs/MISTAKES.md` entry 35: find each mechanism on a
+    subject that certainly has it.
+    """
+    assert base_compose, f"{base_compose_path} does not exist or declares nothing."
+
+    services = services_of(base_compose)
+    db_strings = service_strings(services.get(CREDENTIAL_OWNING_SERVICE) or {})
+    worker_strings = service_strings(services.get("worker") or {})
+
+    assert any("postgres:17" in text for text in db_strings), (
+        f"The walk did not find `db`'s pinned image among {len(db_strings)} strings. That is a "
+        "scalar directly under a service key — the shallowest thing there is — so a walk that "
+        "misses it is not walking service bodies at all."
+    )
+    assert any("psql" in text for text in db_strings), (
+        "The walk did not find `db`'s health check command. It lives inside the list under "
+        "`healthcheck.test`, so a walk that descends into mappings but not into lists finds "
+        "everything else here and misses every command in the file."
+    )
+    assert any("${DB_SUPERUSER" in text for text in db_strings), (
+        "The walk did not find `db`'s POSTGRES_USER value, which is a string inside the "
+        "`environment:` mapping inside the service mapping. It is also the string this rule "
+        "must *not* report — see the interpolation test above — so finding it here and "
+        "reporting nothing there is the pair that says the rule reads values rather than names."
+    )
+    assert any("celery" in text for text in worker_strings), (
+        "The walk did not find `worker`'s command, which is a list of arguments. That is the "
+        "exact shape the measured attack used."
     )
