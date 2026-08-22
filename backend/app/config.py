@@ -412,25 +412,50 @@ class Settings(BaseSettings):
     # pydantic has already validated, and pydantic validates in declaration
     # order — so a `Settings` that declared `environment` below them would
     # accept a mock address everywhere.
+    #
+    # **Each description below carries the rule as well as the meaning**, and
+    # that is not decoration. `_describe_invalid_settings` builds the startup
+    # report out of the field name, this string, and pydantic's error code — a
+    # validator's own message never reaches the operator (ADR 0056), so a
+    # refusal whose reason lives only in the validator prints "rejected by this
+    # setting's own validation" and sends somebody to re-type a URL that is
+    # spelled correctly. `ai_provider_base_url` above carries its transport rule
+    # for the same reason.
     oidc_issuer: str = Field(
         description=(
             "The `iss` a web login's `id_token` must state (OIDC Core 1.0 §3.1.3.7). Not "
-            "browser-facing: it is compared against a claim, never redirected to."
+            "browser-facing: it is compared against a claim, never redirected to. Outside "
+            "ENVIRONMENT=development it may not address the mock provider this repository "
+            "ships, the Compose service mock-idp."
         )
     )
     oidc_authorization_endpoint: str = Field(
-        description="Browser-facing OIDC authorization endpoint of the identity provider."
+        description=(
+            "Browser-facing OIDC authorization endpoint of the identity provider. Outside "
+            "ENVIRONMENT=development it may not address the mock provider this repository "
+            "ships, the Compose service mock-idp."
+        )
     )
     oidc_token_endpoint: str = Field(
-        description="Server-facing OIDC token endpoint, where this tool redeems a code."
+        description=(
+            "Server-facing OIDC token endpoint, where this tool redeems a code. Outside "
+            "ENVIRONMENT=development it may not address the mock provider this repository "
+            "ships, the Compose service mock-idp."
+        )
     )
     oidc_jwks_url: str = Field(
-        description="Server-facing key set a web login's `id_token` is verified against."
+        description=(
+            "Server-facing key set a web login's `id_token` is verified against. Outside "
+            "ENVIRONMENT=development it may not address the mock provider this repository "
+            "ships, the Compose service mock-idp."
+        )
     )
     oidc_client_id: str = Field(
         description=(
             "This tool's registered client at the identity provider. The client is public: "
-            "it holds no secret, and PKCE is what binds a code to it (RFC 7636)."
+            "it holds no secret, and PKCE is what binds a code to it (RFC 7636). Outside "
+            "ENVIRONMENT=development it may not be the mock provider's own registered "
+            "client, mock-idp-client."
         )
     )
 
