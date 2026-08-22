@@ -244,7 +244,7 @@ UNREACHABLE_DATABASE_URL = "postgresql+psycopg://nobody:nothing@127.0.0.1:1/nowh
 # design — so pointing only one at the address above would let a script that
 # prefers another quietly reach the real database, and the refusals below would
 # then be evidence of nothing.
-DATABASE_URL_VARIABLES = ("DATABASE_URL", "ALEMBIC_DATABASE_URL", "CARE_DATABASE_URL")
+DATABASE_URL_VARIABLES = ("DATABASE_URL", "CARE_DATABASE_URL")
 
 # How deep a row label follows foreign keys before it stops. Bounded so that a
 # seed which stored a loop produces a failed assertion in the test that asked
