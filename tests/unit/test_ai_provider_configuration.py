@@ -27,12 +27,25 @@ adding a second field that has to be masked.
 **The transport rule arrived from the first review**, and it is the other half of
 "the key is a secret": a key masked in every log and then sent in clear over a
 network is a key in the open. Plain HTTP stays legal to this machine, where a local model
-server needs no TLS and there is no network to read anything off, and is refused
-to any other host while a key is configured. The refusal is asserted **through
-`create_app()`**, because a `Settings` validator's own message never reaches the
-operator — the startup report is built from the field name, the field's static
-`description` and pydantic's error code, so asserting on a message the validator
-raises would be asserting on something nobody sees.
+server needs no TLS and there is no network to read anything off. The refusal is
+asserted **through `create_app()`**, because a `Settings` validator's own message
+never reaches the operator — the startup report is built from the field name, the
+field's static `description` and pydantic's error code, so asserting on a message
+the validator raises would be asserting on something nobody sees.
+
+**Off this machine means `https`, credential or not** — E0-37 item 12, decided by
+Todd on 2026-08-18, and it narrows what this file used to assert. The rule gated
+on a key being configured, so a base URL naming another host over plain `http`
+was accepted whenever no key was set: the vLLM-in-a-cluster deployment, which
+`README.md`, `.env.example` and the validator's own docstring all offered as
+supported. The key is not the only thing on that connection. The student's
+comment is in the body of every request the gateway makes, and §10 does not allow
+it to cross a network in the clear — so the cluster case is served by terminating
+TLS at the model or by running it alongside the application, and every transport
+case below is therefore parametrized over a key being set and not set. The
+without-a-key half of the refusal is the one that was legal until E0-37; the
+without-a-key halves of the two acceptances are what stop the fix being "refuse
+everything that has no key".
 
 **The key's variable is not named here.** E0-13 spells no variable and no field,
 so both are found — the `.env.example` entry by the words in its name, and the
@@ -657,32 +670,46 @@ def configure_provider(
         monkeypatch.delenv(variable_for(name, info), raising=False)
 
 
+@pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
 def test_an_https_provider_url_is_accepted_wherever_it_points(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    with_key: bool,
 ) -> None:
-    """The ordinary deployment: a hosted provider over TLS, with a key.
+    """The ordinary deployment: a hosted provider over TLS, with a key or without one.
 
     The permitted case, asserted first and separately, because a rule that refuses
     plain HTTP is trivially satisfiable by refusing everything — and a startup
     that turns away the configuration `.env.example` documents is a rule nobody
     can deploy behind.
+
+    **The without-a-key row is E0-37 item 12's control**, and it is the half that
+    keeps that item from being satisfied the lazy way. The rule stops consulting
+    the key at all, so "refuse an unauthenticated provider" would pass every
+    refusal case below while turning away a TLS-terminated model server in the
+    cluster next door — which is the deployment the item explicitly leaves
+    supported. What changes is the *scheme* required off this machine, and
+    nothing else.
     """
-    configure_provider(monkeypatch, OFF_MACHINE_HTTPS_URL)
+    configure_provider(monkeypatch, OFF_MACHINE_HTTPS_URL, with_key=with_key)
 
     settings = load_settings_class()()
 
     assert settings is not None, (
-        f"`Settings` refused {OFF_MACHINE_HTTPS_URL}, a hosted provider reached over TLS with a "
-        "key configured. That is the deployment `.env.example` documents."
+        f"`Settings` refused {OFF_MACHINE_HTTPS_URL}, a hosted provider reached over TLS "
+        f"{'with' if with_key else 'without'} a key configured. That is the deployment "
+        "`.env.example` documents, and E0-37 item 12 requires the transport rule to read the "
+        "scheme and the host rather than whether a credential is present."
     )
 
 
+@pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
 @pytest.mark.parametrize("base_url", LOOPBACK_HTTP_URLS)
 def test_a_plain_http_provider_url_is_accepted_on_this_machine(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     base_url: str,
+    with_key: bool,
 ) -> None:
     """Plain HTTP to this machine stays legal, in all three spellings of it.
 
@@ -697,29 +724,48 @@ def test_a_plain_http_provider_url_is_accepted_on_this_machine(
     the same permission and a rule written against any one of them turns the other
     two away. `[::1]` in particular is what a machine with IPv6 first resolves
     `localhost` to.
+
+    **With a key and without one**, since E0-37 item 12: the rule no longer reads
+    the key, and a local Ollama is the deployment least likely to have one. A fix
+    that refused every keyless provider would take this row down with it, which is
+    the near miss that separates "off this machine means https" from "a provider
+    must be authenticated".
     """
-    configure_provider(monkeypatch, base_url)
+    configure_provider(monkeypatch, base_url, with_key=with_key)
 
     settings = load_settings_class()()
 
     assert settings is not None, (
-        f"`Settings` refused {base_url}, which is plain HTTP to this machine. There is no network "
-        "between the process and a local model server, so there is nothing for the transport rule "
-        "to protect — and refusing it makes running without a hosted provider impossible."
+        f"`Settings` refused {base_url}, which is plain HTTP to this machine, "
+        f"{'with' if with_key else 'without'} a key configured. There is no network between the "
+        "process and a local model server, so there is nothing for the transport rule to protect "
+        "— and refusing it makes running without a hosted provider impossible."
     )
 
 
-def test_a_plain_http_provider_url_to_another_host_is_refused_when_a_key_is_set(
+@pytest.mark.parametrize("with_key", (True, False), ids=("key set", "no key set"))
+def test_a_plain_http_provider_url_to_another_host_is_refused(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    with_key: bool,
 ) -> None:
-    """A key sent in clear over a network is refused at startup rather than at the first call.
+    """Cleartext to a model on another host is refused at startup, key or no key.
 
     The two things travelling over that connection are the provider key in a
     header and the student's comment in the body. SPEC §10 keeps secrets in the
     environment or the secret store, and §4 keeps a comment to the surfaces it
     names; plain HTTP to another host puts both on the wire for anything between
     here and there.
+
+    **The no-key row is E0-37 item 12 and was legal until it.** The rule used to
+    return early when no key was configured, so `http://vllm.internal/v1` with no
+    credential met no check at all — offered as a supported deployment in
+    `README.md`, in `.env.example` and in the validator's own docstring. The key
+    is only one of the two secrets on that link and it is the less serious one:
+    every prompt the gateway sends carries the student's free-text comment, which
+    §4 confines to named surfaces and §10 keeps off the wire in the clear. Todd
+    decided it on 2026-08-18 — an encrypted transport whenever the model is on
+    another host, with or without a credential.
 
     At startup rather than on first use, because the alternative fails in the
     §3.3 fail-open direction: a call that cannot be made is an outage, an outage
@@ -739,8 +785,14 @@ def test_a_plain_http_provider_url_to_another_host_is_refused_when_a_key_is_set(
     inversion this suite is for. Measured on this path rather than assumed: an
     off-machine `http://` URL with a key set raises
     `app.config.ConfigurationError` out of `Settings()` directly.
+
+    **Nothing here names the validator.** The function is renamed by the same
+    item — it is no longer about credentialled endpoints — and a test that asserted
+    the name would be red for the rename rather than for the rule. The controls
+    that keep this from being satisfied by a rule that refuses everything are the
+    two acceptance tests above, both of which now run without a key too.
     """
-    configure_provider(monkeypatch, OFF_MACHINE_HTTP_URL)
+    configure_provider(monkeypatch, OFF_MACHINE_HTTP_URL, with_key=with_key)
 
     with pytest.raises(load_configuration_error()):
         load_settings_class()()

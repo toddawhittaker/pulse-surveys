@@ -1,10 +1,22 @@
 # Entry 2. Behaviour shipped with nothing asserting it
 
-**Caught: 31**
+**Caught: 32**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*12 instances recorded; the 3 most recent are below. The earlier 9 are in this file's git history and in the pull requests they cite.*
+*13 instances recorded; the 3 most recent are below. The earlier 10 are in this file's git history and in the pull requests they cite.*
+
+*(Batch H item 1, and the shape is **a briefed replacement that would have
+un-asserted an older guarantee**. The orchestrator's brief said to replace
+`test_db_engine_configuration.py`'s `not engine.echo` assertion with the
+captured-log test, because the old assertion keeps passing while every bound
+parameter is logged. Replace-as-delete would have shipped E0-04's definition of
+done — the engine does not echo SQL outside development — asserted by nothing,
+reintroducible by a one-line `echo=True` with the suite green. What shipped
+instead: the echo test stays, renamed and demoted in its own docstring to say it
+is not the confidentiality guard, and the captured-log test carries the §10
+property. The two assert different mutations, so "replace" was the wrong verb
+and this entry is what caught it.)*
 
 *(E0-18 PR 1's second round, and it is the shape where **the unasserted behaviour
 is the premise of an exception**. The claim-to-Care sweep gained a named exception
@@ -33,21 +45,6 @@ service's own `POSTGRES_USER`, and each message says which mutation its half
 exists for. The same reading is why the provisioning assertion checks the order
 as well as the presence: a role created after `alembic upgrade head` is a role the
 migration never used, and the step is still sitting there for a reviewer to see.)*
-
-*(In E0-17, and the interesting part is the delay. The
-`ENVIRONMENT` guard on `scripts/seed.py` shipped with nothing in the suite
-executing it — the module's one run with a deployment name sat behind a condition
-that is false — and the implementer noticed, said so in ADR 0063's own
-consequences and in the pull request, and shipped anyway because it may not write
-under `tests/`. That is this entry working as far as it can reach: **the
-behaviour was still unasserted, and what the entry bought was that nobody had to
-discover it.** The test author then wrote ten tests against the record's
-description, and the tenth failed — the guard is satisfied by `.env` when the
-process environment does not supply the variable, which no hand measurement had
-asked. So: an entry that turns "shipped unasserted" into "shipped unasserted, in
-writing, with an owner" is worth its counter even when it cannot stop the ship,
-because the sentence in the record is what got the tests written and the tests
-are what found the defect.)*
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`

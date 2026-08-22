@@ -23,11 +23,27 @@ a copy of every row the application reads or writes, student comments included
 (§4, §10 — no student PII in logs), in a stream a deployment ships to whatever
 aggregates its logs.
 
-Nothing here asserts that the engine *does* echo in development. The definition
-of done asks for one direction only, and an implementation that never echoes
-satisfies it; requiring the other direction would invent a feature the ticket
-does not ask for. `docs/MISTAKES.md` entry 2's rule applies as written — assert
-the forbidden state, not the permitted one.
+**`echo` is not what keeps the parameters out, and E0-37 item 1 is that
+correction.** `Connection.__init__` sets `self._echo` from
+`logger.isEnabledFor(INFO)` on `sqlalchemy.engine.Engine`, not from the `echo`
+flag — so with that logger configured at INFO **by name**, which a `dictConfig`
+plausibly does, `echo=False` still writes every statement and every bound
+parameter. Measured on the pinned SQLAlchemy 2.0.52. From E0-05 those parameters
+are survey answers and free-text comments, material §10 keeps out of logs and
+§4.1's views and grants do not reach. What closes it is `hide_parameters=True`
+outside development, plus the `WARNING` pin `backend/alembic.ini` already applies
+on the migration side — so the assertion that carries the property is a captured
+log around a marker statement, and `not engine.echo` is kept below only as
+E0-04's own smaller criterion, labelled as such.
+
+Nothing here asserts that the engine *does* echo in development, or that a bound
+parameter *is* visible there. The definition of done asks for one direction only,
+and an implementation that never echoes and never shows a parameter satisfies it;
+requiring the other direction would invent a feature no ticket asks for.
+`docs/MISTAKES.md` entry 2's rule applies as written — assert the forbidden
+state, not the permitted one. The one control that does assert a marker is
+*present* builds an engine with no options at all, so it says something about
+this file's log capture and nothing about `app.db`.
 
 The engine is found rather than named, in the spirit of `celery_application_in`
 in `tests/conftest.py`: E0-04 says `db.py` holds "a SQLAlchemy 2.0 engine and
@@ -35,17 +51,67 @@ session factory" and does not say what either is called.
 """
 
 import logging
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Iterator
 from types import ModuleType
 from typing import Any
 
 import pytest
 
 DB_MODULE = "app.db"
+CONFIG_MODULE = "app.config"
 
 DATABASE_URL_VARIABLE = "DATABASE_URL"
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 LOG_LEVEL_VARIABLE = "LOG_LEVEL"
+
+# The two names E0-37 item 1 adds to `app.db`, written here in one place because
+# every assertion about the SQL half goes through them.
+#
+#   engine_options(settings) -> dict   the `create_engine` keyword arguments
+#   pin_sqlalchemy_logging(settings)   pins `sqlalchemy` to WARNING outside
+#                                      development, and is called where the
+#                                      engine is built
+#
+# Both are fetched with `getattr` and reported by a failing assertion rather than
+# imported at module scope: a missing deliverable has to arrive as a red test
+# naming it, not as a collection error that takes the other tests here down with
+# it and says nothing about which one is the deliverable.
+ENGINE_OPTIONS_FUNCTION = "engine_options"
+LOGGING_PIN_FUNCTION = "pin_sqlalchemy_logging"
+
+# The name of the constant that says which environment is the development one.
+# Read out of `app.config` rather than spelled here — E0-37 item 2 makes that the
+# single definition site, and a third copy in a test would be the same defect
+# wearing a test's clothes.
+DEVELOPMENT_ENVIRONMENT_CONSTANT = "DEVELOPMENT_ENVIRONMENT"
+
+# The two loggers this module configures and restores. `sqlalchemy` is the one
+# `backend/alembic.ini` already pins on the migration side; `sqlalchemy.engine`
+# is the one whose effective level decides whether `Connection` logs a statement
+# and its parameters at all.
+SQLALCHEMY_LOGGER = "sqlalchemy"
+SQLALCHEMY_ENGINE_LOGGER = "sqlalchemy.engine"
+
+# An engine that needs no server and no driver beyond the standard library, so
+# the SQL half stays a unit test. What is under test is what the *options* do to
+# the log, and that is a property of SQLAlchemy's logging path rather than of any
+# particular database.
+IN_MEMORY_URL = "sqlite://"
+
+# The value carried into the database as a bound parameter and looked for in the
+# captured log. Long and unlikely-looking for the reason
+# `FAKE_DATABASE_CREDENTIAL` above is, and it stands in for what a real bound
+# parameter holds from E0-05 on: a survey answer, or a student's free-text
+# comment.
+#
+# It is a *parameter* and never part of the statement text — `SELECT :probe`
+# compiles to `SELECT ?`, so a log line containing this value can only have got
+# it from the parameter list. A test that interpolated it into the SQL would go
+# red against a perfectly hidden parameter.
+PARAMETER_MARKER = "marker-Qb7ZxLm4VtR9NsWd"
+PARAMETER_STATEMENT = "SELECT :probe"
+PARAMETER_NAME = "probe"
 
 # Obvious fakes, long and unlikely-looking so that any fragment appearing in a
 # log line is unambiguously a leak and not a coincidence. Named `...CREDENTIAL`
@@ -124,25 +190,171 @@ def import_database_module(
     return module
 
 
+def import_configuration_module(
+    import_app_module: Callable[[str], ModuleType | None],
+) -> ModuleType:
+    """Import `app.config` against the environment the test has just set."""
+    module = import_app_module(CONFIG_MODULE)
+    if module is None:
+        pytest.fail(
+            f"`{CONFIG_MODULE}` does not exist. E0-01 ships it at `backend/app/config.py` "
+            "(SPEC §13) with the `Settings` object every other module reads."
+        )
+    return module
+
+
+def settings_now(import_app_module: Callable[[str], ModuleType | None]) -> Any:
+    """A `Settings` built from the environment the test has just set."""
+    config = import_configuration_module(import_app_module)
+    settings_class = getattr(config, "Settings", None)
+    assert settings_class is not None, (
+        f"`{CONFIG_MODULE}` exposes no `Settings`, so there is nothing to hand the functions "
+        "below. E0-01 ships it and every module here reads its fields."
+    )
+    return settings_class()
+
+
+def development_environment_name(import_app_module: Callable[[str], ModuleType | None]) -> str:
+    """The value of `ENVIRONMENT` that means development, read from its one definition.
+
+    Not spelled in this file. E0-37 item 2 makes `app.config` the single
+    definition site precisely so that "outside development" means the same thing
+    in `db.py`, in `scripts/seed.py` and in the tests that hold them to it — and
+    a literal here would be the fourth copy of the thing that item exists to
+    remove.
+    """
+    config = import_configuration_module(import_app_module)
+    name = getattr(config, DEVELOPMENT_ENVIRONMENT_CONSTANT, None)
+    assert isinstance(name, str) and name, (
+        f"`{CONFIG_MODULE}` exposes no `{DEVELOPMENT_ENVIRONMENT_CONSTANT}` string. E0-37 item 2 "
+        "puts that constant beside the `environment` field and has `db.py` and `scripts/seed.py` "
+        "import it; `tests/unit/test_development_environment_has_one_definition.py` is the module "
+        "that owns the criterion. Everything here that says 'outside development' reads it."
+    )
+    return name
+
+
+def forget_the_app_package() -> None:
+    """Drop every `app.*` module, so the next import reads the environment set now.
+
+    `import_app_module` does exactly this once, before the test body runs, and its
+    docstring says why: a module that builds something out of `Settings` reads the
+    environment at import and `sys.modules` keeps the answer.
+
+    One test here has to look a constant up in `app.config` in order to know which
+    environment to set, and then import `app.db` against it. Without this, `app.db`
+    would import a configuration module that was already loaded — and `app.db`
+    builds its engine at import (ADR 0013), so which import wins is the whole
+    question that test asks. The fixture restores the interpreter afterwards
+    either way.
+    """
+    for name in [n for n in list(sys.modules) if n == "app" or n.startswith("app.")]:
+        sys.modules.pop(name, None)
+
+
+def named_function(module: ModuleType, name: str, contract: str) -> Any:
+    """One of E0-37 item 1's two new names, or a failure quoting what it must be."""
+    found = getattr(module, name, None)
+    assert callable(found), (
+        f"`{DB_MODULE}` exposes no callable `{name}` (it has {sorted(vars(module))}).\n"
+        f"  {contract}\n"
+        "\n"
+        "E0-37 item 1: `echo=False` is not what keeps SQL out of the log, because "
+        "`Connection.__init__` reads `logger.isEnabledFor(INFO)` on `sqlalchemy.engine.Engine` "
+        "rather than the flag. The fix is `hide_parameters=True` outside development plus the "
+        "same `WARNING` pin `backend/alembic.ini` applies on the migration side."
+    )
+    return found
+
+
+def statement_log_of(
+    options: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> str:
+    """What `sqlalchemy.engine` writes while a statement carrying the marker runs.
+
+    The logger is configured **by name**, at INFO, which is the whole scenario:
+    that is what a `dictConfig` naming `sqlalchemy` or `sqlalchemy.engine` does,
+    and it is the one configuration under which `echo=False` still logs every
+    statement and every bound parameter.
+
+    The marker travels as a bound parameter and never as part of the statement,
+    so a log line holding it can only have taken it from the parameter list.
+    """
+    from sqlalchemy import create_engine, text
+
+    caplog.set_level(logging.INFO, logger=SQLALCHEMY_ENGINE_LOGGER)
+
+    try:
+        engine = create_engine(IN_MEMORY_URL, **options)
+    except TypeError as refused:
+        pytest.fail(
+            f"`{ENGINE_OPTIONS_FUNCTION}` returned {options!r}, which `create_engine` refused: "
+            f"{refused}. E0-37 item 1 describes it as the keyword arguments the engine is built "
+            "with — `echo`, `hide_parameters`, `pool_pre_ping` — so whatever it answers has to be "
+            "a mapping `create_engine` accepts. A dialect-specific argument belongs beside the URL "
+            "it goes with rather than in the answer this test builds a SQLite engine from."
+        )
+
+    with engine.connect() as connection:
+        connection.execute(text(PARAMETER_STATEMENT), {PARAMETER_NAME: PARAMETER_MARKER})
+
+    return caplog.text
+
+
+@pytest.fixture
+def restored_sqlalchemy_logging() -> Iterator[None]:
+    """Put the level of every logger these tests configure back afterwards.
+
+    `caplog.set_level` restores the one logger it is given, and the pin tests
+    below set `sqlalchemy` themselves and then ask `app.db` to change it. Left
+    unrestored, a test that pinned the library to `WARNING` would silently decide
+    what every later test in the session can see — which is the shape where a
+    suite passes or fails on the order it ran in.
+    """
+    saved = {
+        name: logging.getLogger(name).level
+        for name in (SQLALCHEMY_LOGGER, SQLALCHEMY_ENGINE_LOGGER)
+    }
+    try:
+        yield
+    finally:
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
+
+
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
-def test_the_engine_does_not_echo_sql_outside_development(
+def test_the_engine_does_not_turn_on_sql_echo_outside_development(
     configured_env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     import_app_module: Callable[[str], ModuleType | None],
     environment: str,
     log_level: str,
 ) -> None:
-    """The definition of done's second security item.
+    """E0-04's own smaller criterion, and **not** the guard on bound parameters.
 
-    `echo=True` writes every statement and every bound parameter to stdout. From
-    E0-05 those parameters are survey answers and free-text comments, so an
-    echoing engine in a deployed environment is a copy of the confidential
-    material in §4 sitting in the log stream — where §4.1's whole apparatus of
-    views and grants does not reach.
+    "Confirm ... that the engine does not echo SQL in a non-development
+    environment" is E0-04's definition of done, and this is the only thing in the
+    repository that asserts it: with nothing here, `echo=True` could be set in a
+    production deployment and every gate would stay green (`docs/MISTAKES.md`
+    entry 2). So it stays, and what changes is that it no longer stands in for the
+    property it cannot see.
+
+    **Read the demotion, not just the assertion.** E0-37 item 1 measured that this
+    keeps passing while every statement and every bound parameter is written to
+    the log, because `Connection.__init__` takes `self._echo` from
+    `logger.isEnabledFor(INFO)` on `sqlalchemy.engine.Engine` rather than from
+    this flag. The test that closes that hole is
+    `test_no_bound_parameter_reaches_the_log_outside_development` below; this one
+    is about log volume in a deployment, which is a smaller and separate thing.
 
     Parametrized over an environment *and* a log level because the two obvious
     one-line derivations of `echo` each pass some of these rows and fail
     others. One test per row, so the failure names the combination that echoes.
+
+    **The mutation this survives:** `echo=True` unconditionally, or an `echo`
+    derived from `LOG_LEVEL`. **The near miss that must stay green:** anything at
+    all done with `hide_parameters`, which this deliberately does not read.
     """
     monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
     monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)
@@ -156,9 +368,301 @@ def test_the_engine_does_not_echo_sql_outside_development(
     )
     assert not engine.echo, (
         f"The engine echoes SQL with {ENVIRONMENT_VARIABLE}={environment!r} and "
-        f"{LOG_LEVEL_VARIABLE}={log_level!r}. Every statement and every bound parameter goes "
-        "to the log — survey answers and free-text comments included from E0-05 — which is "
-        "the one place the §4.1 views and grants cannot reach."
+        f"{LOG_LEVEL_VARIABLE}={log_level!r}. Every statement goes to the log, in a stream a "
+        "deployment ships to whatever aggregates it. This is E0-04's criterion; the bound "
+        "parameters are a separate property and a separate test."
+    )
+
+
+def test_the_log_capture_sees_a_bound_parameter_when_nothing_is_hiding_it(
+    caplog: pytest.LogCaptureFixture,
+    restored_sqlalchemy_logging: None,
+) -> None:
+    """The control for the test below, and the reason its silence can be believed.
+
+    Not a test of `app.db` at all — the engine here is built with no options, so
+    nothing in this file's subject can affect the answer. What it establishes is
+    that the capture works: `sqlalchemy.engine` configured at INFO **by name**
+    really does write bound parameters, and this module's marker really is
+    findable in what it writes.
+
+    Without it, `docs/MISTAKES.md` entry 3 in its plainest form — a capture that
+    collected nothing, a statement that never ran, a marker that never reached the
+    parameter list and a `hide_parameters` that does nothing all report exactly
+    the same silence as a correctly hidden parameter, and the test below passes
+    against every one of them.
+
+    **A red here is a broken test, not a finding.** It says this module can no
+    longer see what it claims to be looking for — SQLAlchemy's logging path
+    changed, or the marker stopped travelling as a parameter — and the assertion
+    below means nothing until it is green again.
+    """
+    written = statement_log_of({}, caplog)
+
+    assert written.strip(), (
+        "`sqlalchemy.engine` was configured at INFO by name and a statement ran, and nothing at "
+        "all was captured. Every assertion about a parameter not appearing in this log is "
+        "therefore vacuous, whatever the engine options do."
+    )
+    assert PARAMETER_MARKER in written, (
+        f"The marker this module looks for did not appear in the log of an engine built with no "
+        f"options, which is the engine that hides nothing.\n"
+        f"  captured: {written}\n"
+        "\n"
+        "So the search below cannot see a bound parameter even when one is written in full, and "
+        "the property it asserts — that no parameter reaches the log outside development — would "
+        "pass against an engine that logged every one of them."
+    )
+
+
+@pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
+def test_no_bound_parameter_reaches_the_log_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    restored_sqlalchemy_logging: None,
+    import_app_module: Callable[[str], ModuleType | None],
+    environment: str,
+    log_level: str,
+) -> None:
+    """E0-37 item 1's first acceptance criterion, asserted by capturing rather than by reading.
+
+    With `sqlalchemy.engine` at INFO **by name** — which is what a `dictConfig`
+    naming the library plausibly does, and the one residual risk two of three
+    security passes agreed on — `echo=False` writes the statement *and its bound
+    parameters*. From E0-05 those parameters are survey answers and free-text
+    comments: material SPEC §10 keeps out of logs, in the one place §4.1's views
+    and grants do not reach.
+
+    So the assertion is about the log rather than about the flag. A marker value
+    goes into the database as a bound parameter and must not come back out in
+    anything `sqlalchemy.engine` wrote. Fragments rather than the whole value, for
+    the reason `leaked_fragments` gives: a truncating formatter can print all but
+    one character and still not contain the exact string.
+
+    The options come from `app.db`, built against a real `Settings` for a real
+    non-development environment, so what is under test is the answer the module
+    gives rather than a dictionary this file wrote. The engine is SQLite in
+    memory, because what those options do to SQLAlchemy's logging path is not a
+    property of any particular database and a unit test may not need a server.
+
+    Nothing here says a parameter *is* visible in development. That direction is
+    the module docstring's rule and this file's long-standing one — assert the
+    forbidden state — and the control above is what keeps the silence meaningful
+    without claiming anything about a development engine.
+
+    **The mutation this survives:** drop `hide_parameters` from
+    `engine_options`, which leaves `not engine.echo` green above. **The near miss
+    that must stay green:** hiding parameters in development too, which is
+    stricter than the ticket asks and is nobody's defect.
+    """
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
+    monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)
+
+    module = import_database_module(import_app_module)
+    build_options = named_function(
+        module,
+        ENGINE_OPTIONS_FUNCTION,
+        f"{ENGINE_OPTIONS_FUNCTION}(settings) answers the keyword arguments the engine is built "
+        "with, and outside development they include `hide_parameters=True`.",
+    )
+
+    settings = settings_now(import_app_module)
+    options = build_options(settings)
+    written = statement_log_of(dict(options), caplog)
+
+    fragments = leaked_fragments(written, PARAMETER_MARKER)
+    assert not fragments, (
+        f"A bound parameter reached the log with {ENVIRONMENT_VARIABLE}={environment!r} and "
+        f"{LOG_LEVEL_VARIABLE}={log_level!r}: {fragments}.\n"
+        f"  engine options: {options!r}\n"
+        f"  captured:       {written}\n"
+        "\n"
+        "`sqlalchemy.engine` was configured at INFO by name, which is all it takes: "
+        "`Connection.__init__` reads `logger.isEnabledFor(INFO)` on `sqlalchemy.engine.Engine` "
+        "and not the `echo` flag, so `echo=False` hides nothing here. From E0-05 these parameters "
+        "are survey answers and free-text comments (SPEC §10, §4.1), and `hide_parameters=True` "
+        "outside development is what keeps them out of a stream the deployment ships elsewhere."
+    )
+
+
+def hidden_parameters_of(engine: Any) -> Any:
+    """Whether this engine hides bound parameters, wherever SQLAlchemy keeps that flag.
+
+    Read off the engine or off its dialect, because which of the two holds it is
+    a detail of the library rather than of this project, and a test that guessed
+    one would report a version change as a defect in `app.db`. `None` means
+    neither has it, which the caller reports as this module needing an update.
+    """
+    for holder in (engine, getattr(engine, "dialect", None)):
+        if holder is None:
+            continue
+        found = getattr(holder, "hide_parameters", None)
+        if found is not None:
+            return found
+    return None
+
+
+@pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
+def test_the_engine_the_module_builds_hides_its_bound_parameters_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    import_app_module: Callable[[str], ModuleType | None],
+    environment: str,
+    log_level: str,
+) -> None:
+    """The options have to reach the engine the application actually uses.
+
+    `test_no_bound_parameter_reaches_the_log_outside_development` above asserts
+    what `engine_options` *answers*, over an engine this file builds. That is one
+    `create_engine` call away from the property anybody cares about: a module can
+    ship a correct `engine_options`, never call it, and keep building its engine
+    the way it did before, with every assertion in this file green and every bound
+    parameter still going to the log. `docs/MISTAKES.md` entry 23 — a validation
+    that creates the appearance of a behaviour — and entry 2's rule that a fix
+    with nothing asserting it is a convention.
+
+    So this reads the flag off the engine `app.db` built at import, for the
+    environment the test configured. The engine is found rather than named, in the
+    spirit of the rest of this module.
+
+    **The mutation this survives:** define `engine_options` and build the engine
+    without it. **The near miss that must stay green:** building the engine any
+    other way that ends with the parameters hidden — the flag is read from the
+    engine, not the call.
+    """
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
+    monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)
+
+    module = import_database_module(import_app_module)
+    engine = engine_in(module)
+
+    assert engine is not None, (
+        f"`{DB_MODULE}` exposes no SQLAlchemy engine and no session factory bound to one, so "
+        "there is nothing here whose parameter handling could be read. E0-04 ships both."
+    )
+
+    hidden = hidden_parameters_of(engine)
+    assert hidden is not None, (
+        "Neither this engine nor its dialect carries a `hide_parameters` flag, so this test "
+        "cannot read the property it is about. That is this module needing an update for the "
+        "SQLAlchemy in `requirements.txt` — a broken test rather than a finding — and the "
+        "captured-log test above is the one that still means something until it is fixed."
+    )
+    assert hidden is True, (
+        f"The engine `{DB_MODULE}` built with {ENVIRONMENT_VARIABLE}={environment!r} and "
+        f"{LOG_LEVEL_VARIABLE}={log_level!r} does not hide its bound parameters "
+        f"(`hide_parameters` is {hidden!r}).\n"
+        "\n"
+        "E0-37 item 1: with `sqlalchemy.engine` configured at INFO by name, every statement and "
+        "every bound parameter is written whatever `echo` says — and from E0-05 those parameters "
+        "are survey answers and free-text comments, which SPEC §10 keeps out of logs. An "
+        "`engine_options` that answers correctly and is not used to build this engine leaves the "
+        "hole exactly where it was."
+    )
+
+
+@pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
+def test_importing_the_database_module_pins_the_sqlalchemy_logger_outside_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    restored_sqlalchemy_logging: None,
+    import_app_module: Callable[[str], ModuleType | None],
+    environment: str,
+    log_level: str,
+) -> None:
+    """The asymmetry E0-37 item 1 names: the migration side is pinned and the application side is not.
+
+    `backend/alembic.ini` already carries `[logger_sqlalchemy] level = WARNING`,
+    so a deployment that configures logging by name gets the parameters of every
+    migration statement withheld and the parameters of every application
+    statement written. Item 1's fix is the same pin, applied where the engine is
+    built.
+
+    **The logger is turned up first, and that is the whole test.** SQLAlchemy
+    pins `sqlalchemy` to `WARNING` itself at import when it is `NOTSET`, so
+    asserting `WARNING` over an untouched interpreter would pass against a module
+    that does nothing at all — `docs/MISTAKES.md` entry 3, in the form where the
+    library under test supplies the answer. Setting `DEBUG` before the import is
+    what makes the assertion about `app.db`.
+
+    **What this cannot promise, said rather than implied.** A `dictConfig` that
+    runs *after* `app.db` is imported wins, because the last writer does. The pin
+    closes the ordinary case — a logging configuration read at startup before the
+    application package is imported — and the parameter-hiding test above is what
+    holds the property when it does not.
+
+    **The mutation this survives:** delete the call from the module body, or make
+    it a function nobody calls. **The near miss that must stay green:** pinning
+    something narrower as well, such as `sqlalchemy.engine`, which is more than
+    the ticket asks and takes nothing away.
+    """
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
+    monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)
+    logging.getLogger(SQLALCHEMY_LOGGER).setLevel(logging.DEBUG)
+
+    module = import_database_module(import_app_module)
+    named_function(
+        module,
+        LOGGING_PIN_FUNCTION,
+        f"{LOGGING_PIN_FUNCTION}(settings) pins the `{SQLALCHEMY_LOGGER}` logger to WARNING "
+        "outside development, and is called where the engine is built.",
+    )
+
+    pinned = logging.getLogger(SQLALCHEMY_LOGGER).level
+    assert pinned == logging.WARNING, (
+        f"Importing `{DB_MODULE}` with {ENVIRONMENT_VARIABLE}={environment!r} left the "
+        f"`{SQLALCHEMY_LOGGER}` logger at {logging.getLevelName(pinned)}, and this test had set it "
+        "to DEBUG beforehand — exactly as a deployment's own `dictConfig` would.\n"
+        "\n"
+        "`backend/alembic.ini` pins that logger to WARNING for the migration side already, so "
+        "without this the two halves of one deployment disagree about whether the parameters of a "
+        "statement may be written down. From E0-05 those parameters are survey answers and "
+        "free-text comments (SPEC §10)."
+    )
+
+
+def test_importing_the_database_module_leaves_the_sqlalchemy_logger_alone_in_development(
+    configured_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    restored_sqlalchemy_logging: None,
+    import_app_module: Callable[[str], ModuleType | None],
+) -> None:
+    """In development the pin is a no-op, because `echo` is a debugging tool there.
+
+    E0-37 item 1 is explicit that `_echoes_sql` is correct as written and is not
+    what changes. A pin applied unconditionally would take the level of the
+    library's own logger down to `WARNING` in development too, and a developer
+    who turned `sqlalchemy` up to see a query would get nothing back with no
+    indication why — the fix quietly removing the tool the ticket says to keep.
+
+    **This passes on the tree as it stands**, which is what it is for: it is the
+    near miss beside the pin above, and the two are only worth having together.
+
+    The development environment's name is read from `app.config`, not spelled
+    here, for the reason `development_environment_name` gives.
+
+    **The mutation this survives:** pin unconditionally — drop the environment
+    check from `pin_sqlalchemy_logging`, or call it before reading the settings.
+    **The near miss that must stay green:** any spelling of the check that reads
+    the constant, since nothing here looks at how the decision is made.
+    """
+    development = development_environment_name(import_app_module)
+    forget_the_app_package()
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, development)
+    logging.getLogger(SQLALCHEMY_LOGGER).setLevel(logging.DEBUG)
+
+    import_database_module(import_app_module)
+
+    left = logging.getLogger(SQLALCHEMY_LOGGER).level
+    assert left == logging.DEBUG, (
+        f"Importing `{DB_MODULE}` with {ENVIRONMENT_VARIABLE}={development!r} moved the "
+        f"`{SQLALCHEMY_LOGGER}` logger from DEBUG to {logging.getLevelName(left)}.\n"
+        "\n"
+        "E0-37 item 1 pins that logger *outside* development and says `_echoes_sql` is correct as "
+        "written. A pin that also fires in development takes away the echo the ticket keeps, and "
+        "does it silently: the developer who turned the logger up sees nothing and has no way to "
+        "tell that the application turned it back down."
     )
 
 
