@@ -4,21 +4,35 @@
 **Branch:** `e0/compose-credential-surface`
 **Depends on:** E0-02, E0-03
 
-## Status — what is left here
+## Status — built 2026-08-21
 
-**Built as written.** This ticket is already one coherent batch — four routes
-to the same ADR 0009 bound, all landing in
-`tests/unit/test_compose_stack.py` and `tests/unit/test_env_example_resolves.py`
-— so nothing moves out of it and nothing moves in.
+**Built as written**, all five scope items, in
+`tests/unit/test_compose_stack.py` and `tests/unit/test_env_example_resolves.py`.
+Nothing moved out of the ticket and nothing moved in.
 
-Re-verified on the epic branch 2026-08-21, with current locations:
-`SENSITIVE_BIND_SOURCES` is still a seven-entry denylist
-(`test_compose_stack.py:379`), `ALLOWED_TOP_LEVEL_KEYS` is
-`("name", "services", "volumes")` (line 249) and bounds which sections may
-appear rather than what an allowed section may carry, `bind_sources` (line
-1644) reads only service-level bind entries and feeds only the relative
-privilege comparison (line 2091), and nothing resolves a named volume through
-`driver_opts`.
+What the module holds now. `ALLOWED_BIND_MOUNTS` is the allowlist the decision
+below asks for, keyed by `(file, service)` and holding the four mounts the two
+files declare today; `normalised_bind_source` normalises both sides of every
+comparison, including the entries of `ALLOWED_BIND_MOUNTS` and of
+`SENSITIVE_BIND_SOURCES`, which stays as defence in depth behind the allowlist.
+`bind_sources` takes the document and the project directory as well as the
+service, and every rule that consumes host mounts consumes it — the allowlist,
+the sensitive check and the privilege comparison against `api`. A service's
+named volumes are resolved through the top-level `volumes:` section by
+`named_volume_source`, which treats a bind-shaped `driver_opts` as a host path
+and **refuses** a volume shape it cannot classify rather than reading it as
+harmless. Route 3 is in `test_env_example_resolves.py`, where the delivered set
+is computed from the Compose files rather than hand-listed.
+
+`ALLOWED_TOP_LEVEL_KEYS` is unchanged — `("name", "services", "volumes")`, plus
+`x-` extension fields — and still bounds which sections may appear; what an
+allowed `volumes:` section may *carry* is now bounded by `READABLE_VOLUME_KEYS`
+beside it.
+
+Item 5 landed as
+[ADR 0076](../../adr/0076-what-a-compose-file-may-say-is-a-closed-set.md), which
+records E0-03's three closed-set rules and this ticket's two in one record, with
+the read-everything alternative and why it lost.
 
 ## Context
 
