@@ -282,10 +282,20 @@ def revealable(committed_rows: Any) -> Revealable:
     )
 
 
+@pytest.mark.invariant
 def test_the_care_service_reveals_identity_to_a_person_holding_a_care_assignment(
     care_service: Any, revealable: Revealable
 ) -> None:
     """The door is open through the service, for the person §6.2 opens it for.
+
+    **Marked `invariant` by E0-41.** SPEC §4 makes `reveal_identity` the single
+    application-code path to a student's name — "re-identification is possible
+    only through the Care queue (§6.2), only by the Care role" — and the isolated
+    §4.1 pass ran none of it. This half is in that pass because the refusal beside
+    it is worth nothing without it: a service that raised `NotCareStaffError` for
+    everybody, or one that could not reach its own connection, satisfies the
+    refusal perfectly, and inside the isolated pass the control would not even
+    have been collected.
 
     This is the positive half of the pair, and it is a criterion in its own right
     — "the Care path must remain open, and this ticket proves it" — as well as
@@ -321,10 +331,16 @@ def test_the_care_service_reveals_identity_to_a_person_holding_a_care_assignment
     )
 
 
+@pytest.mark.invariant
 def test_the_care_service_refuses_a_person_with_no_live_care_assignment(
     care_service: Any, revealable: Revealable
 ) -> None:
     """The service's own check, which has to hold when the routing is wrong.
+
+    **Marked `invariant` by E0-41**: this is §4's "identity is never displayed to
+    instructors or any leadership role" at the one door that can display it, and
+    the `holds_care` pre-check is the whole of the service's half. Unmarked, it
+    could be skipped without the isolated pass noticing.
 
     E0-10: "`services/safety.py` verifies independently before calling it…
     Neither alone; a caller reaching the function by any other route still gets
@@ -344,7 +360,10 @@ def test_the_care_service_refuses_a_person_with_no_live_care_assignment(
     **The exception type is the assertion**, and nothing follows the `raises`
     block on purpose: `refused.value is not None` is the obvious next line and it
     cannot fail, which is `docs/MISTAKES.md` entry 3 in the shape that reads as
-    thoroughness. `NotCareStaffError` is the service's own refusal; the function's
+    thoroughness. What the refusal *carries* is a different question and a real
+    one, and it is asserted next door in
+    `test_the_refusal_carries_no_part_of_the_students_identity` rather than being
+    tacked on here. `NotCareStaffError` is the service's own refusal; the function's
     refusal is a database error. A service that skipped its check and let the
     function speak fails here, and fails saying what it raised instead — which is
     the whole reason the ticket asks for the two halves to be asserted separately,
@@ -364,3 +383,74 @@ def test_the_care_service_refuses_a_person_with_no_live_care_assignment(
     arguments = bind(reveal, revealable, actor=revealable.reporting_person)
     with pytest.raises(refusal_type):
         reveal(**arguments)
+
+
+def raised_surface(failure: BaseException) -> str:
+    """Everything a caller can read off a refusal: its text, its arguments, its chain.
+
+    The chain matters as much as the message. A service that let the database's
+    own error become the `__cause__` of its refusal hands the caller whatever that
+    error quoted — and a Postgres error quotes the row it was raised about — so a
+    scan of `str(failure)` alone would report a clean refusal over a leaked name.
+    """
+    seen: list[str] = []
+    current: BaseException | None = failure
+    while current is not None and len(seen) < 10:
+        seen.append(f"{type(current).__name__}: {current!s} {current.args!r}")
+        current = current.__cause__ or current.__context__
+    return "\n".join(seen)
+
+
+@pytest.mark.invariant
+def test_the_refusal_carries_no_part_of_the_students_identity(
+    care_service: Any, revealable: Revealable
+) -> None:
+    """A refusal that quotes the student has revealed them while saying no — E0-41.
+
+    SPEC §4: identity "is never displayed to instructors or any leadership role,
+    in any view", and §6.2 keeps re-identification to the Care role "only via the
+    audited reveal action". A `NotCareStaffError` that reads "Alex Rivera may not
+    be revealed to …" has performed the reveal on the error path, where nothing is
+    audited: §4's traceability record is written by the reveal, and this call did
+    not get that far.
+
+    **The mutation this kills:** a refusal built from the row the service had
+    already fetched — the natural shape when a service reads the subject first and
+    checks the actor second, and equally the shape of a service that lets the
+    database error surface as its `__cause__`.
+
+    **Why this is not an assertion about emptiness.** The denial itself is
+    asserted next door and is what makes this meaningful; here the seeded identity
+    is known, the control call proves the reveal really can produce it, and the
+    scan is shown finding those very strings in a sample built from them. Without
+    those three, "the message did not contain a name" would be equally true of a
+    service that never ran (`docs/MISTAKES.md` entry 3).
+    """
+    reveal = getattr(care_service, REVEAL)
+    refusal_type = getattr(care_service, NOT_CARE_STAFF_ERROR)
+
+    allowed = reveal(**bind(reveal, revealable, actor=revealable.care_person))
+    assert identity_values(allowed) & revealable.identity_values, (
+        "The control call failed: a person holding a live `CARE` assignment did not get the "
+        "seeded identity back, so this test does not yet know that the values it is scanning for "
+        "are ones this door can produce at all."
+    )
+    canary = " ".join(sorted(revealable.identity_values))
+    assert all(value in canary for value in revealable.identity_values), (
+        "The scan below cannot find the seeded identity in a sample built out of it, so its "
+        "silence about the refusal means nothing."
+    )
+
+    with pytest.raises(refusal_type) as refused:
+        reveal(**bind(reveal, revealable, actor=revealable.reporting_person))
+
+    surface = raised_surface(refused.value)
+    leaked = sorted({value for value in revealable.identity_values if value in surface})
+    assert not leaked, (
+        f"The refusal handed back to a person with no `CARE` assignment carries {leaked}, which is "
+        f"the identity it refused to reveal. What it carries:\n{surface}\n\n"
+        "§6.2 gives identity access to the Care role and to no other, through the audited reveal "
+        "and no other route — and this path writes no audit record, because the check that "
+        "produced this error is what stops the reveal happening. A refusal that quotes the student "
+        "has revealed them to exactly the person the check exists to refuse."
+    )

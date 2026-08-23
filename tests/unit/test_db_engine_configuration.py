@@ -466,11 +466,19 @@ def test_the_engine_does_not_turn_on_sql_echo_outside_development(
     )
 
 
+@pytest.mark.invariant
 def test_the_log_capture_sees_a_bound_parameter_when_nothing_is_hiding_it(
     caplog: pytest.LogCaptureFixture,
     restored_sqlalchemy_logging: None,
 ) -> None:
     """The control for the test below, and the reason its silence can be believed.
+
+    **Marked `invariant` by E0-41, with the guard it controls.** The isolated §4.1
+    pass runs marked tests and nothing else, so a guard marked without its control
+    is a guard whose non-vacuity nobody checks in the one pass that may never be
+    skipped. This asserts nothing about `app.db` — the engine here is built with
+    no options — so it cannot fail for a product reason; what it can do is say
+    that the search below has gone blind.
 
     Not a test of `app.db` at all — the engine here is built with no options, so
     nothing in this file's subject can affect the answer. What it establishes is
@@ -507,6 +515,7 @@ def test_the_log_capture_sees_a_bound_parameter_when_nothing_is_hiding_it(
     )
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_no_bound_parameter_reaches_the_log_outside_development(
     configured_env: dict[str, str],
@@ -547,6 +556,11 @@ def test_no_bound_parameter_reaches_the_log_outside_development(
     `engine_options`, which leaves `not engine.echo` green above. **The near miss
     that must stay green:** hiding parameters in development too, which is
     stricter than the ticket asks and is nobody's defect.
+
+    **Marked `invariant` by E0-41.** From E0-05 these parameters are survey
+    answers and free-text comments, so this is §4 and §10 in the one place §4.1's
+    views and grants do not reach: a log stream the deployment ships somewhere
+    else. It was correct and skippable, and the isolated pass never ran it.
     """
     monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
     monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)
@@ -578,11 +592,17 @@ def test_no_bound_parameter_reaches_the_log_outside_development(
     )
 
 
+@pytest.mark.invariant
 def test_the_log_capture_sees_a_result_row_that_hide_parameters_does_not_cover(
     caplog: pytest.LogCaptureFixture,
     restored_sqlalchemy_logging: None,
 ) -> None:
     """The control for the test below, and the premise of the finding it is written against.
+
+    **Marked `invariant` by E0-41, with the guard it controls**, for the reason
+    the parameter control above gives: the isolated §4.1 pass collects marked
+    tests only, and a guard whose control was not collected is a guard nothing in
+    that pass can tell from a broken capture.
 
     Two things at once, and the second is why this is not only plumbing.
 
@@ -626,6 +646,7 @@ def test_the_log_capture_sees_a_result_row_that_hide_parameters_does_not_cover(
     )
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize(("environment", "log_level"), NON_DEVELOPMENT_ENVIRONMENTS)
 def test_no_result_row_reaches_the_log_outside_development(
     configured_env: dict[str, str],
@@ -674,6 +695,11 @@ def test_no_result_row_reaches_the_log_outside_development(
     function did when this was written. **The near miss that must stay green:**
     pinning the child by any route — directly, or by pinning every logger under
     `sqlalchemy` — since nothing here reads how the pin is applied.
+
+    **Marked `invariant` by E0-41.** A result row from E0-05 is a survey answer or
+    a student's free-text comment written out in full (SPEC §10, §4.1), which is
+    the same disclosure the parameter guard covers arriving by the other
+    direction. Correct and skippable was the state this ticket found it in.
     """
     monkeypatch.setenv(ENVIRONMENT_VARIABLE, environment)
     monkeypatch.setenv(LOG_LEVEL_VARIABLE, log_level)

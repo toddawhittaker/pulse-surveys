@@ -6,8 +6,8 @@ from the provider's token endpoint. In both cases the tool holds no key — it
 fetches the issuer's published JWK Set and checks the signature against it.
 
 **This is not one of SPEC §8's identity-separated read paths, so it is one
-function rather than two.** The duplication `CLAUDE.md` insists on is between
-paths that reach a *name*; this reaches a signature. Two copies of a signature
+function rather than two.** The duplication that section's separation requires is
+between paths that reach a *name*; this reaches a signature. Two copies of a signature
 check is two places for the `verify_signature=False` that somebody adds while
 debugging, which is the failure worth designing against here.
 

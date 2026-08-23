@@ -76,18 +76,33 @@ def client_for(application: Any) -> Any:
     return TestClient(application)
 
 
+@pytest.mark.invariant
 def test_the_dev_console_is_not_served_outside_development(
     configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """**Dies if the `/dev` gate is dropped or inverted** — the become-any-user guard.
 
+    **Marked `invariant` by E0-41.** Served in production this page walks past §4
+    and §6.2 together: whoever asks becomes the Care role, and the Care role is the
+    one that can re-identify a student. The gate was already asserted and already
+    correct; what it was not was unskippable, and the isolated pass is what makes a
+    §4.1 assertion that.
+
+    The development-serves direction stays unmarked in
+    `tests/integration/test_dev_console.py`: it asserts a capability rather than a
+    denial, and the §4.1 pass is for the denials.
+
     The console lists every web-login person as a one-click sign-in link. Served in
     production it hands whoever asks a menu of identities to enter the product as,
     so the gate is the whole safety of the feature: `/dev` must 404 anywhere
     `ENVIRONMENT` is not exactly `"development"`, the way `/docs` does (E0-18, ADR
-    0074). The mutation this kills is the missing or reversed gate — a route
-    registered unconditionally, or one whose condition is written the wrong way
-    round.
+    0074). **The route is registered unconditionally and the gate is the
+    environment check inside the handler**, which answers 404 outside development
+    — ADR 0079, written in E0-42's batch, records that mechanism. So the mutation
+    this kills is that check going missing or being written the wrong way round,
+    and *not* a conditional registration: this route has none, and a docstring
+    naming a mechanism the code does not use sends the next reader looking in the
+    wrong place (found by E0-42's security pass).
 
     The `/healthz` control is what stops this passing on emptiness: an application
     answering 404 to everything — a `create_app()` that failed halfway, a client on

@@ -40,8 +40,25 @@ each router rather than a second place the vocabularies are known.
 visibility invariants and §6.2's Care surface both say what these screens may
 show; E0 computes none of it. So each page carries a heading naming the view, one
 line saying nothing is here yet, and no identifier of any kind — not even the
-signed-in person's own, which would be legitimate and which nothing needs. Two
-`@pytest.mark.invariant` tests hold the leadership and Care pages to it.
+signed-in person's own, which would be legitimate and which nothing needs.
+
+`@pytest.mark.invariant` tests hold four of the five pages to that, each asserted
+against the rendered body rather than a returned value, and each naming its own
+door's module:
+
+  - the **leadership** and **Care** pages, in
+    `tests/integration/test_web_login_door.py`: neither page names anybody but
+    the person signed in;
+  - the **student** and **instructor** pages, in
+    `tests/integration/test_the_launch_views_name_nobody.py`: neither page names
+    anybody but the person who launched, and neither carries a section code, a
+    course number or a roster count. E0-41 added that module because the launch
+    door — the only door a student enters through — had carried no
+    `invariant`-marked test at all, so the isolated §4.1 pass walked past the
+    student page entirely.
+
+The **admin** page has no `invariant`-marked test of its own; what covers it is
+the web door's ordinary dispatch tests.
 
 **This module is a named exception to E0-09's Care tripwire, and it was
 arbitrated rather than assumed.** E0-09 criterion 10 says no LTI claim and no

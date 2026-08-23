@@ -1,9 +1,9 @@
 """The one chokepoint every entry point passes through to read anything (SPEC §13).
 
-`CLAUDE.md` and SPEC §13 put it here: "`api/` routers stay thin and all real
-behavior lives in `services/`", with this module the single place an actor is
-turned into a scope and a scope is turned into a read. HTTP requests, Celery jobs
-and E9's MCP server all come through here or they do not read data.
+SPEC §13 puts it here: "`api/` routers stay thin and all real behavior lives in
+`services/`", with this module the single place an actor is turned into a scope
+and a scope is turned into a read. HTTP requests, Celery jobs and E9's MCP server
+all come through here or they do not read data.
 
 **SPEC §2.1 defines purview as a union, and this module builds only half of it.**
 "Purview(assignment) = own grant union the purviews of all assignments
@@ -741,7 +741,12 @@ class ScopedReader:
     apart — so the scope check lives here, once per view.
 
     Bypassing it means calling `app.views_sql.queries` directly, which is one
-    import and shows up in a diff as exactly what it is.
+    import — and E0-41 mechanised that. The sweep in
+    `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` fails any
+    module under `backend/app/` outside this one that makes that import, or that
+    runs SQL naming one of the three org views. Until then it was a property a
+    reviewer had to notice in a diff, and a property nothing executes is a
+    comment (`docs/MISTAKES.md` entry 9).
     """
 
     def __init__(self, session: Session, scope: ActorScope) -> None:
