@@ -35,7 +35,10 @@ skipped nonce — must not exist in real validation code; check that a habit fro
 classifier accepts the submission on provider timeout. Check that it fails open
 in the intended sense — the student is not blocked — and *not* in the sense of
 silently skipping a safety classification. Check that this pattern has not been
-copied anywhere else. Any other fail-open in this codebase is a defect.
+copied anywhere else. Any other fail-open in this codebase is a defect. Check
+the fail-closed direction too: a change that widens what counts as "timeout" —
+a 503, a connection refusal, a subclass crossing the line — moves failures into
+the fail-open path, and ADR 0056's floor is that only a timeout fails open.
 
 **Audit-write completeness on security-relevant paths.** An action that should
 leave a record and does not is a security defect here, not a logging nit.
