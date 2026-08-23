@@ -57,10 +57,15 @@ trips over rather than by what saves it, which is not the same list.
 
 **A counter retires when its rule becomes mechanically enforced.** Once a test,
 a sweep or a CI gate enforces an entry's rule, the gate is the prevention and
-the counter stops: name the gate beside the count, and leave the entry here as
-the record of why the gate exists. That is the graduation path for every entry
-in this file, frozen or tail — a rule people have to remember becomes a rule
-they cannot break, and a tally of near misses has nothing left to measure.
+the counter stops, and the entry stays here as the record of why the gate
+exists. That is the graduation path for every entry in this file, frozen or
+tail — a rule people have to remember becomes a rule they cannot break, and a
+tally of near misses has nothing left to measure. **Retire a counter only on an
+executed gate, never on a judgement that one covers the entry.** The retirement
+note names the gate by path and test or job name, and names the case it was run
+against: the defect this entry describes, planted, and the gate seen failing on
+it. A gate nobody has watched fail against this entry's own defect is entry 9's
+mistake wearing a green tick, and it does not retire anything.
 
 **Adding an entry.** When something goes wrong, add `docs/mistakes/NN-slug.md`
 with what happened, the root cause, the consequence, and the rule; then add the

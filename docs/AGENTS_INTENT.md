@@ -38,7 +38,10 @@ five counters were frozen on 2026-08-23: their ranking had settled and the
 bookkeeping had begun costing a commit per batch, so they are kept as history
 and read exactly as before. Any counter also retires once a test, a sweep or a
 CI gate enforces its rule — the gate is the prevention from then on, and the
-entry stays as the record behind it.
+entry stays as the record behind it. Retiring one takes an executed gate rather
+than a judgement that some gate covers the entry: the note names the gate by
+path and test or job name, and names the case it was run against — this entry's
+own defect, planted, and the gate seen failing on it.
 Every entry cites a real incident. A rule with no incident behind it is advice,
 and advice belongs in `CLAUDE.md`.
 
