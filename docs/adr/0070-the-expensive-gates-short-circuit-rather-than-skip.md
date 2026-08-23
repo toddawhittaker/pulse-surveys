@@ -93,7 +93,7 @@ is loud rather than silent.
 
 ## Consequences
 
-- **A documentation-only run still costs six job schedules.** Each expensive job
+- **A documentation-only run still costs seven job schedules.** Each expensive job
   starts, checks out, prints a `::notice::` and exits. That is the price of the
   decision and it is a few seconds against the fifteen minutes it saves.
 
@@ -103,6 +103,13 @@ is loud rather than silent.
   scaffold lands it is an `npm ci` and a production build, the same order of cost
   as the rest. E0-38's security review found it unguarded and unnamed. It is
   guarded now.
+
+  **Seven since E0-40 (2026-08-22).** `Fast · tsc + eslint` became the seventh:
+  the ticket that pointed the node gates at the root `package.json` made them
+  cost an `npm ci`, so the same ticket put them behind the short-circuit and
+  under the same fidelity tests as the other six. The six-gate counts this
+  record carried in three places were corrected in that ticket's pull request;
+  the historical five-versus-six narration below stands as history.
 - **`skipped` keeps exactly one meaning**, so E0-36's verdict step needs no new
   case and the proof it was given against the real pipeline still holds.
 - **A green run now has two shapes**, and the checks interface does not
@@ -203,7 +210,7 @@ is loud rather than silent.
   it there, deferring it to the scratch-branch push. That was wrong: the push is
   a one-time act and the reversal needs a standing control, and the two are not
   substitutes. `COMPARISON` was discarding the operator in a non-capturing group;
-  it captures it now, and every work step of all six gates must be switched off
+  it captures it now, and every work step of all seven gates must be switched off
   by an inert diff rather than run only on one. On `evals` the reversed form
   disables SPEC §9.3's threat and self-harm recall floor, which makes this a
   safety gate rather than a tidiness one.

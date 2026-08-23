@@ -220,7 +220,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       frontend: ${{ steps.d.outputs.frontend }}
-      e2e: ${{ steps.d.outputs.e2e }}
+      node: ${{ steps.d.outputs.node }}
       evals: ${{ steps.d.outputs.evals }}
     steps:
       - uses: actions/checkout@v4
@@ -248,17 +248,33 @@ jobs:
           # `python -m tests.evals.runner` needs, was the one file it could not
           # see, and SPEC §9.3's threat and self-harm recall floor is what the
           # job runs.
+          #
+          # The third instance, and the first that was live, is E0-40. There is
+          # one Node tree in this repository and it is at the root: PR #61
+          # committed `package.json`, `package-lock.json`, `playwright.config.ts`
+          # and the §9.2 specs there. `npm audit`, the licence scan, `tsc` and
+          # `eslint` all asked `frontend/package.json`, which does not exist and
+          # is not due until E1, so four gates reported green over a tree they
+          # never read. So there are two questions here and they are asked
+          # separately: `node` is the root manifest and gates those four, and
+          # `frontend` is the E1 manifest and gates the production build and the
+          # bundle budget, which are still legitimately waiting for the scaffold.
+          # A single probe answering both would put `npm run build` in a
+          # directory that is not there.
           echo "Probing repository layout (SPEC §13):"
+          if [ -f package.json ]; then emit node true; else emit node false; fi
           if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
-          # `find` rather than a glob: it descends without a shell option, so it
-          # cannot degrade quietly the way `**` did. There is no fixed filename
-          # to name here — a spec may be called anything.
-          if [ -n "$(find tests/e2e -name '*.spec.ts' -print -quit 2>/dev/null)" ]; then emit e2e true; else emit e2e false; fi
-          # The exact module the job imports, in the shape the `frontend` probe
-          # already uses. Stricter than "some Python exists under tests/evals",
+          # The exact module the job imports, in the shape the manifest probes
+          # already use. Stricter than "some Python exists under tests/evals",
           # and deliberately: a tree with `__init__.py` and no runner would make
           # that glob answer true and the job then fails on the import.
           if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
+          #
+          # There is deliberately no `e2e` probe. PR #61 made the Playwright gate
+          # unconditional on the specs being present, so nothing consumed that
+          # output; a boolean nobody reads is a probe whose wrongness has no
+          # symptom, which is the failure this comment's first paragraph is
+          # about. E0-40 decision 5 removed it.
 
   # ==========================================================================
   # FAST GATES — everything else waits on these.
@@ -340,37 +356,55 @@ jobs:
             "tests/unit/test_mock_lms_service.py::test_no_private_key_material_is_committed_to_the_repository" \
             "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one"
 
+  # The job keeps its id and its display name. Branch protection's required-check
+  # list keys on the display name, and renaming it is a change to that list
+  # rather than to this file — deliberately out of scope for E0-40 (decision 7),
+  # so "frontend" in the name below is stale wording and not an oversight.
+  #
+  # What changed is what it reads. `tsc` and `eslint` ran in `frontend/` on
+  # `detect.outputs.frontend`, a directory that does not exist; they now run at
+  # the repository root on `detect.outputs.node`, over `playwright.config.ts` and
+  # the §9.2 specs, which is the TypeScript this repository actually holds.
+  #
+  # And the job joins E0-38's documentation-only short-circuit. Its exemption was
+  # justified by being free — with the frontend probe false every step switched
+  # itself off — and E0-40 is what makes it cost an `npm ci` plus two checkers on
+  # every pull request. A documentation-only diff changes no TypeScript and no
+  # manifest, so it is exactly the diff these checkers have nothing to read.
   lint-frontend:
     name: Fast · tsc + eslint
-    needs: detect
+    needs: [changed, detect]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Documentation-only diff — nothing was type-checked
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so tsc and eslint did not run."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
       - name: Nothing to check yet
-        if: needs.detect.outputs.frontend != 'true'
-        run: echo "::notice::No frontend/package.json yet — tsc and eslint have nothing to check. Enforcing once the frontend scaffold lands."
+        if: needs.detect.outputs.node != 'true' && needs.changed.outputs.inert != 'true'
+        run: echo "::notice::No package.json at the repository root — tsc and eslint have nothing to check."
 
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.frontend == 'true'
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install (lockfile, exact)
-        if: needs.detect.outputs.frontend == 'true'
-        working-directory: frontend
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
         run: npm ci
 
       - name: tsc --noEmit
-        if: needs.detect.outputs.frontend == 'true'
-        working-directory: frontend
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
         run: npx tsc --noEmit
 
       - name: eslint
-        if: needs.detect.outputs.frontend == 'true'
-        working-directory: frontend
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
         run: npx eslint . --max-warnings=0
 
   # Enforcing since e0/db-session-alembic (E0-04): `backend/alembic.ini` and the
@@ -575,13 +609,14 @@ jobs:
           if-no-files-found: warn
 
   # Enforcing since E0-18: the first §9.2 Playwright specs exist, so this gate
-  # runs the suite on every non-inert diff. There is no `detect.outputs.e2e`
-  # find-and-skip any more — an empty `tests/e2e` fails loudly rather than
-  # switching the gate off (E0-38's inert-diff skip is the only tolerance left).
+  # runs the suite on every non-inert diff. There is no find-and-skip on the
+  # specs any more — an empty `tests/e2e` fails loudly rather than switching the
+  # gate off (E0-38's inert-diff skip is the only tolerance left).
   #
-  # The `detect` job still probes for e2e specs and a test pins that probe to the
-  # files this job runs, but this job no longer reads the answer: with specs
-  # committed the gate is unconditional on their presence, exactly as §9.2 wants.
+  # The `detect` job no longer probes for e2e specs either. It emitted a boolean
+  # this job stopped reading when the gate became unconditional, and a probe
+  # nothing consults is one whose wrongness has no symptom, so E0-40 decision 5
+  # removed the output rather than leaving it to be wired to something later.
   #
   # The stack is brought up here and the database is migrated and seeded
   # host-side, mirroring the `migration-drift` job: the runtime image carries
@@ -855,12 +890,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The sixth expensive job. It is free today only because
+      # The sixth expensive job of the seven. It is free today only because
       # `detect.outputs.frontend` is false and there is no frontend to build;
       # once the scaffold lands it is an `npm ci` and a production build, which
-      # is the same order of cost as the other five. E0-38's security review
-      # found it guarded by neither the ticket, the ADR nor the pull request
-      # body, all three of which said five.
+      # is the same order of cost as the others. E0-38's security review found it
+      # guarded by neither the ticket, the ADR nor the pull request body, all
+      # three of which said five.
+      #
+      # This job keeps the `frontend` probe, and that is the half of E0-40 that
+      # is easy to lose: the split is only honest while the two probes stay
+      # different questions. A blanket rename of `detect.outputs.frontend` to
+      # `detect.outputs.node` — which is how this file has been edited before —
+      # would point `npm run build` at a directory that holds no application.
       - name: Inert diff, so the frontend build did not run
         if: needs.changed.outputs.inert == 'true'
         run: echo "::notice::Every changed path is inert documentation (E0-38), so no frontend bundle was built."
@@ -922,26 +963,29 @@ jobs:
         if: needs.changed.outputs.inert != 'true'
         run: pip-audit --strict --desc -r requirements.txt -r requirements-dev.txt
 
+      # The Node half runs at the repository root, on `detect.outputs.node`. It
+      # asked `detect.outputs.frontend` until E0-40 — a path that does not exist
+      # — so `npm audit` and the licence scan reported green having read nothing
+      # since PR #61 committed the root manifest. The audit runs clean at the
+      # root today; CI simply never called it.
       - uses: actions/setup-node@v4
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # One install for both Node steps below. The licence scanner is a pinned
+      # devDependency in this lockfile, not an `npx --yes` fetch resolving latest
+      # at run time (CLAUDE.md's pin rule), so its binary has to be on disk
+      # before the scan resolves it — and `npm audit` reads the same closure.
+      - name: Install the root Node closure (locked)
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        run: npm ci
 
       - name: npm audit (fail on high/critical)
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
-        working-directory: frontend
-        run: |
-          npm ci
-          npm audit --audit-level=high
-
-      # The npm licence scanner is a pinned devDependency in the root
-      # package-lock.json now, not an `npx --yes` fetch resolving latest at run
-      # time (CLAUDE.md's pin rule). Install the root closure so its binary is on
-      # disk before the scan below resolves it; gated with the scan, since the
-      # scan only runs when there is a frontend tree to read.
-      - name: Install the licence scanner (locked)
-        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
-        run: npm ci
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        run: npm audit --audit-level=high
 
       # pip-licenses reads installed distributions, so the runtime closure has
       # to be on disk. The runtime lock and not the dev one: test dependencies
@@ -961,8 +1005,8 @@ jobs:
           mkdir -p reports
           pip-licenses --format=json --with-urls > reports/py-licenses.json
           ARGS="--python-json reports/py-licenses.json"
-          if [ "${{ needs.detect.outputs.frontend }}" = "true" ]; then
-            (cd frontend && npx license-checker-rseidelsohn --json > ../reports/npm-licenses.json)
+          if [ "${{ needs.detect.outputs.node }}" = "true" ]; then
+            npx license-checker-rseidelsohn --json > reports/npm-licenses.json
             ARGS="$ARGS --npm-json reports/npm-licenses.json"
           fi
           python scripts/ci/check_licenses.py $ARGS
