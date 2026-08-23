@@ -42,11 +42,18 @@ here.
 threat queue, kept isolated so safety re-identification never rides alongside
 routine oversight access." `Purview` is six sets of org-node ids and has nowhere
 to put a capability, so no union can ever pick one up; `ActorScope.holds_care` is
-where the answer lives, and `holds_care` below is the one place that computes it.
-E0-10's Care service asks this module rather than reading a claim: an actor holds
-Care because they hold a live `CARE` role assignment, never because of anything
-an LTI or OIDC claim says, since the platform administrator controls what a claim
-says.
+where the answer lives for this module's own callers, and `holds_care` below
+computes it here — but "here" is deliberately not the only place. This module
+reads `public.assignment_scope` over the `pulse_app` pool; `app.services.safety`
+carries its own copy of the same predicate over `public.role_assignment` on the
+separate `pulse_care` pool (ADR 0042), because the two pools hold different
+grants and neither can borrow the other's; and `public.reveal_student_identity`
+checks it a third time in the database, against a record that could be stale by
+the time it is spent. Three statements of one rule, not one computed here and
+asked elsewhere — `app.services.safety` is where the three are named and kept
+in step (`docs/MISTAKES.md` entry 13). An actor holds Care because they hold a
+live `CARE` role assignment, never because of anything an LTI or OIDC claim
+says, since the platform administrator controls what a claim says.
 
 **Every read here goes through a view, and none of them can reach identity.**
 SPEC §8: "instructor/leadership read paths go through views that structurally
