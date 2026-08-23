@@ -1,10 +1,25 @@
 # 0025 — An assignment's scope is one nullable foreign key per containment level
 
-**Status:** Accepted
+**Status:** Accepted — **context amended 2026-08-22** (E0-42); the decision is
+unchanged and the spec now states it
 **Date:** 2026-08-16
 **Tickets:** E0-09
 
 ## Context
+
+> **Amended 2026-08-22.** The two paragraphs below quote SPEC §8 as it read when
+> this was written. **It no longer reads that way**: `58064c4` (2026-08-18)
+> rewrote that line to describe the scope as "one nullable foreign key per
+> containment level — `institution_id`, `college_id`, `department_id`,
+> `course_id`, `section_id` — of which exactly one is non-null", to say there is
+> no unified scope-node table and therefore no single `scope_node_id`, and to say
+> why there is deliberately no `prefix_id`. So the spec no longer names a column
+> that does not exist, and this record is no longer the only place the rule
+> lives. The quotes are kept because the choice this record made is only
+> intelligible against the sentence that forced it. What remains contestable, and
+> so still this record's own, is the shape: five nullable columns with real
+> foreign keys, rather than the kind-plus-opaque-id or the unified `org_node`
+> table rejected below.
 
 [SPEC §8](../SPEC.md) says an assignment carries "`person_id`, `role`,
 `scope_node_id`, and a nullable `reports_to`", and [§2.1](../SPEC.md) gives each

@@ -1,8 +1,14 @@
 # E0 — Foundations: build order
 
-Thirty-eight tickets decomposing the E0 tickets in SPEC §14.3. Each is sized for a
-single focused session and leaves the repository in a working state: CI green,
-Compose stack healthy, nothing half-wired at a boundary.
+Forty-two tickets: thirty-eight decomposing the E0 tickets in SPEC §14.3, plus
+Batch I's four, which came out of the epic-boundary reviews rather than out of
+§14.3. Each is sized for a single focused session and leaves the repository in a
+working state: CI green, Compose stack healthy, nothing half-wired at a boundary.
+
+**Everything numbered 01 to 38 is merged as of 2026-08-22**, including ticket 18
+and all four of the batches E, F, G and H that the 2026-08-20 exit scope required
+to land first. Batch I is the work in flight; the four rows at the bottom of the
+table say what it is.
 
 Say **"build E0, ticket 3"** and it means E0-03.
 
@@ -35,8 +41,8 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 15 | [Mock LMS: NRPS, AGS, and seed data](E0-15-mock-lms-nrps-ags.md) | 14 | Paged roster service, line items and score posting, seed courses with mid-term adds and drops. |
 | 16 | [Mock OIDC identity provider](E0-16-mock-idp.md) | 02, 08 | Discovery, authorize, token, JWKS, PKCE, seeded leadership, Care, and admin users. |
 | 17 | [Demo seed script](E0-17-seed-script.md) | 07, 09, 15 | Idempotent demo institution including the assistant dean, a two-hat person, and sibling leads. |
-| 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | First Playwright paths through launch and web login; turns on the e2e gate; E0 exit checklist. |
-| 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | **Batch G.** Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. Already one coherent batch; nothing moved. |
+| 18 | [E0 exit: both doors, end to end](E0-18-e0-exit-smoke.md) | 11, 13, 15, 16, 17 | **Merged 2026-08-21 in two pull requests — #57, both doors and the four routes; #61, the Playwright specs and the e2e gate turned enforcing.** PR #62 rode alongside without a ticket and added the development-only `/dev` console (ADR 0079). Four items go on to E1 through `docs/tickets/e1/carried-from-e0.md`. |
+| 19 | [Compose credential surface](E0-19-compose-credential-surface.md) | 02, 03 | **Batch G — merged 2026-08-22 as PR #65.** Four routes to the ADR 0009 bound — host-mount allowlist, named volumes resolved through `driver_opts`, literal values in `.env.example`, unnormalised bind sources — plus the ADR for E0-03's three closed-set rules. Already one coherent batch; nothing moved. |
 | 20 | [Gate fidelity](E0-20-gate-fidelity.md) | 04 | **Redistributed — not built as written.** Its measurements stay here and its items are now 33, 36 and 37. Read it for the mutation tables, not for the work. |
 | 21 | [Review debt from E0-05](E0-21-review-debt.md) | 05 | **Redistributed — not built as written.** Item 1 is now 35, item 2 is now 37. Keeps the record of Todd's `course.lms_title` decision and its three-part cost. |
 | 22 | [Two spec questions from E0-05's review](E0-22-spec-questions-from-e0-05.md) | 05 | **Done 2026-08-20.** Both spec edits landed 2026-08-18 and the constraint is built: `uq_institution_one_row`, a unique index on `(true)` (ADR 0072). It reached 41 tests that built an institution per containment chain and both of the demo seed's foreign-institution scenarios. §4.1 item 7's test is E4's. |
@@ -45,17 +51,25 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 | 25 | [Review debt from E0-09, E0-12 and E0-14](E0-25-review-debt-from-e0-09-to-e0-14.md) | 09, 12, 14 | Item 1 is now 36; items 2 and 3 are now 37; items 4 and 6 are **closed**. Item 5 leaves the epic. Keeps the complete index of what the three reviews produced. |
 | 26 | [Review debt from E0-10](E0-26-review-debt-from-e0-10.md) | 10 | **Nothing moved — nothing here batches.** Item 1 is a live gap in SPEC §4's logging guarantee; the mechanism was decided on 2026-08-18 — the reveal returns nothing until a separately committed record exists. **Scheduled 2026-08-20: it is built inside this epic, before 18**, rather than carried to E10, and it gets the full review treatment including a session with no prior context. Item 5's draft spec line is in the ticket, awaiting Todd. Items 2 to 4 leave the epic with E10. |
 | 27 | [Review debt from E0-11](E0-27-review-debt-from-e0-11.md) | 11 | **Redistributed — not built as written.** Item 1 is now 35, item 2 is now 34, item 3 is **closed**. Keeps the record of E0-11's round, including the invented-statements note. |
-| 28 | [Review debt from E0-15](E0-28-review-debt-from-e0-15.md) | 15 | **Batch E.** Eight items in `mock-lms/app/`, each with a reproduction in PR #31. Item 6 is Todd's and changes what the batch costs; item 8 is **closed**. |
+| 28 | [Review debt from E0-15](E0-28-review-debt-from-e0-15.md) | 15 | **Batch E — merged 2026-08-21 as PR #64.** Eight items in `mock-lms/app/`, each with a reproduction in PR #31. Item 6 is Todd's and changes what the batch costs; item 8 is **closed**. Item 1 seeded a member carrying no enrollment window, and Todd settled the denominator that member needs in SPEC §3.4 on 2026-08-21 rather than leaving it to E1. |
 | 29 | [Review debt from E0-13](E0-29-review-debt-from-e0-13.md) | 13 | Items 1a and 1b were decided 2026-08-18 and **land in Batch H as items 12 and 13** (2026-08-20); 4b and 4c are now 36; item 3 is **closed**. Item 4a stays as a recorded decision; items 2 and 5 leave the epic. |
-| 30 | [Review debt from E0-16](E0-30-review-debt-from-e0-16.md) | 16 | **Batch F.** RFC 6749 §4.1.2.1 error redirects, which E1's callback error branch and E0-18's Playwright path both need and neither can reach, plus ADR 0062's three limits, the Compose redirect URI E0-18 settles, and a strictness choice to affirm. |
+| 30 | [Review debt from E0-16](E0-30-review-debt-from-e0-16.md) | 16 | **Batch F — merged 2026-08-21 as PR #56.** RFC 6749 §4.1.2.1 error redirects, which E1's callback error branch and E0-18's Playwright path both need and neither can reach, plus ADR 0062's three limits, the Compose redirect URI E0-18 settles, and a strictness choice to affirm. |
 | 31 | [Review debt from E0-17](E0-31-review-debt-from-e0-17.md) | 17 | **Item 1 built 2026-08-19 — 18 is unblocked.** The `lti_platform` row for the mock LMS, written by the seed behind its development-environment guard, with ADR 0038 amended rather than falsified and ADR 0068 recording the cost. Item 2 is Todd's; items 3 and 4 are now 37; item 5 is **closed**. Nothing is left here. |
 | 32 | [Three gate gaps the reviewer self-test found](E0-32-gate-gaps-the-selftest-found.md) | 10 | **Redistributed — not built as written.** Item 1 is now 36; items 2 and 3 are now 34. |
-| 33 | [Assert the database objects `alembic check` never looks at](E0-33-catalog-drift-assertions.md) | 08, 10 | **Batch A.** One mechanism — read the object out of the catalog and compare — covering generated-column expressions, check-constraint expressions, exclusion constraints, roles, grants, views and function owners. Carries E0-20 items 3, 3a and 3b. |
-| 34 | [A view file that reads identity must fail on that ground](E0-34-view-file-identity-guards.md) | 10, 11 | **Batch B.** A `views_sql/*.sql` file joining `user_identity` passes the identity invariant vacuously and is caught only by a sweep whose message points at `public.` prefixes. Carries E0-32 items 2 and 3 and E0-27 item 2. |
-| 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C — built 2026-08-19.** Three rules held by a docstring, now three sweeps: an unmarked column on an LMS-owned table, a second assignment site for a section's derived calendar, and a module that writes an LMS-owned relation without naming `guard_write`. Closes E0-21 item 1, E0-24 item 2 and E0-27 item 1. ADR 0069 records the sweep-over-hook choice all three declined, ADR 0014 and ADR 0021 are amended, and one question is left open by decision: how a *sanctioned* writer satisfies the guard rule is E1's. |
-| 36 | [Gates that report green over something they did not look at](E0-36-ci-gate-fidelity.md) | 04 | **Batch D.** Five items in `ci.yml`, `scripts/ci/` and the `Makefile`, including the aggregate `CI` check that prints "All gates green" over a real `migration-drift` failure. Carries E0-20 items 1 and 2, E0-32 item 1, E0-25 item 1 and E0-29 items 4b and 4c. Produces two pull requests. |
-| 37 | [Thirteen small corrections](E0-37-small-corrections.md) | 05, 13, 17, 36, 38 | **Batch H.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, E0-31 items 3 and 4, E0-36's security review as item 9, E0-38's two open LOWs as items 10 and 11, and E0-29 items 1a and 1b as items 12 and 13. Item 12 withdraws a deployment shape the README currently documents as supported, which makes it the largest thing in the batch. Items 1 and 9 are the ones with a confidentiality consequence; item 9 is true of the image on disk today, which is why it depends on 36. Items 10 and 11 are defects in E0-38's guards rather than in the gate they protect, and neither has a live instance. |
+| 33 | [Assert the database objects `alembic check` never looks at](E0-33-catalog-drift-assertions.md) | 08, 10 | **Batch A — merged 2026-08-18 as PR #40.** One mechanism — read the object out of the catalog and compare — covering generated-column expressions, check-constraint expressions, exclusion constraints, roles, grants, views and function owners. Carries E0-20 items 3, 3a and 3b. |
+| 34 | [A view file that reads identity must fail on that ground](E0-34-view-file-identity-guards.md) | 10, 11 | **Batch B — merged 2026-08-18 as PR #42.** A `views_sql/*.sql` file joining `user_identity` passes the identity invariant vacuously and is caught only by a sweep whose message points at `public.` prefixes. Carries E0-32 items 2 and 3 and E0-27 item 2. |
+| 35 | [The writer nobody routed, and the column nobody marked](E0-35-the-writer-and-the-marker-nobody-routed.md) | 07, 11 | **Batch C — merged 2026-08-19 as PR #44.** Three rules held by a docstring, now three sweeps: an unmarked column on an LMS-owned table, a second assignment site for a section's derived calendar, and a module that writes an LMS-owned relation without naming `guard_write`. Closes E0-21 item 1, E0-24 item 2 and E0-27 item 1. ADR 0069 records the sweep-over-hook choice all three declined, ADR 0014 and ADR 0021 are amended, and one question is left open by decision: how a *sanctioned* writer satisfies the guard rule is E1's. |
+| 36 | [Gates that report green over something they did not look at](E0-36-ci-gate-fidelity.md) | 04 | **Batch D — merged 2026-08-19 as PR #45.** Five items in `ci.yml`, `scripts/ci/` and the `Makefile`, including the aggregate `CI` check that prints "All gates green" over a real `migration-drift` failure. Carries E0-20 items 1 and 2, E0-32 item 1, E0-25 item 1 and E0-29 items 4b and 4c. Produced the two pull requests it said it would: #45 for the five items, and #47 for E0-29 item 4b's licence-checker widening, which `CLAUDE.md` requires to ship alone. |
+| 37 | [Thirteen small corrections](E0-37-small-corrections.md) | 05, 13, 17, 36, 38 | **Batch H — merged 2026-08-22 as PR #66.** One line to twenty each, batched because tracking them costs more than fixing them. Carries E0-20 item 4 and its two smaller entries, E0-21 item 2, E0-25 items 2 and 3, E0-31 items 3 and 4, E0-36's security review as item 9, E0-38's two open LOWs as items 10 and 11, and E0-29 items 1a and 1b as items 12 and 13. Item 12 withdraws a deployment shape the README currently documents as supported, which makes it the largest thing in the batch. Items 1 and 9 are the ones with a confidentiality consequence; item 9 is true of the image on disk today, which is why it depends on 36. Items 10 and 11 are defects in E0-38's guards rather than in the gate they protect, and neither has a live instance. |
 | 38 | [A documentation-only change should not run the whole pipeline](E0-38-docs-only-runs-skip-the-heavy-gates.md) | 36 | **Batch D's sequel.** A Markdown-only pull request runs pytest, both image builds, Playwright, the evals and the supply-chain audit — about fifteen minutes of runner time to establish that no Python changed. Two traps: `test_ai_contracts.py` parses `docs/SPEC.md` at test time, and a path filter manufactures a second meaning for `skipped` that E0-36 item 1 must settle first. **Built and merged 2026-08-20** as PR #48, commit `e7cd892`, after three review passes of which the third was the first independent one. Its two remaining LOWs are E0-37 items 10 and 11; nothing else is left here. |
+| 39 | `E0-39-the-configuration-trusts-the-mock-idp.md` | 16, 18 | **Batch I, built 2026-08-22 from the epic-boundary threat model.** Branch `e0/mock-idp-default-trust`. `app/config.py`'s defaults name the mock identity provider as the trusted issuer, token endpoint, key set and client id, so a base-only deployment trusts a signing oracle for fake Care and Admin identities. Owns ADR 0077 and the amendment to ADR 0075. |
+| 40 | `E0-40-four-gates-probe-a-path-that-does-not-exist.md` | 18, 36 | **Batch I, built 2026-08-22 from the epic-boundary exit review.** Branch `e0/gate-fidelity`. PR #61 put the repository's first `package.json` and TypeScript at the root while every Node-facing gate still probes `frontend/`, so all of them report green over a tree they never read — a second live instance of `docs/MISTAKES.md` entry 36, plus three smaller findings on the same subject. |
+| 41 | `E0-41-read-paths-the-invariant-suite-never-touches.md` | 18, 26, 33 | **Batch I, built 2026-08-22 from the epic-boundary coverage audit.** Branch `e0/invariant-coverage-gaps`. The isolated §4.1 pass covers the read paths somebody thought of: the LTI launch door carries no invariant-marked test at all, and neither does `safety.reveal_identity`, the single application-code path to a student's name. |
+| 42 | [The records the epic falsified](E0-42-the-records-the-epic-falsified.md) | nothing unmerged | **Batch I, built 2026-08-22 from all three epic-boundary reviews.** Branch `e0/boundary-docs-sweep`. Documentation only: the indexes, records and citations the epic falsified, plus ADR 0078 and ADR 0079 for two decisions that shipped in a docstring. |
+
+Batch I's other three ticket files land with their own branches, so the rows
+above name them rather than linking them; the links can be made once all four
+branches are on the epic branch.
 
 ## Dependency graph
 
@@ -72,15 +86,20 @@ request model (#1, #2), the secrets policy (#3), and the CI pipeline with
 
                      31 item 1 ─────────────────── ┘   (was the only blocker on 18; built)
 
-08, 10 ── 33        Batch A — catalog comparison
-10, 11 ── 34        Batch B — view files that read identity
-07, 11 ── 35        Batch C — the writer and the marker sweeps (built)
-04 ── 36            Batch D — the pipeline itself
-02, 03 ── 19        Batch G — Compose credential surface
-15 ── 28            Batch E — mock LMS conformance
-16 ── 30            Batch F — mock IdP error redirects
-05, 13, 17, 36, 38 ─ 37  Batch H — thirteen small corrections
-36 ── 38            after Batch D, and the dependency is real rather than tidy
+08, 10 ── 33        Batch A — catalog comparison (merged)
+10, 11 ── 34        Batch B — view files that read identity (merged)
+07, 11 ── 35        Batch C — the writer and the marker sweeps (merged)
+04 ── 36            Batch D — the pipeline itself (merged)
+02, 03 ── 19        Batch G — Compose credential surface (merged)
+15 ── 28            Batch E — mock LMS conformance (merged)
+16 ── 30            Batch F — mock IdP error redirects (merged)
+05, 13, 17, 36, 38 ─ 37  Batch H — thirteen small corrections (merged)
+36 ── 38            after Batch D, and the dependency is real rather than tidy (merged)
+
+16, 18 ── 39        Batch I — the mock IdP's default trust
+18, 36 ── 40        Batch I — the gates that probe frontend/
+18, 26, 33 ── 41    Batch I — read paths with no invariant marker
+        42          Batch I — the records the epic falsified (this file among them)
 
 20, 21, 27, 32      redistributed; read for their measurements, do not build
 22, 23              Todd's, and 22's first question has an E4 deadline
@@ -106,34 +125,29 @@ here.
 
 | Batch | Ticket | Where the work is | Size |
 |---|---|---|---|
-| A | 33 | a new integration module reading `pg_catalog` | medium |
-| B | 34 | `views_sql/` and the identity-marker sweep | small |
-| C | 35 | a sweep in the shape of the read-side one | medium — **built 2026-08-19** |
-| D | 36 | `ci.yml`, `scripts/ci/`, the `Makefile` | medium |
-| E | 28 | `mock-lms/app/` | medium |
-| F | 30 | `mock-idp/app/` | medium |
-| G | 19 | `tests/unit/test_compose_stack.py` and its neighbour | medium |
-| H | 37 | a dozen files, one to twenty lines each, plus two guard corrections in E0-38's test module and the AI transport rule in `config.py` | small, except item 12 |
-| — | 38 | `ci.yml` again, **after** 36 | small |
+| A | 33 | a new integration module reading `pg_catalog` | medium — **merged 2026-08-18, PR #40** |
+| B | 34 | `views_sql/` and the identity-marker sweep | small — **merged 2026-08-18, PR #42** |
+| C | 35 | a sweep in the shape of the read-side one | medium — **merged 2026-08-19, PR #44** |
+| D | 36 | `ci.yml`, `scripts/ci/`, the `Makefile` | medium — **merged 2026-08-19, PRs #45 and #47** |
+| E | 28 | `mock-lms/app/` | medium — **merged 2026-08-21, PR #64** |
+| F | 30 | `mock-idp/app/` | medium — **merged 2026-08-21, PR #56** |
+| G | 19 | `tests/unit/test_compose_stack.py` and its neighbour | medium — **merged 2026-08-22, PR #65** |
+| H | 37 | a dozen files, one to twenty lines each, plus two guard corrections in E0-38's test module and the AI transport rule in `config.py` | small, except item 12 — **merged 2026-08-22, PR #66** |
+| — | 38 | `ci.yml` again, **after** 36 | small — **merged 2026-08-20, PR #48** |
+| I | 39, 40, 41, 42 | `app/config.py` and ADR 0077; the Node-facing gates; the §4.1 marker coverage; and this documentation sweep | **built 2026-08-22**, four parallel branches |
 
-**Suggested order: A and B first, as one sitting.** They are the same subject —
-the identity separation the whole of §4.1 rests on has no assertion over the
-objects that implement it — they are both cheap, and B is the smaller half of a
-hole A does not reach. Then **31 item 1 and then 18**, which is the only path to
-the epic actually exiting. Everything after that can land in any order.
+**The order this section used to recommend has been run.** A and B went first as
+one sitting, then 31 item 1, then 18; E0-26 item 1 and E0-22's constraint landed
+before it, and E, F, G and H all landed before the epic goes to `main`, which is
+what the 2026-08-20 exit scope required. The review debt E0 generated ended with
+E0 rather than being handed on. Batch I is what the three epic-boundary reviews
+found on 2026-08-22, after all of that was merged.
 
-**A, B, C, D, 38, 31 item 1 and 22 are done as of 2026-08-20.** The order from
-here was settled on 2026-08-20: **E0-26 item 1, then E0-22's constraint, then
-18**, and then E, F, G and H in any order. The first two are done, so **18 is
-next**. **All four batches land before the epic merges
-to `main`** — the review debt E0 generated ends with E0 rather than being handed
-on.
-
-E0-26 item 1 goes first even though it blocks nothing, because it is the only
-open item whose subject is a measured hole in a guarantee the spec states, and
-everything it needs exists today. Of the four batches, **F is worth doing early**:
-E1's login error branch cannot be tested until the mock identity provider sends
-error redirects.
+Batch I's four tickets are independent of one another and were dispatched to four
+worktrees at once. Two of them touch a file no other batch does; E0-42 touches
+only `docs/` and `CONTRIBUTING.md`, and E0-39 owns ADR 0077 and `.env.example`, so
+the file-ownership boundaries are stated in each ticket rather than negotiated
+while they build.
 
 **A and B are the two batches where the thing being protected is the
 confidentiality model rather than a convenience.** Two of A's mutations —
@@ -154,12 +168,17 @@ One thing it deliberately left for E0-18: the mock registration carries no
 person. Provisioning the person a launch names is E1's by SPEC §14.3, and what
 E0-18's Playwright path lands on is E0-18's to decide.
 
-### Deadlines that are not blockers
+### Deadlines that are not blockers — all of them now met inside E0
 
-- **E0-30 item 1** is not a blocker and is the worst to defer. E1's OIDC callback
-  has an error branch this mock makes unreachable, so leaving it means E1 ships
-  that branch untested or does not ship it — and the case it handles, the user
-  cancelling, is the one that actually occurs.
+Every deadline below was a thing E0 could have handed to a later epic and did
+not. They are kept here with what closed each one, because the argument for
+closing them inside the epic is the argument for the exit scope above.
+
+- **E0-30 item 1** was the worst to defer: E1's OIDC callback has an error branch
+  the mock made unreachable, so leaving it meant E1 shipping that branch untested
+  — and the case it handles, the user cancelling, is the one that actually
+  occurs. **Closed 2026-08-21 in Batch F (PR #56)**: a refusal now arrives as a
+  redirect carrying `error` and the `state` that was sent.
 - **E0-35 and E0-28 item 1** both land on E1's roster sync from opposite sides.
   That sync is the first code to write all four relations the E0-11 chokepoint
   refuses, and it is also the code that reads the enrollment windows E0-15 puts
@@ -168,16 +187,22 @@ E0-18's Playwright path lands on is E0-18's to decide.
   relations without naming `guard_write`. What it inherits instead is the
   question that sweep leaves open by decision: `guard_write(table="course")`
   refuses unconditionally, so nothing records how a *sanctioned* writer satisfies
-  the rule, and ADR 0069 hands the mechanism to E1 with a "done when". E0-28
-  item 1 is unchanged.
-- **E0-22 question 1** is a confidentiality rule that is currently unenforced,
-  and E4 builds the reports it governs.
-- **E0-26 item 1** is a measured gap in SPEC §4's logging guarantee rather than
-  hardening: a caller holding the Care credential who rolls back keeps the
-  student's name and leaves no audit row. Nothing in E0 opens that door, and it
-  had to close before E10 builds the queue that calls it. **As of 2026-08-20 it is
-  no longer a deferred deadline** — it is the next thing built in this epic.
-- **E0-23** blocks nothing here and E1's sync cannot be built without it.
+  the rule, and ADR 0069 hands the mechanism to E1 with a "done when". **E0-28
+  item 1 landed 2026-08-21 in Batch E (PR #64)**: one seeded member now carries no
+  enrollment window at all, so E1 meets that branch in a fixture, and Todd settled
+  what the participation denominator does with it in SPEC §3.4 the same day.
+- **E0-22 question 1** is a confidentiality rule that is still unenforced, and E4
+  builds the reports it governs. Its rule is in the spec — §4.1 item 7, whose
+  preamble names it as one of the two invariants carrying no assertion yet.
+- **E0-26 item 1** was a measured gap in SPEC §4's logging guarantee rather than
+  hardening: a caller holding the Care credential who rolls back kept the
+  student's name and left no audit row. **Closed 2026-08-20 (PR #53, ADR 0071)**,
+  before ticket 18 and long before E10 builds the queue that calls it. What it
+  created in closing — a committed record that can be spent more than once — is in
+  the carried-out table below with E10.
+- **E0-23** blocked nothing here and E1's sync cannot be built without it. **SPEC
+  §7.3 carries the answer since 2026-08-18**; the column that stores the service
+  address is E1's, built with the sync that reads it.
 
 ## Carried out of E0
 
@@ -235,10 +260,11 @@ What two of them left behind is *code*, and it is owned:
   two invariants that carry no assertion, rather than claiming all seven do.
 - **E0-23's stored service address is E1's**, built with the sync that reads it.
 
-One answer still wants an existing record amended in the pull request that
-implements it: **ADR 0056**, for E0-29 items 1a and 1b. ADR 0038 was amended with
-E0-31 item 1 on 2026-08-19, and ADR 0017 was amended with E0-22's spec edit;
-neither needs anything further.
+Every answer that wanted an existing record amended has had it. **ADR 0056** was
+amended by Batch H on 2026-08-22 for E0-29 items 1a and 1b — item 12 closed the
+keyless-cleartext allowance and item 13 recorded why HTTP 429 and 500 stay outside
+the fail-open set. ADR 0038 was amended with E0-31 item 1 on 2026-08-19, and ADR
+0017 with E0-22's spec edit; neither needs anything further.
 
 ### Decided 2026-08-20 — where the answered work goes, and what the epic owes
 
@@ -259,6 +285,12 @@ carrying the four batches into E1, which would have reached `main` sooner at the
 cost of handing the next epic the largest pile of debt E0 has produced. The
 carried-out table above stays what it is — those items genuinely cannot be built
 here; nothing was added to it by this decision.
+
+**That scope was met.** F merged 2026-08-21 (#56), E on 2026-08-21 (#64), G and H
+on 2026-08-22 (#65, #66), all after ticket 18. What stands between the epic and
+`main` now is Batch I, which nothing above anticipated: the three epic-boundary
+reviews were run once everything else was merged, and each found something in
+work that had already passed its own review.
 
 ## What the built tickets settled
 
@@ -400,7 +432,14 @@ break collection, and `pytests` goes back to `false` with a green check. Ticket
 unconditionally, and the `detect` job no longer probes for either.
 
 The frontend gates (`tsc`, `eslint`, production build, bundle budget) stay
-tolerant through all of E0. No frontend exists until E1.
+tolerant through all of E0, because the application frontend arrives in E1.
+**That is not the same as there being no TypeScript**, and the difference is
+what E0-40 exists to fix: PR #61 committed the repository's first `package.json`,
+`package-lock.json` and `playwright.config.ts` — at the repository root, with the
+three Playwright specs beside the Python suite — while every Node-facing gate
+still asks about `frontend/`, a directory that does not exist, and answers that
+there is nothing to check. A tolerant gate and a gate looking in the wrong place print
+the same green line, which is `docs/MISTAKES.md` entry 36.
 
 ## Notes on the decomposition
 
@@ -433,7 +472,13 @@ Where this differs from the ticket list in §14.3, and why:
   Celery ticket in half, so they became a ticket, along with the ADR E0-03 owes
   for the three constraints it imposed on anyone editing a Compose file. It adds
   no behaviour and blocks nothing.
+- **39 to 42 are new, and came out of the epic boundary** rather than out of
+  §14.3 or out of a ticket's own review. Three reviews run after everything else
+  had merged — a threat model, an exit review and an invariant-coverage audit —
+  each found something in work that had already passed its own review round. That
+  is the argument for running them at the boundary at all, and it is why Batch I
+  exists after the exit scope above said the epic was finished.
 
 Where a branch name here differs from the *Ticket breakdown* line under E0 in
 SPEC §14.3, or from the three illustrative names in `CONTRIBUTING.md`'s diagram,
-these names win. §14.3 lists eight groupings, not twenty-five branches.
+these names win. §14.3 lists eight groupings, not one branch per ticket.

@@ -1,10 +1,22 @@
 # Entry 2. Behaviour shipped with nothing asserting it
 
-**Caught: 32**
+**Caught: 33**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*13 instances recorded; the 3 most recent are below. The earlier 10 are in this file's git history and in the pull requests they cite.*
+*14 instances recorded; the 3 most recent are below, newest first. The earlier 11 are in this file's git history and in the pull requests they cite.*
+
+*(Found while building E0-41 (Batch I, 2026-08-22; that ticket has not merged),
+where the subject is read paths the §4.1 invariant suite never touches — the LTI
+launch door and the service-layer reveal among them. Every sweep the ticket adds
+is written against **the forbidden state rather than the permitted one**, which is
+this entry's second sentence applied to a coverage gap rather than to a feature: a
+sweep saying "these modules are marked" goes green the day somebody deletes a
+module, while a sweep saying "no read path reaches identity unmarked" keeps
+working when a legitimate second read path arrives, and fails when an
+illegitimate one does. The distinction matters most here because the thing being
+asserted is *absence of coverage*, which is the easiest property in the world to
+satisfy by accident.)*
 
 *(Batch H item 1, and the shape is **a briefed replacement that would have
 un-asserted an older guarantee**. The orchestrator's brief said to replace
@@ -31,20 +43,6 @@ shape: the assertion is on the forbidden state, so it keeps working when E1's
 legitimate provisioning arrives — and the `user` and `person` half says in its
 own message that E1 moves it deliberately, in E1's pull request, rather than
 quietly.)*
-
-*(Writing E0-36's tests, on the migration-drift job's two-role shape. The
-criterion is that repointing that job's `DATABASE_URL` at the superuser fails
-something, and the natural assertion is the permitted state: the connection names
-the role the job provisioned, read out of the job's own `DB_APP_USER` so that
-renaming the CI role stays a one-place edit. That assertion is defeated by a
-two-line mutation — set `DB_APP_USER: postgres` and point the URL at it — which is
-the repointing this criterion names, wearing the value the test compares against.
-This entry's second sentence is the one that applies, so the **forbidden** state
-is asserted beside the permitted one, out of `DB_SUPERUSER` and the Postgres
-service's own `POSTGRES_USER`, and each message says which mutation its half
-exists for. The same reading is why the provisioning assertion checks the order
-as well as the presence: a role created after `alembic upgrade head` is a role the
-migration never used, and the step is still sitting there for a reviewer to see.)*
 
 **What happened.** Four times. `__repr_args__` was added to keep credentials out
 of `repr(settings)` — deleting it left the suite green. The `institution_timezone`

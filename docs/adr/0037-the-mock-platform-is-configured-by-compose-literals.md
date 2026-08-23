@@ -38,7 +38,11 @@ the shape the rule permits, and it puts five variables for a development-only
 fake platform into the file that documents the *application's* configuration
 surface — the one an operator reads to deploy Pulse. Each of those five has
 exactly one correct value on the Compose network, so every one of them is a knob
-with one setting, which `CLAUDE.md` says not to build.
+with one setting, which is the thing this project does not build.
+[`docs/AGENTS_INTENT.md`](../AGENTS_INTENT.md) is where that rule lives — "no
+configuration knob for something with one correct answer". (Attribution corrected
+2026-08-22: this said `CLAUDE.md`, which holds process only and does not state
+the rule.)
 
 **A settings file mounted into the container.** A second configuration mechanism
 in a repository that has exactly one, for a service that needs five strings.

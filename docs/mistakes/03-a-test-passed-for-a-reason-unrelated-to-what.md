@@ -1,17 +1,46 @@
 # Entry 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 50**
+**Caught: 52**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*29 instances recorded; the 3 below are the most recent, newest first. The
-earlier 26 are in this file's git history and in the pull requests they cite.*
+*31 instances recorded; the 3 below are the most recent, newest first. The
+earlier 28 are in this file's git history and in the pull requests they cite.
+Two of the three are from Batch I and are kept separate, one per ticket: two
+test authors reached for the same prescriptions on the same day, in different
+material, which is the entry doing its job twice rather than once.*
 
 *The trim the last reader asked for has been done, from git rather than from the
 page order, and the warning was worth writing down: the two E0-36 paragraphs
 were **not** in chronological order, so cutting from the bottom would have kept
 the older of the two. Dating a paragraph is `git log -S"its first phrase"` on
 this file.*
+
+*(Writing E0-41's tests (Batch I, 2026-08-22, found while building that ticket —
+it has not merged; same day as the paragraph below, in unrelated material). The
+ticket adds sweeps over the test suite itself, looking for read paths that carry
+no §4.1 marker — an instrument that reports "nothing found" whether the rule
+holds or the sweep is blind. So every sweep ships with its halves separated: a
+self-check that the matcher matches what it is meant to catch, the allow case
+that it lets a compliant module past, and a **positive control proving the sweep
+can fire at all** before any assertion that it does not. The control is what
+distinguishes "no read path is unmarked" from "this sweep sees no read paths",
+and those two sentences produce identical green.)*
+
+*(Writing E0-40's tests (Batch I, 2026-08-22, found while building that ticket —
+it has not merged), and this one is the entry working rather than the entry
+catching: the prescriptions were applied deliberately, before anything was green.
+The ticket's subject is gates that probe for a path nothing writes, so the tests
+are searches over workflow and `Makefile` text — the exact instrument this entry
+warns reads as coverage. Each search carries a canary: **a pattern must be shown
+to match something before its non-match means anything**, and two of them exist
+only to say so. The counts are asserted non-zero rather than merely equal, so a
+search that has gone blind cannot agree with an expectation of nothing. And the
+equality that matters — what a collector reports against what a scan of the tree
+finds — carries a planted-divergence control, a tree deliberately made to disagree,
+which is what turns "the two agree" from a sentence into a measurement. That
+control is the part worth copying: an equality assertion between two derivations
+of the same fact is worthless until somebody proves it can fail.)*
 
 *(Writing E0-28's tests, and it is the shape where **the walk cannot fail the
 assertion it is walking for.** Item 5 asks that a paged container carry `next`
@@ -28,39 +57,6 @@ one filtered result and a page size of one, the filtered and unfiltered pages ar
 the same page and a lost filter is invisible — and made it follow the relations
 the platform advertises with no limit at all, over a container the test first
 proves carries more than one student.)*
-
-*(The dev-only test console, and it is the shape where **the page under test can
-be empty and the assertion still passes.** The console fetches the mock provider's
-roster and lists the web-login people as sign-in links; the obvious integration
-test renders `/dev` and asserts the dean's subject appears in the body. Against a
-roster that came back empty — a fetch the seam refused, a provider seeded with
-nobody — the page says nothing and "the subject is absent" is trivially true, so
-the test would go green over a console that lists no one. It now asserts the
-provider's own published roster really holds the two named subjects before
-looking for them on the page. The same round has two HTML parsers, one reading
-which `<option>` carries `selected` for the mock IdP's `login_hint` pre-select
-and one reading which `<a>` carries `target="_blank"`, and each is the pattern
-this entry warns of: each ships a control test run against markup it must flag and
-markup it must let past, because a parser blind to the attribute makes "the right
-option is selected" and "nothing is selected" both pass. And the login-form
-pre-select carries its near miss — an unknown or absent `login_hint` must select
-**nothing** — so the feature cannot pass by always selecting the first option.)*
-
-*(E0-18 PR 1's third round, and it is the shape where **a refusal is the right
-answer for a reason the test did not name.** The new rule is that each door reads
-one roles vocabulary, and the obvious test smuggles `https://pulse.example/claims/
-roles: ["CARE"]` into a launch with an empty LIS roles claim and requires a 4xx.
-Written with that claim name transcribed from the ticket, it goes green against a
-door that reads the web vocabulary happily — because a claim name nobody reads is
-a launch carrying no role at all, which is refused anyway. So the claim name and
-the three role spellings are read off the provider's own published registration
-document (ADR 0058), and each is asserted to be a role that document really
-publishes before it is smuggled anywhere. The same round has the other face too:
-these launches carry claims no mock will mint, so they are re-signed by a key set
-of the suite's own with the registration pointed at it — and every refusal in that
-set would be satisfied by a door that simply could not verify the new signature,
-so both doors carry a control that re-signs the claims **unchanged** and requires
-the landing page to appear.)*
 
 **What happened.** A test asserting that a startup error carries no credential
 passed against a demonstrably leaking implementation, because ten variables

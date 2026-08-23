@@ -9,6 +9,11 @@ Created by E0-18. `docs/tickets/e0/E0-28-review-debt-from-e0-15.md` item 6 asks
 for this file by name; it wrote "The client-credentials grant, and the four
 things that move with it" on 2026-08-21, and the pointer to E0-35 inside it.
 
+E0-42 added the last five entries on 2026-08-22, out of the epic-boundary threat
+model and invariant-coverage review. Those five are findings rather than
+hand-offs: nothing in E0 is broken by them, and each one is a thing E1 or a later
+epic makes live.
+
 ## The two doors do not yet resolve to one person, and E0 says so on purpose
 
 E0-18's boundary section moved the same-identity assertion to E1. Both doors
@@ -177,3 +182,131 @@ lineage to `user_identity`) rather than by the label the view gives it, and the
 set of columns `pulse_app` may read from a view is enumerated so a new grant on
 a join key fails the sweep rather than passing it. The reviewer's own writeup,
 and the fixture `identity-column-in-view`, hold the reproduction.
+
+## The reveal's actor check and an instructor's read scope compose
+
+**Found 2026-08-22 by the epic-boundary threat model.** Nothing is broken today
+and E0 has no surface that does this; what E1 and E4 build is the surface that
+would.
+
+Three facts that are individually correct compose into one that is not.
+`ActorScope` (`backend/app/services/authz.py`, `resolve_scope`) carries
+`holds_care` **beside** the purview, deliberately, so that a Care capability can
+never be unioned into a scope. `section_roster` hands instructor-scoped code the
+`user_id` of every enrolled student — that is the whole point of the view, and the
+key is what makes a de-identified response addressable. And
+`safety.reveal_identity(actor_person_id=…, subject_user_id=…)` checks only that
+the **actor** holds Care; it asks nothing about where the subject came from.
+
+So a reporting surface built for the two-hat person §2.1 explicitly permits — a
+Care officer who also teaches — can render roster rows through her instructor
+purview, take a `user_id` straight off one of those rows, call the reveal with it,
+and pass every check there is. The audit row that results is indistinguishable
+from a legitimate Care access: right actor, real subject, no case. The capability
+and the read scope are separated in the value and joined in the caller.
+
+The other half of this is already recorded and owned: the Care-session sweep does
+not see `from app.services.safety import reveal_identity` in a reporting module
+(E0-26 item 4, carried to E10). What is new here is the composition — that the
+reveal's parameter is exactly the identifier an instructor-scoped view hands out.
+
+**Done when** the capability cannot be exercised against a subject the actor
+reached through a reporting scope — the reveal takes its subject from a Care case
+rather than from any caller-supplied id, or an equivalent guard — proved by a test
+that fails on the composition itself: a two-hat actor, a roster row from her own
+section, a reveal that must be refused. It lands **before any instructor-facing
+surface renders roster rows**, because that surface is what makes the path
+reachable.
+
+## `own_grant` and `resolve_scope` verify nothing about their caller
+
+**Found 2026-08-22 by the epic-boundary threat model.** Both take an arbitrary
+person or assignment id and answer for it. Neither asks whether the caller is that
+person, because in E0 there is no authenticated caller to ask about — and the
+views they read (`public.assignment_scope`, `public.lead_faculty_course`,
+`public.containment_path`) are granted to `pulse_app` unscoped, so the answer is
+available to anything running as the application role.
+
+That is correct for a resolver and dangerous for a route. The rule that has to
+land with the purview walk is: **a request resolves only the scope of its own
+authenticated subject**, and any other id is a refusal rather than an answer.
+
+**Done when** that rule holds at the chokepoint with a test that fails on
+resolving another person's id, and `transitive_purview` no longer raises — the two
+belong together, because the union is what makes a resolved scope worth anything,
+and E9 owns both.
+
+## Hypothesis has no purview properties, only graph-storage ones
+
+**Found 2026-08-22 by the epic-boundary coverage audit.** The suite's only
+generated graph property — the supervision-graph property module E0-09 left
+behind — generates *storage* shapes: that a cycle is refused whatever its length,
+and that an arbitrary acyclic forest inserts and reads back as it was asked for.
+Nothing generates a supervision forest and asserts a property of the **purview
+computed over it**.
+
+The property that matters is §4.1 invariant 2 — sibling-lead disjointness — over
+shapes nobody chose by hand: two leads under one chair, a lead who also teaches,
+an assistant dean inserted mid-chain. It cannot be written in E0, because the
+union it would quantify over is E9's and raises today.
+
+**Done when** E9's purview service ships with a Hypothesis property over generated
+supervision forests asserting that no lead's resolved purview contains a course
+another lead leads.
+
+## `/healthz` tells an unauthenticated caller which environment this is
+
+**Found 2026-08-22 by the epic-boundary threat model. Recorded as an open
+decision, not as a defect.** `backend/app/api/health.py` answers with the service
+name, the version and `settings.environment`, to anybody, with no credential.
+
+The environment name is the value every environment-keyed guard in this system
+rests on: whether `/docs` is served (ADR 0074), whether `/dev` exists (ADR 0079),
+whether the login cookie carries `Secure` (ADR 0078), whether SQL is echoed into
+the log, and whether the demo seed will run at all (ADR 0063). Publishing it opens
+none of those, and it does tell a caller which of them to try first.
+
+There are three honest answers and E0 chose none of them deliberately: drop the
+field, gate it behind whatever authentication E1 builds, or keep it and record
+that a deployment's environment name is not a secret. The third is defensible — an
+orchestrator's health check is the field's only consumer today, and the value is
+`production` in production, which surprises nobody.
+
+**The `/dev` console leaks the same fact through a second door.** `GET /dev`
+answers `404` outside development, but the route is registered for `GET` in every
+environment and only the handler is gated, so `POST /dev` answers `405` with
+`Allow: GET` while any unregistered path answers `404` — measured against the
+pinned Starlette 1.6.0. One unauthenticated request therefore confirms both that
+this build ships the console and that `ENVIRONMENT` is not `development`, which is
+this entry's disclosure arriving by another route; ADR 0079 records it in its
+decision section. The code-side fix is to register the route for every method, or
+to gate at registration, and it belongs to whichever decision closes this entry
+rather than to the documentation ticket that found it.
+
+**Done when** one of the three is chosen in E1 and written down: the field is
+gone, the field is gated, or a record says it stays and why the list of
+environment-keyed guards above is acceptable to publish — **and the same verdict
+reaches `/dev`'s method mismatch**, because a decision that the environment name
+may be published makes the `405` acceptable too, while a decision that it may not
+leaves that route still answering the question.
+
+## §4.1 items 4 and 5 are enforced by review only
+
+**Found 2026-08-22 by the epic-boundary coverage audit.** §4.1's preamble names
+items 1 and 7 as the two invariants carrying no assertion. There are four.
+
+Item 4 — aggregate language counts sections rather than instructors, "needs
+attention" rather than "underperforming", no ranking, no composite scores, no
+score-sorting — and item 5 — confidentiality copy appears exactly once per
+surface, in plain words, no shield or lock iconography — are both rules about
+*shipped copy*, and nothing in the suite reads a shipped surface against either.
+The only string in the tree either rule touches is
+`backend/app/services/landing.py`'s "Nothing needs attention.", which happens to
+comply. Every screen those items govern arrives in E2 and E4, and each will be
+reviewed by a person who has read §4.1 — which is exactly the enforcement model
+§4.1's own preamble says is not enough.
+
+**Done when** either a copy-inventory test exists — every user-facing string
+collected from the shipped surfaces and asserted against the forbidden vocabulary
+and the once-per-surface rule — or §4.1's preamble stops saying two and names
+items 4 and 5 beside items 1 and 7 as invariants that carry no assertion yet.

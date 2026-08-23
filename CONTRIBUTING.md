@@ -16,7 +16,8 @@ main                     protected; release history
   └── epic/e0-foundations           one long-lived branch per epic (SPEC §14.3)
         ├── e0/compose-stack        one short-lived branch per ticket
         ├── e0/org-containment-schema
-        └── e0/mock-lms-launch
+        ├── e0/mock-lms-launch
+        └── process/orchestrator-rewire   process and tooling, not a ticket
 ```
 
 **`main` is protected.** Never commit to it, never merge into it locally, never
@@ -30,9 +31,16 @@ named `epic/e<N>-<kebab-title>`. They are cut from `main` and merge back into
 §14.3, named `e<N>/<kebab-slug>`. They are cut from their epic branch and merge
 back into that epic branch by pull request.
 
-Ticket branches merge into their epic branch by pull request. Epic branches merge
-into `main` by pull request. There are no exceptions and no direct merges in
-either direction.
+**Process branches** carry changes to how the work is done rather than to the
+product: `CLAUDE.md`, this file, `.claude/`, the CI workflow. They are named
+`process/<kebab-slug>`, they are not tickets and have no number, and they go
+through the same pull-request path as everything else — cut from the branch they
+will merge back into, reviewed, merged by pull request. In E0 that has meant the
+epic branch: `#59`, `#60` and `#63` all merged into `epic/e0-foundations`.
+
+Ticket and process branches merge into their epic branch by pull request. Epic
+branches merge into `main` by pull request. Nothing reaches `main` any other way,
+and there are no direct merges in either direction.
 
 ## Epic branch names
 
@@ -57,7 +65,7 @@ Ticket branch names come from the *Ticket breakdown* line under each epic in
 §14.3. Where an epic has been decomposed into numbered tickets under
 `docs/tickets/`, those ticket branch names win over the list in the spec —
 [`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is the build order for
-E0 and names a branch for each of its thirty-seven tickets.
+E0 and names a branch for each of its tickets.
 
 ⚠ marks epics that additionally require line-by-line human review of the
 security-relevant diff.
@@ -139,7 +147,7 @@ catch a failure before you push.
 |---|---|
 | Fast | CI checker self-test, ruff check and format, mypy, tsc, eslint, migration drift |
 | Test | pytest unit and integration with coverage, the §4.1 invariant suite, Playwright e2e, AI eval floors |
-| Build | all Docker images, Compose health on api/worker/beat/mock-lms, frontend production build, bundle budget |
+| Build | all Docker images, Compose health on api/worker/beat/mock-lms/mock-idp, frontend production build, bundle budget |
 | Supply chain | pip-audit, npm audit, MIT license compatibility |
 
 Fast gates run first and everything else waits on them.
@@ -147,9 +155,11 @@ Fast gates run first and everything else waits on them.
 A job whose subject does not exist yet detects the absence and passes with a
 note naming the ticket that will make it enforcing. Landing that ticket includes
 removing its tolerance — a ticket that adds tests but leaves the test gate
-tolerant has not finished. Most of them have now tightened; what remains
-tolerant is the Playwright e2e job, which waits for E0-18, the AI eval floors,
-which wait for E2's first eval set, and the four frontend gates (`tsc`,
+tolerant has not finished. Most of them have now tightened. **The Playwright e2e
+job became enforcing with E0-18 (PR #61, 2026-08-21)** — it runs the suite on
+every diff that is not wholly inert documentation, and an empty `tests/e2e` now
+fails loudly instead of passing with a note. What remains tolerant is the AI eval
+floors, which wait for E2's first eval set, and the four frontend gates (`tsc`,
 `eslint`, production build, bundle budget), which wait for the frontend scaffold
 in E1. The E0 build order has the full table.
 

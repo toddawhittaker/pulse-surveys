@@ -70,6 +70,14 @@ docstrings cite "entry 7", and renumbering would silently repoint every one of
 them at a different incident. It is also the detail file's prefix, so the two
 move together.
 
+**There is no entry 32, and no entry is missing.** E0-17 reserved the number and
+did not use it, and the restructure of 2026-08-18 left the gap rather than
+back-filling it, because renumbering is the one thing this file forbids: the
+number is the entry's name, and citations in ADRs, test docstrings and commit
+messages point at it. So a gap here means a reservation that went unused, never a
+deleted entry — and 32 is not free for the next entry to take. The same note in
+`docs/adr/README.md` explains the identical gap at 0029, 0033 and 0034.
+
 **One caution on the counters.** Two branches cut from the same commit that both
 bump the same entry merge without conflicting and count once. If work has been
 running in parallel, re-derive every counter from each branch's own diff against
@@ -79,7 +87,7 @@ the merge base and apply the totals, rather than trusting the merge.
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 50** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 52** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -94,7 +102,7 @@ did not expect.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 42** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 43** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
@@ -107,7 +115,7 @@ amending a record is not reading it**: open the whole file.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 32** · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
+**Caught: 33** · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
 
 **Rule.** After fixing something, try to reintroduce it. If the suite stays
 green, you have written a convention, not a guarantee. Prefer asserting the
@@ -169,7 +177,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 17. An unqualified table name let the caller choose which table a guard read
 

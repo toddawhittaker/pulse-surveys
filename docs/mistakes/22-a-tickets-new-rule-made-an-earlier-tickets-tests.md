@@ -1,10 +1,31 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 4**
+**Caught: 5**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*4 instances recorded; the 3 most recent are below. The earliest is in this file's git history and in the pull request it cites.*
+*5 instances recorded; the 3 most recent are below, newest first — except the
+E0-18 PR 2 one, which sits further down beside the consequence it illustrates.
+The 2 earliest are in this file's git history and in the pull requests they cite.*
+
+*(Found while building E0-39 (Batch I, 2026-08-22; that ticket has not merged),
+and it is the largest blast radius this entry has recorded. E0-39 makes five
+`oidc_*` settings required and refuses a mock identity provider's address outside
+a development environment — a rule about **what `Settings` will accept**, which is
+the configuration equivalent of a rule about what the database will store. At
+least six merged test modules construct a non-development `Settings` against the
+mock's addresses in their own fixtures, for reasons that have nothing to do with
+the identity provider: they wanted a non-development environment for something
+else and took the defaults for everything they were not testing. Every one of them
+goes red inside its own setup, in modules the ticket is not otherwise editing, and
+every repair is on the other side of the test wall. It was caught before any
+implementation by the test author grepping the read-only suite for the
+constructions the new rule would refuse — the sweep this entry prescribes, run at
+the moment it is cheap — and it is repaired as a partitioned fixture-only round in
+that ticket's own scope rather than as a surprise the implementer meets in a
+runner. **A rule that narrows what a configuration object accepts is a
+write-time rule**: fixtures build configuration the same way they build rows, and
+defaults are what makes the collision wide rather than narrow.)*
 
 *(Writing E0-28's tests, and the collision was found by asking this entry's
 question of an *assertion* rather than of a row. E0-28 item 1 makes exactly one
@@ -19,38 +40,6 @@ could not have done: the repair is inside `tests/`, and the person who meets the
 red is the one agent forbidden to touch it. The amendment is narrow and says so —
 a member that carries a window and no `end` key still fails, which is the mutation
 the assertion exists for.)*
-
-*(Writing E0-26 item 1's tests, and this time the sweep was run before the tests
-were, so the collision is a paragraph in a report rather than a dispute round.
-E0-26 splits the reveal into two calls and **drops** the three-argument
-`reveal_student_identity`, and `tests/integration/test_identity_grants.py` reaches
-its door through `the_reveal_function`, which asserts that `pulse_care` may execute
-**exactly one** `SECURITY DEFINER` function. After the split there are two, so that
-helper fails inside the setup of the ten tests that reach the door through it, none
-of which is about this ticket — and the four that go on to *call* the reveal do it
-inside `db_session`, whose transaction is never committed, which the new shape
-refuses by design. `grep -rn
-'reveal_student_identity' tests/` and one read of the helper found all of it in
-about ten minutes. Nothing was repaired: the repair is a migration of E0-10's
-module onto the new interface, it is larger than the ticket's own tests, and doing
-it half-way inside a ticket about something else is how a green suite stops meaning
-what it says. It is reported as a partitioned round for the same agent instead.
-The entry's second rule earned its place here too — `the_reveal_function`'s
-assertion message prescribes a repair to whoever trips it, and whoever trips it
-will be the implementer, who may not edit `tests/`.*
-
-***What the partition was worth, measured after it ran.** Eight tests failed, all
-on the same assertion, and the count hid a second failure the way this entry's
-first instance did: `REVEAL_DEFINER_PRIVILEGES` is asserted as an exact set and was
-**never evaluated**, because the helper raised first — so the ticket's fourth grant
-was a defect queued behind a defect, and a round that had fixed only the visible
-one would have reported the module repaired. The repair round also found that three
-of the four converted tests are now near-duplicates of tests in the new module, and
-that the fourth — the `pg_temp` shadow hijack — is the only coverage there that
-exists nowhere else and had to be rewritten to aim at both halves of the split
-door. **Count the failures, then look for what the first one is standing in front
-of**: a helper that raises in setup suppresses every assertion in the test behind
-it, and an exact-set assertion is the kind whose silence looks like agreement.)*
 
 **What happened.** Twice in E0-11, from two unrelated mechanisms, with the same
 consequence: the ticket cannot be finished green and the implementer cannot fix
@@ -145,5 +134,14 @@ guard that produces an escalation rather than a fix, which is sometimes right �
 is right here — but it should be a chosen outcome and written down, not a surprise.
 Where a test's subject is a particular revision, **name the revision**; `-1` and
 `head` are convenient and neither is a subject.
+
+**And when the partitioned round comes back, count the failures and then look for
+what the first one is standing in front of.** Measured on E0-26 item 1 (PR #53,
+2026-08-20), whose instance paragraph has since been trimmed from this file: eight
+tests failed on one assertion, and a shared helper that raised in setup meant an
+exact-set assertion behind it was **never evaluated** — a defect queued behind a
+defect, and a round that repaired only the visible one would have reported the
+module fixed. An exact-set assertion is the kind whose silence looks like
+agreement.
 
 ---
