@@ -85,11 +85,15 @@ __all__ = [
 
 # Whether this person holds an assignment in the Care role at all. E0-09's
 # `role_assignment` carries no validity dates, so "live" reads as "exists" today:
-# a revoked assignment is a deleted row. When E9 or E10 adds end-dating this
-# predicate gains it, and so do the copies inside
-# `public.record_identity_reveal` and `public.reveal_student_identity` — they are
-# three statements of one rule and they move together (`docs/MISTAKES.md`
-# entry 13).
+# a revoked assignment is a deleted row. This predicate is checked four times,
+# and this is the one place that names all four: this module's own
+# `_HOLDS_A_LIVE_CARE_ASSIGNMENT` below; `app.services.authz.holds_care` /
+# `_HOLDS_A_LIVE_CARE_ASSIGNMENT`, which reads the same fact from
+# `public.assignment_scope` on the `pulse_app` pool for `authz`'s own callers;
+# and the SQL copies inside `public.record_identity_reveal` and
+# `public.reveal_student_identity`. When E9 or E10 adds end-dating, all four
+# gain it together — four statements of one rule, and they move together
+# (`docs/MISTAKES.md` entry 13).
 _HOLDS_A_LIVE_CARE_ASSIGNMENT = text(
     "SELECT EXISTS ("
     " SELECT 1 FROM public.role_assignment AS acting"
