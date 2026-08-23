@@ -86,6 +86,34 @@ x-application-environment: &application-environment
   # removes them.
   DB_SUPERUSER: ''
   DB_SUPERUSER_PASSWORD: ''
+  # Fifth, and the one entry here that supplies rather than withholds: the
+  # identity provider the web login door verifies against (§2). ADR 0077 makes
+  # these five required in `app/config.py` — a deployment that names no provider
+  # now stops at startup instead of quietly trusting the `mock-idp` service this
+  # file starts — and required fields have to arrive from somewhere for `docker
+  # compose up` on a clean checkout to reach a system a person can log in to
+  # (§14.3). This is that somewhere, and it is in the anchor so that all three
+  # services that construct a `Settings` get them; `api` alone would be an API
+  # with `worker` and `beat` in a restart loop.
+  #
+  # **`${NAME:-default}`, never a literal**, and that is the decision rather than
+  # a style choice. `environment:` beats `env_file:`, so a bare literal here
+  # would override a deployment's own `.env` and make this file undeployable. The
+  # interpolated form lets `.env` win and falls back to the development address
+  # only when nothing is set — where the refusal above then catches it outside
+  # development. `${NAME}` with no fallback is wrong in the other direction: it
+  # interpolates to the empty string, which *withholds* the variable exactly as
+  # the blanking lines above do.
+  #
+  # The addresses are two horizons: `OIDC_AUTHORIZATION_ENDPOINT` is where a
+  # browser on the host is sent, so it is `localhost` on the published port; the
+  # rest are reached from inside this network, so they are the service name.
+  # `.env.example` documents all five and ADR 0075 argues the split.
+  OIDC_ISSUER: ${OIDC_ISSUER:-http://mock-idp:8000}
+  OIDC_AUTHORIZATION_ENDPOINT: ${OIDC_AUTHORIZATION_ENDPOINT:-http://localhost:8081/oidc/authorize}
+  OIDC_TOKEN_ENDPOINT: ${OIDC_TOKEN_ENDPOINT:-http://mock-idp:8000/oidc/token}
+  OIDC_JWKS_URL: ${OIDC_JWKS_URL:-http://mock-idp:8000/.well-known/jwks.json}
+  OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-mock-idp-client}
 
 x-application: &application
   build:
@@ -389,9 +417,18 @@ services:
   # every run). Development and test only, in this file rather than behind a
   # profile for the reasons ADR 0038 gives about the platform — §7.2 puts it
   # here, and a profile would take it out of CI's base-file-only pass, the one
-  # pass that runs what actually ships. What keeps it out of a deployment is not
-  # this file: this service holds nothing, reaches nothing, publishes no port,
-  # and is trusted only where Pulse's own configuration names it.
+  # pass that runs what actually ships.
+  #
+  # **This service is trusted wherever Pulse's configuration names it**, and it
+  # will sign an `id_token` for any identity it is asked for, CARE and ADMIN
+  # included. Holding nothing, reaching nothing and publishing no port does not
+  # change that: a Pulse configured with `OIDC_ISSUER`, `OIDC_TOKEN_ENDPOINT`,
+  # `OIDC_JWKS_URL` and `OIDC_CLIENT_ID` pointed here verifies what it signs,
+  # correctly, and lets the holder in. Until ADR 0077 the application's own
+  # defaults did exactly that, which is the finding this comment used to hide.
+  # What keeps it out of a deployment now is `app/config.py`: those five settings
+  # are required, and a value naming this service — by host or by client id — is
+  # refused at startup anywhere `ENVIRONMENT` is not `development`.
   #
   # **No `env_file:`, deliberately**, for the same reason `mock-lms` declares
   # none: `env_file:` is all-or-nothing, and it would hand a fake identity

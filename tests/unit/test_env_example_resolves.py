@@ -483,6 +483,86 @@ def test_database_url_does_not_carry_the_superuser_password(
     )
 
 
+# The five settings E0-39 makes required. Until ADR 0077 they carried defaults
+# naming the development stack, so an entry here that resolved to nothing was
+# invisible — the field simply fell back. Now it is the difference between a stack
+# that comes up and one that refuses to, in every process that builds `Settings`,
+# because CI does `cp .env.example .env` and the containers read it.
+OIDC_URL_VARIABLES = (
+    "OIDC_ISSUER",
+    "OIDC_AUTHORIZATION_ENDPOINT",
+    "OIDC_TOKEN_ENDPOINT",
+    "OIDC_JWKS_URL",
+)
+OIDC_CLIENT_ID_VARIABLE = "OIDC_CLIENT_ID"
+
+
+def test_the_identity_provider_entries_resolve_to_usable_values(
+    resolved_env_example: dict[str, str | None],
+) -> None:
+    """The web door's five settings resolve to something a process can start with.
+
+    The same question this module asks of `DATABASE_URL`, asked of the entries
+    E0-39 turns from defaulted into required. It is worth asking separately from the
+    general interpolation rule above for the reason the `DATABASE_URL` test gives:
+    that rule catches a reference that resolves to nothing, and this one catches a
+    *literal* that is incomplete — a scheme with no host, or an entry emptied by
+    somebody moving the values into `docker-compose.yml` and taking them out of here
+    on the way past.
+
+    **What changed is the consequence, not the file.** These entries are already
+    here; until ADR 0077 a missing one fell back to a default naming `mock-idp`, so
+    the file could be wrong and the stack would still start — quietly pointed at the
+    mock. Now every process that builds `Settings` refuses, and CI's
+    `cp .env.example .env` makes this file the thing that decides it.
+
+    **The mutation this kills:** any of the five deleted from `.env.example`, or
+    left with an empty value, while `app.config` requires it.
+
+    Nothing here asserts what the values *are*. The two horizons — a browser-facing
+    `localhost` and a server-facing service name — are ADR 0075's decision and
+    ADR 0077 leaves that half standing; a test pinning the strings would turn a
+    change of development port into a test edit, and
+    `tests/unit/test_oidc_provider_configuration.py` owns which values are refused
+    where.
+    """
+    assert resolved_env_example, (
+        ".env.example is missing or resolved to nothing, so every entry below would be reported "
+        "absent and this test would be about the file rather than about these five entries."
+    )
+
+    problems: list[str] = []
+    for name in OIDC_URL_VARIABLES:
+        url = resolved_env_example.get(name)
+        if not url:
+            problems.append(f"{name} resolves to nothing")
+            continue
+        parts = urlsplit(url)
+        missing = [
+            label
+            for label, value in (("scheme", parts.scheme), ("host", parts.hostname))
+            if not value
+        ]
+        if missing:
+            problems.append(f"{name} resolves to {url!r}, which has no {', no '.join(missing)}")
+
+    client_id = resolved_env_example.get(OIDC_CLIENT_ID_VARIABLE)
+    if not client_id:
+        problems.append(f"{OIDC_CLIENT_ID_VARIABLE} resolves to nothing")
+
+    assert not problems, "\n".join(
+        [
+            ".env.example does not resolve the identity provider configuration:",
+            *problems,
+            "",
+            "E0-39 makes these five required — `Settings()` refuses to build without them, in "
+            "`api` and in every other process that constructs one — so an entry that resolves to "
+            "nothing is a stack that does not start. CI copies this file to `.env` and brings "
+            "the stack up from it, which is where that would first be seen.",
+        ]
+    )
+
+
 # ---------------------------------------------------------------------------
 # What the Compose files deliver out of this file — ticket E0-19, route 3.
 #

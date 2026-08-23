@@ -26,6 +26,13 @@ mounted; a unit test built on a bare `create_app()` would have no roster to fetc
 and a "not 404" assertion would pass on a `500`, which asserts nothing
 (`docs/MISTAKES.md` entry 2). The two directions are a pair across the two
 modules, and each names the other.
+
+The test below requests `deployed_identity_provider` (E0-39), for the reason
+`tests/unit/test_docs_exposure.py` gives on its own production rows: with
+`ENVIRONMENT` set to a deployment's value, `.env.example`'s `mock-idp` addresses are
+refused at startup, so `create_app()` would raise inside the setup of a test about
+the `/dev` gate. The fixture configures a provider that is not the mock and changes
+nothing else; no assertion here moved.
 """
 
 from typing import Any
@@ -78,7 +85,9 @@ def client_for(application: Any) -> Any:
 
 @pytest.mark.invariant
 def test_the_dev_console_is_not_served_outside_development(
-    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """**Dies if the `/dev` gate is dropped or inverted** — the become-any-user guard.
 

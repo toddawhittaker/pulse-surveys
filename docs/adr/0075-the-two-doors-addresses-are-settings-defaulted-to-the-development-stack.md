@@ -1,8 +1,28 @@
 # 0075 — The two doors' addresses are settings, and every default is the development stack
 
-**Status:** Accepted
+**Status:** Accepted; the five `OIDC_*` fields superseded 2026-08-22 by
+[ADR 0077](0077-the-web-doors-identity-provider-is-named-explicitly.md)
 **Date:** 2026-08-21
 **Ticket:** [E0-18](../tickets/e0/E0-18-e0-exit-smoke.md)
+
+**What still holds.** `PUBLIC_BASE_URL` and
+`LTI_PLATFORM_AUTHORIZATION_ENDPOINT` are settings, defaulted to this
+repository's development stack, and the per-value horizon rule below governs
+every address either record names. So do the notes that `OIDC_ISSUER` is compared
+against a claim rather than fetched, and that the client is public with no secret.
+
+**What no longer holds**, for the five `OIDC_*` fields only: "The defaults are
+not the 'working literal default' that docstring refuses. `http://mock-idp:8000`
+and `http://localhost:8080` resolve nowhere but on this stack". The first of
+those resolves wherever this stack runs — `docker-compose.yml` starts `mock-idp`
+in every deployment — so a deployment that set none of the five had a provider on
+its own network that signs an `id_token` for any identity asked of it, CARE and
+ADMIN included, and trusted it. E0-39 took the alternative this record declined,
+in exactly the case this record named as the one to revisit. Those five are
+required now, and a URL addressing the mock or the mock's client id is refused
+outside development. The rejection below is left exactly as written, because its
+reasoning is the cost ADR 0077 accepts rather than an argument that turned out to
+be wrong.
 
 ## Context
 

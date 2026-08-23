@@ -281,7 +281,12 @@ def provider(mock_idps: Any, door_contract: Any) -> Any:
 
 
 @pytest.fixture
-def open_web_door(tool_doors: Any, door_contract: Any, provider: Any) -> Any:
+def open_web_door(
+    tool_doors: Any,
+    door_contract: Any,
+    provider: Any,
+    deployed_identity_provider: dict[str, str],
+) -> Any:
     """Build the tool for this provider, with settings a test may override.
 
     Every OIDC endpoint comes out of the provider's discovery document, which is
@@ -289,6 +294,22 @@ def open_web_door(tool_doors: Any, door_contract: Any, provider: Any) -> Any:
     written down here. The host in those URLs is also what routes the tool's
     server-side calls back into the in-process provider, so a door that fetched
     from anywhere else reaches no mock and says so.
+
+    **Except when the test asks for a deployment's `ENVIRONMENT`** — E0-39's repair
+    round. That ticket refuses a `mock-idp` host or the mock's client id outside
+    development, and the mock advertises itself under the Compose service name, so
+    "this tool, in production, pointed at the mock" is a configuration that no
+    longer builds. It is also not a configuration any test here is about: the one
+    caller that asks for a production environment is the `Secure` cookie pair below,
+    whose subject is an attribute on the cookie the login initiation sets, and that
+    route redirects the browser to the authorization endpoint without calling the
+    provider at all. So a non-development build gets `deployed_identity_provider`'s
+    placeholder addresses, which is what a real deployment in that environment would
+    hold, and the in-process mock stays routed for the flows that actually redeem a
+    code — every one of which runs in development.
+
+    A test's own `overrides` are applied last and still win, so a case that needs a
+    particular issuer under a deployment's environment can still say so.
     """
     document = provider.discovery()
     registration = provider.registration()
@@ -312,6 +333,11 @@ def open_web_door(tool_doors: Any, door_contract: Any, provider: Any) -> Any:
             names["oidc_jwks_url"]: endpoint("jwks_uri"),
             names["oidc_client_id"]: registration["client_id"],
         }
+        if environment is not None and environment != DEVELOPMENT:
+            # E0-39: the mock's addresses and client id are refused outside
+            # development, and no caller that asks for a deployment's environment
+            # reaches the provider. See this fixture's docstring.
+            values.update(deployed_identity_provider)
         values.update({names[key]: value for key, value in overrides.items()})
         if environment is not None:
             values[ENVIRONMENT_VARIABLE] = environment

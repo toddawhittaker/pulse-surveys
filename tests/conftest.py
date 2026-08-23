@@ -6011,6 +6011,34 @@ OIDC_TOKEN_ENDPOINT_VARIABLE = "OIDC_TOKEN_ENDPOINT"  # noqa: S105
 OIDC_JWKS_URL_VARIABLE = "OIDC_JWKS_URL"
 OIDC_CLIENT_ID_VARIABLE = "OIDC_CLIENT_ID"
 
+# An identity provider that is not the mock — E0-39's repair round.
+#
+# That ticket refuses a `mock-idp` host or the `mock-idp-client` client id in any
+# `oidc_*` setting whenever `ENVIRONMENT` is not the development one. `.env.example`
+# configures exactly those values, `configured_env` lays the whole documented file
+# down, and a good many tests then set `ENVIRONMENT` to `production` or `staging` to
+# ask about something else entirely — a cookie's `Secure` attribute, a 404 on
+# `/docs`, whether an engine hides its bound parameters. Every one of those would
+# stop inside its own setup on a refusal that is not its subject, which is
+# `docs/MISTAKES.md` entry 22.
+#
+# So a test whose subject is *not* the refusal configures a provider that is not the
+# mock, and the guard it is actually about is the one that fires. Nothing here is
+# reachable and nothing here is fetched: these are placeholders in a domain reserved
+# for the purpose.
+#
+# **`tests/unit/test_oidc_provider_configuration.py` keeps its own copy of this
+# idea and does not read these**, deliberately. It is the module that decides what
+# "not the mock" means, and a shared constant would let an edit made for some other
+# suite's convenience move the background its refusals are measured against.
+DEPLOYED_IDENTITY_PROVIDER = {
+    OIDC_ISSUER_VARIABLE: "https://idp.example.edu",
+    OIDC_AUTHORIZATION_ENDPOINT_VARIABLE: "https://idp.example.edu/oidc/authorize",
+    OIDC_TOKEN_ENDPOINT_VARIABLE: "https://idp.example.edu/oidc/token",
+    OIDC_JWKS_URL_VARIABLE: "https://idp.example.edu/.well-known/jwks.json",
+    OIDC_CLIENT_ID_VARIABLE: "example-client",
+}
+
 # Headers that describe one hop rather than the message, and must not be carried
 # from the tool's request onto the in-process call that answers it. `host` is
 # rewritten by the client below; the other three describe a body length and an
@@ -6190,9 +6218,36 @@ def door_contract() -> DoorContract:
 
 
 @pytest.fixture
+def deployed_identity_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_env: dict[str, str],
+) -> dict[str, str]:
+    """Configure an identity provider that is not the mock, and answer what it set.
+
+    For a test that sets `ENVIRONMENT` to a deployment's value and is about
+    something else. `configured_env` has just laid down `.env.example`, whose
+    provider is the mock; E0-39 refuses that combination, so without this the test
+    stops in its own setup on a rule that is not its subject.
+
+    Requested rather than applied globally, because the combination is legal — and
+    required — in development, and `tests/unit/test_config_settings.py` asserts that
+    the documented file is a working configuration. Laying these over every test
+    would take that away.
+
+    Returns the mapping so that a caller which passes settings on rather than
+    reading the environment — `tool_doors` below, and `open_web_door` in the web
+    door suite — can hand the same five values through its own route.
+    """
+    for name, value in DEPLOYED_IDENTITY_PROVIDER.items():
+        monkeypatch.setenv(name, value)
+    return dict(DEPLOYED_IDENTITY_PROVIDER)
+
+
+@pytest.fixture
 def tool_doors(
     monkeypatch: pytest.MonkeyPatch,
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     migrated_database: DatabaseUnderTest,
     import_app_module: Callable[[str], ModuleType | None],
 ) -> Iterator[Callable[..., Any]]:
@@ -6200,6 +6255,13 @@ def tool_doors(
 
     Three things it does, and each is here rather than in a test module because
     both door suites need all three.
+
+    **The identity provider starts out as one that is not the mock** (E0-39). A
+    door test that asks for a deployment's `ENVIRONMENT` is otherwise refused at
+    startup over `.env.example`'s `mock-idp` addresses, which is not what any of
+    them is about. The web door suite overrides all five with the in-process mock's
+    real values, because reaching that provider is its subject; the launch door
+    suite never names them at all.
 
     **The environment is the container's**, laid down by `application_environment`
     over `configured_env`'s placeholders, because the launch door resolves a

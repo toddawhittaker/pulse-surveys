@@ -12,6 +12,15 @@ The three JSON key spellings below are **this test's choice** — the ticket nam
 the three values but not the keys. So is `ENVIRONMENT`, the variable the body is
 checked against; it is kept identical to the one in
 `tests/unit/test_config_settings.py`.
+
+One test below requests `deployed_identity_provider`, and that is E0-39's repair
+round rather than anything E0-01 asks for. `test_healthz_reports_the_environment_it
+_was_configured_with` sets an environment name that is deliberately *not*
+`development`, which is the whole point of it — and E0-39 refuses `.env.example`'s
+`mock-idp` provider anywhere but development, so `create_app()` would raise inside
+the setup of a test about what `/healthz` reports. The fixture configures a provider
+that is not the mock and changes nothing else; the unmistakable environment name,
+and every assertion, are untouched.
 """
 
 from typing import Any
@@ -83,6 +92,7 @@ def test_healthz_names_the_configured_environment(configured_env: dict[str, str]
 
 def test_healthz_reports_the_environment_it_was_configured_with(
     configured_env: dict[str, str],
+    deployed_identity_provider: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The reported environment tracks configuration; it is not a constant.

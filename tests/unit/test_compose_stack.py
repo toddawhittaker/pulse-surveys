@@ -5374,3 +5374,164 @@ def test_the_closed_build_key_set_holds_no_key_the_compose_files_do_not_use(
             "is a smaller open one, with an entry nobody has had to think about.",
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# The identity provider's addresses reach the process that builds `Settings` —
+# ticket E0-39, ADR 0077.
+#
+# ADR 0075 gave the five `oidc_*` settings defaults naming `mock-idp`, and the
+# epic-boundary threat model found what that means: the base file starts that
+# service in every deployment, so a deployment that sets none of them has a signing
+# oracle for fake CARE and ADMIN identities and trusts it. ADR 0077 removes the
+# defaults, which leaves the values needing a home — and the home is the one every
+# other deployment-specific value that is an address rather than a credential
+# already has, the `environment:` block of every service that builds a `Settings`,
+# in the base file, interpolated so a deployment's own `.env` still wins.
+#
+# The other half of the move is `.env.example`, held by
+# `tests/unit/test_env_example_resolves.py`; the refusal that makes removing the
+# defaults worth doing is held by
+# `tests/unit/test_oidc_provider_configuration.py`.
+# ---------------------------------------------------------------------------
+
+# The five variables E0-39 makes required, spelled as `tests/conftest.py`'s
+# `door_contract` and `.env.example` already spell them. Named here rather than
+# derived for the reason `SUPERUSER_VARIABLES` above is: they are the subject of
+# the rule, and a sixth is a deliberate edit on this line.
+OIDC_VARIABLES = (
+    "OIDC_ISSUER",
+    "OIDC_AUTHORIZATION_ENDPOINT",
+    "OIDC_TOKEN_ENDPOINT",
+    "OIDC_JWKS_URL",
+    "OIDC_CLIENT_ID",
+)
+
+# The three services that construct `Settings`, and therefore the three a required
+# setting stops from starting. `api` serves both doors; `worker` and `beat` build
+# one identically — ADR 0042, and `tests/unit/test_config_settings.py`'s "`Settings`
+# is constructed identically in `api`, `worker` and `beat`", which is the whole
+# reason `CARE_DATABASE_URL` had to become optional rather than required.
+SETTINGS_SERVICES = (API_SERVICE, *JOB_SERVICES)
+
+
+def oidc_fallback_spelling(variable: str) -> re.Pattern[str]:
+    """The one form E0-39 settles for these five entries: `${NAME:-<dev address>}`.
+
+    Interpolated with a fallback, and nothing else. A bare literal is what a reader
+    reaches for and it is refused here, because `environment:` beats `env_file:`: a
+    literal overrides a deployment's own `.env` and makes the base file
+    undeployable. Scope item 2 says so in as many words — "that is why the
+    interpolated form is the decision, not a style choice".
+
+    `${NAME}` with no fallback is refused too, for the reverse reason. On a checkout
+    with no `.env` it interpolates to the empty string, and an empty `environment:`
+    value *withdraws* the variable rather than leaving `env_file:` to supply it —
+    the same mechanism the blanking lines above rely on — so the container refuses
+    to start with the fallback one character away.
+
+    The fallback's text is deliberately not pinned. It is the development stack's
+    address, `.env.example` documents it, and a copy here would turn a change of
+    development port into a test edit (`docs/MISTAKES.md` entry 19).
+    """
+    return re.compile(rf"^\$\{{{re.escape(variable)}:-(?P<fallback>\S.*)\}}$")
+
+
+@pytest.mark.parametrize("service_name", SETTINGS_SERVICES)
+def test_a_settings_building_service_is_given_the_identity_providers_addresses(
+    base_compose_path: Path,
+    base_compose: dict[str, Any],
+    service_name: str,
+) -> None:
+    """The five required settings reach every process that constructs `Settings`.
+
+    E0-39 removes the defaults, so `Settings()` refuses to build without these five
+    — and it is built the same way in all three of these services, so a stack that
+    gives them to `api` alone comes up as an API with two containers in a restart
+    loop. SPEC §14.3 asks that `docker compose up` from a clean checkout reach a
+    launchable, loggable-into system, and this is the file that has to make that
+    true now that nothing in the code does.
+
+    **The base file, not the override**, and the asymmetry is the same one
+    `test_services_inheriting_the_env_file_do_not_hold_the_superuser_credential`
+    turns on: the base file is what every deployment runs and what CI's
+    base-file-only pass runs alone, so a value present only in the override is
+    absent from the stack that matters. The direction is the mirror image of the
+    blanking rule — there, a value in the override is harmless and one in the base
+    file is a defect; here, a value in the override is not enough.
+
+    **The spelling is settled and asserted**, per `oidc_fallback_spelling` above:
+    `${OIDC_ISSUER:-http://mock-idp:8000}`, so a deployment's own `.env` still wins
+    and only the un-set case falls back to the development address — where layer 2's
+    refusal then catches it outside development. A bare literal is refused here even
+    though it would look right in the merged configuration, because it is the
+    spelling that takes `.env` out of the picture.
+
+    An entry declared with no value at all does not count either. `supplies_a_value`
+    above reads that as a delivery, correctly, because for a credential the question
+    is whether the host environment's copy reaches the container. The question here
+    is the opposite one: a bare `OIDC_ISSUER:` passes through whatever the person
+    running `docker compose up` happens to have exported, which on a clean checkout
+    is nothing.
+
+    **The mutation this kills:** the defaults removed from `app/config.py` and
+    nothing put in their place, which is a stack that no longer comes up; the five
+    given to `api` alone, which is two containers restarting; the five written into
+    the override only, which comes up on a laptop and not in a deployment; and the
+    literal form, which reads as done and makes the base file undeployable.
+    """
+    assert base_compose, (
+        f"{base_compose_path} does not exist or declares nothing. A file that did not parse "
+        "declares no environment for anybody, and a rule about what a service is given reports "
+        "it missing rather than saying the file is gone."
+    )
+
+    body = services_of(base_compose).get(service_name)
+    assert body is not None, (
+        f"{base_compose_path} declares no `{service_name}` service, so there is nothing here to "
+        f"configure. It declares {sorted(services_of(base_compose))}."
+    )
+
+    declared = service_environment(body)
+    assert declared, (
+        f"The reader finds no `environment:` entries at all on `{service_name}` (its body "
+        f"declares {sorted(body)}). An unreadable environment block and a missing variable report "
+        "the same emptiness, so this control comes first: all three of these services carry the "
+        "shared anchor's blanking lines, and a reader that sees none of those cannot see these "
+        "five either."
+    )
+
+    problems: list[str] = []
+    for variable in OIDC_VARIABLES:
+        if variable not in declared:
+            problems.append(f"{variable} is not declared")
+            continue
+        value = declared[variable]
+        if value is None:
+            problems.append(
+                f"{variable} is declared with no value, which passes through whatever the host "
+                "environment happens to hold"
+            )
+            continue
+        if not oidc_fallback_spelling(variable).match(value.strip()):
+            problems.append(
+                f"{variable} is declared as {value!r} rather than as "
+                f"`${{{variable}:-<the development address>}}`"
+            )
+
+    assert not problems, "\n".join(
+        [
+            f"`{service_name}` is not given the identity provider in {base_compose_path.name}:",
+            *problems,
+            "",
+            "E0-39 makes the five `oidc_*` settings required — a deployment that supplies no "
+            "identity provider now stops at startup with a ConfigurationError naming the field, "
+            "instead of quietly trusting the `mock-idp` container this file starts. The "
+            "development values moved here as part of that change, so a stack whose base file "
+            "does not carry them does not come up at all (SPEC §14.3).",
+            "",
+            "The interpolated form with a fallback is the decision rather than a style choice: "
+            "`environment:` beats `env_file:`, so a bare literal would override a deployment's "
+            "own `.env` and make this file undeployable.",
+        ]
+    )
