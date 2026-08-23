@@ -328,9 +328,9 @@ _ASSIGNMENT = text(
     " WHERE assignment_id = :assignment_id"
 )
 
-# Every assignment one person holds. SPEC §2.1: "a person holds one or more role
-# assignments… every view is resolved from an assignment (or a union of them),
-# never from a person type."
+# Every assignment one person holds. SPEC §2.1: "a person acting in any role but
+# Student holds one or more role assignments… every view is resolved from an
+# assignment (or a union of them), never from a person type."
 _ASSIGNMENTS_OF_PERSON = text(
     "SELECT assignment_id, person_id, role,"
     " institution_id, college_id, department_id, course_id, section_id"
