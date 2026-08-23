@@ -8,10 +8,11 @@ and nothing here is written into Pulse by this service.
 Three things about the shape are deliberate rather than incidental.
 
 **A person is not a role, and a door is a property of the assignment.** SPEC §2:
-"People are not roles. A person holds one or more *role assignments*, each scoped
-to a node in the org hierarchy", and "Entry doors are a property of the
-assignment, not the person. A person holding two assignments uses whichever door
-fits the one they are acting under." So a person here is a subject with a tuple
+"People are not roles. A person acting in any role but Student holds one or more
+*role assignments*, each scoped to a node in the org hierarchy", and "Entry doors
+are a property of the assignment, not the person. A person holding two
+assignments uses whichever door fits the one they are acting under." So a
+person here is a subject with a tuple
 of assignments, and whether they may use this door is computed from those
 assignments rather than stored on the person. That is what makes the two-hat
 person below fall out of the model instead of being a special case.

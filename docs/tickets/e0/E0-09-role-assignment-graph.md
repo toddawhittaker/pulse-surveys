@@ -12,6 +12,15 @@ never org nodes. This is the schema that makes the assistant-dean case
 expressible and sibling-lead isolation enforceable. Getting the edge endpoints
 wrong here would quietly break purview for the whole product.
 
+**Amended 2026-08-23, by PR #72:** the spec sentence quoted above has since
+gained an exception. §2.1's "People are not roles" sentence now reads "a
+person acting in any role but Student holds one or more role assignments",
+and a note under the table states that students hold no role assignment and
+that a student's access is resolved from enrollment instead. Nothing this
+ticket built changes — `AssignmentRole` never had a `STUDENT` member — the
+quotation above is simply the ticket's original wording, kept as written for
+the record.
+
 Read first: SPEC §2.1 in full — especially the purview definition and the
 assistant-dean worked example — plus §8, the roles section of `CLAUDE.md`, and
 **"What the built tickets settled" in [the epic README](README.md)**, whose model

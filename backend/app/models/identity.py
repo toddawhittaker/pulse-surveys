@@ -429,13 +429,13 @@ role = ANY (ARRAY[
 class RoleAssignment(Base):
     """One grant: this person, in this role, over this node (SPEC §2.1, §8).
 
-    **People are not roles.** A person holds one or more assignments and every
-    view is resolved from an assignment or a union of them, never from a person
-    "type". Purview is computed over the `reports_to` edges between the rows of
-    this table, so each row here is a grant of access to somebody's data, and
-    every rule below is in the database rather than in `app/services/` for that
-    reason: a seed script, a roster sync or a future admin console cannot write a
-    row that breaks one.
+    **People are not roles.** A person acting in any role but Student holds one
+    or more assignments and every view is resolved from an assignment or a
+    union of them, never from a person "type". Purview is computed over the
+    `reports_to` edges between the rows of this table, so each row here is a
+    grant of access to somebody's data, and every rule below is in the database
+    rather than in `app/services/` for that reason: a seed script, a roster
+    sync or a future admin console cannot write a row that breaks one.
 
     **`reports_to` references another assignment, never a person and never an org
     node** (SPEC §2.1, in bold). The distinction is invisible until somebody holds
