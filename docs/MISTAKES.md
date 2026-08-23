@@ -27,9 +27,22 @@ this file has at least one entry that demonstrably stopped a real loss and was
 never bumped for it. The counter under-reports, so it decides what is quoted in
 full here — never what is worth keeping.
 
-**Bumping the counter.** When an entry **stops you making the mistake**,
-increment its `Caught:` number in the same change as the work it saved, and add
-an instance paragraph to the linked file saying what it changed.
+**The top five counters are frozen, as of 2026-08-23.** Entries 3, 1, 2, 13 and
+9 — the five that carry their rule in this file — stop being bumped and stop
+taking new instance paragraphs. Their numbers stay exactly where they are, dated
+frozen 2026-08-23, as history. Two things had happened: the ranking stopped
+moving, because those five account for four fifths of every catch recorded here
+and the tier has been the same five entries for long enough to call it settled;
+and the bookkeeping had grown into a commit per batch, spent to turn a 45 into a
+46 that nobody would read differently. Reading these five and acting on their
+rules is unchanged. Only the counting stops.
+
+**Bumping the counter, below the top five.** When an entry outside the frozen
+five **stops you making the mistake**, increment its `Caught:` number in the
+same change as the work it saved, and add an instance paragraph to the linked
+file saying what it changed. The tail keeps the counter because a tail entry
+that starts saving people repeatedly is exactly the thing worth knowing, and its
+count is what detects it.
 
 Before you bump, answer this: **what would have shipped if I had not read this
 entry?** A prevention answers concretely — a test that would have passed against
@@ -37,10 +50,22 @@ the defect, a fix that would have been wrong in a way nobody would have noticed.
 A detection cannot: if the honest answer is "a reviewer would have found it", the
 entry did not stop you and the bump is not earned. Do not bump for reading an
 entry, for recording something already found, or for an entry merely describing
-what went wrong. The counter is the only signal for what belongs at the top, so
-an entry that keeps saving people rises and an entry nobody bumps sinks — and
-counting detections would sort by what this project trips over rather than by
-what saves it, which is not the same list.
+what went wrong. A tail entry's counter is the only signal that it is doing the
+work the top five do, so an entry that keeps saving people rises and an entry
+nobody bumps sinks — and counting detections would sort by what this project
+trips over rather than by what saves it, which is not the same list.
+
+**A counter retires when its rule becomes mechanically enforced.** Once a test,
+a sweep or a CI gate enforces an entry's rule, the gate is the prevention and
+the counter stops, and the entry stays here as the record of why the gate
+exists. That is the graduation path for every entry in this file, frozen or
+tail — a rule people have to remember becomes a rule they cannot break, and a
+tally of near misses has nothing left to measure. **Retire a counter only on an
+executed gate, never on a judgement that one covers the entry.** The retirement
+note names the gate by path and test or job name, and names the case it was run
+against: the defect this entry describes, planted, and the gate seen failing on
+it. A gate nobody has watched fail against this entry's own defect is entry 9's
+mistake wearing a green tick, and it does not retire anything.
 
 **Adding an entry.** When something goes wrong, add `docs/mistakes/NN-slug.md`
 with what happened, the root cause, the consequence, and the rule; then add the
@@ -53,22 +78,23 @@ a count of the rest. The thirty-fifth instance of an entry teaches nothing the
 third did, and this file reached 2,697 lines because every bump appended one — it
 grew with bumps rather than with lessons, and every agent that read it before
 starting paid for all of it. Older instances stay in git history and in the pull
-requests they cite. Trim when a file passes three.
+requests they cite. Trim when a file passes three. This applies to the files
+still taking instances; a frozen entry's file keeps the three it has and gains
+no more.
 
-**Re-ordering, and the tier.** Sort by `Caught:` descending when you notice it is
-wrong, and re-derive the tier from the same numbers: the five highest carry their
-rule in this file, the rest carry a link. An entry that rises into the top five
-gains its rule here; one that falls out keeps everything and loses only the
-duplication. The tier follows the counter rather than position, so it is a
-consequence of the sort rather than a second thing to maintain.
+**Re-ordering, and the tier.** The top five is settled: entries 3, 1, 2, 13 and
+9 carry their rule in this file and keep both their rule and their place. Below
+them, sort by `Caught:` descending when you notice it is wrong. A tail entry
+whose count climbs past the lowest frozen counter has earned its rule here —
+add it, and leave the frozen five where they are, so the tier grows rather than
+rotating.
 
-Sort by `Caught:` descending when you notice it is wrong. Ties
-break toward the more expensive consequence. **An entry keeps its number when it
-moves**, so the headings below are not in numerical order and are not meant to
-be. The number is the entry's name: code comments, commit messages and test
-docstrings cite "entry 7", and renumbering would silently repoint every one of
-them at a different incident. It is also the detail file's prefix, so the two
-move together.
+Ties in that tail sort break toward the more expensive consequence. **An entry
+keeps its number when it moves**, so the headings below are not in numerical
+order and are not meant to be. The number is the entry's name: code comments,
+commit messages and test docstrings cite "entry 7", and renumbering would
+silently repoint every one of them at a different incident. It is also the
+detail file's prefix, so the two move together.
 
 **There is no entry 32, and no entry is missing.** E0-17 reserved the number and
 did not use it, and the restructure of 2026-08-18 left the gap rather than
@@ -78,16 +104,17 @@ messages point at it. So a gap here means a reservation that went unused, never 
 deleted entry — and 32 is not free for the next entry to take. The same note in
 `docs/adr/README.md` explains the identical gap at 0029, 0033 and 0034.
 
-**One caution on the counters.** Two branches cut from the same commit that both
-bump the same entry merge without conflicting and count once. If work has been
-running in parallel, re-derive every counter from each branch's own diff against
-the merge base and apply the totals, rather than trusting the merge.
+**One caution on the tail counters.** Two branches cut from the same commit that
+both bump the same entry merge without conflicting and count once. If work has
+been running in parallel, re-derive each bumped tail counter from each branch's
+own diff against the merge base and apply the totals, rather than trusting the
+merge. The frozen five need none of this — nothing bumps them any more.
 
 ---
 
 ## 3. A test passed for a reason unrelated to what it asserted
 
-**Caught: 52** · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
+**Caught: 52** (frozen 2026-08-23) · [the incidents, the root cause, and the whole rule](mistakes/03-a-test-passed-for-a-reason-unrelated-to-what.md)
 
 **Rule.** Verify by mutation, not by reading: break the thing and watch the test
 fail. Where a test can be satisfied by emptiness, assert non-emptiness first, and
@@ -102,7 +129,7 @@ did not expect.
 
 ## 1. A record went on asserting something the change had made false
 
-**Caught: 45** · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
+**Caught: 45** (frozen 2026-08-23) · [the incidents, the root cause, and the whole rule](mistakes/01-a-record-went-on-asserting-something-the-change-had.md)
 
 **Rule.** After changing a thing, ask what else in the repository asserts
 something about that thing — comments, ADRs, tickets, indexes, READMEs, the pull
@@ -115,7 +142,7 @@ amending a record is not reading it**: open the whole file.
 
 ## 2. Behaviour shipped with nothing asserting it
 
-**Caught: 33** · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
+**Caught: 33** (frozen 2026-08-23) · [the incidents, the root cause, and the whole rule](mistakes/02-behaviour-shipped-with-nothing-asserting-it.md)
 
 **Rule.** After fixing something, try to reintroduce it. If the suite stays
 green, you have written a convention, not a guarantee. Prefer asserting the
@@ -124,7 +151,7 @@ second case arrives.
 
 ## 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 25** · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
+**Caught: 25** (frozen 2026-08-23) · [the incidents, the root cause, and the whole rule](mistakes/13-a-hazard-was-written-down-and-worked-around-in.md)
 
 **Rule.** When you work around a quirk of a type, a parser or an API, grep for
 every place that asks the same question and route them through one helper, in the
@@ -134,7 +161,7 @@ fixture first — the message this one printed said exactly that, and was right.
 
 ## 9. Citing a guard as a guarantee without executing it
 
-**Caught: 18** · [the incidents, the root cause, and the whole rule](mistakes/09-citing-a-guard-as-a-guarantee-without-executing-it.md)
+**Caught: 18** (frozen 2026-08-23) · [the incidents, the root cause, and the whole rule](mistakes/09-citing-a-guard-as-a-guarantee-without-executing-it.md)
 
 **Rule.** Before citing a guard, execute it against the case you claim it stops
 and the case you claim it allows. A guard that has never been run is a comment.
