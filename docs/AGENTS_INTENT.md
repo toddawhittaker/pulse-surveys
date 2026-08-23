@@ -30,11 +30,15 @@ It increments an entry's `Caught:` counter when that entry **stops it making the
 mistake**, and appends a new entry when something goes wrong that is not yet
 there. The test for a bump is what would have shipped had the entry not been
 read: a prevention answers concretely, a detection cannot, and "a reviewer would
-have found it" is not a bump. The counter is the only ordering signal, which is
-why bumping it is part of the work rather than bookkeeping — an entry nobody
-bumps sinks, and the ones that keep saving people rise to the top. Counting
-detections would sort by what the project trips over rather than by what saves
-it.
+have found it" is not a bump. For an entry outside the top five the counter is
+the only signal that it is saving people repeatedly and belongs higher, which is
+why bumping it is part of the work rather than bookkeeping. Counting detections
+would sort by what the project trips over rather than by what saves it. The top
+five counters were frozen on 2026-08-23: their ranking had settled and the
+bookkeeping had begun costing a commit per batch, so they are kept as history
+and read exactly as before. Any counter also retires once a test, a sweep or a
+CI gate enforces its rule — the gate is the prevention from then on, and the
+entry stays as the record behind it.
 Every entry cites a real incident. A rule with no incident behind it is advice,
 and advice belongs in `CLAUDE.md`.
 

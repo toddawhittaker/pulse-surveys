@@ -28,8 +28,10 @@ Read: the ticket in `docs/tickets/`, the spec sections it names, `CLAUDE.md`,
 `docs/MISTAKES.md` records what has actually gone wrong here, most frequent
 first. Two entries are yours more than anyone's: *behaviour shipped with nothing
 asserting it*, and *a test passed for a reason unrelated to what it asserted*.
-When an entry changes what you write, increment its `Caught:` counter in the same
-change. When something goes wrong that is not there, append it.
+Both are in the top five, whose counters were frozen on 2026-08-23: follow their
+rules, and do not bump them. When an entry below the top five changes what you
+write, increment its `Caught:` counter in the same change. When something goes
+wrong that is not there, append it.
 
 ## Where red-green applies
 

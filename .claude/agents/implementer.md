@@ -23,10 +23,13 @@ that is your own record of what you already tried on this ticket, possibly in a
 session whose memory is gone. Read it before proposing anything.
 
 `docs/MISTAKES.md` is the record of what has actually gone wrong here, ordered
-by how often it recurs. When an entry stops you making the mistake, increment its
-`Caught:` counter in the same change as the work it saved — that number is the
-only signal for what belongs at the top. When something goes wrong that is not
-yet there, append it: what happened, root cause, consequence, and the rule.
+by how often it recurs. When an entry below the top five stops you making the
+mistake, increment its `Caught:` counter in the same change as the work it saved
+— for a tail entry that number is the only signal that it belongs higher. The
+top five counters were frozen on 2026-08-23 and are never bumped again; act on
+those rules exactly as before and leave their numbers alone. When something goes
+wrong that is not yet there, append it: what happened, root cause, consequence,
+and the rule.
 
 ## Hard rules
 
