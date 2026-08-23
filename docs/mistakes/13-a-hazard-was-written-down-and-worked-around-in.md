@@ -1,10 +1,13 @@
 # Entry 13. A hazard was written down and worked around in only one of the two places facing it
 
-**Caught: 24**
+**Caught: 25**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*18 instances recorded; the 4 below are the most recent, newest first.*
+*19 instances recorded; the 3 below are the most recent, newest first. The trim
+back to three was dated from `git log` on this file: the E0-18 test-suite
+paragraph (`17f5268`) and the E0-26 item 1 paragraph (`20dcf03`) are the two
+oldest of the five and are in this file's git history.*
 
 *The trim this file asked for has been done, without a shell, by ticket order
 rather than by `git log`: the two **E0-16** paragraphs went, because E0-16 precedes
@@ -27,6 +30,27 @@ E0-33's, which has since been trimmed out of the four shown and is in this file'
 git history. The lesson is the one the note was already reaching for: a bump with no
 instance paragraph is unfalsifiable a week later, so write the paragraph in the
 same change or do not move the number.*
+
+*(E0-40's security-review fix round (PR #70, built 2026-08-22, merged
+2026-08-23), and the hazard is **an unpinned `npx` the workflow had already been
+taught about and the Makefile had not**. The ticket moved four Node gates from
+`cd frontend && npx …`, which never ran because that directory is not there, to a
+bare `npx …` at the repository root, which does run — and on a clean clone `npx`
+silently downloads and executes whatever is latest, the exact pattern the same
+diff had just fixed in `.github/workflows/ci.yml`. Making a dead gate live is
+what turned an inert unpinned call into an executing one, and nothing in the
+round noticed, because `npx` succeeds. The third offender, `make e2e`, predates
+the ticket and stated its `npm ci` precondition in a comment above the target,
+which make does not run: the hazard written down in one of the two places facing
+it and worked around in neither. The fix is this entry's own prescription — a
+guard test requiring every `npx`-invoking recipe to install the pinned closure
+first (prerequisite chains followed, comments not credited; three offenders
+found), then one `node-deps` target that `lint`, `typecheck`, `e2e` and
+`licenses` all name as a prerequisite, measured under `make -n ci` as a single
+`npm ci` serving four `npx` calls. **Second time in one ticket that the Makefile
+copy was the unread one**: the probe fix itself had to be carried into the
+Makefile's copies of the same four gates, or `make ci` and the workflow would
+disagree about which tree they read.)*
 
 *(E0-28 item 3, and the hazard is **one identifier a platform mints and then has
 to recognise.** Every line item id this mock hands out now carries
@@ -61,41 +85,6 @@ plus parameters, and both had a copy of "append a query without dropping the one
 the endpoint already had". It went into `app/api/deps.py::with_query`, which both
 routers call. Neither is subtle; both were about to ship, because the second caller
 is what makes the first one look like duplication.)*
-
-*(Writing E0-18's two door suites, before either door existed, and the hazard is
-that **two test modules were about to answer the same question twice.** The launch
-door and the web door need the same four things — the five landing `data-testid`
-values, the clock-winding that produces a signed-but-stale token, the
-tamper-that-keeps-the-signature, and the `lti_platform`/`lti_deployment`
-registration, because the two-hat person is driven through the launch door from the
-web-login module. A copy of the landing testids in each module is the version that
-bites: PR 2's Playwright specs address the same five, so a rename would have had
-three places to reach and the suite that missed it would go on passing about a view
-nobody serves. All four went into `tests/conftest.py` and are reached as fixtures,
-which is also the only channel the house rule allows — a test module that imports
-its sibling `conftest` by name depends on where pytest put `tests/` on `sys.path`.
-The registration in particular was written in the launch module first and moved,
-which is the honest version of this entry: the second caller is what makes the
-duplication visible, and it arrived twenty minutes later.)*
-
-*(Repairing E0-26 item 1's test round. The suite reported one error —
-`ResourceClosedError: This result object does not return rows` — from the `pg_temp`
-shadow test, and the cause was a one-line assumption in a shared helper:
-`attempt()` called `.mappings().all()` on every result, and `CREATE TEMPORARY
-TABLE` returns none. This entry's rule is what turned a one-line fix into the
-finding. Grepping the helper's six call sites for the same question — which of
-these statements returns no rows? — found two more, the `INSERT` and the `DELETE`
-that `test_the_care_connection_cannot_forge_or_suppress_the_record_the_door_writes`
-must be refused on. **That test was passing**, and passing for the reason that
-makes this expensive: a refused statement raises `DatabaseError` before the rows
-are ever asked for, so the bug sat on the branch where the finding is and nowhere
-else. Under the exact mutation its own docstring names —
-`GRANT INSERT ON public.audit_log TO pulse_care` — the insert would have succeeded,
-the helper would have raised `ResourceClosedError`, which is not a `DatabaseError`
-and escapes the `except`, and an `invariant`-marked confidentiality test would have
-**errored instead of reporting a forgeable audit log**. Fixing only the failure the
-runner named would have left that. The check is now in both copies of the helper,
-in two modules, rather than in one with a comment in the other.)*
 
 **What happened.** In E0-06's test module, `timestamp_columns` discovers timestamp
 columns by reflecting from Postgres, and its docstring said why: "a column whose

@@ -20,7 +20,7 @@ The design goal is trust: students must believe their responses are confidential
 
 ## 2. Roles and access
 
-**People are not roles.** A person holds one or more *role assignments*, each scoped to a node in the org hierarchy; every view is resolved from an assignment (or a union of them), never from a person "type." A chair can also lead courses; an assistant dean can hold a lead-faculty assignment while supervising a chair.
+**People are not roles.** A person acting in any role but Student holds one or more *role assignments*, each scoped to a node in the org hierarchy; every view is resolved from an assignment (or a union of them), never from a person "type." A chair can also lead courses; an assistant dean can hold a lead-faculty assignment while supervising a chair.
 
 | Role | Entry point | Scope attachment |
 |---|---|---|
@@ -37,6 +37,7 @@ The design goal is trust: students must believe their responses are confidential
 Notes:
 
 - **Entry doors are a property of the assignment, not the person.** A person holding two assignments uses whichever door fits the one they are acting under. Every *reporting* role — instructor, lead faculty, chair, assistant dean, dean, VP of Academics — can enter through an LTI launch, including leadership. Every role except instructor and student can *also* enter by web login; Care and Admin are web login only (their work has no launch context), and students enter by launch only. The table above is authoritative where this prose and it disagree.
+- **Students hold no role assignment.** Every other row of the table is held as a role assignment scoped to a containment node; the Student row describes what a student can see, not an assignment record. A student's access is resolved from enrollment — the LMS-owned, term-windowed record of which sections the person is in — because enrollment already answers "which sections may this person act in," and a parallel assignment record would be a second, unwindowed copy that no roster sync corrects.
 - The launch authenticates the person by their LMS user ID; because the app owns the supervision graph (§2.1), once identified they are shown their full purview — not just the course they happened to launch from. The launch context resolves *which* section a link points at, never caps what a leadership user may see.
 - LTI launch requires being an enrolled LMS user in *some* course, so **web login via OIDC is retained** for all leadership and staff roles (Entra ID, Okta, Keycloak, etc.; local accounts as a pilot fallback). Both doors resolve to the same identity and the same views.
 - Roles compose: multi-role people get a role/assignment switcher, or a union purview rendered as a multi-root hierarchy nav. **Care is deliberately not composable** with reporting roles — its sole power is the threat queue, kept isolated so safety re-identification never rides alongside routine oversight access.

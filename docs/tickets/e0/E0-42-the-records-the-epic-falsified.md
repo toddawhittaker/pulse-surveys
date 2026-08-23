@@ -109,6 +109,13 @@ Documentation only. No file under `backend/`, `tests/`, `scripts/`,
     contradicts the spec; the fix is a spec edit only Todd can approve, and
     E1's role-resolution ticket is blocked on the answer.
 
+    **Answered 2026-08-23, and the spec edit has landed.** Todd decided the
+    contradiction in the ADR's favour: §2.1's "People are not roles" sentence
+    now excepts the student, and a note under the table states that students
+    hold no role assignment and that a student's access is resolved from
+    enrollment. ADR 0028 carries a dated context amendment saying so. Nothing
+    here is blocked on it any more.
+
 ## Acceptance
 
 - Every named record matches the tree at HEAD; every claim this ticket adds

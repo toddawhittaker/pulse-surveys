@@ -1,51 +1,50 @@
 # Entry 1. A record went on asserting something the change had made false
 
-**Caught: 43**
+**Caught: 45**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*26 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 23 are in this file's git history and in the pull requests they cite.*
+*28 instances recorded; the 3 most recent are below, oldest of the three first — this file's order is oldest-first, unlike entries 3 and 13. The earlier 25 are in this file's git history and in the pull requests they cite. The three below are Batch I's three builds, all written on 2026-08-22 in parallel worktrees, so ticket number is the tie-break the dates cannot give.*
 
-*(E0-28, Batch E, and the three false records were **made false by code in a
-different file, a different ticket's guess, and a count in prose**. The batch
-made the mock platform's results container page, refused NRPS's own query
-parameters, gave every line item id a query string, and seeded one member with no
-enrollment window. The dispatch brief named the records for the last of those —
-E0-15's criterion, ADR 0048, two module docstrings — and named none of the other
-three. `README.md`'s seed section said "Two of them are not ordinary" about
-`BIOL-215-R3WW`'s late add and drop, and the new windowless student made it
-three: the count-in-prose shape this entry already warns about, found by grepping
-the *fact* rather than any identifier the change touched. ADR 0051's closing
-paragraph guessed that item 3 would need "a seeded line item shaped differently",
-and item 3 landed as every id carrying a query instead — a record that was a
-prediction when written and a false statement once the prediction was answered,
-which nothing in the diff points at. And `docs/tickets/e1/carried-from-e0.md`'s
-preamble said item 6 "adds the last section below" while a later section had been
-appended after it by another ticket, so the sentence was already false before this
-batch touched the file and would have stayed false through a change that rewrote
-the section it describes.)*
+*(E0-39, Batch I (PR #71, built 2026-08-22, merged 2026-08-23), and the shape is
+**the records that carried the argument the change reversed**. ADR 0075 gave
+seven addresses defaults on the argument that none of them can resolve off this
+development stack; E0-39 measured that false for five of them and made those five
+required with no default. The dispatch brief named three records to correct:
+`.env.example`'s "None of them can resolve in a deployment", the `mock-idp`
+comment in the base Compose file, and ADR 0075 itself. The entry's sweep found
+three more that nothing in the diff points at. `backend/app/config.py`'s **module
+docstring** enumerates the required group; five fields joined that group and the
+list did not, three hundred and eighty lines from anything else in the change.
+The comment over the settings block — "Seven values, and every one of them is an
+address… They are defaulted" — described a block the change had split, leaving it
+two. And **`docs/adr/README.md`'s row for 0075** still said "Seven fields … these
+are defaulted because none of them can resolve off this stack", false in both
+halves. The first two were corrected in the same change. The third was out of
+reach — E0-42 owned that file in a sibling worktree and the ticket forbade
+touching it — so it was reported to the coordinator and corrected after both
+merged, which is what the parallel-branch caution at the top of
+`docs/MISTAKES.md` is for.)*
 
-*(E0-37, Batch H, where the sharpest one was **the copy of the rule an operator
-actually reads**. Item 12 changed the model-endpoint transport rule from "https
-when a credential is set" to "https off this machine, credential or not", and the
-dispatch brief named three places to correct: the validator's docstring,
-`README.md` and `.env.example`. It did not name the fourth, because nothing in
-the validator points at it — `ai_provider_base_url`'s `Field(description=...)`,
-twenty lines above, held the old rule in a sentence. That string is not
-commentary: `_describe_invalid_settings` builds the startup report from the field
-name and its `description`, and a validator's own message never reaches the
-operator (ADR 0056 records why). So the refusal would have printed the rule it
-had just stopped enforcing, to the one reader who has to act on it. Found by
-grepping the *fact* — "when that key is set" — rather than the validator's name,
-which appears in none of the four. The same sweep found ADR 0013's `echo`
-consequence claiming that deriving `echo` is what keeps survey answers out of the
-log, which item 1 had just measured false; ADR 0063, ADR 0074 and 0074's row in
-the ADR index all saying item 2's consolidation was "proposed rather than done";
-and two rows of `docs/tickets/e0/E0-29-…` in the present tense of a tree that no
-longer exists. Every one of those was in a file the change did not otherwise
-touch.)*
+*(E0-40, Batch I (PR #70, built 2026-08-22, merged 2026-08-23), and the shape is
+**making a dead gate live falsifies everything written while it was dead**. Four
+CI gates probed `frontend/package.json`, which does not exist, so they reported
+green over a tree they never read; pointing them at the repository root turned
+prose about a tree with no Node toolchain into prose about one that has four
+checkers. Five records went false, and the entry is what sent the author looking
+past the two comments the brief named: `package.json`'s own description, which
+named the Playwright suite and the licence scanner and not the two checkers; the
+two `e2e`-probe comments in `.github/workflows/ci.yml`; `frontend-build`'s "the
+sixth expensive job", when this change makes it the seventh; the Makefile
+header's list of what this tree does not have yet; and ADR 0070's count of six
+expensive gates, in four places. Three of the five were inside files the ticket
+owned and would have shipped false, and nothing in the suite asserts any of them
+— which is what makes this a prevention rather than a reviewer's catch. ADR 0070
+was outside the implementer's file ownership and was reported rather than fixed;
+the correction landed on the ticket's own branch in `5b0dfa8`, moving the two
+standing counts to seven and leaving the two historical ones as history.)*
 
-*(Found while building E0-41 (Batch I, 2026-08-22; that ticket has not merged),
+*(Found while building E0-41 (Batch I, 2026-08-22; merged 2026-08-23 as PR #69),
 and the shape is **a record the author's own change was about to falsify, caught
 at write time rather than after**. E0-41 adds invariant markers to read paths
 that carry none, which changes what two modules can truthfully say about

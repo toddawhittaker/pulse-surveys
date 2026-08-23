@@ -1,10 +1,27 @@
 # 0028 — A student holds no role assignment
 
-**Status:** Accepted
+**Status:** Accepted — **context amended 2026-08-23**; the decision is unchanged
+and the spec now agrees with it
 **Date:** 2026-08-16
 **Tickets:** E0-09
 
 ## Context
+
+> **Amended 2026-08-23.** The paragraphs below describe a spec this record
+> disagreed with. **It no longer reads that way.** On 2026-08-23 Todd decided
+> the disagreement by editing the spec to agree with this record:
+> §2.1's "People are not roles" sentence now reads "A person acting in any role
+> but Student holds one or more *role assignments*", and a note under the table
+> states that students hold no role assignment, that the Student row describes
+> what a student can see rather than an assignment record, and that a student's
+> access is resolved from enrollment. So the contradiction raised at the top of
+> PR #68 — an ADR deciding one thing while the spec still read the other way,
+> which `CLAUDE.md` says an ADR alone may never settle — is resolved, and the
+> resolution is in the spec rather than here. The reading below is kept because
+> the choice this record made is only intelligible against the sentence that
+> forced it, and because the spec's new note states the rule without the
+> reasoning: what stays this record's own is the enum, the constraint that makes
+> a student row unwritable, and the alternatives rejected below.
 
 [SPEC §2.1](../SPEC.md)'s table has nine rows, and Student is one of them: entry
 point "LTI launch", scope attachment "Own responses; aggregate results +
