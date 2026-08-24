@@ -230,13 +230,26 @@ no_implicit_optional = true
 check_untyped_defs = true
 ignore_missing_imports = true
 
-# Strict where the guarantees live. app/services/ holds the authorization
-# chokepoint every entry point passes through (CLAUDE.md, SPEC §2.1), and
-# ai/contracts.py is simultaneously the runtime contract, the API schema, and
-# the eval fixture (§7.4). An untyped escape in either is a confidentiality or
-# eval hole, so these get no untyped defs and no implicit Any.
+# Strict where the guarantees live, which is now the domain logic and both
+# entry doors.
+#
+# app/services/ holds the authorization chokepoint every entry point passes
+# through (CLAUDE.md, SPEC §2.1), and ai/contracts.py is simultaneously the
+# runtime contract, the API schema, and the eval fixture (§7.4). An untyped
+# escape in either is a confidentiality or eval hole.
+#
+# app/api/ and app/lti/ are where untrusted input arrives — a form a platform
+# posted, a query a browser wrote, a claim out of a token — and the modules that
+# decide what to do with it. A handler is exactly the kind of function that gets
+# written without annotations, and an unannotated one is not checked at all: the
+# guarantee that a claim reaches `landing_role_for` as a `Mapping[str, Any]` and
+# not as an unchecked `Any` is worth as much at the door as it is one call
+# deeper. Turned on with the entry doors already clean, so this holds the line
+# rather than paying a migration.
+#
+# So these get no untyped defs and no implicit Any.
 [[tool.mypy.overrides]]
-module = ["app.services.*", "app.ai.contracts"]
+module = ["app.api.*", "app.lti.*", "app.services.*", "app.ai.contracts"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_calls = true
