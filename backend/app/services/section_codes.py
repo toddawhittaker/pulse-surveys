@@ -51,17 +51,15 @@ that writes `section.length_weeks`, `start_date`, `end_date` and `modality`
 """
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.org import SECTION_CODE_MAX_LENGTH, Modality, Section
-from app.models.term import StartLetterMap, Term, TermRow
+from app.models.term import StartLetterMap, Term, TermRow, term_value
 
 # How much of a code a failure message may quote. A refused code is echoed back
 # to whoever is reading a roster sync, and a message that pastes four thousand
@@ -355,11 +353,11 @@ def _term_dates(term: TermRow) -> tuple[UUID, date, date]:
 
     A `Term` instance is what the ORM and the admin editor hand around; a
     `RowMapping` is what a Core insert with `RETURNING` gives back, which is how
-    the seed script (E0-17) creates a term. `app.models.term` reads a term both
-    ways for the same reason, and a service that accepted only one of them would
-    push a conversion onto whichever caller holds the other.
+    the seed script (E0-17) creates a term. `app.models.term.term_value` is the
+    one place that dispatch is made, for both readers.
     """
-    if isinstance(term, Mapping):
-        mapping: Mapping[str, Any] = term
-        return mapping["id"], mapping["start_date"], mapping["end_date"]
-    return term.id, term.start_date, term.end_date
+    return (
+        term_value(term, "id"),
+        term_value(term, "start_date"),
+        term_value(term, "end_date"),
+    )

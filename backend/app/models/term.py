@@ -252,11 +252,32 @@ class SurveyWindow(UuidPrimaryKey, Base):
 TermRow = Term | Mapping[str, Any]
 
 
+def term_value(term: TermRow, name: str) -> Any:
+    """One field of a term, whichever of the two shapes the caller is holding.
+
+    The whole of the `Mapping`-or-attribute dispatch, in one place. Every reader
+    of a `TermRow` needs it and each used to make the same `isinstance` check
+    itself — here and in `app.services.section_codes` — which is the shape
+    `docs/MISTAKES.md` entry 13 describes: one quirk of a type, worked around
+    separately everywhere it is met.
+
+    Here rather than in the service because `section_codes` already imports from
+    this module and the dependency runs that way only. A term's *shapes* are a
+    fact about the model, and this is the model.
+
+    `name` is a field of `Term` in every call, and a wrong one raises — `KeyError`
+    from the mapping, `AttributeError` from the instance — rather than returning
+    `None`. That difference is deliberate: a silent `None` here would be a term
+    date or a term length that reads as "not set".
+    """
+    if isinstance(term, Mapping):
+        return term[name]
+    return getattr(term, name)
+
+
 def _identity_and_length(term: TermRow) -> tuple[UUID, int]:
     """A term's id and length, from an ORM instance or from a row mapping."""
-    if isinstance(term, Mapping):
-        return term["id"], term["length_weeks"]
-    return term.id, term.length_weeks
+    return term_value(term, "id"), term_value(term, "length_weeks")
 
 
 def week_rows_for_term(term: TermRow) -> list[Week]:
