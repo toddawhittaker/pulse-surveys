@@ -310,3 +310,9 @@ reviewed by a person who has read §4.1 — which is exactly the enforcement mod
 collected from the shipped surfaces and asserted against the forbidden vocabulary
 and the once-per-surface rule — or §4.1's preamble stops saying two and names
 items 4 and 5 beside items 1 and 7 as invariants that carry no assertion yet.
+
+**Closed 2026-08-24 by the second branch.** §4.1's preamble no longer counts its
+unasserted items, and items 4 and 5 now carry their own *asserted from* notes
+beside items 1 and 7. The copy-inventory test itself is scheduled rather than
+abandoned: SPEC §14.3 puts it in E2, growing with each later UI epic. This entry
+stops tracking it because the spec now does.

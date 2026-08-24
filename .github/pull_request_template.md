@@ -1,7 +1,8 @@
 # Ticket
 
-<!-- Which ticket from SPEC §14.3 does this PR deliver? Name the epic and
-     the ticket, e.g. "E0 — Foundations / core schema". One ticket per PR. -->
+<!-- Which ticket does this PR deliver? Name the epic and the ticket from its
+     build order in docs/tickets/e<N>/README.md, e.g. "E0 — Foundations /
+     E0-05 org containment schema". One ticket per PR. -->
 
 ## What changed
 

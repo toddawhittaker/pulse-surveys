@@ -17,8 +17,9 @@ ticket's: the test behind SPEC §4.1 item 7.
 | q2 — the rule | **Landed** in SPEC §8, and ADR 0017 is amended to say the assumption became a rule |
 | q2 — the constraint | **Built 2026-08-20** as `uq_institution_one_row`, a unique index on `(true)`; [ADR 0072](../../adr/0072-one-institution-is-a-unique-index-on-a-constant.md) |
 
-**§4.1's preamble now names the two items that carry no assertion** — item 1
-(E2's) and item 7 (E4's) — rather than claiming all seven are asserted. Adding
+**§4.1's preamble now names the items that carry no assertion** — at the time,
+item 1 (E2's) and item 7 (E4's); items 4 and 5 joined that named-gap state on
+2026-08-24 — rather than claiming all seven are asserted. Adding
 item 7 is what made that necessary: an invariant listed with nothing asserting
 it is exactly the rule this ticket exists to stop shipping unenforced.
 
@@ -172,7 +173,7 @@ change is larger than a schema edit.
       of restating it.
 - [ ] §4.1 item 7 has a test asserting it. **Not done, and it is E4's** — the
       reports carrying comparison-set figures do not exist yet. §4.1's preamble
-      names item 7 and item 1 as the two invariants that carry no assertion, so
+      names item 7 and item 1 among the invariants that carry no assertion, so
       the gap is stated rather than implied.
 - [x] SPEC says whether a deployment serves exactly one institution, and ADR 0017
       is amended to say the assumption became a rule. **Done 2026-08-18**, in §8.

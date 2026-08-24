@@ -17,7 +17,7 @@ line is drafted below and waiting on Todd.
 | 2 — the reveal writes no conflict-of-interest marking | **Carried to E10** |
 | 3 — the acting person is a parameter, not a property of the connection | **Carried to E10**, which is the first thing with a request-bound actor to bind |
 | 4 — the Care sweep does not cover the module's own public entry point | **Carried to E10**, which supplies the second legitimate caller the rule needs to name |
-| 5 — §4.1 item 1's deferral to E2 has no home in a document E2 will read | **Drafted 2026-08-20, awaiting Todd.** The proposed wording is in item 5 below; nothing has been written to `docs/SPEC.md`. Half discharged by the README's carried-out table. |
+| 5 — §4.1 item 1's deferral to E2 has no home in a document E2 will read | **Discharged 2026-08-24** by the post-E0 spec pass: §14.3's E2 entry now carries the assertion sentence and E2's exit line the test clause, per the draft below. The breakdown-line half is moot — §14.3 no longer lists per-epic breakdowns, so E2's own README is where that entry goes. |
 
 Item 5 is partly discharged in the meantime: the README now carries a
 carried-out-of-E0 table, which is the bookkeeping half of what item 5 asks for.
@@ -311,7 +311,7 @@ entry's existing voice:
 
 Note that §4.1 itself is **not** silent: item 1 already carries *"(Asserted from
 E2, the first epic with a student-visible path…)"*, and §4.1's preamble names it
-as one of the two items with no assertion behind it. What is missing is the other
+as one of the items with no assertion behind it. What is missing is the other
 direction — somebody reading §14.3 to find out what E2 is has no way to learn
 that an invariant is waiting there. The addition is bookkeeping in the document
 E2 will actually be planned from, which is why it is three sentences and not a
