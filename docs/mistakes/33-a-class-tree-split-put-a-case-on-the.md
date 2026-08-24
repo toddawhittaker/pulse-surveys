@@ -1,6 +1,6 @@
 # Entry 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
 
-**Caught: 0**
+**Caught: 1**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -59,3 +59,20 @@ half.** The line was reviewed twice with the sentence "the request was accepted"
 sitting above a match that included the case where nothing arrived, and the
 sentence is what both readings trusted. That is entry 1 arriving through a
 comment: the code was wrong and the record explained it away.
+
+## Instances
+
+**2026-08-24 — a module split, and the docstring for one half (caught).** The
+6,634-line `tests/conftest.py` was split into `tests/fixtures/`. The dispatch
+brief settled the docstring for `fixtures/app_imports.py` in advance: "every
+`sys.modules` / `sys.meta_path` manipulation in the suite lives in this one
+module". The last half of this entry's rule is what sent the author to grep the
+distinction rather than transcribe it, and the sentence was false in two places —
+`fixtures/seed.py` registers `scripts/seed.py` in `sys.modules` under a name of
+its own, and `tests/unit/test_db_engine_configuration.py` and
+`test_care_engine_configuration.py` each drop the backend's `app` modules inside
+a test. Only the `sys.meta_path` half and the *shared fixtures* half of the
+`sys.modules` half were true. Written as the narrower claim with both exceptions
+named, so the next person hunting an import-order defect is not told there is
+nowhere else to look. A module split is the same shape as the class-tree split
+above: the docstring for one half describes a line the split does not draw.

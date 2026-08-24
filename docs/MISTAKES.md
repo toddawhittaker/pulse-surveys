@@ -238,6 +238,10 @@ file and check the status, or run the gate bare.
 
 **Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/29-a-value-was-repaired-before-the-check-that-should.md)
 
+## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
+
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
+
 ## 4. `git add` swept untracked files into a commit
 
 **Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/04-git-add-swept-untracked-files-into-a-commit.md)
@@ -319,7 +323,3 @@ part of the guard: pass `--` before any list that came from a diff or a glob, an
 refuse leading-dash arguments in the script too. A decision made before your logic
 runs is still your decision. Test the near miss that distinguishes the fix from
 doing nothing.
-
-## 33. A class-tree split put a case on the wrong side, and the docstring said otherwise
-
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/33-a-class-tree-split-put-a-case-on-the.md)
