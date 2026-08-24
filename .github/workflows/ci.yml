@@ -66,7 +66,7 @@ jobs:
       # Full history, because the step below diffs against the base commit and a
       # shallow clone does not have it. A few seconds here against the fifteen
       # minutes E0-38 measured on a documentation-only run.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -223,7 +223,7 @@ jobs:
       node: ${{ steps.d.outputs.node }}
       evals: ${{ steps.d.outputs.evals }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: d
         name: Probe the tree
@@ -284,9 +284,9 @@ jobs:
     name: Fast · ruff + mypy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -376,7 +376,7 @@ jobs:
     needs: [changed, detect]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Documentation-only diff — nothing was type-checked
         if: needs.changed.outputs.inert == 'true'
@@ -388,7 +388,7 @@ jobs:
         if: needs.detect.outputs.node != 'true' && needs.changed.outputs.inert != 'true'
         run: echo "::notice::No package.json at the repository root — tsc and eslint have nothing to check."
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -444,9 +444,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -505,8 +505,8 @@ jobs:
     name: Fast · CI checker self-test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Self-test the CI checkers
@@ -541,7 +541,7 @@ jobs:
     needs: [changed, fast-gate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Documentation-only diff — the suite did not run
         if: needs.changed.outputs.inert == 'true'
@@ -549,7 +549,7 @@ jobs:
           echo "::notice::Every changed path is inert documentation (E0-38), so the suite did not run."
           echo "This job ran and reports success, so the required CI check still sees it."
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -602,7 +602,7 @@ jobs:
 
       - name: Upload coverage
         if: needs.changed.outputs.inert != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.xml
@@ -630,18 +630,18 @@ jobs:
     needs: [changed, fast-gate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Inert diff, so the e2e gate did not run
         if: needs.changed.outputs.inert == 'true'
         run: echo "::notice::Every changed path is inert documentation (E0-38), so no e2e path was exercised."
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -688,7 +688,7 @@ jobs:
         if: failure() && needs.changed.outputs.inert != 'true'
         run: docker compose logs --no-color --tail=200
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure() && needs.changed.outputs.inert != 'true'
         with:
           name: playwright-report
@@ -700,7 +700,7 @@ jobs:
     needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Inert diff, so the eval floors did not run
         if: needs.changed.outputs.inert == 'true'
@@ -712,7 +712,7 @@ jobs:
           echo "::notice::No tests/evals runner yet. E0-13 builds the gateway; the first eval set and the floors that gate on it are E2's, and this job stays tolerant until then."
           echo "::notice::Running the eval suite needs a provider API key as a repository secret and a secrets.* reference in this workflow. Under the secrets policy in CLAUDE.md that is Todd's call, so it is proposed, not wired."
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -752,7 +752,7 @@ jobs:
     needs: [changed, fast-gate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Documentation-only diff — no image was built
         if: needs.changed.outputs.inert == 'true'
@@ -760,7 +760,7 @@ jobs:
           echo "::notice::Every changed path is inert documentation (E0-38), so no image was built."
           echo "This job ran and reports success, so the required CI check still sees it."
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
         if: needs.changed.outputs.inert != 'true'
 
       - name: Build all images
@@ -888,7 +888,7 @@ jobs:
     needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The sixth expensive job of the seven. It is free today only because
       # `detect.outputs.frontend` is false and there is no frontend to build;
@@ -910,7 +910,7 @@ jobs:
         if: needs.detect.outputs.frontend != 'true' && needs.changed.outputs.inert != 'true'
         run: echo "::notice::No frontend/ yet. Enforcing once the frontend scaffold lands."
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -937,7 +937,7 @@ jobs:
     needs: [changed, detect, fast-gate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Documentation-only diff — nothing was audited
         if: needs.changed.outputs.inert == 'true'
@@ -945,7 +945,7 @@ jobs:
           echo "::notice::Every changed path is inert documentation (E0-38), so nothing was audited."
           echo "This job ran and reports success, so the required CI check still sees it."
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.changed.outputs.inert != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -968,7 +968,7 @@ jobs:
       # — so `npm audit` and the licence scan reported green having read nothing
       # since PR #61 committed the root manifest. The audit runs clean at the
       # root today; CI simply never called it.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
