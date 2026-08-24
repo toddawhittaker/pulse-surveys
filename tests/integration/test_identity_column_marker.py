@@ -50,17 +50,31 @@ iterates to a fixed point; the two tests that plant those cases are at the foot
 of the file and require the sweep to report them. The enumeration this file
 computes is what E0-10's views and the CI invariant pass are both built on.
 
-**Three tests here are `invariant`-marked**, and they are the last three:
+**The `invariant`-marked tests here are the ones about what a view may read**, and
+they are at the foot of the file. Three are E0-10's and E0-34's:
 `test_no_view_reads_a_column_the_identity_marker_names`,
 `test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names`, and the
 self-test that keeps the two of them apart. A view is read with its owner's
 privileges, so it is the one route to identity that E0-10's grants do not close,
 and this file holds the guard on it as the *database* reports it — at both of the
 grains Postgres records, because it records a column read and a whole-row read
-differently and the first version of this file only asked about one. Their
-docstrings carry the reasoning; `scripts/ci/check_invariants.py` is what makes
-the mark mean something, by treating a skip, an xfail or an empty collection in
-that pass as a failure.
+differently and the first version of this file only asked about one. Four more
+are E1-01's, in the section below those: the strict rule over the person tables
+and its three planted controls. Their docstrings carry the reasoning;
+`scripts/ci/check_invariants.py` is what makes the mark mean something, by
+treating a skip, an xfail or an empty collection in that pass as a failure. Do
+not count them from this paragraph — `pytest -m invariant --collect-only` is the
+only currency that sees both marking forms (`docs/MISTAKES.md` entry 35).
+
+**E1-01 adds a rule phrased over the *table* rather than over the marker**, and it
+is here for the same reason everything else in this file is: the vocabulary is
+defined here, so widening it widens every reader at once. The marker says what a
+column holds, which cannot answer for `user` — ADR 0001 puts the key and the
+platform reference there precisely so they are not identity, so `user` carries no
+marked column and `user.lms_user_id` is read by a view with every guard above
+green. `JOIN_KEY_COLUMNS` below is the closed list of columns a view may read
+from a table that holds a person, and `person_table_reads_including_chains`
+follows a view built on a view, which the one-hop dependency query cannot.
 
 **It is no longer the only guard on that door, and the other half is E0-34's.**
 This one reads `pg_depend`, so it sees only views a migration has executed — a
@@ -153,6 +167,44 @@ IDENTITY_NAME_FRAGMENTS = (
 # The tables that hold a person by construction. Anything with a foreign key to
 # one of them is swept too — see `people_tables`.
 PERSON_TABLES = ("user", "user_identity", "person")
+
+# The columns a view may read from one of those tables, and the whole of the list.
+# This is E1-01's strict rule: a view may name **no** column of `user`,
+# `user_identity` or `person` except one of these three — whatever the column is
+# called, and whether or not it carries a marker.
+#
+# **Why an allow-list of keys rather than a longer list of forbidden names.**
+# E1-01's carried entry ("The §4.1 view sweep is blind to an aliased identity
+# column and to join keys", `docs/tickets/e1/carried-from-e0.md`) measured two
+# blind spots and rules the obvious repair out in as many words: the fix is
+# "lineage and enumeration, not a longer fragment list". `IDENTITY_NAME_FRAGMENTS`
+# above is a judgement about *names*, and the view's author picks the name — the
+# reviewer's fixture selects `ui.display_name AS respondent_display_name` and
+# matches no fragment. A rule phrased over the columns that may be read does not
+# depend on the name at all: that column is refused because it is not `id`,
+# `user_id` or `lti_platform_id`, and it would be refused if it were called `x`.
+#
+# **`lms_user_id` is deliberately absent, and it is the second blind spot.** It is
+# the LTI `sub`, a stable per-person key at the platform, and
+# [ADR 0014](../../docs/adr/0014-lms-owned-columns-are-marked-by-a-name-prefix.md)'s
+# `lms_` prefix marks *ownership* rather than identity — so no rule in this module
+# sees it and none was ever meant to. The carried entry: "a view returning it
+# beside a comment lets an instructor resolve a named student in the LMS in one
+# step, with every §4.1 guard green."
+#
+# **What the three buy.** A read view has to be able to join. The carried entry
+# on the reveal's composition says what `section_roster` is for — it "hands
+# instructor-scoped code the `user_id` of every enrolled student… the key is what
+# makes a de-identified response addressable" — and `id` is what such a key is
+# joined to. `lti_platform_id` is the platform reference ADR 0001 puts on `user`
+# beside the key. Each of the three names a *row*; none of them names a person.
+#
+# The list is kept from growing into a schema by
+# `test_every_join_key_the_bound_column_mechanism_allows_is_a_structural_key` in
+# `test_identity_separated_views.py`, which requires each entry to be a primary
+# key or a foreign key on one of the tables above: a name added here that is
+# neither — `lms_user_id` is neither — turns that test red.
+JOIN_KEY_COLUMNS = ("id", "user_id", "lti_platform_id")
 
 # ---------------------------------------------------------------------------
 # E0-10 changes this module in two places and adds three tests, and all of it is
@@ -259,6 +311,45 @@ VIEW_TABLE_DEPENDENCIES = """
 PLANTED_IDENTITY_TABLE = "e0_34_planted_identity_table"
 PLANTED_WHOLE_ROW_VIEW = "e0_34_planted_whole_row_view"
 PLANTED_COLUMN_VIEW = "e0_34_planted_column_view"
+
+# The objects E1-01's three controls plant, and the column they add to a real
+# person table. Named for the ticket, like the two sets above, so that one
+# surviving a fixture change is traceable to the test that made it.
+#
+# `display_name` is the reviewer fixture's own column name
+# (`.claude/review-fixtures/identity-column-in-view.diff`), and it is not in this
+# schema — which is the point of the control rather than an accident of it. The
+# strict rule has to fire on a column the identity vocabulary cannot know about,
+# so the control adds one and then reads it under an alias.
+PLANTED_ALIAS_TABLE = "user_identity"
+PLANTED_ALIAS_COLUMN = "display_name"
+
+# The other half of the fixture's select list, and the carried entry's second
+# finding: `user.lms_user_id` is the LTI `sub`, a stable per-person key at the
+# platform that no rule in this module saw before E1-01. Spelled here rather than
+# discovered, because the control's job is to stand up that exact disclosure.
+#
+# `test_identity_grants.py` carries the same two names for its own control, and
+# they are copies for the reason `IDENTITY_NAME_FRAGMENTS` above is copied three
+# times: a test module importing a sibling test module resolves only because of
+# where pytest puts `tests/` on `sys.path`. Change one, change both.
+USER_TABLE = "user"
+LMS_USER_KEY = "lms_user_id"
+PLANTED_ALIAS_VIEW = "e1_01_planted_alias_view"
+PLANTED_CHAIN_SOURCE_VIEW = "e1_01_planted_chain_source_view"
+PLANTED_CHAIN_READER_VIEW = "e1_01_planted_chain_reader_view"
+PLANTED_JOIN_KEY_VIEW = "e1_01_planted_join_key_view"
+PLANTED_ROSTER_SHAPE_VIEW = "e1_01_planted_roster_shape_view"
+PLANTED_OFFENDING_VIEW = "e1_01_planted_offending_view"
+
+# The table the roster-shaped control reads, and the column it reads from it.
+# SPEC §8 names `enrollment` in the core table list, and the carried entry on the
+# reveal's composition names this exact read: `section_roster` "hands
+# instructor-scoped code the `user_id` of every enrolled student". A view of that
+# shape must stay silent, or the strict rule would forbid the read path §4.1
+# depends on.
+ENROLLMENT_TABLE = "enrollment"
+ENROLLMENT_KEY_COLUMN = "user_id"
 
 # Tables that hold no person at all (SPEC §2.1: the institution/college/
 # department/prefix hierarchy is Pulse's own org structure, built in the admin
@@ -984,8 +1075,15 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
     reports it** — E0-34 adds the file-side twin,
     `test_no_view_created_under_views_sql_names_an_identity_column`, which reads
     the `views_sql/` sources as text and so catches the same join in a file no
-    revision names yet. That one cannot see an alias or a chain of views; this one
-    cannot see a file nothing has executed. A view is
+    revision names yet. That one cannot see a column whose name it has no reason
+    to know, nor a chain of views; this one cannot see a file nothing has
+    executed. **E1-01 narrowed the first of those from both sides** — the text
+    sweep gained a mechanism that reads what an alias is *bound to* rather than
+    what a column is called, and this module gained the strict rule below, which
+    reads the table rather than the marker and folds a chain of views to a fixed
+    point. Neither closes the other's gap: text still cannot see a name that is
+    never written, and the catalog still cannot see a file nothing has run. A view
+    is
     read with its *owner's* privileges rather than its reader's, so a later
     `CREATE VIEW … SELECT ui.identity_name … JOIN public.user_identity ui`
     followed by `GRANT SELECT ON that view TO pulse_app` puts a name on an
@@ -1000,8 +1098,9 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
     this module's `pytestmark = pytest.mark.integration` rather than replacing
     it, so the test still runs in the ordinary suite as well.
 
-    Only this test, its whole-row twin above and the self-test that separates them
-    are marked in this module. The others are the marker convention's own
+    The marked tests in this module are this one, its whole-row twin above, the
+    self-test that separates them, and E1-01's strict rule with its three
+    controls at the foot of the file. The others are the marker convention's own
     tripwires — they say what an identity column *is*, which is a precondition for
     §4.1 rather than an instance of it, and
     `test_application_role_privileges.py`'s docstring draws the same line for the
@@ -1066,4 +1165,541 @@ def test_no_view_reads_a_column_the_identity_marker_names(migrated_engine: Any) 
         "column — and the grant that would otherwise stop it does not apply, because a view runs "
         "with its owner's privileges rather than its reader's. If a column in this list is "
         "genuinely not identity, the fix is at the marker rather than here."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1-01 — the two things the marked-column sweep above cannot see, closed here
+# rather than in a module of their own for the reason this file's E0-10 section
+# gives: the vocabulary is defined here, so the rule that widens it belongs here
+# (`docs/MISTAKES.md` entry 13).
+#
+# The two are the carried entry's, and neither is a defect in the sweep above —
+# each is a question it was never asked:
+#
+#   - **the marker is not the boundary.** `test_no_view_reads_a_column_the_
+#     identity_marker_names` filters `(table, column) in marked_columns`, so a
+#     column on `user_identity` that carries no marker is invisible to it, and
+#     `user` carries no marked column at all by construction (ADR 0001 splits the
+#     key from the identity, and `marked` above refuses a table comment on
+#     `user` on that ground). `user.lms_user_id` is therefore read by a view with
+#     every guard in this file green;
+#   - **a chain of views records its dependency one hop out.** `VIEW_COLUMN_
+#     DEPENDENCIES` is one hop by construction: a view B built on a view A
+#     records a dependency on *A's* columns, and A's columns carry no marker, so
+#     B reads a name through A and appears here reading nothing. The gap is
+#     recorded at `test_identity_separated_views.py`'s `identity_findings`, which
+#     names the mirror case its own text sweep cannot see.
+# ---------------------------------------------------------------------------
+
+
+def person_table_column_reads(connection: Any) -> dict[str, set[str]]:
+    """Every view, and the person-table columns it reads that are not join keys.
+
+    One hop, straight off `VIEW_COLUMN_DEPENDENCIES` — the same query the sweep
+    for a marked column uses, filtered differently. That one asks whether the
+    column is *marked*; this asks whether the table is one a person is stored in
+    and the column is not one of the keys a view may join on. They overlap on
+    `user_identity.identity_name` and diverge in both directions: an unmarked
+    column on a person table is here and not there, and a marked column on a
+    table outside `PERSON_TABLES` — a planted one, or E10's case model — is there
+    and not here.
+
+    Each finding is spelled `table.column`, which is what the failure message
+    quotes: naming the source column is E1-01's first criterion, and the same
+    file already fails other sweeps with messages about other things.
+    """
+    found: dict[str, set[str]] = {}
+    for view, table, column in connection.execute(text(VIEW_COLUMN_DEPENDENCIES)):
+        if table in PERSON_TABLES and column not in JOIN_KEY_COLUMNS:
+            found.setdefault(view, set()).add(f"{table}.{column}")
+    return found
+
+
+def view_dependency_edges(connection: Any) -> dict[str, set[str]]:
+    """Every view, and the views it reads a column of — one hop.
+
+    Read out of the same dependency query rather than a second one: `pg_class` is
+    not filtered by `relkind` on the *referenced* side there, so a view built on
+    a view is already reported, with the intermediate view in the `table_name`
+    column. That is the whole of what makes the fold below possible without new
+    SQL.
+    """
+    views = set(public_views(connection))
+    edges: dict[str, set[str]] = {}
+    for view, table, _ in connection.execute(text(VIEW_COLUMN_DEPENDENCIES)):
+        if table in views:
+            edges.setdefault(view, set()).add(table)
+    return edges
+
+
+def person_table_reads_including_chains(connection: Any) -> dict[str, set[tuple[str, str]]]:
+    """Every view, and every person-table column it reads directly or through another view.
+
+    Each finding is `(source, path)`: the base column — `user_identity.identity_name`
+    — and the chain of views it arrived through, the reading view first. So a
+    failure message names what leaked *and* where to look, which a set of view
+    names alone cannot.
+
+    **It is deliberately coarse, and the coarseness is the decision rather than a
+    limitation to be repaired later.** A view B that reads any column of a view A
+    inherits *all* of A's findings, including when B reads only the columns of A
+    that carry nothing. Postgres records which of A's columns B depends on, so a
+    column-precise lineage is possible; it is not built, because the failure
+    direction of the coarse version is the safe one — B is named, a human reads
+    two view definitions, and the answer is either a real leak or a `_v002.sql`
+    that stops selecting from a view it does not need. The precise version fails
+    the other way the first time a rename or an expression makes the mapping
+    ambiguous.
+
+    **The fold is bounded rather than run to exhaustion.** Postgres cannot hold a
+    cycle among views — a view must exist before it can be referenced, and
+    `CREATE OR REPLACE VIEW` refuses one that would introduce it — so the longest
+    chain is shorter than the number of views that read another view, and the
+    loop stops when nothing grew. The bound is there so that a future catalog
+    which *did* report a cycle is a slow test rather than a hung one.
+    """
+    direct = person_table_column_reads(connection)
+    edges = view_dependency_edges(connection)
+
+    found: dict[str, set[tuple[str, str]]] = {
+        view: {(source, view) for source in sources} for view, sources in direct.items()
+    }
+    for _ in range(len(edges) + 1):
+        grew = False
+        for reader, upstream in edges.items():
+            inherited = {
+                (source, f"{reader} <- {path}")
+                for view in upstream
+                for source, path in found.get(view, set())
+            }
+            if not inherited <= found.get(reader, set()):
+                found.setdefault(reader, set()).update(inherited)
+                grew = True
+        if not grew:
+            break
+    return found
+
+
+def person_table_reads_reported(connection: Any) -> list[str]:
+    """The findings above as one sorted list of sentences, which is what a message prints."""
+    return sorted(
+        f"{view} reads {source} (through {path})"
+        for view, findings in person_table_reads_including_chains(connection).items()
+        for source, path in findings
+    )
+
+
+@pytest.mark.invariant
+def test_no_view_reads_a_column_of_a_person_table_outside_the_join_keys(
+    migrated_engine: Any,
+) -> None:
+    """E1-01: the strict rule — a view may read a person table's keys and nothing else.
+
+    The two invariants above are phrased over the *marker*, which says what a
+    column holds. This one is phrased over the *table*, which says what a row is:
+    the tables `PERSON_TABLES` names hold a person by construction, so a view that
+    reads a column of one of them is reading something about a named human unless
+    the column is one of the keys `JOIN_KEY_COLUMNS` allows.
+
+    **Why the marker cannot carry this rule.** ADR 0001 puts the key and the
+    platform reference on `user` and identity on `user_identity`, and `marked`
+    above refuses a table comment on `user` on exactly that ground — so `user`
+    carries no marked column, and `test_no_view_reads_a_column_the_identity_
+    marker_names` is silent about every column it has. `user.lms_user_id` is the
+    LTI `sub`: a stable per-person key at the platform, matching no identity
+    fragment, marked by nothing, and enough to resolve a named student in the LMS
+    in one step. The carried entry measured that and this test is its "done when".
+
+    **And why it reaches through a chain.** `VIEW_COLUMN_DEPENDENCIES` is one hop:
+    a view built on another view records its dependency against the intermediate
+    view's columns, which carry no marker and belong to no person table, so the
+    filter above returns nothing for it. `person_table_reads_including_chains`
+    folds those hops to a fixed point and carries the base column forward, so the
+    failure names `user_identity.identity_name` and the path it travelled rather
+    than the intermediate view's invented column name.
+
+    **Marked `invariant` for the reason both of its neighbours are**: a view runs
+    with its owner's privileges rather than its reader's, so this is a route to
+    identity that no arrangement of ADR 0001's grants closes, and in a green
+    checkmark a skipped assertion and a passing one look the same.
+
+    **The mutation it exists to survive**: a view selecting `u.lms_user_id`, and
+    a view selecting `ui.<anything unmarked>` on a person table — neither of
+    which any other test in this repository mentions — and either of those read
+    through a second view that renames the column.
+    **The near miss it tolerates**: a view joining a person table and reading only
+    the keys `JOIN_KEY_COLUMNS` names, which is how a roster view is built and
+    what makes a de-identified response addressable at all.
+
+    Three non-vacuity guards, and the third is the one that is easy to leave out:
+    the dependency query has to return something, or an empty finding set is
+    telling you about the query rather than about the views.
+    """
+    with migrated_engine.connect() as connection:
+        views = public_views(connection)
+        present = sorted(inspect(connection).get_table_names())
+        dependencies = connection.execute(text(VIEW_COLUMN_DEPENDENCIES)).all()
+        reported = person_table_reads_reported(connection)
+
+    assert views, (
+        "The migrated database holds no view in `public`, so this sweep looked at nothing and "
+        "would report success. `test_identity_separated_views.py` is where their absence is "
+        "diagnosed."
+    )
+    absent = [name for name in PERSON_TABLES if name not in present]
+    assert not absent, (
+        f"The migrated database has no {absent} table, so this rule is scoped to fewer tables than "
+        f"it names and would pass over a view reading every column of the missing one. It holds "
+        f"{present}."
+    )
+    assert dependencies, (
+        f"Postgres reports no column-level dependency for any of {views}, which cannot be true of "
+        "a view that selects anything at all. `VIEW_COLUMN_DEPENDENCIES` is not finding what it is "
+        "meant to find, and the assertion below would pass against a view that returns every "
+        "column of `user_identity`."
+    )
+
+    assert not reported, (
+        f"{reported}. Each is a view reading a column of one of {list(PERSON_TABLES)} — the tables "
+        f"that hold a person — that is not one of the join keys {list(JOIN_KEY_COLUMNS)}.\n\n"
+        "SPEC §8 requires the instructor and leadership read paths to go through views that "
+        "'structurally cannot join to `user` identity columns — enforced in the database, not just "
+        "the application', and §4.1 makes the resulting rules automated assertions. This is the "
+        "half of that neither marker-based invariant above can state: the marker says what a "
+        "column *holds*, and these tables say what a row *is*. `user` carries no marked column by "
+        "construction (ADR 0001's split, and `marked` above refuses a table comment on it), so "
+        "every column it has — `lms_user_id`, the LTI `sub` — is invisible to the marked-column "
+        "sweep and is a stable per-person key at the platform.\n\n"
+        "**A finding whose path names more than one view is a chain**, and the column named is the "
+        "one at the *base* of it: the view listed first reads a later one, which reads the person "
+        "table. The intermediate view's column may be called anything at all, which is why the "
+        "one-hop dependency query returns nothing for the reader and why this fold exists. The "
+        "inheritance is deliberately coarse — the reader is named even if it selects only the "
+        "intermediate view's harmless columns — and `person_table_reads_including_chains` says "
+        "why that direction was chosen.\n\n"
+        "If the column named is genuinely a join key that a read path needs, it is added to "
+        "`JOIN_KEY_COLUMNS` above with the sentence that sanctions it, in a pull request that says "
+        "which reads that opens — and never `lms_user_id`, which is the whole of what the carried "
+        "entry measured."
+    )
+
+
+@pytest.mark.invariant
+def test_a_view_that_aliases_an_unmarked_person_table_column_is_flagged(db_session: Any) -> None:
+    """E1-01 criterion 1, on the catalog side: caught by lineage, not by the label.
+
+    The planted view is the reviewer's fixture
+    (`.claude/review-fixtures/identity-column-in-view.diff`), and its four
+    load-bearing lines are copied rather than retyped — `docs/MISTAKES.md` entry
+    3's canary rule, which is about a sentence retyped from where you think it
+    begins:
+
+        ui.display_name     AS respondent_display_name,
+        u.lms_user_id
+        JOIN user_identity ui ON ui.user_id = u.id
+
+    So both of the carried entry's findings are in one planted view, which is how
+    the fixture writes them. **The `FROM` is adapted and nothing else is**: the
+    fixture reads `FROM response r` and joins `"user" u` to it, and `response`
+    arrives with the survey tables in E2, so the view selects from `"user"`
+    directly. Neither identity read changes with it.
+
+    **Three assertions are what make this a test of the strict rule and not of
+    the marker**, and each is a measurement rather than reasoning:
+
+      - the planted column carries **no marker** in any of the three shapes
+        `marked` accepts, so the enumeration this module maintains does not
+        contain it;
+      - neither does `user.lms_user_id`, which is ADR 0001's split holding: the
+        LMS key is on `user` precisely because it is not identity;
+      - `column_grained_identity_reads` — the older `invariant`-marked sweep's
+        own computation — reports **nothing** for the planted view. That sweep is
+        green on this file. If it ever stops being green on it, the marker has
+        grown to cover the planted column and this control is measuring the wrong
+        thing.
+
+    Everything is planted inside `db_session`'s transaction and rolled back with
+    it, Postgres putting DDL inside the transaction, so `public` is unchanged at
+    the end and no other connection ever sees the column. The assertions run in
+    the same transaction as the plant, which is the point: a mutation a fixture
+    undoes before the assertion is a control that cannot fail
+    (`docs/MISTAKES.md` entry 20).
+
+    **The mutation it exists to survive**: reverting `person_table_column_reads`
+    to the marked-columns filter its neighbour uses, which is the state this
+    ticket found the sweep in.
+    **The near miss it tolerates**: the same view reading `ui.user_id`, which is
+    the allow side and is `test_a_view_that_reads_only_join_keys_of_a_person_
+    table_is_not_flagged`.
+    """
+    session = db_session
+    assert PLANTED_ALIAS_TABLE in PERSON_TABLES and USER_TABLE in PERSON_TABLES, (
+        f"`{PLANTED_ALIAS_TABLE}` and `{USER_TABLE}` are not both in the person tables "
+        f"{list(PERSON_TABLES)}, so one of the two reads planted below is not on a table this rule "
+        "guards and the flag asserted at the end would be about something else entirely."
+    )
+    on_user = {column["name"] for column in inspect(session.connection()).get_columns(USER_TABLE)}
+    assert LMS_USER_KEY in on_user, (
+        f"`public.{USER_TABLE}` has no `{LMS_USER_KEY}` column; it has {sorted(on_user)}. ADR 0001 "
+        "puts the LMS key and the platform reference on that table, and ADR 0014 prefixes an "
+        "LMS-owned column `lms_`. If the key has been renamed, this constant follows it — the "
+        "control cannot plant the disclosure the carried entry measured without the column that "
+        "carries it, and the planted view below would fail to compile instead of failing to be "
+        "caught."
+    )
+
+    session.execute(
+        text(f"ALTER TABLE public.{PLANTED_ALIAS_TABLE} ADD COLUMN {PLANTED_ALIAS_COLUMN} text")
+    )
+    # One statement per line, the shape this repository already uses for
+    # interpolated DDL in a test (`test_a_whole_row_view_reference_is_recorded_at_
+    # table_grain` above). Every name interpolated is a constant declared at the
+    # head of this module; nothing reaches these from outside the file, and the
+    # transaction is rolled back.
+    #
+    # **This line carries no S608 suppression**, and that is measured rather than
+    # chosen: ruff does not read this string as SQL built by interpolation, so
+    # adding one earns a `RUF100` for an unused directive. The two planted
+    # statements in the controls below are flagged and do carry it. A blanket
+    # suppression on every line that looks SQL-ish is what `RUF100` exists to
+    # stop.
+    #
+    # The rule is spelled in prose here rather than quoted, which is not fussiness:
+    # ruff reads a suppression token anywhere in a comment, so a sentence quoting
+    # the marker syntax *is* a directive, and one explaining a removed directive is
+    # an unused one. Measured — it cost a round.
+    planted_view = f'CREATE VIEW public.{PLANTED_ALIAS_VIEW} AS\nSELECT\n    ui.{PLANTED_ALIAS_COLUMN}     AS respondent_display_name,\n    u.{LMS_USER_KEY}\nFROM public."{USER_TABLE}" u\nJOIN {PLANTED_ALIAS_TABLE} ui ON ui.user_id = u.id'
+    session.execute(text(planted_view))
+
+    connection = session.connection()
+    source = f"{PLANTED_ALIAS_TABLE}.{PLANTED_ALIAS_COLUMN}"
+    join_key = f"{USER_TABLE}.{LMS_USER_KEY}"
+
+    marked_columns = database_marked_columns(connection)
+    assert (PLANTED_ALIAS_TABLE, PLANTED_ALIAS_COLUMN) not in marked_columns, (
+        f"`{source}` reads as *marked*, so the marked-column sweep above already sees this view "
+        "and the planted case no longer demonstrates anything the strict rule adds. The column is "
+        "planted by raw DDL with no comment and no `identity_` prefix; if `marked` now accepts a "
+        "third thing about it, read that change before this test."
+    )
+    assert (USER_TABLE, LMS_USER_KEY) not in marked_columns, (
+        f"`{join_key}` reads as marked, which contradicts ADR 0001's split — `{USER_TABLE}` holds "
+        "the LMS key and the platform reference precisely so that they are not identity — and "
+        "`test_the_marker_does_not_reach_columns_that_hold_no_identity` above is where that is "
+        "diagnosed. Until it is, the second finding asserted below would be the marker's rather "
+        "than this rule's."
+    )
+    assert not [
+        entry
+        for entry in column_grained_identity_reads(connection)
+        if entry.startswith(f"{PLANTED_ALIAS_VIEW}:")
+    ], (
+        f"`{PLANTED_ALIAS_VIEW}` is reported by the *marked-column* sweep. That is good news and it "
+        "contradicts the assertion above, which says the planted column carries no marker — so one "
+        "of the two computations has changed, and this control is no longer evidence that the "
+        "strict rule catches something its neighbour cannot."
+    )
+
+    dependencies = connection.execute(text(VIEW_COLUMN_DEPENDENCIES)).all()
+    assert (PLANTED_ALIAS_VIEW, PLANTED_ALIAS_TABLE, PLANTED_ALIAS_COLUMN) in [
+        tuple(row) for row in dependencies
+    ], (
+        f"Postgres records no dependency of `{PLANTED_ALIAS_VIEW}` on `{source}`, so the planted "
+        "view either was not created, does not read the column, or is invisible to "
+        "`VIEW_COLUMN_DEPENDENCIES` — and the assertion below would be about a view nothing is "
+        "looking at rather than about the rule."
+    )
+
+    findings = person_table_reads_including_chains(connection).get(PLANTED_ALIAS_VIEW, set())
+    assert any(found == source for found, _ in findings), (
+        f"The strict rule does not report `{source}` for `{PLANTED_ALIAS_VIEW}`; it reported "
+        f"{sorted(findings)}. The view aliases the column to `respondent_display_name`, which is "
+        "the shape the reviewer's fixture uses and the shape the sweep this ticket closed was "
+        "measured green against: the guard keys on the *output label*, which the view's author "
+        "chooses. The source column is what has to be named — E1-01 criterion 1 — because the "
+        "same file fails other sweeps with messages about other things, and a red that points "
+        "away from the defect spends the one moment somebody was looking."
+    )
+    assert any(found == join_key for found, _ in findings), (
+        f"The strict rule does not report `{join_key}` for `{PLANTED_ALIAS_VIEW}`; it reported "
+        f"{sorted(findings)}. That is the carried entry's second finding and the one nothing in "
+        "this repository looked at before: the LTI `sub`, on a table that carries no marked column "
+        "by construction, matching no identity fragment, and enough to resolve a named student in "
+        "the LMS in one step. A rule that caught the aliased name and not this one would close "
+        "half of what the entry measured."
+    )
+
+
+@pytest.mark.invariant
+def test_a_view_that_reads_a_person_table_column_through_another_view_is_flagged(
+    db_session: Any,
+) -> None:
+    """The chain: B reads A, A reads `user_identity`, and Postgres records B against A.
+
+    The gap is a fact about `pg_depend` rather than about anybody's SQL. A view
+    is stored as a rewrite rule over the relations it names, so a view built on
+    another view records column dependencies against *that view's* columns — and
+    an intermediate view's columns carry no marker, belong to no person table,
+    and may be called anything the author likes. The one-hop query therefore
+    reports the reader as reading nothing, which is the first assertion here.
+
+    **The negative and the two assertions after it are the finding**, and they are
+    the reason this is a test rather than a paragraph: the reader has no direct
+    person-table read, and the fold reports one anyway, naming the base column and
+    the path. Without the negative, a fold that had quietly collapsed into the
+    one-hop version would pass on the positives alone — the source view is
+    flagged directly, and asserting only that would be asserting the neighbour's
+    rule.
+
+    Both views are planted inside `db_session`'s transaction and roll back with
+    it (`docs/MISTAKES.md` entry 20: the plant and the assertions are in one
+    transaction).
+
+    **The mutation it exists to survive**: deleting the fixed-point loop from
+    `person_table_reads_including_chains`, or reading only the rows whose
+    `table_name` is a base table.
+    **The near miss it tolerates**: a chain whose base view reads only join keys,
+    which is flagged nowhere — the source view has no finding to inherit.
+    """
+    session = db_session
+    # Two statements, one per line with its own suppression, for the reason the
+    # sibling control above gives. `identity_name` is the marked column this
+    # schema really carries, so the base read is a real one.
+    source_view = f"CREATE VIEW public.{PLANTED_CHAIN_SOURCE_VIEW} AS SELECT identity_name AS display_name FROM public.{PLANTED_ALIAS_TABLE}"  # noqa: S608
+    reader_view = f"CREATE VIEW public.{PLANTED_CHAIN_READER_VIEW} AS SELECT display_name FROM public.{PLANTED_CHAIN_SOURCE_VIEW}"  # noqa: S608
+    session.execute(text(source_view))
+    session.execute(text(reader_view))
+
+    connection = session.connection()
+    direct = person_table_column_reads(connection)
+    chained = person_table_reads_including_chains(connection)
+
+    assert direct.get(PLANTED_CHAIN_SOURCE_VIEW), (
+        f"The one-hop reading reports nothing for `{PLANTED_CHAIN_SOURCE_VIEW}`, which selects "
+        f"`identity_name` straight out of `public.{PLANTED_ALIAS_TABLE}`. Then the base of this "
+        "chain is not being seen at all and the reader below has nothing to inherit, so the "
+        "assertion about the chain would be about a computation that is blind rather than about "
+        "one that is closed."
+    )
+    assert PLANTED_CHAIN_READER_VIEW in view_dependency_edges(connection), (
+        f"Postgres records no view-to-view dependency for `{PLANTED_CHAIN_READER_VIEW}`, which "
+        f"selects from `{PLANTED_CHAIN_SOURCE_VIEW}`. The edge query is not seeing a chain that "
+        "exists, and the fold has no hop to follow."
+    )
+    assert not direct.get(PLANTED_CHAIN_READER_VIEW), (
+        f"The one-hop reading already reports {sorted(direct[PLANTED_CHAIN_READER_VIEW])} for "
+        f"`{PLANTED_CHAIN_READER_VIEW}`, which reads no person table directly — it reads a view "
+        "that does. If Postgres has begun recording a transitive column dependency, the fold below "
+        "is unnecessary rather than wrong, and that is worth knowing before anybody decides which "
+        "of the two to keep."
+    )
+
+    source = f"{PLANTED_ALIAS_TABLE}.identity_name"
+    inherited = chained.get(PLANTED_CHAIN_READER_VIEW, set())
+    assert any(found == source for found, _ in inherited), (
+        f"The chain closure does not report `{source}` for `{PLANTED_CHAIN_READER_VIEW}`; it "
+        f"reported {sorted(inherited)}. The reader selects a column called `display_name` from a "
+        "view that selects `identity_name` from a person table, so every name in the reader's own "
+        "dependency row belongs to the intermediate view — and the marked-column sweep, the "
+        "whole-row sweep and the one-hop reading are all correctly silent about it. This fold is "
+        "the only thing between that arrangement and an instructor screen."
+    )
+    paths = [path for found, path in inherited if found == source]
+    assert any(PLANTED_CHAIN_SOURCE_VIEW in path for path in paths), (
+        f"The chain closure reports `{source}` for `{PLANTED_CHAIN_READER_VIEW}` and the path it "
+        f"names does not mention `{PLANTED_CHAIN_SOURCE_VIEW}`: it reported {sorted(inherited)}. "
+        "The path is half of what the failure message is for — a reader told only that a view "
+        "reads a name has two view definitions to open before knowing which."
+    )
+
+
+@pytest.mark.invariant
+def test_a_view_that_reads_only_join_keys_of_a_person_table_is_not_flagged(
+    db_session: Any,
+) -> None:
+    """The other half of the boundary: the reads a read path is built out of stay silent.
+
+    A tripwire that fires on correct SQL is repaired by weakening it, and the
+    casualty is the guard rather than the view. Two shapes are planted, and both
+    are shapes this schema either has or would write next: a view reading the keys
+    `JOIN_KEY_COLUMNS` allows off a person table — spelled from the table's own
+    columns rather than named here, so that the sample cannot come to name a
+    column the table does not have — and a view reading `enrollment.user_id`,
+    which is what `section_roster` does and which the carried entry on the
+    reveal's composition describes as "the whole point of the view".
+
+    **The offending view is planted in the same transaction as the two allowed
+    ones**, and that is not decoration: silence is what a computation that has
+    gone blind produces as well, so a control that only asserted an absence would
+    be green with the rule deleted (`docs/MISTAKES.md` entry 3).
+
+    **The mutation it exists to survive**: dropping `id` or `user_id` from
+    `JOIN_KEY_COLUMNS`, which would make every roster-shaped view in the schema
+    an offender and would be repaired by whoever met the red at the cheapest
+    place — by widening the rule back out to marked columns only.
+    **The near miss it tolerates**: none beyond the two planted here; that is
+    what this test is.
+    """
+    session = db_session
+    inspector = inspect(session.connection())
+    on_enrollment = {
+        column["name"]
+        for column in (
+            inspector.get_columns(ENROLLMENT_TABLE)
+            if ENROLLMENT_TABLE in inspector.get_table_names()
+            else []
+        )
+    }
+    assert ENROLLMENT_KEY_COLUMN in on_enrollment, (
+        f"`public.{ENROLLMENT_TABLE}` does not exist or has no `{ENROLLMENT_KEY_COLUMN}` column; "
+        f"it has {sorted(on_enrollment)}. SPEC §8 names `{ENROLLMENT_TABLE}` in the core table "
+        "list and the carried entry on the reveal's composition names this exact read, so if "
+        "either has been renamed these constants follow it — the roster-shaped sample is the shape "
+        "the real read path has, and dropping it would leave the allow side asserted only over a "
+        "shape nobody writes."
+    )
+
+    on_identity = {column["name"] for column in inspector.get_columns(PLANTED_ALIAS_TABLE)}
+    keys = sorted(set(JOIN_KEY_COLUMNS) & on_identity)
+    assert keys, (
+        f"`public.{PLANTED_ALIAS_TABLE}` carries none of the join keys {list(JOIN_KEY_COLUMNS)}, so "
+        "there is no allowed read of a person table to plant. Either the schema has moved or the "
+        "allow-list names columns this table does not have, which "
+        "`test_every_join_key_the_bound_column_mechanism_allows_is_a_structural_key` in "
+        "`test_identity_separated_views.py` is where it is diagnosed."
+    )
+    select_keys = ", ".join(f"ui.{key}" for key in keys)
+
+    # Three views, one per line with its own suppression, as above: two the rule
+    # must allow and one it must catch, so that the two absences below are
+    # attributable to the views rather than to a rule that reports nothing.
+    join_key_view = f"CREATE VIEW public.{PLANTED_JOIN_KEY_VIEW} AS SELECT {select_keys} FROM public.{PLANTED_ALIAS_TABLE} ui"  # noqa: S608
+    roster_shape_view = f"CREATE VIEW public.{PLANTED_ROSTER_SHAPE_VIEW} AS SELECT e.{ENROLLMENT_KEY_COLUMN} FROM public.{ENROLLMENT_TABLE} e"  # noqa: S608
+    offending_view = f"CREATE VIEW public.{PLANTED_OFFENDING_VIEW} AS SELECT ui.identity_name FROM public.{PLANTED_ALIAS_TABLE} ui"  # noqa: S608
+    session.execute(text(join_key_view))
+    session.execute(text(roster_shape_view))
+    session.execute(text(offending_view))
+
+    connection = session.connection()
+    findings = person_table_reads_including_chains(connection)
+
+    assert findings.get(PLANTED_OFFENDING_VIEW), (
+        "The rule reports nothing for a planted view that selects `identity_name` straight out of "
+        f"`public.{PLANTED_ALIAS_TABLE}`. It is blind, and the two absences asserted below are "
+        "facts about the computation rather than about the two views they name."
+    )
+    assert not findings.get(PLANTED_JOIN_KEY_VIEW), (
+        f"`{PLANTED_JOIN_KEY_VIEW}` reads {keys} off a person table and the rule reports "
+        f"{sorted(findings[PLANTED_JOIN_KEY_VIEW])}. Every one of those is in "
+        f"{list(JOIN_KEY_COLUMNS)}: a read view has to be able to join, and a rule that forbids "
+        "the key forbids the read path §4.1 depends on rather than the disclosure it is about."
+    )
+    assert not findings.get(PLANTED_ROSTER_SHAPE_VIEW), (
+        f"`{PLANTED_ROSTER_SHAPE_VIEW}` reads `{ENROLLMENT_TABLE}.{ENROLLMENT_KEY_COLUMN}` — the "
+        f"shape `section_roster` really has — and the rule reports "
+        f"{sorted(findings[PLANTED_ROSTER_SHAPE_VIEW])}. `{ENROLLMENT_TABLE}` is not one of "
+        f"{list(PERSON_TABLES)}, so nothing here should have looked at it at all; the Pulse-"
+        "internal `user_id` is the design, and it is what makes a de-identified response "
+        "addressable."
     )

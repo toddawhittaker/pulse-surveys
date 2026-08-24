@@ -104,14 +104,25 @@ a `CARE` assignment — needs the session factory's symbol, which E0-10 does not
 spell. The structural half of it is in the unit test named above; the runtime
 half waits on the interface.
 
-**The last section is E0-33's**, and it is a different question from every rule
-above: not "is this rule stated" but "was anything *else* stated". Asserting a
-refusal proves the refusal and proves nothing about what a later migration
-granted beside it, and `alembic check` reads no ACL, no `pg_roles` row and no
-`pg_proc` entry in either direction. Its sibling for generated columns, check
-constraints and exclusion constraints is
-`test_objects_the_drift_gate_cannot_compare.py`, and the view set is in
-`test_identity_separated_views.py`.
+**The E0-33 section** is a different question from every rule above it: not "is
+this rule stated" but "was anything *else* stated". Asserting a refusal proves the
+refusal and proves nothing about what a later migration granted beside it, and
+`alembic check` reads no ACL, no `pg_roles` row and no `pg_proc` entry in either
+direction. Its sibling for generated columns, check constraints and exclusion
+constraints is `test_objects_the_drift_gate_cannot_compare.py`, and the view set
+is in `test_identity_separated_views.py`.
+
+**The last section is E1-01's**, and it is a third question again: not which
+relations a role may read, but which *columns* it may read out of the views it is
+allowed to read at all. Every rule above is relation-grained, so none of them can
+see what a granted view returns — and a view runs with its owner's privileges, so
+the grant on it is the whole of the exposure. The carried entry
+`docs/tickets/e1/carried-from-e0.md` measured the disclosure that follows:
+`user.lms_user_id` is the LTI `sub`, matched by no identity rule anywhere in this
+repository, and a view returning it beside a comment resolves a named student at
+the platform in one step. The set of columns `pulse_app` may select is therefore
+enumerated as an equality, with the candidates read out of the catalog and the
+sanctioned set written down here.
 """
 
 import re
@@ -3649,4 +3660,561 @@ def test_downgrading_the_committed_record_revision_takes_back_the_definers_read_
         "halves rather than E0-10's single three-argument function. A downgrade that leaves the "
         "two-call door standing beside the restored one leaves both callable, and the old one "
         "takes its subject from its caller."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1-01 — what the application role may read from a view, column by column.
+# ---------------------------------------------------------------------------
+#
+# Every rule above is about *relations*: which role may read `user_identity`,
+# which may execute the door, who else is named in an ACL. None of them can see
+# what a view a role is allowed to read actually returns, and that is the gap the
+# carried entry measured: "the set of columns `pulse_app` may read from a view is
+# enumerated so a new grant on a join key fails the sweep rather than passing it"
+# (`docs/tickets/e1/carried-from-e0.md`).
+#
+# It is a third question, not a restatement of the two next door.
+# `test_identity_column_marker.py` asks what a view *reads*, out of `pg_depend`;
+# `test_identity_separated_views.py` asks what a view *file says*, out of the
+# text. This one asks what the application connection is *granted*, and the three
+# disagree in both directions: a view can read a column it does not return, and a
+# view whose column list is faultless can be granted to a role nobody sanctioned.
+#
+# **A `GRANT SELECT` on a view is the whole of the exposure.** A view runs with
+# its owner's privileges, so the grant is not filtered by anything the reader
+# holds; the columns of a view `pulse_app` may select are exactly the columns
+# every instructor and leadership screen can put on a page.
+
+# Every `(view, column, grantee)` a relation-level `SELECT` grant reaches, in
+# `public`. Relation-level grants carry no column list, so the columns come from
+# `pg_attribute` — a grant on the view is a grant on all of them.
+#
+# `aclexplode` rather than a text match on the `aclitem`, for the reason
+# `RELATION_GRANTEES` above gives: the rendered form carries the grantor's name,
+# which is `.env`'s choice. Grantee oid 0 is `PUBLIC`, which has no `pg_roles`
+# row and is named here rather than dropped by the join — every role in the
+# cluster is a member of it, `pulse_app` included, so a view granted to `PUBLIC`
+# is a view `pulse_app` may read without being named anywhere.
+APPLICATION_READABLE_VIEW_COLUMNS = """
+    SELECT c.relname AS relation,
+           a.attname AS column_name,
+           coalesce(r.rolname, 'PUBLIC') AS grantee
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN LATERAL aclexplode(c.relacl) AS g
+    LEFT JOIN pg_roles r ON r.oid = g.grantee
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('v', 'm')
+      AND g.privilege_type = 'SELECT'
+    ORDER BY 1, 2, 3
+"""
+
+# The grantees whose `SELECT` puts a column within the application connection's
+# reach. Two, and the second is the one that reads as mild: `PUBLIC` is the
+# pseudo-role every role belongs to, so one `GRANT SELECT ON <a view> TO PUBLIC`
+# is a grant to `pulse_app` that names no role at all.
+#
+# **A privilege reaching `pulse_app` by *membership* in another role is
+# deliberately not counted here**, and that is not an oversight: it is the whole
+# subject of `test_neither_runtime_role_can_become_a_role_that_may_read_identity`
+# above, which asks `pg_has_role` in `'MEMBER'` mode because a membership granted
+# `WITH INHERIT FALSE` appears in no ACL and in no `has_table_privilege` answer.
+# Asking that question again here would report the same hole twice and would make
+# this enumeration's expected set depend on the role graph rather than on what
+# each view returns.
+APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
+
+# What the application connection may read from a view, and the whole of it:
+# every `(view, column)` pair, written out by hand.
+#
+# **Hand-written and derived from the record, never read out of the view files**
+# — the same decision `RUNTIME_BASE_TABLE_PRIVILEGES` and
+# `REVEAL_DEFINER_PRIVILEGES` make above, for the same reason
+# (`docs/MISTAKES.md` entry 19). A set assembled from `backend/app/views_sql/*.sql`
+# at run time, or copied out of them without a sentence per entry, can be checked
+# only against the SQL it is supposed to police: the file says select it, the
+# catalog says granted, the test says fine, and a later ticket's column — which
+# is exactly how `lms_user_id` would arrive — justifies itself on the way past.
+#
+# The cost is honest and is the point: a ticket that legitimately adds a column to
+# a read view turns this red, and the pull request that adds it adds the entry and
+# says why. That is a loud failure on a legitimate change, and the alternative is
+# a silent pass on a widening.
+#
+# **`section_roster.user_id` is expected and allowed**, and it is worth saying
+# outright because it looks like the thing this rule is against. The
+# Pulse-internal uuid is the design — the carried entry on the reveal's
+# composition calls it "the whole point of the view", since "the key is what makes
+# a de-identified response addressable". `lms_user_id` is the one that must never
+# appear: it is the LTI `sub`, it resolves a named student at the platform in one
+# step, and ADR 0014's `lms_` prefix marks where the value came from rather than
+# what it holds.
+#
+# **Per view, because the sanction is per view.** Each entry below carries the
+# sentence that admits it, and the sentences come from the ticket, SPEC and the
+# ADR rather than from the SQL: the five views are E0-10's two and ADR 0046's
+# three, and what each is *for* is written down in those records.
+SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
+    # E0-10's scope, in its own words: "a section-roster view and an
+    # enrollment-count view that expose section membership and counts with **no**
+    # identity columns reachable". This is the membership half, one row per
+    # enrolment — `enrollment_id` is the row's key.
+    #
+    # **`user_id` is the Pulse-internal key and is the design**, not an oversight.
+    # The carried entry on the reveal's composition states it as the view's
+    # purpose: `section_roster` "hands instructor-scoped code the `user_id` of
+    # every enrolled student — that is the whole point of the view, and the key is
+    # what makes a de-identified response addressable". It names a `user` row and
+    # resolves to a name nowhere: every path from it to `user_identity` is shut by
+    # ADR 0001's grants, which the `invariant`-marked refusals earlier in this file
+    # assert. `lms_user_id` is the value that is different in kind — SPEC §4 keys
+    # responses "to the **LMS user ID** (`sub` from the launch)", so it is the one
+    # identifier here that means something outside this database — and it is
+    # absent, and must stay absent.
+    #
+    # **`lms_section_code` is an LMS key that resolves to a section**, never to a
+    # person: ADR 0014 puts the `lms_` prefix on `section.lms_section_code` as an
+    # ownership marker, and SPEC §8 derives `length_weeks` and the section's start
+    # and end dates from that code through `start_letter_map`. Those three travel
+    # with it for that reason. `started_on` and `ended_on` are the other two dates
+    # on the roster row; every one of the four is a date rather than an
+    # identifier.
+    "section_roster": (
+        "enrollment_id",
+        "user_id",
+        "section_id",
+        "course_id",
+        "term_id",
+        "lms_section_code",
+        "length_weeks",
+        "section_start_date",
+        "section_end_date",
+        "started_on",
+        "ended_on",
+    ),
+    # The counts half of the same E0-10 sentence. It carries no person key at all,
+    # and the contrast with `section_roster` above is the point rather than a
+    # detail: membership has to name the row it is about, and a count does not, so
+    # the two views differ by exactly the column that needed arguing for.
+    "section_enrollment_count": (
+        "section_id",
+        "course_id",
+        "term_id",
+        "lms_section_code",
+        "enrolled_count",
+    ),
+    # ADR 0046's first view: "one assignment, its scope node, its edge". SPEC §8
+    # spells the scope exactly — an assignment carries "its **scope as one
+    # nullable foreign key per containment level** — `institution_id`,
+    # `college_id`, `department_id`, `course_id`, `section_id` — of which exactly
+    # one is non-null" — so the five scope columns are that sentence, and
+    # `reports_to` is the edge, which ADR 0046's consequences say is carried now
+    # because "E9 walks that edge".
+    #
+    # **There is deliberately no `prefix_id` here and there is one in
+    # `containment_path` below**, which reads like an inconsistency and is not:
+    # SPEC §8 says "there is deliberately no `prefix_id`, because no role in
+    # §2.1's table is scoped to a prefix", while containment has six levels and a
+    # prefix is one of them. The two views answer different questions.
+    #
+    # `person_id` names a `person` row and nothing else. `person.identity_name` is
+    # marked identity (ADR 0022) and stays behind the view boundary; the key does
+    # not carry it.
+    "assignment_scope": (
+        "assignment_id",
+        "person_id",
+        "role",
+        "reports_to",
+        "institution_id",
+        "college_id",
+        "department_id",
+        "course_id",
+        "section_id",
+    ),
+    # ADR 0046's second: "which courses a person leads". SPEC §8:
+    # "`lead_faculty_mapping` maps a person to the courses they lead (one lead per
+    # course)". The pair is the whole answer, and ADR 0046 says why the courses
+    # come from the mapping rather than from the assignment — the mapping carries
+    # `UNIQUE (course_id)` and has exactly one answer per course.
+    "lead_faculty_course": ("person_id", "course_id"),
+    # ADR 0046's third: "every org node with the chain of ancestors above it",
+    # emitting "one row per node at every level". Six columns for SPEC §2.1's six
+    # containment levels, which is the same six `Purview` holds a set for. No
+    # person table appears anywhere in it.
+    "containment_path": (
+        "institution_id",
+        "college_id",
+        "department_id",
+        "prefix_id",
+        "course_id",
+        "section_id",
+    ),
+}
+
+EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(
+    (view, column) for view, columns in SANCTIONED_VIEW_COLUMNS.items() for column in columns
+)
+
+# The view E1-01's two controls plant, and the column the catching one exposes.
+# Named for the ticket so that one surviving a fixture change is traceable to it.
+PLANTED_GRANTED_VIEW = "e1_01_planted_granted_view"
+PLANTED_UNGRANTED_VIEW = "e1_01_planted_ungranted_view"
+
+# The join key the carried entry names, and the table ADR 0001 puts it on. Spelled
+# here rather than discovered, because the control's whole job is to stand up the
+# exact disclosure that entry measured: "`user.lms_user_id` is a stable per-person
+# join key (the LTI `sub`), and it is flagged by nothing".
+LMS_USER_KEY = "lms_user_id"
+USER_TABLE = "user"
+
+
+def mentions(message: str, word: str) -> bool:
+    """Does `message` name `word` as a whole word?
+
+    A whole word rather than a substring, because the control below asks whether a
+    *failure message* names a column, and the pair this rule is about is exactly
+    the pair a substring check gets wrong: `user_id` occurs inside `lms_user_id`,
+    so a message naming only the harmless key would satisfy a substring test for
+    the dangerous one. `\\b` refuses that — `_` is a word character — and it is the
+    difference between "the guard named the leak" and "the guard said something
+    that contained the right letters".
+
+    A second copy of a three-line regex, and deliberately: `test_identity_
+    separated_views.py` has the other. A test module importing a sibling test
+    module resolves only because of where pytest puts `tests/` on `sys.path`, so
+    borrowing costs a file loader — that module's `identity_marker_module` is what
+    it takes — and a loader for this is more machinery than the duplication.
+    `IDENTITY_NAME_FRAGMENTS` next door records the same trade for the same
+    reason.
+    """
+    return re.search(rf"\b{re.escape(word)}\b", message) is not None
+
+
+def columns_the_application_role_may_read(session: Any) -> set[tuple[str, str]]:
+    """Every `(view, column)` the application connection may `SELECT`, out of the catalog.
+
+    **Two ACLs, because a `SELECT` on a column is not recorded where a `SELECT` on
+    a relation is.** `pg_class.relacl` carries the grant on the view and says
+    nothing about columns, so every column of the view is reachable through it;
+    `pg_attribute.attacl` carries a grant on one column of it, appears in no
+    `relacl` anywhere, and is invisible to `has_table_privilege` — measured on
+    this stack during a security review of PR #40, and `COLUMN_GRANTEES` above
+    carries the measurement. A view granted at column level to `pulse_app` is a
+    view this sweep would miss entirely if it read only the first.
+
+    **The candidate set comes from the catalog and not from a list in this file**,
+    which is E1-01's scope in as many words: "the enumeration's inventory comes
+    from somewhere the guarded structure cannot shrink". A hand-kept list of views
+    would answer for the views somebody remembered, and the grant this rule exists
+    to catch is one nobody wrote down.
+    """
+    views = set(read_views(session))
+    granted = {
+        (row["relation"], row["column_name"])
+        for row in session.execute(text(APPLICATION_READABLE_VIEW_COLUMNS)).mappings()
+        if row["grantee"] in APPLICATION_READERS
+    }
+    granted |= {
+        (row["relation"], row["column_name"])
+        for row in session.execute(text(COLUMN_GRANTEES)).mappings()
+        if row["relation"] in views
+        and row["privilege"] == "SELECT"
+        and row["grantee"] in APPLICATION_READERS
+    }
+    return granted
+
+
+@pytest.mark.invariant
+def test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_enumerated_set(
+    db_session: Any,
+) -> None:
+    """E1-01 criterion 2: an equality, so that a new column is a decision and not a diff.
+
+    Every other grant rule in this file is about relations, and a relation-grained
+    rule cannot see what a view returns. This one is the column enumeration the
+    carried entry asks for: the set of `(view, column)` pairs `pulse_app` may
+    select is compared, both directions, against a set written down in this file
+    — so a column added to a read view, or a grant on a view nobody sanctioned,
+    fails here rather than passing everything.
+
+    **Views only, and base tables keep their table-grained equality.** They are
+    different questions and the answers are shaped differently: a base table's
+    rule is that the connection holds *no* privilege, which
+    `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
+    states exactly, and a view's rule is that it holds `SELECT` on precisely the
+    columns somebody sanctioned. Widening the base-table test to column grain
+    would compare an empty set against an empty set, which is a rule that cannot
+    fail; narrowing this one to relations would say nothing about `lms_user_id`,
+    which is the point of it.
+
+    **Marked `invariant` because it is a door rather than an inventory**, by the
+    line this file's E0-33 section draws: a marked test guards one route into
+    identity, and a column list a screen may read is that route at its last
+    possible moment — after the view text, after the dependency graph, in the
+    grant that decides what the application connection can put on a page.
+
+    **The mutation it exists to survive**: `GRANT SELECT ON <a view exposing
+    lms_user_id> TO pulse_app`, which is the carried entry's second finding and
+    which every other test in this suite is green against — the marked-column
+    sweeps say nothing, because `lms_` is ADR 0014's ownership marker rather than
+    an identity one, and the relation-grained grant rules say nothing, because
+    reading a view is what `pulse_app` exists to do. Also `GRANT SELECT (<a
+    column>) ON <a view> TO pulse_app`, which is recorded in a third catalog, and
+    `GRANT SELECT ON <a view> TO PUBLIC`, which names no role.
+    **The near miss it tolerates**: none by construction — a new column on a
+    granted view is a red, deliberately, and the entry that answers it is one line
+    with the sentence that sanctions it.
+
+    **Which is also how this test is defeated, so it is not defeated alone.**
+    Writing the entry is the cheap repair for any red here, including the one red
+    that must never be repaired that way, and no equality can tell a sanctioned
+    column from a sanctioned mistake. Two guards stand behind it:
+    `test_no_sanctioned_view_column_is_an_lms_join_key` below refuses that entry
+    by name, and `test_identity_column_marker.py`'s strict rule refuses the
+    *lineage* whatever the view calls the column.
+
+    Two non-vacuity guards. There must be views, or the catalog sweep has nothing
+    to enumerate; and the candidate set must be non-empty, or "the columns
+    `pulse_app` may read are exactly these" is equally true of a connection that
+    may read nothing at all and every screen in the product is shut.
+    """
+    views = read_views(db_session)
+    assert views, (
+        "There is no view in `public`, so this enumeration is over an empty set and would report "
+        "success against any grant at all. `test_identity_separated_views.py` diagnoses that."
+    )
+
+    candidates = columns_the_application_role_may_read(db_session)
+    assert candidates, (
+        f"`{APPLICATION_ROLE}` may read no column of any of {views}. Either the grants are missing "
+        "— in which case every read path in the product is shut, and "
+        "`test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own` reads "
+        "the same fact from the other side — or this sweep is reading the wrong catalog, in which "
+        "case the comparison below is between an empty set and a hand-written one and says nothing "
+        "about the database."
+    )
+
+    sanctioned = EXPECTED_APPLICATION_READABLE_COLUMNS
+    surplus = sorted(f"{view}.{column}" for view, column in candidates - sanctioned)
+    missing = sorted(f"{view}.{column}" for view, column in sanctioned - candidates)
+    assert not surplus and not missing, (
+        f"Granted and not sanctioned: {surplus}. Sanctioned and not granted: {missing}.\n\n"
+        "The first list is the one to read first. A view is read with its **owner's** privileges, "
+        "so a `GRANT SELECT` on one hands every column it returns to the grantee whatever the "
+        "grants on the tables underneath say — SPEC §8's separation is 'enforced in the database, "
+        "not just the application', and this is the last place in the database where what an "
+        "instructor's connection may see is decided. Nothing else in this build looks at it: "
+        "`alembic check` reads no ACL and no `pg_class` entry for a view (E0-20 item 3b), the "
+        "marked-column sweeps ask what a view *reads* rather than what it *returns*, and every "
+        "other grant rule in this file is about relations.\n\n"
+        f"**`{LMS_USER_KEY}` in that first list is the disclosure this rule was written for.** It "
+        "is the LTI `sub`: a stable per-person key at the platform, marked `lms_` for ownership by "
+        "ADR 0014 and by nothing for identity, matching no identity fragment and carrying no "
+        "marker. A view returning it beside a comment lets an instructor resolve a named student "
+        "in the LMS in one step with every §4.1 guard green, which is what "
+        "`docs/tickets/e1/carried-from-e0.md` measured. A Pulse-internal `user_id` is a different "
+        "thing and is expected: it names a row here and nothing anywhere else.\n\n"
+        "The second list means a column this project sanctioned is not readable, which shuts a "
+        "read path rather than opening one — a view replaced by a `_v002.sql` that dropped a "
+        "column, or a grants file a revision stopped executing.\n\n"
+        "If a column in the first list is legitimate, `EXPECTED_APPLICATION_READABLE_COLUMNS` at "
+        "the head of this section is the one place it is recorded, with the sentence that "
+        "sanctions it rather than just its name, and the pull request says which screen needs it. "
+        "That constant is deliberately not read out of `backend/app/views_sql/`: a set derived "
+        "from the files it polices lets every grant justify itself (`docs/MISTAKES.md` entry 19)."
+    )
+
+
+@pytest.mark.invariant
+def test_no_sanctioned_view_column_is_an_lms_join_key() -> None:
+    """The repair this enumeration invites, refused: an entry rather than a fix.
+
+    An equality fails in two directions and only one of them has an honest repair.
+    A column granted and not sanctioned is either a widening to undo or a decision
+    to record — and recording it is one line in the constant above, which is
+    exactly what somebody under time pressure would write for the column this
+    whole ticket is about. So the constant is held to the one name the carried
+    entry measured: `lms_user_id` may not appear in it, on any view, ever.
+
+    **What this does not do, said plainly, because it would be easy to read as
+    more.** It reads names, and a view may call a column anything: `SELECT
+    u.lms_user_id AS platform_key` sanctioned as `platform_key` passes here. That
+    case is not this test's — it is
+    `test_identity_column_marker.py`'s `test_no_view_reads_a_column_of_a_person_
+    table_outside_the_join_keys`, which reads the *lineage* out of `pg_depend` and
+    does not care what the view called it. The two are a pair: this one refuses
+    the cheap repair, that one refuses the aliased read, and neither covers the
+    other's case.
+
+    **The mutation it exists to survive**: adding `("<any view>", "lms_user_id")`
+    to `SANCTIONED_VIEW_COLUMNS` to make the enumeration green.
+    **The near miss it tolerates**: `section_roster.user_id`, which is sanctioned
+    above with the sentence that admits it and is a different identifier —
+    Pulse-internal, and resolving to a name nowhere.
+    """
+    assert SANCTIONED_VIEW_COLUMNS, (
+        "`SANCTIONED_VIEW_COLUMNS` is empty, so this test reads nothing and reports success. The "
+        "enumeration it belongs to would be failing on every granted column at the same time; "
+        "that test is where an empty constant is diagnosed."
+    )
+
+    named = sorted(
+        f"{view}.{column}"
+        for view, columns in SANCTIONED_VIEW_COLUMNS.items()
+        for column in columns
+        if column == LMS_USER_KEY
+    )
+    assert not named, (
+        f"{named} — `{LMS_USER_KEY}` is sanctioned as readable by `{APPLICATION_ROLE}`.\n\n"
+        "That is the LTI `sub`: a stable per-person key at the platform, which resolves a named "
+        "student in the LMS in one step. SPEC §4 keys responses to it, ADR 0014's `lms_` prefix "
+        "marks only where the value came from, and no identity rule in this repository matches it "
+        "— which is what `docs/tickets/e1/carried-from-e0.md` measured and what E1-01 exists to "
+        "close.\n\n"
+        "If this entry was added to make the enumeration green, that is the repair this test "
+        "refuses: the column comes out of the view, in a `_v002.sql` under ADR 0041, rather than "
+        "into this constant. If a read path genuinely needs to identify a person at the platform, "
+        "it is a decision for the spec and for Todd rather than for a grant list."
+    )
+
+
+@pytest.mark.invariant
+def test_a_granted_view_exposing_the_lms_join_key_fails_the_enumeration(db_session: Any) -> None:
+    """The enumeration seen *finding* something, on the exact grant the carried entry names.
+
+    `docs/MISTAKES.md` entry 35: a guard that enumerates and only ever reports
+    absence cannot tell you which of its mechanisms it can still see. So the grant
+    is stood up rather than reasoned about — a view returning `user.lms_user_id`,
+    granted `SELECT` to the application role, which is two statements a later
+    ticket writes to make one screen work.
+
+    **Everything is planted inside `db_session`'s transaction and rolled back with
+    it.** Postgres puts DDL *and* a `GRANT` inside the transaction, so `public` is
+    unchanged at the end and no other connection ever sees either. The assertions
+    run in the same transaction as the plant, which is what makes them mean
+    anything: a mutation a fixture undoes before the assertion is a control that
+    cannot fail (`docs/MISTAKES.md` entry 20).
+
+    **Three assertions, in order, and the middle one is the control on the
+    control.** The column has to exist — otherwise the plant is a view of
+    something else. The enumeration's *candidate* set has to contain it —
+    otherwise the failure below is the empty-expectation failure rather than this
+    grant. And the guard's message has to name the *entry* — the view and the
+    column together, as a whole word — because a red that does not name what
+    leaked is repaired by whatever is cheapest, and on this file the cheapest
+    repair is an entry in the sanctioned set. The bare column name would not do:
+    the guard's message explains in prose what `lms_user_id` is, so a check for
+    that word passes whatever the granted set contains.
+
+    **The mutation it exists to survive**: narrowing the candidate sweep to a
+    hand-kept list of views, which is the shape E1-01's scope forbids and which
+    would leave a planted view invisible; and dropping either ACL from
+    `columns_the_application_role_may_read`.
+    **The near miss it tolerates**: the same view left ungranted, which is the
+    other control below.
+    """
+    session = db_session
+    columns = {name for name, _ in public_table_columns(session, USER_TABLE)}
+    assert LMS_USER_KEY in columns, (
+        f"`public.{USER_TABLE}` has no `{LMS_USER_KEY}` column; it has {sorted(columns)}. ADR 0001 "
+        f"puts the LMS key and the platform reference on that table and ADR 0014 prefixes an "
+        "LMS-owned column `lms_`, so if the key has been renamed this constant follows it — the "
+        "control cannot plant the disclosure the carried entry measured without the column that "
+        "carries it."
+    )
+
+    # One statement per line with its own suppression, the convention this file
+    # already uses for interpolated DDL (`READ_IDENTITY` above, and the planted
+    # objects in `test_identity_column_marker.py`). Every name interpolated is a
+    # module constant declared beside `PLANTED_GRANTED_VIEW`; nothing reaches
+    # these from outside the file, and the transaction is rolled back.
+    planted = f'CREATE VIEW public.{PLANTED_GRANTED_VIEW} AS SELECT u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(planted))
+    session.execute(text(f'GRANT SELECT ON public.{PLANTED_GRANTED_VIEW} TO "{APPLICATION_ROLE}"'))
+
+    candidates = columns_the_application_role_may_read(session)
+    assert (PLANTED_GRANTED_VIEW, LMS_USER_KEY) in candidates, (
+        f"`{APPLICATION_ROLE}` was granted `SELECT` on a view returning `{LMS_USER_KEY}` and the "
+        f"candidate sweep does not report it. It reported {sorted(candidates)}. The sweep is "
+        "blind — to `pg_class.relacl`, to `pg_attribute`, or to views in `public` — and the "
+        "enumeration above is then an equality between a hand-written set and whatever a broken "
+        "query returns."
+    )
+
+    with pytest.raises(AssertionError) as failure:
+        test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_enumerated_set(
+            session
+        )
+
+    # **The column's name alone would not do**, and that is `docs/MISTAKES.md`
+    # entry 3 caught in the act: the guard's own failure message explains what
+    # `lms_user_id` is, in prose, so a check for the bare word passes whatever the
+    # granted set contains. What is asked for is the *entry* — the view and the
+    # column together, as the surplus list spells it — which nothing but a real
+    # finding can put in that message.
+    reported = f"{PLANTED_GRANTED_VIEW}.{LMS_USER_KEY}"
+    assert mentions(str(failure.value), reported), (
+        f"The enumeration failed on the planted grant and its message does not name `{reported}`. "
+        f"What it said: {failure.value}\n\n"
+        "The message is the criterion rather than a courtesy: a reader who is told only that the "
+        "granted set differs from the sanctioned one has two lists to diff, and the repair that "
+        "presents itself for either is an entry in the sanctioned set. It is also possible this "
+        "caught a *different* failure inside the guard — an empty candidate set, no views at all — "
+        "in which case the planted grant was never enumerated and this control would otherwise "
+        "have passed for a reason unrelated to what it asserts (`docs/MISTAKES.md` entry 3)."
+    )
+
+
+@pytest.mark.invariant
+def test_a_view_the_application_role_cannot_read_is_outside_the_enumeration(
+    db_session: Any,
+) -> None:
+    """The allow side: a view is the enumeration's business only once it is granted.
+
+    The same view as the control above, planted without the `GRANT`. A view
+    `pulse_app` cannot read exposes nothing to any screen, whatever its column
+    list says — that is what a grant model is *for* — so an enumeration that
+    reported it would be red on every internal view anybody ever adds, and would
+    be repaired by narrowing it back to the views somebody remembered.
+
+    **The grant is then made, in the same transaction, and the same sweep is asked
+    again.** Without that second half, the silence asserted first is equally the
+    silence of a sweep that has gone blind (`docs/MISTAKES.md` entry 3) — the two
+    halves together say that the *grant* is what moved the answer and not the
+    view's existence.
+
+    **The mutation it exists to survive**: dropping the grantee filter from
+    `columns_the_application_role_may_read`, so that every view in `public` is
+    enumerated whether the application role may read it or not.
+    **The near miss it tolerates**: none; the pair is the test.
+    """
+    session = db_session
+    planted = f'CREATE VIEW public.{PLANTED_UNGRANTED_VIEW} AS SELECT u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(planted))
+
+    assert PLANTED_UNGRANTED_VIEW in read_views(session), (
+        f"`{PLANTED_UNGRANTED_VIEW}` is not a view in `public` at all, so the absence asserted "
+        "below would be a fact about a view that was never created rather than about a grant that "
+        "was never made."
+    )
+    ungranted = columns_the_application_role_may_read(session)
+    assert not [view for view, _ in ungranted if view == PLANTED_UNGRANTED_VIEW], (
+        f"`{PLANTED_UNGRANTED_VIEW}` is enumerated as readable by `{APPLICATION_ROLE}` and no "
+        f"grant on it was ever made. The sweep reported {sorted(ungranted)}. It is therefore "
+        "reporting views rather than grants, and the equality above would go red on any view this "
+        "project creates for its own use — after which the cheapest repair is a list of the views "
+        "that count, which is what E1-01's scope forbids."
+    )
+
+    session.execute(
+        text(f'GRANT SELECT ON public.{PLANTED_UNGRANTED_VIEW} TO "{APPLICATION_ROLE}"')
+    )
+    granted = columns_the_application_role_may_read(session)
+    assert (PLANTED_UNGRANTED_VIEW, LMS_USER_KEY) in granted, (
+        f"The same view, now granted `SELECT` to `{APPLICATION_ROLE}`, is still not enumerated; "
+        f"the sweep reported {sorted(granted)}. Then the silence asserted above was the sweep "
+        "failing to see a grant rather than the grant's absence, and this control establishes "
+        "nothing about either."
     )
