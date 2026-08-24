@@ -61,11 +61,12 @@ and there are no direct merges in either direction.
 | E12 — Notifications | `epic/e12-notifications` |
 | E13 — Hardening & release ⚠ | `epic/e13-hardening-release` |
 
-Ticket branch names come from the *Ticket breakdown* line under each epic in
-§14.3. Where an epic has been decomposed into numbered tickets under
-`docs/tickets/`, those ticket branch names win over the list in the spec —
-[`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is the build order for
-E0 and names a branch for each of its tickets.
+Ticket branch names come from the epic's build order in
+`docs/tickets/e<N>/README.md`, which is written before the epic's first ticket
+branch is cut —
+[`docs/tickets/e0/README.md`](docs/tickets/e0/README.md) is E0's and names a
+branch for each of its tickets. The spec states each epic's scope and exit; it
+no longer lists per-epic ticket breakdowns (SPEC §14.1 says why).
 
 ⚠ marks epics that additionally require line-by-line human review of the
 security-relevant diff.
@@ -223,12 +224,14 @@ request bodies, test fixtures, seed data, or logs.
 
 ## Definition of done
 
-Every epic — and by extension every ticket that composes it — carries the five
+Every epic — and by extension every ticket that composes it — carries the
 conditions in [SPEC §14.2](docs/SPEC.md): tests land with the feature, AI evals
 are updated when a model task changes, a separate agent runs the adversarial
 security review, accessibility is handled in-slice rather than deferred to E13,
 and docs cover anything an operator or developer needs. The pull request
-template restates these as a checklist.
+template restates the per-ticket ones as a checklist. At the epic boundary,
+§14.2 item 6 adds the epic-level reviews — exit, invariant coverage, docs/ADR
+completeness, and a threat model on ⚠ epics — that gate the merge to `main`.
 
 Testing and security review are not separate epics. They are part of finishing
 each one.

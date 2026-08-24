@@ -189,7 +189,7 @@ closing them inside the epic is the argument for the exit scope above.
   what the participation denominator does with it in SPEC §3.4 the same day.
 - **E0-22 question 1** is a confidentiality rule that is still unenforced, and E4
   builds the reports it governs. Its rule is in the spec — §4.1 item 7, whose
-  preamble names it as one of the two invariants carrying no assertion yet.
+  preamble names it as one of the invariants carrying no assertion yet.
 - **E0-26 item 1** was a measured gap in SPEC §4's logging guarantee rather than
   hardening: a caller holding the Care credential who rolls back kept the
   student's name and left no audit row. **Closed 2026-08-20 (PR #53, ADR 0071)**,
@@ -252,8 +252,10 @@ What two of them left behind is *code*, and it is owned:
   as `uq_institution_one_row` (ADR 0072). §8 states the rule and the database now
   holds it.
 - **§4.1 item 7's test is E4's**, because the reports carrying comparison-set
-  figures do not exist yet. §4.1's preamble now names item 7 and item 1 as the
-  two invariants that carry no assertion, rather than claiming all seven do.
+  figures do not exist yet. §4.1's preamble names item 7 and item 1 among the
+  invariants that carry no assertion, rather than claiming all seven are
+  asserted (items 4 and 5 joined that named-gap state on 2026-08-24, out of the
+  epic-boundary coverage audit).
 - **E0-23's stored service address is E1's**, built with the sync that reads it.
 
 Every answer that wanted an existing record amended has had it. **ADR 0056** was
@@ -475,6 +477,8 @@ Where this differs from the ticket list in §14.3, and why:
   is the argument for running them at the boundary at all, and it is why Batch I
   exists after the exit scope above said the epic was finished.
 
-Where a branch name here differs from the *Ticket breakdown* line under E0 in
-SPEC §14.3, or from the three illustrative names in `CONTRIBUTING.md`'s diagram,
-these names win. §14.3 lists eight groupings, not one branch per ticket.
+Where a branch name here differed from the *Ticket breakdown* line SPEC §14.3
+carried under E0 at the time (eight groupings, not one branch per ticket), or
+differs from the three illustrative names in `CONTRIBUTING.md`'s diagram, these
+names win. Since 2026-08-24 the spec lists no per-epic breakdowns at all — an
+epic's README like this one is the only home a ticket's name has.
