@@ -54,6 +54,22 @@ reads what an alias is bound *to* instead: a read of any column of `user`,
 `user.lms_user_id` with it, which is the same entry's second finding and which no
 rule in this repository looked at before.
 
+**A fresh-context security review then found a third route, and it is why the
+`whole row` and `star` mechanisms sweep the guarded tables and not only the
+marked ones.**
+`SELECT to_jsonb(u) AS platform_ref FROM public."user" u` writes no column name,
+no `*` and no qualified reference, so the `column`, `star` and `bound column`
+mechanisms are all silent — and the `whole row` mechanism iterated the tables
+carrying a *marked* column, which `user` does not and by ADR 0001's design never
+will. One statement carrying every value `user` holds, seen by four mechanisms
+and reported by none. `SELECT * FROM public."user"` was open through the `star`
+mechanism for the identical reason and is closed in the same change, because a
+finding names one spelling and a guard owes an answer for the class. The same
+review found the quoted spelling `SELECT "user".lms_user_id FROM public."user"`,
+which binds no alias and puts a quote where the read pattern expected a dot.
+Every one of them has a shape in the inventories below, and each has an
+allow-side pair.
+
 **The guard's two controls read their inventory from constants and not from the
 table of mechanisms they control**, and that separation is load-bearing rather
 than stylistic: with the controls parametrised over `IDENTITY_MECHANISMS`,
@@ -1593,6 +1609,23 @@ def identity_columns_a_star_reaches(body: str, vocabulary: IdentityVocabulary) -
     names alone is green against the widest read in the schema. It is also one of
     the two places the table-grained marker is honoured, because a `*` really does
     reach every column of the table it stars.
+
+    **It sweeps the guarded person tables too, for the reason
+    `identity_rows_read_whole` below now does.** The security review that found
+    `to_jsonb(u)` invisible on this side named that spelling; `SELECT * FROM
+    public."user"` is the same exposure through this mechanism, and it was
+    invisible for the identical reason — the iteration was over the tables
+    carrying a *marked* column, and `user` carries none by ADR 0001's design.
+    Widening only the mechanism the review happened to name would have left the
+    wider of the two reads open, which is `docs/MISTAKES.md` entry 35's rule read
+    the wrong way round: a finding names one currency and the guard owes an answer
+    for the class.
+
+    The catalog rule does catch that one — a `*` records a column dependency for
+    every column, so `test_identity_column_marker.py` sees it — which makes this a
+    gap only for a `views_sql/` file no revision has executed. That is precisely
+    the state E0-34 exists to cover, so it is closed here rather than left to the
+    other side.
     """
     if not SELECTS_A_STAR.search(body):
         return ()
@@ -1600,9 +1633,9 @@ def identity_columns_a_star_reaches(body: str, vocabulary: IdentityVocabulary) -
         sorted(
             {
                 column
-                for table in vocabulary.tables
+                for table in sorted(vocabulary.tables | vocabulary.guarded)
                 if names_a_relation(body, table)
-                for column in vocabulary.carried.get(table, ())
+                for column in vocabulary.carried.get(table, ()) or (f"{table}.*",)
             }
         )
     )
@@ -1653,6 +1686,32 @@ def identity_rows_read_whole(body: str, vocabulary: IdentityVocabulary) -> tuple
     reference — `ui.identity_name` — is a column read and belongs to the column
     mechanism; the whole row is what is left.
 
+    **It sweeps the guarded person tables as well as the marked ones, which is
+    E1-01's widening and a security review's finding.** As E0-34 wrote it, this
+    iterated the tables carrying a marked column and skipped any table with none
+    — and `user` has none by construction, because ADR 0001 puts the key and the
+    platform reference there precisely so that they are *not* identity. So
+    `SELECT to_jsonb(u) AS platform_ref FROM public."user" u` was seen by no
+    mechanism here and by neither dependency grain in the catalog: the shape that
+    carries `lms_user_id` and everything else `user` holds, reported by nothing.
+    A table with no marked column now reports `<table>.*`, because there is no
+    column name to report and the star is what tells a reader which shape they
+    are looking at.
+
+    **The widening lives here rather than in `person_table_columns_bound`**, and
+    the choice is entry 13's: "is this row read whole" is one question, this is
+    where it is answered, and a second implementation of it inside the
+    bound-column mechanism would be the copy that does not get the next repair —
+    the comma-join false positive below took a review to find and is stated in one
+    place.
+
+    **A quote between the token and its dot is still a column read.** `"user".id`
+    binds no row; it names a column of one. The lookahead below refuses it for the
+    same reason `person_table_columns_bound` was taught to *accept* it — the two
+    mechanisms have to agree about which shape a quoted reference is, or a
+    quoted column read is reported as a whole-row read by one of them and the
+    repair is to weaken whichever fired.
+
     **Its known false positive, stated rather than discovered**
     (`docs/MISTAKES.md` entry 14): an old-style comma join,
     `FROM public.a, public.user_identity ui`, binds through no `FROM` or `JOIN`
@@ -1664,16 +1723,14 @@ def identity_rows_read_whole(body: str, vocabulary: IdentityVocabulary) -> tuple
     and in the guard's failure message rather than left to be found.
     """
     found: set[str] = set()
-    for table in vocabulary.tables:
-        columns = vocabulary.carried.get(table, ())
-        if not columns:
-            continue
+    for table in sorted(vocabulary.tables | vocabulary.guarded):
+        columns = vocabulary.carried.get(table, ()) or (f"{table}.*",)
         bindings = relation_bindings(body, table)
         spans = [(start, end) for start, end, _ in bindings]
         names = {table} | {alias for _, _, alias in bindings if alias}
         for token in names:
-            bare = re.compile(rf"\b{re.escape(token)}\b(?!\s*\.)", re.IGNORECASE)
-            whole = re.compile(rf"\b{re.escape(token)}\s*\.\s*\*", re.IGNORECASE)
+            bare = re.compile(rf'\b{re.escape(token)}\b(?!"?\s*\.)', re.IGNORECASE)
+            whole = re.compile(rf'\b{re.escape(token)}"?\s*\.\s*\*', re.IGNORECASE)
             outside = [
                 match
                 for match in bare.finditer(body)
@@ -1709,13 +1766,21 @@ def person_table_columns_bound(body: str, vocabulary: IdentityVocabulary) -> tup
     binds it took an incident to get right, and the whole-row mechanism above
     already depends on both (`docs/MISTAKES.md` entry 13).
 
-    **The `\\b` on the token is load-bearing and is pinned by a sample.** Without
-    it, any token *ending* in a bound name is read as that name — `xu.note`
-    becomes `u.note` and is reported as a read of `user` — which flags correct SQL
-    and so fails in the direction that gets a guard weakened rather than the
-    direction that leaks. A mutation battery found nothing distinguishing the two
-    versions, so `IDENTITY_SWEEP_MUST_ALLOW` now carries the two-alias shape that
-    does.
+    **The left boundary is load-bearing and is pinned by a sample.** Without it,
+    any token *ending* in a bound name is read as that name — `xu.note` becomes
+    `u.note` and is reported as a read of `user` — which flags correct SQL and so
+    fails in the direction that gets a guard weakened rather than the direction
+    that leaks. A mutation battery found nothing distinguishing the two versions,
+    so `IDENTITY_SWEEP_MUST_ALLOW` now carries the two-alias shape that does.
+
+    **It is a lookbehind rather than a `\\b`, because a quote is not a word
+    character.** `SELECT "user".lms_user_id FROM public."user"` puts a `"` between
+    the token and its dot and binds no alias to fall back on, so a pattern
+    anchored with `\\b` and requiring the dot immediately after the name matched
+    nothing at all — found by a fresh-context security review. The optional quotes
+    are matched on both sides of the token and `(?<![\\w"])` keeps the left
+    boundary: `"user_archive".note` still does not match, because the quote is
+    consumed before the token and what follows the token is `_` rather than a dot.
 
     **What it cannot see**, stated here rather than found later
     (`docs/MISTAKES.md` entry 14):
@@ -1734,6 +1799,17 @@ def person_table_columns_bound(body: str, vocabulary: IdentityVocabulary) -> tup
         names no alias and no table before the column, so this sees nothing —
         the `column` mechanism is what catches that, and it catches it only
         because the column carries a name the vocabulary knows.
+      - **a name bound by a CTE.** `WITH ui AS (SELECT * FROM public.user_identity)
+        SELECT ui.identity_name FROM ui` binds `ui` in a `WITH` clause rather than
+        in the `FROM` this reads, so `relation_bindings` reports nothing and every
+        later `ui.<column>` is unattributed. **This is deliberately not closed
+        here**: following a CTE in text means resolving one query's scope from
+        another's, which is parsing SQL rather than sweeping it, and a
+        half-resolved scope flags correct queries. The backstop is the catalog —
+        `test_identity_column_marker.py`'s strict rule reads what the *stored*
+        view depends on, and a CTE leaves the same `pg_depend` row a plain join
+        does, at both grains. A file no revision has executed is the case that
+        falls between the two, and it is the one this mechanism cannot answer for.
     """
     found: set[str] = set()
     for table in sorted(vocabulary.guarded):
@@ -1741,7 +1817,7 @@ def person_table_columns_bound(body: str, vocabulary: IdentityVocabulary) -> tup
         if not bindings:
             continue
         for token in sorted({table} | {alias for _, _, alias in bindings if alias}):
-            reads = re.compile(rf'\b{re.escape(token)}\s*\.\s*"?(\w+)"?', re.IGNORECASE)
+            reads = re.compile(rf'(?<![\w"])"?{re.escape(token)}"?\s*\.\s*"?(\w+)"?', re.IGNORECASE)
             for match in reads.finditer(body):
                 if match.group(1).lower() not in vocabulary.join_keys:
                     found.add(f"{table}.{match.group(1)}")
@@ -1865,6 +1941,39 @@ IDENTITY_SWEEP_MUST_CATCH = (
         "CREATE VIEW public.{view} AS SELECT (ui.*)::text FROM public.{table} ui;",
     ),
     RequiredShape("whole row", "CREATE VIEW public.{view} AS TABLE public.{table};"),
+    # The widest read of the same table, through the mechanism beside it. Not the
+    # spelling the review named — it named `to_jsonb` — and it was open for the
+    # identical reason, so it is closed and controlled in the same change.
+    RequiredShape(
+        "star",
+        'CREATE VIEW public.{view} AS SELECT * FROM public."user";',
+        ("user.*",),
+    ),
+    # The same mechanism over the person table that carries **no marked column**,
+    # which is where a fresh-context security review walked around every guard in
+    # this repository at once. `user` holds the LMS key and the platform reference
+    # by ADR 0001's split, so it is in no marked-table set — and the row of it is
+    # every one of those values under one harmless column name. The alias is the
+    # reviewer's own: this is what the accident looks like.
+    RequiredShape(
+        "whole row",
+        'CREATE VIEW public.{view} AS SELECT to_jsonb(u) AS platform_ref FROM public."user" u;',
+        ("user.*",),
+    ),
+    RequiredShape(
+        "whole row",
+        'CREATE VIEW public.{view} AS SELECT u FROM public."user" u;',
+        ("user.*",),
+    ),
+    # The quoted spelling, which binds no alias and puts a `"` between the table
+    # name and its dot — so a pattern anchored on `\b` and requiring the dot
+    # immediately after the name matched nothing at all. Also a security review's,
+    # and the reason the read pattern carries a lookbehind rather than a boundary.
+    RequiredShape(
+        "bound column",
+        'CREATE VIEW public.{view} AS SELECT "user".lms_user_id FROM public."user";',
+        ("user.lms_user_id",),
+    ),
     # E1-01's shapes, and the first of them is the reviewer's fixture. Its lines
     # are **copied** out of `.claude/review-fixtures/identity-column-in-view.diff`
     # rather than retyped, including the run of spaces before each `AS` — entry
@@ -1974,6 +2083,24 @@ IDENTITY_SWEEP_MUST_ALLOW = (
     # alias as its suffix.
     "CREATE VIEW public.{view} AS SELECT xu.note FROM public.{other} xu\n"
     'JOIN "user" u        ON u.id = xu.user_id;',
+    # The allow half of the two shapes a security review added above.
+    #
+    # A whole-row read of a relation that holds **no** person: the widened
+    # whole-row mechanism must stay off it, or the first legitimate `to_jsonb` in
+    # the schema is a red and the repair is to narrow the mechanism back to marked
+    # tables — which is the state the review found.
+    "CREATE VIEW public.{view} AS SELECT to_jsonb(r) AS payload FROM public.{other} r;",
+    # And a **quoted** relation whose name *ends* in a guarded one, beside a real
+    # binding of that guarded table so that the read pattern actually runs. The
+    # suffix is what makes this discriminate: with the quote allowed on the left
+    # and no lookbehind to stop it, `"archived_user".note` matches — the optional
+    # quote skips nothing, `user` matches the tail, the closing quote is consumed
+    # and the dot follows — and every view naming an archive table is reported as
+    # reading `user`. `"user_archive"` would not have shown this: what stops that
+    # one is the `_` where a dot is required, which every version of the pattern
+    # gets right.
+    'CREATE VIEW public.{view} AS SELECT "archived_user".note FROM public."archived_user"\n'
+    'JOIN public."user" u ON u.id = "archived_user".user_id;',
     # The clause words that may follow a relation and are not an alias for it. Each
     # of these is a line a real view writes, and each would be a false red if
     # `ALIAS_STOP_WORDS` lost a member: the word after the table would be read as
@@ -2266,10 +2393,12 @@ def test_the_view_file_identity_sweep_allows_the_shapes_that_read_no_identity(
     column search, which makes `{column}_hash` one; dropping the dollar-quote and
     view-body handling, which makes the reveal function one; emptying
     `ALIAS_STOP_WORDS`, which makes `WHERE` a row reference; emptying
-    `JOIN_KEY_COLUMNS`, which makes every join to a person table a person read; or
-    dropping the `\\b` from the bound-column read pattern, which makes an alias
-    ending in a person table's alias one — the last was measured surviving
-    everything else in this module and is why the two-alias sample is here.
+    `JOIN_KEY_COLUMNS`, which makes every join to a person table a person read;
+    dropping the left boundary from the bound-column read pattern, which makes an
+    alias *ending* in a person table's alias one — measured surviving everything
+    else in this module, which is why the two-alias sample and the
+    `"archived_user"` sample are here; and widening the whole-row mechanism to any
+    `to_jsonb`, which makes a row of a table holding no person one.
     **The near miss it tolerates**: none — that is what this test is.
     """
     assert IDENTITY_SWEEP_MUST_ALLOW, (

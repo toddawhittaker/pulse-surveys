@@ -58,9 +58,9 @@ self-test that keeps the two of them apart. A view is read with its owner's
 privileges, so it is the one route to identity that E0-10's grants do not close,
 and this file holds the guard on it as the *database* reports it — at both of the
 grains Postgres records, because it records a column read and a whole-row read
-differently and the first version of this file only asked about one. Four more
-are E1-01's, in the section below those: the strict rule over the person tables
-and its three planted controls. Their docstrings carry the reasoning;
+differently and the first version of this file only asked about one. The rest are
+E1-01's, in the section below those: the strict rule over the person tables and
+its planted controls. Their docstrings carry the reasoning;
 `scripts/ci/check_invariants.py` is what makes the mark mean something, by
 treating a skip, an xfail or an empty collection in that pass as a failure. Do
 not count them from this paragraph — `pytest -m invariant --collect-only` is the
@@ -75,6 +75,15 @@ marked column and `user.lms_user_id` is read by a view with every guard above
 green. `JOIN_KEY_COLUMNS` below is the closed list of columns a view may read
 from a table that holds a person, and `person_table_reads_including_chains`
 follows a view built on a view, which the one-hop dependency query cannot.
+
+**It reads both dependency grains, and that is a security review's finding rather
+than symmetry for its own sake.** A view taking `to_jsonb(u)` of a `user` row
+carries every column that table has and records *no* column dependency, so the
+column-grain rule is silent; and the whole-row rule above is scoped to marked
+tables, where `user` is deliberately absent. The two guards that each cover one
+grain left one table uncovered at both, which is the shape `docs/MISTAKES.md`
+entry 35 records one level up: an enumeration of mechanisms that is complete on
+the subject somebody had in mind.
 
 **It is no longer the only guard on that door, and the other half is E0-34's.**
 This one reads `pg_depend`, so it sees only views a migration has executed — a
@@ -341,6 +350,15 @@ PLANTED_CHAIN_READER_VIEW = "e1_01_planted_chain_reader_view"
 PLANTED_JOIN_KEY_VIEW = "e1_01_planted_join_key_view"
 PLANTED_ROSTER_SHAPE_VIEW = "e1_01_planted_roster_shape_view"
 PLANTED_OFFENDING_VIEW = "e1_01_planted_offending_view"
+
+# The whole-row plants, added by the security review that found the second
+# dependency grain unguarded on `user`. The alias on the first is the reviewer's
+# own — a name a real author would choose for that column, which is what makes it
+# the accident rather than the sabotage.
+PLANTED_WHOLE_PERSON_VIEW = "e1_01_planted_whole_person_view"
+PLANTED_WHOLE_PERSON_READER_VIEW = "e1_01_planted_whole_person_reader_view"
+PLANTED_WHOLE_OTHER_VIEW = "e1_01_planted_whole_other_view"
+PLANTED_WHOLE_ROW_ALIAS = "platform_ref"
 
 # The table the roster-shaped control reads, and the column it reads from it.
 # SPEC §8 names `enrollment` in the core table list, and the carried entry on the
@@ -1230,6 +1248,46 @@ def person_table_column_reads(connection: Any) -> dict[str, set[str]]:
     return found
 
 
+def person_table_rows_read_whole(connection: Any) -> dict[str, set[str]]:
+    """Every view, and the person tables whose **row** it reads whole, spelled `table.*`.
+
+    **The second dependency grain, and the hole a fresh-context security review
+    found between the two.** Postgres records a reference to a row *as a value* at
+    `refobjsubid = 0` and records no column dependency for it at all — the
+    measurement is on `VIEW_TABLE_DEPENDENCIES` above — so
+    `person_table_column_reads` is silent about `SELECT to_jsonb(u) FROM
+    public."user" u`, which carries every column `user` has. `row_to_json(u)`, a
+    bare `SELECT u`, `(u.*)::text` and `TABLE public."user"` are the same shape.
+
+    `whole_row_identity_reads` above is the same grain and does not close it: it
+    scopes to the tables the *marker* names, and `user` carries no marked column
+    by construction — ADR 0001 puts the key and the platform reference there
+    precisely so that they are not identity. So a whole-row read of `user` was
+    invisible at the column grain, invisible at the row grain, and invisible to
+    the file sweep next door. Three guards, one shape, nothing.
+
+    **The scope is the union of both**, marked tables and person tables, rather
+    than the person tables alone. A marked table that is not a person table —
+    E10's `threat_case`, a planted one — is E0-34's subject and is deliberately
+    also this rule's, because what this adds over that one is the chain fold: a
+    view built on a view that reads such a row is exposed by it, and nothing else
+    in the tree follows that hop. The overlap costs a second finding on the same
+    view and each guard's message says a different thing about it, which is the
+    same trade the two column-grain rules already make.
+
+    Reported as `table.*` rather than as a column list. A whole-row reference has
+    no column to name — that is what makes it invisible — and naming the table
+    with a star is what tells a reader which of the two shapes they are looking
+    at without them having to open the view.
+    """
+    tables = {table for table, _ in database_marked_columns(connection)} | set(PERSON_TABLES)
+    found: dict[str, set[str]] = {}
+    for view, table in connection.execute(text(VIEW_TABLE_DEPENDENCIES)):
+        if table in tables:
+            found.setdefault(view, set()).add(f"{table}.*")
+    return found
+
+
 def view_dependency_edges(connection: Any) -> dict[str, set[str]]:
     """Every view, and the views it reads a column of — one hop.
 
@@ -1250,10 +1308,10 @@ def view_dependency_edges(connection: Any) -> dict[str, set[str]]:
 def person_table_reads_including_chains(connection: Any) -> dict[str, set[tuple[str, str]]]:
     """Every view, and every person-table column it reads directly or through another view.
 
-    Each finding is `(source, path)`: the base column — `user_identity.identity_name`
-    — and the chain of views it arrived through, the reading view first. So a
-    failure message names what leaked *and* where to look, which a set of view
-    names alone cannot.
+    Each finding is `(source, path)`: the base read — `user_identity.identity_name`
+    for a column, `user.*` for a whole row — and the chain of views it arrived
+    through, the reading view first. So a failure message names what leaked *and*
+    where to look, which a set of view names alone cannot.
 
     **It is deliberately coarse, and the coarseness is the decision rather than a
     limitation to be repaired later.** A view B that reads any column of a view A
@@ -1273,11 +1331,20 @@ def person_table_reads_including_chains(connection: Any) -> dict[str, set[tuple[
     loop stops when nothing grew. The bound is there so that a future catalog
     which *did* report a cycle is a slow test rather than a hung one.
     """
-    direct = person_table_column_reads(connection)
+    # **Both grains seed the fold**, which is the security review's finding
+    # arriving one level up: a view reading a *column* of a person table and a
+    # view reading its whole *row* are the same exposure to whoever reads the
+    # view, and the chain that carries the first carries the second. Seeding from
+    # one of the two would have left a probe view over `to_jsonb(u)` flagged and
+    # every view built on that probe clean.
+    seeded: dict[str, set[str]] = {}
+    for reads in (person_table_column_reads(connection), person_table_rows_read_whole(connection)):
+        for view, sources in reads.items():
+            seeded.setdefault(view, set()).update(sources)
     edges = view_dependency_edges(connection)
 
     found: dict[str, set[tuple[str, str]]] = {
-        view: {(source, view) for source in sources} for view, sources in direct.items()
+        view: {(source, view) for source in sources} for view, sources in seeded.items()
     }
     for _ in range(len(edges) + 1):
         grew = False
@@ -1325,26 +1392,44 @@ def test_no_view_reads_a_column_of_a_person_table_outside_the_join_keys(
     fragment, marked by nothing, and enough to resolve a named student in the LMS
     in one step. The carried entry measured that and this test is its "done when".
 
+    **Both dependency grains, which is a fresh-context security review's finding
+    and was a live hole in the first version of this rule.** Postgres records a
+    read of a row *as a value* at `refobjsubid = 0` and records no column
+    dependency for it, so `SELECT to_jsonb(u) AS platform_ref FROM public."user" u`
+    produced nothing at the column grain — and the whole-row rule next door scopes
+    itself to the tables the marker names, where `user` is absent by construction.
+    A view carrying every column `user` has was invisible to both, and to the file
+    sweep in `test_identity_separated_views.py`, which had the mirror of the same
+    gap. `person_table_rows_read_whole` is the second grain and it is folded in
+    here rather than asserted separately, because a reader wants one answer to
+    "what does this view reach" and the two grains are two spellings of one
+    question.
+
     **And why it reaches through a chain.** `VIEW_COLUMN_DEPENDENCIES` is one hop:
     a view built on another view records its dependency against the intermediate
     view's columns, which carry no marker and belong to no person table, so the
     filter above returns nothing for it. `person_table_reads_including_chains`
-    folds those hops to a fixed point and carries the base column forward, so the
-    failure names `user_identity.identity_name` and the path it travelled rather
-    than the intermediate view's invented column name.
+    folds those hops to a fixed point and carries the base read forward, so the
+    failure names `user_identity.identity_name` — or `user.*` — and the path it
+    travelled rather than the intermediate view's invented column name. The fold
+    is seeded from **both** grains, so a view built on the `to_jsonb` probe above
+    inherits it too; a fold seeded from one would have flagged the probe and
+    cleared everything downstream of it.
 
     **Marked `invariant` for the reason both of its neighbours are**: a view runs
     with its owner's privileges rather than its reader's, so this is a route to
     identity that no arrangement of ADR 0001's grants closes, and in a green
     checkmark a skipped assertion and a passing one look the same.
 
-    **The mutation it exists to survive**: a view selecting `u.lms_user_id`, and
-    a view selecting `ui.<anything unmarked>` on a person table — neither of
-    which any other test in this repository mentions — and either of those read
-    through a second view that renames the column.
+    **The mutation it exists to survive**: a view selecting `u.lms_user_id`, a
+    view selecting `ui.<anything unmarked>` on a person table, and a view taking
+    `to_jsonb(u)` of one — none of which any other test in this repository
+    mentions — and any of those read through a second view that renames the
+    column.
     **The near miss it tolerates**: a view joining a person table and reading only
     the keys `JOIN_KEY_COLUMNS` names, which is how a roster view is built and
-    what makes a de-identified response addressable at all.
+    what makes a de-identified response addressable at all; and a whole-row read
+    of a table that holds no person, which is most of the schema.
 
     Three non-vacuity guards, and the third is the one that is easy to leave out:
     the dependency query has to return something, or an empty finding set is
@@ -1375,8 +1460,14 @@ def test_no_view_reads_a_column_of_a_person_table_outside_the_join_keys(
     )
 
     assert not reported, (
-        f"{reported}. Each is a view reading a column of one of {list(PERSON_TABLES)} — the tables "
-        f"that hold a person — that is not one of the join keys {list(JOIN_KEY_COLUMNS)}.\n\n"
+        f"{reported}. Each is a view reading, from one of {list(PERSON_TABLES)} — the tables that "
+        f"hold a person — either a column that is not one of the join keys "
+        f"{list(JOIN_KEY_COLUMNS)}, or the whole row.\n\n"
+        "**A finding spelled `<table>.*` is the whole row**, and it is the shape that carries "
+        "every column the table has while naming none of them: `to_jsonb(u)`, `row_to_json(u)`, a "
+        'bare `SELECT u`, `(u.*)::text`, `TABLE public."user"`. Postgres records it at '
+        "`refobjsubid = 0` and records no column dependency at all, which is why the rule reads "
+        "two grains and why neither of the marker-based invariants above sees it on `user`.\n\n"
         "SPEC §8 requires the instructor and leadership read paths to go through views that "
         "'structurally cannot join to `user` identity columns — enforced in the database, not just "
         "the application', and §4.1 makes the resulting rules automated assertions. This is the "
@@ -1635,6 +1726,119 @@ def test_a_view_that_reads_a_person_table_column_through_another_view_is_flagged
         f"names does not mention `{PLANTED_CHAIN_SOURCE_VIEW}`: it reported {sorted(inherited)}. "
         "The path is half of what the failure message is for — a reader told only that a view "
         "reads a name has two view definitions to open before knowing which."
+    )
+
+
+@pytest.mark.invariant
+def test_a_whole_row_read_of_a_person_table_is_flagged_and_travels_down_the_chain(
+    db_session: Any,
+) -> None:
+    """The grain a fresh-context security review walked around both guards through.
+
+    Reproduced as the reviewer wrote it: `SELECT to_jsonb(u) AS platform_ref FROM
+    public."user" u`. It carries every column `user` has — the LMS key included —
+    and it was reported by nothing. The column-grain rule sees no dependency,
+    because Postgres records a row-as-value at `refobjsubid = 0` and records no
+    column dependency beside it. `test_no_view_reads_a_whole_row_of_a_table_the_
+    identity_marker_names` above sees no *table*, because it scopes to the tables
+    the marker names and `user` carries no marked column by design. The file sweep
+    next door had the mirror of the same gap.
+
+    **Four assertions, and the order is the argument.** The two negatives come
+    first and they are the finding rather than ceremony: this planted view must be
+    absent from the column-grain reading and absent from the older whole-row
+    reading, or the hole has been closed somewhere else and this control is
+    measuring a different thing. Then the rule must report it as `user.*`. Then a
+    second view built on the first must inherit it — a view reading the probe's
+    one column is exactly as exposed as the probe, and a fold seeded from the
+    column grain alone would have flagged the probe and cleared everything
+    downstream.
+
+    **The pair is in the same transaction**: a whole-row read of a table that
+    holds no person must stay silent. Without it, "flagged" is equally what a rule
+    that flags every whole-row read anywhere would produce, and that rule would go
+    red on the first legitimate `to_jsonb` in the schema and be repaired by
+    narrowing it back to marked tables — which is the state this control exists to
+    leave behind.
+
+    **The mutation it exists to survive**: reverting `person_table_rows_read_whole`
+    to the marked-table scope `whole_row_identity_reads` uses, or dropping the
+    whole-row seed from the chain fold.
+    **The near miss it tolerates**: a whole-row read of `enrollment`, planted here
+    and required to stay silent.
+    """
+    session = db_session
+    assert ENROLLMENT_TABLE in inspect(session.connection()).get_table_names(), (
+        f"There is no `{ENROLLMENT_TABLE}` table, so the silent half of this pair cannot be "
+        "planted and the flag asserted above would stand alone — which is equally what a rule "
+        "flagging every whole-row read in the schema would produce."
+    )
+
+    # One statement per line with its own suppression, as the sibling controls do.
+    probe = f'CREATE VIEW public.{PLANTED_WHOLE_PERSON_VIEW} AS SELECT to_jsonb(u) AS {PLANTED_WHOLE_ROW_ALIAS} FROM public."{USER_TABLE}" u'  # noqa: S608
+    reader = f"CREATE VIEW public.{PLANTED_WHOLE_PERSON_READER_VIEW} AS SELECT {PLANTED_WHOLE_ROW_ALIAS} FROM public.{PLANTED_WHOLE_PERSON_VIEW}"  # noqa: S608
+    other = f"CREATE VIEW public.{PLANTED_WHOLE_OTHER_VIEW} AS SELECT to_jsonb(e) AS payload FROM public.{ENROLLMENT_TABLE} e"  # noqa: S608
+    session.execute(text(probe))
+    session.execute(text(reader))
+    session.execute(text(other))
+
+    connection = session.connection()
+    whole = f"{USER_TABLE}.*"
+
+    assert not person_table_column_reads(connection).get(PLANTED_WHOLE_PERSON_VIEW), (
+        f"`{PLANTED_WHOLE_PERSON_VIEW}` takes `to_jsonb` of a person table's row and the "
+        "*column*-grain reading reports it. That contradicts what was measured on this stack — a "
+        "row-as-value records `[(0, whole row)]` and no column dependency at all — so either "
+        "Postgres has changed what it records, in which case the second grain below may be "
+        "redundant rather than wrong, or the view is not the shape this control believes it is. "
+        "Read that before changing anything here."
+    )
+    assert not [
+        entry
+        for entry in whole_row_identity_reads(connection)
+        if entry.startswith(f"{PLANTED_WHOLE_PERSON_VIEW}:")
+    ], (
+        f"`{PLANTED_WHOLE_PERSON_VIEW}` is reported by "
+        "`test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names`'s own computation, "
+        f"which scopes itself to the tables the marker names. Then `{USER_TABLE}` now carries a "
+        "marked column — which contradicts ADR 0001's split and is diagnosed by "
+        "`test_the_marker_does_not_reach_columns_that_hold_no_identity` — and this control is no "
+        "longer evidence that the person-table scope catches something the marker scope cannot."
+    )
+
+    findings = person_table_reads_including_chains(connection)
+    probed = findings.get(PLANTED_WHOLE_PERSON_VIEW, set())
+    assert any(source == whole for source, _ in probed), (
+        f"The strict rule does not report `{whole}` for `{PLANTED_WHOLE_PERSON_VIEW}`; it reported "
+        f"{sorted(probed)}. The view carries every column of `{USER_TABLE}` — `{LMS_USER_KEY}` "
+        "among them, which resolves a named student at the platform in one step — under one "
+        f"harmless-looking column called `{PLANTED_WHOLE_ROW_ALIAS}`. Both assertions above say "
+        "the two older guards are silent about it, so with this one silent as well the shape is "
+        "reported by nothing in this repository."
+    )
+
+    inherited = findings.get(PLANTED_WHOLE_PERSON_READER_VIEW, set())
+    assert any(source == whole for source, _ in inherited), (
+        f"`{PLANTED_WHOLE_PERSON_READER_VIEW}` selects the probe's one column and does not inherit "
+        f"`{whole}`; it reported {sorted(inherited)}. A view built on a view that reads a row whole "
+        "hands on exactly what that row held, so the fold has to be seeded from both dependency "
+        "grains — seeded from the column grain alone it flags the probe and clears every view "
+        "downstream of it, which is the arrangement anybody would reach for once the probe itself "
+        "went red."
+    )
+    paths = [path for source, path in inherited if source == whole]
+    assert any(PLANTED_WHOLE_PERSON_VIEW in path for path in paths), (
+        f"The inherited finding for `{PLANTED_WHOLE_PERSON_READER_VIEW}` does not name "
+        f"`{PLANTED_WHOLE_PERSON_VIEW}` in its path: {sorted(inherited)}. The path is what tells a "
+        "reader which of two view definitions to open."
+    )
+
+    assert not findings.get(PLANTED_WHOLE_OTHER_VIEW), (
+        f"`{PLANTED_WHOLE_OTHER_VIEW}` takes `to_jsonb` of a `{ENROLLMENT_TABLE}` row — a table "
+        f"that holds no person — and the rule reports {sorted(findings[PLANTED_WHOLE_OTHER_VIEW])}. "
+        "A rule that flags every whole-row read anywhere would be red on the first legitimate "
+        "`to_jsonb` in the schema, and the repair somebody reaches for under that pressure is the "
+        "marked-table scope this control exists to have replaced."
     )
 
 
