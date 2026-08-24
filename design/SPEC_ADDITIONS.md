@@ -1,5 +1,7 @@
 # Pulse Surveys — SPEC_ADDITIONS
 
+> Frozen design-session input, written before `docs/SPEC.md` existed; where they disagree, the spec governs (known case: §2.1 — students hold no role assignment; their access resolves from enrollment).
+
 Consolidated spec input covering the data model plus all behavioral, policy, and design decisions made in sessions 1–4. Feed this to the spec AI alongside the design brief. Entity/field names are suggestions.
 
 ---
