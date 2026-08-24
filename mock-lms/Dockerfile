@@ -18,8 +18,8 @@
 # The project itself is deliberately *not* installed here. The backend's package
 # is also called `app` (SPEC §13 names both), and an image holding both would
 # resolve `import app` by whichever won the path — the same collision
-# `tests/conftest.py` installs a scoped finder to avoid. This image holds one
-# `app`, at `/app/app`, and no wheel that could shadow it.
+# `tests/fixtures/app_imports.py` installs a scoped finder to avoid. This image
+# holds one `app`, at `/app/app`, and no wheel that could shadow it.
 #
 # There is no HEALTHCHECK instruction. `docker-compose.yml` declares the check
 # for this service, and one copy is the point — see the comment there.

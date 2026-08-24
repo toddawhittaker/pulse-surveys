@@ -19,10 +19,11 @@ reason. Nothing reaches a key through a global, so there is no arrangement of
 imports that lets two applications share one.
 
 **Configuration is read here, at build time**, not in a lifespan handler and not
-per request. The test fixture in `tests/conftest.py` sets the environment around
-the import and the factory call and restores it before lifespan runs, so a
-platform that read its issuer in `startup` would read whatever the process
-happened to hold — and would pass every test that does not set configuration.
+per request. The test fixture in `tests/fixtures/app_imports.py` sets the
+environment around the import and the factory call and restores it before
+lifespan runs, so a platform that read its issuer in `startup` would read
+whatever the process happened to hold — and would pass every test that does not
+set configuration.
 
 **No launch payload and no roster is logged.** SPEC §10 forbids personally
 identifiable information in logs, and a request logger that dumped `id_token`
