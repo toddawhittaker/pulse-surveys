@@ -14,7 +14,7 @@ Before adding a line here, ask whether it would still be true if the process
 changed; if yes, it belongs elsewhere. No feature decisions, status, or
 changelog entries. Under 150 lines; growth means something here belongs elsewhere.
 
-**Active epic:** E0 — Foundations. Tickets: `docs/tickets/e0/README.md`.
+**Active epic:** E1 — Entering the app (⚠). Tickets: `docs/tickets/e1/README.md` (on `epic/e1-entering-the-app` until the epic merges).
 
 ## Read before you start
 
