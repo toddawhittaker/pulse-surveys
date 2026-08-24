@@ -78,7 +78,13 @@ AUTHORIZATION_REQUEST_CONSTANTS = {
 # Bytes behind a `state` and a `nonce`. 24 urlsafe bytes is 32 characters of
 # base64 and is far past anything guessable; the values are opaque to the
 # platform, which hands both back untouched.
-OPAQUE_VALUE_BYTES = 24
+#
+# Named for what it sizes rather than for the property it has, because
+# `app.api.auth` has a constant of its own for the same *kind* of value at a
+# different size: 32, which is RFC 7636's minimum PKCE verifier length and is
+# load-bearing there. One name holding two numbers in two modules reads as
+# shared and is not.
+STATE_NONCE_BYTES = 24
 
 
 class LaunchRefusedError(Exception):
@@ -150,8 +156,8 @@ def begin_a_launch(session: Session, settings: Settings, form: Mapping[str, str]
     all.
     """
     platform = registered_platform(session, form.get("iss", ""))
-    state = secrets.token_urlsafe(OPAQUE_VALUE_BYTES)
-    nonce = secrets.token_urlsafe(OPAQUE_VALUE_BYTES)
+    state = secrets.token_urlsafe(STATE_NONCE_BYTES)
+    nonce = secrets.token_urlsafe(STATE_NONCE_BYTES)
 
     parameters = {
         **AUTHORIZATION_REQUEST_CONSTANTS,
