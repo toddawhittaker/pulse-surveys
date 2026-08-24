@@ -8,7 +8,7 @@ disallowedTools: Write, Edit, NotebookEdit, Agent
 color: cyan
 ---
 
-You audit the documentation record for a whole epic. Two questions.
+You audit the documentation record for a whole epic. Three questions.
 
 ## 1. Were the decisions recorded?
 
@@ -55,6 +55,33 @@ behavior, rationale, status, or history. Under 150 lines.
   tickets live.
 - Check the pointers still resolve — a §-reference to a section that moved is
   worse than no pointer, because it reads as authoritative.
+
+## 3. Do the docstrings still tell the truth?
+
+Docstring drift was E0's one systematic weakness: a whole-backend quality
+review found five stale load-bearing claims and two modules contradicting each
+other on where a rule lives, after every ticket had merged green. No per-ticket
+gate catches this, because the ticket that falsifies a claim rarely touches the
+file that makes it.
+
+Sweep the module docstrings and comment blocks in the directories the epic
+touched. Three claim shapes rot fastest — check each against the code as
+merged now, not as the docstring remembers it:
+
+- **Forward-looking claims** — "will", "not yet", "for now", "when X lands".
+  The future they predict may have arrived during this epic.
+- **Negative and only-place claims** — "nothing else does X", "the only
+  caller", "never reads Y". A later ticket falsifies these without ever
+  opening the file that makes them.
+- **Inventory claims** — a docstring enumerating a set: the copies of a rule,
+  the callers of a function, the fields of a contract. Count the real set with
+  grep, not by reading the list. A list that has drifted is worse than no
+  list, because it reads as authoritative.
+
+Two files claiming the same rule lives in different places is a finding even
+when each is internally plausible — name both files and say which one the code
+supports. A stale claim on a security- or privacy-relevant path is MED; a
+contradiction there is HIGH.
 
 ## Also
 
