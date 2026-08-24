@@ -55,7 +55,14 @@ creates `user`, not `person`).
   (`http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor`) by **exact
   string match** — never substring, because the TeachingAssistant sub-role
   URN embeds the word Instructor — or the launching subject holds a live
-  leadership `role_assignment` resolved through the app's own model. Nothing
+  leadership `role_assignment` resolved through the app's own model. The
+  leadership limb is stated here as the rule but **activates with E1-12**:
+  resolving a launch subject to an assignment needs the `sub` → `user` →
+  `person` link that only E1-12 builds, so in this ticket only the
+  Instructor-URN limb can fire, which fails safe — §7.3's Dean-launch trigger
+  arrives when E1-12 lands, and E1-12 carries the accept-side criterion. A
+  limb with no test here is not left untested; it is tested where it becomes
+  testable. Nothing
   else qualifies: TeachingAssistant, Mentor, ContentDeveloper, Observer, and
   platform-Administrator launches store no address and trigger no sync.
   Under-inclusion fails safe (a real instructor's next launch triggers the
@@ -108,5 +115,7 @@ creates `user`, not `person`).
 
 - Enrollment and INSTRUCTOR assignment writes (E1-11's, from NRPS — a launch
   proves one person's presence, not a roster).
-- Identity merge (E1-12); `person` rows are not created here.
+- Identity merge (E1-12); `person` rows are not created here. With it goes
+  the accept side of the leadership limb — a Dean's launch triggering the
+  sync — which is E1-12's criterion 6, activating with the linkage it builds.
 - The hourly schedule and the service client (E1-11).

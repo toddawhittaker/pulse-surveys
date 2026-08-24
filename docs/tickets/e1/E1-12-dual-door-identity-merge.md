@@ -47,7 +47,15 @@ could trip it — any new view or grant must pass the closed version);
   reads assignments through it).
 - The seed links the two-hat person's two subjects to one identity (behind
   the ADR 0063 guard), and gains any linkage rows other seeded web identities
-  need.
+  need — including a leadership person linked to an LMS subject, because the
+  next bullet needs one drivable.
+- **The leadership limb of E1-10's staff-launch set activates here.** E1-10
+  states the rule (§7.3's "any leadership role") but cannot resolve a launch
+  subject to an assignment without this ticket's `sub` → `user` → `person`
+  link, so the accept side is deferred to exactly here: with the linkage in
+  place, a launch whose subject resolves to a person holding a live
+  leadership assignment stores the roster address and triggers the sync as an
+  Instructor-URN launch does.
 - The unlinked web login state: a verified `id_token` whose subject has no
   linkage lands on a calm "no account" page — no auto-provisioning of
   identities from the web door (the IdP asserts authentication, not
@@ -68,6 +76,10 @@ could trip it — any new view or grant must pass the closed version);
    identity).
 5. The §4.1 isolated pass, including E1-01's closed sweep, stays green with
    the new columns marked.
+6. A launch by the seeded leadership-linked person, whose roles claim carries
+   no Instructor URN, stores the roster address and triggers the sync — the
+   accept side of E1-10's leadership limb, tested here because the limb
+   activates here.
 
 ## Out of scope
 

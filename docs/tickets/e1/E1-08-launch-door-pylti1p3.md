@@ -81,8 +81,11 @@ per ADR 0073's note).
 4. A session survives navigation between landing routes and expires on
    schedule; expiry is tested at the boundary, not just "eventually."
 5. The session cookie's attributes are asserted by a test in both environment
-   modes, and the CSRF primitive the session ADR names exists in the session
-   module with its own tests — issue and verify, both directions.
+   modes, and the session ADR's CSRF stance is enforced by test: where its
+   `SameSite` choice requires a defense, the primitive it names exists in the
+   session module with its own tests (issue and verify, both directions);
+   where it does not, the ADR records why the chosen attributes suffice for
+   every credential the session uses in the iframe context.
 6. No refusal path logs claim contents: each refusal test also asserts its
    captured log output carries no claim payload, no name or email, and no
    `lms_user_id` — §10's no-student-PII-in-logs as a criterion, not prose.
