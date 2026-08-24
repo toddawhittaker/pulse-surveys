@@ -15,8 +15,9 @@ they are controls on this module's own verifier, and they are labelled as such.
 Without them, `verify_rs256` returning `True` unconditionally would make the
 signature criterion pass, which is `docs/MISTAKES.md` entry 3 exactly.
 
-**What this suite gives E1.** `mock_platform.mint(...)` in `tests/conftest.py` is
-the fixture E0-14's definition of done asks for. It mints by being the tool —
+**What this suite gives E1.** `mock_platform.mint(...)` in
+`tests/fixtures/lti_services.py` is the fixture E0-14's definition of done asks
+for. It mints by being the tool —
 reading the platform's initiation request off the launch page and answering it
 with an authorization request — so a launch obtained here and a launch a browser
 produces are the same launch, and E1's validation tests can build on it without
@@ -32,8 +33,9 @@ client ID, its deployment ID and the target link URI, so every claim comparison
 below reads its expected value out of that form. The one thing this cannot reach
 is the value of a registration field the initiation request does not carry.
 
-**The verifier is written out of `pow` and `hashlib`** in `tests/conftest.py`,
-because nothing in this project's locked dependency set verifies a JSON Web
+**The verifier is written out of `pow` and `hashlib`** in
+`tests/fixtures/lti_platform.py`, because nothing in this project's locked
+dependency set verifies a JSON Web
 Signature and adding one to satisfy a test would decide, from the test side,
 which JOSE library the mock signs with. RS256 is required rather than merely
 accepted: the IMS security framework LTI 1.3 rests on specifies it, and SPEC §7.3
@@ -52,16 +54,16 @@ import pytest
 pytestmark = pytest.mark.lti
 
 # `mock_platform`, `mock_platforms` and `signed_launch` come from
-# `tests/conftest.py`, and everything this module needs from the platform is
-# reached through them rather than imported. That is deliberate: a test module
-# that imports its sibling `conftest` by name depends on where pytest happened
-# to put `tests/` on `sys.path`, and an import error is not a red — it is a
-# broken suite that reports nothing about the ticket.
+# `tests/fixtures/lti_services.py`, and everything this module needs from the
+# platform is reached through them rather than imported. That is deliberate: a
+# test module that imports a fixtures module by name depends on where pytest
+# happened to put `tests/` on `sys.path`, and an import error is not a red — it
+# is a broken suite that reports nothing about the ticket.
 #
-# The fixtures are annotated `Any` for the same reason. `MockPlatform`,
-# `SignedLaunch` and `LaunchOffer` are documented on the class in
-# `tests/conftest.py`; mypy checks `backend/app` only, so nothing is lost but
-# the reading.
+# The fixtures are annotated `Any` for the same reason. `MockPlatform` is
+# documented on the class in `tests/fixtures/lti_services.py` and `SignedLaunch`
+# and `LaunchOffer` on theirs in `tests/fixtures/lti_platform.py`; mypy checks
+# `backend/app` only, so nothing is lost but the reading.
 
 # The one signature algorithm this suite verifies. Not a preference: the IMS
 # security framework LTI 1.3 rests on requires RS256 for message signing, and
@@ -328,8 +330,9 @@ def test_a_launch_from_another_platform_is_refused_by_this_platforms_key_set(
     assert mock_platform.verifies(stranger.signature) is None, (
         "A launch signed by a different platform instance verified against this platform's "
         "published key set. Either the two instances share a key — which is criterion 3's "
-        "failure, keys not generated per run — or the verifier in tests/conftest.py is "
-        "decoding rather than verifying, in which case every signature assertion in this "
+        "failure, keys not generated per run — or the verifier in "
+        "tests/fixtures/lti_platform.py is decoding rather than verifying, in which case every "
+        "signature assertion in this "
         "module is vacuous."
     )
 
@@ -362,8 +365,9 @@ def test_a_tampered_payload_is_refused_by_the_published_key_set(
 
     assert mock_platform.verifies(tampered) is None, (
         "A token whose payload was altered after signing still verified against the "
-        "published key set. The verifier in tests/conftest.py is not checking the signature "
-        "over the payload, so every other signature assertion in this module means nothing."
+        "published key set. The verifier in tests/fixtures/lti_platform.py is not checking "
+        "the signature over the payload, so every other signature assertion in this module "
+        "means nothing."
     )
 
 

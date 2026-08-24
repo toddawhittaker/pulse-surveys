@@ -121,8 +121,8 @@ PROVIDER_KEY_QUALIFIERS = ("AI", "PROVIDER", "MODEL", "LLM")
 #
 # Nothing here resembles a real credential and nothing was copied from a working
 # `.env` (CLAUDE.md, secrets). Named `...CREDENTIAL` rather than `...KEY` so
-# ruff's S105 keeps flagging the real thing; `tests/conftest.py` made the same
-# choice.
+# ruff's S105 keeps flagging the real thing; `tests/fixtures/database.py` made
+# the same choice.
 FAKE_PROVIDER_CREDENTIAL = "Qv7ZmXt4Ld9RbNsW-Kj3PxE8mZt5UwGh"
 
 # Length of the contiguous run of a secret that counts as leaked. Checking for the

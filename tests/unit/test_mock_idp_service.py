@@ -24,7 +24,8 @@ E0-16's own — keys generated at startup rather than loaded — is asserted in
 `tests/integration/test_mock_idp_authorization_code_flow.py`, where two
 independently started providers must publish different keys.
 
-The Compose files are parsed in `tests/conftest.py`, unmerged and one at a time,
+The Compose files are parsed in `tests/fixtures/repo.py`, unmerged and one at a
+time,
 which is the whole point: `docker compose config` would merge the override back
 in and hide the property under test.
 

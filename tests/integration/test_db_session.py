@@ -41,10 +41,10 @@ from sqlalchemy import text
 pytestmark = pytest.mark.integration
 
 # The fixtures hand back the `DatabaseUnderTest` named tuple defined in
-# `tests/conftest.py` — `.superuser_url` and `.application_url`. Annotated `Any`
-# rather than imported: a test module importing `conftest` by name works only
-# because of where pytest puts `tests/` on `sys.path`, and a collection error is
-# not a failing test.
+# `tests/fixtures/database.py` — `.superuser_url` and `.application_url`.
+# Annotated `Any` rather than imported: a test module importing a fixtures module
+# by name works only because of where pytest puts `tests/` on `sys.path`, and a
+# collection error is not a failing test.
 
 DB_MODULE = "app.db"
 DATABASE_URL_VARIABLE = "DATABASE_URL"
@@ -84,7 +84,7 @@ def session_dependency_in(module: ModuleType) -> Callable[[], Any] | None:
     """The dependency that yields a session, whatever it is named.
 
     Structural, in the same spirit as `celery_application_in` in
-    `tests/conftest.py`: a generator function — synchronous or asynchronous —
+    `tests/fixtures/repo.py`: a generator function — synchronous or asynchronous —
     that can be called with no arguments. FastAPI resolves a dependency by
     calling it, so a callable with a required positional parameter of its own is
     not one, and a plain function that returns a session is not "yielding a

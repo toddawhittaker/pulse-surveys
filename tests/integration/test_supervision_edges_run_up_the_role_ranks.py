@@ -95,7 +95,7 @@ REFUSED_EDGES = [
 ADMIN_ROLE = "ADMIN"
 
 # The kind of containment node each role in the chain is scoped to: SPEC §2.1's
-# table, and a copy of `ROLE_SCOPE_GRAIN` in `tests/conftest.py`, marked as one for
+# table, and a copy of `ROLE_SCOPE_GRAIN` in `tests/fixtures/supervision.py`, marked as one for
 # the reason `written` below is marked. It is needed because **a role cannot change
 # on its own**. E0-09's role grain rule pairs the role with the kind of node the
 # assignment is scoped to, so an `UPDATE` that moved only the role would be refused
@@ -116,7 +116,7 @@ def written(graph: Any, action: Any, what: str) -> Any:
 
     A copy of the helper in `tests/integration/test_role_assignment_graph.py`,
     marked as one for the reason that module's docstring gives: a test module
-    importing the conftest module by name works only because of where pytest puts
+    importing a fixtures module by name works only because of where pytest puts
     `tests/` on `sys.path`, and a collection error is not a failing test.
 
     Every "and then this is refused" assertion here is preceded by rows that must

@@ -35,10 +35,20 @@ and six columns of comment continuation, and went green against the exact text i
 existed to catch. `ast` has no opinion about wrapping.
 
 **What it does not assert.** Not the import *spelling* — `from app.config import
-DEVELOPMENT_ENVIRONMENT` and an attribute read off the imported module are both
-"read it from the one place", and choosing between them is style rather than the
-criterion. Not the constant's value either: what matters is that there is one of
-it, and `test_config_settings.py` owns what `ENVIRONMENT` may be.
+DEVELOPMENT_ENVIRONMENT`, an attribute read off the imported module, and a call
+to `app.config`'s own `is_development` predicate are all "read it from the one
+place", and choosing between them is style rather than the criterion. The third
+of those is the strongest form of the property and not an exception to it: the
+predicate lives in `backend/app/config.py` and reads that module's own
+`DEVELOPMENT_ENVIRONMENT`, so a module calling it has moved the *shape* of the
+comparison into the configuration alongside the value, leaving nothing local to
+drift. Not the constant's value either: what matters is that there is one of it,
+and `test_config_settings.py` owns what `ENVIRONMENT` may be.
+
+The predicate was added after this module was first written, and the paragraph
+above once enumerated two spellings and so rejected a third that did not exist
+yet; `docs/disputes/QUALITY-REVIEW-CLEANUPS-01.md` records why the old detector
+was wrong and how it was amended.
 """
 
 import ast
@@ -66,6 +76,13 @@ SEARCHED_TREES = ("backend/app", "scripts")
 # test that needs it reads it off `app.config`.
 CONSTANT = "DEVELOPMENT_ENVIRONMENT"
 DEVELOPMENT = "development"
+
+# The predicate `backend/app/config.py` exports beside the constant. It is owned
+# by the configuration and it reads the configuration's own
+# `DEVELOPMENT_ENVIRONMENT`, so calling it is reading the one definition — the
+# same property the two import spellings have, with the comparison in one place
+# as well as the value.
+PREDICATE = "is_development"
 
 
 def source_of(relative: str) -> str:
@@ -131,17 +148,31 @@ def literals_of_the_development_name(tree: ast.Module) -> list[int]:
 
 
 def reads_the_constant(tree: ast.Module) -> bool:
-    """Whether the module gets the name from somewhere rather than declaring it.
+    """Whether the module gets the answer from somewhere rather than declaring it.
 
-    Both spellings, because the ticket asks for one definition and not for one
-    import style: the name imported directly, or read as an attribute of the
-    configuration module. A module doing neither either has its own copy or does
-    not care about the environment at all, and the caller says which.
+    Three spellings, because the ticket asks for one definition and not for one
+    import style: the constant imported directly, the constant read as an
+    attribute of the configuration module, or `is_development` — the predicate
+    `backend/app/config.py` owns — imported or read the same two ways. The
+    predicate satisfies the criterion more completely than the other two rather
+    than by exception: it reads `config.py`'s single `DEVELOPMENT_ENVIRONMENT`,
+    so a caller has both the value *and* the shape of the comparison living in
+    the configuration, with no local copy of either left to drift.
+
+    A module doing none of the three either has its own copy or does not care
+    about the environment at all, and the caller says which.
+
+    As loose as it has always been, deliberately: the name is matched wherever it
+    appears, without checking that the import names `app.config`. A module that
+    imports either name from somewhere else is not the failure this sweep exists
+    to catch, and the assignment sweep above is what would see a local
+    redefinition.
     """
+    wanted = (CONSTANT, PREDICATE)
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and any(alias.name == CONSTANT for alias in node.names):
+        if isinstance(node, ast.ImportFrom) and any(alias.name in wanted for alias in node.names):
             return True
-        if isinstance(node, ast.Attribute) and node.attr == CONSTANT:
+        if isinstance(node, ast.Attribute) and node.attr in wanted:
             return True
     return False
 
@@ -270,7 +301,8 @@ def test_the_engine_and_the_seed_read_the_development_environment_name_rather_th
     A module can satisfy the sweep above by holding the value without binding a
     name to it — `if settings.environment == "development":` is a copy with no
     assignment. So both files are required to hold no bare `"development"` at
-    all, and to read the name from somewhere.
+    all, and to get the answer from `backend/app/config.py` — by the constant or
+    by the predicate; `reads_the_constant` says which spellings count.
 
     Both halves, because either alone is satisfiable the wrong way. A module that
     imports the constant *and* keeps its old literal comparison has two answers
@@ -304,9 +336,13 @@ def test_the_engine_and_the_seed_read_the_development_environment_name_rather_th
         )
 
         assert reads_the_constant(tree), (
-            f"`{relative}` holds no {DEVELOPMENT!r} literal and never reads `{CONSTANT}` either, "
-            "so it has stopped asking which environment it is running in rather than started "
-            f"asking `{CONFIGURATION}`.\n"
+            f"`{relative}` holds no {DEVELOPMENT!r} literal and reads neither `{CONSTANT}` nor "
+            f"`{PREDICATE}()`, so it has stopped asking which environment it is running in rather "
+            f"than started asking `{CONFIGURATION}`.\n"
+            "\n"
+            f"Either spelling satisfies this: import `{CONSTANT}` and compare it yourself, or "
+            f"call `{PREDICATE}(settings)`, which `{CONFIGURATION}` owns and which reads that "
+            "same constant.\n"
             "\n"
             "Both readers have a rule that depends on the answer: the engine hides bound "
             "parameters outside development (E0-37 item 1) and the seed refuses to run against a "

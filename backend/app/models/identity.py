@@ -69,16 +69,15 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    Uuid,
     text,
 )
 from sqlalchemy.dialects.postgresql import ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, UuidPrimaryKey
 
 
-class User(Base):
+class User(UuidPrimaryKey, Base):
     """One LMS user on one platform — the key SPEC §4 keys every response to.
 
     "Responses are stored keyed to the **LMS user ID** (`sub` from the launch)."
@@ -100,9 +99,6 @@ class User(Base):
     __tablename__ = "user"
     __table_args__ = (UniqueConstraint("lti_platform_id", "lms_user_id"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # No index of its own: it leads `uq_user_lti_platform_id_lms_user_id`, which
     # already serves a lookup by platform. Same reasoning as `course.prefix_id`
     # in `app/models/org.py`, and the same caveat — leading position is what
@@ -116,7 +112,7 @@ class User(Base):
     lms_user_id: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class UserIdentity(Base):
+class UserIdentity(UuidPrimaryKey, Base):
     """The name and email address of one LMS user, in a table of their own.
 
     One row per user, enforced by `UNIQUE (user_id)` rather than implied by the
@@ -141,15 +137,12 @@ class UserIdentity(Base):
     __tablename__ = "user_identity"
     __table_args__ = (UniqueConstraint("user_id"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
     identity_name: Mapped[str] = mapped_column(Text, nullable=False)
     identity_email: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class Person(Base):
+class Person(UuidPrimaryKey, Base):
     """A Pulse-owned person record: the node the supervision graph hangs off.
 
     SPEC §2.1 puts "person records (name, category) plus reports-to edges" on
@@ -182,9 +175,6 @@ class Person(Base):
     __tablename__ = "person"
     __table_args__ = (UniqueConstraint("user_id"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # RESTRICT: a `user` row that a person is linked to cannot be deleted out
     # from under the people graph. Unlinking is a deliberate edit, not a side
     # effect of removing an LMS user.
@@ -195,7 +185,7 @@ class Person(Base):
     category: Mapped[str] = mapped_column(String(50), nullable=False)
 
 
-class Enrollment(Base):
+class Enrollment(UuidPrimaryKey, Base):
     """One window during which a user was enrolled in a section.
 
     E3's participation formula is enrollment-windowed — it asks whether a student
@@ -270,9 +260,6 @@ class Enrollment(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Not indexed on its own: it leads the GiST index backing the exclusion
     # constraint above, so a lookup of one user's enrollments is served without a
     # second index. That index is also what every insert here already pays for.
@@ -426,7 +413,7 @@ role = ANY (ARRAY[
 """
 
 
-class RoleAssignment(Base):
+class RoleAssignment(UuidPrimaryKey, Base):
     """One grant: this person, in this role, over this node (SPEC §2.1, §8).
 
     **People are not roles.** A person acting in any role but Student holds one
@@ -506,9 +493,6 @@ class RoleAssignment(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # The Pulse-owned people graph, not `user`: SPEC §2.1 keeps the two sides
     # apart and computes purview from this one, because "the LMS has no
     # equivalent". A dean who has never launched the tool still supervises
@@ -573,7 +557,7 @@ class RoleAssignment(Base):
     )
 
 
-class LeadFacultyMapping(Base):
+class LeadFacultyMapping(UuidPrimaryKey, Base):
     """Which courses a person leads (SPEC §2.1, §8).
 
     Pulse-owned, maintained in the admin console with CSV import/export, and the
@@ -605,9 +589,6 @@ class LeadFacultyMapping(Base):
     __tablename__ = "lead_faculty_mapping"
     __table_args__ = (UniqueConstraint("course_id"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Indexed: "which courses does this lead lead" is how a lead's own grant is
     # built, and it is asked on every request they make. Nothing else covers it —
     # the unique constraint below leads with `course_id`.

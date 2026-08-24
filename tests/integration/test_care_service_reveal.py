@@ -28,7 +28,8 @@ the boundary of the search, not a proof).
 the Care pool to the service module rather than to the actor, so
 `app.services.safety` opens its own connection from `CARE_DATABASE_URL` — and it
 therefore cannot see a single row written inside `db_session`'s transaction. The
-rows have to be committed, which is `committed_rows` in `tests/conftest.py`, and
+rows have to be committed, which is `committed_rows` in
+`tests/fixtures/authz_data.py`, and
 the environment has to point at this container, which is
 `care_service_environment` beside it. Both undo themselves: the teardown removes
 whatever *appeared*, including the audit row the service writes on its own
@@ -133,7 +134,8 @@ def bind(function: Any, revealable: Revealable, *, actor: Any) -> dict[str, Any]
     shapes until one stops raising: a `TypeError` swallowed that way could have
     come from inside the service, and the test would report a design the ticket
     never chose as working (`docs/MISTAKES.md` entry 3 — `SectionCodeService.call`
-    in `tests/conftest.py` refuses the same shortcut for the same reason).
+    in `tests/fixtures/section_codes.py` refuses the same shortcut for the same
+    reason).
 
     A parameter this cannot fill stops the test with a message naming it. E0-10
     spells `reveal_identity` and neither its signature nor its argument order, so

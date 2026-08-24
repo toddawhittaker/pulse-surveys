@@ -38,7 +38,7 @@ rather than separately about the same job.
 This module is separate from `test_compose_stack.py` because its subject is the
 workflow rather than the Compose file, and separate from the image-pin module
 because that one is about two files agreeing about a third thing. It reads
-`ci_workflow` from `tests/conftest.py`, parsed rather than grepped, for the
+`ci_workflow` from `tests/fixtures/repo.py`, parsed rather than grepped, for the
 reason given there.
 
 One test below reads the file as text instead, and that is deliberate rather

@@ -16,7 +16,7 @@ Both sides then reached for the suite, and the suite could not answer.
 - **The proposed fix turned everything green and proved nothing.** Reading the
   variable before `.env` made all 29 tests in the module pass. It also made
   `make seed` refuse on a correct stock checkout — measured — and *no test could
-  see that*, because `seed_environment` in `tests/conftest.py` lays every
+  see that*, because `seed_environment` in `tests/fixtures/seed.py` lays every
   documented `.env.example` entry into the child environment. The fixture supplies
   `ENVIRONMENT` to every run the suite makes, so the one path the change altered
   is the one path the suite never exercises. Its whole design is to over-supply,

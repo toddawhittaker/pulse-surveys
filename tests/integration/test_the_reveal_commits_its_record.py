@@ -157,7 +157,7 @@ RECORD_NOT_COMMITTED = "55000"
 #      user. The reveal answers zero rows, and the service turns that into `None`.
 #
 # The address is seeded explicitly, and that is a repair rather than a detail. The
-# seeding helper in `tests/conftest.py` fills only what the schema requires, and
+# seeding helper in `tests/fixtures/supervision.py` fills only what the schema requires, and
 # `identity_email` is nullable — so before `an_address` below existed, every
 # identity row the suite had ever made carried a null address. Two assertions were
 # satisfied by that null and by nothing else: `returned["identity_email"] ==
@@ -347,8 +347,8 @@ def reveal_interface(migrated_engine: Any) -> dict[str, list[Any]]:
     than a `ProgrammingError` from inside a query.** A call to a function that does
     not exist raises SQLSTATE 42883 with a message about argument types, which
     reads as a test that is broken rather than as a criterion nobody has met yet —
-    and the two are fixed by different people. `AuthzModule` in `tests/conftest.py`
-    draws the same line for the same reason.
+    and the two are fixed by different people. `AuthzModule` in
+    `tests/fixtures/authz_data.py` draws the same line for the same reason.
 
     It asserts only that each name resolves to at least one function. **What their
     shape has to be is asserted in tests and not here**: two tests below are about
@@ -478,8 +478,9 @@ def seed_a_student_with_no_address(committed_rows: Any) -> tuple[Any, str]:
     committed_rows.commit()
     assert identity[IDENTITY_COLUMNS[1]] is None, (
         f"This helper asked for a student with no address and the row came back carrying "
-        f"{identity[IDENTITY_COLUMNS[1]]!r}. `seed_row` in `tests/conftest.py` states that 'an "
-        "override is honoured even when it is `None`, so a test can write a null and let the "
+        f"{identity[IDENTITY_COLUMNS[1]]!r}. `seed_row` in `tests/fixtures/supervision.py` "
+        "states that 'an override is honoured even when it is `None`, so a test can write a "
+        "null and let the "
         "database accept or refuse it', so either that has stopped being true or the column is no "
         "longer nullable — and the test using this would be asserting a null the reveal was never "
         "given the chance to return."
@@ -1154,7 +1155,8 @@ def test_the_reveal_returns_the_student_named_in_the_committed_record(
         f"{other_name!r}/{other_email!r} against {revealable.identity_name!r}/"
         f"{revealable.identity_email!r}. The assertion below distinguishes the two students by "
         "their values, so a collision would make a correct reveal look like a leak. The seeding "
-        "helper in `tests/conftest.py` invents a fresh value per row; if this fires, that is where "
+        "helper in `tests/fixtures/supervision.py` invents a fresh value per row; if this fires, "
+        "that is where "
         "it is diagnosed rather than here."
     )
     caller = care_connections()

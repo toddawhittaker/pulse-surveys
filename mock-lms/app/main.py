@@ -19,10 +19,11 @@ reason. Nothing reaches a key through a global, so there is no arrangement of
 imports that lets two applications share one.
 
 **Configuration is read here, at build time**, not in a lifespan handler and not
-per request. The test fixture in `tests/conftest.py` sets the environment around
-the import and the factory call and restores it before lifespan runs, so a
-platform that read its issuer in `startup` would read whatever the process
-happened to hold — and would pass every test that does not set configuration.
+per request. The test fixture in `tests/fixtures/app_imports.py` sets the
+environment around the import and the factory call and restores it before
+lifespan runs, so a platform that read its issuer in `startup` would read
+whatever the process happened to hold — and would pass every test that does not
+set configuration.
 
 **No launch payload and no roster is logged.** SPEC §10 forbids personally
 identifiable information in logs, and a request logger that dumped `id_token`
@@ -125,7 +126,7 @@ from app.paging import (
     page_size,
     window,
 )
-from app.seed import MockContext, seeded_platform
+from app.seed import MockContext, SeededPlatform, seeded_platform
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
 
 SERVICE_NAME = "mock-lms"
@@ -232,25 +233,62 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
     return decoded
 
 
-def create_app() -> FastAPI:
-    """Build the platform: read the environment, seed it, and generate its key."""
-    settings = PlatformSettings.from_environment()
-    platform = seeded_platform()
-    key = IssuerKey.generate()
-    grades = GradeBook(settings=settings)
+# -- LTI Advantage (E0-15) ----------------------------------------------
+#
+# Every route below is reached through a URL the launch advertised, never
+# through a path a tool assembled, and every one of them is scoped to a
+# context: a roster is one section's and a gradebook is one section's. The
+# gradebook is built per application exactly as the issuer key is, so two
+# platforms started in one process hold two gradebooks (ADR 0049).
+#
+# None of them is authenticated. A real platform puts its Advantage services
+# behind an OAuth 2.0 client-credentials grant; E0-14 built no token endpoint
+# and E0-15 specifies none, and the ticket's out-of-scope list says whichever
+# of E1 and E3 needs a token first is where that grant belongs. An endpoint
+# that answered 401 today would answer it to a tool with nothing to present.
 
-    app = FastAPI(
-        title="Pulse Surveys — mock LMS",
-        summary=SUMMARY,
-        # No OpenAPI schema, and so no `/docs` and no `/redoc`. This service's
-        # contract is OIDC and LTI 1.3, and its discovery document describes it
-        # to the only audience that matters. Leaving them on would also put a
-        # second route carrying the word `auth` in the routing table
-        # (`/docs/oauth2-redirect`), which is one more thing for a tool — or a
-        # test discovering endpoints by name — to have to disambiguate.
-        openapi_url=None,
-    )
-    app.state.settings = settings
+
+def require_context(platform: SeededPlatform, context_id: str) -> MockContext:
+    """The seeded section, or a 404 that says which identifiers exist."""
+    context = platform.context(context_id)
+    if context is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No seeded context {context_id!r}. The seeded contexts are "
+                f"{sorted(seeded.context_id for seeded in platform.contexts)}."
+            ),
+        )
+    return context
+
+
+def require_line_item(
+    platform: SeededPlatform, grades: GradeBook, context_id: str, line_item_id: str
+) -> LineItem:
+    """The line item, or a 404 — checking the section exists first.
+
+    The section is resolved before the line item so that a wrong context and
+    an unknown line item are two different messages. They fail identically
+    otherwise, and the first is a tool addressing the wrong course.
+    """
+    require_context(platform, context_id)
+    line_item = grades.line_item(context_id, line_item_id)
+    if line_item is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No line item {line_item_id!r} in context {context_id!r}. This platform "
+                "creates line items only when a tool posts one; it seeds none, because SPEC "
+                "§3.4 has the tool create its own on first launch."
+            ),
+        )
+    return line_item
+
+
+def _register_health_and_pages(
+    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform
+) -> None:
+    """Liveness, and the page a developer clicks a launch from."""
 
     @app.get(HEALTH_PATH, summary="Liveness, for the Compose health check")
     def healthz() -> dict[str, str]:
@@ -261,6 +299,10 @@ def create_app() -> FastAPI:
     def launch() -> HTMLResponse:
         """A form a browser can click through, per E0-14's scope."""
         return HTMLResponse(launch_page(settings, platform))
+
+
+def _register_oidc_metadata(app: FastAPI, settings: PlatformSettings, key: IssuerKey) -> None:
+    """What a tool reads to find this platform: discovery, keys, registration."""
 
     @app.get(DISCOVERY_PATH, summary="OIDC discovery")
     def discovery() -> dict[str, Any]:
@@ -309,6 +351,12 @@ def create_app() -> FastAPI:
         literal rather than an exercise in translation.
         """
         return registration_values(settings)
+
+
+def _register_authorization(
+    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, key: IssuerKey
+) -> None:
+    """The authorization endpoint, which is where a launch is actually signed."""
 
     @app.api_route(
         AUTHORIZATION_PATH,
@@ -368,52 +416,9 @@ def create_app() -> FastAPI:
             )
         )
 
-    # -- LTI Advantage (E0-15) ----------------------------------------------
-    #
-    # Every route below is reached through a URL the launch advertised, never
-    # through a path a tool assembled, and every one of them is scoped to a
-    # context: a roster is one section's and a gradebook is one section's. The
-    # gradebook is a closure over this application exactly as the issuer key is,
-    # so two platforms started in one process hold two gradebooks (ADR 0049).
-    #
-    # None of them is authenticated. A real platform puts its Advantage services
-    # behind an OAuth 2.0 client-credentials grant; E0-14 built no token endpoint
-    # and E0-15 specifies none, and the ticket's out-of-scope list says whichever
-    # of E1 and E3 needs a token first is where that grant belongs. An endpoint
-    # that answered 401 today would answer it to a tool with nothing to present.
 
-    def require_context(context_id: str) -> MockContext:
-        """The seeded section, or a 404 that says which identifiers exist."""
-        context = platform.context(context_id)
-        if context is None:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"No seeded context {context_id!r}. The seeded contexts are "
-                    f"{sorted(seeded.context_id for seeded in platform.contexts)}."
-                ),
-            )
-        return context
-
-    def require_line_item(context_id: str, line_item_id: str) -> LineItem:
-        """The line item, or a 404 — checking the section exists first.
-
-        The section is resolved before the line item so that a wrong context and
-        an unknown line item are two different messages. They fail identically
-        otherwise, and the first is a tool addressing the wrong course.
-        """
-        require_context(context_id)
-        line_item = grades.line_item(context_id, line_item_id)
-        if line_item is None:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"No line item {line_item_id!r} in context {context_id!r}. This platform "
-                    "creates line items only when a tool posts one; it seeds none, because SPEC "
-                    "§3.4 has the tool create its own on first launch."
-                ),
-            )
-        return line_item
+def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPlatform) -> None:
+    """Names and Role Provisioning 2.0: one section's roster, paged."""
 
     @app.get(MEMBERSHIPS_PATH, summary="NRPS 2.0: one section's roster, one page at a time")
     def memberships(
@@ -466,7 +471,7 @@ def create_app() -> FastAPI:
                     f"`{PAGE_PARAMETER}` is the one parameter this container implements."
                 ),
             )
-        context = require_context(context_id)
+        context = require_context(platform, context_id)
         try:
             served = membership_page(platform, settings, context, page)
         except PageOutOfRangeError as refusal:
@@ -477,10 +482,16 @@ def create_app() -> FastAPI:
             headers={"link": served.link_header},
         )
 
+
+def _register_ags(
+    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, grades: GradeBook
+) -> None:
+    """Assignment and Grade Services 2.0: line items, scores and results."""
+
     @app.post(LINE_ITEMS_PATH, summary="AGS 2.0: create a line item in a section")
     async def create_line_item(context_id: str, request: Request) -> JSONResponse:
         """Store one line item and answer with the identifier scores are posted to."""
-        require_context(context_id)
+        require_context(platform, context_id)
         payload = await json_object(request, "line item")
         try:
             created = grades.create_line_item(context_id, payload)
@@ -511,7 +522,7 @@ def create_app() -> FastAPI:
         query this request carried, so a filtered container's second page is the
         second page *of that filter* rather than of everything.
         """
-        require_context(context_id)
+        require_context(platform, context_id)
         found = grades.line_items(
             context_id,
             LineItemFilters(resource_link_id=resource_link_id, resource_id=resource_id, tag=tag),
@@ -548,7 +559,7 @@ def create_app() -> FastAPI:
         on a URL the platform itself composed.
         """
         return JSONResponse(
-            require_line_item(context_id, line_item_id).document,
+            require_line_item(platform, grades, context_id, line_item_id).document,
             media_type=LINE_ITEM_MEDIA_TYPE,
         )
 
@@ -559,7 +570,7 @@ def create_app() -> FastAPI:
         The body is not modelled, defaulted or normalised anywhere between the
         socket and the store — see `json_object` above and ADR 0047.
         """
-        line_item = require_line_item(context_id, line_item_id)
+        line_item = require_line_item(platform, grades, context_id, line_item_id)
         payload = await json_object(request, "score")
         try:
             grades.record_score(line_item, payload)
@@ -604,7 +615,7 @@ def create_app() -> FastAPI:
         the whole class the moment it follows one — and it fails open, which is
         the paging defect that looks most like working.
         """
-        line_item = require_line_item(context_id, line_item_id)
+        line_item = require_line_item(platform, grades, context_id, line_item_id)
         found = grades.results(line_item, user_id=user_id)
         size = page_size(limit, RESULT_PAGE_SIZE, MAX_RESULT_LIMIT)
         try:
@@ -637,7 +648,7 @@ def create_app() -> FastAPI:
         parameter, for the reason that function gives at length: one decode of
         what the wire carried, whatever the server did to the path on the way in.
         """
-        line_item = require_line_item(context_id, line_item_id)
+        line_item = require_line_item(platform, grades, context_id, line_item_id)
         user_id = addressed_user_id(request)
         found = grades.result(line_item, user_id)
         if found is None:
@@ -650,6 +661,10 @@ def create_app() -> FastAPI:
                 ),
             )
         return JSONResponse(found, media_type=RESULT_MEDIA_TYPE)
+
+
+def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
+    """The `/mock/` surface, which no real platform serves."""
 
     @app.get(MOCK_POSTED_SCORES_PATH, summary="Mock only: every score this platform was sent")
     def posted_scores() -> JSONResponse:
@@ -675,4 +690,38 @@ def create_app() -> FastAPI:
             }
         )
 
+
+def create_app() -> FastAPI:
+    """Build the platform: read the environment, seed it, and generate its key.
+
+    The four values below are the whole of this platform's state, and each
+    `_register_*` call above takes the ones its routes need. They were closures
+    over this function when every handler lived in it — a 440-line body with
+    fourteen nested definitions — and they are parameters now, which is the only
+    change: no route, no status code and no document moved.
+    """
+    settings = PlatformSettings.from_environment()
+    platform = seeded_platform()
+    key = IssuerKey.generate()
+    grades = GradeBook(settings=settings)
+
+    app = FastAPI(
+        title="Pulse Surveys — mock LMS",
+        summary=SUMMARY,
+        # No OpenAPI schema, and so no `/docs` and no `/redoc`. This service's
+        # contract is OIDC and LTI 1.3, and its discovery document describes it
+        # to the only audience that matters. Leaving them on would also put a
+        # second route carrying the word `auth` in the routing table
+        # (`/docs/oauth2-redirect`), which is one more thing for a tool — or a
+        # test discovering endpoints by name — to have to disambiguate.
+        openapi_url=None,
+    )
+    app.state.settings = settings
+
+    _register_health_and_pages(app, settings, platform)
+    _register_oidc_metadata(app, settings, key)
+    _register_authorization(app, settings, platform, key)
+    _register_nrps(app, settings, platform)
+    _register_ags(app, settings, platform, grades)
+    _register_mock_inspection(app, grades)
     return app

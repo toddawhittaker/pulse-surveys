@@ -28,8 +28,9 @@ its end date. `END_DATE_IS_INCLUSIVE` below is the one line that changes if the
 ticket settles this the other way, and the failure messages say so.
 
 **What this file does not name.** Nothing inside `app.services.section_codes`:
-the callables are discovered by `tests/conftest.py`'s `SectionCodeService`, which
-says why at length. Column names are taken from the ticket where it spells them
+the callables are discovered by `SectionCodeService` in
+`tests/fixtures/section_codes.py`, which says why at length. Column names are
+taken from the ticket where it spells them
 (`letter`, and the four derived columns) and from a candidate constant where it
 does not (a length in weeks, a start date on the map row) — the precedent, and
 the reason, are in `tests/integration/test_term_calendar_schema.py`.
@@ -416,7 +417,7 @@ COURSE_NUMBER_LAST = 799
 # Cleared before every test, so the numbers only have to be distinct within one:
 # `db_session` rolls every write back at the end of a test, so no course this
 # module seeds outlives the test that asked for it. The same mechanism and the
-# same reasoning as `_GRAPH_INTEGER_COUNTERS` in `tests/conftest.py`.
+# same reasoning as `_GRAPH_INTEGER_COUNTERS` in `tests/fixtures/supervision.py`.
 _COURSE_NUMBERS: dict[str, Any] = {}
 
 
@@ -457,8 +458,8 @@ def course_number() -> str:
 
     A fourth copy of one generator, and deliberately so: this module carries its
     own copy of the whole seeding walker for the reason its docstring gives, and
-    importing `tests/conftest.py` as a module rather than letting pytest load it
-    as a plugin loads it twice.
+    importing `tests/fixtures/supervision.py`, which holds the shared one, would
+    couple this module to where pytest happens to put `tests/` on `sys.path`.
     """
     counter = _COURSE_NUMBERS.setdefault(COURSE_NUMBER_COLUMN, count(COURSE_NUMBER_FIRST))
     number = next(counter)

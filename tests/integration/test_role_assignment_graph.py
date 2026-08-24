@@ -23,7 +23,7 @@ row for its own reasons, or from an insert path that does not work at all
 in through the same helper, in the same transaction, and a failure there stops the
 test naming the write rather than the assertion that could not run.
 
-**The builder is in `tests/conftest.py`**, not here, because the property module
+**The builder is in `tests/fixtures/supervision.py`**, not here, because the property module
 asks it the same questions and E0-09's definition of done asks for a fixture
 builder E9 will reuse (`docs/MISTAKES.md` entry 13). What it decides, and the one
 thing it refuses to decide — what a `scope_node_id` points at, given that E0-05
@@ -48,10 +48,11 @@ built and where the reasoning sits; it uses the superuser-only bypass ADR 0027
 measured, restores it immediately, and asserts both halves before anything is read.
 Nothing it does is reachable by `pulse_app`.
 
-**Two small helpers are copied here rather than imported from `tests/
-conftest.py`.** A test module importing the conftest module by name works only
-because of where pytest puts `tests/` on `sys.path`, and a collection error is
-not a failing test — `test_identity_schema.py` copies its constants for the same
+**Two small helpers are copied here rather than imported from
+`tests/fixtures/supervision.py`.** A test module importing a fixtures module by
+name works only because of where pytest puts `tests/` on `sys.path`, and a
+collection error is not a failing test — `test_identity_schema.py` copies its
+constants for the same
 reason. The copies are marked where they sit.
 
 **One of those copies is `IDENTITY_NAME_FRAGMENTS`, and it is one of three in
@@ -379,8 +380,8 @@ def test_an_assignment_belongs_to_a_person_and_not_to_a_user(supervision_graph: 
 # the assistant dean inserted between chair and dean by the same paragraph. A third
 # copy — `test_supervision_edges_run_up_the_role_ranks.py` and
 # `test_supervision_graph_properties.py` hold the others — written out rather than
-# imported for the reason this module's docstring gives about importing the
-# conftest module by name.
+# imported for the reason this module's docstring gives about importing a
+# fixtures module by name.
 CLIMBING_CHAIN = ("INSTRUCTOR", "LEAD_FACULTY", "CHAIR", "ASSISTANT_DEAN", "DEAN", "VP_ACADEMICS")
 
 # The superuser bypass ADR 0027 measured while deciding that a trigger was the

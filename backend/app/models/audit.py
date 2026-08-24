@@ -58,7 +58,7 @@ from uuid import UUID
 from sqlalchemy import Enum, ForeignKey, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import AwareDateTime, Base
+from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 
 class AuditAction(StrEnum):
@@ -75,7 +75,7 @@ class AuditAction(StrEnum):
     IDENTITY_REVEAL = "IDENTITY_REVEAL"
 
 
-class AuditLog(Base):
+class AuditLog(UuidPrimaryKey, Base):
     """One thing that happened, the actor who did it, and when (SPEC §8).
 
     Append-only by rule rather than by instrument today: nothing holds `UPDATE`
@@ -87,9 +87,6 @@ class AuditLog(Base):
 
     __tablename__ = "audit_log"
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Server-side, not application-side: the one writer is SQL inside the
     # database, and a timestamp a caller could choose is not evidence of when
     # the access happened. `AwareDateTime` refuses a naive value (ADR 0019).

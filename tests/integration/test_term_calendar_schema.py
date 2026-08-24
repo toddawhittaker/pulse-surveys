@@ -59,8 +59,9 @@ so the next edit cannot re-split them.
 **Two column names in this file are guesses and are marked as ones.** The ticket
 gives both `term` and `start_letter_map` a "length in weeks" without spelling
 either column, so each is a named constant with a candidate list, following the
-precedent `tests/conftest.py` sets and the correction E0-05 went through: that
-file guessed `number`, the ticket then spelled `lms_number`, and the constant is
+precedent the shared seeding helper sets and the correction E0-05 went through:
+`tests/fixtures/supervision.py` guessed `number`, the ticket then spelled
+`lms_number`, and the constant is
 what made the fix a one-line change. Everything else this file needs is spelled
 by a ticket — `letter`, `number`, `lms_section_code`, `term_id`, `course_id` —
 or reached without a name at all: ancestors are found by following foreign keys,
@@ -405,7 +406,7 @@ COURSE_NUMBER_LAST = 799
 # Cleared before every test, so the numbers only have to be distinct within one:
 # `db_session` rolls every write back at the end of a test, so no course this
 # module seeds outlives the test that asked for it. The same mechanism and the
-# same reasoning as `_GRAPH_INTEGER_COUNTERS` in `tests/conftest.py`.
+# same reasoning as `_GRAPH_INTEGER_COUNTERS` in `tests/fixtures/supervision.py`.
 _COURSE_NUMBERS: dict[str, Any] = {}
 
 
@@ -445,8 +446,8 @@ def course_number() -> str:
 
     A fourth copy of one generator, and deliberately so: this module carries its
     own copy of the whole seeding walker for the reason its docstring gives, and
-    importing `tests/conftest.py` as a module rather than letting pytest load it
-    as a plugin loads it twice.
+    importing `tests/fixtures/supervision.py`, which holds the shared one, would
+    couple this module to where pytest happens to put `tests/` on `sys.path`.
     """
     counter = _COURSE_NUMBERS.setdefault(COURSE_NUMBER_COLUMN, count(COURSE_NUMBER_FIRST))
     number = next(counter)

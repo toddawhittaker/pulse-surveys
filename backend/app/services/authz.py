@@ -679,7 +679,11 @@ def holds_care(session: Session, *, person_id: UUID) -> bool:
 
 
 def resolve_scope(
-    session: Session, *, person_id: UUID, n_threshold: int | None = None
+    session: Session,
+    *,
+    person_id: UUID,
+    n_threshold: int | None = None,
+    settings: Settings | None = None,
 ) -> ActorScope:
     """Everything one person may reach, as one value every read path is handed.
 
@@ -708,6 +712,14 @@ def resolve_scope(
     will write — a recomputation over a past week, a job answering for another
     institution — and an override that were quietly ignored would be worse than no
     parameter at all, since the caller believes it applied.
+
+    `settings` is the configuration that default is read from. A caller that
+    already holds one — every route does, on `request.app.state.settings` — should
+    pass it, because building a fresh `Settings` re-reads and re-validates the
+    whole environment on every call. When it is omitted the read happens here, at
+    call time, exactly as it always did: this is deliberately not cached, because
+    a process that read its configuration once at import time would fail on
+    whichever variable the machine running the suite happens not to have set yet.
     """
     rows = session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings().all()
 
@@ -725,7 +737,11 @@ def resolve_scope(
         # which is a second place for the grain to live.
         purview = purview.union(_own_grant_of(session, assignment))
 
-    threshold = Settings().n_threshold_default if n_threshold is None else n_threshold
+    if n_threshold is None:
+        configured = Settings() if settings is None else settings
+        threshold = configured.n_threshold_default
+    else:
+        threshold = n_threshold
     return ActorScope(
         person_id=person_id,
         purview=purview,

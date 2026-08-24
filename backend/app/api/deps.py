@@ -1,8 +1,11 @@
 """What a router needs from the request that is not the request (SPEC §13).
 
-Today that is one thing: the short-lived signed cookie both entry doors use to
-carry a `state`, a `nonce` and — on the web door — a PKCE verifier from the
-redirect that mints them to the redirect that checks them. §13 names this module
+Today that is two things. The first is the short-lived signed cookie both entry
+doors use to carry a `state`, a `nonce` and — on the web door — a PKCE verifier
+from the redirect that mints them to the redirect that checks them. The second is
+the small amount of scaffolding both doors share around their answers: the two
+status codes, the refusal page, and the tail that turns verified claims into a
+landing view or a refusal and clears the cookie either way. §13 names this module
 for "auth context, role scoping, n-threshold guards"; the first of those is what
 this is, and the other two arrive with the screens that need them.
 
@@ -46,9 +49,9 @@ simply be on, either: a `Secure` cookie is not sent to `http://localhost`, and
 E0-18 exists to make `docker compose up` launchable-into on a laptop, so an
 unconditional flag would refuse every development flow for a `state` mismatch and
 look like a broken door. So it is on unless `ENVIRONMENT` is exactly
-`development`, which is the same comparison `app/main.py` makes before it serves
-`/docs` and the same constant, `app.config.DEVELOPMENT_ENVIRONMENT`. The
-comparison is made once, here, rather than at each door: two copies of it is
+`development`, which is the same question `app/main.py` asks before it serves
+`/docs`, asked through the same predicate, `app.config.is_development`. The
+question is asked once, here, rather than at each door: two copies of it is
 `docs/MISTAKES.md` entry 13, and one door left insecure is invisible.
 
 **`SameSite=Lax`, not `None`.** An LTI launch is posted back to the tool from
@@ -66,17 +69,23 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
+from fastapi.responses import HTMLResponse
 from starlette.responses import Response
 
-from app.config import DEVELOPMENT_ENVIRONMENT, Settings
+from app.config import Settings, is_development
+from app.services.landing import Door, landing_page, landing_role_for, refusal_page
 
 __all__ = [
+    "FOUND",
     "LOGIN_COOKIE_LIFETIME_SECONDS",
     "LTI_LOGIN_COOKIE",
     "OIDC_LOGIN_COOKIE",
+    "REFUSED",
     "carried_across",
     "carry_across",
     "clear_carried",
+    "landing_or_refusal",
+    "refused",
     "with_query",
 ]
 
@@ -98,6 +107,16 @@ LOGIN_COOKIE_LIFETIME_SECONDS = 300
 # the way out. A verifier that read `alg` out of the cookie would accept `none`
 # from anyone who could write the cookie, which is everyone.
 COOKIE_ALGORITHM = "HS256"
+
+# What a refused launch or sign-in answers. 400 rather than 401 or 403: nothing
+# here is authenticated in the HTTP sense — there is no realm to challenge and no
+# credential to re-present — the request itself is the thing that does not hold.
+REFUSED = 400
+
+# The redirect a login initiation answers with. 302 is what the LTI 1.3 security
+# framework and every platform in the field expect; 303 would also be correct
+# after a POST and is not what tools send.
+FOUND = 302
 
 
 def with_query(url: str, parameters: Mapping[str, str]) -> str:
@@ -140,7 +159,7 @@ def carry_across(
         jwt.encode(payload, secret, algorithm=COOKIE_ALGORITHM),
         max_age=LOGIN_COOKIE_LIFETIME_SECONDS,
         httponly=True,
-        secure=settings.environment != DEVELOPMENT_ENVIRONMENT,
+        secure=not is_development(settings),
         samesite="lax",
         path="/",
     )
@@ -170,3 +189,32 @@ def clear_carried(response: Response, name: str) -> None:
     attacker can replay into a second callback.
     """
     response.delete_cookie(name, path="/")
+
+
+def refused(reason: str) -> HTMLResponse:
+    """A 4xx page carrying the reason and no landing view."""
+    return HTMLResponse(refusal_page(reason), status_code=REFUSED)
+
+
+def landing_or_refusal(
+    claims: Mapping[str, Any],
+    *,
+    door: Door,
+    cookie: str,
+    no_role_reason: str,
+) -> Response:
+    """The last step of both second legs: land the caller, or refuse, and clear.
+
+    Verified claims come in; the view their roles name goes out, or `no_role_reason`
+    on a refusal page when this door has no view for any role they state. The
+    carried cookie is deleted either way, because a `state` is good once.
+
+    `door`, `cookie` and `no_role_reason` are the whole of what differs between
+    the launch door and the web door. The two refusal sentences are deliberately
+    not the same — each door tells the caller something true only of that door —
+    so the sentence is an argument rather than a constant here.
+    """
+    role = landing_role_for(claims, door=door)
+    answer: Response = refused(no_role_reason) if role is None else HTMLResponse(landing_page(role))
+    clear_carried(answer, cookie)
+    return answer

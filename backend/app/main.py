@@ -29,7 +29,7 @@ from fastapi import FastAPI
 
 from app import __version__
 from app.api import auth, dev, health, lti
-from app.config import DEVELOPMENT_ENVIRONMENT, Settings
+from app.config import Settings, is_development
 
 # What the tool waits for any single outbound request. A per-request timeout
 # beats it where a caller sets one; this is the floor, and it exists so that a
@@ -58,11 +58,15 @@ def documentation_is_served(settings: Settings) -> bool:
     schema is a list of every route this application answers on, and §6.2's
     reveal surface and §5.5's roll-ups are what such a list points at — in a
     system that holds student comment text, handed to any browser an LMS launched
-    into an iframe. Keeping it for developers costs one comparison; the value
-    compared against is the same one `app/db.py` and `scripts/seed.py` already
-    key on, and it is `app.config.DEVELOPMENT_ENVIRONMENT`.
+    into an iframe. Keeping it for developers costs one comparison, and the
+    comparison is not made here: `app.config.is_development` is the one predicate
+    every reader of `ENVIRONMENT` goes through, over the one value
+    `app.config.DEVELOPMENT_ENVIRONMENT`. This function stays because "whether
+    the documentation is served" is what the caller below is asking, and that is
+    a different question from "is this a developer's machine" that happens to
+    have the same answer today.
     """
-    return settings.environment == DEVELOPMENT_ENVIRONMENT
+    return is_development(settings)
 
 
 def create_app() -> FastAPI:

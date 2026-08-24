@@ -30,15 +30,18 @@ from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 from app.api.deps import (
+    FOUND,
     LTI_LOGIN_COOKIE,
     carried_across,
     carry_across,
     clear_carried,
+    landing_or_refusal,
+    refused,
     with_query,
 )
 from app.db import get_session
@@ -49,19 +52,9 @@ from app.lti.launch import (
     begin_a_launch,
     verified_launch,
 )
-from app.services.landing import Door, landing_page, landing_role_for, refusal_page
+from app.services.landing import Door
 
 router = APIRouter(tags=["lti"])
-
-# What a refused launch answers. 400 rather than 401 or 403: nothing here is
-# authenticated in the HTTP sense — there is no realm to challenge and no
-# credential to re-present — the request itself is the thing that does not hold.
-REFUSED = 400
-
-# The redirect a login initiation answers with. 302 is what the LTI 1.3 security
-# framework and every platform in the field expect; 303 would also be correct
-# after a POST and is not what tools send.
-FOUND = 302
 
 
 def form_body(raw: bytes) -> dict[str, str]:
@@ -72,11 +65,6 @@ def form_body(raw: bytes) -> dict[str, str]:
     mistakes, and the refusals below can only tell them apart if the parser does.
     """
     return dict(parse_qsl(raw.decode("utf-8", errors="replace"), keep_blank_values=True))
-
-
-def refused(reason: str) -> HTMLResponse:
-    """A 4xx page carrying the reason and no landing view."""
-    return HTMLResponse(refusal_page(reason), status_code=REFUSED)
 
 
 @router.post(LOGIN_PATH, summary="LTI 1.3 third-party-initiated login")
@@ -133,14 +121,11 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
         clear_carried(answer, LTI_LOGIN_COOKIE)
         return answer
 
-    role = landing_role_for(claims, door=Door.LAUNCH)
-    if role is None:
-        answer = refused(
+    return landing_or_refusal(
+        claims,
+        door=Door.LAUNCH,
+        cookie=LTI_LOGIN_COOKIE,
+        no_role_reason=(
             "The launch states no role this tool has a view for, so there is nothing to show you."
-        )
-        clear_carried(answer, LTI_LOGIN_COOKIE)
-        return answer
-
-    answer = HTMLResponse(landing_page(role))
-    clear_carried(answer, LTI_LOGIN_COOKIE)
-    return answer
+        ),
+    )

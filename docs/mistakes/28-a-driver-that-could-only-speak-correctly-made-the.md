@@ -15,7 +15,7 @@ protocol earlier — raised when the same redemption compared it with
 Both were found by the implementer reading its own finished code. **Nothing in the
 suite could have found either**, and the reason is structural rather than an
 oversight: every PKCE value the suite sends is built by `pkce_pair` in
-`tests/conftest.py` out of `secrets.token_urlsafe`, whose alphabet is exactly the
+`tests/fixtures/mock_idp.py` out of `secrets.token_urlsafe`, whose alphabet is exactly the
 unreserved set both guards accept. Seven refusal tests across the two provider
 modules — a replayed code, a mismatched verifier, an absent verifier, an
 unregistered redirect URI, two launch-only identities, a launch-only role — all

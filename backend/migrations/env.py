@@ -62,10 +62,10 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 config = context.config
 
 # `disable_existing_loggers=False` is not cosmetic. pytest runs `alembic upgrade
-# head` in its own process (tests/conftest.py), and the default would switch off
-# every logger configured before this point — including the suite's own capture,
-# which would then report an absence of log records as evidence of a property
-# rather than as evidence of nothing having been captured.
+# head` in its own process (tests/fixtures/database.py), and the default would
+# switch off every logger configured before this point — including the suite's
+# own capture, which would then report an absence of log records as evidence of
+# a property rather than as evidence of nothing having been captured.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 

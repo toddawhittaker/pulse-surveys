@@ -9,7 +9,12 @@ identity. `landing.py` maps a verified token to the landing role and page it
 sends the browser to (E0-18).
 
 The package was created before any of them, because the strict mypy profile
-in `pyproject.toml` is pinned to `app.services.*`: the modules that hold the
-guarantees get no untyped escape from their first line, rather than from
-whenever someone remembers to tighten it.
+in `pyproject.toml` was pinned to `app.services.*` from the start: the modules
+that hold the guarantees get no untyped escape from their first line, rather
+than from whenever someone remembers to tighten it.
+
+That profile is no longer only this package. It covers `app.api.*` and
+`app.lti.*` as well — the two entry doors, where untrusted input arrives — and
+`app.ai.contracts`. `pyproject.toml`'s comment above the override is where the
+reasoning lives, so there is one copy of it.
 """

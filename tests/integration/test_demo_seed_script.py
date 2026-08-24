@@ -14,8 +14,9 @@ no name resembles anybody. The address half comes from the ticket's security
 review rather than from the criterion, and is decidable outright.
 
 **Why this runs a process instead of calling a function.** The criteria are about
-`make seed`, which runs the file as a program. `tests/conftest.py`'s `DemoSeed`
-runs it the same way, against a database created and migrated for this module and
+`make seed`, which runs the file as a program. `DemoSeed` in
+`tests/fixtures/seed.py` runs it the same way, against a database created and
+migrated for this module and
 dropped afterwards, and hands back the exit status. Nothing in this file names a
 callable inside the script, because E0-17 names none — a test that imported one
 would be requiring an interface the ticket leaves open, and a script whose work
@@ -58,14 +59,14 @@ of an idempotent seed against the database that already holds it.
 
 **What this file does not decide.** The role spellings, the parent edge and what a
 scope node is made of are read off the schema through `SupervisionGraph`, which
-`tests/conftest.py` built for E0-09 and which answers those questions from
-`Base.metadata` alone. It is requested here **only as a reader**: nothing is
+`tests/fixtures/supervision.py` built for E0-09 and which answers those questions
+from `Base.metadata` alone. It is requested here **only as a reader**: nothing is
 written through it, and the session it holds belongs to a different database
 entirely. That is cheaper than a fourth copy of the scope-shape logic, which
 `docs/MISTAKES.md` entry 13 is about — and a copy is what nobody updates.
 
 **The small schema helpers and the constant lists are copied rather than
-imported.** A test module importing the conftest module by name works only
+imported.** A test module importing a fixtures module by name works only
 because of where pytest puts `tests/` on `sys.path`, and a collection error is
 not a failing test; `test_identity_schema.py` and `test_role_assignment_graph.py`
 copy theirs for the same reason. Each copy is marked where it sits, and one of
@@ -101,7 +102,7 @@ DEPLOYMENTS = "lti_deployment"
 USERS = "user"
 
 # SPEC §2.1's containment hierarchy, outermost first. A copy of the tuple in
-# `tests/conftest.py`; see the module docstring on copies.
+# `tests/fixtures/supervision.py`; see the module docstring on copies.
 CONTAINMENT_ORDER = ("institution", "college", "department", "prefix", "course", "section")
 
 # Not this file's choice: E0-05 created these columns under these names and
@@ -238,7 +239,7 @@ DEVELOPMENT_ENVIRONMENT = "development"
 # ordering claim; a run that gets past the guard fails on this address instead.
 UNREACHABLE_DATABASE_URL = "postgresql+psycopg://nobody:nothing@127.0.0.1:1/nowhere"
 
-# Every variable `seed_environment` in tests/conftest.py sets to a database URL,
+# Every variable `seed_environment` in tests/fixtures/seed.py sets to a database URL,
 # so that unreachability can be said in all of them at once. E0-17 does not say
 # which one a seed reads — supplying every spelling is that fixture's whole
 # design — so pointing only one at the address above would let a script that
@@ -656,7 +657,7 @@ def test_seeding_a_freshly_migrated_database_completes_without_error(
         f"{seeded_demo.report()}\n"
         "E0-17's third criterion is this run. The environment it was given supplies the "
         "container's coordinates under every spelling `backend/migrations/env.py` and "
-        "`app.config.Settings` read — see `seed_environment` in tests/conftest.py — so a "
+        "`app.config.Settings` read — see `seed_environment` in tests/fixtures/seed.py — so a "
         "failure naming a missing variable is a variable no other part of this repository "
         "documents, which is worth saying in the pull request."
     )
@@ -2379,7 +2380,7 @@ def test_the_seed_is_refused_wherever_the_environment_is_not_development(
 # **Why these are not subprocess tests, when everything above them is.** The guard
 # reads the process environment with `.env` filling in what it does not set, and
 # *which of the two supplied a value* is the one question a subprocess cannot be
-# asked from here: `seed_environment` in tests/conftest.py lays every documented
+# asked from here: `seed_environment` in tests/fixtures/seed.py lays every documented
 # `.env.example` entry into the child, and whether an untracked `.env` sits in the
 # working tree decides the rest. A case written that way measures the machine —
 # it passed in CI, which never creates that file, and failed on every checkout
@@ -2402,7 +2403,7 @@ def test_the_seed_is_refused_wherever_the_environment_is_not_development(
 # The seam ADR 0063 records: "`resolved_configuration(environ, dotenv_path)`
 # returns a mapping instead of mutating `os.environ`, and `main` takes both as
 # optional arguments defaulting to the real thing." Looked up by name rather than
-# discovered, for the reason `AuthzModule` in tests/conftest.py gives: this
+# discovered, for the reason `AuthzModule` in tests/fixtures/authz_data.py gives: this
 # surface was settled in writing before these tests were, so a name that is not
 # there is a missing deliverable rather than a rename to accommodate.
 RESOLVE_CONFIGURATION = "resolved_configuration"

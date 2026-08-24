@@ -108,9 +108,11 @@ which is a sentence a prompt author could act on and be wrong.
 explicitly. That is the intended cost of not having a verdict be a string.
 
 **A comparison against a bare string is a type error rather than a silent
-`False`.** This only holds where mypy runs strictly. `app.ai.contracts` and
-`app.services.*` are in the strict profile; a comparison in a router or a job is
-checked less strictly, and this record does not claim otherwise.
+`False`.** This only holds where mypy runs strictly. `app.ai.contracts`,
+`app.services.*`, and — since 2026-08-24 — the routers under `app.api.*` are in
+the strict profile; a comparison in a job is checked less strictly, and this
+record does not claim otherwise. (Amended 2026-08-24; the original said "a
+router or a job", which was true when written.)
 
 **The spec's `self-harm` and the stored `self_harm` are two spellings of one
 verdict**, and anyone reading a database row against §7.4's table has to know
