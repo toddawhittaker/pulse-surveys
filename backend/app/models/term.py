@@ -66,14 +66,13 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     Uuid,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import AwareDateTime, Base
+from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 
-class Term(Base):
+class Term(UuidPrimaryKey, Base):
     """One academic term — Fall 2026 — and how many weeks it runs.
 
     **The length is stored, not derived from the two dates.** SPEC §2.2 states
@@ -102,9 +101,6 @@ class Term(Base):
         CheckConstraint("end_date > start_date", name="end_date_is_after_start_date"),
     )
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # No index of its own: it leads `uq_term_institution_id_name`, which already
     # serves a lookup by institution. Same reasoning as `course.prefix_id` in
     # `app/models/org.py`.
@@ -117,7 +113,7 @@ class Term(Base):
     length_weeks: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
-class Week(Base):
+class Week(UuidPrimaryKey, Base):
     """Week `number` of a term, so the term axis (§2.2) is data rather than arithmetic.
 
     Aggregate pages plot TERM 01 to 18 with one line per start cohort, and every
@@ -144,9 +140,6 @@ class Week(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Leads `uq_week_term_id_number`, so a lookup of a term's weeks is served
     # without an index of its own.
     term_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
@@ -156,7 +149,7 @@ class Week(Base):
     number: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
-class StartLetterMap(Base):
+class StartLetterMap(UuidPrimaryKey, Base):
     """What a section code's start letter means in one term: a length and a start date.
 
     §2.2's Fall 2026 map — 12-week U/R/Q starting 8/17, 9/7 and 9/28, 6-week
@@ -199,9 +192,6 @@ class StartLetterMap(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Leads `uq_start_letter_map_term_id_letter`, so a lookup of a term's whole
     # map — which is how E0-07 reads this table — is served without an index of
     # its own.
@@ -213,7 +203,7 @@ class StartLetterMap(Base):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
 
 
-class SurveyWindow(Base):
+class SurveyWindow(UuidPrimaryKey, Base):
     """When one section's survey opens and closes in one week of the term (§3.1).
 
     Both timestamps are timezone-aware and refuse a naive value: the default
@@ -238,9 +228,6 @@ class SurveyWindow(Base):
         CheckConstraint("closes_at > opens_at", name="closes_after_it_opens"),
     )
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Leads `uq_survey_window_section_id_week_id`, which serves the read the
     # student and instructor surfaces make: this section's windows.
     section_id: Mapped[UUID] = mapped_column(

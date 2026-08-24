@@ -53,12 +53,11 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    Uuid,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, UuidPrimaryKey
 
 
 class CourseLevel(StrEnum):
@@ -169,7 +168,7 @@ END
 """
 
 
-class Institution(Base):
+class Institution(UuidPrimaryKey, Base):
     """The top of the containment hierarchy, and there is at most one of it (SPEC §2.1, §8).
 
     The academic calendar and the timezone are institution *configuration* and
@@ -212,43 +211,34 @@ class Institution(Base):
     # column name, and a textual expression has none to give it.
     __table_args__ = (Index("uq_institution_one_row", text("(true)"), unique=True),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
 
 
-class College(Base):
+class College(UuidPrimaryKey, Base):
     """A college within an institution (e.g. College of Sciences)."""
 
     __tablename__ = "college"
     __table_args__ = (UniqueConstraint("institution_id", "name"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     institution_id: Mapped[UUID] = mapped_column(
         ForeignKey("institution.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
 
 
-class Department(Base):
+class Department(UuidPrimaryKey, Base):
     """A department within a college. Groups one or more prefixes (SPEC §2.1)."""
 
     __tablename__ = "department"
     __table_args__ = (UniqueConstraint("college_id", "name"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     college_id: Mapped[UUID] = mapped_column(
         ForeignKey("college.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
 
 
-class Prefix(Base):
+class Prefix(UuidPrimaryKey, Base):
     """A course prefix (e.g. BIOL), belonging to exactly one department.
 
     **`code` is unique across the whole table**, which is what `unique=True`
@@ -270,9 +260,6 @@ class Prefix(Base):
 
     __tablename__ = "prefix"
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Indexed, unlike the other containment foreign keys, because nothing else
     # covers it: `college.institution_id`, `department.college_id` and
     # `course.prefix_id` are each the leading column of a composite unique
@@ -286,7 +273,7 @@ class Prefix(Base):
     code: Mapped[str] = mapped_column(String(16), nullable=False, unique=True)
 
 
-class Course(Base):
+class Course(UuidPrimaryKey, Base):
     """A course under exactly one prefix (e.g. BIOL 215).
 
     LMS-owned and read-only in Pulse (SPEC §2.1), which is what the `lms_` names
@@ -305,9 +292,6 @@ class Course(Base):
     __tablename__ = "course"
     __table_args__ = (UniqueConstraint("prefix_id", "lms_number"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     prefix_id: Mapped[UUID] = mapped_column(
         ForeignKey("prefix.id", ondelete="RESTRICT"), nullable=False
     )
@@ -320,7 +304,7 @@ class Course(Base):
     )
 
 
-class Section(Base):
+class Section(UuidPrimaryKey, Base):
     """A term instance of a course, identified by its LMS section code (e.g. R3WW).
 
     Sections belong to exactly one course and one term (SPEC §8), and both
@@ -359,9 +343,6 @@ class Section(Base):
     __tablename__ = "section"
     __table_args__ = (UniqueConstraint("course_id", "term_id", "lms_section_code"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Reaching sections by course has to be indexed: `section` is the leaf table
     # and it grows by a row per section per term, so a sequential scan here is
     # invisible on seed data and worse every term. It is *served* by the unique

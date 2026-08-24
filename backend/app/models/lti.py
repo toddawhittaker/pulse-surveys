@@ -42,13 +42,13 @@ chooses it.
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import AwareDateTime, Base
+from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 
-class LtiPlatform(Base):
+class LtiPlatform(UuidPrimaryKey, Base):
     """One registered LTI 1.3 platform — one issuer, one client ID.
 
     **Identified by the pair, not by the issuer alone.** A platform issues a
@@ -68,9 +68,6 @@ class LtiPlatform(Base):
     __tablename__ = "lti_platform"
     __table_args__ = (UniqueConstraint("issuer", "client_id"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Text and not a bounded string: an issuer is a URL the platform chooses, and
     # a length limit here would reject a registration for a reason that has
     # nothing to do with Pulse. Same for the client ID, which is opaque, and for
@@ -81,7 +78,7 @@ class LtiPlatform(Base):
     jwks_fetched_at: Mapped[datetime | None] = mapped_column(AwareDateTime, nullable=True)
 
 
-class LtiDeployment(Base):
+class LtiDeployment(UuidPrimaryKey, Base):
     """One deployment of this tool within a platform (the `deployment_id` claim).
 
     A platform can deploy the same tool registration in more than one place — a
@@ -97,9 +94,6 @@ class LtiDeployment(Base):
     __tablename__ = "lti_deployment"
     __table_args__ = (UniqueConstraint("lti_platform_id", "deployment_id"),)
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # No index of its own: it leads `uq_lti_deployment_lti_platform_id_deployment_id`,
     # which serves a lookup of one platform's deployments.
     lti_platform_id: Mapped[UUID] = mapped_column(

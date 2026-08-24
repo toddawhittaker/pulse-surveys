@@ -25,12 +25,13 @@ rather than left to look like an unused import that a later cleanup can delete.
 """
 
 from app.models import ai, audit, identity, lti, org, term
-from app.models.base import NAMING_CONVENTION, AwareDateTime, Base
+from app.models.base import NAMING_CONVENTION, AwareDateTime, Base, UuidPrimaryKey
 
 __all__ = [
     "NAMING_CONVENTION",
     "AwareDateTime",
     "Base",
+    "UuidPrimaryKey",
     "ai",
     "audit",
     "identity",

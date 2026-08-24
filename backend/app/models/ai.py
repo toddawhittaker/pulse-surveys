@@ -35,13 +35,12 @@ safe to import for the same reason: it declares Pydantic models and reads nothin
 
 from datetime import datetime
 from enum import StrEnum
-from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Enum, Text, Uuid, text
+from sqlalchemy import CheckConstraint, Enum, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.ai.contracts import ValidityVerdict
-from app.models.base import AwareDateTime, Base
+from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 
 class ClassificationTask(StrEnum):
@@ -75,7 +74,7 @@ class ClassificationTask(StrEnum):
 VALIDITY_VERDICT_TOKENS = tuple(member.value for member in ValidityVerdict)
 
 
-class Classification(Base):
+class Classification(UuidPrimaryKey, Base):
     """One model verdict about one thing, with the pair that reproduces it.
 
     The prompt version and the model ID are what SPEC §7.4 asks a stored
@@ -108,9 +107,6 @@ class Classification(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
     # Server-side, so that two rows for the same comment can be ordered by when
     # they were written whatever wrote them. `AwareDateTime` refuses a naive
     # value (ADR 0019).
