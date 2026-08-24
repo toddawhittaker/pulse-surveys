@@ -34,8 +34,11 @@ job in `.github/workflows/ci.yml` run the pair, in that order.
 The second run inherits the project's mypy configuration — the same Python
 version, the same warnings — and takes its files from the command line, which
 overrides `files`. The strict profile in `pyproject.toml` is scoped to
-`app.services.*` and `app.ai.contracts`; those module names exist only in the
-backend, so the mock is checked at the default strictness.
+`app.services.*`, `app.ai.contracts`, and — since the quality-review cleanups,
+2026-08-24 — `app.api.*` and `app.lti.*`; none of those module names exist in
+either mock (neither ships an `api` or `lti` subpackage), so the mock is
+checked at the default strictness. (Amended 2026-08-24; the original named only
+the first two, which was true when written.)
 
 ## Alternatives rejected
 

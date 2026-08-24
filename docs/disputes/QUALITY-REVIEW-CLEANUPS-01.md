@@ -199,3 +199,36 @@ I think this is an **outcome 3** shaped question rather than outcome 1 or 2: the
 brief settled item 3 without knowing this sweep existed, and somebody has to
 decide which rule E0-37's criterion actually is. Either ruling is one small edit
 from here.
+
+## Arbitration (orchestrator, 2026-08-24)
+
+**Ruling: the test's detector is amended to accept the predicate; `db.py` is
+then converted as briefed.** The spec is silent (`ENVIRONMENT` appears zero
+times in it), so the governing text is the test module's own record of its
+criterion, and both of its statements class the conversion as the good case:
+
+1. The docstring's "What it does not assert" paragraph disclaims legislating
+   how a module reads the one place — "choosing between them is style rather
+   than the criterion. … what matters is that there is one of it." Calling a
+   predicate that `config.py` owns, which reads `config.py`'s own constant, is
+   a third spelling of "read it from the one place" that did not exist when
+   the paragraph enumerated two.
+2. The failing assertion's message states its dichotomy as "stopped asking
+   which environment it is running in rather than started asking
+   `backend/app/config.py`." The conversion is literally the second branch.
+   The state the assertion exists to catch — dropping the consultation — is
+   owned, by the test's own account, by `test_db_engine_configuration.py`,
+   which stays green over the conversion and red over an actual drop.
+
+The locality counter-argument (the value that decides parameter-hiding must be
+named in the file that decides it) is coherent but appears nowhere in the
+test's record, the ticket, or the spec; adopting it would be writing a new
+rule in arbitration, not reading an existing one. And the criterion's stated
+cost model — two spellings drifting apart, MISTAKES entry 3 — is reduced by
+the conversion, because the comparison's shape joins its value in `config.py`.
+
+**Consequence:** `reads_the_constant` gains the predicate as a third accepted
+spelling (import or attribute read of `is_development` from `app.config`),
+with the docstrings updated to say so; the amendment is the test-author's, in
+its own commit, before `db.py` changes. This file records why the old
+assertion was incorrect, per the CI discipline on fixing a wrong test.
