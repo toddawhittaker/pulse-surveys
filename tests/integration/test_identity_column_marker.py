@@ -351,6 +351,20 @@ PLANTED_OFFENDING_VIEW = "e1_01_planted_offending_view"
 ENROLLMENT_TABLE = "enrollment"
 ENROLLMENT_KEY_COLUMN = "user_id"
 
+# The keys the allow-side control plants, written out rather than intersected with
+# `JOIN_KEY_COLUMNS`. **That intersection is what the first version did, and the
+# mutation battery measured what it cost**: shrinking the allow-list shrank the
+# plant with it, so dropping `id` or dropping `user_id` — the two mutations that
+# control's docstring claims to kill — left it green, reading whichever keys
+# survived. A control whose subject comes from the structure it is guarding cannot
+# notice that structure getting smaller, which is the shape `REQUIRED_MECHANISM_
+# LABELS` in `test_identity_separated_views.py` exists to avoid and which this
+# module's own comments warn about twice.
+#
+# So these are literal, and a rename in the schema is a named failure in that
+# control rather than a sample that quietly stops testing anything.
+PLANTED_ALLOWED_KEYS = ("id", "user_id")
+
 # Tables that hold no person at all (SPEC §2.1: the institution/college/
 # department/prefix hierarchy is Pulse's own org structure, built in the admin
 # console). Used by the anti-blanket test below. `course` and `section` are
@@ -1432,6 +1446,16 @@ def test_a_view_that_aliases_an_unmarked_person_table_column_is_flagged(db_sessi
     **The near miss it tolerates**: the same view reading `ui.user_id`, which is
     the allow side and is `test_a_view_that_reads_only_join_keys_of_a_person_
     table_is_not_flagged`.
+
+    **How deleting the plant kills this, which is not by an assertion.** Removing
+    the `ALTER TABLE` leaves `CREATE VIEW` selecting a column that does not exist,
+    so psycopg raises `UndefinedColumn` before the dependency check below is
+    reached. That is still a kill of the right kind — a red carrying this test's
+    name and the missing column's, diagnosable in one line — but it is an error
+    rather than a failed assertion, and the distinction matters to whoever runs a
+    battery here: only deleting the `CREATE VIEW` reaches the non-vacuity
+    assertion. Left in this order deliberately, because the alternative is
+    asserting a column exists that the next statement would have named anyway.
     """
     session = db_session
     assert PLANTED_ALIAS_TABLE in PERSON_TABLES and USER_TABLE in PERSON_TABLES, (
@@ -1622,23 +1646,38 @@ def test_a_view_that_reads_only_join_keys_of_a_person_table_is_not_flagged(
 
     A tripwire that fires on correct SQL is repaired by weakening it, and the
     casualty is the guard rather than the view. Two shapes are planted, and both
-    are shapes this schema either has or would write next: a view reading the keys
-    `JOIN_KEY_COLUMNS` allows off a person table — spelled from the table's own
-    columns rather than named here, so that the sample cannot come to name a
-    column the table does not have — and a view reading `enrollment.user_id`,
-    which is what `section_roster` does and which the carried entry on the
-    reveal's composition describes as "the whole point of the view".
+    are shapes this schema either has or would write next: a view reading `id` and
+    `user_id` off a person table, and a view reading `enrollment.user_id`, which
+    is what `section_roster` does and which the carried entry on the reveal's
+    composition describes as "the whole point of the view".
+
+    **The two keys are spelled out in `PLANTED_ALLOWED_KEYS` and not intersected
+    with `JOIN_KEY_COLUMNS`**, which is a repair with a measurement behind it: the
+    first version derived them from the allow-list, so shrinking the allow-list
+    shrank the plant and both mutations named below left this green. That constant
+    carries what it cost.
 
     **The offending view is planted in the same transaction as the two allowed
     ones**, and that is not decoration: silence is what a computation that has
     gone blind produces as well, so a control that only asserted an absence would
     be green with the rule deleted (`docs/MISTAKES.md` entry 3).
 
-    **The mutation it exists to survive**: dropping `id` or `user_id` from
-    `JOIN_KEY_COLUMNS`, which would make every roster-shaped view in the schema
-    an offender and would be repaired by whoever met the red at the cheapest
-    place — by widening the rule back out to marked columns only.
-    **The near miss it tolerates**: none beyond the two planted here; that is
+    **The mutation it exists to survive**: dropping `id` or dropping `user_id`
+    from `JOIN_KEY_COLUMNS`, either of which makes a roster-shaped view an
+    offender — a red on correct SQL, which is the direction that gets a guard
+    repaired by widening it back out to marked columns only.
+
+    **What the roster-shaped half does *not* kill, stated because it would be easy
+    to claim.** It does not catch widening `PERSON_TABLES` to "any table with a
+    `user_id`": `user_id` is a join key either way, so `enrollment.user_id` stays
+    allowed under both readings and this stays green. Other tests kill that
+    mutation. What this half is, is a regression sample for the shape the real
+    read path has — the one view in the schema this rule could most plausibly go
+    red on by accident, planted so that it goes red *here*, in a test whose
+    message says the read is legitimate, rather than in CI against
+    `section_roster` itself.
+
+    **The near miss it tolerates**: none beyond the shapes planted here; that is
     what this test is.
     """
     session = db_session
@@ -1661,15 +1700,13 @@ def test_a_view_that_reads_only_join_keys_of_a_person_table_is_not_flagged(
     )
 
     on_identity = {column["name"] for column in inspector.get_columns(PLANTED_ALIAS_TABLE)}
-    keys = sorted(set(JOIN_KEY_COLUMNS) & on_identity)
-    assert keys, (
-        f"`public.{PLANTED_ALIAS_TABLE}` carries none of the join keys {list(JOIN_KEY_COLUMNS)}, so "
-        "there is no allowed read of a person table to plant. Either the schema has moved or the "
-        "allow-list names columns this table does not have, which "
-        "`test_every_join_key_the_bound_column_mechanism_allows_is_a_structural_key` in "
-        "`test_identity_separated_views.py` is where it is diagnosed."
+    absent = [key for key in PLANTED_ALLOWED_KEYS if key not in on_identity]
+    assert not absent, (
+        f"`public.{PLANTED_ALIAS_TABLE}` has no {absent} column; it has {sorted(on_identity)}. The "
+        "planted read below is spelled out rather than derived, so a renamed key is a named "
+        "failure here instead of a sample that quietly stops testing anything."
     )
-    select_keys = ", ".join(f"ui.{key}" for key in keys)
+    select_keys = ", ".join(f"ui.{key}" for key in PLANTED_ALLOWED_KEYS)
 
     # Three views, one per line with its own suppression, as above: two the rule
     # must allow and one it must catch, so that the two absences below are
@@ -1690,10 +1727,12 @@ def test_a_view_that_reads_only_join_keys_of_a_person_table_is_not_flagged(
         "facts about the computation rather than about the two views they name."
     )
     assert not findings.get(PLANTED_JOIN_KEY_VIEW), (
-        f"`{PLANTED_JOIN_KEY_VIEW}` reads {keys} off a person table and the rule reports "
-        f"{sorted(findings[PLANTED_JOIN_KEY_VIEW])}. Every one of those is in "
-        f"{list(JOIN_KEY_COLUMNS)}: a read view has to be able to join, and a rule that forbids "
-        "the key forbids the read path §4.1 depends on rather than the disclosure it is about."
+        f"`{PLANTED_JOIN_KEY_VIEW}` reads {list(PLANTED_ALLOWED_KEYS)} off a person table and the "
+        f"rule reports {sorted(findings[PLANTED_JOIN_KEY_VIEW])}. `JOIN_KEY_COLUMNS` currently "
+        f"holds {list(JOIN_KEY_COLUMNS)}, so read the two lists against each other: a name planted "
+        "here and missing there is a key that has been taken out of the allow-list, and a read "
+        "view has to be able to join. A rule that forbids the key forbids the read path §4.1 "
+        "depends on rather than the disclosure it is about."
     )
     assert not findings.get(PLANTED_ROSTER_SHAPE_VIEW), (
         f"`{PLANTED_ROSTER_SHAPE_VIEW}` reads `{ENROLLMENT_TABLE}.{ENROLLMENT_KEY_COLUMN}` — the "

@@ -1709,6 +1709,14 @@ def person_table_columns_bound(body: str, vocabulary: IdentityVocabulary) -> tup
     binds it took an incident to get right, and the whole-row mechanism above
     already depends on both (`docs/MISTAKES.md` entry 13).
 
+    **The `\\b` on the token is load-bearing and is pinned by a sample.** Without
+    it, any token *ending* in a bound name is read as that name — `xu.note`
+    becomes `u.note` and is reported as a read of `user` — which flags correct SQL
+    and so fails in the direction that gets a guard weakened rather than the
+    direction that leaks. A mutation battery found nothing distinguishing the two
+    versions, so `IDENTITY_SWEEP_MUST_ALLOW` now carries the two-alias shape that
+    does.
+
     **What it cannot see**, stated here rather than found later
     (`docs/MISTAKES.md` entry 14):
 
@@ -1950,6 +1958,22 @@ IDENTITY_SWEEP_MUST_ALLOW = (
     'CREATE VIEW public.{view} AS SELECT u.id FROM public."user" u;',
     "CREATE VIEW public.{view} AS SELECT r.id FROM public.{other} r\n"
     'JOIN "user" u        ON u.id = r.user_id;',
+    # **The word boundary, which nothing else here distinguishes.** The bound-column
+    # mechanism resolves a read by looking for `<token>.` where the token is a
+    # person table or the alias it bound, and dropping the `\b` from that pattern
+    # widens it to any token *ending* in one — `xu.note` reads as `u.note` and is
+    # reported as `user.note`, on SQL that touches no person column at all. The
+    # mutation battery found nothing telling the two versions apart.
+    #
+    # It fails in the direction that gets a guard weakened rather than the
+    # direction that leaks, which is why the sample belongs on this side: an
+    # author whose correct view is flagged for a read it never wrote repairs the
+    # guard, and the cheapest repair is to stop looking at the alias at all. The
+    # short alias is the realistic case — `u` beside `xu` is two joins in one
+    # statement — and the same defect reaches any alias with a person table's
+    # alias as its suffix.
+    "CREATE VIEW public.{view} AS SELECT xu.note FROM public.{other} xu\n"
+    'JOIN "user" u        ON u.id = xu.user_id;',
     # The clause words that may follow a relation and are not an alias for it. Each
     # of these is a line a real view writes, and each would be a false red if
     # `ALIAS_STOP_WORDS` lost a member: the word after the table would be read as
@@ -2241,8 +2265,11 @@ def test_the_view_file_identity_sweep_allows_the_shapes_that_read_no_identity(
     which makes `count(*)` an identity read; dropping the word boundary from the
     column search, which makes `{column}_hash` one; dropping the dollar-quote and
     view-body handling, which makes the reveal function one; emptying
-    `ALIAS_STOP_WORDS`, which makes `WHERE` a row reference; or emptying
-    `JOIN_KEY_COLUMNS`, which makes every join to a person table a person read.
+    `ALIAS_STOP_WORDS`, which makes `WHERE` a row reference; emptying
+    `JOIN_KEY_COLUMNS`, which makes every join to a person table a person read; or
+    dropping the `\\b` from the bound-column read pattern, which makes an alias
+    ending in a person table's alias one — the last was measured surviving
+    everything else in this module and is why the two-alias sample is here.
     **The near miss it tolerates**: none — that is what this test is.
     """
     assert IDENTITY_SWEEP_MUST_ALLOW, (

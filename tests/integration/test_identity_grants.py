@@ -3857,10 +3857,18 @@ EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(
     (view, column) for view, columns in SANCTIONED_VIEW_COLUMNS.items() for column in columns
 )
 
-# The view E1-01's two controls plant, and the column the catching one exposes.
-# Named for the ticket so that one surviving a fixture change is traceable to it.
+# The views E1-01's controls plant. Named for the ticket so that one surviving a
+# fixture change is traceable to it.
+#
+# The last two are the mutation battery's: a view granted to a role that is not an
+# application reader, and a view granted one *column* at a time. Each covers a
+# half of the candidate sweep that the first two left untouched — an ungranted
+# view has a `NULL` `relacl` and so exercises no filter at all, and a
+# table-granted view never reaches `pg_attribute.attacl`.
 PLANTED_GRANTED_VIEW = "e1_01_planted_granted_view"
 PLANTED_UNGRANTED_VIEW = "e1_01_planted_ungranted_view"
+PLANTED_CARE_GRANTED_VIEW = "e1_01_planted_care_granted_view"
+PLANTED_COLUMN_GRANTED_VIEW = "e1_01_planted_column_granted_view"
 
 # The join key the carried entry names, and the table ADR 0001 puts it on. Spelled
 # here rather than discovered, because the control's whole job is to stand up the
@@ -3999,7 +4007,24 @@ def test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_e
     sanctioned = EXPECTED_APPLICATION_READABLE_COLUMNS
     surplus = sorted(f"{view}.{column}" for view, column in candidates - sanctioned)
     missing = sorted(f"{view}.{column}" for view, column in sanctioned - candidates)
-    assert not surplus and not missing, (
+
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not surplus and not missing`, pytest's assertion
+    # rewriting appends the *repr of the lists* to the exception, so the offending
+    # column appears in `str(failure.value)` whatever this message says — and
+    # `test_a_granted_view_exposing_the_lms_join_key_fails_the_enumeration`, whose
+    # whole job is to establish that the message names it, passed against a
+    # version of this message that printed only counts. Measured by the mutation
+    # battery, not reasoned about; `docs/MISTAKES.md` entry 3 in the place a
+    # control was supposed to close.
+    #
+    # With a plain bool there is nothing for the rewriter to expand — the
+    # explanation is `assert False` — so the names below are the only names in the
+    # failure, and the control that reads them is load-bearing. Nothing is lost to
+    # a human reader: the message prints both lists in full, which the rewriter's
+    # own output does less legibly.
+    agrees = not surplus and not missing
+    assert agrees, (
         f"Granted and not sanctioned: {surplus}. Sanctioned and not granted: {missing}.\n\n"
         "The first list is the one to read first. A view is read with its **owner's** privileges, "
         "so a `GRANT SELECT` on one hands every column it returns to the grantee whatever the "
@@ -4108,6 +4133,17 @@ def test_a_granted_view_exposing_the_lms_join_key_fails_the_enumeration(db_sessi
     the guard's message explains in prose what `lms_user_id` is, so a check for
     that word passes whatever the granted set contains.
 
+    **That third assertion was measured guarding nothing, and the repair is in the
+    guard rather than here.** The mutation battery changed the guard's message to
+    print `len(surplus)` instead of the names and this control stayed green:
+    pytest's assertion rewriting appends the repr of the compared lists to the
+    exception, so the entry was in `str(failure.value)` no matter what the message
+    said, and `mentions` was reading the rewriter's output rather than anything
+    anybody wrote. The guard now compares a bool, so the explanation is
+    `assert False` and the authored message is the whole of the text — which is
+    what makes the check below load-bearing. `docs/MISTAKES.md` entry 3, found
+    inside a control written to close entry 35.
+
     **The mutation it exists to survive**: narrowing the candidate sweep to a
     hand-kept list of views, which is the shape E1-01's scope forbids and which
     would leave a planted view invisible; and dropping either ACL from
@@ -4154,6 +4190,12 @@ def test_a_granted_view_exposing_the_lms_join_key_fails_the_enumeration(db_sessi
     # granted set contains. What is asked for is the *entry* — the view and the
     # column together, as the surplus list spells it — which nothing but a real
     # finding can put in that message.
+    #
+    # **And the text read here is the authored message and nothing else**, which
+    # is the second half of the same lesson: while the guard asserted on the lists
+    # themselves, pytest's rewriter appended their repr and this check passed
+    # against a message that had stopped naming anything. The guard asserts a bool
+    # now for that reason, and the comment above `agrees` carries the measurement.
     reported = f"{PLANTED_GRANTED_VIEW}.{LMS_USER_KEY}"
     assert mentions(str(failure.value), reported), (
         f"The enumeration failed on the planted grant and its message does not name `{reported}`. "
@@ -4164,6 +4206,92 @@ def test_a_granted_view_exposing_the_lms_join_key_fails_the_enumeration(db_sessi
         "caught a *different* failure inside the guard — an empty candidate set, no views at all — "
         "in which case the planted grant was never enumerated and this control would otherwise "
         "have passed for a reason unrelated to what it asserts (`docs/MISTAKES.md` entry 3)."
+    )
+
+
+@pytest.mark.invariant
+def test_a_column_grant_on_a_view_reaches_the_enumeration(db_session: Any) -> None:
+    """The other ACL, stood up: a grant on one column, on a view granted to nobody.
+
+    `columns_the_application_role_may_read` reads two catalogs, and until now only
+    one of them had a subject. `pg_class.relacl` carries a grant on the whole
+    view; `pg_attribute.attacl` carries a grant on a single column of it, appears
+    in no `relacl` anywhere, and is invisible to `has_table_privilege` — measured
+    on this stack during a security review of PR #40, which `COLUMN_GRANTEES`
+    above records. Deleting that half of the union left every test green, because
+    both plants beside this one use a relation grant. So this one does not.
+
+    **Three assertions, and the middle one is the finding rather than bookkeeping.**
+    The granted column must be enumerated. The view's *other* column must **not**
+    be — that is what makes this a column grant rather than a table grant, and it
+    is the reviewer's own measurement reproduced: `SELECT *` on such a view is
+    refused while the granted column reads fine. And the guard must fail naming
+    the entry, because a candidate the enumeration never compares is a candidate
+    that changes nothing.
+
+    **Why this matters beyond covering a branch.** A column grant is the quietest
+    way to widen this surface: it leaves the view ungranted as far as every
+    relation-level rule in this file can see, and ADR 0001 rejects column grants
+    by name — which is exactly why somebody reaches for one when a screen needs a
+    single value.
+
+    Everything is planted inside `db_session`'s transaction and rolled back with
+    it (`docs/MISTAKES.md` entry 20: the plant and the assertions are in one
+    transaction).
+
+    **The mutation it exists to survive**: deleting the `COLUMN_GRANTEES` half of
+    the union in `columns_the_application_role_may_read`, or narrowing it to base
+    tables.
+    **The near miss it tolerates**: the ungranted column of the same view, which
+    must stay out — asserted here rather than assumed.
+    """
+    session = db_session
+    columns = [name for name, _ in public_table_columns(session, USER_TABLE)]
+    assert LMS_USER_KEY in columns, (
+        f"`public.{USER_TABLE}` has no `{LMS_USER_KEY}` column; it has {sorted(columns)}. The "
+        "planted view below selects it beside a key, and the column grant is made on it."
+    )
+
+    # Two columns, so that the grant can be narrower than the view.
+    planted = f'CREATE VIEW public.{PLANTED_COLUMN_GRANTED_VIEW} AS SELECT u.id, u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(planted))
+    session.execute(
+        text(
+            f"GRANT SELECT ({LMS_USER_KEY}) ON public.{PLANTED_COLUMN_GRANTED_VIEW} "
+            f'TO "{APPLICATION_ROLE}"'
+        )
+    )
+
+    candidates = columns_the_application_role_may_read(session)
+    assert (PLANTED_COLUMN_GRANTED_VIEW, LMS_USER_KEY) in candidates, (
+        f"`{APPLICATION_ROLE}` holds `SELECT` on the `{LMS_USER_KEY}` column of "
+        f"`public.{PLANTED_COLUMN_GRANTED_VIEW}` and the candidate sweep does not report it; it "
+        f"reported {sorted(candidates)}.\n\n"
+        "The sweep is reading `pg_class.relacl` only. A column grant is recorded in "
+        "`pg_attribute.attacl`, which no relation-level query and no `has_table_privilege` answer "
+        "reads — so the enumeration would be blind to the one shape ADR 0001 rejects by name, "
+        "while every other rule in this file goes on passing."
+    )
+    assert (PLANTED_COLUMN_GRANTED_VIEW, "id") not in candidates, (
+        f"The sweep reports `id` as readable on `public.{PLANTED_COLUMN_GRANTED_VIEW}`, and the "
+        f"grant was `SELECT ({LMS_USER_KEY})` on that column alone. Then it is expanding a column "
+        "grant to the whole view, the assertion above is satisfied by the wrong mechanism, and the "
+        "enumeration would report columns nobody may read — which fails in the direction that gets "
+        "a guard widened until it stops discriminating."
+    )
+
+    with pytest.raises(AssertionError) as failure:
+        test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_enumerated_set(
+            session
+        )
+
+    reported = f"{PLANTED_COLUMN_GRANTED_VIEW}.{LMS_USER_KEY}"
+    assert mentions(str(failure.value), reported), (
+        f"The enumeration failed and its message does not name `{reported}`. What it said: "
+        f"{failure.value}\n\nA candidate the comparison never mentions is a candidate that changes "
+        "nothing: the sweep would be finding the column grant and the equality would be failing "
+        "for some other reason. The comment in the sibling control above says why this reads the "
+        "authored message and why the guard asserts a bool."
     )
 
 
@@ -4185,10 +4313,21 @@ def test_a_view_the_application_role_cannot_read_is_outside_the_enumeration(
     halves together say that the *grant* is what moved the answer and not the
     view's existence.
 
+    **A third view carries the grantee filter, and it is here because the pair
+    above does not.** The mutation battery deleted
+    `if row["grantee"] in APPLICATION_READERS` from the candidate sweep and every
+    test stayed green: an ungranted view has a `NULL` `relacl`, `aclexplode`
+    returns no row for it at all, and a filter over rows that do not exist is a
+    filter nothing runs. So a view granted to `pulse_care` is planted beside it —
+    a real ACL entry, a real grantee, and one this enumeration must not count.
+    `pulse_care` is the honest choice rather than an invented role: it exists, it
+    is a runtime role, and the reason it is excluded is the design (ADR 0001 gives
+    it one door and no read paths) rather than an accident of who was named.
+
     **The mutation it exists to survive**: dropping the grantee filter from
-    `columns_the_application_role_may_read`, so that every view in `public` is
-    enumerated whether the application role may read it or not.
-    **The near miss it tolerates**: none; the pair is the test.
+    `columns_the_application_role_may_read`, so that every ACL entry on every view
+    in `public` is enumerated whoever holds it.
+    **The near miss it tolerates**: none; the three plants are the test.
     """
     session = db_session
     planted = f'CREATE VIEW public.{PLANTED_UNGRANTED_VIEW} AS SELECT u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
@@ -4217,4 +4356,39 @@ def test_a_view_the_application_role_cannot_read_is_outside_the_enumeration(
         f"the sweep reported {sorted(granted)}. Then the silence asserted above was the sweep "
         "failing to see a grant rather than the grant's absence, and this control establishes "
         "nothing about either."
+    )
+
+    # The third plant: a view with a real ACL entry naming somebody who is not an
+    # application reader. Its own non-vacuity comes first — the ACL row has to
+    # exist, or this is the ungranted case again under another name, which is
+    # exactly how the grantee filter came to be uncovered.
+    care_view = f'CREATE VIEW public.{PLANTED_CARE_GRANTED_VIEW} AS SELECT u.{LMS_USER_KEY} FROM public."{USER_TABLE}" u'  # noqa: S608
+    session.execute(text(care_view))
+    session.execute(text(f'GRANT SELECT ON public.{PLANTED_CARE_GRANTED_VIEW} TO "{CARE_ROLE}"'))
+
+    acl = [
+        dict(row)
+        for row in session.execute(text(APPLICATION_READABLE_VIEW_COLUMNS)).mappings()
+        if row["relation"] == PLANTED_CARE_GRANTED_VIEW
+    ]
+    assert any(row["grantee"] == CARE_ROLE for row in acl), (
+        f"`public.{PLANTED_CARE_GRANTED_VIEW}` was granted `SELECT` to `{CARE_ROLE}` and the "
+        f"relation-ACL query reports {acl} for it. With no row there, the grantee filter below has "
+        "nothing to filter and its absence asserts nothing — which is the defect this plant was "
+        "added for: an *ungranted* view carries a `NULL` `relacl`, `aclexplode` returns no row at "
+        "all, and deleting the filter left the whole suite green."
+    )
+    reachable = columns_the_application_role_may_read(session)
+    assert not [view for view, _ in reachable if view == PLANTED_CARE_GRANTED_VIEW], (
+        f"`{PLANTED_CARE_GRANTED_VIEW}` is granted to `{CARE_ROLE}` and to nobody else, and the "
+        f"candidate sweep counts it as readable by `{APPLICATION_ROLE}`; it reported "
+        f"{sorted(reachable)}.\n\n"
+        "The sweep is reporting every ACL entry rather than the entries that put a column within "
+        "the application connection's reach. `APPLICATION_READERS` is the filter — the application "
+        f"role and `PUBLIC`, which every role is a member of — and `{CARE_ROLE}` is neither: ADR "
+        "0001 gives it one `SECURITY DEFINER` door and no read path, so a view it alone may read "
+        "is outside this enumeration by design.\n\n"
+        "With the filter gone, the sanctioned set would have to grow to cover grants made to other "
+        "roles entirely, and the equality would stop saying anything about what an instructor's "
+        "connection can put on a page."
     )
