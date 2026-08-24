@@ -101,7 +101,54 @@ _PROBLEM_EXPLANATIONS = {
 # it; **E0-37 item 2 migrated the other two**, so this is the one definition and
 # `tests/unit/test_development_environment_has_one_definition.py` sweeps
 # `backend/app` and `scripts` for a second.
+#
+# There are five readers now rather than three — `app/api/dev.py` gates the
+# developer console on it (ADR 0079) and `app/api/deps.py` the login cookie's
+# `Secure` flag — and all but two of them go through `is_development` below
+# rather than comparing the string themselves.
 DEVELOPMENT_ENVIRONMENT = "development"
+
+
+def is_development(settings: "Settings") -> bool:
+    """Whether this process is running on a developer's machine.
+
+    A comparison against a convention rather than against an enumeration
+    `Settings` enforces: `ENVIRONMENT` is free-form — **not by SPEC §6.3**, which
+    is the admin console's configuration surface and names no environment
+    variable — and `.env.example` documents the vocabulary. Anything that is not
+    that exact string is a deployment, which is the safe direction for every rule
+    that keys on this: the `/docs` routes (`app/main.py`), the developer console
+    (`app/api/dev.py`) and the login cookie's `Secure` flag (`app/api/deps.py`).
+
+    **`app/db.py` asks the same question and does not call this yet.** It keeps a
+    private `_is_development` with an identical body, because
+    `tests/unit/test_development_environment_has_one_definition.py` requires that
+    module to name `DEVELOPMENT_ENVIRONMENT` itself and a delegating call does
+    not. That is under arbitration in
+    `docs/disputes/QUALITY-REVIEW-CLEANUPS-01.md`; until it is ruled on, the
+    fourth reader stays where it is.
+
+    **Two places deliberately do not call this, and neither is an oversight.**
+
+    * `_is_a_deployment` below runs *during* `Settings` validation, deciding
+      whether a mock address may be configured. There is no `Settings` object to
+      hand it at that point — the value being judged is the raw one the validator
+      was given — so it takes the environment itself and stays separate.
+    * `scripts/seed.py` reads a raw mapping and strips whitespace before
+      comparing. That is a real behavioural difference, not a spelling one: the
+      seed refuses to run against a deployment (ADR 0063) and treats
+      `" development "` as development, while everything here compares the
+      validated field exactly. Routing the seed through this would change what it
+      accepts.
+
+    Neither is a candidate for a later sweep to "fix", which is why they are
+    named here rather than left to be rediscovered.
+
+    The annotation is a forward reference because this belongs beside the
+    constant it compares against, and `Settings` is defined further down.
+    """
+    return settings.environment == DEVELOPMENT_ENVIRONMENT
+
 
 # The two spellings by which a configuration can reach or name the mock identity
 # provider `docker-compose.yml` starts, refused outside development by the two

@@ -49,9 +49,9 @@ simply be on, either: a `Secure` cookie is not sent to `http://localhost`, and
 E0-18 exists to make `docker compose up` launchable-into on a laptop, so an
 unconditional flag would refuse every development flow for a `state` mismatch and
 look like a broken door. So it is on unless `ENVIRONMENT` is exactly
-`development`, which is the same comparison `app/main.py` makes before it serves
-`/docs` and the same constant, `app.config.DEVELOPMENT_ENVIRONMENT`. The
-comparison is made once, here, rather than at each door: two copies of it is
+`development`, which is the same question `app/main.py` asks before it serves
+`/docs`, asked through the same predicate, `app.config.is_development`. The
+question is asked once, here, rather than at each door: two copies of it is
 `docs/MISTAKES.md` entry 13, and one door left insecure is invisible.
 
 **`SameSite=Lax`, not `None`.** An LTI launch is posted back to the tool from
@@ -72,7 +72,7 @@ import jwt
 from fastapi.responses import HTMLResponse
 from starlette.responses import Response
 
-from app.config import DEVELOPMENT_ENVIRONMENT, Settings
+from app.config import Settings, is_development
 from app.services.landing import Door, landing_page, landing_role_for, refusal_page
 
 __all__ = [
@@ -159,7 +159,7 @@ def carry_across(
         jwt.encode(payload, secret, algorithm=COOKIE_ALGORITHM),
         max_age=LOGIN_COOKIE_LIFETIME_SECONDS,
         httponly=True,
-        secure=settings.environment != DEVELOPMENT_ENVIRONMENT,
+        secure=not is_development(settings),
         samesite="lax",
         path="/",
     )

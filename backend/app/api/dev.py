@@ -37,7 +37,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from app.api.auth import LOGIN_PATH
-from app.config import DEVELOPMENT_ENVIRONMENT, Settings
+from app.config import Settings, is_development
 
 router = APIRouter(tags=["dev"])
 
@@ -275,7 +275,7 @@ def dev_console(request: Request) -> HTMLResponse:
     runs in FastAPI's threadpool the way `app.api.auth.begin_web_login` does.
     """
     settings: Settings = request.app.state.settings
-    if settings.environment != DEVELOPMENT_ENVIRONMENT:
+    if not is_development(settings):
         raise HTTPException(status_code=NOT_FOUND)
 
     users = roster_users(settings, request.app.state.http)
