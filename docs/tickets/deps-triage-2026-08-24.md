@@ -84,8 +84,10 @@ decision, not a spec change.
 `requires-python`, mypy's `python_version`, and the dev venv together — or
 records staying on 3.13 — **and** a guard ties the Dockerfile's Python to
 `PYTHON_VERSION` so the next image bump cannot split the runtime; either way
-`dependabot.yml` ignores python-image minors, matching the postgres and redis
-entries.
+`dependabot.yml` ignores python-image semver-minor updates. That is a
+deliberately stricter rule than the semver-major ignores the postgres and
+redis entries carry (`.github/dependabot.yml`), because a Python "minor" —
+3.13 to 3.14 — is a runtime move, while a Postgres 17.x step is a patch.
 
 ### 6. Branch protection requires the `CI` check — owner: Todd (admin settings)
 
