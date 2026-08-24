@@ -41,12 +41,23 @@ posture on pins for any new dependency; `backend/app/models/lti.py`;
   endpoint (browser horizon) and `auth_token_url` (tool horizon), beside the
   existing issuer/client/deployment and `jwks_url`. Migration plus model, with
   the E0-33 catalog assertions extended to the new objects.
-- `jwks_url` (and the two new URL columns) are **constrained**: what a
-  legitimate value looks like is this ticket's decision, made consistently
-  with ADR 0077's existing refusals (transport rule; loopback-class and
-  mock-address refusals outside development) rather than inventing a second
-  vocabulary. The constraint's location (check constraint, validator at the
-  chokepoint, or both) is the builder's call with an ADR if contestable.
+- `jwks_url` (and the two new URL columns) are **constrained, and the
+  constraint is this ticket's own decision with its own ADR** — not a reuse
+  of ADR 0077's vocabulary, which was written for `.env`-supplied values in a
+  trusted deployment context and explicitly exempts `jwks_url` from its
+  loopback-class rule. This column is a different thing: database-resident,
+  written by the seed today and by E11's registration UI later,
+  credential-equivalent (it decides which keys may sign an accepted launch),
+  and fetched server-side on every launch — an SSRF surface and a trust
+  anchor at once. The floor is fixed here: an encrypted transport outside
+  development, and the mock addresses refused outside development (those two
+  rules do carry over from ADR 0077). The ADR must additionally take a
+  position on loopback, link-local, and private-range addresses as
+  server-side fetch targets — weighing that an institution's real LMS may
+  legitimately live on a private address — with refusal tests on both sides
+  of whatever boundary it draws. The constraint's location (check constraint,
+  validator at the chokepoint, or both) is the builder's call in the same
+  ADR.
 - **The tool's key pair exists**, for signing client assertions (E1-06/E1-11)
   — generated or supplied per environment, never committed; custody (settings
   variable, file path, or database) is a real decision: write the ADR. The
@@ -64,9 +75,10 @@ posture on pins for any new dependency; `backend/app/models/lti.py`;
    endpoints; the test fails if both resolve one address.
 2. `grep -r LTI_PLATFORM_AUTHORIZATION_ENDPOINT` over the tree finds only
    history (ADRs, tickets); no code, config, example, or Compose reference.
-3. Invalid `jwks_url`/endpoint values (per the chosen constraint) are refused
-   at write time with tests on both sides of the boundary; ADR 0077's existing
-   refusal tests still pass.
+3. Invalid `jwks_url`/endpoint values are refused at write time per this
+   ticket's constraint ADR — at least a cleartext URL and a mock address
+   outside development — with tests on both sides of every boundary the ADR
+   draws; ADR 0077's existing refusal tests still pass untouched.
 4. The tool key pair exists in development bring-up with no committed private
    key anywhere in the repository (a test greps for key material in the tree —
    PEM headers make a serviceable canary).

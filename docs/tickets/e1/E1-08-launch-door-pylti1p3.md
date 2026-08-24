@@ -45,11 +45,24 @@ per ADR 0073's note).
   than the session needs. What the session JWT carries, where the signing key
   lives, and its lifetime are decisions: ADR them if they outlast this ticket
   (they will).
-- Every E1-07 mint is met by a refusal test: wrong key, tampered claims, wrong
-  `aud`, wrong `iss`, missing nonce, **replayed nonce**, tampered/missing
-  state, stale/future timestamps. Each refusal is specific enough that the
-  test can tell which guard fired, and none leaks claim contents into the
-  error page or log (no student PII in logs — §10).
+- Every E1-07 mint is met by a refusal test: wrong key, tampered claims,
+  `alg: none`, the HS256-with-public-key confusion case, wrong `aud`, wrong
+  `iss`, unregistered `deployment_id`, unknown message type, wrong version,
+  missing nonce, **replayed nonce**, tampered/missing state, stale/future
+  timestamps. Each refusal is specific enough that the test can tell which
+  guard fired, and none leaks claim contents into the error page or log (no
+  student PII in logs — §10). The algorithm list stays a constant in code
+  (ADR 0073's closing condition applies to the adapter too).
+- **The session cookie's attributes are this ticket's explicit decision**, in
+  the session ADR: `HttpOnly`, `Secure` outside development, and the
+  `SameSite` choice for a session that must survive inside the LMS iframe.
+  ADR 0078 governs only the five-minute login-state cookie, says itself that
+  E1 replaces it outright, and is superseded in part here. If the choice is
+  `SameSite=None`, CSRF becomes a live class the moment a state-changing
+  endpoint exists — so the same ADR names the defense that replaces one-shot
+  `state` for a long-lived session, and the session module ships that
+  primitive tested. E2's first mutating endpoint consumes it; E1-15 carries
+  the line into `carried-from-e1.md` so it cannot arrive unowned.
 - The happy path lands on E1-04's landing routes carrying the session; the
   claims-derived landing mapping (`landing_role_for`) keeps working unchanged
   — replacing it is E1-13's, and this ticket must not half-replace it.
@@ -67,7 +80,13 @@ per ADR 0073's note).
    process restart if the store outlives the process (say which in the ADR).
 4. A session survives navigation between landing routes and expires on
    schedule; expiry is tested at the boundary, not just "eventually."
-5. `ruff`, `mypy` strict on the touched packages, and the full §4.1 pass stay
+5. The session cookie's attributes are asserted by a test in both environment
+   modes, and the CSRF primitive the session ADR names exists in the session
+   module with its own tests — issue and verify, both directions.
+6. No refusal path logs claim contents: each refusal test also asserts its
+   captured log output carries no claim payload, no name or email, and no
+   `lms_user_id` — §10's no-student-PII-in-logs as a criterion, not prose.
+7. `ruff`, `mypy` strict on the touched packages, and the full §4.1 pass stay
    green; the new dependency's license is clean in the gate.
 
 ## Out of scope

@@ -40,8 +40,10 @@ ADR 0073 (why PyJWT stays here), Batch F's ticket
   code. A mismatched or absent `state` on an error redirect is itself a
   refusal, tested separately from the happy cancel.
 - Session issuance through E1-08's shared module — same type, same custody,
-  cookie attributes per ADR 0078 (and `Secure` outside development, per the
-  environment rules ADR 0078/0079 record).
+  cookie attributes per **E1-08's session ADR** (ADR 0078 governs only the
+  five-minute login-state cookie and is superseded in part by that ADR;
+  `Secure` outside development stands, per the environment rules ADR
+  0078/0079 record).
 - Landing continues through the unchanged claims mapping (E1-13 replaces it).
 
 ## Acceptance criteria

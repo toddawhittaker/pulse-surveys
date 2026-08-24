@@ -36,10 +36,24 @@ way each:
 
 - signature by a key not in the platform's JWKS (`kid` present but unknown);
 - signature by the right key over tampered claims;
+- `alg: none`, and the algorithm-confusion case: an HS256 token whose HMAC
+  secret is the platform's own public key — the classic verifier bypass, the
+  one a hand-written framework adapter is most likely to reintroduce, and per
+  the E0 carried-out table the worst outcome this system has if it lands
+  (anyone forges a launch as any user);
 - wrong `aud`; wrong `iss`; missing `nonce`; **reused** `nonce` (same token
   replayed — the replay case E1-08's exit clause names);
+- a `deployment_id` the registration does not list (registered platform,
+  unregistered deployment); an unknown message type; a wrong version —
+  E1-08 validates all three against the registration row, and a guard with no
+  mint is a guard with no test capable of failing;
 - tampered or missing `state` on the return leg;
 - `iat`/`exp` outside plausible windows (the clock-skew cases §9.1 names);
+- a valid launch whose roles claim carries **only** the TeachingAssistant
+  sub-role URN (`…/membership/Instructor#TeachingAssistant` — the string
+  contains "Instructor", which is exactly why an exact-match guard needs it),
+  and one carrying only Mentor — not *wrong* launches, but the near-miss
+  fixtures E1-10's trigger refusal consumes;
 - a syntactically valid launch whose context carries `id` alone — no `title`,
   no `label` (the E0-14 case; not *wrong*, but edge — the mint interface is
   where it lives so the seed stays fully titled per E0-15).

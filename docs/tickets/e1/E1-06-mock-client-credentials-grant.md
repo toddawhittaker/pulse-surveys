@@ -46,9 +46,14 @@ satisfy).
   its diff is the ⚠ here. Key rotation is out of scope; one live key, `kid`
   set, shape per RFC 7517.
 - The mock's token endpoint refuses: a request with no assertion, a
-  wrong-audience assertion, an unadvertised scope, and an assertion signed by
-  a key not in the tool's set — each refusal a test, because E1-11's client is
-  only conformant if nonconformance is distinguishable.
+  wrong-audience assertion, an unadvertised scope, an assertion signed by a
+  key not in the tool's set, an **expired** assertion, and an assertion with
+  no `exp` or one longer-lived than the short bound the mock enforces
+  (minutes, not hours; the exact bound is the builder's, asserted in a test)
+  — each refusal a test, because E1-11's client is only conformant if
+  nonconformance is distinguishable, and the lifetime bound is what makes
+  that client honest about assertion life: a tool-signed bearer assertion
+  with unbounded `exp` is a credential that stays usable wherever it leaks.
 - Compose wiring unchanged except what the new routes need; ADR 0037's
   compose-literals rule holds.
 
@@ -63,7 +68,7 @@ satisfy).
    in the loop yet (the library arrives with E1-08/E1-11; this test speaks
    raw HTTP so the mock's conformance is proven independently of the client
    that will consume it).
-3. The four refusal cases above fail as specified.
+3. The six refusal cases above fail as specified.
 4. The tool's JWKS route serves the public key in every environment and never
    the private half (asserted, not assumed).
 

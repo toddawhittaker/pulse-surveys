@@ -48,6 +48,21 @@ creates `user`, not `person`).
   visible in the catalog or the code — not a bypass flag. The design must keep
   MISTAKES entry 35 in view: the mechanism's inventory of sanctioned writers
   comes from somewhere the guarded structure cannot shrink.
+- **What counts as a staff launch is a closed, named set** — §7.3 makes the
+  launching person's role the authorization for the trigger, so the set is
+  the authorization boundary and is stated here rather than left to the
+  builder: the roles claim contains the canonical context-instructor URN
+  (`http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor`) by **exact
+  string match** — never substring, because the TeachingAssistant sub-role
+  URN embeds the word Instructor — or the launching subject holds a live
+  leadership `role_assignment` resolved through the app's own model. Nothing
+  else qualifies: TeachingAssistant, Mentor, ContentDeveloper, Observer, and
+  platform-Administrator launches store no address and trigger no sync.
+  Under-inclusion fails safe (a real instructor's next launch triggers the
+  sync); over-inclusion hands a TA the full roster — names and emails — that
+  §7.3 does not authorize. A platform that sends the plain Instructor URN
+  alongside the TA sub-role has made its TAs instructors; that is the
+  platform's call, and the exact-match rule records it.
 - On a validated staff or leadership launch: upsert `course` and `section`
   from the context claim through the mechanism; derive the section calendar
   only via `apply_section_code` (ADR 0021); store the NRPS service address
@@ -66,7 +81,12 @@ creates `user`, not `person`).
   "correct" a real title into a fallback or vice versa).
 - Out-of-band course numbers (§8's bands) are refused at ingestion with the
   defect visible in the launch outcome log surface E11 will read — for now,
-  a structured log/DB record, not a silent drop.
+  a structured log/DB record, not a silent drop. The record's field set is
+  enumerated in this ticket's design: defect kind, issuer, deployment,
+  context id, timestamp — never a claim payload, a name, an email, or
+  `lms_user_id` (§10; the stable join key E1-01 keeps out of views does not
+  enter an Admin-visible record here either), and log lines on this path
+  carry no more than the record does.
 
 ## Acceptance criteria
 
@@ -74,7 +94,10 @@ creates `user`, not `person`).
    correct derived dates; a second identical launch changes nothing
    (idempotence asserted on row identity, not just count).
 2. A student launch against an unknown section stores no roster address and
-   triggers no sync; the assertion covers the forbidden state.
+   triggers no sync; so does a launch whose roles claim carries only the
+   TeachingAssistant sub-role URN (E1-07's near-miss mint — its URN contains
+   the string "Instructor"), and one carrying only Mentor. Each assertion
+   covers the forbidden state.
 3. The E0-35 sweep still fails a planted unsanctioned writer, and the new
    sanctioned path passes it — both directions run, per MISTAKES entry 9.
 4. The title-less mint provisions a course whose `lms_title` carries the
