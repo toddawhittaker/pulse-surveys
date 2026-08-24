@@ -89,12 +89,13 @@ deliberately stricter rule than the semver-major ignores the postgres and
 redis entries carry (`.github/dependabot.yml`), because a Python "minor" —
 3.13 to 3.14 — is a runtime move, while a Postgres 17.x step is a patch.
 
-### 6. Branch protection requires the `CI` check — owner: Todd (admin settings)
+### 6. Branch protection requires the `CI` check — done 2026-08-24
 
-Triage found `main` has no required status checks — the only ruleset targets
-`epic/*` — so a red PR still shows a working merge button. The aggregate `CI`
-job exists to be that check and nothing points at it. The settings change is
-admin-only.
+Triage found `main` had no required status checks — the only ruleset targets
+`epic/*` — so a red PR still showed a working merge button. The aggregate `CI`
+job existed to be that check and nothing pointed at it.
 
-**Done when** the check named `CI` is required on `main` and a red pull
-request's merge button is disabled.
+**Done, and seen working:** the owner set the requirement (admin-only) the
+same day, preserving the existing protection settings. The gate was watched
+holding, not merely configured — the pull request carrying this file reported
+`BLOCKED` while its own `CI` check was still running.
