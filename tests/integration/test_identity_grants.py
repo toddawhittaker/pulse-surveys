@@ -3978,10 +3978,13 @@ def test_the_columns_the_application_role_may_read_from_a_view_are_exactly_the_e
     **Which is also how this test is defeated, so it is not defeated alone.**
     Writing the entry is the cheap repair for any red here, including the one red
     that must never be repaired that way, and no equality can tell a sanctioned
-    column from a sanctioned mistake. Two guards stand behind it:
-    `test_no_sanctioned_view_column_is_an_lms_join_key` below refuses that entry
-    by name, and `test_identity_column_marker.py`'s strict rule refuses the
-    *lineage* whatever the view calls the column.
+    column from a sanctioned mistake. The guards that stand behind it are
+    `test_no_sanctioned_view_column_is_an_lms_join_key` below, which refuses that
+    entry by name, and the two lineage rules, which refuse the *read* whatever the
+    view calls the column: `test_identity_column_marker.py`'s strict rule at
+    column grain, and `test_identity_separated_views.py`'s file-text sweep for a
+    whole-row read. That split is measured rather than tidy, and the docstring on
+    the name guard below says what it rests on.
 
     Two non-vacuity guards. There must be views, or the catalog sweep has nothing
     to enumerate; and the candidate set must be non-empty, or "the columns
@@ -4066,12 +4069,31 @@ def test_no_sanctioned_view_column_is_an_lms_join_key() -> None:
     **What this does not do, said plainly, because it would be easy to read as
     more.** It reads names, and a view may call a column anything: `SELECT
     u.lms_user_id AS platform_key` sanctioned as `platform_key` passes here. That
-    case is not this test's — it is
-    `test_identity_column_marker.py`'s `test_no_view_reads_a_column_of_a_person_
-    table_outside_the_join_keys`, which reads the *lineage* out of `pg_depend` and
-    does not care what the view called it. The two are a pair: this one refuses
-    the cheap repair, that one refuses the aliased read, and neither covers the
-    other's case.
+    case is not this test's, and the guard that owns it depends on how the view
+    reached the column:
+
+      - **a column-grain read** — `u.lms_user_id`, aliased or not, in a select
+        list or a `WHERE` — is caught by
+        `test_identity_column_marker.py`'s `test_no_view_reads_a_column_of_a_
+        person_table_outside_the_join_keys`, which reads the lineage out of
+        `pg_depend` and does not care what the view called it;
+      - **a whole-row read** — `to_jsonb(u)` and its spellings — is caught by
+        `test_identity_separated_views.py`'s file-text sweep, and **not**
+        reliably by the catalog. Measured by a security re-pass: Postgres drops
+        the `refobjsubid = 0` row as soon as the same view also names a column of
+        that table, so `SELECT to_jsonb(u) … JOIN public."user" u ON u.id =
+        e.user_id` records only `(1, id)` and the catalog's whole-row closure
+        does not fire on it.
+
+    That second one rests on every live view shipping as a file under
+    `views_sql/`, which is a rule with a test behind it rather than a convention:
+    `test_every_read_view_is_created_from_a_sql_file_under_views_sql`. A view
+    created by an `op.execute` in a revision would be outside the text sweep, and
+    that test is what makes it impossible to have one.
+
+    So the three are a chain rather than a pair: this one refuses the cheap
+    repair, the catalog refuses the aliased column read, the file sweep refuses
+    the whole-row read, and none of them covers another's case.
 
     **The mutation it exists to survive**: adding `("<any view>", "lms_user_id")`
     to `SANCTIONED_VIEW_COLUMNS` to make the enumeration green.

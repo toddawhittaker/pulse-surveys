@@ -1761,6 +1761,26 @@ def test_a_whole_row_read_of_a_person_table_is_flagged_and_travels_down_the_chai
     narrowing it back to marked tables — which is the state this control exists to
     leave behind.
 
+    **What this control proves is narrower than "the catalog covers whole-row
+    reads", and the boundary is measured.** Postgres drops the `refobjsubid = 0`
+    row as soon as the same view also names a column of that table, so the catalog
+    half fires only on a view that touches **no** column of the person table —
+    which the planted probe here does not, and which is why it is planted that
+    way. Its join form,
+    `SELECT to_jsonb(u) … FROM public.enrollment e JOIN public."user" u ON u.id =
+    e.user_id`, records only `(1, id)` and is reported by this rule not at all.
+
+    That spelling is text-side territory: `identity_rows_read_whole` in
+    `test_identity_separated_views.py` catches every form of it — a security
+    re-pass tried to defeat it and did not — and every live view reaches the
+    database through a `views_sql/` file, which
+    `test_every_read_view_is_created_from_a_sql_file_under_views_sql` is what
+    enforces. So no live path is open. What is open is the same statement in a
+    file no revision has executed *and* the text sweep somehow missing it, which
+    is two failures rather than one; the residual is recorded as a deferred MEDIUM
+    in the pull request rather than left for a reader to infer from a control that
+    looks wider than it is.
+
     **The mutation it exists to survive**: reverting `person_table_rows_read_whole`
     to the marked-table scope `whole_row_identity_reads` uses, or dropping the
     whole-row seed from the chain fold.

@@ -55,6 +55,16 @@ code:
 
 ## Consequences
 
+- **The two sides are complementary by grain, and neither is complete alone.**
+  Postgres records a whole-row reference at table grain and drops that row the
+  moment the same view also names any column of the table — so the catalog
+  side sees every column-grain read (aliases included) but misses a whole-row
+  read inside a join, while the file-text sweep sees every whole-row spelling
+  but must be reachable, which rests on every live view shipping as a
+  `views_sql/` file. The join-form catalog gap is a recorded MEDIUM in
+  E1-01's pull request with its "done when"; until it lands, weakening either
+  side re-opens what the other cannot see.
+
 - A future view that legitimately needs a person-table column (say
   `person.category`) goes red until the allowed set is widened in a reviewed
   one-line change. That is the intended review moment.

@@ -1805,11 +1805,24 @@ def person_table_columns_bound(body: str, vocabulary: IdentityVocabulary) -> tup
         later `ui.<column>` is unattributed. **This is deliberately not closed
         here**: following a CTE in text means resolving one query's scope from
         another's, which is parsing SQL rather than sweeping it, and a
-        half-resolved scope flags correct queries. The backstop is the catalog —
+        half-resolved scope flags correct queries.
+
+        The backstop is **the catalog at column grain and this module's own
+        whole-row mechanism at the other**, which is narrower than the first
+        version of this note claimed and is measured rather than reasoned.
         `test_identity_column_marker.py`'s strict rule reads what the *stored*
-        view depends on, and a CTE leaves the same `pg_depend` row a plain join
-        does, at both grains. A file no revision has executed is the case that
-        falls between the two, and it is the one this mechanism cannot answer for.
+        view depends on, so a CTE that reads a column records the same
+        column-grain dependency a plain join does. It does **not** follow that a
+        CTE leaves the same row at both grains: Postgres drops the
+        `refobjsubid = 0` whole-row row as soon as the view also names any column
+        of that table, so the join form of a whole-row read records only the
+        column it joined on. What catches that spelling is
+        `identity_rows_read_whole` above — which is text, and which was attacked
+        and held — so for whole-row reads the two sides trade places and the file
+        sweep is the one carrying the guarantee.
+
+        A file no revision has executed is still the case that falls between the
+        two at column grain, and it is the one this mechanism cannot answer for.
     """
     found: set[str] = set()
     for table in sorted(vocabulary.guarded):
