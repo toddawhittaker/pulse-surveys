@@ -2,8 +2,10 @@
 
 SPEC §7.3 and §8. A registration is what a launch is validated against — the
 issuer that signed the `id_token`, the client ID it was issued for, the
-deployment it came from, and the key set the signature is checked with. No launch
-happens until E1; these tables are the record E1 reads.
+deployment it came from, and the key set the signature is checked with. E0-18's
+launch door reads both tables today: `app.lti.launch.registered_platform` looks
+a platform up by issuer, and `registered_deployment` refuses a launch naming a
+deployment nobody registered under it.
 
 **No secret is stored, and that is the design rather than an omission.** LTI 1.3
 is asymmetric: the platform signs, and the tool verifies with public keys it
@@ -22,11 +24,12 @@ flow that uses it, and the epic README's configuration rule means it earns its
 not before. **So this ticket adds no configuration variable**, which is the
 honest answer to its definition-of-done item rather than a skipped one.
 
-**What a launch needs that is not here yet.** `pylti1p3` also wants the
-platform's OIDC authentication endpoint and its access-token endpoint. E0-08's
-scope names issuer, client ID, deployment IDs, JWKS URL and last fetch, and those
-are what this module builds; the two endpoints arrive with the code that calls
-them, in the same change, rather than as columns nothing writes.
+**What a launch needs that is not here yet.** §7.3 leaves the platform's OIDC
+authorization endpoint to the registration, but E0-23 decided that the
+service-address columns for it are E1's, built with the sync that reads them;
+E0-18's launch door uses `Settings.lti_platform_authorization_endpoint` as its
+stand-in until then (`docs/adr/0075`). E0-08's scope names issuer, client ID,
+deployment IDs, JWKS URL and last fetch, and those are what this module builds.
 
 **Nothing here is marked LMS-owned.** An `lms_` prefix (ADR 0014) marks a column
 Pulse may never edit. A registration is typed into the admin console by an

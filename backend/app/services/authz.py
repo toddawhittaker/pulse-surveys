@@ -42,11 +42,18 @@ here.
 threat queue, kept isolated so safety re-identification never rides alongside
 routine oversight access." `Purview` is six sets of org-node ids and has nowhere
 to put a capability, so no union can ever pick one up; `ActorScope.holds_care` is
-where the answer lives, and `holds_care` below is the one place that computes it.
-E0-10's Care service asks this module rather than reading a claim: an actor holds
-Care because they hold a live `CARE` role assignment, never because of anything
-an LTI or OIDC claim says, since the platform administrator controls what a claim
-says.
+where the answer lives for this module's own callers, and `holds_care` below
+computes it here — but "here" is deliberately not the only place the live-CARE
+predicate is checked. This module reads it from `public.assignment_scope` over
+the `pulse_app` pool; `app.services.safety` reads it again from
+`public.role_assignment` over the separate `pulse_care` pool (ADR 0042),
+because the two pools hold different grants and neither can borrow the
+other's. `app.services.safety`'s own comment above its
+`_HOLDS_A_LIVE_CARE_ASSIGNMENT` is the one place all four copies — this
+module's included — are named and kept in step (`docs/MISTAKES.md` entry 13).
+An actor holds Care because they hold a live `CARE` role assignment, never
+because of anything an LTI or OIDC claim says, since the platform administrator
+controls what a claim says.
 
 **Every read here goes through a view, and none of them can reach identity.**
 SPEC §8: "instructor/leadership read paths go through views that structurally
@@ -339,12 +346,14 @@ _ASSIGNMENTS_OF_PERSON = text(
     " ORDER BY assignment_id"
 )
 
-# Whether this person holds a live `CARE` assignment at all. E0-09's
-# `role_assignment` carries no validity dates, so "live" reads as "exists" today:
-# a revoked assignment is a deleted row. When E9 or E10 adds end-dating, this
-# predicate gains it — and so do its two siblings, the one inside
-# `app.services.safety` and the one inside `public.reveal_student_identity`, which
-# are three statements of one rule (`docs/MISTAKES.md` entry 13).
+# Whether this person holds a live `CARE` assignment at all, read here from
+# `public.assignment_scope`. E0-09's `role_assignment` carries no validity
+# dates, so "live" reads as "exists" today: a revoked assignment is a deleted
+# row. When E9 or E10 adds end-dating, this predicate gains it along with its
+# three siblings — `app.services.safety`'s own copy, and the two inside
+# `public.record_identity_reveal` and `public.reveal_student_identity` — all
+# four statements of one rule, named together in `app.services.safety`, above
+# its `_HOLDS_A_LIVE_CARE_ASSIGNMENT` (`docs/MISTAKES.md` entry 13).
 _HOLDS_A_LIVE_CARE_ASSIGNMENT = text(
     "SELECT EXISTS ("
     " SELECT 1 FROM public.assignment_scope AS acting"

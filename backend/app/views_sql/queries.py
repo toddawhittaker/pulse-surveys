@@ -18,9 +18,11 @@ permitted. So a hand-rolled join is refused by Postgres rather than quietly
 working, and identity is not the only thing it is refused. `CONTRIBUTING.md`'s
 "Read paths go through `views_sql/`" states the same rule the right way round.
 
-**Nothing in the application calls these yet**, and that is where E0-10 leaves
-them: this ticket ships the views, the grants and the way in, and the first read
-path that needs a roster is a later ticket's.
+**`services/authz.py` is the only caller.** It imports both helpers, and
+`ScopedReader.section_roster` and `ScopedReader.section_enrollment_counts`
+check the purview and then pass the session and key straight through to
+them — the chokepoint is the one door these two are reached from, not a
+second way in beside it.
 
 **These return plain frozen rows, not ORM entities, and deliberately.** A view is
 not on `Base.metadata` (E0-10: views ship "as Alembic migrations under
