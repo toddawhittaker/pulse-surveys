@@ -38,18 +38,21 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from starlette.responses import Response
 
 from app.api.deps import (
+    FOUND,
     OIDC_LOGIN_COOKIE,
     carried_across,
     carry_across,
     clear_carried,
+    landing_or_refusal,
+    refused,
     with_query,
 )
 from app.config import Settings
-from app.services.landing import Door, landing_page, landing_role_for, refusal_page
+from app.services.landing import Door
 from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
 router = APIRouter(tags=["auth"])
@@ -82,9 +85,6 @@ OPAQUE_VALUE_BYTES = 32
 # `app.services.tokens` gives about the key-set timeout: this request happens
 # inside a browser redirect, and there is one right answer.
 TOKEN_TIMEOUT_SECONDS = 10.0
-
-REFUSED = 400
-FOUND = 302
 
 
 class SessionRefusedError(Exception):
@@ -216,11 +216,6 @@ def verified_session(
     return claims
 
 
-def refused(reason: str) -> HTMLResponse:
-    """A 4xx page carrying the reason and no landing view."""
-    return HTMLResponse(refusal_page(reason), status_code=REFUSED)
-
-
 @router.get(LOGIN_PATH, summary="Start a web login against the identity provider")
 def begin_web_login(request: Request) -> Response:
     """Send the browser to the provider with a fresh state, nonce and challenge.
@@ -299,15 +294,12 @@ async def finish_web_login(request: Request) -> Response:
         clear_carried(answer, OIDC_LOGIN_COOKIE)
         return answer
 
-    role = landing_role_for(claims, door=Door.WEB)
-    if role is None:
-        answer = refused(
+    return landing_or_refusal(
+        claims,
+        door=Door.WEB,
+        cookie=OIDC_LOGIN_COOKIE,
+        no_role_reason=(
             "That sign-in states no role this tool has a view for, so there is nothing to show "
             "you. SPEC §2 gives instructors and students the LMS launch rather than this door."
-        )
-        clear_carried(answer, OIDC_LOGIN_COOKIE)
-        return answer
-
-    answer = HTMLResponse(landing_page(role))
-    clear_carried(answer, OIDC_LOGIN_COOKIE)
-    return answer
+        ),
+    )
