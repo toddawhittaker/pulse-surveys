@@ -30,7 +30,7 @@ dynamic = ["version"]
 
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn==0.52.1",
+    "uvicorn==0.52.4",
     "pydantic==2.13.4",
     "pydantic-settings==2.15.0",
     "SQLAlchemy==2.0.52",
@@ -49,7 +49,7 @@ dependencies = [
     # `backend/migrations/env.py` imports it directly: `alembic` is not started
     # by `Settings`, so it reads `.env` itself, and an import we write is a
     # dependency we declare rather than one we inherit. See docs/adr/0012.
-    "python-dotenv==1.2.2",
+    "python-dotenv==1.2.3",
     "celery==5.6.3",
     "redis==8.1.0",
     "httpx==0.28.1",
@@ -85,7 +85,7 @@ dependencies = [
     # imports `openai`, and a direct dependency would say something imports it.
     # `make lock` resolves the extra into explicit, hashed lines in both
     # lockfiles, so what ships is still named and pinned.
-    "pydantic-ai-slim[openai]==2.31.0",
+    "pydantic-ai-slim[openai]==2.33.0",
     # The IANA database as a package, so `zoneinfo` resolves
     # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
     # container that ships no system tzdata (§3.1 — windows are timezone-bound).
@@ -98,14 +98,14 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "testcontainers==4.15.0",
-    "hypothesis==6.165.5",
+    "hypothesis==6.165.10",
     # Test-only. `tests/unit/test_compose_stack.py` asserts properties of the
     # Compose files that no running stack can check — chiefly that host port
     # publishing lives in the development override and not in the base file,
     # which `docker compose up` hides by merging the two. Reading the base file
     # on its own is the whole point, so `docker compose config` cannot do this
     # job and a parser is needed. Nothing at runtime imports yaml.
-    "PyYAML==6.0.2",
+    "PyYAML==6.0.3",
     # Not a test dependency: this is the PEP 517 build backend from
     # `[build-system]` above, listed here so `pip-compile` locks it with a hash
     # and `pip install -e . --no-build-isolation` has a verified copy to build
