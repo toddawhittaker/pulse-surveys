@@ -11,7 +11,7 @@ restart, so it was moved to a module-level constant: `_CACHED_KEY =
 IssuerKey.generate()` at import, with `create_app()` handing it out. All 27 tests
 stayed green, which reads as the criterion being asserted by nothing.
 
-It is not. `import_mock_lms_application` in `tests/conftest.py` drops every
+It is not. `import_mock_lms_application` in `tests/fixtures/app_imports.py` drops every
 `app.*` module from `sys.modules` and re-imports before each platform starts —
 deliberately, and its docstring says why. So a module-level constant is
 *regenerated per platform*, and the mutation had not made the key survive
@@ -35,7 +35,7 @@ which is why a false one is expensive.
 
 **Rule.** Before believing a mutation that did not fail, say which mechanism was
 supposed to carry it to the assertion, and check the harness does not neutralise
-it. `tests/conftest.py` has two fixtures that drop and restore `sys.modules` —
+it. `tests/fixtures/app_imports.py` has two fixtures that drop and restore `sys.modules` —
 `import_app_module` and `import_mock_lms_application` — so **anything at module
 scope is per-test state, not process state**, and a mutation that relies on
 process lifetime has to go below the import: into a file, into the environment, or

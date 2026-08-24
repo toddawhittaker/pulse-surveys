@@ -321,7 +321,7 @@ across regenerations. Do not hand-name a constraint to match a preferred style �
 `alembic check` will churn. Watch the 63-byte Postgres identifier limit when
 choosing table and column names, since the convention's templates concatenate.
 
-**The database fixtures already exist.** `tests/conftest.py` provides
+**The database fixtures already exist.** `tests/fixtures/database.py` provides
 `postgres_container`, `provisioned_database`, `migrated_database`,
 `empty_database`, `migrated_engine`, `db_session` and `application_engine`. A
 schema ticket writes tests against these rather than standing up its own
@@ -350,7 +350,7 @@ configuration and should expect this.
 From E0-10 the migration grants `SELECT` on the read views to `pulse_app` and
 nothing at all on `user_identity`, so *which role a fixture authenticates as* is
 now the difference between a test that can detect a missing grant and one that
-cannot. `tests/conftest.py`'s `application_engine` provisioned and connected as
+cannot. `tests/fixtures/database.py`'s `application_engine` provisioned and connected as
 `pulse_test_app` — a name chosen in E0-04, when no grant existed for it to be
 wrong about — which held none of those grants, so an assertion made over it was
 an assertion about a role holding nothing and passed for the wrong reason

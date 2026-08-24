@@ -7,7 +7,7 @@
 *(Applied before anything went wrong rather than after. E0-15's
 mutation harness edits `mock-lms/app/*.py` and reverts each edit inside seconds,
 which is exactly the size-and-second window this entry's root cause describes —
-and `tests/conftest.py` re-imports every `app.*` module per platform, so a stale
+and `tests/fixtures/app_imports.py` re-imports every `app.*` module per platform, so a stale
 `.pyc` would be read seventeen times over. The harness therefore runs each variant
 with `PYTHONDONTWRITEBYTECODE=1` and deletes every `__pycache__` under
 `mock-lms/` first, which is this entry's rule and costs one line. Nothing was
