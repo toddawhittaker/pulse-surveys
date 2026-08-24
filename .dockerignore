@@ -1,0 +1,158 @@
+# Build context for the three images this repository builds:
+# backend/Dockerfile (ticket E0-02), mock-lms/Dockerfile (E0-14) and
+# mock-idp/Dockerfile (E0-16). One file serves all three, because Docker reads
+# it per build *context* and all three are built from the repository root.
+#
+# Deny everything, then name what the build needs. The other way round — listing
+# what to exclude — fails open: a file added later is in the context until
+# someone remembers to exclude it, and `.env` is the file that matters most. It
+# is gitignored, so it exists on every developer's machine and in CI, and a
+# `COPY . .` would put a real credential into an image layer.
+#
+# The guarantee is exact, and it is worth stating exactly. At the repository
+# root nothing is in the context unless it is named below. Re-including a
+# *directory*, though, re-includes everything beneath it — so inside `backend/`
+# and `mock-lms/` the deny-all does not apply and the patterns have to be
+# re-stated. That is not hypothetical: `.gitignore`'s `.env`, `*.pem`, and
+# `*.key` patterns are unanchored, so `backend/.env` is untracked, invisible in
+# review, and was reaching the builder stage until the re-exclusions below were
+# added. Verified by planting all three and rebuilding.
+#
+# `mock-lms/` and `mock-idp/` get the same re-exclusions for the same reasons,
+# and one more reason of their own: they are the services that hold a signing
+# key, so a `*.pem` or `*.key` appearing under either is the exact file E0-14
+# criterion 3 and E0-16 criterion 9 say must never exist. Both keys are generated
+# per process and never written to disk, so these patterns should never match
+# anything — they are here so that the day one does, it does not reach a layer.
+
+*
+
+!pyproject.toml
+!README.md
+!requirements.txt
+!requirements-dev.txt
+!backend
+!mock-lms
+!mock-idp
+
+# Re-excluded inside the directories re-included above. Secrets first: these
+# mirror .gitignore, so a file git refuses to track cannot reach a layer either.
+backend/.env
+backend/.env.*
+backend/**/.env
+backend/**/.env.*
+backend/**/*.pem
+backend/**/*.key
+
+# More secret-shaped names, and these do **not** mirror .gitignore: git tracks a
+# `.pfx`, a `.p12`, a `.secret`, or a private key called `id_rsa` happily, so the
+# sentence above does not cover them. E0-37 item 9 planted a `.pfx` and a
+# `.secret` in `backend/app/ai/prompts/`, built the runtime image and listed the
+# installed directory inside it: both arrived, where the `.pem` and `.key` lines
+# above stop their own suffixes by exactly the same route. The Batch H review
+# found the commonest names that item missed still reaching the image — `.p12`,
+# the same format as `.pfx` under its commoner extension, and the four
+# extensionless basenames OpenSSH writes a private key as by default: `id_rsa`,
+# `id_ed25519` (the modern default and the likeliest to be sitting in a
+# developer's `~/.ssh`), `id_ecdsa` and `id_dsa`. So a `signing.p12` or an
+# `id_ed25519` parked beside a prompt while debugging was in the image, untracked
+# or not.
+#
+# The `id_*` keys have no suffix to glob, so each is matched by its literal
+# basename under any directory rather than by an extension. The list stops at
+# OpenSSH's four default names on purpose: `.jks`, `.keystore`, `.p8` and `.der`
+# are speculative beside an AI-prompt directory, and the review agreed not to
+# reach for them.
+#
+# Only `backend/` needs them. `mock-lms/` and `mock-idp/` hold the signing keys,
+# but neither ships package data, so nothing under either is a path into an
+# image the way `pyproject.toml`'s `prompts/**/*` glob is.
+#
+# `scripts/ci/check_image_contents.sh` plants one file per line here, so
+# deleting any of these fails the Docker gate naming the line that went.
+backend/**/*.pfx
+backend/**/*.p12
+backend/**/*.secret
+backend/**/id_rsa
+backend/**/id_ed25519
+backend/**/id_ecdsa
+backend/**/id_dsa
+
+mock-lms/.env
+mock-lms/.env.*
+mock-lms/**/.env
+mock-lms/**/.env.*
+mock-lms/**/*.pem
+mock-lms/**/*.key
+
+mock-idp/.env
+mock-idp/.env.*
+mock-idp/**/.env
+mock-idp/**/.env.*
+mock-idp/**/*.pem
+mock-idp/**/*.key
+
+# Build and test debris; none of it belongs in an image.
+backend/**/__pycache__
+backend/**/*.py[cod]
+backend/*.egg-info
+
+mock-lms/**/__pycache__
+mock-lms/**/*.py[cod]
+
+mock-idp/**/__pycache__
+mock-idp/**/*.py[cod]
+
+# Editor and merge debris. E0-12 made this reachable: `pyproject.toml` ships
+# `app/ai/prompts/**/*` as package data, so any non-hidden file left in that
+# directory is copied into the build context, packaged into the wheel, and
+# installed into the runtime image. Before that entry the image held installed
+# `.py` modules and nothing else. A `validity.v1.md~` or a `validity.v1.md.orig`
+# is untracked, invisible in review, and sitting on the machine that runs
+# `make docker-build` — so a key parked beside a prompt while debugging ends up
+# in an image layer.
+#
+# The glob stays wide on purpose (ADR 0032: packaging decides what reaches
+# production, the naming scheme decides what a file is called, and a glob that
+# enforces the scheme does it by making files vanish from containers). This is
+# the other end of that trade, and it is **this file's header warning applied in
+# the direction that fails open**: a suffix nobody thought of is in the context
+# until someone remembers to add it. It is the weaker half of the guarantee, and
+# it is here rather than in the glob because narrowing the glob costs a silent
+# production failure while missing a suffix costs a stray file.
+#
+# These four have a gate behind them, and so do `backend/**/*.pem`,
+# `backend/**/*.key`, `backend/**/*.pfx`, `backend/**/*.p12`,
+# `backend/**/*.secret`, `backend/**/id_rsa`, `backend/**/id_ed25519`,
+# `backend/**/id_ecdsa` and `backend/**/id_dsa` above.
+# `scripts/ci/check_image_contents.sh` (E0-36 item 4) plants one file per covered
+# pattern, builds the runtime image and looks inside it, so deleting one of those
+# thirteen lines fails the Docker gate in both CI and `make docker-build`, and
+# names the line that went. Before that, deleting any of them left every gate green.
+#
+# An earlier version of this note said the four here were singled out because the
+# package-data glob makes this directory a path into the image the other patterns
+# do not have. **That was false**, and the `.pem` and `.key` lines are the
+# counterexample: same directory, same glob, and measured as excluded by exactly
+# those two lines. Believing it is what left them ungated for a ticket, so it is
+# recorded rather than quietly replaced.
+#
+# What is true, and is the reason the `.env` patterns are a different case:
+# setuptools' package-data glob skips dotfiles, so `backend/**/.env` does not
+# reach the runtime stage by this route at all. It reaches the *builder* stage
+# through the build context, which is what those lines are for.
+#
+# This says nothing about suffixes no line here matches. That is a question about
+# what the patterns cover rather than about whether the gate works, and it is not
+# answered in this file. **E0-37 item 9 answered two of it** — `.pfx` and
+# `.secret`, both measured reaching the image and both now excluded above — and
+# **the Batch H review answered five more**, `.p12` and the four extensionless
+# OpenSSH default key basenames (`id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa`),
+# the commonest names item 9 left uncovered, measured reaching the image the same
+# way. It left the question itself open: this is still a denylist, and the
+# allowlist for this directory that would close it is ADR 0032's trade to reverse
+# rather than a line to add here.
+backend/**/*~
+backend/**/*.orig
+backend/**/*.rej
+backend/**/*.bak

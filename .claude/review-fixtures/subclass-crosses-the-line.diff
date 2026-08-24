@@ -1,0 +1,38 @@
+# fixture: subclass-crosses-the-line
+# reviewer: app-security
+# ticket: E0-13 (AIGateway shell and one working round-trip)
+# expect: HIGH — the fail-open is narrowed to `httpx.TimeoutException`, and
+#         `httpx.ConnectTimeout` is a subclass of it. So a connection that never
+#         completed — nothing sent, nothing received — takes the fail-open path
+#         the docstring says is for an endpoint that "accepted the request and
+#         did not answer in time". Anyone who can drop packets on the path to the
+#         provider forces every comment to be graded by character count, for as
+#         long as they care to, and SPEC §3.3 sanctions the floor for a timeout
+#         rather than for a request that never arrived.
+# secondary: the same narrowing puts HTTP 503 outside the floor, so the ordinary
+#         shape of a hosted-provider outage now blocks students — the direction
+#         §3.3 exists to prevent. A reviewer that reports the subclass and not
+#         the 503 has checked what fails open and not what fails closed.
+# note: from a real miss. The first narrowing shipped in E0-13 and its own ADR
+#       argued the change on availability grounds, which is the half that made it
+#       persuasive. `docs/mistakes/33-*.md` carries it: matching on a base class
+#       is a decision about every subclass, including ones added later.
+
+diff --git a/backend/app/ai/gateway.py b/backend/app/ai/gateway.py
+--- a/backend/app/ai/gateway.py
++++ b/backend/app/ai/gateway.py
+@@ -486,12 +486,16 @@ class AIGateway:
+-    def _unanswered_outcome(self, error: Exception) -> AIGatewayError:
+-        """Classify a provider failure. See ADR 0056 for the whole taxonomy."""
++    def _timed_out(self, error: Exception) -> bool:
++        """True when the endpoint accepted the request and did not answer in time.
++
++        Decided on the exception chain rather than on a message, because a rule
++        that reads a library's sentence breaks when the library rewords it.
++        """
++        seen = error
++        while seen is not None:
++            if isinstance(seen, httpx.TimeoutException):
++                return True
++            seen = seen.__cause__
++        return False

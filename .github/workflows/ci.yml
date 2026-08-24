@@ -1,0 +1,1070 @@
+name: CI
+
+# Runs on every pull request and on pushes to epic branches. `main` needs no
+# push trigger of its own: every path to `main` is a pull request, and that
+# pull request already ran this pipeline.
+on:
+  pull_request:
+  push:
+    branches:
+      - 'epic/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Pinned deliberately (CLAUDE.md — "Pin dependency versions"). Dependabot's
+# github-actions and pip ecosystems bump these; nothing here floats.
+env:
+  PYTHON_VERSION: '3.13'
+  NODE_VERSION: '20'
+  RUFF_VERSION: '0.6.9'
+  MYPY_VERSION: '1.11.2'
+  PIP_AUDIT_VERSION: '2.7.3'
+  # 5.5.5 and not 5.0.0: the older release reads only the legacy `License`
+  # metadata field, and reported 30 of 77 real dependencies as "unknown
+  # license" — including fastapi and pydantic, which declare PEP 639
+  # `License-Expression`. An unknown license does not fail the build, so that
+  # was a license gate that could not see most of what it was scanning.
+  PIP_LICENSES_VERSION: '5.5.5'
+
+jobs:
+  # --------------------------------------------------------------------------
+  # What exists yet? The jobs still listed here are tolerant of a tree that has
+  # not been built. As each E0 ticket lands, flip the matching `allow-missing`
+  # step in that job from tolerant to enforcing — the job body is already
+  # written — and drop the probe with it, so this list shrinks to nothing.
+  #
+  # Gone already: `migrations` and `pytests`. E0-04 turned the `migration-drift`
+  # and `test` jobs on, and they now run unconditionally.
+  # --------------------------------------------------------------------------
+  # E0-38: what *changed*, as against what `detect` below answers, which is what
+  # exists. A documentation-only pull request ran pytest against testcontainers,
+  # built both images, brought up the Compose stack, ran Playwright, ran the eval
+  # floors and audited the supply chain — about fifteen minutes of runner time to
+  # establish that no Python changed, on a shape this epic produced six times.
+  #
+  # **Its own job rather than a fourth output on `detect`**, for two reasons.
+  # `detect` answers what exists and this answers what moved, which are different
+  # questions with different failure modes; and `detect`'s probe battery in
+  # tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py compares the
+  # whole set of outputs that job emits, so an extra one there is a committed
+  # E0-36 test turning red for no reason anybody would enjoy diagnosing.
+  changed:
+    name: Detect what changed
+    runs-on: ubuntu-latest
+    outputs:
+      # `true` only when every path the diff touched is documentation nothing
+      # depends on. Read by the six expensive gates, which switch their own work
+      # off rather than being skipped — the `ci` job's comment says why a
+      # job-level `if:` would fail the required check instead.
+      inert: ${{ steps.diff.outputs.inert }}
+    steps:
+      # Full history, because the step below diffs against the base commit and a
+      # shallow clone does not have it. A few seconds here against the fifteen
+      # minutes E0-38 measured on a documentation-only run.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # **Every failure here emits `inert=false`, which runs everything.** A base
+      # commit that is missing, a clone too shallow to hold it, a diff that
+      # errors: each means "we do not know what changed", and the only safe
+      # reading of that is the full pipeline. `classify_changed_paths.py` takes
+      # the same direction for the same reason, an empty path list included.
+      #
+      # The context values arrive through `env:` rather than being interpolated
+      # into the script. They are commit SHAs and an event name, so nothing here
+      # is attacker-controlled, but a `${{ }}` expanded inside a `run:` block is
+      # the shape of a script-injection finding and there is no reason to write
+      # one.
+      - id: diff
+        name: Classify the changed paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
+
+          # **Only a pull request may be inert.** A push event's base is
+          # `github.event.before`, which is the previous head of the branch, so
+          # the diff is incremental while the verdict is not. Land a
+          # documentation-only merge on an epic branch whose gates last went red
+          # and the diff holds only the new commits, everything short-circuits,
+          # and the branch badge reports success over code those gates failed on
+          # — through this repository's ordinary ticket-merge flow, with nobody
+          # doing anything unusual. A pull request is unaffected, because
+          # `base.sha` gives the whole delta rather than the last push, which is
+          # why the saving this ticket is for is untouched: documentation-only
+          # pull requests are the case it was measured on.
+          if [ "${EVENT_NAME:-}" != "pull_request" ]; then
+            echo "::notice::${EVENT_NAME:-unknown} is not a pull request, so the diff would be"
+            echo "::notice::incremental while the verdict is not. Every gate runs."
+            emit inert false
+            exit 0
+          fi
+          base="${PR_BASE_SHA:-}"
+
+          # A new branch pushes an all-zero "before", and a missing base is an
+          # empty string. Both mean there is nothing to diff against.
+          if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::no base commit to diff against; every gate runs."
+            emit inert false
+            exit 0
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::notice::base commit ${base} is not in this clone; every gate runs."
+            emit inert false
+            exit 0
+          fi
+
+          # Redirected to a file and the status checked separately, rather than
+          # read through a process substitution: `mapfile` succeeds whether or not
+          # `git` did, so reading it that way would turn a failed diff into an
+          # empty one (docs/MISTAKES.md entry 34). NUL-delimited because `design/`
+          # holds file names with spaces in them, and word-splitting would hand
+          # the classifier two paths it has never heard of in place of one it has.
+          #
+          # **`--no-renames`, and it is load-bearing.** Git detects renames by
+          # default and reports a rename as the destination alone, so
+          # `git mv backend/app/services/authz.py docs/whatever.md` arrives here
+          # as one inert path and the classifier — correctly, about the list it
+          # was handed — answers inert. pytest would not run on a change that
+          # deleted a service module. The hole is in the path list, not in the
+          # classifier. Without rename detection the delete and the add arrive as
+          # two paths, the source is outside the inert set, and everything runs.
+          # A rename *inside* `docs/mistakes/` still reports two inert paths and
+          # stays inert, which is what trimming that directory looks like.
+          if ! git diff --no-renames --name-only -z "${base}" HEAD > /tmp/changed-paths.z; then
+            echo "::notice::could not diff against ${base}; every gate runs."
+            emit inert false
+            exit 0
+          fi
+          # Also in an `if`, for the reason the classifier invocation below is:
+          # a bare command that fails ends the step under `-e`, and the failure
+          # mode of this step ending is every gate reporting `skipped` and the
+          # required check going red. No bare command is left in it.
+          if ! mapfile -t -d '' changed < /tmp/changed-paths.z; then
+            echo "::notice::could not read the changed-path list; every gate runs."
+            emit inert false
+            exit 0
+          fi
+
+          echo "  changed paths (${#changed[@]}):"
+          if [ "${#changed[@]}" -gt 0 ]; then
+            printf '    %s\n' "${changed[@]}"
+          fi
+
+          # `python3`, not `python`: this job deliberately runs no
+          # `actions/setup-python`, because the classifier is standard library
+          # only and does not need one — and without that action `python` is not
+          # on the runner's PATH. Measured by executing this script: it exits 127
+          # and the branch below would have emitted `inert=false` forever, so the
+          # filter would never once have fired and nothing would have said so.
+          #
+          # An empty list reaches the classifier as no arguments and it answers
+          # not-inert. Deliberate: an empty diff is far more often a broken
+          # comparison than an empty change.
+          # **In an `if`, not bare.** GitHub runs a `run:` block that declares
+          # no `shell:` as `bash -e {0}`, and `set -uo pipefail` above adds two
+          # options without clearing the inherited `-e` — only `set +e` would do
+          # that, and turning `-e` off wholesale to fix one line is the larger
+          # change. Under `-e` a bare command that exits non-zero ends the
+          # script, and **exit 1 is this classifier's "not inert" answer**: the
+          # ordinary answer for every pull request that touches code. Written
+          # bare, this step died before the `case` below could read the status,
+          # the job failed, every job needing it reported `skipped`, and E0-36
+          # made the aggregate treat `skipped` as failure — so every
+          # code-touching pull request failed CI. Measured under `bash -e`.
+          # **`--` before the paths, and it is load-bearing.** Without it
+          # argparse parses the path list, and it answers before `main` runs, so
+          # every fail-closed decision in this script and in that one is
+          # downstream of it. A repository root file named `-h` exits 0 — the
+          # classifier's "inert" answer — and switches off pytest, the §4.1
+          # invariant suite, both image builds, Playwright, the evals and the
+          # audit, with the required check green. The class is wider than `-h`:
+          # `-hx` is a short-option cluster and `--hel` is an argparse
+          # abbreviation, and both exit 0 too. Near misses like `-q` exit 2 and
+          # land in the `*)` branch below, which is why nothing caught this.
+          # The script rejects leading-dash arguments as well; both halves are
+          # deliberate, because the script advertises a general command line.
+          if python3 scripts/ci/classify_changed_paths.py -- "${changed[@]}"; then
+            status=0
+          else
+            status=$?
+          fi
+
+          # Its contract is exit 0 for inert and exit 1 for not. Anything else is
+          # the classifier failing rather than answering, and that is worth a line
+          # in the log: every route out of here still runs every gate, so a broken
+          # classifier is invisible in the result and would otherwise look exactly
+          # like a repository whose every pull request touches code.
+          case "${status}" in
+            0) emit inert true ;;
+            1) emit inert false ;;
+            *)
+              echo "::warning::classify_changed_paths.py exited ${status}, which is neither of"
+              echo "::warning::its two answers. Every gate runs. This is a broken checker, not a"
+              echo "::warning::busy repository."
+              emit inert false
+              ;;
+          esac
+
+  detect:
+    name: Detect what exists
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.d.outputs.frontend }}
+      node: ${{ steps.d.outputs.node }}
+      evals: ${{ steps.d.outputs.evals }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: d
+        name: Probe the tree
+        run: |
+          set -euo pipefail
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1 = $2"; }
+
+          # Each probe names, as exactly as it can, the thing its job actually
+          # runs. A probe that answers false over a tree that has the thing does
+          # not skip its gate: the real steps switch themselves off by their own
+          # `if:`, the `::notice::` step runs in their place, and **the job
+          # reports success**. So a wrong answer here is invisible to the
+          # aggregate `ci` check, which sees green rather than skipped.
+          #
+          # Both of the globs that used to be here were wrong in that direction.
+          # `tests/e2e/*.spec.ts` does not descend, so a spec at
+          # `tests/e2e/lms/launch.spec.ts` read as no e2e suite at all. And
+          # `tests/evals/**/*.py` needs `shopt -s globstar`, which was never set
+          # — measured, `globstar` is off in a non-interactive bash — so `**`
+          # degraded to a single `*` and the pattern only matched one directory
+          # *below* `tests/evals`. `tests/evals/runner.py`, the file
+          # `python -m tests.evals.runner` needs, was the one file it could not
+          # see, and SPEC §9.3's threat and self-harm recall floor is what the
+          # job runs.
+          #
+          # The third instance, and the first that was live, is E0-40. There is
+          # one Node tree in this repository and it is at the root: PR #61
+          # committed `package.json`, `package-lock.json`, `playwright.config.ts`
+          # and the §9.2 specs there. `npm audit`, the licence scan, `tsc` and
+          # `eslint` all asked `frontend/package.json`, which does not exist and
+          # is not due until E1, so four gates reported green over a tree they
+          # never read. So there are two questions here and they are asked
+          # separately: `node` is the root manifest and gates those four, and
+          # `frontend` is the E1 manifest and gates the production build and the
+          # bundle budget, which are still legitimately waiting for the scaffold.
+          # A single probe answering both would put `npm run build` in a
+          # directory that is not there.
+          echo "Probing repository layout (SPEC §13):"
+          if [ -f package.json ]; then emit node true; else emit node false; fi
+          if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
+          # The exact module the job imports, in the shape the manifest probes
+          # already use. Stricter than "some Python exists under tests/evals",
+          # and deliberately: a tree with `__init__.py` and no runner would make
+          # that glob answer true and the job then fails on the import.
+          if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
+          #
+          # There is deliberately no `e2e` probe. PR #61 made the Playwright gate
+          # unconditional on the specs being present, so nothing consumed that
+          # output; a boolean nobody reads is a probe whose wrongness has no
+          # symptom, which is the failure this comment's first paragraph is
+          # about. E0-40 decision 5 removed it.
+
+  # ==========================================================================
+  # FAST GATES — everything else waits on these.
+  # ==========================================================================
+
+  lint-python:
+    name: Fast · ruff + mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pinned tools
+        run: pip install "ruff==${RUFF_VERSION}" "mypy==${MYPY_VERSION}"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      # Installed from the committed lockfile, hashes and all
+      # (docs/adr/0005-dependency-locking.md), then the project itself with no
+      # dependency resolution of its own. mypy needs the third-party type
+      # information; nothing here may float.
+      - name: Install backend and dev dependencies (locked)
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
+
+      # mypy runs over backend/, with the strict profile pinned to
+      # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
+      # the authorization chokepoint and the AI output contract; they carry the
+      # confidentiality and eval guarantees, so they get no untyped escape.
+      #
+      # Then one invocation per mock, each of which is a further package also
+      # called `app` (SPEC §13 names all three). One run over two of them stops
+      # with "Duplicate module named app" having checked neither, so this is
+      # three runs rather than a longer `files` list. `make typecheck` runs the
+      # same three in the same order. See
+      # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
+      - name: mypy
+        run: |
+          mypy
+          mypy mock-lms/app
+          mypy mock-idp/app
+
+      # **Repository-wide sweeps run here because this job is unconditional.**
+      # E0-38's inert set says `docs/` is documentation nothing depends on, and
+      # that is true of `docs/` as a build *input* — nothing imports, executes,
+      # packages or lints it. It is false of `docs/` as a *subject*. These
+      # sweeps enumerate the whole repository, so a documentation-only pull
+      # request is exactly when they have something new to look at, and leaving
+      # them in `Test · pytest + invariants` let the path filter switch off the
+      # answer to two incidents that have already happened here:
+      #
+      #   * conflict markers committed in a Markdown file — docs/MISTAKES.md
+      #     entry 21, which happened twice (7f5b300 in PR #24, again in PR #27);
+      #   * private key material committed anywhere in the tree, which a docs-only
+      #     pull request can carry as easily as a code one — a key pasted into an
+      #     ADR is the shape.
+      #
+      # Both were verified reachable: a tracked `docs/` file holding a conflict
+      # marker turns the first red, and `classify_changed_paths.py` calls that
+      # same path inert.
+      #
+      # They stay in tests/unit as well; this runs the same node ids a second
+      # time rather than moving them, because they belong to the suite and the
+      # suite is where someone looks for them. The duplication is the same shape
+      # as `ci-selftest` re-running the classifier battery, and for the same
+      # reason: a guard inside a job the classifier can switch off is not a guard.
+      - name: Repository-wide sweeps that a docs-only diff must not switch off
+        run: |
+          pytest -q \
+            "tests/unit/test_no_unresolved_merge_conflicts.py::test_the_index_holds_no_conflict_marker" \
+            "tests/unit/test_mock_lms_service.py::test_no_private_key_material_is_committed_to_the_repository" \
+            "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one"
+
+  # The job keeps its id and its display name. Branch protection's required-check
+  # list keys on the display name, and renaming it is a change to that list
+  # rather than to this file — deliberately out of scope for E0-40 (decision 7),
+  # so "frontend" in the name below is stale wording and not an oversight.
+  #
+  # What changed is what it reads. `tsc` and `eslint` ran in `frontend/` on
+  # `detect.outputs.frontend`, a directory that does not exist; they now run at
+  # the repository root on `detect.outputs.node`, over `playwright.config.ts` and
+  # the §9.2 specs, which is the TypeScript this repository actually holds.
+  #
+  # And the job joins E0-38's documentation-only short-circuit. Its exemption was
+  # justified by being free — with the frontend probe false every step switched
+  # itself off — and E0-40 is what makes it cost an `npm ci` plus two checkers on
+  # every pull request. A documentation-only diff changes no TypeScript and no
+  # manifest, so it is exactly the diff these checkers have nothing to read.
+  lint-frontend:
+    name: Fast · tsc + eslint
+    needs: [changed, detect]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Documentation-only diff — nothing was type-checked
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so tsc and eslint did not run."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
+      - name: Nothing to check yet
+        if: needs.detect.outputs.node != 'true' && needs.changed.outputs.inert != 'true'
+        run: echo "::notice::No package.json at the repository root — tsc and eslint have nothing to check."
+
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install (lockfile, exact)
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        run: npm ci
+
+      - name: tsc --noEmit
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        run: npx tsc --noEmit
+
+      - name: eslint
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        run: npx eslint . --max-warnings=0
+
+  # Enforcing since e0/db-session-alembic (E0-04): `backend/alembic.ini` and the
+  # revision chain exist, so this job no longer tolerates their absence.
+  #
+  # It runs against the role shape a deployment has rather than against a bare
+  # superuser cluster, because a drift gate that connects as a role no
+  # deployment uses cannot see a grant problem. `services.postgres` has no
+  # `/docker-entrypoint-initdb.d`, so the application role is provisioned by a
+  # step below, running the same script the Compose stack runs at first start
+  # (docs/adr/0009's provisioning table, settled by docs/adr/0012).
+  migration-drift:
+    name: Fast · migration drift
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Must match the `db` service in docker-compose.yml exactly, image
+        # reference and all. This job autogenerates migrations against it from
+        # E0-04 on, so a Postgres that differs from the deployed one checks the
+        # schema against a server the project never runs.
+        #
+        # Pinned by tag and digest like every other image in the repository
+        # (docs/adr/0007). This is the one reference no Dependabot ecosystem
+        # reads — `github-actions` updates `uses:` only, and the `docker` and
+        # `docker-compose` ecosystems read backend/Dockerfile and
+        # docker-compose.yml — so it moves by hand, together with the `db`
+        # service, and never on its own. ADR 0007 records that consequence.
+        image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: pulse_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend (locked)
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
+
+      # The same script `/docker-entrypoint-initdb.d` runs on the Compose stack,
+      # rather than a second copy of the SQL that could drift from it. It talks
+      # to the service container over TCP, so the connection parameters come
+      # from PG* variables; everything else it reads is what the `db` service
+      # passes it.
+      #
+      # psql ships in the GitHub runner image. The install line is there so that
+      # a runner image which drops it fails with an apt error rather than with
+      # "command not found" three steps of debugging later.
+      - name: Provision the application role (docs/adr/0009)
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGPASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: pulse_ci
+          DB_APP_USER: pulse_app
+          DB_APP_PASSWORD: ci-only-application-role-password
+        run: |
+          set -euo pipefail
+          command -v psql > /dev/null || { sudo apt-get update && sudo apt-get install -y postgresql-client; }
+          ./scripts/db-init/01-application-role.sh
+
+      # `alembic check` autogenerates against the live schema and exits non-zero
+      # if the models and the migrations have diverged. A model edited without a
+      # migration fails here rather than at deploy time.
+      #
+      # The three variables are the deployed split, not a convenience: DATABASE_URL
+      # names the application role, which cannot create a table, and
+      # DB_SUPERUSER/DB_SUPERUSER_PASSWORD are the identity `migrations/env.py`
+      # actually connects as (docs/adr/0009, docs/adr/0012). An `env.py` that
+      # quietly used DATABASE_URL fails this job on `permission denied for schema
+      # public` instead of passing under privileges no deployment grants.
+      - name: alembic upgrade head && alembic check
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://pulse_app:ci-only-application-role-password@localhost:5432/pulse_ci
+          DB_SUPERUSER: postgres
+          DB_SUPERUSER_PASSWORD: postgres
+        run: |
+          alembic upgrade head
+          alembic check
+
+  # The checkers below decide whether the build may go green, so a bug in one
+  # of them fails open and nobody notices. They run before there is a pytest
+  # suite to hold them, so they carry their own.
+  ci-selftest:
+    name: Fast · CI checker self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Self-test the CI checkers
+        run: python scripts/ci/test_ci_scripts.py
+      # Every shared shell script under scripts/ci/, and the list has to grow with
+      # them: a syntax error in one of these is a gate that dies on its first
+      # line, and the job that would have found it is this one. `check_job_runtime.sh`
+      # and `check_image_contents.sh` both run only inside the `docker` job,
+      # which is minutes downstream of here.
+      - name: Shell scripts parse
+        run: |
+          bash -n scripts/ci/wait_for_health.sh
+          bash -n scripts/ci/check_job_runtime.sh
+          bash -n scripts/ci/check_image_contents.sh
+
+  fast-gate:
+    name: Fast gates passed
+    needs: [lint-python, lint-frontend, migration-drift, ci-selftest]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Lint, typecheck, migration drift, and checker self-tests are clean."
+
+  # ==========================================================================
+  # TEST GATES
+  # ==========================================================================
+
+  # Enforcing since e0/db-session-alembic (E0-04): the suite exists, so this job
+  # no longer tolerates its absence. A change that breaks collection now fails
+  # this gate instead of switching it off.
+  test:
+    name: Test · pytest + invariants
+    needs: [changed, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Documentation-only diff — the suite did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so the suite did not run."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
+      - uses: actions/setup-python@v5
+        if: needs.changed.outputs.inert != 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend + test deps (locked)
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
+
+      # The invariant suite runs first and alone, so a failure here is
+      # unambiguous and cheap. It then runs again inside the full suite; that
+      # duplication is deliberate.
+      #
+      # §4.1 invariants are assertions about what a student can never see. A
+      # skipped invariant test is indistinguishable from a deleted one in a
+      # green checkmark, so the checker treats skip, xfail, and empty
+      # collection as failures — not as skips.
+      #
+      # `--allow-empty` went with E0-10, which landed the first §4.1
+      # invariants. With it, deleting every invariant assertion in the
+      # repository was a green pipeline; without it, an empty collection is a
+      # build failure. `scripts/ci/check_invariants.py` keeps the flag as an
+      # option and nothing passes it.
+      # The gate has two halves and they see different things. The first reads
+      # the JUnit XML the run above produced, so it catches a skip, an xfail and
+      # an empty collection. It cannot see a marked test that ran and asserted
+      # nothing — the XML carries no assertion count, so such a test is counted
+      # toward the "N invariant test(s) ran" the first one prints. The second
+      # reads the sources and refuses exactly that (E0-36 item 3). The Makefile's
+      # `invariants` target runs both, in this order.
+      - name: Invariant suite (§4.1) — no skips, and no test that asserts nothing
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          mkdir -p reports
+          pytest -m invariant --junitxml=reports/invariants.xml || true
+          python scripts/ci/check_invariants.py reports/invariants.xml
+          python scripts/ci/check_invariant_assertions.py tests
+
+      - name: Unit + integration with coverage
+        if: needs.changed.outputs.inert != 'true'
+        env:
+          # testcontainers drives its own Postgres; the runner's Docker daemon
+          # is what it talks to.
+          TESTCONTAINERS_RYUK_DISABLED: 'false'
+        run: |
+          pytest tests/unit tests/integration \
+            --cov=backend/app --cov-report=term-missing --cov-report=xml \
+            --junitxml=reports/pytest.xml
+
+      - name: Upload coverage
+        if: needs.changed.outputs.inert != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: warn
+
+  # Enforcing since E0-18: the first §9.2 Playwright specs exist, so this gate
+  # runs the suite on every non-inert diff. There is no find-and-skip on the
+  # specs any more — an empty `tests/e2e` fails loudly rather than switching the
+  # gate off (E0-38's inert-diff skip is the only tolerance left).
+  #
+  # The `detect` job no longer probes for e2e specs either. It emitted a boolean
+  # this job stopped reading when the gate became unconditional, and a probe
+  # nothing consults is one whose wrongness has no symptom, so E0-40 decision 5
+  # removed the output rather than leaving it to be wired to something later.
+  #
+  # The stack is brought up here and the database is migrated and seeded
+  # host-side, mirroring the `migration-drift` job: the runtime image carries
+  # neither `scripts/` nor the migrations, so exec-in-container is not an option,
+  # and the override publishes Postgres on localhost:5432 for the host to reach.
+  # The seed registers the mock platform in `lti_platform` behind its development
+  # guard, and the launch door resolves `iss` against that row — so a launch spec
+  # fails without it.
+  e2e:
+    name: Test · Playwright e2e
+    needs: [changed, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inert diff, so the e2e gate did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: echo "::notice::Every changed path is inert documentation (E0-38), so no e2e path was exercised."
+
+      - uses: actions/setup-node@v4
+        if: needs.changed.outputs.inert != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-python@v5
+        if: needs.changed.outputs.inert != 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The dev closure plus the app itself, from the committed lockfile with
+      # hashes — the shape every other Python job here uses. The dev lock rather
+      # than the runtime one because `pip install -e . --no-build-isolation`
+      # needs the setuptools build backend present, and that ships in the dev
+      # extra, not the runtime closure. alembic and the seed's own dependencies
+      # are a subset of both.
+      - name: Install backend to migrate and seed (locked)
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
+
+      - name: Bring up the stack (api, worker, beat, mock-lms, mock-idp)
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          cp .env.example .env
+          docker compose up -d --build
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+
+      # Host-side, against the published port. `.env` supplies the superuser
+      # credentials `migrations/env.py` connects as and the ENVIRONMENT the seed
+      # requires; only DATABASE_URL's host is rewritten to localhost, the same
+      # incantation the README documents for running alembic from the host.
+      - name: Migrate and seed the stack's database
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          set -a; . ./.env; set +a
+          export DATABASE_URL="$(printf '%s' "$DATABASE_URL" | sed 's/@db:/@localhost:/')"
+          (cd backend && alembic upgrade head)
+          python scripts/seed.py
+
+      - name: Run Playwright
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Compose logs on failure
+        if: failure() && needs.changed.outputs.inert != 'true'
+        run: docker compose logs --no-color --tail=200
+
+      - uses: actions/upload-artifact@v4
+        if: failure() && needs.changed.outputs.inert != 'true'
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+
+  evals:
+    name: Test · AI eval floors
+    needs: [changed, detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inert diff, so the eval floors did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: echo "::notice::Every changed path is inert documentation (E0-38), so no eval floor was checked."
+
+      - name: No eval sets yet
+        if: needs.detect.outputs.evals != 'true' && needs.changed.outputs.inert != 'true'
+        run: |
+          echo "::notice::No tests/evals runner yet. E0-13 builds the gateway; the first eval set and the floors that gate on it are E2's, and this job stays tolerant until then."
+          echo "::notice::Running the eval suite needs a provider API key as a repository secret and a secrets.* reference in this workflow. Under the secrets policy in CLAUDE.md that is Todd's call, so it is proposed, not wired."
+
+      - uses: actions/setup-python@v5
+        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend (locked)
+        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        run: |
+          pip install --require-hashes -r requirements-dev.txt
+          pip install -e . --no-deps --no-build-isolation
+
+      # Per-task precision and recall floors live with the eval sets, not here,
+      # so changing a floor is a visible diff in the suite it governs. The
+      # threat/self-harm recall floor is the strictest in the suite (§9.3): a
+      # false negative there is a student in danger whose comment reached
+      # nobody, which is why it is a hard gate and never a warning.
+      - name: Eval runner (per-task floors; threat recall is a hard gate)
+        if: needs.detect.outputs.evals == 'true' && needs.changed.outputs.inert != 'true'
+        run: python -m tests.evals.runner --enforce-floors
+
+  # ==========================================================================
+  # BUILD GATES
+  # ==========================================================================
+
+  # Enforcing since e0/compose-stack (E0-02): the Compose file and
+  # backend/Dockerfile exist, so this job no longer tolerates their absence.
+  #
+  # The steps after the health wait are the acceptance criteria of E0-02 and
+  # E0-03 that no unit test can reach. They live here rather than in pytest
+  # because each one needs a running daemon, and because a Compose file can
+  # declare all of them correctly and still not work.
+  #
+  # One step is not an acceptance criterion of either ticket: the base-file-only
+  # pass near the end. It covers a gap the others opened rather than a criterion
+  # they left, and it says so where it stands.
+  docker:
+    name: Build · images + Compose health
+    needs: [changed, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Documentation-only diff — no image was built
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so no image was built."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
+      - uses: docker/setup-buildx-action@v3
+        if: needs.changed.outputs.inert != 'true'
+
+      - name: Build all images
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          cp .env.example .env
+          docker compose build
+
+      # E0-36 item 4, and it builds an image of its own rather than inspecting
+      # the one above — the files it plants have to be in the tree before the
+      # build reads the context. In the passing case that build is a cache hit
+      # off the one this step follows, because `.dockerignore` excluding the
+      # planted files is exactly the condition under which the context has not
+      # changed.
+      - name: Nothing .dockerignore re-excludes reaches the runtime image
+        if: needs.changed.outputs.inert != 'true'
+        run: ./scripts/ci/check_image_contents.sh
+
+      # Five services named, seven covered. `api` declares `depends_on` on a
+      # healthy `db` and a healthy `redis`, so reaching healthy here means those
+      # two did too. `worker`, `beat`, `mock-lms` and `mock-idp` have to be
+      # named: nothing depends on any of them — the API must come up whether or
+      # not the job runtime does, and nothing in the tool depends on either mock
+      # — and a service nobody names is one this gate never looks at.
+      - name: Stack comes up healthy (api, worker, beat, mock-lms, mock-idp, and through api db and redis)
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          docker compose up -d
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+
+      # The container's own HEALTHCHECK proves the app answers itself. It says
+      # nothing about whether the development override publishes the port, which
+      # is what a developer following the README actually does first.
+      # Not `curl --fail`: that fails on 4xx and 5xx, so a redirect satisfies it
+      # and the criterion is 200. The code is captured and compared, and it is
+      # printed before the comparison so a failure says what was served rather
+      # than only that something was wrong.
+      - name: Health endpoint answers 200 on the published host port
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --max-time 10 \
+                       --output /dev/null --write-out '%{http_code}' \
+                       http://localhost:8000/healthz)"
+          echo "GET /healthz -> ${code}"
+          test "${code}" = "200"
+
+      # A root runtime user is the first item in E0-02's security review. Asked
+      # of the running container rather than read off the Dockerfile, because a
+      # `USER` instruction can name a user whose uid is 0.
+      - name: API container runs as a non-root user
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          set -euo pipefail
+          uid="$(docker compose exec -T api id -u | tr -d '\r')"
+          echo "api runs as uid ${uid}"
+          test "${uid}" != "0"
+
+      # E0-03's criteria 2, 3 and 4: the round trip from the API container, beat
+      # restarting without losing its schedule file, and the worker health check
+      # going red when Redis is taken away. The script is shared with the
+      # Makefile — see the comment at the top of it for why these three are not
+      # written out here.
+      - name: Job runtime (ping round trip, beat restart, worker without Redis)
+        if: needs.changed.outputs.inert != 'true'
+        run: ./scripts/ci/check_job_runtime.sh
+
+      # The only pass in this pipeline that runs what actually ships, and the
+      # reason it exists is not obvious from what it does — so read this before
+      # deleting it as a redundant third `up`.
+      #
+      # `docker compose up` merges docker-compose.override.yml automatically, and
+      # that override replaces the installed application with the checkout in all
+      # three application containers. Every step above therefore imports from the
+      # bind mount, and none of them executes the copy `pip install` put in the
+      # image. A stale or missing wheel in `app/jobs` leaves the build, the round
+      # trip and every health wait above green, and then fails at worker startup
+      # in every deployment. That was reproduced, not assumed; the measurement,
+      # the alternatives, and what has to stay true are in
+      # docs/adr/0011-ci-validates-the-image-by-running-the-base-compose-file-alone.md.
+      #
+      # `-f docker-compose.yml` alone: no source mount and no published host
+      # port, which is why every check that talks to localhost lives above this
+      # step rather than inside it. `down -v` first, so the base file is proved
+      # from nothing — beat builds its schedule store on an empty volume here.
+      #
+      # Every service is named on purpose. `api` reaches `db` and `redis`
+      # through its depends_on conditions; nothing depends on `worker`, `beat`,
+      # `mock-lms` or `mock-idp`, so dropping any of them from this list would
+      # leave the pass green against a container that never started.
+      - name: Base file alone runs the installed application, not the mounted checkout
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml down -v
+          docker compose -f docker-compose.yml up -d
+          ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+
+      # `down -v` discards the Postgres volume and beat's schedule volume, so
+      # the second and third starts each initialise from nothing. This catches
+      # the class of bug where the stack only comes up on a machine that has run
+      # it before.
+      - name: Teardown and restart leaves no manual cleanup, twice
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            echo "::group::down -v && up -d (attempt ${attempt})"
+            docker compose down -v
+            docker compose up -d
+            ./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp
+            echo "::endgroup::"
+          done
+
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true
+
+  frontend-build:
+    name: Build · frontend + bundle budget
+    needs: [changed, detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The sixth expensive job of the seven. It is free today only because
+      # `detect.outputs.frontend` is false and there is no frontend to build;
+      # once the scaffold lands it is an `npm ci` and a production build, which
+      # is the same order of cost as the others. E0-38's security review found it
+      # guarded by neither the ticket, the ADR nor the pull request body, all
+      # three of which said five.
+      #
+      # This job keeps the `frontend` probe, and that is the half of E0-40 that
+      # is easy to lose: the split is only honest while the two probes stay
+      # different questions. A blanket rename of `detect.outputs.frontend` to
+      # `detect.outputs.node` — which is how this file has been edited before —
+      # would point `npm run build` at a directory that holds no application.
+      - name: Inert diff, so the frontend build did not run
+        if: needs.changed.outputs.inert == 'true'
+        run: echo "::notice::Every changed path is inert documentation (E0-38), so no frontend bundle was built."
+
+      - name: Nothing to build yet
+        if: needs.detect.outputs.frontend != 'true' && needs.changed.outputs.inert != 'true'
+        run: echo "::notice::No frontend/ yet. Enforcing once the frontend scaffold lands."
+
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Production build
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Bundle budget
+        if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
+        run: python scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json
+
+  # ==========================================================================
+  # SUPPLY CHAIN
+  # ==========================================================================
+
+  supply-chain:
+    name: Supply chain · audit + licenses
+    needs: [changed, detect, fast-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Documentation-only diff — nothing was audited
+        if: needs.changed.outputs.inert == 'true'
+        run: |
+          echo "::notice::Every changed path is inert documentation (E0-38), so nothing was audited."
+          echo "This job ran and reports success, so the required CI check still sees it."
+
+      - uses: actions/setup-python@v5
+        if: needs.changed.outputs.inert != 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pinned audit tools
+        if: needs.changed.outputs.inert != 'true'
+        run: pip install "pip-audit==${PIP_AUDIT_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
+
+      # Audits the lockfiles rather than an installed environment: the locked
+      # closure is what deploys, it is hash-pinned so nothing has to be
+      # resolved, and the project's own editable install — which is on no
+      # advisory feed and which `--strict` would otherwise refuse to skip — is
+      # not in the way.
+      - name: pip-audit (fail on high/critical)
+        if: needs.changed.outputs.inert != 'true'
+        run: pip-audit --strict --desc -r requirements.txt -r requirements-dev.txt
+
+      # The Node half runs at the repository root, on `detect.outputs.node`. It
+      # asked `detect.outputs.frontend` until E0-40 — a path that does not exist
+      # — so `npm audit` and the licence scan reported green having read nothing
+      # since PR #61 committed the root manifest. The audit runs clean at the
+      # root today; CI simply never called it.
+      - uses: actions/setup-node@v4
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # One install for both Node steps below. The licence scanner is a pinned
+      # devDependency in this lockfile, not an `npx --yes` fetch resolving latest
+      # at run time (CLAUDE.md's pin rule), so its binary has to be on disk
+      # before the scan resolves it — and `npm audit` reads the same closure.
+      - name: Install the root Node closure (locked)
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        run: npm ci
+
+      - name: npm audit (fail on high/critical)
+        if: needs.detect.outputs.node == 'true' && needs.changed.outputs.inert != 'true'
+        run: npm audit --audit-level=high
+
+      # pip-licenses reads installed distributions, so the runtime closure has
+      # to be on disk. The runtime lock and not the dev one: test dependencies
+      # are not distributed, and §10 is about what we ship. The audit tools
+      # installed above are in this environment too, so the scan is a superset
+      # of the shipped closure — stricter than §10 asks, deliberately
+      # (docs/adr/0005-dependency-locking.md).
+      - name: Install the runtime closure to scan (locked)
+        if: needs.changed.outputs.inert != 'true'
+        run: pip install --require-hashes -r requirements.txt
+
+      # MIT distribution is a spec requirement (§10, "Licensing hygiene"), so a
+      # copyleft dependency is a build break rather than a note for later.
+      - name: License compatibility (MIT distribution)
+        if: needs.changed.outputs.inert != 'true'
+        run: |
+          mkdir -p reports
+          pip-licenses --format=json --with-urls > reports/py-licenses.json
+          ARGS="--python-json reports/py-licenses.json"
+          if [ "${{ needs.detect.outputs.node }}" = "true" ]; then
+            npx license-checker-rseidelsohn --json > reports/npm-licenses.json
+            ARGS="$ARGS --npm-json reports/npm-licenses.json"
+          fi
+          python scripts/ci/check_licenses.py $ARGS
+
+  # --------------------------------------------------------------------------
+  # One required check to point branch protection at. Fails if any gate failed,
+  # was cancelled, or did not run.
+  #
+  # `skipped` is in that list, and it is the whole of E0-36 item 1. A job whose
+  # dependency failed is reported `skipped` rather than `failure`, so a failure
+  # anywhere above `fast-gate` — `migration-drift`, `lint-python`,
+  # `lint-frontend`, `ci-selftest`, or `detect` — used to arrive here as a row of
+  # skips that `grep -qE 'failure|cancelled'` matched none of. This check then
+  # printed "All gates green" and exited 0 over a migration that had drifted from
+  # its models, on the one check branch protection points at.
+  #
+  # The comment this replaces said `skipped` was left out because tolerant jobs
+  # report success and so the verdict stayed honest as the tree filled in. The
+  # first half is still true and the second no longer follows: every tolerance in
+  # this file is at the *step* level, with a `::notice::` step in place of the
+  # real work, so no job named below is ever legitimately skipped and a skip here
+  # always means something upstream failed. A job-level `if:` on any of them
+  # would break that, which is why nothing here has one and why
+  # `tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py` fails
+  # loudly the moment one appears.
+  #
+  # **Read the sentence above as narrowly as it is written.** It says a skip
+  # among these needs means an upstream failure. It does not say this check sees
+  # every way a gate can fail to run, and it must not be read that way, because
+  # step-level tolerance is exactly the mechanism by which a job reports
+  # *success* over work it did not do: the real steps switch themselves off by
+  # their own `if:`, the notice step runs, and the job is green. Nothing is
+  # skipped and nothing is red, so this verdict cannot see it and was never going
+  # to.
+  #
+  # That is not hypothetical. E0-36's security review found both `detect` probes
+  # answering false over trees that held the thing — `tests/evals/**/*.py`
+  # without `globstar`, and a flat-only `tests/e2e/*.spec.ts` — which would have
+  # turned off SPEC §9.3's threat and self-harm recall floor with `CI` green.
+  # Those two are fixed and `tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py`
+  # holds them, but the shape belongs to the tolerance design rather than to
+  # those two globs: what keeps a tolerant job honest is the probe being right,
+  # and that is asserted over planted trees, not here.
+  # --------------------------------------------------------------------------
+  ci:
+    name: CI
+    if: always()
+    needs: [fast-gate, test, e2e, evals, docker, frontend-build, supply-chain]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verdict
+        run: |
+          echo "Results: ${{ join(needs.*.result, ', ') }}"
+          if echo "${{ join(needs.*.result, ',') }}" | grep -qE 'failure|cancelled|skipped'; then
+            echo "::error::One or more gates failed, was cancelled, or did not run."
+            echo "A gate reports 'skipped' when a job it needed did not succeed, so a"
+            echo "skip above is an upstream failure — open the job list and find the"
+            echo "red one. It will be upstream of the gates listed here."
+            exit 1
+          fi
+          echo "All gates green."

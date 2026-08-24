@@ -20,7 +20,7 @@ The design goal is trust: students must believe their responses are confidential
 
 ## 2. Roles and access
 
-**People are not roles.** A person holds one or more *role assignments*, each scoped to a node in the org hierarchy; every view is resolved from an assignment (or a union of them), never from a person "type." A chair can also lead courses; an assistant dean can hold a lead-faculty assignment while supervising a chair.
+**People are not roles.** A person acting in any role but Student holds one or more *role assignments*, each scoped to a node in the org hierarchy; every view is resolved from an assignment (or a union of them), never from a person "type." A chair can also lead courses; an assistant dean can hold a lead-faculty assignment while supervising a chair.
 
 | Role | Entry point | Scope attachment |
 |---|---|---|
@@ -36,7 +36,9 @@ The design goal is trust: students must believe their responses are confidential
 
 Notes:
 
-- **Every role can enter through an LTI launch**, including leadership. The launch authenticates the person by their LMS user ID; because the app owns the supervision graph (§2.1), once identified they are shown their full purview — not just the course they happened to launch from. The launch context resolves *which* section a link points at, never caps what a leadership user may see.
+- **Entry doors are a property of the assignment, not the person.** A person holding two assignments uses whichever door fits the one they are acting under. Every *reporting* role — instructor, lead faculty, chair, assistant dean, dean, VP of Academics — can enter through an LTI launch, including leadership. Every role except instructor and student can *also* enter by web login; Care and Admin are web login only (their work has no launch context), and students enter by launch only. The table above is authoritative where this prose and it disagree.
+- **Students hold no role assignment.** Every other row of the table is held as a role assignment scoped to a containment node; the Student row describes what a student can see, not an assignment record. A student's access is resolved from enrollment — the LMS-owned, term-windowed record of which sections the person is in — because enrollment already answers "which sections may this person act in," and a parallel assignment record would be a second, unwindowed copy that no roster sync corrects.
+- The launch authenticates the person by their LMS user ID; because the app owns the supervision graph (§2.1), once identified they are shown their full purview — not just the course they happened to launch from. The launch context resolves *which* section a link points at, never caps what a leadership user may see.
 - LTI launch requires being an enrolled LMS user in *some* course, so **web login via OIDC is retained** for all leadership and staff roles (Entra ID, Okta, Keycloak, etc.; local accounts as a pilot fallback). Both doors resolve to the same identity and the same views.
 - Roles compose: multi-role people get a role/assignment switcher, or a union purview rendered as a multi-root hierarchy nav. **Care is deliberately not composable** with reporting roles — its sole power is the threat queue, kept isolated so safety re-identification never rides alongside routine oversight access.
 
@@ -51,11 +53,13 @@ Institution
 └── College                 (e.g., College of Sciences)
     └── Department          (groups one or more prefixes: Math may hold MATH, STAT, MIS)
         └── Prefix          (e.g., BIOL)
-            └── Course      (e.g., BIOL 2150)
+            └── Course      (e.g., BIOL 215)
                 └── Section (term instance, e.g., R3WW in Fall 2026)
 ```
 
 **Supervision graph** — who answers to whom; drives purview and escalation. `reportsTo` edges connect **role assignments, not people or org nodes**. Canonical chain: `INSTRUCTOR(section) → LEAD_FACULTY(course) → CHAIR(department) → DEAN(college) → VP_ACADEMICS`, with insertions supported without schema change — e.g., some chairs in a college report through an assistant dean (`CHAIR → ASSISTANT_DEAN → DEAN`) while others report straight to the dean. Two-hat people hold two assignments with two edges (a chair's lead-faculty assignment may report to their own chair assignment — legal and expected). The graph is a forest/DAG over assignments; assignment-level cycles are invalid, person-level cycles are fine.
+
+**An edge climbs.** A `reportsTo` edge is legal only where the child assignment's role sits below the parent's in the chain above. Two assignments in the same role never report to one another — a lead reporting to a lead would put one lead's courses inside a sibling's purview, which §4.1 invariant 2 forbids — and an edge never runs downward. Care and Admin sit outside the graph and hold no edges in either direction. The supervision graph is therefore at most six assignments deep. The rule reads the two assignments' roles and never the person holding them, so a dean, a chair or a lead who teaches a section for another lead does so through a separate instructor assignment, which is legal and expected.
 
 **Purview(assignment) = own grant ∪ purviews of all assignments transitively reporting to it**, with the own grant restricted by role grain: a Lead Faculty's grant is only the courses they lead (never sibling leads' courses, at any point in the union); a chair's is the department subtree; a dean's the college. The assistant dean is the worked example for why purview comes from the graph: own led courses ∪ every supervised chair's department — a set no single containment node holds.
 
@@ -67,9 +71,9 @@ View behavior:
 
 **Data sources — who owns what:**
 
-- **LMS-owned (read-only in Pulse; hourly roster sync + launch-time ingestion):** courses, sections, section codes, enrollments, teaching instructors. Course **level** (UG/GR/DR) derives from the course number; section **length and start date** derive from the section code (§2.2). A read-only course-catalog viewer in the admin console shows what synced and when.
+- **LMS-owned (read-only in Pulse; hourly roster sync + launch-time ingestion):** courses, sections, section codes, enrollments, teaching instructors. Course **level** (DEV/UG/UGGR/GR/DR) derives from the course number, by the bands §8 sets out; section **length and start date** derive from the section code (§2.2). A read-only course-catalog viewer in the admin console shows what synced and when. Which launches trigger a sync, and how a section is first discovered at all, is §7.3.
 - **Pulse-owned — people graph:** person records (name, category) plus reports-to edges. The LMS has no equivalent; purview is computed from this graph. Built top-down in the admin console (a new person's reports-to selector lists only people already in the graph).
-- **Pulse-owned — Lead Faculty mapping:** a mapping of individuals to the courses they lead (people and courses are not 1:1), maintained in the admin console with CSV import/export. Imports always show a dry-run diff before applying (e.g., "2 mappings added · 1 changed · BIOL 4410 unmapped, falls to chair"). A course with no mapping falls to its department chair.
+- **Pulse-owned — Lead Faculty mapping:** a mapping of individuals to the courses they lead (people and courses are not 1:1), maintained in the admin console with CSV import/export. Imports always show a dry-run diff before applying (e.g., "2 mappings added · 1 changed · BIOL 441 unmapped, falls to chair"). A course with no mapping falls to its department chair.
 
 ### 2.2 Terms, section codes, and course weeks
 
@@ -110,7 +114,8 @@ Participation credit requires a *complete, reasonable* submission:
 - One AGS line item per section: **"Pulse Participation"**, created by the tool on first launch.
 - Score = valid weeks completed ÷ weeks elapsed to date, posted as a percentage of the line item's max score (default 100).
 - Recomputed and re-posted after each week closes; fully automatic, no instructor action or override.
-- Late adds: denominator starts at the student's first enrolled week (from NRPS enrollment data). Drops: scores stop updating; the LMS owns what happens to the column.
+- Late adds: denominator starts at the student's first enrolled week (from NRPS enrollment data). Where the platform supplies no enrollment dates — most supply none — a student counts as enrolled from the section's start date, except that a student who first appears in a roster sync later than their section's first sync counts from the week of that sync. A late add the platform never dated and the first sync already contained cannot be told from a day-one student; that under-credit is accepted, because no rule can recover data the platform never supplied.
+- Drops: scores stop updating; the LMS owns what happens to the column.
 
 ## 4. Confidentiality model
 
@@ -124,14 +129,15 @@ This is the load-bearing wall of the product.
 
 ### 4.1 Hard visibility invariants (testable)
 
-Each of these is an automated assertion in the test suite (§9), not a convention:
+Each of these is an automated assertion in the test suite (§9), not a convention. An item whose surface does not exist yet carries no assertion until the epic that builds that surface adds one, and the two in that state are named where they sit — an invariant listed here with nothing asserting it is a rule that ships unenforced, so the gap is stated rather than left to be discovered:
 
-1. Students never see comparables, benchmarks, university averages, or other sections — in charts, text, or aria labels.
+1. Students never see comparables, benchmarks, university averages, or other sections — in charts, text, tooltips, exports, or aria labels. *(Asserted from **E2**, the first epic with a student-visible path and the scoping that gives "another section" its meaning.)*
 2. A Lead Faculty assignment never grants sibling leads' courses, at any point in the purview union computation.
 3. Below the n-threshold, raw comments are hidden from instructors and students alike.
-4. Aggregate language counts sections, never instructors; "needs attention," never "underperforming"; no ranking or score-sorting anywhere.
+4. Aggregate language counts sections, never instructors; "needs attention," never "underperforming"; no ranking, no composite scores, and no score-sorting anywhere.
 5. Confidentiality copy appears exactly once per surface (survey: in the submit bar), in plain words, no shield or lock iconography.
 6. No view may ever widen a student's visibility relative to these rules.
+7. No figure computed from a comparison set is shown below the benchmark minimum — a mean, a median, or any other statistic, not only a drawn line. A comparison figure over fewer than the configured number of sections is suppressed exactly as a line is (§5.1). *(Asserted from **E4**, the epic that builds the reports carrying these figures.)*
 
 ## 5. Reporting and the feedback loop
 
@@ -142,7 +148,7 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 - De-identified comments **grouped under "About the instructor" / "About the course," each group led by its own AI summary**; empty groups show a one-line notice, not a hidden heading. Comments carry their moderation status (§5.2), subject to §4 small-N rules.
 - AI summaries per stream: preserve clearly critical themes (never sanded off), state the response count they draw from, exclude flagged-held content (above small-N they may note "one comment is held for review" with type only), and are generated **even in small-N weeks** — there, the summary is the only comment signal.
 
-**Comparison sets.** To be comparable, sections must match on **both** length (§2.2's length set) *and* level (UG / GR / DR) — an 8-week graduate course is never averaged against a 12-week undergraduate one. Benchmarks are **past-referencing**: week N of a 12-week section is compared against week N of 12-week sections of the same level in the current *and prior* terms, regardless of start date. The default comparison set is the same Lead Faculty's courses filtered to matching length+level; leadership can define named sets, and set-definition UI makes invalid combinations impossible rather than erroring on them. The university-wide line is all same-length+level sections institution-wide. Benchmark lines have their own minimum (distinct from the per-section n-threshold): computed from fewer than the configured number of sections, the line is suppressed rather than shown thin.
+**Comparison sets.** To be comparable, sections must match on **both** length (§2.2's length set) *and* level (§8's set: `DEV`, `UG`, `UGGR`, `GR`, `DR`) — an 8-week graduate course is never averaged against a 12-week undergraduate one. Levels match **exactly**; no level is folded into another. A `UGGR` section is compared against other `UGGR` sections and not against `UG` or `GR` ones, and a `DEV` section only against `DEV`. This is deliberate rather than an omission: the dual-credit and developmental populations are the two whose experience is least like the undergraduate mean, so averaging them into it would hide exactly the signal the product exists to surface. Splitting three levels into five makes a thin comparison set the common case rather than the edge, and **the benchmark minimum covers every figure computed from a comparison set, not only a drawn line**. The workload mean and median this section requires against comparison-set figures are covered by it exactly as the trend lines are. A mean over one or two sections is a number about those sections — the same inference small-N suppression exists to prevent, reached through a benchmark rather than through a comment. That rule is **§4.1 item 7** and carries an automated assertion; it is stated there rather than only here, because a confidentiality rule written where nothing obliges a test is a rule that ships unenforced. Suppression is the right outcome for a thin set and is not a reason to widen the level match. Benchmarks are **past-referencing**: week N of a 12-week section is compared against week N of 12-week sections of the same level in the current *and prior* terms, regardless of start date. The default comparison set is the same Lead Faculty's courses filtered to matching length+level; leadership can define named sets, and set-definition UI makes invalid combinations impossible rather than erroring on them. The university-wide line is all same-length+level sections institution-wide. Comparison-set figures have their own minimum (distinct from the per-section n-threshold): computed from fewer than the configured number of sections, a benchmark line is suppressed rather than shown thin, and a comparison mean or median is suppressed rather than shown at all (§4.1 item 7).
 
 ### 5.2 Comment moderation
 
@@ -205,6 +211,7 @@ Each attention card names its rule and stream and links to that section's Monday
   - **Reveal student identity** — a plain, one-click procedural action (no confirmation dialog or typed justification; Care staff acting on a real case *is* the reason). The access is automatically audit-logged (actor, timestamp, case).
   - **Mark resolved** becomes available only *after* identity has been revealed — a genuine case cannot be closed without the responsible staff member having established who the student is. Resolution takes an optional short disposition note, recorded with staff name and date. Outreach, conduct process, and CARE protocol happen outside the tool per Office of Community Standards practice; the tool records only the outcome.
 - The identity-access audit log (actor, timestamp, case, later disposition) is reviewable by Admin, without comment content, and access records are **reviewed periodically outside the Care office** (reference practice: monthly, by the Dean of Students office) — the accountability check on Care itself.
+- **Conflict-of-interest flag.** A Care assignment and a reporting assignment may legitimately sit on the same person — a Care staffer who also teaches a section is unlikely but permitted (§2.1). Where a reveal returns a student enrolled in a section inside that person's own reporting purview, the audit entry is marked as a conflict. Concretely and most importantly: a Care staffer revealing a student in a section they themselves teach. The reveal is **never blocked** — a student at risk must not wait on a governance check, and a preventive control here would cost more than it saves. The flag is detective: it is surfaced distinctly in the Admin access log and to the periodic outside review, so the rare overlap is visible rather than merely permitted. The narrow case (enrollment in a section the revealer teaches) needs only enrollment data; the general case (anywhere in the revealer's purview) depends on the purview computation in §14.3 E9.
 - Queue scale assumptions: no search, no filters beyond Open/Resolved, no bulk actions — expected volume is low and the design must not imply triage-at-scale; the Resolved list is collapsed by default and renders in batches.
 - **Non-content apertures** (no comment text or identity crosses these):
   - Admin observability console shows open-case count and oldest-case age, so an unworked queue is operationally visible.
@@ -257,6 +264,7 @@ Production deployment follows the same topology; reverse proxy / tunnel (e.g., c
 - Per-platform quirk isolation: a thin `PlatformProfile` adapter (Canvas, Moodle, D2L, Blackboard) for known deviations in AGS score semantics and NRPS paging — quirks live in one file each, nothing leaks into domain logic.
 - Deep Linking supported so the tool can be placed as a graded assignment where the platform prefers that flow; plain resource-link launch is the default.
 - Roster sync: NRPS pulled on schedule and on launch (debounced), used for enrollment windows (§3.4) and email addresses where exposed.
+- **What triggers the first pull.** A launch by an instructor or any leadership role triggers a roster sync; a **student** launch does not. The roster service address arrives as a claim on that launch and is **stored**, which is what gives the scheduled job the discovery it otherwise lacks — it has no way of its own to learn that a section exists. So the first staff launch of a section bootstraps every later sync of it. The tool calls the roster service with its own credentials, so the launching person's role authorizes the *trigger*, never the request. Where a platform withholds the address even from a staff launch, the section has no roster and no sync can be attempted: the admin console shows it as never-synced (§6.1, §6.3) rather than as empty, because a section with no roster and a section with no enrollments are different states and only one of them is a fault.
 
 ### 7.4 AI task inventory
 
@@ -294,12 +302,24 @@ The Claude Design prototype is the visual and interaction contract; the frontend
 
 ## 8. Data model (core tables)
 
-`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, user, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, summary, instructor_response, moderation_action, exclusion_log, comparison_set, grade_sync, threat_case, audit_log, notification`
+`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, summary, instructor_response, moderation_action, exclusion_log, comparison_set, grade_sync, threat_case, audit_log, notification`
 
 Selected constraints:
 
-- Containment: `college → department → prefix → course → section` per §2.1; a department groups one or more prefixes; courses belong to exactly one prefix; sections to exactly one course and one term. Course `level` (UG/GR/DR) derives from the course number; section `length_weeks` and start/end dates derive from the section code via `start_letter_map` — LMS-owned data is never hand-edited in Pulse.
-- `person` and `role_assignment` implement §2.1: an assignment carries `person_id`, `role`, `scope_node_id`, and a nullable `reports_to` referencing another **assignment** (never a person or org node). The graph is a forest/DAG over assignments; assignment-level cycles are rejected at write time. Purview is computed from this graph, not from containment.
+- Containment: `college → department → prefix → course → section` per §2.1; a department groups one or more prefixes; courses belong to exactly one prefix; sections to exactly one course and one term. Course `level` derives from the course number and is never set independently of it; section `length_weeks` and start/end dates derive from the section code via `start_letter_map` — LMS-owned data is never hand-edited in Pulse.
+- **A deployment serves exactly one institution**, and that is enforced by a constraint permitting at most one `institution` row rather than left as an assumption. It is what makes the rest coherent: `prefix.code` is unique across the whole table while `college.name` is unique per institution and `department.name` per college, and with one institution those are the same rule rather than two that disagree. Without the constraint, a second institution's `BIOL` is refused by a uniqueness violation naming a constraint and no institution, which is an error at the wrong row. The institution timezone is a deployment-level setting (§6.3) for the same reason. A multi-institution deployment is not a schema edit: it would need `prefix.code` rescoped and that setting moved.
+- Course number is stored as text, not as an integer, because a developmental number carries a significant leading zero (`MATH 040`) that an integer cannot hold. It is three or four digits, and `level` derives from it by these bands:
+
+  | Number | `level` | |
+  |---|---|---|
+  | `000`–`099` | `DEV` | developmental |
+  | `100`–`499` | `UG` | undergraduate |
+  | `500`–`599` | `UGGR` | dual undergraduate/graduate credit |
+  | `600`–`799` | `GR` | graduate |
+  | `8000`–`9999` | `DR` | doctoral |
+
+  Width is part of the rule, not an accident of it: a three-digit number is valid only in `000`–`799`, and a four-digit number only in `8000`–`9999`. So `800` and `999` are rejected, and so are `1000`–`7999` and any four-digit number below `1000`. That last case is why width is stated rather than left to the arithmetic — `0099` and `099` are different strings that a numeric comparison would read as the same course, which is how one course acquires two spellings and two rows. Numbers outside the bands are rejected at write time rather than stored with an absent or guessed level. A roster sync carrying an unexpected number is a defect to see, not a row to accept.
+- `person` and `role_assignment` implement §2.1: an assignment carries `person_id`, `role`, a nullable `reports_to` referencing another **assignment** (never a person or org node), and its **scope as one nullable foreign key per containment level** — `institution_id`, `college_id`, `department_id`, `course_id`, `section_id` — of which exactly one is non-null. There is no unified scope-node table and therefore no single `scope_node_id`: containment is six tables, so a single column would have to be an untyped identifier with no referential integrity. There is deliberately no `prefix_id`, because no role in §2.1's table is scoped to a prefix and a scope that cannot be spelled at all is a stronger rule than one that is spelled and rejected. A database constraint fixes which column each role may use, and fails closed for a role nobody has given a grain to. The graph is a forest/DAG over assignments; assignment-level cycles are rejected at write time. Purview is computed from this graph, not from containment.
 - `lead_faculty_mapping` maps a person to the courses they lead (one lead per course); a course with no mapping resolves to its department chair.
 - `response` is unique per (student, section, week); `answer` rows link to versioned `question` rows; workload is stored as a decimal.
 - `classification` is append-only (re-runs create new rows) with prompt/model versioning; moderation state transitions (`flagged-collapsed` → `excluded`/`kept`, with undo) are recorded as `moderation_action` rows, both directions logged.
@@ -331,7 +351,7 @@ Selected constraints:
 
 - **Accessibility:** WCAG 2.2 AA; full keyboard operability inside the iframe; charts carry data-table equivalents.
 - **Privacy/compliance:** FERPA-aligned handling; no student PII in logs; secrets via environment/secret store; encryption at rest is deployment responsibility, in transit mandatory.
-- **Performance:** survey submit p95 < 2.5s including synchronous validity check; Monday report generation for 500 sections < 30 min.
+- **Performance:** survey submit p95 < 2.5s including synchronous validity check; Monday report generation for 500 sections < 30 min. The 2.5s figure and the p95 < 2s classifier budget in §3.3 and §7.4 measure different spans — the whole submit round-trip versus the model call inside it — and are not in conflict. Do not reconcile them into one number.
 - **I18n:** UI strings externalized from day one; English only at v1.
 - **Licensing hygiene:** dependencies compatible with MIT distribution.
 
@@ -378,9 +398,9 @@ pulse-surveys/
 │       ├── db.py                   # SQLAlchemy engine/session
 │       │
 │       ├── models/                 # ORM tables (§8), one module per aggregate
-│       │   ├── org.py              # institution, department, course_set, course, section
-│       │   ├── term.py             # term, week, survey_window
-│       │   ├── identity.py         # user, enrollment, role_assignment
+│       │   ├── org.py              # institution, college, department, prefix, course, section
+│       │   ├── term.py             # term, week, start_letter_map, survey_window
+│       │   ├── identity.py         # user, user_identity, person, enrollment, role_assignment, lead_faculty_mapping
 │       │   ├── survey.py           # question_set, question, response, answer
 │       │   ├── ai.py               # classification, summary
 │       │   ├── loop.py             # instructor_response, moderation_action, exclusion_log
@@ -482,7 +502,7 @@ pulse-surveys/
     └── ci.yml                      # lint, typecheck, unit+integration+e2e, eval gates
 ```
 
-Two structural choices worth calling out. First, `api/` routers stay thin and all real behavior lives in `services/`, so the same logic backs the HTTP API, the Celery jobs, and the future MCP server without duplication — and the authz scoping in `services/authz.py` is the single chokepoint every entry point passes through. Second, the identity-separated read views (`views_sql/`) are shipped as migrations, not just ORM conventions, so the confidentiality guarantee holds at the database level even against a future careless query.
+Three structural choices worth calling out. First, `api/` routers stay thin and all real behavior lives in `services/`, so the same logic backs the HTTP API, the Celery jobs, and the future MCP server without duplication — and the authz scoping in `services/authz.py` is the single chokepoint every entry point passes through. Second, the identity-separated read views (`views_sql/`) are shipped as migrations, not just ORM conventions, so the confidentiality guarantee holds at the database level even against a future careless query. Third, the tree above is the list of module homes rather than a suggestion: **use an existing module; add one only when nothing fits**, and the pull request that adds a module says why nothing did. The comment beside a module here is what that module is for, so code the comment already describes belongs in it — and work that fits nowhere is usually work that spans two modules and should be split before it is placed.
 
 ## 14. Development plan
 
@@ -500,63 +520,63 @@ After a single foundations epic (E0), **epics are vertical feature slices**, not
 
 ### 14.3 Epics
 
-Hours are focused engineering time for one senior engineer, solo vs. maximizing Claude Code, ±20%. Each epic's estimate includes its testing, eval, and review work per §14.2. "Ticket seams" indicate how each epic naturally decomposes into scoped tickets.
+Hours are focused engineering time for one senior engineer, solo vs. maximizing Claude Code, ±20%. Each epic's estimate includes its testing, eval, and review work per §14.2. "Ticket breakdown" indicates how each epic naturally decomposes into scoped tickets.
 
 **E0 — Foundations** (solo 135h / CC 63h)
 The only horizontal epic: monorepo scaffold, Compose stack, CI pipeline with test/lint/typecheck/eval gates, Dockerfiles, config surface, core schema and migrations (org, term, identity aggregates), `AIGateway` shell with typed Pydantic contracts and one working task round-trip, authz skeleton, **mock LMS** (LTI 1.3 login/launch, JWKS, NRPS + AGS stubs, seed data), and **mock OIDC IdP** (discovery, authorize, token, JWKS, seeded users). Exit: `docker compose up` yields a launchable-into, loggable-into, testable system that does nothing yet.
-*Ticket seams:* repo+CI; Compose+Dockerfiles; core schema; mock LMS; mock IdP; AIGateway shell + task contract models; authz skeleton; seed script.
+*Ticket breakdown:* repo+CI; Compose+Dockerfiles; core schema; mock LMS; mock IdP; AIGateway shell + task contract models; authz skeleton; seed script.
 
 **E1 — Entering the app** ⚠ (solo 100h / CC 60h)
 Both doors work end-to-end: LTI launch validation (state/nonce, platform storage for cookieless iframes), automatic section/enrollment provisioning from launch plus the hourly roster sync, section-code parsing against the start-letter map (derived length, start/end dates, modality; §2.2), course-level derivation from course numbers, role resolution from `id_token` claims and the app-owned assignment model, OIDC web login against the mock IdP, unified session model so both doors resolve to the same identity and correct purview. Exit: a student, an instructor, and a Dean each land on the right (empty) view from either door, and a synced section shows correct derived dates.
-*Ticket seams:* launch flow; cookieless session; section provisioning + code parsing; hourly roster sync; OIDC login; role/purview resolution; dual-door identity merge.
+*Ticket breakdown:* launch flow; cookieless session; section provisioning + code parsing; hourly roster sync; OIDC login; role/purview resolution; dual-door identity merge.
 
 **E2 — Weekly survey & validity** (solo 70h / CC 34h)
 The five-question form (Likert, conditional-required text, workload slider), survey-window scheduling from term dates (Friday 18:00 ET open), synchronous AI validity gating with fail-open on provider timeout, one-open-survey rule, resubmission within window. Exit: a student submits a valid response; "it was okay" is bounced with immediate feedback.
-*Ticket seams:* window scheduler; survey form UI; submit API; validity task + prompts + evals; fail-open path; resubmission rules.
+*Ticket breakdown:* window scheduler; survey form UI; submit API; validity task + prompts + evals; fail-open path; resubmission rules.
 
 **E3 — Grade passback** (solo 55h / CC 30h)
 AGS line-item creation, participation formula (valid weeks ÷ elapsed weeks, enrollment-windowed), weekly recompute job, score posting with retry/failure handling, Hypothesis property tests across adds/drops/missed weeks, `PlatformProfile` seams for AGS quirks. Exit: mock-LMS gradebook shows correct percentages across enrollment edge cases.
-*Ticket seams:* line-item management; formula service + property tests; posting job + retries; platform adapter seam.
+*Ticket breakdown:* line-item management; formula service + property tests; posting job + retries; platform adapter seam.
 
 **E4 — Instructor Monday report** (solo 85h / CC 42h)
 Report generation job at window close, TrendPair with course-week axis and term-week sub-label, per-stream distributions, workload mean/median, response/validity rates, per-stream AI summaries under the §5.1 contracts (criticism preserved, counts stated, generated even in small-N), grouped comment lists each led by its stream summary, week navigation across published weeks, small-N suppression of raw comments (§4) including cumulative batched release and flag concealment (§5.2). Exit: instructor opens a real Monday report for a seeded section with a diverging two-stream story.
-*Ticket seams:* report job; distribution + dual-axis queries; summary task + prompts + evals; report UI; week navigation; small-N logic (⚠ human review on the suppression queries).
+*Ticket breakdown:* report job; distribution + dual-axis queries; summary task + prompts + evals; report UI; week navigation; small-N logic (⚠ human review on the suppression queries).
 
 **E5 — Benchmarks & comparison sets** (solo 70h / CC 36h)
 Default comparison-set resolution (same lead's courses, matched length+level from derived attributes), **past-referencing benchmarks** spanning current and prior terms, named-set management UI where invalid length/level combinations are impossible, university-wide line within length+level cohort, benchmark min-N suppression (distinct threshold), overlay rendering in both TrendPair panels, cohort-mode term-axis aggregates, student-view exclusion of all benchmark lines (invariant §4.1.1). Exit: an instructor sees three lines per panel benchmarked against prior terms; a student provably sees two lines and no benchmarks.
-*Ticket seams:* set resolution service; historical benchmark queries; named-set CRUD; panel overlays + cohort mode; min-N rules; invariant tests.
+*Ticket breakdown:* set resolution service; historical benchmark queries; named-set CRUD; panel overlays + cohort mode; min-N rules; invariant tests.
 
 **E6 — Moderation & exclusions** (solo 65h / CC 33h)
 Moderation classification at window close with harm-type routing (§5.2): instructor-abuse to the Lead Faculty review queue, welfare signals to Care regardless of thresholds. Full lifecycle — flagged-collapsed, excluded-with-undo, kept-with-undo (both directions logged), excluded text muted-but-visible to the instructor, reason-required exclusion of unflagged comments, small-N flag concealment with the neutral participation trace, exclusion log at the Lead Faculty prefix scope and above. Exit: the anti-cherry-picking trail is visible up-chain, and a welfare-flagged comment in a 3-response week provably reaches Care with no trace in the instructor view.
-*Ticket seams:* moderation task + evals; harm-type routing; lifecycle state machine + undo; LF review queue; small-N concealment tests; exclusion/kept log views.
+*Ticket breakdown:* moderation task + evals; harm-type routing; lifecycle state machine + undo; LF review queue; small-N concealment tests; exclusion/kept log views.
 
 **E7 — Response loop** (solo 70h / CC 36h)
 Instructor response editor with non-anonymous posting and as-students-see-it Edit path, AI draft-from-themes, instructor-initiated draft check (re-runnable, clears on edit), publish flow, required-response policy per prefix, aggregate hold with 48h delinquency surfacing, respond-on-behalf enabling at 96h with honest attribution, release of held aggregates. Exit: required-mode section shows nothing to students until a named human publishes.
-*Ticket seams:* editor UI; draft task; coaching task + evals; publish/hold state machine; reminders; on-behalf flow + attribution.
+*Ticket breakdown:* editor UI; draft task; coaching task + evals; publish/hold state machine; reminders; on-behalf flow + attribution.
 
 **E8 — Student loop closure** (solo 35h / CC 16h)
 Student results view: own-section aggregates, published comment set, instructor response; next-launch surfacing. Exit: the full weekly loop demos end-to-end from one student's seat.
-*Ticket seams:* results UI; published-set assembly; launch-time routing.
+*Ticket breakdown:* results UI; published-set assembly; launch-time routing.
 
 **E9 — Leadership hierarchy & roll-ups** ⚠ (solo 110h / CC 55h)
 The people graph and supervision model in full: People & reporting editor (top-down build), Lead Faculty mapping table with CSV import/export and dry-run diffs, purview computation over the assignment DAG (assistant-dean insertions, two-hat people, sibling-lead isolation), multi-role switcher / union purview with multi-root nav, roll-up dashboards at every level on the term axis with cohort selection, hierarchy and by-lead tree modes (by-lead for chair+ only), read-only section drill-down into the Monday report, n-threshold enforcement at the aggregation being viewed. Exit: the assistant-dean worked example (§2.1) resolves correctly from either door, and Hypothesis-generated graphs prove sibling isolation and transitive unions.
-*Ticket seams:* people graph editor; LF mapping + CSV dry-run; purview service over the DAG (⚠); role switcher; roll-up queries + cohort mode; tree modes; scope-boundary property tests.
+*Ticket breakdown:* people graph editor; LF mapping + CSV dry-run; purview service over the DAG (⚠); role switcher; roll-up queries + cohort mode; tree modes; scope-boundary property tests.
 
 **E10 — Care queue & safety** ⚠ (solo 60h / CC 40h)
 Threat/self-harm classification routing, suppression from all instructor/leadership views, Care-only queue UI with the two-action case flow (reveal identity / false positive, resolve-only-after-reveal with disposition note), automatic identity-access audit logging, Admin-visible access log and open-case count/age aperture (without content), configurable stale-case escalation notice, false-positive feed into evals. Highest human-review burden in the plan; the threat-recall eval floor is set and validated here. Exit: a seeded threat comment reaches only Care, a false positive closes without identity ever surfacing, and every reveal leaves an audit row.
-*Ticket seams:* safety routing; suppression proofs; queue UI + case state machine; reveal + audit (⚠ line-by-line); resolution notes; count/age aperture + escalation notice; recall-floor eval work.
+*Ticket breakdown:* safety routing; suppression proofs; queue UI + case state machine; reveal + audit (⚠ line-by-line); resolution notes; count/age aperture + escalation notice; recall-floor eval work.
 
 **E11 — Admin console & observability** (solo 70h / CC 32h)
 LTI health and launch-outcome log, job dashboard, AI provider metrics and spend, classifier drift panel with override-to-eval feed, full configuration surface (§6.3), LTI platform registration UI. Exit: an operator can diagnose a failed launch and a stuck job without shell access.
-*Ticket seams:* launch log; job dashboard; AI metrics; drift panel; config UI; registration UI.
+*Ticket breakdown:* launch log; job dashboard; AI metrics; drift panel; config UI; registration UI.
 
 **E12 — Notifications** (solo 25h / CC 10h)
 Email rendering and SMTP delivery, link-only Monday instructor mail, optional student open/published notices, per-institution toggles, Mailpit-verified e2e. Exit: Monday morning mail arrives with numbers and a link, never content.
-*Ticket seams:* templates; delivery + toggles; e2e via Mailpit.
+*Ticket breakdown:* templates; delivery + toggles; e2e via Mailpit.
 
 **E13 — Hardening & release** ⚠ (solo 60h / CC 35h)
 System-level passes that only make sense against the whole: full WCAG 2.2 AA audit, retention job + purge verification, load test (report generation at 500 sections), end-to-end FERPA data-flow review, dependency/license sweep for MIT compatibility, operator documentation, cut v1.0. This epic exists *despite* integrated testing, not instead of it.
-*Ticket seams:* a11y audit; retention + purge tests; load test; FERPA review (⚠ human-led); license sweep; docs; release.
+*Ticket breakdown:* a11y audit; retention + purge tests; load test; FERPA review (⚠ human-led); license sweep; docs; release.
 
 ### 14.4 Totals and sequencing
 

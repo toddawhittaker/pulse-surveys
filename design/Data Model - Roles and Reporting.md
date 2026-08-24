@@ -1,5 +1,7 @@
 # Pulse Surveys — Data Model: Org Hierarchy, Roles, and Reporting
 
+> Frozen design-session input (an earlier standalone copy of SPEC_ADDITIONS.md Part A), written before `docs/SPEC.md` existed; where they disagree, the spec governs (known case: §2.1 — students hold no role assignment; their access resolves from enrollment).
+
 Spec input for the data model behind the Leadership Roll-up, Instructor Monday Report, Student Survey, and Student Results views. Written to be machine-readable; entity and field names are suggestions, not mandates.
 
 ## 1. Core principle

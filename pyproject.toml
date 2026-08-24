@@ -1,0 +1,335 @@
+# Backend package metadata and tooling configuration.
+#
+# The tool configuration below predates the code it checks: it landed with the
+# CI pipeline so that the first backend commit was linted and typechecked on
+# arrival rather than retrofitted. The [project] table arrived later, with the
+# backend scaffold in E0-01.
+#
+# Direct dependencies are pinned exactly here; the full transitive closure,
+# with hashes, is locked in `requirements.txt` and `requirements-dev.txt`, and
+# `make lock` regenerates both. See docs/adr/0005-dependency-locking.md.
+
+[build-system]
+# Pinned exactly, like every other dependency. A floating range here is the one
+# artifact `--require-hashes` does not reach: under PEP 517 build isolation pip
+# fetches the newest matching setuptools from PyPI with no digest to check it
+# against, and then runs its build backend in the CI runner. Every site that
+# builds this project passes `--no-build-isolation` and uses the hash-locked
+# setuptools from `requirements-dev.txt` instead, so this pin and that lock
+# entry must move together. See docs/adr/0005-dependency-locking.md.
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulse-surveys"
+description = "Weekly course feedback over LTI 1.3, confidential by construction."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+dynamic = ["version"]
+
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.52.1",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.15.0",
+    "SQLAlchemy==2.0.52",
+    "alembic==1.19.1",
+    # The driver `DATABASE_URL` names, `postgresql+psycopg://`. The `binary`
+    # extra is what makes it work in the image: the runtime stage is
+    # python:3.13-slim with no libpq and no compiler, so the pure-Python
+    # distribution would import and then fail to find the library it wraps.
+    # `--strip-extras` in `make lock` resolves the extra into an explicit
+    # `psycopg-binary` line in both lockfiles, so what ships is still named and
+    # hashed. psycopg is LGPL-3.0: the license gate classifies it "review —
+    # weak copyleft, linkage matters", which is the right answer for a library
+    # imported unmodified from a wheel rather than vendored into our source.
+    "psycopg[binary]==3.3.4",
+    # Already in the closure under pydantic-settings, and declared here because
+    # `backend/migrations/env.py` imports it directly: `alembic` is not started
+    # by `Settings`, so it reads `.env` itself, and an import we write is a
+    # dependency we declare rather than one we inherit. See docs/adr/0012.
+    "python-dotenv==1.2.2",
+    "celery==5.6.3",
+    "redis==8.1.0",
+    "httpx==0.28.1",
+    # The JSON Web Token library both entry doors verify with (E0-18). Nothing
+    # else in the locked closure verifies an RS256 signature: the two mocks
+    # *sign* with standard-library arithmetic under ADR 0035's mock-only bound,
+    # and that bound explicitly forbids copying it into the tool. `pylti1p3`,
+    # which SPEC §13 assigns to `lti/`, is not adopted here — it covers only the
+    # launch door, needs a framework adapter, and E1 restructures this code
+    # anyway. See docs/adr/0073.
+    #
+    # `cryptography` is declared beside it rather than left implicit: PyJWT
+    # publishes it as the `crypto` extra, so a bare `PyJWT` locks a closure that
+    # cannot verify RS256 at all and fails at the first launch rather than at
+    # install time. An import we depend on is a dependency we name.
+    "PyJWT==2.13.0",
+    "cryptography==50.0.0",
+    # The AI provider client, imported by `backend/app/ai/gateway.py` and by
+    # nothing else — SPEC §7.4 puts every model call behind one internal gateway,
+    # and `tests/unit/test_provider_library_is_confined_to_the_gateway.py` holds
+    # it to one importer so that replacing the library stays a day's work.
+    #
+    # `pydantic-ai-slim[openai]` rather than `pydantic-ai`: the same library SPEC
+    # §7.4 names, importing under the same `pydantic_ai` root, without the eight
+    # other extras the metapackage turns on. Measured against PyPI rather than
+    # estimated — 30 packages against 100, and the seventy include `anthropic`,
+    # `google-genai`, `mcp`, `logfire`, `keyring` and a D-Bus client, in the image
+    # of the process that ships student comment text to a third party. Todd's
+    # decision; docs/adr/0053 records it and what was measured.
+    #
+    # The `openai` extra is what supplies the OpenAI-compatible client underneath.
+    # It is deliberately *not* declared here as well: nothing this project writes
+    # imports `openai`, and a direct dependency would say something imports it.
+    # `make lock` resolves the extra into explicit, hashed lines in both
+    # lockfiles, so what ships is still named and pinned.
+    "pydantic-ai-slim[openai]==2.31.0",
+    # The IANA database as a package, so `zoneinfo` resolves
+    # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
+    # container that ships no system tzdata (§3.1 — windows are timezone-bound).
+    "tzdata==2026.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "testcontainers==4.15.0",
+    "hypothesis==6.165.5",
+    # Test-only. `tests/unit/test_compose_stack.py` asserts properties of the
+    # Compose files that no running stack can check — chiefly that host port
+    # publishing lives in the development override and not in the base file,
+    # which `docker compose up` hides by merging the two. Reading the base file
+    # on its own is the whole point, so `docker compose config` cannot do this
+    # job and a parser is needed. Nothing at runtime imports yaml.
+    "PyYAML==6.0.2",
+    # Not a test dependency: this is the PEP 517 build backend from
+    # `[build-system]` above, listed here so `pip-compile` locks it with a hash
+    # and `pip install -e . --no-build-isolation` has a verified copy to build
+    # against. It is deliberately absent from the runtime closure, because
+    # nothing ships it.
+    "setuptools==84.0.0",
+]
+
+# ruff, mypy, pip-audit, and pip-licenses are deliberately not listed. They are
+# pinned once, in the Makefile and in the `env:` block of
+# .github/workflows/ci.yml, because those two run them; a second pin here would
+# be a second thing to keep in step.
+
+# `backend/` is the import root: modules are `app.<module>`, never
+# `backend.app.<module>`. `mypy_path` below and
+# `uvicorn app.main:create_app --factory` both depend on that.
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["app*"]
+
+# The only non-Python files inside the package, and they are not optional: the
+# prompt a classification names is the text that produced it (SPEC §7.4). The
+# Dockerfile installs a wheel built from this project and nothing else, so
+# without this line the runtime image holds `app/ai/contracts.py` and no prompt
+# beside it — measured, not assumed: `pip wheel . --no-deps` before this entry
+# produced a wheel containing the two `.py` files alone. E0-13 is the first
+# caller, and it would fail in the container while passing on a developer's
+# machine, where the source tree is still there to read from.
+#
+# **The glob ships the whole directory on purpose, and is deliberately wider
+# than the naming scheme.** `prompts/*.md` was the first version of this line
+# and it was wrong twice: it does not descend, so a version held in a directory
+# (`prompts/v2/moderation.md`) is silently dropped, and it fixes the extension,
+# so a template named anything else is silently dropped. Both were measured by
+# building the wheel with such a file planted. `prompts/**/*` matches flat files
+# as well as nested ones — also measured, since `**` matching zero segments is
+# the part people get wrong.
+#
+# Prompts are Markdown by rule and flat by rule (ADR 0032), but that rule is
+# **not enforced here**, and the distinction is the point. This entry decides
+# what reaches production; the scheme decides what a file is called. If a future
+# prompt breaks the scheme, the right outcome is a red test and an argument
+# about ADR 0032 — not a file that is absent from every container while
+# `pyproject.toml` looks entirely correct.
+#
+# The second entry is E0-10's, and it is the same rule for the same reason. The
+# `views_sql/` scripts are what `alembic upgrade head` executes to create the
+# identity-separated read views, the Care reveal function and the grants that
+# make them a guarantee (SPEC §8, ADR 0041). A wheel without them installs an
+# application whose migrations fail on a missing file — in a container, at
+# deploy time, having passed every gate on a machine where the source tree was
+# still there to read from. Same glob, chosen the same way: it descends, and it
+# fixes no name beyond the extension.
+[tool.setuptools.package-data]
+"app.ai" = ["prompts/**/*"]
+"app.views_sql" = ["**/*.sql"]
+
+[tool.setuptools.dynamic]
+version = { attr = "app.__version__" }
+
+# ---------------------------------------------------------------------------
+# ruff — lint + format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["backend/migrations/versions", "design"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "A",    # shadowed builtins
+    "C4",   # comprehensions
+    "DTZ",  # naive datetimes — survey windows are timezone-bound (§3.1)
+    "T20",  # no print() in application code
+    "SIM",  # simplify
+    "PTH",  # pathlib over os.path
+    "RUF",
+    "S",    # bandit — security
+    "ASYNC",
+]
+ignore = [
+    "E501",  # line length is the formatter's job
+    "B008",  # FastAPI Depends() in defaults is the idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]        # assert is the point
+"scripts/**" = ["T20"]       # scripts talk to the operator
+"backend/migrations/**" = ["E402", "F401"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+# `app` is this project's own package, and it lives under `backend/` rather than
+# at the repository root — so ruff cannot infer it from the layout for a file
+# that is not itself inside the package. Without this, imports of `app.*` are
+# sorted into the third-party block in `backend/migrations/env.py` and into the
+# first-party block everywhere else, and the difference is invisible until you
+# read two files side by side.
+known-first-party = ["app"]
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+mypy_path = "backend"
+files = ["backend/app"]
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = true
+
+# Strict where the guarantees live, which is now the domain logic and both
+# entry doors.
+#
+# app/services/ holds the authorization chokepoint every entry point passes
+# through (CLAUDE.md, SPEC §2.1), and ai/contracts.py is simultaneously the
+# runtime contract, the API schema, and the eval fixture (§7.4). An untyped
+# escape in either is a confidentiality or eval hole.
+#
+# app/api/ and app/lti/ are where untrusted input arrives — a form a platform
+# posted, a query a browser wrote, a claim out of a token — and the modules that
+# decide what to do with it. A handler is exactly the kind of function that gets
+# written without annotations, and an unannotated one is not checked at all: the
+# guarantee that a claim reaches `landing_role_for` as a `Mapping[str, Any]` and
+# not as an unchecked `Any` is worth as much at the door as it is one call
+# deeper. Turned on with the entry doors already clean, so this holds the line
+# rather than paying a migration.
+#
+# So these get no untyped defs and no implicit Any.
+[[tool.mypy.overrides]]
+module = ["app.api.*", "app.lti.*", "app.services.*", "app.ai.contracts"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+warn_return_any = true
+strict_equality = true
+extra_checks = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+# The whole test tree, not a list of the directories that hold Python today
+# (E0-40 decision 4). The §4.1 invariant pass runs `pytest -m invariant` with no
+# path, so this setting is the whole of what that half of the gate collects,
+# while `scripts/ci/check_invariant_assertions.py` is handed `tests`. A narrower
+# `testpaths` is an invariant that can be written, counted, approved and never
+# run, with both halves exiting 0. Collection is identical today — `tests/e2e`
+# holds TypeScript, which pytest does not collect — and a directory nobody has
+# added yet is included instead of silently dropped.
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Async fixtures get a fresh event loop each test. Set explicitly because
+# pytest-asyncio warns when it is left implicit, and `filterwarnings` below
+# turns that warning into a failure.
+asyncio_default_fixture_loop_scope = "function"
+addopts = "--strict-markers --strict-config -ra"
+markers = [
+    # The §4.1 confidentiality assertions. CI runs these in an isolated pass
+    # and treats a skip or an xfail as a failure — see
+    # scripts/ci/check_invariants.py.
+    "invariant: a SPEC §4.1 confidentiality invariant; may never be skipped",
+    # Widened in E0-03 from "needs a real Postgres": the Celery round-trip test
+    # needs a real broker, and a marker description that named only Postgres
+    # would have been a record asserting something the first integration test
+    # made false (docs/MISTAKES.md entry 1).
+    "integration: needs a real backing service via testcontainers (Postgres, Redis)",
+    "lti: exercises signed LTI 1.3 launch fixtures",
+    "slow: property-based or generative, measured in tens of seconds",
+]
+# A deprecated call our own code makes is a defect, so the default is to fail
+# on one. The single exemption below is not ours to fix and is not a defect.
+#
+# celery 5.6.3's Redis result backend stores every task result with
+# `pipe.setex(key, expires, value)`. redis-py 8.1.0 marks `setex` deprecated,
+# mirroring the Redis *server*, which has preferred `SET key value EX seconds`
+# since 2.6.12 — the command still works and celery's call is correct. Under
+# `error::DeprecationWarning` that warning is raised inside the worker's task
+# trace, so the result is never written and the round-trip test times out
+# thirty seconds later with nothing in the failure naming a warning. Measured,
+# not guessed: with `WORKER_LOGLEVEL=info` the worker logs
+# "Exception raised outside body: DeprecationWarning(...)" and the task itself
+# succeeded.
+#
+# Narrowed to that one message from that one module, so any other deprecated
+# call — including a second one from celery — still fails the suite. It goes
+# when celery stops calling `setex` or redis-py withdraws the notice; nothing
+# in this project calls it.
+filterwarnings = [
+    "error::DeprecationWarning",
+    'ignore:Call to deprecated setex\.:DeprecationWarning:celery.backends.redis',
+]
+
+# ---------------------------------------------------------------------------
+# coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["backend/app"]
+branch = true
+omit = ["backend/app/main.py", "backend/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]

@@ -1,0 +1,54 @@
+-- What the application may read about an LTI registration — ticket E0-18,
+-- SPEC §7.3, SPEC §8, ADR 0001.
+--
+-- E0-18 builds the launch door, and a launch door is a lookup: the third-party
+-- login initiation resolves `iss` in public.lti_platform to find the client ID
+-- the authorization request must name, and the launch endpoint reads the same
+-- row again for the JWKS URL its signature is checked against and reads
+-- public.lti_deployment for the `deployment_id` claim. All of that runs on the
+-- connection pulse_app holds, which until this file held nothing on either
+-- table — so every launch was refused by Postgres with 42501 rather than by any
+-- check the ticket is about.
+--
+-- **SELECT, and nothing else, on two tables.** A registration is typed into the
+-- admin console by an administrator (SPEC §2, Admin: "LTI registration") and
+-- E0-18 builds no console, so nothing the application runs today writes either
+-- table. Withholding INSERT, UPDATE and DELETE is what keeps a launch from
+-- registering the platform that sent it: a door that could write here would
+-- turn an unknown issuer from a refusal into a self-service registration, which
+-- is the one mistake this door must not be able to make. The ticket that builds
+-- the admin console adds the write privilege with the code that spends it, and
+-- says so in its own file.
+--
+-- **A grant on a base table rather than a read view, and this is the exception
+-- rather than a precedent.** SPEC §4.1's rule is that a read path goes through
+-- an identity-separated view, and the reason is identity: a view selects the
+-- columns a caller may see and omits the ones §8 protects. Neither table here
+-- holds a person. public.lti_platform carries an issuer URL, an opaque client
+-- ID, a public JWKS address and a fetch timestamp; public.lti_deployment
+-- carries a platform key and an opaque deployment string. There is no identity
+-- column to separate, so a view over them would select every column of its
+-- source and exist only to satisfy the shape of the rule. `classification` is
+-- the same judgment one ticket earlier (classification_grants_v001.sql), and
+-- the ADR that governs which reads must go through a view is the place to
+-- change this, not a file.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal; which platform launched a section is not part of that
+-- surface, and the role that can reach a student's name gets no privilege it has
+-- no use for (ADR 0001, SPEC §6.2).
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade does have something to revoke**, unlike
+-- classification_grants_v001.sql's: both tables are E0-08's and outlive this
+-- revision, so a privilege granted here would survive a downgrade that dropped
+-- nothing. The revision's `downgrade()` writes the two REVOKE statements rather
+-- than a second file, because there is no `_v001` text for an un-grant to be an
+-- immutable record of.
+
+GRANT SELECT ON public.lti_platform TO pulse_app;
+GRANT SELECT ON public.lti_deployment TO pulse_app;

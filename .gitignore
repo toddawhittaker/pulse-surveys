@@ -16,6 +16,9 @@ venv/
 htmlcov/
 .coverage
 .coverage.*
+coverage.xml
+reports/
+*.egg-info/
 
 # Node
 node_modules/
@@ -23,6 +26,11 @@ dist/
 build/
 .vite/
 *.tsbuildinfo
+
+# Playwright (the e2e run's local output; the CI report is uploaded, not committed)
+playwright-report/
+test-results/
+/playwright/.cache/
 
 # Editors and OS
 .DS_Store
@@ -33,3 +41,8 @@ build/
 # Claude Code local overrides
 .claude/settings.local.json
 .claude/*.local.json
+
+# Subagent memory (`memory: project` in .claude/agents/*.md). Local working
+# state, not a repository artifact — and left untracked it gets swept into
+# ticket commits by any agent running `git add -A`.
+.claude/agent-memory/

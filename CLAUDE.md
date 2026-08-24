@@ -1,145 +1,149 @@
-# Pulse Surveys — operative constraints
+# Pulse Surveys — process
 
-Full detail lives in `docs/SPEC.md` and `docs/DESIGN_BRIEF.md`. This file lists
-what must not be violated. Where the two documents disagree, the spec wins (it
-is later); the brief still governs anything the spec does not restate.
+This file holds process only: how work is done in this repo. It does not hold
+feature decisions, system behavior, rationale, status, or history.
 
-## Confidentiality invariants (SPEC §4.1)
+- What the system does → `docs/SPEC.md`
+- Why a construction choice was made → `docs/adr/`
+- What is being built next → `docs/tickets/`
+- How it should look → `docs/DESIGN_BRIEF.md`, `design/`
+- What has already gone wrong here → `docs/MISTAKES.md`, read whole before you
+  start; it is the rules, and each links to its incident in `docs/mistakes/`
 
-These are automated assertions in the test suite, not conventions. Every read
-path must satisfy them, and a change that weakens one is a defect regardless of
-how it improves anything else.
+Before adding a line here, ask whether it would still be true if the process
+changed; if yes, it belongs elsewhere. No feature decisions, status, or
+changelog entries. Under 150 lines; growth means something here belongs elsewhere.
 
-1. Students never see comparables, benchmarks, university averages, or other
-   sections — not in charts, text, tooltips, exports, or aria labels.
-2. A Lead Faculty assignment never grants a sibling lead's courses, at any point
-   in the purview union computation.
-3. Below the n-threshold (default 5 responses in a reporting week), raw comments
-   are hidden from instructors and students alike.
-4. Aggregate language counts sections, never instructors. Say "needs attention,"
-   never "underperforming." No ranking, no composite scores, no score-sorting
-   anywhere.
-5. Confidentiality copy appears exactly once per surface (on the survey: in the
-   submit bar), in plain words, with no shield or lock iconography.
-6. No view may ever widen a student's visibility relative to these rules.
+**Active epic:** E0 — Foundations. Tickets: `docs/tickets/e0/README.md`.
 
-Supporting rules that make the above hold:
+## Read before you start
 
-- Responses are keyed to the LMS user ID. Identity is never displayed to any
-  instructor or leadership role, in any view, including CSV export.
-- Re-identification is possible only through the Care queue, only by the Care
-  role, and is automatically audit-logged (actor, timestamp, case). Admin and
-  VPAA cannot read flagged comment content or reach identity.
-- Instructor and leadership read paths go through identity-separated SQL views
-  that structurally cannot join to identity columns. Enforce this in migrations
-  (`backend/app/views_sql/`), not only in application code.
-- Comment display order is randomized; timestamps are never shown with comments.
-- Small-N comments are not discarded — they feed AI summaries and are released
-  as raw text in a batch once cumulative term volume crosses the threshold, so
-  release timing cannot identify an author.
-- Threat and self-harm content appears only in the Care queue. Below small-N,
-  flagged comments are concealed from the instructor entirely (no chip, no
-  count, no flag-type hint) while routing to the reviewer immediately.
+On what the system does, `docs/SPEC.md` governs; the brief governs only what
+the spec does not restate. On how work is done, **this file governs** — where
+`CONTRIBUTING.md` (the same rules written for humans, and the copy that drifts)
+disagrees, this file wins. If your work contradicts the spec, that is not yours
+to resolve alone — raise it and update the spec.
 
-## Roles and purview (SPEC §2.1)
+Read the relevant section before touching the code it governs. Do not work from
+a summary of it, including this file:
 
-- People are not roles. A person holds one or more *role assignments*, each
-  scoped to an org node. Every view resolves from an assignment or a union of
-  assignments, never from a person "type."
-- Two decoupled structures, neither derived from the other:
-  **containment** (Institution → College → Department → Prefix → Course →
-  Section) drives navigation and aggregation; the **supervision graph** drives
-  purview and escalation.
-- `reportsTo` edges connect **assignments**, never people and never org nodes.
-  The graph is a forest/DAG over assignments; assignment-level cycles are
-  rejected at write time, person-level cycles are legal and expected.
-- Purview(assignment) = own grant ∪ purviews of all assignments transitively
-  reporting to it, with the own grant restricted by role grain (a lead's grant
-  is only their led courses; a chair's the department subtree; a dean's the
-  college). The assistant dean — led courses ∪ every supervised chair's
-  department — is the case that proves purview cannot come from containment.
-- Lead Faculty get the hierarchy view only, never a by-lead-faculty pivot. Chair
-  and above additionally get the by-lead pivot over their purview.
-- Care is deliberately not composable with any reporting role. Its only power is
-  the threat queue.
-- Every role can enter by LTI launch; leadership, Care, and Admin can also enter
-  by OIDC web login. Both doors resolve to the same identity and the same full
-  purview. The launch context resolves which section a link points at; it never
-  caps what a leadership user may see.
-- LMS-owned data (courses, sections, section codes, enrollments, teaching
-  instructors) is read-only in Pulse. Course level derives from the course
-  number; section length and dates derive from the section code via the
-  start-letter map. Nothing LMS-owned is hand-edited here.
-- All authorization scoping goes through `backend/app/services/authz.py`. Every
-  entry point — HTTP, Celery job, future MCP server — passes that chokepoint.
+| Before touching | Read |
+|---|---|
+| any read path, view, or export | §4 and §4.1 — the visibility invariants |
+| roles, purview, scoping, `authz.py` | §2.1 — assignments, supervision graph, purview |
+| terms, section codes, week axes | §2.2 |
+| anything the Care role can reach | §6.2 |
+| any model call, prompt, or contract | §7.4 — the single-shot boundary |
+| where a module goes | §13 — use an existing module; add one only when nothing fits |
+| any UI | `docs/DESIGN_BRIEF.md`, `design/tokens.css`, and §7.6 |
+| something someone already built | `docs/adr/` — how it was built and why |
 
-## Single-shot AI boundary (SPEC §7.4)
+## Branch and pull request discipline
 
-- The five gateway tasks (comment validity, moderation, weekly summary, response
-  draft, draft check) are each **one call in, one validated Pydantic object
-  out**. No tool use, no planning loop, no iterative retrieval. This protects
-  the p95 < 2s validity budget, the CI precision/recall gates, and the
-  auditability of a safety flag (a specific prompt version and model ID produced
-  a specific classification for a specific comment).
-- Every classification stores its prompt version and model ID. Prompts are
-  versioned in-repo under `backend/app/ai/prompts/`.
-- The output contract models in `ai/contracts.py` serve three roles at once —
-  runtime contract, API schema, eval fixture. Do not fork them.
-- Validity gating fails open: on provider timeout the character heuristic floor
-  applies, the submission is accepted, and classification runs async. Never
-  block a student on a provider outage.
-- Agentic loops live in `backend/app/agents/` and consume the authz-scoped
-  services; they never live inside the gateway, are read-only, and never touch
-  the student-facing or grading paths. AI never publishes anything — a human
-  presses publish.
+`main` is protected. Never commit to it, never merge into it locally, never
+force-push anything anywhere. Every change reaches `main` through a pull
+request, and so does every change to an epic branch.
 
-## Repository structure (SPEC §13)
+Three tiers. `main` holds reviewed work. One long-lived **epic branch** per epic
+in SPEC §14.3, named `epic/e<N>-<kebab-title>`, cut from `main`. One short-lived
+**ticket branch** per item in that epic's breakdown, named `e<N>/<kebab-slug>`,
+cut from its epic branch. Ticket branches merge into their epic branch by pull
+request; epic branches merge into `main` by pull request. No exceptions, no
+direct merges either way. Process and tooling changes (this file, `.claude/`,
+CI) ride a `process/<kebab-slug>` branch through the same PR path;
+`CONTRIBUTING.md` has the branch name tables.
 
-Monorepo, laid out as specified in §13. Two structural rules carry weight:
+For every unit of work, in order: confirm the epic branch (create from `main`
+if absent); cut the ticket branch from it — never work on the epic branch;
+commit in small coherent steps, subject naming the ticket (`e1/launch-flow:
+validate state and nonce on LTI launch`); open a PR into the epic branch using
+the template; stop and wait for Todd.
 
-- `api/` routers stay thin. All domain logic lives in `services/`, so the HTTP
-  API, Celery jobs, and the future MCP server share one implementation and one
-  authorization chokepoint.
-- Identity-separated read views ship as Alembic migrations in `views_sql/`, not
-  as ORM convention, so confidentiality survives a future careless query.
+**Never merge an epic branch into `main`** — Todd's call, always. A ticket PR
+may be merged into its epic branch only after Todd approves it in writing in
+the conversation; his approval is the trigger, never your own assessment. Never
+use an admin override, never merge while CI is failing or red, never retarget a
+PR across epics — close it and re-cut the branch.
 
-Keep the top-level shape: `backend/`, `frontend/`, `mock-lms/`, `mock-idp/`,
-`tests/{unit,integration,e2e,evals}`, `scripts/`, `docs/`, `design/`, with
-Compose and the Makefile at the root. New backend code belongs in an existing
-§13 module; add a new one only when nothing fits.
+## How a ticket is built
 
-## Design rules (DESIGN_BRIEF)
+The orchestrating session designs and briefs; subagents build. The brief
+settles design decisions before dispatch — a decision left open in a brief
+comes back as a review finding. In order: `test-author` writes failing tests
+from the ticket and spec (it never reads the implementation; only it writes
+under `tests/`); the implementer confirms the reds, then codes to green without
+touching a test — a disputed test gets `docs/disputes/<TICKET>-NN.md` and a
+stop, and the orchestrator arbitrates from the disputed sources, escalating to
+Todd only when the spec is genuinely silent; `verifier` independently re-runs
+every green claim and the mutation battery — no green is believed on its
+author's word. Fix rounds are tests-first too, with the stopping rule declared
+before the round and recorded in the PR. Mechanics: `.claude/skills/build-ticket`.
 
-The prototype in `design/` is the visual and interaction contract. The frontend
-implements it; it does not reinterpret it.
+## CI and build discipline
 
-- **Chart family.** TrendPair wherever benchmarks are present (instructor
-  report, leadership). TrendDuo for the two-stream benchmark-free case (student
-  results). Single-line for one-stream contexts. Section line is marigold,
-  solid, 2.5px, with a dot on the current week; benchmark is mist dashed;
-  university is mist 50% dotted. Course-level pages plot course week with a term
-  week sub-label; aggregate pages plot the term axis with one line per start
-  cohort.
-- **Madder (`--madder`) is reserved** for flags, destructive actions, and the
-  required state — it always means "attend to this." A conditional-required
-  field warming up is an invitation, so it uses marigold, not madder. Nothing in
-  this product shames: no shake, no red on a student who wrote too little.
-- **Motion budget.** Micro-interactions 150–220ms ease-out. Exactly one 600ms
-  signature moment per screen (the hero line drawing once per visit). All motion
-  removed under `prefers-reduced-motion` via the global kill switch.
-- **The Care queue has no motion at all.** Stillness is the design. It also
-  carries a distinct quiet register, no search, no filters beyond
-  Open/Resolved, no bulk actions — the UI must not imply triage at scale.
-- One signature motif (the pulse line), zero other decoration. All color, type,
-  spacing, radius, shadow, and focus values come from `design/tokens.css`; no
-  raw hex in components. Focus ring is 2px marigold at 2px offset on every
-  interactive element.
-- Type: Literata (display), Schibsted Grotesk (body), Spline Sans Mono (all
-  numbers). No Inter, Roboto, Arial, Lato, or system stacks. Never use Canvas
-  blue (#0374B5) for interactive elements.
-- Radius 4px inputs, 8px cards. Report and survey surfaces use a single ~720px
-  reading column, not a dashboard grid; leadership may go two-pane and dense.
-- Every prototype primitive becomes one React component with variants, never a
-  per-screen copy.
-- WCAG 2.2 AA is a floor: full keyboard operability inside the iframe, and every
-  chart carries a data-table equivalent.
+CI is what makes the §14.2 definition of done enforceable. A red pipeline is
+information, never an obstacle.
+
+**Never merge or mark a pull request ready with red CI.** Not "it's unrelated,"
+not "it passes locally." Run `make ci` before pushing; when it disagrees with
+`.github/workflows/ci.yml`, the workflow is right and the Makefile is the bug.
+
+**Never skip, xfail, mark flaky, or delete a failing test to make CI pass.** A
+failing test is finding a real defect or is itself wrong. If the test is wrong,
+fix it in its own commit, separate from the change that provoked it, and say in
+the PR why the old assertion was incorrect. Deleting a red test and reporting
+green is a false report about the state of the system.
+
+**The §4.1 invariant suite may never be skipped.** CI runs it in an isolated
+pass and treats a skip, an xfail, or an empty collection as a failure;
+`scripts/ci/check_invariants.py` enforces this.
+
+**Never weaken an eval floor to get a gate to pass.** Floors move only in a
+deliberate PR whose subject is moving them. The threat and self-harm recall
+floor (§9.3) is a hard gate; lowering it is a safety decision and Todd's call.
+
+**Every pull request gets an independent security review before it is marked
+ready** (§14.2 item 3), from a context that watched none of the work — an
+`app-security` subagent briefed with the diff and nothing else, reading the
+diff before the ticket. Record the findings and their resolutions in the PR
+body. A review pass goes stale the moment a fix lands on top of it: run the
+pass over the fixes, or say plainly that you stopped and why. On a ⚠ epic it
+supplements line-by-line human review; it never replaces it.
+
+**Pin dependency versions and commit lockfiles.** No floating ranges, no
+unpinned tool versions in CI. Dependabot proposes upgrades through the same
+gates as anything else.
+
+**Do not weaken a gate to get past it.** An ignore rule, an exclusion, a
+`continue-on-error`, or a raised budget changes what the project guarantees and
+belongs in its own PR saying what coverage was given up and why. On the
+tolerance flags in `ci.yml`, see ADR 0002.
+
+## Architecture decision records
+
+When a construction decision is **not answered by `docs/SPEC.md`** and a
+reasonable engineer might choose differently, write `docs/adr/NNNN-slug.md` **in
+the same pull request as the decision**. Four sections, under a page: context,
+decision, alternatives rejected and why, consequences.
+
+- **Never write an ADR restating something the spec already decides.** Link to
+  the spec section instead.
+- **If a decision contradicts the spec, an ADR is not sufficient.** Raise it,
+  and update the spec.
+- The test is both halves: the spec is silent, *and* the choice is contestable.
+- Number sequentially, never reuse a number, never renumber. A superseded ADR
+  stays in place with a line pointing at its replacement.
+
+## Secrets
+
+Never create, read, modify, or echo a repository secret or an environment
+secret. Never add a secret reference to a workflow — a new `secrets.*`
+expression, binding, or widening — without asking first; then wait, do not add
+it provisionally.
+
+Local secrets live in `.env`, gitignored and staying that way. `.env.example`
+carries variable *names* and obviously-fake placeholders, never a real
+credential; a ticket adding a variable adds its name there in the same PR. Do
+not print `.env`, paste a credential into a commit or PR body, or write one
+into a fixture, seed, or log. If a real secret is needed, say so and let Todd
+supply it.

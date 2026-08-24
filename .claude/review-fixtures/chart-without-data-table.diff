@@ -1,0 +1,82 @@
+# fixture: chart-without-data-table
+# reviewer: a11y-copy
+# ticket: none — the student results view belongs to E8 ("results UI"), which
+#         has no tickets written. Tell the reviewer the pull request names no
+#         ticket; do not invent one.
+# expect: HIGH — the chart carries no data-table equivalent, which SPEC §10 and
+#         the design brief make a floor rather than an enhancement.
+# note: several smaller defects are planted so the fixture also measures noise:
+#       a raw hex value instead of a token, a removed focus outline, a motion
+#       duration outside the budget, and an aria label that names the benchmark
+#       to a student — the last leaks a §4.1 item to precisely the users who
+#       depend on assistive technology.
+# corrected: this header used to say the motion case ships "with no
+#       reduced-motion guard". It was wrong, and a reviewer measured it: the
+#       global kill switch in `design/tokens.css` catches an inline animation,
+#       because an author `!important` beats an inline declaration. It is a
+#       budget note, not a reduced-motion failure. A fixture that overstates its
+#       own defect teaches a reviewer to over-report.
+# also planted, undeclared until a run found them: the banned word
+#       "underperforming", lock-emoji iconography, confidentiality copy on a
+#       surface it does not belong to, two series distinguished by colour alone
+#       below the 3:1 floor, and a `benchmark` field in the props — a leak that
+#       reaches the client whether or not it is painted.
+
+diff --git a/frontend/src/components/StudentTrendDuo.tsx b/frontend/src/components/StudentTrendDuo.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/StudentTrendDuo.tsx
+@@ -0,0 +1,52 @@
++import { Line, LineChart, XAxis, YAxis, Tooltip } from 'recharts'
++
++interface Props {
++  weeks: { week: number; clarity: number; pace: number; benchmark: number }[]
++  courseName: string
++}
++
++export function StudentTrendDuo({ weeks, courseName }: Props) {
++  return (
++    <figure
++      className="trend-duo"
++      style={{ animation: 'fade-in 900ms ease-out' }}
++      aria-label={`Weekly trend for ${courseName}, compared against the university average`}
++    >
++      <figcaption>How the class has been going</figcaption>
++
++      <LineChart width={680} height={240} data={weeks}>
++        <XAxis dataKey="week" />
++        <YAxis domain={[1, 5]} />
++        <Tooltip />
++        <Line
++          type="monotone"
++          dataKey="clarity"
++          stroke="#DFA320"
++          strokeWidth={2.5}
++          dot={false}
++        />
++        <Line
++          type="monotone"
++          dataKey="pace"
++          stroke="#8F6A10"
++          strokeWidth={2.5}
++          dot={false}
++        />
++      </LineChart>
++
++      <button
++        className="trend-duo__toggle"
++        style={{ outline: 'none' }}
++        onClick={() => {}}
++      >
++        Switch view
++      </button>
++
++      <p className="trend-duo__note">
++        Your section is currently underperforming relative to similar courses.
++      </p>
++      <p className="trend-duo__confidentiality">
++        🔒 Your responses are confidential.
++      </p>
++    </figure>
++  )
++}

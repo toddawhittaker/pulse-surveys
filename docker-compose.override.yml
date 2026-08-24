@@ -1,0 +1,148 @@
+# Development wiring only (SPEC §13).
+#
+# `docker compose up` merges this file over docker-compose.yml automatically, so
+# everything here is on by default on a laptop and in CI — and absent from any
+# deployment that runs the base file alone. That is the whole reason the split
+# exists: host port publishing, hot reload, and running your checkout instead of
+# the code baked into the image are development conveniences, and each one is a
+# defect in production.
+#
+# One deliberate exception, and it is in CI rather than on a laptop: the `docker`
+# job runs a pass with `-f docker-compose.yml` alone. Because this file replaces
+# the installed application with your checkout, a merged stack proves nothing
+# about the image, and every other gate runs merged. See docs/adr/0011.
+#
+# Ports bind to 127.0.0.1 rather than to every interface, so a laptop on a
+# conference network is not serving its database to the room.
+
+# Your checkout, in place of the copy the image installed. It goes to all three
+# application services and not just `api`, and that is the point rather than
+# tidiness: with it on `api` alone, an edit reaches the API and not the worker,
+# so the two containers run different code. Both outcomes were measured against
+# the running stack, and the quiet one is the one to fear:
+#
+#   - A task you *change* comes back with the answer the old code gave. The API
+#     reads your edit, the worker answers out of what it imported at startup,
+#     and nothing anywhere reports a problem.
+#   - A task you *add* comes back as `NotRegistered: app.jobs.tasks.<name>`,
+#     because the worker stores a failure result for a name it does not know.
+#     That one at least says what happened.
+#
+# **Celery does not reload.** `api` picks an edit up by itself; `worker` and
+# `beat` need `docker compose restart worker beat`. README.md says so where it
+# tells you to edit a task.
+x-development-source: &development-source
+  environment:
+    # The image installs the application into its virtualenv. PYTHONPATH comes
+    # before site-packages on `sys.path`, so the mounted source below is what
+    # gets imported and the installed copy is what production runs. Both lines
+    # move together — a mount with no PYTHONPATH would run the image's copy and
+    # look like a reloader that quietly does nothing.
+    PYTHONPATH: /app/backend
+  volumes:
+    # Read-only: no container writes to your checkout, and nothing they create
+    # ends up owned by uid 1001 on the host. It is also why this grants no
+    # privilege the base file does not — all three services get the same mount,
+    # read-only, as the same unprivileged user.
+    - ./backend:/app/backend:ro
+
+services:
+  api:
+    <<: *development-source
+    # Reload on edit. StatReload polls, because `watchfiles` is not in the
+    # locked closure and the image ships exactly what the lockfile says; polling
+    # one directory is cheap and works across a bind mount, where inotify from
+    # inside a container often does not.
+    command:
+      - uvicorn
+      - app.main:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8000'
+      - --reload
+      - --reload-dir
+      - /app/backend
+    ports:
+      - '127.0.0.1:8000:8000'
+
+  # No `command` override on either: the base file's is already right, and there
+  # is no reload flag to add. `beat` keeps its schedule volume from the base
+  # file — Compose merges the two volume lists rather than replacing one.
+  worker:
+    <<: *development-source
+
+  beat:
+    <<: *development-source
+
+  db:
+    ports:
+      # For psql and a GUI client against the development database.
+      - '127.0.0.1:5432:5432'
+
+  redis:
+    ports:
+      - '127.0.0.1:6379:6379'
+
+  mailpit:
+    ports:
+      # 8025 is the web interface; 1025 is the SMTP port the app will send to.
+      - '127.0.0.1:8025:8025'
+      - '127.0.0.1:1025:1025'
+
+  # The mock LTI platform's launch page, so a developer can click through a
+  # launch in a browser. 8080 on the host because 8000 is `api`; inside the
+  # container it is 8000 like every other Python service here.
+  #
+  # No source mount and no reload flag: the development anchor above sets
+  # PYTHONPATH to `/app/backend`, which is the backend's import root and not this
+  # service's. Editing the mock means `docker compose up -d --build mock-lms`,
+  # and README.md says so where it tells you how to reach it.
+  #
+  # **The two tool URLs are repointed at the published address** (E0-18, and it
+  # settles E0-30 item 3). The base file names `http://api:8000/...`, which is
+  # correct for a container talking to a container — and a launch is neither. It
+  # is a *browser* being redirected: the launch page runs at
+  # `localhost:8080`, the form posts to the tool, the tool redirects back to the
+  # authorization endpoint, and the platform posts the signed `id_token` to the
+  # tool again. Every one of those hops is made by the browser on the host, which
+  # cannot resolve `api`. And `MOCK_LMS_TOOL_LAUNCH_URL` is compared **exactly**
+  # against the `redirect_uri` the tool builds out of `PUBLIC_BASE_URL`, so these
+  # two lines and that setting have to name the same address or no launch
+  # completes at all.
+  #
+  # They live here rather than in the base file because they are development
+  # wiring: a deployment reaches its real LMS at a real address, and
+  # `localhost:8000` would be nonsense there.
+  mock-lms:
+    environment:
+      MOCK_LMS_TOOL_LOGIN_URL: http://localhost:8000/lti/login
+      MOCK_LMS_TOOL_LAUNCH_URL: http://localhost:8000/lti/launch
+    ports:
+      - '127.0.0.1:8080:8000'
+
+  # The mock OIDC provider's pages, so a developer can read the seeded identities
+  # and the registration in a browser. 8081 on the host because 8000 is `api` and
+  # 8080 is `mock-lms`; inside the container it is 8000 like every other Python
+  # service here.
+  #
+  # No source mount and no reload flag, for the same reason as `mock-lms` above:
+  # the development anchor sets PYTHONPATH to `/app/backend`, which is the
+  # backend's import root and not this service's. Editing the mock means
+  # `docker compose up -d --build mock-idp`, and README.md says so where it tells
+  # you how to reach it.
+  #
+  # **The redirect URI is repointed for the same reason**, and the base file's
+  # own comment asks for exactly this. The provider sends the browser back to the
+  # tool with an authorization code, and it compares this value exactly — twice,
+  # once when the authorization request arrives and again when the code is
+  # redeemed — against the `redirect_uri` the tool builds out of
+  # `PUBLIC_BASE_URL`. The token endpoint and the key set are *not* repointed:
+  # the tool fetches those itself, from inside the `api` container, where
+  # `mock-idp:8000` is the address that resolves.
+  mock-idp:
+    environment:
+      MOCK_IDP_TOOL_REDIRECT_URI: http://localhost:8000/auth/oidc/callback
+    ports:
+      - '127.0.0.1:8081:8000'

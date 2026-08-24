@@ -1,0 +1,118 @@
+version: 2
+
+# Dependency versions are pinned and lockfiles are committed (CLAUDE.md), so
+# updates arrive as reviewable pull requests rather than as drift. Each one goes
+# through the same CI gates and the same branch model as any other change.
+updates:
+  # ---- Python backend -----------------------------------------------------
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    labels: [dependencies, python]
+    commit-message:
+      prefix: 'deps(py)'
+    groups:
+      # Patch and minor bumps arrive as one pull request so review effort goes
+      # to the ones that can actually break something.
+      python-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      # Majors for the LTI, database, and AI provider layers land deliberately
+      # in their own ticket, not on a Monday morning batch.
+      - dependency-name: pylti1p3
+        update-types: [version-update:semver-major]
+      - dependency-name: sqlalchemy
+        update-types: [version-update:semver-major]
+      - dependency-name: alembic
+        update-types: [version-update:semver-major]
+
+  # ---- Node, at the repository root ---------------------------------------
+  # `/`, not `/frontend`. This entry watched a directory that has never existed
+  # while the repository's only `package-lock.json` — the Playwright runner, the
+  # TypeScript and eslint checkers, the licence scanner — sat at the root
+  # unwatched, which is E0-40's founding defect wearing different clothes: a
+  # control pointed at a path that is not there reports nothing and looks well.
+  #
+  # There is one entry rather than two because there is one lockfile. When the
+  # E1 scaffold lands it brings `frontend/package-lock.json`, and a second entry
+  # for `/frontend` — with its own React major-version ignores, which moved out
+  # of here with the directory they were about — goes in beside this one.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    labels: [dependencies, javascript]
+    commit-message:
+      prefix: 'deps(js)'
+    groups:
+      js-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # ---- Container images ---------------------------------------------------
+  # Two ecosystems, because they read different files: `docker` reads the
+  # `FROM` lines in backend/Dockerfile, `docker-compose` reads the `image:`
+  # lines in docker-compose.yml. Every one of those references is pinned by
+  # tag *and* by digest (docs/adr/0007-container-images-pinned-by-tag-and-digest.md),
+  # which is the form Dependabot updates as a unit — it moves the tag and
+  # re-resolves the digest in the same pull request. A bare `postgres:17` would
+  # go stale silently instead.
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: 'deps(img)'
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: 'deps(img)'
+    ignore:
+      # SPEC §7.1 and §7.2 name these major versions. Moving off one is a spec
+      # change and a ticket, not a Monday morning batch.
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+      - dependency-name: redis
+        update-types: [version-update:semver-major]
+
+  # ---- GitHub Actions -----------------------------------------------------
+  # Actions are pinned by major tag in ci.yml; this keeps them current. It was
+  # the only ecosystem with anything to watch when this file was written; pip,
+  # npm and both image ecosystems have had something since.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: 'deps(ci)'
+    groups:
+      actions:
+        patterns: ['*']

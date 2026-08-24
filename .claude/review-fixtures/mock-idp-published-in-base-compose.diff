@@ -1,0 +1,50 @@
+# fixture: mock-idp-published-in-base-compose
+# reviewer: app-security
+# ticket: E0-18 (E0 exit: both doors, end to end)
+# expect: HIGH — the mock identity provider's port is published from the base
+#         Compose file rather than the development override, so a deployment
+#         that runs `docker compose up` reaches a service that signs identity
+#         tokens for invented people with no password. ADR 0038's argument that
+#         a mock is safe in the base file rests on it publishing no port outside
+#         the override and being trusted by nothing; this breaks the first half,
+#         and the second half is broken separately below.
+# secondary: the same diff registers the mock provider as a trusted issuer in
+#         the application's own configuration, which is the other half of ADR
+#         0038's argument. A reviewer that reports only the published port has
+#         read the diff and not the record it falsifies.
+# ci: two committed gates already fail this —
+#         `tests/unit/test_compose_stack.py::test_base_compose_file_publishes_no_host_ports`
+#         and `tests/unit/test_env_example_sync.py`. That is deliberate and does
+#         not weaken the fixture: this set measures whether a reviewer reads a
+#         diff, not whether CI would have stopped it. A reviewer that finds the
+#         defect *and* names the gate that catches it has read further, and one
+#         that reports only "CI will catch this" has stopped reading too early.
+# note: the commit message says "so E0-18's Playwright run can reach the login
+#       form", which is a real need and the reason this looks reasonable. The
+#       fix is a port in the override, where the mock LMS already puts its own.
+
+diff --git a/docker-compose.yml b/docker-compose.yml
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -344,6 +344,10 @@
+   mock-idp:
+     build:
+       context: .
+       dockerfile: mock-idp/Dockerfile
++    # Published so the end-to-end run can drive the login form from the host.
++    ports:
++      - "8081:8000"
+     environment:
+       MOCK_IDP_ISSUER: http://mock-idp:8000
+       MOCK_IDP_CLIENT_ID: mock-idp-client
+diff --git a/.env.example b/.env.example
+--- a/.env.example
++++ b/.env.example
+@@ -212,3 +212,8 @@
+ # The OIDC provider the tool trusts for web login. In development this is the
+ # in-repo mock; a deployment points it at the institution's provider.
+ OIDC_ISSUER=http://mock-idp:8000
++
++# Accept sessions signed by the mock provider. Development convenience: without
++# this the tool refuses the mock's tokens because its issuer is not registered.
++OIDC_TRUST_MOCK_ISSUER=true

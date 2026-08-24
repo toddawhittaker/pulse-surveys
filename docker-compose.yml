@@ -1,0 +1,495 @@
+# Pulse Surveys — the stack every deployment runs (SPEC §7.2, §13).
+#
+# Three properties of this file are load-bearing.
+#
+# **Nothing here publishes a port to the host.** Host publishing is
+# development-only and lives in docker-compose.override.yml, which
+# `docker compose up` merges in automatically. A `ports:` entry added here is
+# published in every non-development deployment and breaks nothing anyone runs,
+# so `tests/unit/test_compose_stack.py` reads this file on its own to catch it.
+# §7.2 puts the reverse proxy outside the compose file, so there is nothing this
+# file needs to bind.
+#
+# **No credential is defaulted.** Every `${...:?}` below is required, so a
+# deployment that has not set it fails to start and says which variable is
+# missing. A default password here would be a working credential in production.
+#
+# **Every image is pinned by tag and by digest**, so what runs is fixed by
+# content and not by whatever the registry currently serves under a tag. See
+# docs/adr/0007-container-images-pinned-by-tag-and-digest.md.
+#
+# Configuration comes from `.env`; copy `.env.example` to `.env` first.
+
+name: pulse-surveys
+
+# What `api`, `worker`, and `beat` have in common, written once. All three run
+# the same image over the same configuration and differ only in the command they
+# run and in how they report health, so the shared part is an anchor rather than
+# three copies: the blanking below is a handful of hand-written lines whose
+# absence is invisible in every dynamic check, and copying a service block is
+# exactly how they go missing.
+#
+# **The environment is an anchor of its own, and that is not tidiness.** A YAML
+# merge key supplies only the keys a node does not declare for itself, so a
+# service that writes its own `environment:` block replaces the anchor's mapping
+# wholesale rather than adding to it — which is how a service gains one variable
+# and silently loses every blanked one. `api` needs exactly that: one variable
+# the other two must not hold. It merges this mapping inside its own block, so
+# the blanking travels with it. Verified with `docker compose config`, which
+# renders the merged environment per service.
+x-application-environment: &application-environment
+  # Overrides, all relying on `environment:` beating `env_file:` on every
+  # Compose version.
+  #
+  # First: `.env` builds DATABASE_URL out of DB_APP_USER, DB_APP_PASSWORD,
+  # and DB_NAME so the password is written once, and Compose expands that
+  # here, when it reads `.env` as its own interpolation source. Whether
+  # `env_file:` expands it is a Compose version's business and has not
+  # always been the same answer, so the container gets an expanded URL
+  # either way.
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is not set — copy .env.example to .env}
+  # Second: the Care queue's own connection, blanked here and supplied by the
+  # `api` service alone. `pulse_care` is the only credential in the cluster
+  # that can execute the reveal, and a caller holding it can read the `CARE`
+  # assignments it needs to borrow an actor. Until E0-26 it could also run the
+  # reveal inside a transaction it rolled back, keeping the name and discarding
+  # the audit row — reproduced on the pinned image, and the premise ADR 0042
+  # rejected this blanking on, so that record was amended rather than left
+  # standing. That half is closed as of ADR 0071: the door is two calls and the
+  # second answers only against a committed record. The borrowed actor is not,
+  # and is E0-26 item 3, so the blanking stands on its own terms — a credential
+  # in a process that never serves this queue buys nothing either way.
+  # `worker` and `beat` never serve this queue, and
+  # `worker` is the process that ships student comment text to a third-party
+  # model provider, so it is the last container in the stack that should hold
+  # a route to a student's name. Blanked rather than omitted, for the same
+  # reason as the superuser pair below.
+  CARE_DATABASE_URL: ''
+  # And the parts that URL is built from, blanked on every application service
+  # including `api`, because blanking the URL alone would be nominal:
+  # `env_file:` hands over `DB_CARE_USER` and `DB_CARE_PASSWORD` as well, and
+  # `DATABASE_URL` supplies the host, the port and the database name, so a
+  # process holding the pair can assemble the connection in one line. `db` is
+  # the only service that needs them and takes them by explicit interpolation
+  # (below), never through `env_file:`. Nothing in the application reads them —
+  # see `.env.example`, where the whole `DB_*` block exists for Compose.
+  DB_CARE_USER: ''
+  DB_CARE_PASSWORD: ''
+  # Fourth: `.env` also carries the superuser credential, because `db` needs
+  # it, and `env_file:` would hand the whole file to this container. No
+  # application container may hold it. `db:5432` is reachable from all three
+  # and accepts that role over scram, so a credential sitting in this
+  # environment is a route back to everything scripts/db-init and ADR 0009
+  # exist to deny — bypass of every grant, bypass of row-level security, and
+  # COPY … FROM PROGRAM. Blanked rather than omitted: `env_file:` has
+  # already set them by the time this is applied, so an empty value is what
+  # removes them.
+  DB_SUPERUSER: ''
+  DB_SUPERUSER_PASSWORD: ''
+  # Fifth, and the one entry here that supplies rather than withholds: the
+  # identity provider the web login door verifies against (§2). ADR 0077 makes
+  # these five required in `app/config.py` — a deployment that names no provider
+  # now stops at startup instead of quietly trusting the `mock-idp` service this
+  # file starts — and required fields have to arrive from somewhere for `docker
+  # compose up` on a clean checkout to reach a system a person can log in to
+  # (§14.3). This is that somewhere, and it is in the anchor so that all three
+  # services that construct a `Settings` get them; `api` alone would be an API
+  # with `worker` and `beat` in a restart loop.
+  #
+  # **`${NAME:-default}`, never a literal**, and that is the decision rather than
+  # a style choice. `environment:` beats `env_file:`, so a bare literal here
+  # would override a deployment's own `.env` and make this file undeployable. The
+  # interpolated form lets `.env` win and falls back to the development address
+  # only when nothing is set — where the refusal above then catches it outside
+  # development. `${NAME}` with no fallback is wrong in the other direction: it
+  # interpolates to the empty string, which *withholds* the variable exactly as
+  # the blanking lines above do.
+  #
+  # The addresses are two horizons: `OIDC_AUTHORIZATION_ENDPOINT` is where a
+  # browser on the host is sent, so it is `localhost` on the published port; the
+  # rest are reached from inside this network, so they are the service name.
+  # `.env.example` documents all five and ADR 0075 argues the split.
+  OIDC_ISSUER: ${OIDC_ISSUER:-http://mock-idp:8000}
+  OIDC_AUTHORIZATION_ENDPOINT: ${OIDC_AUTHORIZATION_ENDPOINT:-http://localhost:8081/oidc/authorize}
+  OIDC_TOKEN_ENDPOINT: ${OIDC_TOKEN_ENDPOINT:-http://mock-idp:8000/oidc/token}
+  OIDC_JWKS_URL: ${OIDC_JWKS_URL:-http://mock-idp:8000/.well-known/jwks.json}
+  OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-mock-idp-client}
+
+x-application: &application
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  # The whole §6.3 configuration surface, so a setting added in a later
+  # ticket reaches the container without editing this file.
+  env_file:
+    - .env
+  environment: *application-environment
+
+services:
+  # The FastAPI application (§7.1).
+  api:
+    <<: *application
+    # The one process that serves the Care queue (§6.2), and therefore the one
+    # that holds the `pulse_care` credential. `<<:` inside this block and not
+    # beside it: an `environment:` written here replaces the anchor's mapping
+    # outright, so without the merge the superuser pair would arrive unblanked
+    # from `env_file:` and nothing dynamic would say so.
+    environment:
+      <<: *application-environment
+      CARE_DATABASE_URL: ${CARE_DATABASE_URL:?CARE_DATABASE_URL is not set — copy .env.example to .env}
+    depends_on:
+      # The mapping form, not the list. `depends_on: [db]` waits for the
+      # container to start; this waits for Postgres to accept connections,
+      # which is a different guarantee and the one E0-04 needs.
+      db:
+        condition: service_healthy
+      # Redis is the Celery broker the API publishes to (§7.2). Waiting on it
+      # here is also what carries `db` and `redis` into the health gate: CI
+      # names api, worker, and beat, and reaches the other two only through
+      # these two conditions.
+      redis:
+        condition: service_healthy
+    # Documentation, not publishing: reachable from the other services on this
+    # network, and from nothing on the host.
+    expose:
+      - '8000'
+
+  # The Celery worker — classification, summaries, passback (§7.2, §7.4).
+  worker:
+    <<: *application
+    # Log level from the same variable the application's own logging follows, so
+    # turning the stack up to DEBUG is one edit rather than two.
+    command:
+      - celery
+      - --app
+      - app.jobs.celery_app
+      - worker
+      - --loglevel
+      - ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # `celery inspect ping` sends a control message over the broker and waits
+      # for this worker to answer it. That is the point: it fails when Redis is
+      # gone, when the worker has stopped consuming, and when the application
+      # cannot be imported — which is more than "the process exists" and is
+      # E0-03's fourth acceptance criterion.
+      #
+      # `--destination` scopes the question to this container. Without it the
+      # probe is satisfied by *any* worker replying, so a second worker on the
+      # same broker would report this one healthy while it is wedged. `$$`
+      # reaches the container as a single `$`, so the shell inside it runs
+      # `hostname`; Celery's default node name is `celery@<hostname>`.
+      test:
+        - CMD-SHELL
+        - >-
+          celery --app app.jobs.celery_app inspect ping
+          --destination "celery@$$(hostname)" --timeout 5 > /dev/null
+      interval: 15s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # Celery beat — window open and close, Monday reports, retention (§7.2, §3.1).
+  beat:
+    <<: *application
+    # `--schedule` is not optional here: the default is `celerybeat-schedule` in
+    # the working directory, which is `/app` and owned by root, so beat would
+    # fail to start. The path is the named volume below.
+    command:
+      - celery
+      - --app
+      - app.jobs.celery_app
+      - beat
+      - --loglevel
+      - ${LOG_LEVEL:-INFO}
+      - --schedule
+      - /var/lib/celery/beat-schedule
+      # How long beat sleeps between iterations when nothing is due, and with an
+      # empty schedule that is every iteration. It is also what bounds how stale
+      # the schedule file gets: beat writes the store after a wake-up on which
+      # its own `sync_every` — 180 seconds — has elapsed, so a short loop makes
+      # the write land close to that figure rather than up to five minutes after
+      # it. Measured on the running container: 180 seconds between writes, 210
+      # in the worst case, where the wake lands just before the boundary.
+      - --max-interval
+      - '30'
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # Named, so the last-run times survive `docker compose restart beat` and a
+      # container replacement alike. That persistence is what will keep beat
+      # from re-firing a window it already fired once E2 puts a real entry in
+      # the schedule; today the schedule is empty and nothing could fire twice,
+      # so the volume is built now and the property is E2's to assert.
+      - beat-schedule:/var/lib/celery
+    healthcheck:
+      # Freshness of the schedule file, not the existence of a process. A beat
+      # whose loop has wedged, or which is stuck on a broker it cannot reach,
+      # goes on existing as a process and stops writing this file.
+      #
+      # 300 seconds against a write cadence measured at 180, worst case 210:
+      # about a minute and a half of slack over the worst ordinary write, so a
+      # slow one is not a flap, and well under two missed writes. Measured on a
+      # running beat rather than read out of celery's source
+      # (docs/MISTAKES.md entry 8). Three retries thirty seconds apart sit on
+      # top of that, so a wedged beat is reported in roughly six minutes.
+      #
+      # The glob rather than the exact name: the store is a `shelve`, and which
+      # files the interpreter's `dbm` implementation puts behind that name is
+      # not this file's business — on python 3.13 it is `dbm.sqlite3`, and the
+      # write that matters lands in `beat-schedule-wal` while `beat-schedule`
+      # itself keeps the mtime it was created with. Taking the youngest of them
+      # is what makes the check survive a different `dbm`. The age is printed
+      # because `docker inspect` keeps a health check's output, and "no schedule
+      # file" and "written 412s ago" are different faults.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import pathlib, sys, time;
+          ages = [time.time() - p.stat().st_mtime
+          for p in pathlib.Path("/var/lib/celery").glob("beat-schedule*")];
+          print("schedule file written %.0fs ago" % min(ages) if ages else "no schedule file");
+          sys.exit(0 if ages and min(ages) <= 300 else 1)
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # PostgreSQL 17 (§7.1, §7.2).
+  db:
+    image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
+    # Compose cannot parse a URL, so the database's own credentials cannot be
+    # read out of DATABASE_URL. They are read from the parts DATABASE_URL is
+    # built from instead, which keeps each password in one place rather than in
+    # two that can disagree. See docs/adr/0008.
+    #
+    # Three roles, and the split is the point. POSTGRES_USER is the role `initdb`
+    # creates; it is the cluster superuser, and ADR 0009 sanctions it for
+    # migrations and system-level tasks only. DB_APP_USER is the role the
+    # application connects as, created by scripts/db-init, and it is granted
+    # only CONNECT — it keeps whatever Postgres gives PUBLIC by default, which
+    # today is CONNECT on the other databases and TEMPORARY on this one, so it
+    # is not a role with no privileges at all. ADR 0001 line 71 still holds and
+    # is what this buys: a runtime role that is superuser bypasses grants and
+    # row-level security entirely, which would make the whole
+    # identity-separation scheme decorative.
+    #
+    # DB_CARE_USER is E0-10's third role, created the same way and for the
+    # opposite job: it is the only role in the cluster that can execute the
+    # audited reveal, and it holds no SELECT on the identity table either, so a
+    # name cannot be obtained without an audit row (SPEC §6.2, ADR 0001). Both
+    # runtime roles get their privileges and their grants from the E0-10
+    # migration; what these two pairs carry is the login credential, which a
+    # migration cannot hold without holding it in the repository.
+    environment:
+      POSTGRES_USER: ${DB_SUPERUSER:?DB_SUPERUSER is not set — copy .env.example to .env}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:?DB_SUPERUSER_PASSWORD is not set — copy .env.example to .env}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is not set — copy .env.example to .env}
+      DB_APP_USER: ${DB_APP_USER:?DB_APP_USER is not set — copy .env.example to .env}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD is not set — copy .env.example to .env}
+      DB_CARE_USER: ${DB_CARE_USER:?DB_CARE_USER is not set — copy .env.example to .env}
+      DB_CARE_PASSWORD: ${DB_CARE_PASSWORD:?DB_CARE_PASSWORD is not set — copy .env.example to .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Runs once, against an empty data directory. An existing volume never
+      # sees it — `down -v` is what discards one.
+      - ./scripts/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # `psql`, not `pg_isready`: that one reports whether the server answers and
+      # never authenticates, so it prints "accepting connections" for a role and
+      # a database that do not exist. This asks the question `depends_on`
+      # actually needs answered — can the application's role log in to the
+      # application's database — so a volume initialised under different
+      # credentials fails here instead of at E0-04's first connection.
+      #
+      # `--host=db` and not `127.0.0.1`, and the difference is not cosmetic. The
+      # image's generated `pg_hba.conf` ends with
+      # `host all all 127.0.0.1/32 trust`, so a loopback probe never checks the
+      # password; reaching the service by name resolves to this container's
+      # address on the Compose network, which falls to the final
+      # `host all all all scram-sha-256` rule — the same rule `api` authenticates
+      # under. Verified by connecting with a deliberately wrong password: over
+      # loopback it succeeds, by name it is refused.
+      #
+      # Naming a host at all also forces TCP. The temporary server `initdb` runs
+      # listens on the local socket only, so a socket probe can report healthy
+      # before the real server accepts a connection; a TCP probe cannot.
+      #
+      # `$$` reaches the container as a single `$`, so the shell inside expands
+      # these out of the environment above rather than Compose expanding them
+      # out of `.env`.
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$DB_APP_PASSWORD" psql --host=db
+          --username="$$DB_APP_USER" --dbname="$$POSTGRES_DB"
+          --no-password --quiet --tuples-only --command="select 1" > /dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Celery broker and result backend (§7.1, §7.2).
+  redis:
+    image: redis:7.4.10-bookworm@sha256:e9b2e45ecd47fbb69b877cf8d045d5cccaaaed52524b6e098b4abe8212994f73
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  # SMTP capture, so the Monday mail in §5.7 has somewhere to go that is not a
+  # real inbox. Its web interface is published by the development override.
+  mailpit:
+    image: axllent/mailpit:v1.30.7@sha256:d5ecbb067db3705fa953d79e1b7f81ef84038df67aba6c52825d8c02a1ea748a
+
+  # The in-repo LTI 1.3 platform to launch from (§7.2 lists it, §9.2 says what
+  # it is for). Development and test only, and it is in this file rather than
+  # behind a profile because §7.2 puts it here and because a profile would take
+  # it out of the base-file-only pass in CI — the one pass that runs what
+  # actually ships. What keeps it out of a deployment is not this file: see
+  # docs/adr/0038-the-mock-platform-ships-in-the-base-compose-file.md.
+  #
+  # **No `env_file:`, deliberately.** This service needs five addresses and none
+  # of the application's configuration surface, and `env_file:` is
+  # all-or-nothing — it would hand a fake platform the database credentials,
+  # which ADR 0009 spends two rules keeping out of containers that have no use
+  # for them.
+  mock-lms:
+    build:
+      context: .
+      dockerfile: mock-lms/Dockerfile
+    # Literals, not `${...}`. Every one of these is an address on this network
+    # with one correct value, so there is nothing for an operator to set per
+    # deployment — and the epic README's rule is that an `.env.example` entry is
+    # earned by a `Settings` field or a Compose interpolation, so interpolating
+    # here would add five entries to the application's documented configuration
+    # surface for a service that is not the application. See
+    # docs/adr/0037-the-mock-platform-is-configured-by-compose-literals.md.
+    #
+    # `mock-lms/app/config.py` defaults to these same values, so the platform
+    # starts with no configuration at all. They agree; if they ever disagree,
+    # what a deployment runs is this file.
+    environment:
+      MOCK_LMS_ISSUER: http://mock-lms:8000
+      MOCK_LMS_CLIENT_ID: mock-lms-client
+      MOCK_LMS_DEPLOYMENT_ID: mock-lms-deployment-1
+      # Where the launch page posts: the tool's third-party login-initiation
+      # endpoint. E1 builds it; until then the form posts at a 404, which is the
+      # honest state of a platform whose tool does not exist yet.
+      MOCK_LMS_TOOL_LOGIN_URL: http://api:8000/lti/login
+      # Where the tool should land the user, carried as the `target_link_uri`
+      # claim. A different URL from the one above, and not by accident: they are
+      # two steps of the protocol and a mock that conflated them would let a tool
+      # conflate them too.
+      MOCK_LMS_TOOL_LAUNCH_URL: http://api:8000/lti/launch
+    # Documentation, not publishing: reachable from `api` on this network, and
+    # from nothing on the host. The development override publishes it.
+    expose:
+      - '8000'
+    healthcheck:
+      # Declared here rather than as a HEALTHCHECK in the image, unlike the
+      # backend's. One copy either way; this is the one `wait_for_health.sh`
+      # needs and the one `tests/unit/test_mock_lms_service.py` reads, and a
+      # second copy in the Dockerfile would be a thing to keep in step.
+      #
+      # urllib is in the standard library, so this adds nothing to the image and
+      # needs no shell; `urlopen` raises on any non-2xx, which is the failure the
+      # check has to report.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # The in-repo OIDC provider to log in through (§7.2 lists it, §9.2 says what it
+  # is for: the *other* entry door, so that both doors in §2 are exercised in
+  # every run). Development and test only, in this file rather than behind a
+  # profile for the reasons ADR 0038 gives about the platform — §7.2 puts it
+  # here, and a profile would take it out of CI's base-file-only pass, the one
+  # pass that runs what actually ships.
+  #
+  # **This service is trusted wherever Pulse's configuration names it**, and it
+  # will sign an `id_token` for any identity it is asked for, CARE and ADMIN
+  # included. Holding nothing, reaching nothing and publishing no port does not
+  # change that: a Pulse configured with `OIDC_ISSUER`, `OIDC_TOKEN_ENDPOINT`,
+  # `OIDC_JWKS_URL` and `OIDC_CLIENT_ID` pointed here verifies what it signs,
+  # correctly, and lets the holder in. Until ADR 0077 the application's own
+  # defaults did exactly that, which is the finding this comment used to hide.
+  # What keeps it out of a deployment now is `app/config.py`: those five settings
+  # are required, and a value naming this service — by host or by client id — is
+  # refused at startup anywhere `ENVIRONMENT` is not `development`.
+  #
+  # **No `env_file:`, deliberately**, for the same reason `mock-lms` declares
+  # none: `env_file:` is all-or-nothing, and it would hand a fake identity
+  # provider the database credentials that ADR 0009 spends two rules keeping out
+  # of containers with no use for them.
+  mock-idp:
+    build:
+      context: .
+      dockerfile: mock-idp/Dockerfile
+    # Literals, not `${...}`. Each is an address on this network with one correct
+    # value, so there is nothing for an operator to set per deployment — and the
+    # epic README's rule is that an `.env.example` entry is earned by a `Settings`
+    # field or a Compose interpolation, so interpolating here would add three
+    # entries to the application's documented configuration surface for a service
+    # that is not the application. ADR 0037 settled this for the platform and
+    # asked E0-16 to reach the same answer or say why not; ADR 0058 is E0-16
+    # reaching it.
+    #
+    # `mock-idp/app/config.py` defaults to these same values, so the provider
+    # starts with no configuration at all. They agree; if they ever disagree,
+    # what a deployment runs is this file.
+    environment:
+      MOCK_IDP_ISSUER: http://mock-idp:8000
+      # The one registered client: Pulse. A provider with no registered client
+      # can answer no authorization request at all.
+      MOCK_IDP_CLIENT_ID: mock-idp-client
+      # Where a session is delivered to that client — the tool's OIDC callback.
+      # E1 builds it; until then the redirect lands on a 404, which is the honest
+      # state of a provider whose client does not exist yet. A browser on the
+      # host reaches `api` at `localhost:8000` rather than at `api:8000`, so
+      # E0-18 may need this pointed at the published address instead; that is one
+      # line here rather than an edit to the image.
+      MOCK_IDP_TOOL_REDIRECT_URI: http://api:8000/auth/oidc/callback
+    # Documentation, not publishing: reachable from `api` on this network, and
+    # from nothing on the host. The development override publishes it.
+    expose:
+      - '8000'
+    healthcheck:
+      # Declared here rather than as a HEALTHCHECK in the image, exactly as
+      # `mock-lms` above. One copy either way; this is the one
+      # `wait_for_health.sh` needs and the one `tests/unit/test_mock_idp_service.py`
+      # reads, and a second copy in the Dockerfile would be a thing to keep in
+      # step.
+      #
+      # urllib is in the standard library, so this adds nothing to the image and
+      # needs no shell; `urlopen` raises on any non-2xx, which is the failure the
+      # check has to report.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  # Named, so `docker compose down -v` is the only thing that discards the
+  # database and an ordinary `down` never does.
+  postgres-data:
+  # The same bargain for beat's schedule store: a restart, a container
+  # replacement, and an image rebuild all keep it; `down -v` discards it.
+  beat-schedule:
