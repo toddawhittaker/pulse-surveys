@@ -73,7 +73,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import DEVELOPMENT_ENVIRONMENT, Settings
+from app.config import Settings, is_development
 from app.models import Base
 
 __all__ = [
@@ -102,23 +102,12 @@ __all__ = [
 SQLALCHEMY_LOGGER = "sqlalchemy"
 SQLALCHEMY_ENGINE_LOGGER = "sqlalchemy.engine"
 
-# Which environment may see SQL in the log is `app.config`'s to say: the constant
-# is declared beside the `environment` field it describes and imported here
-# (E0-37 item 2). This module used to carry its own copy, which is two spellings
-# of one convention with nothing comparing them — `docs/MISTAKES.md` entry 3.
-
-
-def _is_development(settings: Settings) -> bool:
-    """Whether this process is running on a developer's machine.
-
-    A comparison against a convention rather than against an enumeration
-    `Settings` enforces: `ENVIRONMENT` is free-form — **not by SPEC §6.3**, which
-    is the admin console's configuration surface and names no environment
-    variable — and `.env.example` documents the vocabulary. Anything that is not
-    that exact string is a deployment, which is the safe direction for both of
-    the rules below.
-    """
-    return settings.environment == DEVELOPMENT_ENVIRONMENT
+# Which environment may see SQL in the log is `app.config`'s to say: the question
+# is asked through `is_development`, the predicate declared beside the
+# `environment` field it compares against, and imported here (E0-37 item 2). This
+# module used to carry its own copy of the value, and then its own copy of the
+# comparison — each of which is two spellings of one convention with nothing
+# comparing them, `docs/MISTAKES.md` entry 3.
 
 
 def _echoes_sql(settings: Settings) -> bool:
@@ -131,7 +120,7 @@ def _echoes_sql(settings: Settings) -> bool:
     is exactly when the log is being read by the most people and shipped to
     whatever aggregates it.
     """
-    return _is_development(settings) and settings.log_level.upper() == "DEBUG"
+    return is_development(settings) and settings.log_level.upper() == "DEBUG"
 
 
 def engine_options(settings: Settings) -> dict[str, Any]:
@@ -155,7 +144,7 @@ def engine_options(settings: Settings) -> dict[str, Any]:
         # From E0-05 a bound parameter is a survey answer or a free-text comment
         # (SPEC §4, §10). Outside development, SQLAlchemy writes the placeholder
         # instead of the value.
-        "hide_parameters": not _is_development(settings),
+        "hide_parameters": not is_development(settings),
         # A pooled connection can be dead before it is handed out — Postgres
         # restarts, a network drops an idle socket — and without this the first
         # statement of a request fails instead of the pool quietly replacing it.
@@ -193,7 +182,7 @@ def pin_sqlalchemy_logging(settings: Settings) -> None:
     setting `echo=True` in a deployment; it is recorded here and in ADR 0013
     rather than implied away.
     """
-    if _is_development(settings):
+    if is_development(settings):
         return
     for name in (SQLALCHEMY_LOGGER, SQLALCHEMY_ENGINE_LOGGER):
         logging.getLogger(name).setLevel(logging.WARNING)

@@ -104,8 +104,9 @@ _PROBLEM_EXPLANATIONS = {
 #
 # There are five readers now rather than three — `app/api/dev.py` gates the
 # developer console on it (ADR 0079) and `app/api/deps.py` the login cookie's
-# `Secure` flag — and all but two of them go through `is_development` below
-# rather than comparing the string themselves.
+# `Secure` flag — and all but one of them go through `is_development` below
+# rather than comparing the string themselves. The exception is `scripts/seed.py`,
+# for the behavioural reason that predicate's docstring gives.
 DEVELOPMENT_ENVIRONMENT = "development"
 
 
@@ -117,18 +118,12 @@ def is_development(settings: "Settings") -> bool:
     is the admin console's configuration surface and names no environment
     variable — and `.env.example` documents the vocabulary. Anything that is not
     that exact string is a deployment, which is the safe direction for every rule
-    that keys on this: the `/docs` routes (`app/main.py`), the developer console
+    that keys on this: the SQL echo and the hiding of bound parameters
+    (`app/db.py`), the `/docs` routes (`app/main.py`), the developer console
     (`app/api/dev.py`) and the login cookie's `Secure` flag (`app/api/deps.py`).
 
-    **`app/db.py` asks the same question and does not call this yet.** It keeps a
-    private `_is_development` with an identical body, because
-    `tests/unit/test_development_environment_has_one_definition.py` requires that
-    module to name `DEVELOPMENT_ENVIRONMENT` itself and a delegating call does
-    not. That is under arbitration in
-    `docs/disputes/QUALITY-REVIEW-CLEANUPS-01.md`; until it is ruled on, the
-    fourth reader stays where it is.
-
-    **Two places deliberately do not call this, and neither is an oversight.**
+    **One place deliberately does not call this, and it is not an oversight**
+    — plus one that cannot.
 
     * `_is_a_deployment` below runs *during* `Settings` validation, deciding
       whether a mock address may be configured. There is no `Settings` object to
