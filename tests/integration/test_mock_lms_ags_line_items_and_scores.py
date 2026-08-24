@@ -92,10 +92,10 @@ import pytest
 pytestmark = pytest.mark.lti
 
 # `mock_platform` and `signed_launch` come from
-# `tests/conftest.py` and are reached through fixtures rather than imported, for
-# the reason `test_mock_lms_launch.py` gives: a module that imports its sibling
-# `conftest` by name depends on where pytest put `tests/` on `sys.path`, and an
-# import error is a broken suite rather than a red.
+# `tests/fixtures/lti_services.py` and are reached through fixtures rather than
+# imported, for the reason `test_mock_lms_launch.py` gives: a module that imports
+# a fixtures module by name depends on where pytest put `tests/` on `sys.path`,
+# and an import error is a broken suite rather than a red.
 
 # The scopes AGS 2.0 names for the two things SPEC §3.4 does. Specification
 # constants: a tool asks its token endpoint for exactly these strings, so a
@@ -1481,7 +1481,8 @@ def test_a_line_item_filter_does_not_return_an_item_that_lacks_the_member(
     widening does not affect.
 
     The line item is created with the member **absent** rather than null, which
-    `create_line_item(omitting=…)` in `tests/conftest.py` exists for: `{"tag":
+    `create_line_item(omitting=…)` in `tests/fixtures/lti_services.py` exists
+    for: `{"tag":
     null}` and a body with no `tag` are two different bodies, and only the second
     is what `.get()` returns `None` for.
 

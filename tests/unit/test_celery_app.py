@@ -32,7 +32,8 @@ would arrive in E2.
 The tests below therefore set a value no default could be mistaken for, and
 assert the application ends up holding it.
 
-`import_app_module` (in `tests/conftest.py`) is what makes that possible: it
+`import_app_module` (in `tests/fixtures/app_imports.py`) is what makes that
+possible: it
 drops `app.*` out of `sys.modules` so the module is built against the
 environment the test just set, rather than against whatever the environment
 held the first time some other test imported it.

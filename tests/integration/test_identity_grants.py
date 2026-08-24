@@ -50,7 +50,7 @@ works and the behavioural test cannot see whether it exists".
 **How these tests become `pulse_app`.** They `SET ROLE` from the bootstrap
 session, which drops superuser and applies the target role's privileges exactly as
 a login would. The question this used to leave open is now closed the other way:
-`tests/conftest.py` provisions the suite's application role as **`pulse_app`
+`tests/fixtures/database.py` provisions the suite's application role as **`pulse_app`
 itself**, so a login and a `SET ROLE` reach the same privileges and the choice is
 no longer about which role is measured. Two reasons it stays a `SET ROLE`.
 `pulse_care` has no login credential in this fixture — the migration establishes
@@ -676,7 +676,7 @@ def test_the_suites_application_connection_authenticates_as_the_granted_role(
     """The role the suite connects as and the role this ticket grants to are one role.
 
     Two constants in two files decide this — `TEST_APP_USER` in
-    `tests/conftest.py` and `APPLICATION_ROLE` here — and nothing else in the
+    `tests/fixtures/database.py` and `APPLICATION_ROLE` here — and nothing else in the
     suite would notice them drifting apart. What drift costs is specific and
     silent: `application_engine` would authenticate as a role holding no grant on
     anything, every "permission denied" assertion in this module would pass
@@ -695,8 +695,9 @@ def test_the_suites_application_connection_authenticates_as_the_granted_role(
     assert current == APPLICATION_ROLE, (
         f"`application_engine` authenticates as {current!r}, and this ticket's grants belong to "
         f"`{APPLICATION_ROLE}` — the name `.env.example` gives `DB_APP_USER` and the name E0-10's "
-        "migration establishes. Change `TEST_APP_USER` in `tests/conftest.py`, or, if the "
-        "deployment's application role is genuinely spelled some other way, change it here and in "
+        "migration establishes. Change `TEST_APP_USER` in `tests/fixtures/database.py`, or, if "
+        "the deployment's application role is genuinely spelled some other way, change it here "
+        "and in "
         "the migration together. Two spellings is the one outcome that reads as working: the "
         "connection succeeds, the queries run, and every grant assertion in this module measures a "
         "role nothing granted anything to."
@@ -1803,8 +1804,9 @@ def test_the_role_migration_corrects_an_attribute_it_did_not_write(
         "when absent and assuming a bootstrap-created role is already correct would leave the two "
         "mechanisms free to disagree.' On a Compose volume the role comes from "
         "`scripts/db-init/01-application-role.sh`; in CI's drift job from a shell step; in these "
-        "tests from `tests/conftest.py`; on a managed Postgres from the operator. The migration "
-        "is the one mechanism that runs everywhere, so it is the one that has to end with the "
+        "tests from `tests/fixtures/database.py`; on a managed Postgres from the operator. The "
+        "migration is the one mechanism that runs everywhere, so it is the one that has to end "
+        "with the "
         "attributes stated."
     )
 
@@ -1840,7 +1842,7 @@ def test_the_role_migration_corrects_an_attribute_it_did_not_write(
 # it. A test that poisons the fixture it shares is worse than no test, because the
 # failures land in modules that did nothing wrong. Roles are cluster-wide and
 # privileges on tables are not, so a fresh database is the same arrangement of
-# privileges with none of the blast radius: `tests/conftest.py` has already
+# privileges with none of the blast radius: `tests/fixtures/database.py` has already
 # created `pulse_app` and `pulse_care`, and the migration creates the definer.
 #
 # **Not `invariant`-marked**, on the line `test_application_role_privileges.py`

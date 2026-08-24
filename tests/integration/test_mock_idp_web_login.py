@@ -12,7 +12,7 @@ module holds those. The protocol is next door in
 
 **Roles are read by scanning the session, not by reading one agreed claim.**
 E0-16 spells no claim name, and pinning one here would decide it — so
-`roles_in` in `tests/conftest.py` walks the whole claim tree and matches the
+`roles_in` in `tests/fixtures/mock_idp.py` walks the whole claim tree and matches the
 normalised leaves against how this project spells its roles (E0-09's
 `ROLE_ALIASES`, plus the vocabulary spelling of the two launch-only roles). Two
 of the assertions below are about a role being *absent*, which is exactly the
@@ -178,8 +178,9 @@ def test_the_role_scanner_reads_a_stated_role_and_not_a_person_named_after_one(
 
     assert roles_in_claims(claims) == expected, (
         f"Scanning {case} — {claims!r} — found {sorted(roles_in_claims(claims))} rather than "
-        f"{sorted(expected)}. `roles_in` in tests/conftest.py is what every role assertion in "
-        "this module is made with, so it is wrong here before it is wrong about the provider."
+        f"{sorted(expected)}. `roles_in` in tests/fixtures/mock_idp.py is what every role "
+        "assertion in this module is made with, so it is wrong here before it is wrong about "
+        "the provider."
     )
 
 

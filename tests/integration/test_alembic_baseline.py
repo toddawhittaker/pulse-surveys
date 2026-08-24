@@ -45,10 +45,10 @@ from sqlalchemy import Column, Integer, String, Table, create_engine, text
 pytestmark = pytest.mark.integration
 
 # `empty_database` and its siblings hand back the `DatabaseUnderTest` named
-# tuple defined in `tests/conftest.py` — `.superuser_url` and
+# tuple defined in `tests/fixtures/database.py` — `.superuser_url` and
 # `.application_url`. It is annotated `Any` here rather than imported: a test
-# module importing `conftest` by name works only because of where pytest puts
-# `tests/` on `sys.path`, and a collection error is not a failing test.
+# module importing a fixtures module by name works only because of where pytest
+# puts `tests/` on `sys.path`, and a collection error is not a failing test.
 
 # A table nothing else will ever declare, so a diff naming it is unambiguously
 # this test's doing.

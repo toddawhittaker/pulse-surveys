@@ -14,7 +14,8 @@ no inheritance. So the models are *found* — by matching a task's word against 
 names of the Pydantic models the module defines itself — and every name this file
 does supply is a constant marked as this suite's choice, because pinning one here
 would make the implementer build to this file instead of to the ticket. The same
-mechanism, and the same reason, as `SectionCodeService` in `tests/conftest.py`.
+mechanism, and the same reason, as `SectionCodeService` in
+`tests/fixtures/section_codes.py`.
 
 **The task table and the verdict sets are read from `docs/SPEC.md`, not copied
 into this file.** They were copied once, and an eval-gate review showed the cost:

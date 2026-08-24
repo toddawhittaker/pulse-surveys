@@ -77,10 +77,10 @@ from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
-# `mock_idp` and `mock_idps` come from `tests/conftest.py` and are annotated
-# `Any` for the reason the sibling flow module gives: a test module that imports
-# its own `conftest` by name depends on where pytest happened to put `tests/` on
-# `sys.path`, and an import error is not a red — it is a broken suite that
+# `mock_idp` and `mock_idps` come from `tests/fixtures/mock_idp.py` and are
+# annotated `Any` for the reason the sibling flow module gives: a test module
+# that imports a fixtures module by name depends on where pytest happened to put
+# `tests/` on `sys.path`, and an import error is not a red — it is a broken suite that
 # reports nothing about the ticket.
 
 # The error codes RFC 6749 §4.1.2.1 defines for the authorization endpoint,
@@ -261,7 +261,7 @@ def parameters_for(
     A list rather than the mapping `MockIdentityProvider.authorization_request`
     hands back, because half the cases here are about a name appearing twice and
     a mapping cannot express one (ADR 0062 rule 3, and `begin_from`'s docstring
-    in `tests/conftest.py`).
+    in `tests/fixtures/mock_idp.py`).
     """
     request, _ = provider.authorization_request(omitting=omitting, **overrides)
     return list(request.items())
@@ -279,7 +279,7 @@ def with_repeated(
 
     A twin of the one in `test_mock_idp_authorization_code_flow.py`, and a copy
     on purpose: these modules share code only through fixtures (they do not
-    import their own `conftest`), and a pure list transform is not the kind of
+    import a fixtures module), and a pure list transform is not the kind of
     hazard `docs/MISTAKES.md` entry 13 is about. What must not be copied is a
     rule that could drift, and this one has no rule in it.
     """
@@ -568,7 +568,8 @@ def test_a_missing_required_parameter_is_refused_as_invalid_request_by_redirect(
     parameters = parameters_for(mock_idp, omitting=[name])
     assert name not in dict(parameters), (
         f"`parameters_for(omitting=[{name!r}])` still sent `{name}`, so this test would be about a "
-        "conformant request. `authorization_request` in tests/conftest.py takes `omitting`."
+        "conformant request. `authorization_request` in tests/fixtures/mock_idp.py takes "
+        "`omitting`."
     )
 
     returned = refused_by_redirect(mock_idp, authorize(mock_idp, parameters), f"no `{name}`")

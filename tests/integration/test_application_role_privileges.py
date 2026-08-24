@@ -42,8 +42,8 @@ and all three of the doors above stay shut while it happens.
 **The role this connects as is `pulse_app` from E0-10 onward**, not the
 `pulse_test_app` E0-04 invented: every grant in the schema belongs to that name,
 so a fixture connecting as another one holds nothing and could not tell a missing
-grant from a present one. `tests/conftest.py` carries the reasoning beside the
-constant.
+grant from a present one. `tests/fixtures/database.py` carries the reasoning
+beside the constant.
 """
 
 from typing import Any
@@ -54,7 +54,7 @@ from sqlalchemy.exc import ProgrammingError
 
 pytestmark = pytest.mark.integration
 
-# `application_engine` and `migrated_engine` come from `tests/conftest.py`.
+# `application_engine` and `migrated_engine` come from `tests/fixtures/database.py`.
 
 ROLE_ATTRIBUTES = (
     "SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole"

@@ -69,7 +69,7 @@ def written(graph: Any, action: Any, what: str) -> Any:
 
     A copy of the helper in `tests/integration/test_role_assignment_graph.py`,
     marked as one for the reason that module's docstring gives: a test module
-    importing the conftest module by name works only because of where pytest puts
+    importing a fixtures module by name works only because of where pytest puts
     `tests/` on `sys.path`, and a collection error is not a failing test.
     """
     holder: dict[str, Any] = {}

@@ -82,7 +82,8 @@ would test the other reader, needs a daemon, and is the `docker` job's business.
 python-dotenv falls back to `os.environ` for a name the file has not defined
 yet, so a developer who happens to export `DB_APP_USER` would see a reordered
 file resolve perfectly and this suite pass. That is the same trap
-`configured_env` in `tests/conftest.py` guards against from the other direction.
+`configured_env` in `tests/fixtures/repo.py` guards against from the other
+direction.
 """
 
 import importlib.util
@@ -96,7 +97,8 @@ import pytest
 from dotenv import dotenv_values
 
 # python-dotenv's interpolation syntax, which is not Compose's — hence a second
-# pattern rather than reusing `COMPOSE_INTERPOLATION` from conftest. dotenv
+# pattern rather than reusing `COMPOSE_INTERPOLATION` from
+# `tests/fixtures/repo.py`. dotenv
 # reads `${NAME}` and `${NAME:-default}` only: a bare `$NAME` is left alone, and
 # `$$` is not an escape. Sharing one pattern between the two readers would
 # quietly assert that they agree about syntax, and they do not.
@@ -222,7 +224,8 @@ def delivered_values(
 
     The second map below is the one concession to case and it is not about
     delivery. `interpolated_variables` upper-cases the names it returns, by its
-    own contract in `conftest.py`, so resolving a `${...}` reference has to look
+    own contract in `tests/fixtures/repo.py`, so resolving a `${...}` reference
+    has to look
     up a folded key. Delivery is accounted in the exact spelling; references are
     resolved through the folded copy. Keeping the two apart is what stops the
     folding leaking back into the accounting.

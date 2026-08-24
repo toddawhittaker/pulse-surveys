@@ -274,7 +274,8 @@ def forget_the_app_package() -> None:
 
     **A copy of the helper in `tests/unit/test_db_engine_configuration.py`**,
     which needs it for the same reason and names this one in return. If a third
-    module wants it, it belongs beside `import_app_module` in `tests/conftest.py`
+    module wants it, it belongs beside `import_app_module` in
+    `tests/fixtures/app_imports.py`
     rather than in a third copy (`docs/MISTAKES.md` entry 13).
     """
     for name in [n for n in list(sys.modules) if n == "app" or n.startswith("app.")]:

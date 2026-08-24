@@ -149,8 +149,8 @@ class SectionCodeService:
                     f"`{SECTION_CODE_MODULE}` defines more than one callable whose name carries "
                     f"{fragment!r} ({sorted(matches)}), so this cannot tell which one {purpose}. "
                     "Naming one here would pin an interface E0-07 leaves open — say in the pull "
-                    "request which it is, and `SectionCodeService` in tests/conftest.py is the "
-                    "one place that changes."
+                    "request which it is, and `SectionCodeService` in "
+                    "tests/fixtures/section_codes.py is the one place that changes."
                 )
             if matches:
                 return next(iter(matches.values()))
@@ -267,7 +267,7 @@ class SectionCodeService:
                     f"{sorted(available)}. E0-07 says the derivation takes 'the code and the "
                     "section's term' and spells no signature, so a parameter outside that is an "
                     "interface question for the ticket — add the role to `SERVICE_ROLES` in "
-                    "tests/conftest.py once the pull request says what it is for."
+                    "tests/fixtures/section_codes.py once the pull request says what it is for."
                 )
             if parameter.kind is parameter.POSITIONAL_ONLY:
                 positional.append(available[role])

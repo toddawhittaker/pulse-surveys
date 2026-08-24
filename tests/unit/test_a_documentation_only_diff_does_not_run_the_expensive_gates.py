@@ -79,7 +79,7 @@ A literal sweep would demand that the mistakes file and the root README leave th
 inert set, which is most of what the ticket exists to skip. The cost of the
 narrower rule is that a document read through a form this does not model — an
 `open()` on a literal, a path assembled at runtime, a constant imported from
-`conftest.py` — is invisible, and the module says so where it fails rather than
+a fixtures module — is invisible, and the module says so where it fails rather than
 implying coverage it does not have.
 
 Because it is derived, it can also go quiet. `docs/MISTAKES.md` entry 35's
@@ -1034,7 +1034,7 @@ def test_nothing_the_test_suite_opens_by_path_is_classified_inert() -> None:
 
     **What it therefore cannot see**, said plainly rather than implied away: a
     document opened from a literal, from a path assembled at run time, or from a
-    constant imported out of `conftest.py`. Those forms exist nowhere in this suite
+    constant imported out of a fixtures module. Those forms exist nowhere in this suite
     today and nothing stops one arriving. The sweep is a floor under the allowlist,
     not a proof that no test reads anything else.
 
@@ -2484,7 +2484,7 @@ SUBPROCESS_SWEEPS = ("ls-files", "git grep", "grep -r", "grep -R")
 WALK_CALLS = ("walk", "rglob", "glob", "iterdir")
 
 # Names that mean the repository root: the `…parents[N]` idiom this suite uses,
-# the `repo_root` fixture in tests/conftest.py, and the bare `root` that a
+# the `repo_root` fixture in tests/fixtures/lti_services.py, and the bare `root` that a
 # helper taking the root as a parameter is called.
 #
 # **`root` is in this list deliberately, and it over-detects.** The private-key

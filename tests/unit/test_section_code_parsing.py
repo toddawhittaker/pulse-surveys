@@ -18,7 +18,8 @@ present.
 
 **Nothing in this file names anything inside the service.** E0-07 spells the file
 and the four values the derivation produces, and no callable, no error class and
-no result shape. `tests/conftest.py`'s `SectionCodeService` does the finding and
+no result shape. `SectionCodeService` in `tests/fixtures/section_codes.py` does
+the finding and
 says at length why; what is left here is a small constant listing the names a
 part might be carried under, which is this file's choice and a one-line change.
 

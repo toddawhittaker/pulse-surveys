@@ -53,8 +53,8 @@ import pytest
 pytestmark = pytest.mark.lti
 
 # `mock_platform`, `link_relations_in` and the platform's service helpers come
-# from `tests/conftest.py` and are reached through fixtures rather than
-# imported. A test module that imports its sibling `conftest` by name depends on
+# from `tests/fixtures/lti_services.py` and are reached through fixtures rather
+# than imported. A test module that imports a fixtures module by name depends on
 # where pytest happened to put `tests/` on `sys.path`, and an import error is
 # not a red — it is a broken suite that reports nothing about the ticket.
 

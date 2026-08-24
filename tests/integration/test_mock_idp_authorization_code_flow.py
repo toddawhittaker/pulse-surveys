@@ -57,7 +57,7 @@ subject on the endpoint the earlier rounds did not reach.
 
 **Where the seeded client comes from.** An authorization request names a
 `client_id` and a redirect URI, and E0-16 spells neither. `MockIdentityProvider.
-registration()` in `tests/conftest.py` looks in the three places a reasonable
+registration()` in `tests/fixtures/mock_idp.py` looks in the three places a reasonable
 implementation would publish them — a JSON document, a form on the provider's own
 page, the Compose environment — and fails by name if none of them does. That
 failure is a real gap rather than a fixture problem: E1 and E0-18 have to learn
@@ -70,8 +70,9 @@ a package to satisfy a test would be a lockfile decision this ticket does not
 own — so the schema's requirements are written out instead, and the citation is
 on each constant.
 
-**The verifier is written out of `pow` and `hashlib`** in `tests/conftest.py`,
-shared with the mock platform's launch tests, which is also where the tampered-
+**The verifier is written out of `pow` and `hashlib`** in
+`tests/fixtures/lti_platform.py`, shared with the mock platform's launch tests,
+which is also where the tampered-
 payload control on it lives. RS256 is required rather than merely accepted:
 OIDC Core 1.0 §2 makes it the algorithm every implementation must support, and a
 session signed with anything else is one E1 could not validate with a conformant
@@ -85,10 +86,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
-# `mock_idp`, `mock_idps` and `web_login` come from `tests/conftest.py`, and
-# everything this module needs from the provider is reached through them rather
-# than imported. That is deliberate: a test module that imports its sibling
-# `conftest` by name depends on where pytest happened to put `tests/` on
+# `mock_idp`, `mock_idps` and `web_login` come from `tests/fixtures/mock_idp.py`,
+# and everything this module needs from the provider is reached through them
+# rather than imported. That is deliberate: a test module that imports a fixtures
+# module by name depends on where pytest happened to put `tests/` on
 # `sys.path`, and an import error is not a red — it is a broken suite that
 # reports nothing about the ticket. The fixtures are annotated `Any` for the same
 # reason `test_mock_lms_launch.py` annotates its own that way.
@@ -861,8 +862,9 @@ def test_a_session_from_another_provider_instance_does_not_verify_here(
     assert mock_idp.verifies(stranger.signature) is None, (
         "A session signed by a different provider instance verified against this provider's key "
         "set. Either the two instances share a key — which is criterion 9's failure, keys not "
-        "generated at startup — or the verifier in tests/conftest.py is decoding rather than "
-        "verifying, in which case every signature assertion in this module is vacuous."
+        "generated at startup — or the verifier in tests/fixtures/lti_platform.py is decoding "
+        "rather than verifying, in which case every signature assertion in this module is "
+        "vacuous."
     )
 
 
@@ -1039,7 +1041,7 @@ def test_a_code_redemption_with_a_mismatched_pkce_verifier_is_rejected(mock_idp:
     _, another_verifier = mock_idp.authorization_request()
     assert another_verifier != submitted.verifier, (
         "Two authorization requests produced the same PKCE verifier, so the 'mismatch' below is "
-        "not one. `pkce_pair` in tests/conftest.py draws it from `secrets`."
+        "not one. `pkce_pair` in tests/fixtures/mock_idp.py draws it from `secrets`."
     )
     mismatched = mock_idp.redeem(submitted.code, another_verifier)
     refusal(mock_idp, mismatched, "a code exchange carrying a PKCE verifier from another flow")
@@ -1077,7 +1079,7 @@ def test_a_code_redemption_carrying_a_malformed_pkce_verifier_is_refused_rather_
     A `code_verifier` carrying a character outside ASCII raised inside the
     provider and produced a 500. That is a different failure from the mismatch
     two tests above, and no test in this module could reach it: `pkce_pair` in
-    `tests/conftest.py` builds every verifier this suite sends out of
+    `tests/fixtures/mock_idp.py` builds every verifier this suite sends out of
     `secrets.token_urlsafe`, which cannot emit a byte outside the unreserved set
     — so the suite was structurally incapable of producing the input that broke
     it. The values are written out at the top of this file for that reason.
@@ -1354,7 +1356,7 @@ def test_an_authorization_request_repeating_the_client_id_is_refused(
     forged-first ordering and accepts the forged-last one, which means **a test
     written in one order reports a pass for the half it happened to pick**. Both
     orders are therefore the test rather than a pair of similar tests, and
-    `begin_from` in `tests/conftest.py` exists because a mapping cannot express
+    `begin_from` in `tests/fixtures/mock_idp.py` exists because a mapping cannot express
     the question at all.
 
     What it buys an attacker if it is accepted: the request one endpoint validates
@@ -1817,7 +1819,8 @@ def test_a_padded_token_request_field_is_refused_rather_than_repaired(
     body = mock_idp.token_body(submitted.code, submitted.verifier)
     assert field in body, (
         f"A conformant token request carries no `{field}` (it carries {sorted(body)}), so there is "
-        "nothing to pad. `token_body` in tests/conftest.py builds RFC 6749 §4.1.3's request."
+        "nothing to pad. `token_body` in tests/fixtures/mock_idp.py builds RFC 6749 §4.1.3's "
+        "request."
     )
     body[field] = padded(body[field])
     response = mock_idp.redeem_from(list(body.items()))
@@ -1909,6 +1912,6 @@ def test_the_registration_this_suite_drives_the_provider_with_is_the_one_it_regi
         f"An authorization request naming client {registration['client_id']!r} did not reach a "
         f"login form — the provider answered {attempt.response.status_code}. Either that client "
         "is not the seeded one, in which case `MockIdentityProvider.registration()` in "
-        "tests/conftest.py found the wrong thing and every other test here fails for that reason, "
-        "or the provider refuses a conformant authorization request."
+        "tests/fixtures/mock_idp.py found the wrong thing and every other test here fails for "
+        "that reason, or the provider refuses a conformant authorization request."
     )

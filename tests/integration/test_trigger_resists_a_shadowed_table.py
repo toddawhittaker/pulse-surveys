@@ -48,8 +48,9 @@ table and keeps doing so as the table changes, so a refusal here is a refusal by
 the guard.
 
 **One limit, stated rather than implied.** These tests connect as the bootstrap
-identity, because that is the identity `db_session` provides (`tests/conftest.py`
-says why: the application role holds only `CONNECT`, so it can seed nothing). The
+identity, because that is the identity `db_session` provides
+(`tests/fixtures/database.py` says why: the application role holds only
+`CONNECT`, so it can seed nothing). The
 vulnerability is reachable by a far weaker role — creating a temporary table needs
 only the `TEMPORARY` privilege, which Postgres grants to `PUBLIC` — and ADR 0027
 reproduced it that way. What this module asserts is that the guard resists the

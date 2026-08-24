@@ -286,7 +286,7 @@ class MockPlatform:
                     f"{fragment!r} ({matches}), so this cannot tell which one {purpose}. E0-14 "
                     "spells no URL, so naming one here would pin an interface the ticket leaves "
                     "open — say in the pull request which it is, and `MockPlatform` in "
-                    "tests/conftest.py is the one place that changes."
+                    "tests/fixtures/lti_services.py is the one place that changes."
                 )
             if matches:
                 return matches[0]
@@ -294,7 +294,7 @@ class MockPlatform:
             f"The mock platform declares no route whose path carries any of {list(fragments)} — "
             f"it declares {declared}. This is the endpoint that {purpose}, which E0-14's scope "
             "requires; if it is there under a path none of these fragments reaches, that is a "
-            "defect in `MockPlatform` in tests/conftest.py rather than in the mock."
+            "defect in `MockPlatform` in tests/fixtures/lti_services.py rather than in the mock."
         )
 
     def discovery(self) -> dict[str, Any] | None:
@@ -507,7 +507,7 @@ class MockPlatform:
                 "access token for its Advantage services. E0-15 specifies no token endpoint and "
                 "no grant, and E0-14 built neither, so this suite calls NRPS and AGS "
                 "unauthenticated. What a tool should present is an interface question for the "
-                "ticket rather than something to guess at in tests/conftest.py."
+                "ticket rather than something to guess at in tests/fixtures/lti_services.py."
             )
 
     def service_get(self, url: str, accept: str | None = None) -> Any:

@@ -135,7 +135,8 @@ plain list is a different thing from `depends_on` with a health condition.
 Where Compose allows several spellings of the same property, all of them are
 accepted.
 
-The Compose files are parsed in `tests/conftest.py`, unmerged and one at a time,
+The Compose files are parsed in `tests/fixtures/repo.py`, unmerged and one at a
+time,
 which is the whole point of item 1 — `docker compose config` would merge the
 override back in and hide it.
 
@@ -1790,8 +1791,8 @@ def test_the_repository_root_holds_no_compose_file_this_suite_does_not_read(
             "over `docker-compose.yml`. So an extra file at the root does not add a stack — "
             "it replaces the one every rule in this module describes, silently, while every "
             "test stays green. If the project is genuinely moving to the modern name, move "
-            "it: rename the files and point `conftest.py` at them, in one change, so the "
-            "suite follows the stack. Adding a second base file is not a rename.",
+            "it: rename the files and point `tests/fixtures/repo.py` at them, in one change, "
+            "so the suite follows the stack. Adding a second base file is not a rename.",
         ]
     )
 
@@ -5395,7 +5396,7 @@ def test_the_closed_build_key_set_holds_no_key_the_compose_files_do_not_use(
 # `tests/unit/test_oidc_provider_configuration.py`.
 # ---------------------------------------------------------------------------
 
-# The five variables E0-39 makes required, spelled as `tests/conftest.py`'s
+# The five variables E0-39 makes required, spelled as `tests/fixtures/doors.py`'s
 # `door_contract` and `.env.example` already spell them. Named here rather than
 # derived for the reason `SUPERUSER_VARIABLES` above is: they are the subject of
 # the rule, and a sixth is a deliberate edit on this line.

@@ -334,8 +334,8 @@ def import_mock_idp_application(values: Mapping[str, str]) -> Any:
             f"module-level instance, then a factory named one of {list(APPLICATION_FACTORY_NAMES)}"
             f", in {list(MOCK_IDP_MODULES)}; imported {{imported}}. If it is reachable under a "
             "spelling none of those covers, that is a defect in `MockIdentityProvider` in "
-            "tests/conftest.py rather than in the mock, and MOCK_IDP_MODULES there is the one "
-            "line that changes."
+            "tests/fixtures/mock_idp.py rather than in the mock, and MOCK_IDP_MODULES there is "
+            "the one line that changes."
         ),
     )
 
@@ -859,8 +859,8 @@ class MockIdentityProvider:
         pytest.fail(
             f"The login form offers choices under {choices}, and this cannot tell which one names "
             "the person signing in. Submitting the wrong field would make a refusal a fact about "
-            "something else. `IDENTITY_FIELD_HINTS` in tests/conftest.py is the one line that "
-            "changes."
+            "something else. `IDENTITY_FIELD_HINTS` in tests/fixtures/mock_idp.py is the one line "
+            "that changes."
         )
 
     def submit_login(
@@ -1142,8 +1142,8 @@ def find_mock_idp_settings_class() -> Any:
         f"in {list(MOCK_IDP_SETTINGS_MODULES)}, imported {imported or 'nothing'}. That callable is "
         "where the redirect URI is validated, and validation with no HTTP surface can only be "
         "reached by importing it. If it is there under a spelling none of "
-        "`PROVIDER_SETTINGS_NAMES` reaches, that constant in tests/conftest.py is the one line "
-        "that changes."
+        "`PROVIDER_SETTINGS_NAMES` reaches, that constant in tests/fixtures/mock_idp.py is the "
+        "one line that changes."
     )
 
 

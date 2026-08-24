@@ -233,7 +233,8 @@ def import_mock_lms_application(values: Mapping[str, str]) -> Any:
             f"module-level instance, then a factory named one of {list(APPLICATION_FACTORY_NAMES)}"
             f", in {list(MOCK_LMS_MODULES)}; imported {{imported}}. E0-14's scope is a "
             "`mock-lms/` FastAPI application; if it is reachable under a spelling none of those "
-            "covers, that is a defect in `MockPlatform` in tests/conftest.py rather than in the "
-            "mock, and MOCK_LMS_MODULES there is the one line that changes."
+            "covers, that is a defect in `MockPlatform` in tests/fixtures/lti_services.py rather "
+            "than in the mock, and MOCK_LMS_MODULES in tests/fixtures/lti_platform.py is the one "
+            "line that changes."
         ),
     )

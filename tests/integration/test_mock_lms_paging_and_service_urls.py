@@ -53,9 +53,10 @@ import pytest
 pytestmark = pytest.mark.lti
 
 # `mock_platform`, `signed_launch`, `link_relations_in` and `path_appended_to`
-# come from `tests/conftest.py` and are reached through fixtures rather than
-# imported, for the reason the sibling modules give: a module that imports its
-# own `conftest` by name depends on where pytest put `tests/` on `sys.path`, and
+# come from `tests/fixtures/lti_services.py` and are reached through fixtures
+# rather than imported, for the reason the sibling modules give: a module that
+# imports a fixtures module by name depends on where pytest put `tests/` on
+# `sys.path`, and
 # an import error is a broken suite rather than a red.
 
 # The three NRPS 2.0 query parameters a membership container defines and this
@@ -93,7 +94,7 @@ INSTRUCTOR_ROLE = "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
 LINE_ITEM_ID_QUERY_PARAMETER = "type_id"
 
 # The media types NRPS 2.0 and AGS 2.0 fix for these documents. Transcribed from
-# the specifications, the way `tests/conftest.py` transcribes them and the AGS
+# the specifications, the way `tests/fixtures/lti_services.py` transcribes them and the AGS
 # suite transcribes its scopes: they are published constants rather than a
 # decision either file makes.
 LINE_ITEM_MEDIA_TYPE = "application/vnd.ims.lis.v2.lineitem+json"

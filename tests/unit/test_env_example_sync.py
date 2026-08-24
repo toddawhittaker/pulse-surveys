@@ -168,7 +168,8 @@ def test_every_variable_the_compose_files_interpolate_is_documented(
     rather than being a technicality. `docker-compose.yml`'s `db` health check
     passes `$$POSTGRES_DB` and `$$DB_APP_USER` — a literal `$NAME` reaching the
     container, expanded by the shell inside it out of an environment Compose has
-    already built, never looked up in `.env`. `conftest.py`'s walker consumes
+    already built, never looked up in `.env`. `tests/fixtures/repo.py`'s walker
+    consumes
     `$$` first and registers nothing, which is what keeps them out of the set
     below. At the time of writing `POSTGRES_DB` appears in the Compose files
     *only* in that escaped form and is documented nowhere, so it is a live
@@ -179,8 +180,8 @@ def test_every_variable_the_compose_files_interpolate_is_documented(
         "The Compose files interpolate no variables at all. Every name is then trivially "
         "documented and this test has stopped checking anything — which is precisely the "
         "shape of the hole it was written to close, so it is worth being loud about. Either "
-        "a Compose file has stopped parsing, or the interpolation walker in conftest.py has "
-        "stopped matching."
+        "a Compose file has stopped parsing, or the interpolation walker in "
+        "tests/fixtures/repo.py has stopped matching."
     )
 
     documented = {name.upper() for name in documented_env}

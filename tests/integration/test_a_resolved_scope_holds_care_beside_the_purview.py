@@ -25,7 +25,8 @@ makes the value configurable with a default of 5, and E4's rules read it off the
 scope rather than fetching it themselves, which is what makes forgetting it hard.
 
 **The person who holds both hats is the whole point**, and E0-09 built the fixture
-for it: `care_and_instructor_person` in `tests/conftest.py`, named by that ticket
+for it: `care_and_instructor_person` in `tests/fixtures/supervision.py`, named by
+that ticket
 as reused here. The combination is legal — the separation is between
 capabilities, not between people — so the assertion is not that such a person is
 refused. It is that resolving them yields the teaching grant, and only the
@@ -333,7 +334,8 @@ def test_a_resolved_scope_takes_its_n_threshold_from_configuration(
 
     **Why the module is re-imported.** A module that builds something out of
     `Settings` may read the environment once, at import time — `import_app_module`
-    in `tests/conftest.py` exists for exactly that and says so — and E0-11 leaves
+    in `tests/fixtures/app_imports.py` exists for exactly that and says so — and
+    E0-11 leaves
     the choice open. Re-importing after the override makes this test true of a
     resolver that reads `Settings` per call *and* of one that holds a `Settings`
     from import, so it asserts the criterion rather than an implementation of it.

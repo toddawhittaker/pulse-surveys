@@ -298,8 +298,8 @@ class AuthzModule:
                 f"`{AUTHZ_MODULE}` defines no `{name}` — it defines {defined}. That name is part "
                 "of the interface E0-11 settled before any of it was written, so this is a "
                 "missing deliverable rather than a rename to accommodate here. If it genuinely "
-                "moved, say so in the pull request; `AuthzModule` in tests/conftest.py is the one "
-                "place that changes."
+                "moved, say so in the pull request; `AuthzModule` in tests/fixtures/authz_data.py "
+                "is the one place that changes."
             )
         return found
 

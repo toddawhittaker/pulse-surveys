@@ -405,7 +405,7 @@ def door_column_named(table: Any, candidates: tuple[str, ...], purpose: str) -> 
     pytest.fail(
         f"`{table.name}` has none of the columns {list(candidates)} — it has {present}. That "
         f"column is {purpose}, and E0-08 creates the table. The candidate list is a constant in "
-        "tests/conftest.py, so a deliberate rename is a one-line change."
+        "tests/fixtures/doors.py, so a deliberate rename is a one-line change."
     )
 
 

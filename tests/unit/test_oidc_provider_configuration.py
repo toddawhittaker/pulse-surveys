@@ -83,7 +83,7 @@ from urllib.parse import urlsplit
 import pytest
 
 # The variable each setting arrives in. **These spellings are not this module's
-# choice** — `tests/conftest.py` already fixes them for E0-18's door suites, and
+# choice** — `tests/fixtures/doors.py` already fixes them for E0-18's door suites, and
 # `.env.example` documents all five — so they are transcribed rather than decided,
 # and a rename is these five lines plus that fixture.
 OIDC_ISSUER_VARIABLE = "OIDC_ISSUER"
@@ -846,7 +846,7 @@ def test_the_refused_host_is_the_compose_service_name_the_mock_actually_runs_as(
     catalog can go stale without anything failing, since a rule that refuses a name
     nothing runs under reports every configuration clean.
 
-    `mock_idp_service` is `tests/conftest.py`'s single answer to "what is the mock
+    `mock_idp_service` is `tests/fixtures/mock_idp.py`'s single answer to "what is the mock
     called", used by every other module that reasons about it.
     """
     assert mock_idp_service == MOCK_SERVICE, (

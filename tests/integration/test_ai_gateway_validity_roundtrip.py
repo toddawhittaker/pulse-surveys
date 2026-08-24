@@ -12,8 +12,9 @@ ticket spells the two files and spells no callable, no signature and no return
 shape, so the validity task is *found* — one public callable whose name carries
 the task's own word — and it is called by filling its parameters from the values
 this module has, by parameter name. That is the mechanism `SectionCodeService` in
-`tests/conftest.py` uses and it is here for the same reason: pinning a name would
-make the implementer build to this file instead of to the ticket. A parameter no
+`tests/fixtures/section_codes.py` uses and it is here for the same reason:
+pinning a name would make the implementer build to this file instead of to the
+ticket. A parameter no
 offered role matches stops the test with a message naming it, which is an
 interface question for the ticket rather than something to guess at.
 
@@ -138,9 +139,9 @@ AI_PROVIDER_BASE_URL_VARIABLE = "AI_PROVIDER_BASE_URL"
 # The exceptions that mean the gateway fell over rather than reported. E0-13 names
 # no error type, so requiring one would pin an interface the ticket leaves open;
 # what is required is that a failure is *surfaced* — something a caller on §3.3's
-# submit path can catch on purpose. `raised_by_the_service` in `tests/conftest.py`
-# draws the same line for E0-07 and gives the reason: an unguarded parse failure
-# is not an error anybody can handle.
+# submit path can catch on purpose. `raised_by_the_service` in
+# `tests/fixtures/section_codes.py` draws the same line for E0-07 and gives the
+# reason: an unguarded parse failure is not an error anybody can handle.
 FELL_OVER = (AttributeError, TypeError, NameError)
 
 # E0-12 shipped the prompts here and `pyproject.toml` packages the directory.
@@ -162,7 +163,7 @@ VALIDITY_FRAGMENTS = ("validity", "valid", "classify_comment")
 # session is passed or what any of it is called, so the tests offer what they have
 # and let the signature take what it wants. Matching is by exact name or by
 # `_`-suffix, longest alias first, exactly as `SERVICE_ROLES` in
-# `tests/conftest.py` does.
+# `tests/fixtures/section_codes.py` does.
 CALL_ROLES: dict[str, tuple[str, ...]] = {
     "session": ("session", "db", "database"),
     "comment": ("comment", "text", "body", "content", "answer", "comment_text"),
@@ -965,7 +966,8 @@ def call_task(task: Any, **available: Any) -> Any:
     """Call `task`, filling each parameter from the values offered, by name.
 
     Binding by parameter name and never by `try: ... except TypeError:` is
-    deliberate, and `tests/conftest.py` gives the reason at length: a helper that
+    deliberate, and `SectionCodeService.call` in `tests/fixtures/section_codes.py`
+    gives the reason at length: a helper that
     retried call shapes until one stopped raising would swallow a `TypeError`
     raised *inside* the task and report a design the ticket never chose as
     working. A parameter no offered role matches stops the test with a message
@@ -1660,7 +1662,8 @@ def test_a_persistently_malformed_provider_answer_raises_rather_than_returning_a
     required is that the failure is a *surfaced* one — a project error or the
     `ValidationError` the contract raised — rather than a `TypeError` or an
     `AttributeError`, which is the gateway falling over rather than reporting.
-    `tests/conftest.py`'s `raised_by_the_service` draws the same line for E0-07,
+    `raised_by_the_service` in `tests/fixtures/section_codes.py` draws the same
+    line for E0-07,
     for the same reason: an unguarded parse failure is not something a caller can
     catch on purpose.
     """
@@ -3308,13 +3311,15 @@ def test_the_application_role_may_write_a_classification_row(
     """The role production runs as can insert one, which no test above can see.
 
     Every behavioural test in this module hands the task a session on the
-    bootstrap connection, because that is what `tests/conftest.py` provides and
+    bootstrap connection, because that is what `db_session` in
+    `tests/fixtures/database.py` provides and
     because the ticket does not say whether the task opens its own. So all of them
     would pass against a schema in which `pulse_app` — the role the API and the
     worker actually connect as (ADR 0001, ADR 0009) — holds no `INSERT` on this
     table, and the first classification in a deployment would fail with a
-    permission error. `tests/conftest.py` states the general form of this: "a test
-    that passes under privileges production lacks is a test that fails."
+    permission error. `tests/fixtures/database.py` states the general form of
+    this: "a test that passes under privileges production lacks is a test that
+    fails."
 
     Asserted out of the catalog rather than by writing a row, because the two
     answer different questions and `docs/MISTAKES.md` entry 3 asks for both where
@@ -3701,8 +3706,8 @@ def test_the_application_role_is_refused_a_write_that_would_amend_a_classificati
         current = connection.execute(text("SELECT current_user")).scalar()
         assert current == APPLICATION_ROLE, (
             f"This test connected as {current!r} rather than as `{APPLICATION_ROLE}`, so a "
-            "refusal here would be about some other role's privileges. `tests/conftest.py` "
-            "carries the reasoning beside `TEST_APP_USER`, and "
+            "refusal here would be about some other role's privileges. "
+            "`tests/fixtures/database.py` carries the reasoning beside `TEST_APP_USER`, and "
             "`test_the_suites_application_connection_authenticates_as_the_granted_role` in "
             "`tests/integration/test_identity_grants.py` is what keeps the two names in step."
         )

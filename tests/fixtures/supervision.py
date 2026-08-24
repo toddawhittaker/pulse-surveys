@@ -256,8 +256,8 @@ def graph_course_number() -> str:
             "`uq_course_prefix_id_lms_number` refuses — and that failure would be a unique "
             "violation raised inside a fixture rather than a message naming its cause, which is "
             "the shape this generator exists to leave behind. If a test genuinely needs this many "
-            "courses, widen the band in tests/conftest.py: `000`-`099` is available with zero "
-            "padding."
+            "courses, widen the band in tests/fixtures/supervision.py: `000`-`099` is available "
+            "with zero padding."
         )
     return str(number)
 
@@ -346,8 +346,9 @@ def invented_value(table: Any, column: Any) -> Any:
         return graph_letters(limit)
 
     pytest.fail(
-        f"The seeding helper in tests/conftest.py cannot invent a value for `{table.name}."
-        f"{column.name}`, which is NOT NULL, has no default, and is of type {column.type!r}. That "
+        f"The seeding helper in tests/fixtures/supervision.py cannot invent a value for "
+        f"`{table.name}.{column.name}`, which is NOT NULL, has no default, and is of type "
+        f"{column.type!r}. That "
         "is this fixture needing a case added, not a defect in the schema — add the type to "
         "`invented_value`."
     )
@@ -373,8 +374,8 @@ def require_column(table: Any, candidates: tuple[str, ...]) -> str:
     present = [column.name for column in table.columns]
     pytest.fail(
         f"`{table.name}` has none of the columns {list(candidates)} — it has {present}. The "
-        "candidate list is a constant in tests/conftest.py, so a deliberate rename is a one-line "
-        "change there."
+        "candidate list is a constant in tests/fixtures/supervision.py, so a deliberate rename is "
+        "a one-line change there."
     )
 
 
@@ -623,7 +624,7 @@ class SupervisionGraph:
             f"The `{self.role_column}` column enumerates {values}, none of which is any of "
             f"{list(aliases)}. SPEC §2.1's canonical chain spells INSTRUCTOR, LEAD_FACULTY, "
             "CHAIR, DEAN and VP_ACADEMICS, and E0-09 spells CARE; if this role is genuinely "
-            "spelled some other way, add it to `ROLE_ALIASES` in tests/conftest.py."
+            "spelled some other way, add it to `ROLE_ALIASES` in tests/fixtures/supervision.py."
         )
 
     # -- scope nodes --------------------------------------------------------
@@ -656,7 +657,8 @@ class SupervisionGraph:
                     "which is a good answer to what a singular `scope_node_id` points at and is "
                     "the one shape this fixture cannot build a node in: it would have to know how "
                     f"a node of a given kind is spelled in {elsewhere}. Say so in the pull "
-                    "request and teach `scope_overrides` in tests/conftest.py how to seed one."
+                    "request and teach `scope_overrides` in tests/fixtures/supervision.py how to "
+                    "seed one."
                 )
             return "kind_and_id", (kind_column, id_column)
 

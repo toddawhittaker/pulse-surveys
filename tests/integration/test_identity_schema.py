@@ -118,7 +118,8 @@ OTHER_LMS_USER_ID = "sub-10000002"
 # where its blind spots are written down — and `test_role_assignment_graph.py`.
 # They are copies deliberately: a test module importing a sibling test module
 # works only because of where pytest puts `tests/` on `sys.path`, and a collection
-# error is not a failing test (`tests/conftest.py` says the same of itself).
+# error is not a failing test (`tests/fixtures/__init__.py` says the same of the
+# fixtures package: never imported by a test module).
 # Change one, change all three. `login_id` and never a bare `login`, which would
 # match `role_assignment.permits_web_login` and turn two other modules red.
 IDENTITY_NAME_FRAGMENTS = (
@@ -160,7 +161,8 @@ CLIENT_ID_FRAGMENT = "client"
 # Written into the secret column and read back through raw SQL. Not a credential
 # and not copied from one — it is a marker string whose only job is to be
 # searched for. Deliberately not named `..._SECRET` or `..._PASSWORD`, so ruff's
-# S105 keeps flagging the real thing; `tests/conftest.py` made the same choice.
+# S105 keeps flagging the real thing; `tests/fixtures/database.py` made the same
+# choice for the container's credentials.
 PLAINTEXT_SENTINEL = "sentinel-value-9d41c7ba0e"
 CLIENT_ID_SENTINEL = "client-id-4b8e0257fa"
 
@@ -402,7 +404,7 @@ COURSE_NUMBER_LAST = 799
 # Cleared before every test, so the numbers only have to be distinct within one:
 # `db_session` rolls every write back at the end of a test, so no course this
 # module seeds outlives the test that asked for it. The same mechanism and the
-# same reasoning as `_GRAPH_INTEGER_COUNTERS` in `tests/conftest.py`.
+# same reasoning as `_GRAPH_INTEGER_COUNTERS` in `tests/fixtures/supervision.py`.
 _COURSE_NUMBERS: dict[str, Any] = {}
 
 
@@ -442,8 +444,8 @@ def course_number() -> str:
 
     A fourth copy of one generator, and deliberately so: this module carries its
     own copy of the whole seeding walker for the reason its docstring gives, and
-    importing `tests/conftest.py` as a module rather than letting pytest load it
-    as a plugin loads it twice.
+    importing `tests/fixtures/supervision.py`, which holds the shared one, would
+    couple this module to where pytest happens to put `tests/` on `sys.path`.
     """
     counter = _COURSE_NUMBERS.setdefault(COURSE_NUMBER_COLUMN, count(COURSE_NUMBER_FIRST))
     number = next(counter)

@@ -65,7 +65,7 @@ state, not the permitted one. The two controls that do assert a marker is
 nothing about what `app.db` chose.
 
 The engine is found rather than named, in the spirit of `celery_application_in`
-in `tests/conftest.py`: E0-04 says `db.py` holds "a SQLAlchemy 2.0 engine and
+in `tests/fixtures/repo.py`: E0-04 says `db.py` holds "a SQLAlchemy 2.0 engine and
 session factory" and does not say what either is called.
 
 **Every non-development test here requests `deployed_identity_provider`, and that
