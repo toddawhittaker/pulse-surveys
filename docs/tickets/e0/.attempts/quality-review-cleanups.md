@@ -53,10 +53,38 @@ definition, its `__all__` entry and one docstring cross-reference.
 Gates: ruff format/check clean, mypy clean (38 files), and the four
 scope/purview/org-view modules → 25 passed.
 
-## Item 3 — one is-development predicate: THREE of the four converted, one disputed
+## Item 3 — one is-development predicate: RESOLVED, all four converted
 
-**Partly worked, and stopped on the rest.** Commit `3561cb1`, objection
-`docs/disputes/QUALITY-REVIEW-CLEANUPS-01.md`.
+**Settled in two rounds.** Three call sites in `3561cb1`, the fourth in
+`aad947d` after the dispute was arbitrated. Everything below the line about
+`db.py` is the state *before* the ruling and is kept because it explains why the
+conversion is split across two commits.
+
+**The ruling, and what it changed.** The objection succeeded: the detector was
+amended (`7d805ae`) to accept `is_development` — imported, or read as an
+attribute — as a third spelling alongside the constant. `db.py` then converted
+exactly as originally briefed: `_is_development` deleted, the predicate
+imported, three call sites each keeping their own polarity (echo requires
+development; `hide_parameters` is its negation; the logging pin returns early in
+development).
+
+Two records in `config.py` went false the moment it landed and were corrected in
+the same commit — the predicate's docstring said `db.py` did not call it yet and
+pointed at the open dispute, and the constant's comment counted "all but two"
+readers. It is "all but one" now, `scripts/seed.py`.
+
+**The green was mutation-checked, because an amended detector is exactly the
+thing that can be amended into blindness.** Restoring a bare `"development"`
+literal to `db.py` fails the sweep naming the line it was added on; stripping
+the predicate out so the module asks nothing at all fails it with "reads neither
+`DEVELOPMENT_ENVIRONMENT` nor `is_development()`". Both restored from a copy
+taken first.
+
+---
+
+### The pre-ruling state, kept for the reasoning
+
+Objection `docs/disputes/QUALITY-REVIEW-CLEANUPS-01.md`.
 
 `is_development(settings)` is in `backend/app/config.py` beside the constant.
 `main.py`, `api/dev.py` and `api/deps.py` call it.
@@ -188,3 +216,39 @@ pass once the five names are supplied from `.env.example`:
     set +a
 
 Use that line for any full-suite run on this machine until `.env` is refreshed.
+
+## Follow-up round (after the ruling and the conftest split)
+
+HEAD moved between rounds: `7d805ae` amended the sweep, `f8ba7d1` amended the
+ADRs, and `0b21b9a` split the 6,634-line conftest into `tests/fixtures/`. Same
+checkout, so nothing to pull — but re-read anything you are about to act on.
+
+**Item 3 finished** — `aad947d`, written up under item 3 above.
+
+**Four stale comments repointed at the fixtures package** — `3fb534f`. The
+conftest split left four non-test files naming `tests/conftest.py` as the home
+of something that had moved: both mock Dockerfiles and `mock-lms/app/main.py`
+(→ `tests/fixtures/app_imports.py`) and `backend/migrations/env.py`
+(→ `tests/fixtures/database.py`).
+
+Two things worth carrying forward from it:
+
+- **Check the destination holds the thing, not just that it exists.** Each of
+  the three claims was grepped in its new module — the `sys.meta_path` insert,
+  the environment set around the factory call, and
+  `command.upgrade(alembic_config(), "head")` — before the comment was pointed
+  at it.
+- **A path substitution inside wrapped prose loses words.** Replacing a shorter
+  path with a longer one in `mock-idp/Dockerfile` silently dropped "avoid. This"
+  off the end of the line, because the replacement text ended where the old line
+  did. Read the paragraph back after every such edit; the wrap is exactly where
+  `docs/MISTAKES.md` entry 3 says surprises live.
+
+"No executable line changed" was measured rather than eyeballed: both
+Dockerfiles' non-comment lines compare byte-identical, and both Python files
+parse to identical ASTs with the module docstring excluded. Twenty lines of
+throwaway script, and it is the check to repeat for any comment-only commit.
+
+**42 files under `docs/` still say `tests/conftest.py`.** Out of scope here —
+records are the orchestrator's — but they are the largest remaining group, and
+nothing outside `tests/` and `docs/` mentions the conftest at all any more.
