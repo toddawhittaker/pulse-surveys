@@ -1,12 +1,23 @@
 """The process-wide authorization endpoint is deleted, not demoted — E1-05, criterion 2.
 
-The criterion: "`grep -r LTI_PLATFORM_AUTHORIZATION_ENDPOINT` over the tree finds
-only history (ADRs, tickets); no code, config, example, or Compose reference."
+The criterion is a grep for the setting's name over the tree, which must find
+"only history (ADRs, tickets); no code, config, example, or Compose reference."
 The carried entry it comes from says why the distinction matters — the setting
 has to be **gone** from `Settings` and `.env.example` "rather than left as a
 default the column falls back to". A setting that survives as a fallback is the
 finding still open: one address standing in for every registration that does not
 carry its own, reached now through an `or` instead of directly.
+
+**Nothing in this file writes that name out, prose included, and this paragraph
+is the rule.** `NEEDLE` below is assembled at run time for the reason its own
+comment gives, and the same rule binds every docstring here: a module that spells
+the setting is an offender its own sweep has to report, and there is no `tests/`
+exemption to reach for — `tests/fixtures/doors.py` naming the setting is one of
+the mutations this sweep exists to kill, so exempting the directory would give
+that mutation away. The first draft of these docstrings spelled it three times
+and made the assertion unsatisfiable by any change to production code;
+`docs/disputes/E1-05-01.md` is where that was measured and ruled on. Refer to it
+in prose, or assemble it the way `NEEDLE` does.
 
 **Why a sweep rather than an assertion about `Settings`.** Reading the field off
 the settings object answers for one of the four places the criterion names.
@@ -17,20 +28,20 @@ nothing supplies (`docs/MISTAKES.md` entry 1). One search over everything git
 tracks is the shape that covers all of them and covers the next one nobody has
 written yet.
 
-**Matched without regard to case, which is not a detail.** The variable is
-`LTI_PLATFORM_AUTHORIZATION_ENDPOINT` and the pydantic field behind it is
-`lti_platform_authorization_endpoint`; the reader in `app/api/lti.py` spells only
-the lower-case one. A case-sensitive sweep for the upper-case spelling reports
-this criterion met over a tree where the field, its default and its two readers
-are all exactly where they were — green for a reason unrelated to what it
-asserts. So the needle is one identifier, folded, and the control below shows it
-finding both spellings.
+**Matched without regard to case, which is not a detail.** The environment
+variable is spelled in capitals and the pydantic field behind it in lower case,
+and the reader in `app/api/lti.py` spelled only the lower-case one. A
+case-sensitive sweep for the upper-case spelling reports this criterion met over
+a tree where the field, its default and its two readers are all exactly where
+they were — green for a reason unrelated to what it asserts. So the needle is one
+identifier, folded, and the control below shows it finding both spellings.
 
-**Three directories are allowed, and they are the ones that hold history.** ADRs,
+**Four directories are allowed, and they are the ones that hold records.** ADRs,
 tickets and the mistakes log describe decisions that were true when they were
 written; ADR 0075 chose this setting and ADR 0077 records what it left standing,
-and rewriting either would be falsifying a record rather than finishing a
-ticket.
+and rewriting either would be falsifying a record rather than finishing a ticket.
+`docs/disputes/` is the fourth and is there for the same reason, stated at the
+constant.
 
 **The planted-positive control is not optional here** (`docs/MISTAKES.md` entry
 3). A sweep that reports a clean tree and a sweep that has gone blind print the
@@ -57,9 +68,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # markers the same way and for the same two reasons.
 NEEDLE = "LTI_PLATFORM_" + "AUTHORIZATION_ENDPOINT"
 
-# Where history is allowed to go on naming it. Paths as `git ls-files` reports
+# Where a record is allowed to go on naming it. Paths as `git ls-files` reports
 # them, so the comparison is a prefix on a repository-relative POSIX path.
-HISTORY_DIRECTORIES = ("docs/adr/", "docs/tickets/", "docs/mistakes/")
+#
+# **`docs/disputes/` is here because an objection has to quote what it objects
+# to.** A dispute file states the assertion it is about and the criterion behind
+# it, both of which spell the setting, and the moment it is ruled on it is
+# history in the same sense `docs/mistakes/` is. The alternative — deleting a
+# record so that a sweep reports clean — is backwards, and it is the shape this
+# module's own docstring warns against under "What a legitimate red looks like".
+# Ruled in `docs/disputes/E1-05-01.md`, which is itself the first file the
+# directory was added for.
+#
+# This is a records list and not an allow-list for convenience: a source file
+# that names the setting belongs in none of these four, whatever it is for.
+HISTORY_DIRECTORIES = ("docs/adr/", "docs/tickets/", "docs/mistakes/", "docs/disputes/")
 
 # Every text file here is UTF-8. A tracked file that will not decode is a binary
 # — an image, the design prototype's thumbnail — and cannot carry an identifier.
@@ -246,10 +269,16 @@ def test_no_tracked_file_outside_the_records_names_the_process_wide_setting() ->
     would keep this suite configuring a setting the application ignores — green,
     and asserting nothing about where a browser is sent.
 
-    **What a legitimate red looks like** is a new file under `docs/adr/` that
-    argues about this decision and sits outside the three history directories.
-    The answer then is the directory, not the allow-list: a record belongs with
-    the other records.
+    **What a legitimate red looks like** is a new record that argues about this
+    decision and sits outside the four directories that hold records. The answer
+    then is the directory, not the allow-list: a record belongs with the other
+    records. `docs/disputes/` was added to that list on exactly that reasoning
+    and not as an exemption — see the constant, and `docs/disputes/E1-05-01.md`.
+
+    **A test module's own prose is not a record**, which is the other half of
+    that ruling: this file and its sibling refer to the setting in prose rather
+    than spelling it, because `tests/fixtures/doors.py` naming it is one of the
+    mutations above and a `tests/` exemption would give that mutation away.
     """
     offenders = {
         path.relative_to(REPO_ROOT).as_posix(): lines

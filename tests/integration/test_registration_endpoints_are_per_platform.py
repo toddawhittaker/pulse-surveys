@@ -1,8 +1,13 @@
 """Each platform's launch goes to its own authorization endpoint — E1-05, criterion 1.
 
 The carried entry this closes is E0-18's security review, written up in
-`docs/tickets/e1/carried-from-e0.md`: "`LTI_PLATFORM_AUTHORIZATION_ENDPOINT` is
-process-wide and platforms are not". Platforms already resolve per issuer —
+`docs/tickets/e1/carried-from-e0.md` under the heading that says the deleted
+setting is process-wide and platforms are not. (The setting's name is not
+spelled here, and not because it is a secret: the removal sweep in
+`tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py` reports any
+file outside the four records directories that names it, `tests/` included, and
+that exemption is deliberately unavailable — see `docs/disputes/E1-05-01.md`.)
+Platforms already resolve per issuer —
 `app/lti/launch.py::registered_platform` looks up the one `lti_platform` row for
 the `iss` in the login initiation and takes the client ID from that row — but the
 address the browser was then sent to came from a single setting, the same string

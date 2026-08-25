@@ -1020,6 +1020,75 @@ def mock_lms_config() -> Iterator[Any]:
         yield importlib.import_module(f"{MOCK_PACKAGE}.config")
 
 
+class MockLmsPaths(NamedTuple):
+    """The mock platform's own route paths, as strings, with nothing held open."""
+
+    jwks: str
+    authorization: str
+
+
+@pytest.fixture
+def mock_lms_paths() -> MockLmsPaths:
+    """The two paths a registration is built from, read out and the resolution closed.
+
+    **Why this exists beside `mock_lms_config` rather than instead of it.** That
+    fixture holds `mock_package_resolved(MOCK_LMS_DIR)` open for the whole test
+    body, deliberately and correctly — a class taken out of a mock and used after
+    the resolution closed would re-resolve its lazy imports against this
+    repository's own `app`, which is a different program. The cost is stated in
+    `tests/fixtures/app_imports.py`'s docstring and is absolute: while the mock's
+    `app` is resolved, **this repository's `app` is not importable**, so nothing
+    that imports it may run in that window.
+
+    An in-process `alembic upgrade head` is exactly such a thing — the first line
+    of `backend/migrations/env.py` is `from app.models import Base` — so a test
+    that requests `mock_lms_config` and then builds a database dies in
+    `ModuleNotFoundError` before its first assertion, and no change on the
+    implementation side of the wall can help it. That was measured and ruled on
+    in `docs/disputes/E1-05-02.md`.
+
+    So this reads the *values* out while the resolution is briefly open and lets
+    it close before the caller's body runs — the shape
+    `tests/fixtures/doors.py::seed_constant` already uses, for the reason its own
+    docstring gives. Both are plain strings, so nothing is lost by copying them
+    out. A test that needs the live module and never migrates anything can go on
+    asking for `mock_lms_config`.
+
+    The two paths are the ones a `lti_platform` registration is composed from:
+    the key set the launch signature is verified against, and the authorization
+    endpoint a browser is sent to. Both are validated here rather than in the
+    caller, because "absolute path" is a property of the mock's configuration and
+    not an assertion any one test owns.
+    """
+    if not MOCK_LMS_DIR.is_dir():
+        pytest.fail(
+            f"{MOCK_LMS_DIR} does not exist, so there is no configuration module to read the "
+            "platform's own paths out of. SPEC §13 puts the in-repo LTI 1.3 platform at "
+            "`mock-lms/`, and E0-14 is the ticket that writes it."
+        )
+    with mock_package_resolved(MOCK_LMS_DIR):
+        configuration = importlib.import_module(f"{MOCK_PACKAGE}.config")
+        found = {
+            name: getattr(configuration, name, None) for name in ("JWKS_PATH", "AUTHORIZATION_PATH")
+        }
+
+    wrong = {
+        name: value
+        for name, value in found.items()
+        if not isinstance(value, str) or not value.startswith("/")
+    }
+    if wrong:
+        pytest.fail(
+            f"`mock-lms/app/config.py` defines no absolute {sorted(wrong)} (found {wrong}). That "
+            "module declares the platform's routes and builds the URLs its discovery document "
+            "advertises, and a registration composed from a missing path would be checked against "
+            "an absence."
+        )
+    return MockLmsPaths(
+        jwks=str(found["JWKS_PATH"]), authorization=str(found["AUTHORIZATION_PATH"])
+    )
+
+
 @pytest.fixture
 def mock_platforms() -> Iterator[Callable[..., MockPlatform]]:
     """Start one or more independent mock platforms, and shut them all down after.

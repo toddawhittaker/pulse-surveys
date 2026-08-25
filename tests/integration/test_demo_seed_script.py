@@ -1362,7 +1362,7 @@ def test_the_seed_fills_the_authorization_endpoint_on_a_registration_that_predat
     metadata_tables: dict[str, Any],
     base_compose: dict[str, Any],
     mock_lms_service: str,
-    mock_lms_config: Any,
+    mock_lms_paths: Any,
 ) -> None:
     """A development database seeded before E1-05 gets the column filled, not a second row.
 
@@ -1391,6 +1391,15 @@ def test_the_seed_fills_the_authorization_endpoint_on_a_registration_that_predat
     or takes them with it — which is a different repair from the one this ticket
     asks for, and one that would quietly discard a development database's
     launches.
+
+    **It reads `mock_lms_paths` and not `mock_lms_config`**, and the difference is
+    the whole reason this test could not run when it was first written. That
+    second fixture holds the mock's `app` package resolved for the length of the
+    body, which makes this repository's own `app` unimportable — and
+    `demo_databases()` migrates a database in process, whose first act is
+    `from app.models import Base`. The strings are read out and the resolution
+    closed before anything here runs; `docs/disputes/E1-05-02.md` has the
+    measurement and the ruling, and the fixture's docstring has the rule.
     """
     platforms = require_table(metadata_tables, PLATFORMS)
     assert AUTHORIZATION_ENDPOINT_COLUMN in platforms.c, (
@@ -1415,7 +1424,7 @@ def test_the_seed_fills_the_authorization_endpoint_on_a_registration_that_predat
         **{
             "issuer": environment["MOCK_LMS_ISSUER"],
             "client_id": environment.get("MOCK_LMS_CLIENT_ID"),
-            "jwks_url": f"{environment['MOCK_LMS_ISSUER']}{mock_lms_config.JWKS_PATH}",
+            "jwks_url": f"{environment['MOCK_LMS_ISSUER']}{mock_lms_paths.jwks}",
             AUTHORIZATION_ENDPOINT_COLUMN: None,
         },
     )
@@ -1457,13 +1466,11 @@ def test_the_seed_fills_the_authorization_endpoint_on_a_registration_that_predat
         "writes the new column only on insert leaves the whole development stack unlaunchable "
         "while `make seed` exits zero."
     )
-    assert str(completed[AUTHORIZATION_ENDPOINT_COLUMN]).endswith(
-        mock_lms_config.AUTHORIZATION_PATH
-    ), (
+    assert str(completed[AUTHORIZATION_ENDPOINT_COLUMN]).endswith(mock_lms_paths.authorization), (
         f"The completed registration names {completed[AUTHORIZATION_ENDPOINT_COLUMN]!r}, which "
         f"does not end at the mock platform's own authorization path "
-        f"{mock_lms_config.AUTHORIZATION_PATH!r}. The value written on an update has to be the "
-        "value written on an insert; the test that pins the whole address owns the rest of it."
+        f"{mock_lms_paths.authorization!r}. The value written on an update has to be the value "
+        "written on an insert; the test that pins the whole address owns the rest of it."
     )
 
 
