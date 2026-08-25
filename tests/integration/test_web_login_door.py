@@ -1094,14 +1094,13 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     )
 
     jwks_url = platform.discovery()["jwks_uri"]
-    register_platform(offers[0], jwks_url)
+    # The authorization endpoint is the registration's since E1-05, not a
+    # setting: this suite's subject is which person a launch lands as, so the
+    # value only has to be one nothing could reach by accident. `.invalid` is
+    # RFC 2606.
+    register_platform(offers[0], jwks_url, "http://lti-platform.invalid/e0-18-configured-authorize")
     launch_tool = tool_doors(
-        {
-            door_contract.settings["public_base_url"]: door_contract.public_base_url,
-            door_contract.settings["lti_authorization_endpoint"]: (
-                "http://lti-platform.invalid/e0-18-configured-authorize"
-            ),
-        },
+        {door_contract.settings["public_base_url"]: door_contract.public_base_url},
         {urlsplit(jwks_url).hostname: platform},
     )
 

@@ -74,13 +74,19 @@ MOCK_LMS_TOOL_LOGIN_URL_VARIABLE = "MOCK_LMS_TOOL_LOGIN_URL"
 MOCK_LMS_TOOL_LAUNCH_URL_VARIABLE = "MOCK_LMS_TOOL_LAUNCH_URL"
 MOCK_LMS_ISSUER_VARIABLE = "MOCK_LMS_ISSUER"
 
-# Where the tool is configured to send a browser to begin the launch. **Chosen so
-# that no implementation could arrive at it by accident**: E0-18 puts the
-# platform's browser-facing authorization endpoint in a settings field because
-# `lti_platform` has no column for it, and a redirect built from anything else —
-# the issuer plus a guessed path, a constant in the source — would agree with the
-# real mock and disagree with this. `.invalid` is reserved by RFC 2606.
-CONFIGURED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e0-18-configured-authorize"
+# Where this platform's **registration** says to send a browser to begin the
+# launch. **Chosen so that no implementation could arrive at it by accident**: a
+# redirect built from anything else — the issuer plus a guessed path, a constant
+# in the source — would agree with the real mock and disagree with this.
+# `.invalid` is reserved by RFC 2606.
+#
+# **It was a setting until E1-05 and is a column now.** E0-18 put it in
+# `Settings` because `lti_platform` had no column for it (ADR 0075), which is
+# correct for one registered platform and wrong for two; E1-05 makes it a
+# property of the registration and deletes the setting outright. Nothing about
+# what this module asserts changes — the redirect still has to go to an address
+# nothing could guess — only where the value is written.
+REGISTERED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e0-18-configured-authorize"
 
 # An issuer no `lti_platform` row will ever carry. Used for the login endpoint's
 # unknown-issuer case and for the second platform instance whose launches nobody
@@ -192,7 +198,9 @@ def jwks_url(platform: Any) -> str:
 @pytest.fixture
 def registration(platform: Any, jwks_url: str, register_platform: Any) -> Any:
     """The mock platform, registered in `lti_platform` and `lti_deployment`."""
-    return register_platform(platform.require_offers()[0], jwks_url)
+    return register_platform(
+        platform.require_offers()[0], jwks_url, REGISTERED_AUTHORIZATION_ENDPOINT
+    )
 
 
 @pytest.fixture
@@ -209,10 +217,7 @@ def open_launch_door(
     names = door_contract.settings
 
     def build(*, around: Any = None, environment: str | None = None, **overrides: str) -> Any:
-        values = {
-            names["public_base_url"]: door_contract.public_base_url,
-            names["lti_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
-        }
+        values = {names["public_base_url"]: door_contract.public_base_url}
         values.update({names[key]: value for key, value in overrides.items()})
         if environment is not None:
             values[ENVIRONMENT_VARIABLE] = environment
@@ -237,7 +242,9 @@ def registration_naming_this_suites_key(
     issuer would leave the door choosing between them, and which one it chose
     would decide the result of every test below.
     """
-    return register_platform(platform.require_offers()[0], suite_key_set.jwks_url)
+    return register_platform(
+        platform.require_offers()[0], suite_key_set.jwks_url, REGISTERED_AUTHORIZATION_ENDPOINT
+    )
 
 
 @pytest.fixture
@@ -255,10 +262,7 @@ def tool_verifying_against_this_suites_key(
     served the platform's real keys.
     """
     return tool_doors(
-        {
-            door_contract.settings["public_base_url"]: door_contract.public_base_url,
-            door_contract.settings["lti_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
-        },
+        {door_contract.settings["public_base_url"]: door_contract.public_base_url},
         {suite_key_set.host: suite_key_set},
     )
 
@@ -515,16 +519,24 @@ def test_the_login_endpoint_refuses_an_issuer_no_row_registers(
     )
 
 
-def test_the_login_redirect_goes_to_the_configured_authorization_endpoint(
-    tool: Any, door_contract: Any, platform: Any
+def test_the_login_redirect_goes_to_the_registrations_authorization_endpoint(
+    tool: Any, door_contract: Any, platform: Any, registration: Any
 ) -> None:
     """Criterion: the redirect targets the platform's authorization endpoint.
 
-    **Dies if the endpoint is derived rather than configured** — assembled from the
-    issuer plus a guessed path, or written into the source. E0-23 put service
-    addresses out of `lti_platform` until E1, so E0-18's stand-in is a settings
-    field, and the value used here is one nothing could arrive at by any other
-    route.
+    **Dies if the endpoint is derived rather than read** — assembled from the
+    issuer plus a guessed path, or written into the source. The value registered
+    here is one nothing could arrive at by any other route, so a redirect that
+    lands on it can only have been read from somewhere.
+
+    **What it no longer says, after E1-05.** Until this ticket the endpoint was a
+    process-wide setting, and this test could not tell "read from configuration"
+    from "read from *this* registration" — with one platform registered the two
+    are the same string. That distinction is the ticket's first criterion and is
+    asserted where it can be, in
+    `tests/integration/test_registration_endpoints_are_per_platform.py`, which
+    registers two platforms at once. What this one still holds, and holds for the
+    whole launch-door suite, is that the address is not derived.
     """
     offer = platform.require_offers()[0]
 
@@ -534,12 +546,11 @@ def test_the_login_redirect_goes_to_the_configured_authorization_endpoint(
 
     split = urlsplit(location)
     without_query = f"{split.scheme}://{split.netloc}{split.path}"
-    assert without_query == CONFIGURED_AUTHORIZATION_ENDPOINT, (
-        f"The tool redirected to {without_query!r} and the configured authorization endpoint is "
-        f"{CONFIGURED_AUTHORIZATION_ENDPOINT!r}. E0-18 makes that endpoint a setting because "
-        "`lti_platform` has no column for it; a value that agrees with the platform by "
-        "construction would pass a test written against the real address and would not be "
-        "configuration."
+    assert without_query == registration.authorization_endpoint, (
+        f"The tool redirected to {without_query!r} and this platform's registration carries "
+        f"{registration.authorization_endpoint!r}. E1-05 makes the authorization endpoint a "
+        "column on `lti_platform`; a value that agrees with the platform by construction would "
+        "pass a test written against the real address and would not be a registration at all."
     )
 
 
