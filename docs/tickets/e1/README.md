@@ -22,6 +22,10 @@ fixtures, migration identity, `.env.example` readers, `pulse_app` read-path
 tests, view rules, the Care session bound, synchronous sessions), and
 `docs/MISTAKES.md` whole.
 
+Items an E1 ticket deferred rather than fixed live in
+[`deferred.md`](deferred.md); a PR that defers something adds it there in the
+same PR, and the end of the epic runs a cleanup pass over the file.
+
 ## Build order
 
 | # | Ticket | Branch | Depends on | Summary |
