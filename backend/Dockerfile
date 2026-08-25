@@ -1,14 +1,24 @@
-# Backend image — ticket E0-02, SPEC §7.2.
+# Backend image — ticket E0-02, SPEC §7.2. The frontend build stage is E1-04's.
 #
-# Two stages. The builder resolves, compiles, and builds; the runtime stage
-# receives a finished virtualenv and nothing else, so no compiler, no pip cache,
-# no lockfile, and no test dependency ships. It runs as an unprivileged user and
-# declares the HEALTHCHECK that `scripts/ci/wait_for_health.sh` waits on — that
-# script treats a service with no health check as a configuration gap rather
-# than as healthy, deliberately.
+# Three stages now. The Python builder resolves, compiles and builds; the
+# frontend builder produces the single-page application; the runtime stage
+# receives a finished virtualenv and a finished `dist` and nothing else, so no
+# compiler, no pip cache, no lockfile, no `node_modules` and no test dependency
+# ships. It runs as an unprivileged user and declares the HEALTHCHECK that
+# `scripts/ci/wait_for_health.sh` waits on — that script treats a service with no
+# health check as a configuration gap rather than as healthy, deliberately.
 #
-# Both stages name the same base image by tag *and* by digest; see
-# docs/adr/0007-container-images-pinned-by-tag-and-digest.md.
+# **The frontend is built into this image rather than served from one of its
+# own** (ADR 0086). SPEC §13 draws a `frontend/Dockerfile`; what the same section
+# gives `backend/app/main.py` is the SPA static serve, and one process serving
+# both is what makes `docker compose up` bring up a working application with no
+# reverse proxy in front of it to route `/app` away from the API.
+#
+# Every stage names its base image by tag *and* by digest; see
+# docs/adr/0007-container-images-pinned-by-tag-and-digest.md. The Node tag is the
+# major `.github/workflows/ci.yml` sets as `NODE_VERSION`, so the build that
+# produces the shipped bundle and the build the pull request gate runs are the
+# same runtime.
 #
 # Installing follows docs/adr/0005-dependency-locking.md rather than inventing
 # its own way: the closure comes from a committed lockfile under
@@ -47,6 +57,27 @@ RUN pip wheel . --no-deps --no-build-isolation --wheel-dir /wheels \
  && /opt/venv/bin/pip install --no-deps --no-index /wheels/*.whl
 
 
+FROM node:20.20.2-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS frontend
+
+WORKDIR /src
+
+# The one lockfile, at the root, resolving the whole workspace (ADR 0083).
+# `frontend/package.json` is copied with it so `npm ci` has the member manifest
+# to resolve against; the source follows in its own layer, so editing a
+# component does not reinstall the closure.
+COPY package.json package-lock.json ./
+COPY frontend/package.json ./frontend/package.json
+RUN npm ci
+
+# `design/tokens.css` is a build input, not a frontend file: `src/styles.css`
+# imports it from outside this package so that SPEC §7.6's single source stays
+# one file. A context without it fails the build loudly rather than shipping a
+# bundle with no palette in it.
+COPY design/tokens.css ./design/tokens.css
+COPY frontend ./frontend
+RUN npm run build --workspace frontend
+
+
 FROM python:3.13.15-slim-bookworm@sha256:00faa2debb87529f9f0764e9491d8ba400a3678976616c3bd7cb193745ac20d1 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -61,6 +92,18 @@ RUN groupadd --system --gid 1001 pulse \
         --shell /usr/sbin/nologin pulse
 
 COPY --from=builder --chown=root:root /opt/venv /opt/venv
+
+# The built single-page application, and the variable that tells the app factory
+# where it is. Owned by root and served read-only, like the virtualenv beside it:
+# nothing this image runs may rewrite what it serves.
+#
+# A fixed path rather than the repository layout, because the application is
+# installed as a wheel into the virtualenv and there is no `frontend/` beside it
+# in here. `backend/app/main.py` falls back to the repository's `frontend/dist`
+# when the variable is unset, which is the developer's machine; this is the
+# container's answer to the same question.
+COPY --from=frontend --chown=root:root /src/frontend/dist /opt/pulse/frontend
+ENV FRONTEND_DIST=/opt/pulse/frontend
 
 # Somewhere writable for Celery beat's schedule file. `/app` is owned by root so
 # that nothing this image runs can rewrite its own code, and beat has to write
