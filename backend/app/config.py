@@ -500,9 +500,8 @@ class Settings(BaseSettings):
     # starts `mock-idp` in every deployment, so an operator who deployed per
     # §7.2 and set none of these had a signing oracle for fake CARE and ADMIN
     # identities, which this application then verified correctly and trusted.
-    # ADR 0077 reverses that half of ADR 0075; `PUBLIC_BASE_URL` and
-    # `LTI_PLATFORM_AUTHORIZATION_ENDPOINT` keep their defaults for the reasons
-    # at their own block below.
+    # ADR 0077 reverses that half of ADR 0075; `PUBLIC_BASE_URL` keeps its
+    # default for the reason at its own block below.
     #
     # The development values did not disappear, they moved: `docker-compose.yml`
     # gives all three `Settings`-building services `${OIDC_ISSUER:-...}` and the
@@ -580,44 +579,42 @@ class Settings(BaseSettings):
     # The reason is on the field. It is not the same reason twice, and no
     # heading here summarizes it — see the module docstring for why not.
 
-    # --- the launch door's addresses (E0-18) ----------------------------------
+    # --- the tool's own address (E0-18) ---------------------------------------
     #
-    # Two values, both of them addresses a browser is sent to. They are
-    # defaulted, and the reason is the third of the three this module keeps
-    # apart: **the spec never spoke to them.** §6.3's configuration surface names
-    # no LTI endpoint, §7.3 leaves the platform's addresses to the registration,
-    # and E0-23 decided that `lti_platform` gains service-address columns in E1,
-    # with the code that reads them. So the values below are E0's stand-in and
-    # the ADR says so (docs/adr/0075).
+    # One value, an address a browser is sent to. It is defaulted, and the reason
+    # is the third of the three this module keeps apart: **the spec never spoke
+    # to it.** §6.3's configuration surface names no such value.
     #
-    # **Each default is this repository's own development stack**, spelled the
-    # way `docker-compose.override.yml` publishes it — a browser-facing horizon
-    # in both cases, per the note at the identity provider above. That is
-    # deliberate and it is not the "working literal default" the module docstring
-    # refuses: neither address can resolve in a deployment, and neither names
-    # anything the base Compose file starts, so a deployment that forgets one
-    # gets a launch that fails at its first hop rather than a system that is
-    # quietly wrong. What a required field would buy instead is a startup
-    # refusal, and what it would cost is that `docker compose up` from a clean
-    # checkout — E0's own exit criterion (§14.3) — stops working without an
-    # `.env` nobody has written yet.
+    # **The default is this repository's own development stack**, spelled the way
+    # `docker-compose.override.yml` publishes it — a browser-facing horizon, per
+    # the note at the identity provider above. That is deliberate and it is not
+    # the "working literal default" the module docstring refuses: the address
+    # cannot resolve in a deployment and names nothing the base Compose file
+    # starts, so a deployment that forgets it gets a launch that fails at its
+    # first hop rather than a system that is quietly wrong. What a required field
+    # would buy instead is a startup refusal, and what it would cost is that
+    # `docker compose up` from a clean checkout — E0's own exit criterion (§14.3)
+    # — stops working without an `.env` nobody has written yet.
     #
     # **The five `oidc_*` settings used to be in this block and are not any
     # more** (ADR 0077). The argument above did not hold for them: `mock-idp` is
     # a service every deployment starts, so their default *did* resolve.
+    #
+    # **The LTI platform's authorization endpoint used to be in this block too,
+    # and it is not a setting at all any more** (E1-05, docs/adr/0075's
+    # amendment). It was E0's stand-in while `lti_platform` had no column for it,
+    # and one process-wide address is wrong the moment two platforms are
+    # registered: a launch from the second resolved the second registration and
+    # then sent the browser to the first's address. It is a column on the
+    # registration now, and the deletion is a deletion rather than a demotion —
+    # a surviving default the column fell back to would be the same finding
+    # reached through an `or`.
     public_base_url: str = Field(
         default="http://localhost:8000",
         description=(
             "Browser-facing base URL of this tool. `/lti/launch` and "
             "`/auth/oidc/callback` are derived from it, and both mocks compare "
             "the result exactly against what they were registered with."
-        ),
-    )
-    lti_platform_authorization_endpoint: str = Field(
-        default="http://localhost:8080/oidc/authorize",
-        description=(
-            "Browser-facing OIDC authorization endpoint of the LTI platform. A settings "
-            "field because `lti_platform` has no column for it until E1 (E0-23)."
         ),
     )
     # The spec never spoke to this one. §6.3 enumerates the configuration

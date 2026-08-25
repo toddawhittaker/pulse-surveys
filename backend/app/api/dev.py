@@ -2,8 +2,14 @@
 
 The console is a convenience for a developer, and nothing a deployment serves. It
 lists the web-login people the mock identity provider knows and offers each as a
-one-click "sign in as this person" link, plus a link to the mock LMS launcher, so
-both of SPEC §2's entry doors can be walked without typing URLs.
+one-click "sign in as this person" link, plus one launcher link per registered
+LTI platform, so both of SPEC §2's entry doors can be walked without typing URLs.
+
+**The launcher links come from `lti_platform`** (E1-05). They used to come from
+the origin of a process-wide setting, which rendered one link whatever the
+database held — including when it held no registration at all, which sent a
+developer to a port answering nothing. With nothing registered the page now says
+so and how to fix it.
 
 **It is a become-any-user surface, so it is gated exactly the way `/docs` is** —
 served only when `ENVIRONMENT` is exactly `development` (ADR 0074), the same value
@@ -33,11 +39,15 @@ from typing import Any
 from urllib.parse import urlencode, urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.api.auth import LOGIN_PATH
 from app.config import Settings, is_development
+from app.db import get_session
+from app.models.lti import LtiPlatform
 
 router = APIRouter(tags=["dev"])
 
@@ -217,13 +227,31 @@ def unreachable_section() -> str:
     </p>"""
 
 
-def launcher_section(origin: str) -> str:
-    """The link into the mock LMS launcher, at the platform's own origin."""
+def launcher_section(origins: list[str]) -> str:
+    """One launcher link per registered platform origin, or an honest line saying none is.
+
+    **The empty case is a case, not a blank space.** While the origin came from a
+    process-wide setting there was always a link, including on a database that
+    had never been seeded — which sent a developer to a port answering nothing
+    and read as a broken stack. The console reads the registrations now, so the
+    absence is visible, and the honest answer to it names what is missing and how
+    to fix it.
+    """
+    if not origins:
+        return """    <h2>LTI launch</h2>
+    <p class="note">
+      No LTI platform is registered, so there is nothing to launch from. Run
+      <code>make seed</code> to register the mock LMS, then reload this page.
+    </p>"""
+    links = "\n          ".join(
+        f'<li><a class="action" href="{escape(origin, quote=True)}" target="_blank">'
+        f"Open the launcher at {escape(origin)}</a></li>"
+        for origin in origins
+    )
     return f"""    <h2>LTI launch</h2>
-    <p>Launch into the mock LMS as an instructor or a student (SPEC §2).</p>
+    <p>Launch as an instructor or a student from a registered platform (SPEC §2).</p>
     <ul>
-          <li><a class="action" href="{escape(origin, quote=True)}" target="_blank">
-            Open the mock LMS launcher</a></li>
+          {links}
     </ul>"""
 
 
@@ -254,25 +282,54 @@ def roster_users(settings: Settings, http: httpx.Client) -> list[dict[str, Any]]
     return [user for user in users if isinstance(user, dict)]
 
 
-def launcher_origin(settings: Settings) -> str:
-    """The scheme-and-authority of the configured LTI authorization endpoint.
+def launcher_origins(session: Session) -> list[str]:
+    """The distinct origins of every registered platform's authorization endpoint.
 
-    The console links to the origin — `scheme://host[:port]`, path stripped — so a
-    developer reaches the launcher rather than the platform's authorization route
-    itself.
+    The console links to the origin — `scheme://host[:port]`, path stripped — so
+    a developer reaches the platform's launcher page rather than its
+    authorization route itself.
+
+    **Read from `lti_platform` and from nowhere else** (E1-05). This used to be
+    the origin of one process-wide setting, which is one link whatever the
+    database holds — the same address for every registration, and a link even
+    when there is no registration at all. A registration with no authorization
+    endpoint states none, so it offers no launcher; that is the same NULL the
+    launch door refuses rather than defaults.
+
+    Distinct, in the order the issuers sort, because two registrations of one
+    platform — a pilot beside production, which is why `lti_platform` is unique
+    on the pair — share one launcher page and two identical links would be a
+    duplicate rather than a choice.
     """
-    split = urlsplit(settings.lti_platform_authorization_endpoint)
-    return f"{split.scheme}://{split.netloc}"
+    endpoints = session.execute(
+        select(LtiPlatform.authorization_endpoint)
+        .where(LtiPlatform.authorization_endpoint.is_not(None))
+        .order_by(LtiPlatform.issuer)
+    ).scalars()
+
+    origins: list[str] = []
+    for endpoint in endpoints:
+        split = urlsplit(str(endpoint))
+        origin = f"{split.scheme}://{split.netloc}"
+        if origin not in origins:
+            origins.append(origin)
+    return origins
 
 
 @router.get(DEV_CONSOLE_PATH, summary="Development-only test console for both entry doors")
-def dev_console(request: Request) -> HTMLResponse:
+def dev_console(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
     """Render the console, or `404` outside development.
 
     The gate is the whole safety of the feature (see the module docstring), and it
-    is checked here so production is indistinguishable from a route that does not
-    exist. Synchronous, and the one blocking thing it does — the roster fetch —
-    runs in FastAPI's threadpool the way `app.api.auth.begin_web_login` does.
+    is checked here so production is indistinguishable from a route that was never
+    registered. Synchronous, and the one blocking thing it does — the roster fetch
+    — runs in FastAPI's threadpool the way `app.api.auth.begin_web_login` does.
+
+    **The session is taken before the gate rather than after**, because
+    `Depends` resolves before the handler body runs either way. It costs a
+    connection from the pool on a request a deployment answers `404` to, which is
+    the same cost every other routed dependency has and is why the gate stays in
+    the handler (ADR 0079) rather than moving anywhere clever.
     """
     settings: Settings = request.app.state.settings
     if not is_development(settings):
@@ -283,5 +340,5 @@ def dev_console(request: Request) -> HTMLResponse:
     body = f"""    <h1>{escape(CONSOLE_TITLE)}</h1>
     <p>Walk either of Pulse's two entry doors (SPEC §2) without typing URLs.</p>
 {web}
-{launcher_section(launcher_origin(settings))}"""
+{launcher_section(launcher_origins(session))}"""
     return HTMLResponse(page(body))

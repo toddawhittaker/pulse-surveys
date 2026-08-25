@@ -99,14 +99,23 @@ class LaunchRefusedError(Exception):
 class Initiation:
     """The authorization request a login initiation produces, and what to remember.
 
-    `parameters` rather than a finished URL: where they are sent is the
-    `LTI_PLATFORM_AUTHORIZATION_ENDPOINT` setting, and the router that reads
-    settings is the one that assembles the redirect (`app.api.deps.with_query`).
+    `parameters` rather than a finished URL: the router assembles the redirect
+    out of these and `authorization_endpoint` (`app.api.deps.with_query`).
+
+    **`authorization_endpoint` is read off the registration that resolved this
+    launch**, and it is the whole of E1-05's first criterion. It was a
+    process-wide setting while `lti_platform` had no column for it (ADR 0075),
+    which is right for one registered platform and wrong for two: a launch from
+    platform B resolved B's registration and then sent the browser to A's
+    address, carrying B's client ID and this tool's `state` and `nonce`. Carried
+    on the initiation rather than looked up again in the router, so the row that
+    decided the client ID is unarguably the row that decides the address.
     """
 
     parameters: dict[str, str]
     state: str
     nonce: str
+    authorization_endpoint: str
 
 
 def registered_platform(session: Session, issuer: str) -> LtiPlatform:
@@ -154,8 +163,23 @@ def begin_a_launch(session: Session, settings: Settings, form: Mapping[str, str]
     opaque values — who is launching, and from which placement — and a tool that
     dropped either gets a launch for whoever the platform guesses, or none at
     all.
+
+    **A registration that states no authorization endpoint is refused, not
+    defaulted.** The column is nullable because a row written before E1-05 has no
+    value for it, so NULL means "not stated" — and the answer to "not stated" is
+    that an administrator completes the registration. A fallback to any
+    process-wide address would be the finding E1-05 closes, re-opened under
+    another name: one string standing in for every registration that does not
+    carry its own.
     """
     platform = registered_platform(session, form.get("iss", ""))
+    endpoint = (platform.authorization_endpoint or "").strip()
+    if not endpoint:
+        raise LaunchRefusedError(
+            "That platform's registration states no authorization endpoint, so this tool does not "
+            "know where to send the browser to continue the launch. An administrator completes the "
+            "registration before it can launch this tool (SPEC §2)."
+        )
     state = secrets.token_urlsafe(STATE_NONCE_BYTES)
     nonce = secrets.token_urlsafe(STATE_NONCE_BYTES)
 
@@ -175,7 +199,9 @@ def begin_a_launch(session: Session, settings: Settings, form: Mapping[str, str]
         if value:
             parameters[hint] = value
 
-    return Initiation(parameters=parameters, state=state, nonce=nonce)
+    return Initiation(
+        parameters=parameters, state=state, nonce=nonce, authorization_endpoint=endpoint
+    )
 
 
 def registered_deployment(session: Session, platform: LtiPlatform, deployment_id: Any) -> None:

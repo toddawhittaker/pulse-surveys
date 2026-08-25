@@ -84,7 +84,7 @@ async def login(request: Request, session: Session = Depends(get_session)) -> Re
         return refused(str(refusal))
 
     response = RedirectResponse(
-        with_query(settings.lti_platform_authorization_endpoint, initiation.parameters),
+        with_query(initiation.authorization_endpoint, initiation.parameters),
         status_code=FOUND,
     )
     carry_across(
