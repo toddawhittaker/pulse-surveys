@@ -97,6 +97,21 @@ development name:
    service answers credentials to any request that reaches it on every major
    provider, and no legitimate LMS is there.
 
+**Where "class" actually ends for rules 3 and 4, measured by this PR's security
+review (2026-08-25).** Both rules judge only spellings `ipaddress.ip_address`
+parses. A shortened dotted quad (`127.1`), a bare decimal (`2130706433`,
+`2852039166`), dotted hex or octal (`0x7f.0.0.1`, `0251.0376.0251.0376`), and a
+resolver-backed name for a refused address (`metadata.google.internal`) are all
+accepted while the addresses they reach are refused — the same residue ADR 0077
+records for its loopback class, arrived at the same way. The impact cap is rule
+1: cleartext off this machine is refused regardless of spelling, so the
+plain-`http` metadata endpoints stay unreachable, and today's only writer is
+the development-only seed. Closing it means resolving the host and judging
+every returned address, or refusing hosts that parse as integer or dotted-hex
+literals — a reviewed tightening with its own test pairs, owed before E11's
+console becomes a second writer; `docs/tickets/e1/deferred.md` carries the
+done-when.
+
 **Private ranges are accepted on every column**, RFC 1918 and IPv6 unique-local
 alike. A university running Canvas on `10.0.0.5` behind its own network is an
 ordinary deployment, and a browser on that network resolves the address

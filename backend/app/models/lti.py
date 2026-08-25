@@ -156,8 +156,11 @@ def refuse_invalid_registration_addresses(
 ) -> None:
     """Refuse a registration whose addresses this environment will not accept.
 
-    The one chokepoint every writer of an `lti_platform` row passes through —
-    today `scripts/seed.py`, later E11's registration console. E0-24 item 1 left
+    The chokepoint every writer of an `lti_platform` row is expected to call —
+    today `scripts/seed.py` does, and E11's registration console must. **A call
+    convention, not an enforcement point**: no mapper event or sweep makes a
+    future writer call it, which this ticket's security review recorded and
+    `docs/tickets/e1/deferred.md` carries with a done-when. E0-24 item 1 left
     `jwks_url` credential-equivalent and unconstrained, and E1 writes and fetches
     it, so E1 says what a legitimate value looks like. `docs/adr/0081` is this
     ticket's own decision and states where ADR 0077's vocabulary carries over and

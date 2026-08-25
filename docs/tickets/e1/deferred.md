@@ -67,3 +67,22 @@ Every E1 pull request that defers something adds it here in the same PR.
    since the one-row rule forbids the two-key overlap a real rotation needs.
    **Owner:** the epic that first registers a real platform and therefore first
    needs a production signer.
+
+2. **The address rules judge spellings, not addresses** (security review,
+   LOW). Rules 3 and 4 of ADR 0081 accept `127.1`, bare-decimal and
+   dotted-hex literals, and resolver-backed names (`metadata.google.internal`)
+   for the exact addresses they refuse — ADR 0081's residue paragraph holds
+   the measurements. Capped by rule 1 (cleartext off this machine is refused
+   regardless of spelling) and by the seed being the only writer today.
+   **Done when** the two helpers resolve the host and judge every returned
+   address, or refuse integer/dotted-hex host literals, with test pairs on
+   both sides — before E11's console becomes a second writer.
+
+3. **The write-time chokepoint is a call convention** (security review,
+   LOW). Nothing — mapper event, sweep, or grant — makes a future writer of
+   `lti_platform` call `refuse_invalid_registration_addresses`; a writer
+   going through SQLAlchemy without the call is as unjudged as the raw-SQL
+   writer ADR 0081 records.
+   **Done when** the call is structural (a `before_insert`/`before_update`
+   event on `LtiPlatform`) or a sweep asserts every write site calls it —
+   in the same change that adds the second writer, E11 at the latest.
