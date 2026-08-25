@@ -193,9 +193,14 @@ INERT_DIFFS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "a record that is not in the tree, as a new file and a deleted one both appear in a diff",
         ("docs/adr/0071-a-record-this-test-invented.md",),
     ),
+    # A design file whose name has a space in it, and **`design/tokens.css` is no
+    # longer beside it** — see `UNCLASSIFIED_PATHS` below and
+    # `docs/disputes/E1-04-01.md`. The rest of `design/` is inert exactly as it
+    # was: nothing imports a prototype canvas or a usage note, and nothing copies
+    # one into an image.
     (
-        "a design file, including one whose name has a space in it",
-        ("design/tokens.css", "design/Usage Rules.md"),
+        "a design file whose name has a space in it",
+        ("design/Usage Rules.md",),
     ),
     # `CONTRIBUTING.md` rather than `README.md`. The readme is a root Markdown
     # file and is deliberately *not* inert: `pyproject.toml` declares it as the
@@ -204,7 +209,15 @@ INERT_DIFFS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # E0-38's security review asked whether a build input belongs in the set that
     # switches the build off, and ADR 0070 records the reversal and its cost.
     ("a root Markdown file", ("CONTRIBUTING.md",)),
-    ("several families at once", ("CLAUDE.md", "docs/MISTAKES.md", "design/tokens.css")),
+    # `design/CommentCard.dc.html` in place of `design/tokens.css`, which E1-04
+    # made a build input. A `.dc.html` canvas is the prototype export itself and
+    # is the bulk of that directory: nothing imports it, no `COPY` names it, no
+    # test parses it, and deleting it breaks nothing that builds. It is what
+    # `design/**` being an inert family is actually about.
+    (
+        "several families at once",
+        ("CLAUDE.md", "docs/MISTAKES.md", "design/CommentCard.dc.html"),
+    ),
 )
 
 # Paths in neither set. The classification fails toward running everything, so a
@@ -231,6 +244,22 @@ UNCLASSIFIED_PATHS: tuple[tuple[str, str], ...] = (
     # A declared build input that reads as documentation. See the inert table
     # above for why it moved.
     ("the readme, which the wheel and the image both consume", "README.md"),
+    # The second file to make that move, and it is the stronger case of the two.
+    # E1-04 made `design/tokens.css` a build input by both of the tests `README.md`
+    # had to satisfy to leave this set: `frontend/src/styles.css` opens with
+    # `@import '../../design/tokens.css'`, so the palette, the type scale and the
+    # focus ring are compiled into `frontend/dist/assets/*.css` and served to every
+    # visitor — the readme is only packaged, never rendered — and
+    # `backend/Dockerfile`'s frontend stage carries
+    # `COPY design/tokens.css ./design/tokens.css`, so deleting it breaks the image
+    # build. Called inert, a palette edit built no bundle, measured no budget and
+    # built no image, and a deletion surfaced on some later unrelated pull request.
+    # SPEC §7.6's "single source" forecloses the alternative that would have kept
+    # it inert — a copy of the definitions under `frontend/src/`. Ruled in
+    # `docs/disputes/E1-04-01.md`; ADR 0070 is the precedent, applied rather than
+    # extended. Only this path moves: the rest of `design/` stays inert, and the
+    # `design/Usage Rules.md` case above stays green.
+    ("the design tokens, which the stylesheet imports and the image copies", "design/tokens.css"),
     # A path that leaves the directory it appears to be in. Unreachable from
     # `git diff --name-only` today, and one line to close.
     ("a path escaping the inert directory", "docs/../backend/app/main.py"),
@@ -2560,9 +2589,11 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
     # `frontend/` — every file it can possibly read is outside the inert set, so a
     # diff that could plant a raw hex, the host's blue or a forbidden typeface
     # already runs the whole pipeline. The samples it checks its readers against
-    # are copied literals rather than reads of `design/tokens.css`, which is inert;
-    # if it is ever taught to read that file, this entry stops being true and the
-    # module belongs in the unconditional job instead.
+    # are copied literals rather than reads of `design/tokens.css` — which is no
+    # longer inert either, per `docs/disputes/E1-04-01.md`, so that file is now
+    # covered twice over. What would still break this entry is the sweep being
+    # taught to read something under `docs/` or the rest of `design/`; then it
+    # belongs in the unconditional job instead.
     "tests/unit/test_the_frontend_source_uses_tokens_only.py": (
         "sweeps tracked files under frontend/ only, and nothing under frontend/ is inert"
     ),

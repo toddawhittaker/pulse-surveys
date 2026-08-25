@@ -383,9 +383,14 @@ CLASSIFIER_CASES = [
     ("a document that is not in the tree", ["docs/adr/0071-invented.md"], 0),
     ("a design file whose name has a space in it", ["design/Usage Rules.md"], 0),
     ("a root Markdown file", ["CONTRIBUTING.md"], 0),
+    # `design/CommentCard.dc.html` in place of `design/tokens.css`, which E1-04
+    # made a build input (see the entry below). A `.dc.html` canvas is the
+    # prototype export itself: nothing imports it, no `COPY` names it, no test
+    # parses it, and it is the bulk of that directory — it is what `design/**`
+    # being an inert family is actually about.
     (
         "several inert families at once",
-        ["CLAUDE.md", "docs/MISTAKES.md", "design/tokens.css"],
+        ["CLAUDE.md", "docs/MISTAKES.md", "design/CommentCard.dc.html"],
         0,
     ),
     # `README.md` is a root Markdown file and is *not* inert: `pyproject.toml`
@@ -394,6 +399,16 @@ CLASSIFIER_CASES = [
     # build input belongs in the set that switches the build off; ADR 0070
     # records the reversal.
     ("the readme, which is a declared build input", ["README.md"], 1),
+    # The second file to make that move, on the same two properties and holding
+    # both more strongly. E1-04 made `design/tokens.css` a build input:
+    # `frontend/src/styles.css` opens with `@import '../../design/tokens.css'`, so
+    # it is compiled into `frontend/dist/assets/*.css` and served to every visitor
+    # — the readme is packaged and never rendered — and `backend/Dockerfile`'s
+    # frontend stage carries `COPY design/tokens.css ./design/tokens.css`, so
+    # deleting it breaks the image build. Called inert, a palette edit built no
+    # bundle and measured no budget. Ruled in `docs/disputes/E1-04-01.md`; only
+    # this path moves, and the `design/Usage Rules.md` case above stays inert.
+    ("the design tokens, which the stylesheet imports", ["design/tokens.css"], 1),
     # Not inert. The spec is the one the naive version gets wrong: it is parsed
     # at run time by the contract suite, so editing it is exactly when that suite
     # has to run. PR #39 is the incident.
