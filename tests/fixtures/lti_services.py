@@ -251,7 +251,9 @@ class MockPlatform:
     an interface the ticket never asked for.
     """
 
-    def __init__(self, values: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self, values: Mapping[str, str] | None = None, tool_key_set: Any | None = None
+    ) -> None:
         from fastapi.testclient import TestClient
 
         self.values = dict(values or {})
@@ -260,6 +262,17 @@ class MockPlatform:
         # Entered so the application's lifespan runs: a platform that generates
         # its issuer key on startup has not generated one until it does.
         self.client.__enter__()
+        # E1-06. The platform verifies a tool-signed `client_assertion` against the
+        # tool's published key set, which it fetches — and neither the tool's
+        # address nor any other resolves in an in-process test. So every
+        # server-side fetch this platform makes goes through one client, the way
+        # `tests/fixtures/doors.py` routes the tool's own; see
+        # `tests/fixtures/client_credentials.py` for what that pins and what it
+        # deliberately leaves to the implementer. Installed **after** the lifespan
+        # has run, for the reason `tool_doors` gives: it then holds this test's
+        # client whether the mock builds one in its factory or at startup.
+        if tool_key_set is not None:
+            self.application.state.http = tool_key_set.client
 
     def close(self) -> None:
         self.client.__exit__(None, None, None)
@@ -494,20 +507,25 @@ class MockPlatform:
         """Turn a 401 or a 403 into a named gap rather than a puzzling red.
 
         Real LTI Advantage services sit behind an OAuth 2.0 client-credentials
-        grant against the platform's token endpoint. E0-15 does not mention one,
-        E0-14 built none, and no ticket says what a tool would sign its
-        assertion with — so this suite drives the services unauthenticated,
-        which is the only reading of the ticket that does not invent an
-        interface. If the mock requires a token, the answer is a sentence in the
-        ticket, not a guess here.
+        grant against the platform's token endpoint. E0-15 does not mention one
+        and E0-14 built none, so this suite drives the services unauthenticated.
+
+        **E1-06 builds the token endpoint and deliberately does not make NRPS or
+        AGS require a token**, which is a ruling of that ticket rather than an
+        omission: enforcement pairs with E1-11's client, and a mock that started
+        refusing unauthenticated reads would turn every E0-15 test red for a
+        reason none of them is about (`docs/MISTAKES.md` entry 22). So this stays
+        exactly as it was, and a 401 here is still a gap to be settled in a
+        ticket rather than guessed at in this file.
         """
         if response.status_code in (401, 403):
             pytest.fail(
                 f"The platform answered {response.status_code} for `{url}`, so it requires an "
-                "access token for its Advantage services. E0-15 specifies no token endpoint and "
-                "no grant, and E0-14 built neither, so this suite calls NRPS and AGS "
-                "unauthenticated. What a tool should present is an interface question for the "
-                "ticket rather than something to guess at in tests/fixtures/lti_services.py."
+                "access token for its Advantage services. E0-15 specifies no grant, E0-14 built "
+                "none, and E1-06 builds the token endpoint while ruling that these services do "
+                "not yet require a token — enforcement arrives with E1-11's client. So this suite "
+                "calls NRPS and AGS unauthenticated; what a tool should present is a question for "
+                "that ticket rather than something to guess at in tests/fixtures/lti_services.py."
             )
 
     def service_get(self, url: str, accept: str | None = None) -> Any:
@@ -1100,8 +1118,10 @@ def mock_platforms() -> Iterator[Callable[..., MockPlatform]]:
     """
     started: list[MockPlatform] = []
 
-    def start(values: Mapping[str, str] | None = None) -> MockPlatform:
-        platform = MockPlatform(values)
+    def start(
+        values: Mapping[str, str] | None = None, tool_key_set: Any | None = None
+    ) -> MockPlatform:
+        platform = MockPlatform(values, tool_key_set)
         started.append(platform)
         return platform
 

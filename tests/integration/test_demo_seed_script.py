@@ -1298,39 +1298,70 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
     )
 
 
-def test_the_seeded_mock_registration_states_no_token_endpoint(
+def test_the_seeded_mock_registration_states_the_mocks_token_endpoint(
     seeded_demo: Any,
     demo_database: Any,
     metadata_tables: dict[str, Any],
     base_compose: dict[str, Any],
     mock_lms_service: str,
+    mock_lms_config: Any,
 ) -> None:
-    """E1-05 leaves `auth_token_url` NULL, and that is a decision rather than an omission.
+    """E1-06 fills `auth_token_url`, in the change that gives the mock a token endpoint.
 
-    The mock platform has no token endpoint: its discovery document advertises
-    none, because E0-14 built none and "an advertised endpoint that answers
-    nothing is a record asserting something untrue" — the platform's own words,
-    in `mock-lms/app/main.py`. E1-06 builds it, and fills this column in the same
-    change, which is why the carried entry insists the client-credentials grant
-    lands as one change covering all four parts.
+    **This test asserted the opposite until E1-06, correctly.** E1-05 left the
+    column NULL on purpose, because the mock had no token endpoint and "a
+    registration naming an address that answers nothing is exactly the record the
+    platform's own discovery document refuses to be" (ADR 0036). E1-06 builds the
+    endpoint, so the reason for the NULL is gone and the record that asserted it
+    would otherwise go on asserting something the change made false
+    (`docs/MISTAKES.md` entries 1 and 22 — the repair is inside `tests/`, on the
+    other side of the wall from whoever implements the ticket). The carried entry
+    is why the two move together: the grant lands "as one change covering all four
+    parts", and a column left NULL beside a served endpoint leaves
+    `ServiceConnector` with nowhere to ask for a token.
 
-    **The mutation this kills:** a seed that fills the column with a plausible
-    address — `{issuer}/oidc/token` is one line and looks like tidiness — which
-    makes the registration claim an endpoint that 404s. The tool would then
-    attempt a client-credentials grant against it the moment E1-06 ships a
-    service client, and the failure would surface as a token request that
-    returns HTML.
+    **The mutations this kills.** The column left NULL, which is HEAD and which
+    makes every part of E1-06 unreachable from a registration. A plausible address
+    that is not the one the platform serves — `{issuer}/oidc/token` is one line
+    and looks like tidiness — which surfaces much later as a token request that
+    returns HTML. And the **browser** spelling of the address, which is the
+    interesting near miss rather than a hypothetical one: the column beside this
+    one holds `localhost` and a published host port on purpose (ADR 0075's
+    per-value horizon rule), because a browser resolves no Compose service name.
+    This column is the opposite case — the *tool container* fetches it, over the
+    Compose network, exactly as it fetches `jwks_url` — so the two neighbours are
+    right in two different currencies and copying either into the other is a
+    registration that fails at the point of use.
 
-    The column is asserted to *exist* first, so that "it is NULL" cannot pass
-    because there is no such column (`docs/MISTAKES.md` entry 3).
+    The column is asserted to exist first, so that a disagreement cannot be read
+    over a column that is not there (`docs/MISTAKES.md` entry 3).
     """
     seeded(seeded_demo)
     platforms = require_table(metadata_tables, PLATFORMS)
     assert AUTH_TOKEN_URL_COLUMN in platforms.c, (
         f"`{PLATFORMS}` has no `{AUTH_TOKEN_URL_COLUMN}` column — it has "
         f"{[column.name for column in platforms.columns]}. E1-05 adds it beside the authorization "
-        "endpoint, and 'the seed leaves it unset' is true of a column that does not exist in a "
-        "way that says nothing."
+        "endpoint, and what the seed writes into it cannot be read over a column that does not "
+        "exist."
+    )
+
+    token_path = getattr(mock_lms_config, "TOKEN_PATH", None)
+    assert isinstance(token_path, str) and token_path.startswith("/"), (
+        f"`mock-lms/app/config.py` defines no absolute `TOKEN_PATH` (found {token_path!r}). That "
+        "module declares the platform's routes and builds the URLs its discovery document "
+        "advertises — `JWKS_PATH` and `AUTHORIZATION_PATH` are already there — and E1-06 adds the "
+        "token endpoint beside them. Without it the seeded address has nothing to be checked "
+        "against and this comparison would pass over an absence."
+    )
+
+    services = base_compose.get("services") or {}
+    service = services.get(mock_lms_service) or {}
+    environment = service.get("environment") if isinstance(service, dict) else None
+    issuer = environment.get("MOCK_LMS_ISSUER") if isinstance(environment, dict) else None
+    assert issuer, (
+        f"`docker-compose.yml` configures the `{mock_lms_service}` service with no "
+        "`MOCK_LMS_ISSUER`, so there is no origin to build the expected token endpoint from. "
+        "ADR 0037: the mock platform is configured by Compose literals."
     )
 
     addresses = mock_platform_addresses(base_compose, mock_lms_service)
@@ -1347,12 +1378,16 @@ def test_the_seeded_mock_registration_states_no_token_endpoint(
         f"{len(naming_the_mock)}. An earlier test owns that failure."
     )
 
-    assert naming_the_mock[0].get(AUTH_TOKEN_URL_COLUMN) is None, (
-        f"The seeded mock registration states a token endpoint: "
-        f"{naming_the_mock[0].get(AUTH_TOKEN_URL_COLUMN)!r}. The mock platform has none until "
-        "E1-06 builds one, and a registration naming an address that answers nothing is exactly "
-        "the record the platform's own discovery document refuses to be. E1-06 fills this column "
-        "in the change that creates the endpoint."
+    seeded_token_url = naming_the_mock[0].get(AUTH_TOKEN_URL_COLUMN)
+    expected_token_url = f"{issuer}{token_path}"
+    assert seeded_token_url == expected_token_url, (
+        f"The seeded mock registration states `{AUTH_TOKEN_URL_COLUMN}` as {seeded_token_url!r} "
+        f"and the running platform issues tokens at {expected_token_url!r}. A NULL here is the "
+        "state E1-05 left and E1-06 fills; any other value is an address the tool will ask for a "
+        "token at and not get one. The origin is the issuer rather than the browser-facing host "
+        "the authorization endpoint carries, because this is the one column beside `jwks_url` "
+        "that **this container** fetches — ADR 0075's per-value horizon rule, and ADR 0081 rule 4 "
+        "refuses link-local on exactly these two for the same reason."
     )
 
 
