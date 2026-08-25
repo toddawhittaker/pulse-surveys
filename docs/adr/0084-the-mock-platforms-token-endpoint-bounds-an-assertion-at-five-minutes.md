@@ -26,6 +26,19 @@ has. It is measured against the assertion's own `iat` rather than against the
 platform's clock, so the boundary is exactly where the number says and a slow
 request cannot move it; an assertion carrying no `iat` is measured from now.
 
+*Measured boundary of this control (security review, 2026-08-25):* both claims
+are the signer's own statements, so `exp - iat` bounds only an honestly dated
+assertion. A signer who dates both claims in the future mints an assertion that
+passes the expiry check and measures a lifetime of zero, and — with `jti`
+untracked — stays spendable until its far-future `exp`. Against a *leaked*
+assertion the bound holds (a thief cannot re-date a signed claim); against the
+key holder it bounds nothing, so what this control caps is the life of a leaked
+credential, not of a hostile one. The wall-clock clamp that would close the
+forged-dating case (refuse `exp` further than the bound plus skew beyond now)
+is deferred with its done-when beside the `jti` item in
+`docs/tickets/e1/deferred.md`; the two belong to the same future change because
+both are about what the endpoint remembers or refuses beyond the signature.
+
 **2. `aud` must be the token endpoint's own advertised URL.** Not the issuer,
 which is the value most likely to be compared against by accident, and which
 would let an assertion minted for any endpoint on this platform be spent at this

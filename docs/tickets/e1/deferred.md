@@ -166,3 +166,15 @@ Every E1 pull request that defers something adds it here in the same PR.
    `jti` granted, replayed `jti` refused) — at latest with E1-11, whose
    client's conformance claims otherwise rest on an endpoint that cannot
    notice a replay.
+
+2. **The lifetime bound trusts the signer's own dates** (security review,
+   LOW). `exp - iat` are both the assertion's claims, so a signer who dates
+   both in the future mints an assertion that passes every check and stays
+   spendable until its far-future `exp`. Exploiting it needs the tool's
+   private key, and this is the development-only mock, which is what keeps it
+   LOW; ADR 0084's decision 1 now states the measured boundary (the bound
+   caps a leaked assertion, not a hostile signer).
+   **Done when** the endpoint also refuses an assertion whose `exp` lies
+   further than the bound plus a stated skew allowance beyond the platform's
+   clock, proven by a pair on both sides of that line — in the same change as
+   item 1, E1-11 at latest.
