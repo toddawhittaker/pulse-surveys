@@ -34,6 +34,7 @@ import hashlib
 import json
 import math
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -89,6 +90,23 @@ def base64url_uint(value: int) -> str:
     """
     width = max(1, (value.bit_length() + 7) // 8)
     return base64url(value.to_bytes(width, "big"))
+
+
+def base64url_decoded(value: str) -> bytes:
+    """Decode a base64url member, restoring the padding JOSE omits (RFC 7515 §2).
+
+    Raises `ValueError` on anything that is not base64url, which is what makes a
+    mangled token a refusal rather than a 500: `binascii.Error` is a subclass of
+    `ValueError`. `validate=True` is what makes that true — without it the
+    decoder discards every character outside the alphabet, so a corrupted segment
+    decodes to something shorter and plausible instead of failing.
+    """
+    return base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+
+
+def base64url_uint_decoded(value: str) -> int:
+    """One RSA parameter out of a JWK: base64url, big-endian, unpadded (RFC 7518 §6.3)."""
+    return int.from_bytes(base64url_decoded(value), "big")
 
 
 def pkcs1_v15_encoded(signing_input: bytes, width: int) -> bytes:
@@ -275,3 +293,117 @@ class IssuerKey:
         encoded_claims = base64url(json.dumps(claims, separators=(",", ":")).encode("utf-8"))
         signing_input = f"{encoded_header}.{encoded_claims}".encode("ascii")
         return f"{signing_input.decode('ascii')}.{base64url(self.sign(signing_input))}"
+
+
+# ---------------------------------------------------------------------------
+# The other direction (E1-06): reading a JWS somebody else signed.
+# ---------------------------------------------------------------------------
+#
+# The platform verifies a `client_assertion` the **tool** signed, against a key
+# set it fetches from the tool. That is the same arithmetic as above read
+# backwards — the signature raised to a public exponent, compared against the
+# encoding `pkcs1_v15_encoded` produces — and it stays in this file for the
+# reason ADR 0035 gives about the signing half: nothing in the mock's dependency
+# closure does it, the mock has no lockfile of its own, and the bound is that
+# none of this is copied into the tool, which uses PyJWT (ADR 0073).
+
+
+class JwsError(ValueError):
+    """A compact JWS could not be read, or did not verify against the key given.
+
+    One exception for both, because a caller here answers the same way to each:
+    RFC 6749 §5.2 has a refused token request say the client did not
+    authenticate, and "your assertion is three segments of nonsense" and "your
+    assertion is signed by somebody else" are not distinctions a platform owes an
+    unauthenticated caller.
+    """
+
+
+@dataclass(frozen=True)
+class CompactJws:
+    """One compact JWS, read but not yet believed.
+
+    Parsing and verifying are two steps and this type is what sits between them,
+    so that nothing can read the claims of a token whose signature has not been
+    checked without saying so in as many words: `parse` hands back the claims,
+    and `verifies_with` is a separate call the caller has to make.
+    """
+
+    header: dict[str, Any]
+    claims: dict[str, Any]
+    signing_input: bytes
+    signature: bytes
+
+    @classmethod
+    def parse(cls, token: str) -> "CompactJws":
+        """Read a `header.claims.signature` token, refusing anything else.
+
+        Both segments must decode to a JSON **object**: a token whose payload is
+        an array or a bare string is not a JWT, and a caller reading claims off
+        it would be reading attributes of a list.
+        """
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise JwsError(
+                f"A compact JWS has three dot-separated segments and this has {len(parts)}."
+            )
+        encoded_header, encoded_claims, encoded_signature = parts
+        try:
+            header = json.loads(base64url_decoded(encoded_header))
+            claims = json.loads(base64url_decoded(encoded_claims))
+            signature = base64url_decoded(encoded_signature)
+        except ValueError as failure:
+            raise JwsError(f"A segment of this compact JWS could not be read: {failure}") from None
+        if not isinstance(header, dict) or not isinstance(claims, dict):
+            raise JwsError(
+                "A compact JWS carries a JSON object in each of its first two segments; this "
+                f"carries a {type(header).__name__} and a {type(claims).__name__}."
+            )
+        return cls(
+            header=header,
+            claims=claims,
+            signing_input=f"{encoded_header}.{encoded_claims}".encode("ascii"),
+            signature=signature,
+        )
+
+    def verifies_with(self, jwk: Mapping[str, Any]) -> bool:
+        """Whether this token's signature is one `jwk` could have produced.
+
+        **`alg` is taken from this file, never from the token.** A JWS header
+        names its own algorithm, and a verifier that obeys it accepts `none` and
+        accepts an HMAC keyed with the public key it was about to verify against.
+        RS256 is what LTI 1.3 specifies and it is the only thing this platform
+        signs or checks, so a header naming anything else is refused rather than
+        honoured.
+
+        A signature wider than the modulus, or numerically at or above it, is
+        refused before `pow` is asked anything: RFC 8017 §8.2.2 makes that a
+        malformed signature rather than one to reduce.
+        """
+        if self.header.get("alg") != SIGNATURE_ALGORITHM:
+            return False
+        if str(jwk.get("kty")) != "RSA":
+            return False
+        try:
+            modulus = base64url_uint_decoded(str(jwk["n"]))
+            public_exponent = base64url_uint_decoded(str(jwk["e"]))
+        except (KeyError, ValueError):
+            return False
+
+        width = (modulus.bit_length() + 7) // 8
+        if len(self.signature) != width:
+            return False
+        raised = int.from_bytes(self.signature, "big")
+        if raised >= modulus:
+            return False
+        try:
+            expected = pkcs1_v15_encoded(self.signing_input, width)
+        except ValueError:
+            # A modulus too small to carry a SHA-256 DigestInfo. No signature
+            # over it can be valid, so this is a refusal rather than a failure.
+            return False
+        recovered = pow(raised, public_exponent, modulus).to_bytes(width, "big")
+        # Constant time is not required — every value here is public — but it
+        # costs nothing and keeps the comparison honest for anyone reading the
+        # file for a pattern to copy.
+        return secrets.compare_digest(recovered, expected)
