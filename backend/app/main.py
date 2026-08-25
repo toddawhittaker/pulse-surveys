@@ -106,8 +106,11 @@ class SinglePageApp(StaticFiles):
         try:
             return await super().get_response(path, scope)
         except HTTPException as missing:
-            # Only a 404. A 405 on a non-GET, or a 403 on a path that escapes
-            # the directory, is a refusal this must not paper over.
+            # Only a 404. Any other status — a 405 on a non-GET, a 401 from a
+            # permission error — is a refusal this must not convert. (A path
+            # that escapes the directory is already a 404 in Starlette, not a
+            # 403 as an earlier version of this comment claimed; the security
+            # review measured it.)
             if missing.status_code != 404:
                 raise
             return await super().get_response(SPA_ENTRY_DOCUMENT, scope)
