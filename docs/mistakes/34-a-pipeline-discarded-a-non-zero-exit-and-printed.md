@@ -1,8 +1,8 @@
 # Entry 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 1**
+**Caught: 2**
 
-*2 instances recorded: one occurrence, and one catch.*
+*3 instances recorded: one occurrence, and two catches.*
 
 *(An occurrence, not a prevention, and it earned no bump: this
 entry did **not** stop the mistake here. In E0-33, by the orchestrating session, against this entry's own
@@ -29,6 +29,23 @@ original instance was a human piping a gate at a terminal, and this one is a pip
 compiled into a gate, where it would have re-reported the same false green on
 every run rather than once. Any check whose verdict is "the search found
 nothing" has to prove separately that the search ran.)*
+
+*(The second prevention, in E1-04, by the implementer, in the one place where a
+discarded status would have inverted the meaning of the evidence. That ticket
+makes four CI gates enforcing, and MISTAKES entry 9 requires each to be proved by
+a planted defect — so four of its runs are runs whose **expected** result is a
+non-zero exit. Each gate's output is long enough to want a `| tail`, and a
+planted type error read through one prints its `error TS2322` line and reports
+zero: the proof then reads as a gate that did not catch its defect, which is the
+opposite of what happened, and the honest fix would look like weakening the gate.
+Every gate in that ticket was run redirected to a file, or piped with the real
+status read out of `${PIPESTATUS[0]}` — the four proofs, the three workspace
+scripts, the two root checkers, three mypy targets, two ruff passes, the bundle
+budget, the checker harness, `npm audit` and the licence scan. **What is new here
+is the direction:** the earlier instances are a false green over a gate that
+failed; this one would have been a false red over a gate that worked. A pipe
+discards the verdict in both directions, and only one of them looks like good
+news.)*
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
