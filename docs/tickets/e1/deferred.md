@@ -62,6 +62,12 @@ Every E1 pull request that defers something adds it here in the same PR.
    [ADR 0082](../../adr/0082-the-tools-signing-key-lives-in-the-database.md)
    rejects, and inventing a supply route before anything needs one would fix the
    shape of it in the wrong ticket.
+   *E1-06 made the gap visible rather than closing it.* The tool publishes its
+   key set at `GET /lti/jwks` now, and a deployment holding no row answers `503`
+   there — loud at the point the key is missing, rather than an empty key set a
+   platform would accept and store
+   ([ADR 0085](../../adr/0085-the-tools-key-set-is-public-in-every-environment.md)).
+   Nothing about the supply route changed.
    **Done when** a non-development deployment has a documented and tested way to
    put a signing key in that table — with the rotation question answered too,
    since the one-row rule forbids the two-key overlap a real rotation needs.

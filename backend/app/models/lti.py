@@ -300,11 +300,14 @@ class LtiPlatform(UuidPrimaryKey, Base):
 
     # **Tool horizon**: the platform's OAuth 2.0 token endpoint, fetched
     # server-side when this tool presents a client assertion for a service call
-    # (LTI 1.3 client-credentials grant). Nullable for the same reason and with a
-    # second one of its own — the mock platform has no token endpoint until
-    # E1-06 builds it, and a registration naming an address that answers nothing
-    # is a record asserting something untrue. E1-06 fills it in the change that
-    # creates the endpoint.
+    # (LTI 1.3 client-credentials grant). Nullable for the same reason: a
+    # registration nobody has finished stating is a different situation from one
+    # stated wrongly, with a different repair. It had a second reason until
+    # E1-06 — the mock platform had no token endpoint, and a registration naming
+    # an address that answers nothing is a record asserting something untrue —
+    # and that reason is gone: E1-06 built the endpoint and filled this column in
+    # the same change, which is what the carried entry means by all four parts
+    # moving together.
     auth_token_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -364,12 +367,16 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     tool, and whichever row a process reads first decides whether its assertions
     verify.
 
-    **Nothing reads this table yet, and no `pulse_app` grant exists for it.**
-    E1-06 signs with the key, and the grant lands there with the code that spends
-    it: a runtime role holding read access to a private key it never opens is a
-    credential at rest with no owner. `RUNTIME_BASE_TABLE_PRIVILEGES` in the
-    §4.1 suite compares privileges *held*, so a table granted nothing contributes
-    no entry and the equality is unchanged here on purpose.
+    **`pulse_app` holds `SELECT` on this table and nothing else**, granted by
+    E1-06 in `tool_signing_key_grants_v001.sql` — the ticket whose code spends
+    it, which is the whole of why it did not arrive with the table: a runtime
+    role holding read access to a private key it never opens is a credential at
+    rest with no owner. `GET /lti/jwks` (`app.lti.registration`) is that code,
+    and E1-11's `client_assertion` is the second reader. The write privileges
+    stay withheld, because the seed writes this row as the superuser and an
+    application connection that could write here could rotate the tool's
+    identity. `RUNTIME_BASE_TABLE_PRIVILEGES` in the §4.1 suite carries the
+    entry, which is where that widening has its loud conversation.
 
     **Not a person table.** It holds no subject, no name and no address, so
     `PERSON_TABLES` does not change — the question `docs/tickets/e1/deferred.md`

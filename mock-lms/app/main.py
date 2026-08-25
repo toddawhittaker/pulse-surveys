@@ -262,11 +262,15 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # gradebook is built per application exactly as the issuer key is, so two
 # platforms started in one process hold two gradebooks (ADR 0049).
 #
-# None of them is authenticated. A real platform puts its Advantage services
-# behind an OAuth 2.0 client-credentials grant; E0-14 built no token endpoint
-# and E0-15 specifies none, and the ticket's out-of-scope list says whichever
-# of E1 and E3 needs a token first is where that grant belongs. An endpoint
-# that answered 401 today would answer it to a tool with nothing to present.
+# **None of them is authenticated, and since E1-06 that is a gap rather than an
+# absence.** A real platform puts its Advantage services behind an OAuth 2.0
+# client-credentials grant. E0-14 built no token endpoint and E0-15 specified
+# none, so an endpoint that answered 401 then would have answered it to a tool
+# with nothing to present; E1-06 built the grant (`app.tokens`), and the token a
+# tool obtains there is presentable here but not required. E1-06 rules that
+# enforcement pairs with E1-11's client — a service that started refusing before
+# a conformant client existed would be refusing this repository's own tests —
+# and E1-11 is the ticket that closes it.
 
 
 def require_context(platform: SeededPlatform, context_id: str) -> MockContext:

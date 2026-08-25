@@ -238,9 +238,23 @@ be delivered to. See [ADR 0050](docs/adr/0050-the-mock-roster-exposes-an-address
 
 The platform serves LTI Advantage as well as the launch, and a tool finds both
 services the way a real tool does — out of the two service claims inside the
-`id_token`, never from a path it assembled. Nothing here is authenticated: a real
-platform puts these behind an OAuth 2.0 client-credentials grant, and whichever
-of E1 and E3 needs a token first is where that belongs.
+`id_token`, never from a path it assembled.
+
+**The client-credentials grant these services are reached with is at
+`POST /token`**, advertised as `token_endpoint` in the discovery document and as
+`auth_token_url` in the registration. A tool authenticates there with a
+`client_assertion` it signs with its own key — Pulse's is published at
+<http://localhost:8000/lti/jwks>, and the platform fetches it to check the
+signature — and asks for one of the scopes `scopes_supported` lists. An assertion
+addressed anywhere but the token endpoint, signed by a key the tool never
+published, expired, or claiming to live longer than five minutes is refused with
+the RFC 6749 error code that says which
+([ADR 0084](docs/adr/0084-the-mock-platforms-token-endpoint-bounds-an-assertion-at-five-minutes.md)).
+
+**The two services do not yet require that token**, and that is a gap with an
+owner rather than an oversight: enforcing it before a conformant client exists
+would refuse this repository's own tests, so E1-11 turns it on with the client
+that presents one.
 
 - **NRPS 2.0** serves one section's roster five members at a time, and says where
   the next page is in an RFC 8288 `Link` header — never in the body. Every page
