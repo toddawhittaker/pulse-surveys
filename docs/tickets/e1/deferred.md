@@ -86,3 +86,21 @@ Every E1 pull request that defers something adds it here in the same PR.
    **Done when** the call is structural (a `before_insert`/`before_update`
    event on `LtiPlatform`) or a sweep asserts every write site calls it —
    in the same change that adds the second writer, E11 at the latest.
+
+## From E1-03 — TypeScript 7 with typescript-eslint, one change
+
+1. **The TypeScript 7 pair did not move, because no released
+   `typescript-eslint` accepts TypeScript 7.** The ticket's own escape clause
+   was taken: nothing was pinned, nothing was forced, and the measurement is
+   recorded under entry 3 of
+   [`../deps-triage-2026-08-24.md`](../deps-triage-2026-08-24.md). The
+   repository stays on `typescript` 6.0.3 with `typescript-eslint` 8.67.0, both
+   exact-pinned and both green. Forcing the pair past npm's peer check installs
+   and then fails the lint gate outright, so there is no partial move to take
+   either.
+   **Done when** `npm view typescript-eslint peerDependencies` reports a
+   `typescript` range admitting 7.x, and the pair then lands in one change with
+   `npm ci` resolving and the four Node-facing gates green — that is triage
+   entry 3's "done when", unchanged.
+   **Owner:** whichever epic is running when that range widens; it is no longer
+   E1's to wait for.
