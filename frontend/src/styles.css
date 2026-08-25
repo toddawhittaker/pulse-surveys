@@ -1,0 +1,88 @@
+/* The application's one stylesheet — SPEC §7.6.
+ *
+ * `design/tokens.css` is imported rather than copied. It is the single source
+ * for palette, type, spacing, radii, shadow, the focus ring and the global
+ * reduced-motion kill switch, and a second copy of the palette under `src/` is
+ * exactly what makes "single source" a sentence rather than a fact. The import
+ * reaches outside this package, which is why `vite.config.ts` allows the dev
+ * server to read it.
+ *
+ * Tailwind comes next, for its reset and for the palette namespace below. No
+ * utility class is used in this ticket: the five landing views are a heading and
+ * a line each, and choosing a utility vocabulary belongs with the first real
+ * screen (E2's survey) where there is a layout to choose it against.
+ */
+@import '../../design/tokens.css';
+@import 'tailwindcss';
+
+/* The design palette, published under Tailwind's colour namespace so a future
+ * screen can write `bg-chalk` and get the token rather than a second opinion
+ * about the colour. `inline` because these are references, not values — the
+ * definitions stay in `design/tokens.css` and are resolved at use.
+ *
+ * The type namespace is deliberately absent. Tailwind names its faces
+ * `--font-*`, which is what the token file already calls them, so mapping them
+ * would be a custom property defined in terms of itself. The three faces are
+ * reached through `var(--font-display)`, `var(--font-body)` and
+ * `var(--font-mono)`, as `design/Usage Rules.md` describes.
+ */
+@theme inline {
+  --color-chalk: var(--chalk);
+  --color-paper: var(--paper);
+  --color-spruce: var(--spruce);
+  --color-spruce-60: var(--spruce-60);
+  --color-hairline: var(--hairline);
+  --color-marigold: var(--marigold);
+  --color-marigold-deep: var(--marigold-deep);
+  --color-madder: var(--madder);
+  --color-mist: var(--mist);
+}
+
+@layer base {
+  body {
+    margin: 0;
+    background: var(--chalk);
+    color: var(--spruce);
+    font-family: var(--font-body);
+    font-size: var(--text-2);
+    line-height: 1.5;
+  }
+}
+
+/* The landing shell. One reading column at the width `docs/DESIGN_BRIEF.md`
+ * gives report and survey surfaces, and nothing else — these views are
+ * intentionally empty.
+ *
+ * There is no motion here at all, on any of the five. The brief gives the Care
+ * queue none by name ("stillness is the design"), and an empty view has nothing
+ * to animate; `design/tokens.css` carries the reduced-motion kill switch for
+ * when a later screen does.
+ */
+@layer components {
+  .pulse-landing {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: var(--space-7) var(--space-5);
+  }
+
+  .pulse-landing h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--text-4);
+    font-weight: 600;
+  }
+
+  .pulse-landing p {
+    margin: 0;
+    color: var(--spruce-60);
+  }
+
+  /* The brief's empty-state variant of the signature motif: flat, in mist, with
+   * the rounded caps the line is drawn with. Flat is what it means here —
+   * nothing has arrived yet.
+   */
+  .pulse-line {
+    display: block;
+    margin: var(--space-4) 0;
+  }
+}
