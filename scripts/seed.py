@@ -70,6 +70,14 @@ between a deployment and a registration that would make it trust the mock
 platform, so it is checked twice: once in `main` before a connection is opened,
 and once inside `seed_mock_platform` at the row itself.
 
+Since E1-05 it carries a third, on the same terms. `seed_tool_signing_key`
+generates the private half of this tool's own identity, and a key created in a
+production database by a script nobody meant to run there sits outside whatever
+key management that deployment has. It checks the guard at its own write for the
+same structural reason, and E1-05's address chokepoint reads the environment a
+third time at each registration — so the same variable is what admits every row
+here that a deployment must never receive.
+
 ## Running it twice
 
 Every row is matched on the natural key the schema already gives it — an
@@ -122,6 +130,8 @@ from pathlib import Path
 from typing import Any, TypeVar
 from uuid import UUID
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from dotenv import dotenv_values
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import URL, make_url
@@ -137,7 +147,12 @@ from app.models.identity import (
     User,
     UserIdentity,
 )
-from app.models.lti import LtiDeployment, LtiPlatform
+from app.models.lti import (
+    LtiDeployment,
+    LtiPlatform,
+    ToolSigningKey,
+    refuse_invalid_registration_addresses,
+)
 from app.models.org import College, Course, Department, Institution, Prefix, Section
 from app.models.term import StartLetterMap, Term, Week, week_rows_for_term
 from app.services.section_codes import apply_section_code
@@ -303,6 +318,37 @@ MOCK_PLATFORM_ISSUER = "http://mock-lms:8000"
 MOCK_PLATFORM_CLIENT_ID = "mock-lms-client"
 MOCK_PLATFORM_DEPLOYMENT_ID = "mock-lms-deployment-1"
 MOCK_PLATFORM_JWKS_URL = f"{MOCK_PLATFORM_ISSUER}/.well-known/jwks.json"
+
+# **A third source, and the only value here on the browser horizon** (E1-05,
+# ADR 0075's per-value rule). Every constant above is what one container reaches
+# another by; this one is a string handed to a *browser* on the developer's own
+# machine, which cannot resolve a Compose service name at all. The mock's own
+# `/registration` document publishes `{issuer}/oidc/authorize` — right for a
+# container, wrong for this column — so copying that value here is the mistake
+# `test_the_seeded_mock_registration_is_the_registration_compose_configures`
+# asserts against, one half at a time: the path against the platform's own
+# `AUTHORIZATION_PATH`, the origin against the host port
+# `docker-compose.override.yml` publishes.
+MOCK_PLATFORM_BROWSER_ORIGIN = "http://localhost:8080"
+MOCK_PLATFORM_AUTHORIZATION_ENDPOINT = f"{MOCK_PLATFORM_BROWSER_ORIGIN}/oidc/authorize"
+
+# **The mock's token endpoint is deliberately not seeded, and NULL is the
+# statement.** `mock-lms` has none: its discovery document advertises none,
+# because E0-14 built none and an advertised endpoint that answers nothing is a
+# record asserting something untrue — the platform's own words. **E1-06 builds
+# the endpoint and fills this column in the same change**, which is why the
+# carried entry insists the client-credentials grant lands as one change over
+# all four parts. Scheduled work, not a deferral. A plausible
+# `{issuer}/oidc/token` written here is one line, looks like tidiness, and makes
+# the registration claim an address that 404s.
+MOCK_PLATFORM_AUTH_TOKEN_URL: str | None = None
+
+# The size of the tool's own RSA key (E1-05). 2048 is the floor every conformant
+# LTI 1.3 platform accepts for an RS256 assertion, and it is the number to raise
+# rather than a number to tune: a shorter key loads and signs exactly like a long
+# one and is refused at the platform, which is a failure against a real LMS and
+# nowhere before it.
+TOOL_SIGNING_KEY_BITS = 2048
 
 # Where a demo person's address points: nowhere. RFC 2606 reserves `.invalid` for
 # exactly this, and a demo seed is a thing that gets copied into a staging
@@ -1147,8 +1193,23 @@ def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> Lt
     people, and turning such a subject into a Pulse person is launch-time
     provisioning — E1's, by SPEC §14.3. What this row does is make that launch
     reach the code at all.
+
+    **The authorization endpoint is written on an update as well as on an
+    insert**, which `upsert` does for every value it is given and which matters
+    here more than usual: every development database already holds this
+    registration, written before E1-05's column existed, and a launch from the
+    mock is refused until the column is filled. The migration cannot fill it —
+    that is half of why the column is nullable — so this re-run is the upgrade
+    path, and it completes the row rather than replacing it, because `user` and
+    `lti_deployment` both key to it.
     """
     check_environment_is_development(configuration)
+    refuse_invalid_registration_addresses(
+        configuration.get(ENVIRONMENT_VARIABLE, ""),
+        authorization_endpoint=MOCK_PLATFORM_AUTHORIZATION_ENDPOINT,
+        jwks_url=MOCK_PLATFORM_JWKS_URL,
+        auth_token_url=MOCK_PLATFORM_AUTH_TOKEN_URL,
+    )
 
     platform = upsert(
         session,
@@ -1156,6 +1217,8 @@ def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> Lt
         {"issuer": MOCK_PLATFORM_ISSUER, "client_id": MOCK_PLATFORM_CLIENT_ID},
         jwks_url=MOCK_PLATFORM_JWKS_URL,
         jwks_fetched_at=None,
+        authorization_endpoint=MOCK_PLATFORM_AUTHORIZATION_ENDPOINT,
+        auth_token_url=MOCK_PLATFORM_AUTH_TOKEN_URL,
     )
     upsert(
         session,
@@ -1165,13 +1228,21 @@ def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> Lt
     return platform
 
 
-def seed_people(session: Session) -> dict[str, Person]:
+def seed_people(session: Session, configuration: Mapping[str, str]) -> dict[str, Person]:
     """Every demo person, with the `user` and `user_identity` rows behind them.
 
     Three tables and not one, because SPEC §4.1's separation is table-level: `user`
     is the key and the platform reference, `user_identity` holds the name and the
     address `pulse_app` is refused any grant on, and `person` is the Pulse-owned
     node the supervision graph hangs off (E0-08, ADR 0024).
+
+    **`configuration` is threaded here for one row**, the fictional platform the
+    demo people belong to. It is the second writer of an `lti_platform` row in
+    this file, so it goes through E1-05's address chokepoint exactly as
+    `seed_mock_platform` does — a chokepoint one writer can walk past is not one.
+    Its three addresses are https at an RFC 2606 reserved domain and would pass
+    in any environment; the call is what makes that a fact the code states rather
+    than one a reader has to check.
 
     **Every demo person is linked to a `user`.** The schema allows a person with
     none — a dean who has never launched still supervises chairs — and this seed
@@ -1180,12 +1251,24 @@ def seed_people(session: Session) -> dict[str, Person]:
     demo institution where somebody cannot log in is a demo institution somebody
     will file a bug about.
     """
+    refuse_invalid_registration_addresses(
+        configuration.get(ENVIRONMENT_VARIABLE, ""),
+        # No endpoints: nobody launches from this platform. It exists so the demo
+        # people have a `user.lti_platform_id` to key to, and a browser is never
+        # sent anywhere on its behalf, so stating an address it does not serve
+        # would be the untrue record `MOCK_PLATFORM_AUTH_TOKEN_URL` explains.
+        authorization_endpoint=None,
+        jwks_url=DEMO_PLATFORM_JWKS_URL,
+        auth_token_url=None,
+    )
     platform = upsert(
         session,
         LtiPlatform,
         {"issuer": DEMO_PLATFORM_ISSUER, "client_id": DEMO_PLATFORM_CLIENT_ID},
         jwks_url=DEMO_PLATFORM_JWKS_URL,
         jwks_fetched_at=None,
+        authorization_endpoint=None,
+        auth_token_url=None,
     )
     upsert(
         session,
@@ -1279,20 +1362,79 @@ def seed_lead_faculty_mappings(
         )
 
 
+def seed_tool_signing_key(session: Session, configuration: Mapping[str, str]) -> ToolSigningKey:
+    """Generate this tool's own signing key if it has none, and refuse outside development.
+
+    E1-05 criterion 4. LTI 1.3 needs a key pair this tool owns: E1-06 signs a
+    `client_assertion` with the private half and publishes the public half for a
+    platform to verify against. `docs/adr/0082` records why custody is a database
+    row — the api container and the celery worker are two processes and one tool,
+    and they have to sign with the same key.
+
+    **An existing row is kept, never rotated.** Rotation is the dangerous shape,
+    because it fails invisibly: a fresh key signs perfectly, and nothing goes
+    wrong until a platform that already fetched the old public half rejects an
+    assertion, hours later, somewhere else. So this reads first and writes only
+    into an empty table, which also keeps `make seed` re-runnable — the ordinary
+    state of every development database after the first run is that a key is
+    already there.
+
+    **The guard is checked here rather than only in `main`**, exactly as
+    `seed_mock_platform` is and for the same reason: `main` checks it before it
+    opens a connection, which is what actually stops a deployed run, and checking
+    it again at the row makes the dependency structural rather than a property of
+    the current call order. What the miss would cost is worse here than there —
+    the private half of the tool's identity, created in a production database
+    outside whatever key management that deployment has, by whoever had a
+    development checkout and a production `DATABASE_URL`.
+
+    **The PEM never leaves this function.** It is not printed, not logged, and
+    not put in an exception message: `make seed` runs in a terminal, in CI and
+    inside `docker compose logs`, and a private key printed once is a private key
+    in a scrollback buffer, a CI artefact and whatever gets pasted when somebody
+    asks for help (SPEC §10).
+
+    RSA 2048 through `cryptography`, which is already pinned and is what the tool
+    verifies launches with (ADR 0073) — ADR 0035's bound says the tool's real key
+    uses a real library, and this is that. PKCS#8, unencrypted, because the
+    process that reads it has nowhere to get a passphrase from.
+    """
+    check_environment_is_development(configuration)
+
+    existing = session.scalars(select(ToolSigningKey)).first()
+    if existing is not None:
+        return existing
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=TOOL_SIGNING_KEY_BITS)
+    row = ToolSigningKey(
+        private_key_pem=key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("ascii")
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
 def seed(session: Session, configuration: Mapping[str, str]) -> None:
     """Load the whole demo institution into `session`. The caller commits.
 
     `configuration` is the resolved mapping `main` has already checked, and it is
-    threaded here for one row: `seed_mock_platform` re-reads the environment guard
-    at the registration that would let a Pulse trust the mock platform. It runs
-    first so that a refusal costs no writes at all.
+    threaded here for three writes: `seed_mock_platform` and `seed_tool_signing_key`
+    re-read the environment guard at the row each of them would write, and both
+    registrations go through E1-05's address chokepoint, which reads the
+    environment too. The two guarded writes run first so that a refusal costs no
+    writes at all.
     """
     check_calendar_fits()
     seed_mock_platform(session, configuration)
+    seed_tool_signing_key(session, configuration)
     nodes = seed_containment(session)
     term = seed_calendar(session, nodes["institution", INSTITUTION_NAME])
     seed_sections(session, term, nodes)
-    people = seed_people(session)
+    people = seed_people(session, configuration)
     seed_assignments(session, people, nodes)
     seed_lead_faculty_mappings(session, people, nodes)
 
@@ -1339,9 +1481,9 @@ def main(environ: Mapping[str, str] | None = None, dotenv_path: Path | None = No
         f"{len(PREFIXES)} prefixes, {len(COURSES)} courses, {len(SECTIONS)} sections, "
         f"{TERM_NAME} with {len(START_LETTER_MAP)} start positions, "
         f"{len(PEOPLE)} people, {len(ASSIGNMENTS)} assignments, "
-        f"{len(LEAD_FACULTY_MAPPINGS)} lead-faculty mappings, and two platform "
+        f"{len(LEAD_FACULTY_MAPPINGS)} lead-faculty mappings, two platform "
         f"registrations — the fictional one its people belong to, and {MOCK_PLATFORM_ISSUER} "
-        "for the mock LMS."
+        "for the mock LMS — and this tool's own signing key."
     )
     return 0
 
