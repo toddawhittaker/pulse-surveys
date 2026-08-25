@@ -261,9 +261,33 @@ jobs:
           # bundle budget, which are still legitimately waiting for the scaffold.
           # A single probe answering both would put `npm run build` in a
           # directory that is not there.
+          #
+          # E1-02 makes `frontend/` an npm workspace member of the root package
+          # (ADR 0083), so `frontend/package.json` is committed from now on and
+          # its mere presence stopped being the question the `frontend` probe was
+          # asking. The manifest E1-02 lands is a stub: it declares no
+          # dependencies and no scripts, and it exists so there is one lockfile
+          # and one dependency resolution for the whole repository. What the
+          # frontend-build job runs is `npm run build` in that workspace, so the
+          # probe names the script rather than the file that will one day hold
+          # it. Answering true over the stub would run `npm run build` against a
+          # package with no build, which is a red rather than a silence — but it
+          # is a red on every pull request from now until E1-04, and the gate
+          # would still never have built anything.
+          #
+          # `grep` rather than a JSON reader because this job installs no
+          # toolchain. The way it can be wrong is a dependency literally named
+          # `build`, which makes the probe answer true and the gate fail loudly;
+          # it cannot answer false over a package that has a build script, which
+          # is the direction entry 36 is about.
           echo "Probing repository layout (SPEC §13):"
           if [ -f package.json ]; then emit node true; else emit node false; fi
-          if [ -f frontend/package.json ]; then emit frontend true; else emit frontend false; fi
+          if [ -f frontend/package.json ] \
+            && grep -Eq '"build"[[:space:]]*:[[:space:]]*"' frontend/package.json; then
+            emit frontend true
+          else
+            emit frontend false
+          fi
           # The exact module the job imports, in the shape the manifest probes
           # already use. Stricter than "some Python exists under tests/evals",
           # and deliberately: a tree with `__init__.py` and no runner would make
@@ -910,7 +934,8 @@ jobs:
       - uses: actions/checkout@v7
 
       # The sixth expensive job of the seven. It is free today only because
-      # `detect.outputs.frontend` is false and there is no frontend to build;
+      # `detect.outputs.frontend` is false: E1-02 lands `frontend/` as a
+      # workspace member with no `build` script, and the probe names the script;
       # once the scaffold lands it is an `npm ci` and a production build, which
       # is the same order of cost as the others. E0-38's security review found it
       # guarded by neither the ticket, the ADR nor the pull request body, all
@@ -927,21 +952,27 @@ jobs:
 
       - name: Nothing to build yet
         if: needs.detect.outputs.frontend != 'true' && needs.changed.outputs.inert != 'true'
-        run: echo "::notice::No frontend/ yet. Enforcing once the frontend scaffold lands."
+        run: echo "::notice::frontend/ declares no build script yet. Enforcing once the frontend scaffold lands."
 
+      # The one lockfile, at the root. `frontend/` is a workspace member of the
+      # root package (ADR 0083), so it has no lockfile of its own to cache on and
+      # no install of its own to run: the root `npm ci` resolves the whole
+      # workspace, and `--workspace frontend` picks the script to run out of it.
+      # A `cache-dependency-path` naming a file that is not there is not a
+      # tolerated miss — setup-node fails the step — so this line moved with the
+      # lockfile in the same change (E1-02, acceptance criterion 4).
       - uses: actions/setup-node@v7
         if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Production build
         if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'
-        working-directory: frontend
         run: |
           npm ci
-          npm run build
+          npm run build --workspace frontend
 
       - name: Bundle budget
         if: needs.detect.outputs.frontend == 'true' && needs.changed.outputs.inert != 'true'

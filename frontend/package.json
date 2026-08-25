@@ -1,0 +1,7 @@
+{
+  "name": "@pulse-surveys/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The SPEC §13 frontend package. A workspace member of the root package (ADR 0083) and deliberately empty: E1-04 lands React 19, TypeScript and Vite here, along with the `build` script the production-build and bundle-budget gates wait for.",
+  "license": "MIT"
+}

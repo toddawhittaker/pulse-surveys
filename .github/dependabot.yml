@@ -39,10 +39,11 @@ updates:
   # unwatched, which is E0-40's founding defect wearing different clothes: a
   # control pointed at a path that is not there reports nothing and looks well.
   #
-  # There is one entry rather than two because there is one lockfile. When the
-  # E1 scaffold lands it brings `frontend/package-lock.json`, and a second entry
-  # for `/frontend` — with its own React major-version ignores, which moved out
-  # of here with the directory they were about — goes in beside this one.
+  # There is one entry rather than two because there is one lockfile, and E1-02
+  # settled that there always will be: `frontend/` is a member of the root npm
+  # workspace (ADR 0083), so it has no lockfile of its own for a second entry to
+  # watch. The React major-version ignores the E1 scaffold needs belong here,
+  # beside the ones already in this file.
   - package-ecosystem: npm
     directory: /
     schedule:

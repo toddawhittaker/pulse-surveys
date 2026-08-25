@@ -4,6 +4,9 @@
   "private": true,
   "description": "Root dev tooling for Pulse Surveys: the Playwright end-to-end suite (SPEC §9.2), the TypeScript and eslint checkers that read it (E0-40), and the npm license scanner. Ships in no image; §10 is about what we distribute.",
   "license": "MIT",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
     "test:e2e": "playwright test"
   },
