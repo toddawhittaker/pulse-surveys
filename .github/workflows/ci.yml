@@ -390,6 +390,14 @@ jobs:
       # has to travel together, and a control added later comes with it instead
       # of being forgotten here. Its subject is every tracked file, `docs/`
       # included, which is why it is in this job at all.
+      #
+      # The fifth entry is E1-02's `@types/node` guard, and it is here because
+      # the guard that forces this decision said so rather than because anyone
+      # noticed. It walks the repository for every `package.json` — the pin may
+      # sit in any of them, and E1-04 will move it — and
+      # `classify_changed_paths.py` calls `docs/package.json` inert, measured
+      # rather than assumed. So a documentation-only pull request can commit a
+      # manifest this guard reads, on the one run where it would not have run.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
@@ -397,7 +405,8 @@ jobs:
             "tests/unit/test_mock_lms_service.py::test_no_private_key_material_is_committed_to_the_repository" \
             "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one" \
             "tests/unit/test_mock_lms_service.py::test_the_sweep_itself_finds_a_planted_key_and_not_a_tree_without_one" \
-            "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py"
+            "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py" \
+            "tests/unit/test_types_node_tracks_runtime.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list
