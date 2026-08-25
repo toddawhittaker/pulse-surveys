@@ -64,14 +64,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 # second derivation of either is `docs/MISTAKES.md` entry 13 exactly — a hazard
 # worked around in one of the two places facing it.
 #
-# They keep their leading underscore because they are `app.config`'s own
-# vocabulary and renaming them is a cross-module refactor rather than this
-# ticket's work; the pull request proposes it.
+# They carried a leading underscore while `app.config` was their only caller.
+# This module is the second, so the underscore stopped being true and they lost
+# it.
 from app.config import (
-    _is_a_deployment,
-    _is_a_loopback_host,
-    _is_on_this_machine,
-    _url_host,
+    is_a_deployment,
+    is_a_loopback_host,
+    is_on_this_machine,
+    url_host,
 )
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
@@ -125,15 +125,15 @@ def _is_a_link_local_host(host: str | None) -> bool:
     thing through it.
 
     **A third question about a host, and deliberately its own helper.**
-    `app.config._is_on_this_machine` governs an *exemption* and
-    `app.config._is_a_loopback_host` governs a refusal about the reader's
+    `app.config.is_on_this_machine` governs an *exemption* and
+    `app.config.is_a_loopback_host` governs a refusal about the reader's
     machine; this one governs a refusal about what this container may fetch.
     Merging any two would mean a future widening moved both, and for two of the
     three that is in opposite directions of safety — which is the reasoning
-    `_is_a_loopback_host` already carries for not merging with the first.
+    `is_a_loopback_host` already carries for not merging with the first.
 
     The IPv4-mapped form is unwrapped first, for the reason and by the shape
-    `_is_a_loopback_host` uses: it keeps both halves live rather than resting on
+    `is_a_loopback_host` uses: it keeps both halves live rather than resting on
     a library behaviour that has moved between versions.
     """
     if not host:
@@ -196,7 +196,7 @@ def refuse_invalid_registration_addresses(
     the loopback rule, and an exemption written as an early return would leave
     exactly the value an operator carries forward from the development stack.
     """
-    if not _is_a_deployment(environment):
+    if not is_a_deployment(environment):
         return
 
     addresses = {
@@ -207,13 +207,13 @@ def refuse_invalid_registration_addresses(
     for column, value in addresses.items():
         if value is None:
             continue
-        host = _url_host(value)
+        host = url_host(value)
 
         # The scheme off the parse rather than off `startswith`, so a spelling
         # `urlsplit` reads as https and a string comparison does not — or the
-        # other way round — cannot arise. `_url_host` parses the same value the
+        # other way round — cannot arise. `url_host` parses the same value the
         # same way, so one answer governs the host rules below.
-        if urlsplit(value).scheme != "https" and not _is_on_this_machine(host):
+        if urlsplit(value).scheme != "https" and not is_on_this_machine(host):
             raise RegistrationAddressError(
                 f"The registration's `{column}` is not https and does not name a service on this "
                 "machine, so a launch would put the address, its query and whatever it carries on "
@@ -230,7 +230,7 @@ def refuse_invalid_registration_addresses(
                 "ENVIRONMENT=development."
             )
 
-        if column == AUTHORIZATION_ENDPOINT_COLUMN and _is_a_loopback_host(host):
+        if column == AUTHORIZATION_ENDPOINT_COLUMN and is_a_loopback_host(host):
             raise RegistrationAddressError(
                 f"The registration's `{column}` names this machine — localhost or a loopback "
                 "address. A browser, not this container, is what resolves it, so loopback there is "

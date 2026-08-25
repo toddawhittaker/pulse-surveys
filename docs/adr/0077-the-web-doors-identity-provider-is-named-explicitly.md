@@ -214,7 +214,7 @@ and it is already named in every refusal message.
 - **The named deployability cost, and it is a real one: an `http` provider
   sidecar addressed by service name is refused.** `http://idp-sidecar:8000/token`
   in production fails rule 4, because a container on a bridge network is not on
-  this machine — `_is_on_this_machine` answers on the host in the URL, not on
+  this machine — `is_on_this_machine` answers on the host in the URL, not on
   whether the packet leaves the physical box, and a service name on a shared
   network is reachable by every other container on it. Measured, not assumed. The
   exemption above covers the same sidecar addressed as `http://localhost:8000` or
@@ -277,8 +277,10 @@ and it is already named in every refusal message.
   moved the LTI platform's authorization endpoint onto the registration and
   deleted the field, so this sentence now covers one value rather than two.
 - **The four host helpers this record introduced have a second caller as of
-  E1-05.** `app.models.lti` imports `_url_host`, `_is_on_this_machine`,
-  `_is_a_loopback_host` and `_is_a_deployment` rather than re-deriving the
+  E1-05, and lost their leading underscore for it.** `app.models.lti` imports
+  `url_host`, `is_on_this_machine`, `is_a_loopback_host` and `is_a_deployment`
+  — spelled `_url_host` and so on while this record was written, when
+  `app.config` was their only caller — rather than re-deriving the
   one-trailing-dot strip or the IPv4-mapped unwrap, which is
   `docs/MISTAKES.md` entry 13's rule applied at the second place facing the same
   question. What E1-05 does **not** inherit is this record's conclusions:

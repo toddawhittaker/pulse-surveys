@@ -125,7 +125,7 @@ def is_development(settings: "Settings") -> bool:
     **One place deliberately does not call this, and it is not an oversight**
     — plus one that cannot.
 
-    * `_is_a_deployment` below runs *during* `Settings` validation, deciding
+    * `is_a_deployment` below runs *during* `Settings` validation, deciding
       whether a mock address may be configured. There is no `Settings` object to
       hand it at that point — the value being judged is the raw one the validator
       was given — so it takes the environment itself and stays separate.
@@ -236,7 +236,7 @@ def _blank_is_absent(value: object) -> object:
     return value
 
 
-def _is_on_this_machine(host: str | None) -> bool:
+def is_on_this_machine(host: str | None) -> bool:
     """Whether a URL's host names this machine, so nothing crosses a network.
 
     `localhost` by name, and any address in a loopback range by value —
@@ -253,7 +253,7 @@ def _is_on_this_machine(host: str | None) -> bool:
         return False
 
 
-def _url_host(value: str) -> str | None:
+def url_host(value: str) -> str | None:
     """A URL's host, read the way a resolver reads it, for every comparison below.
 
     `urlsplit(...).hostname` already does most of it: it strips an IPv6 literal's
@@ -284,7 +284,7 @@ def _url_host(value: str) -> str | None:
     return host[:-1] if host.endswith(".") else host
 
 
-def _is_a_loopback_host(host: str | None) -> bool:
+def is_a_loopback_host(host: str | None) -> bool:
     """Whether this host names the machine the *reader* of the URL is sitting at.
 
     A class, not a list of spellings, and that is the whole point: a three-entry
@@ -302,7 +302,7 @@ def _is_a_loopback_host(host: str | None) -> bool:
     answer for every address, keeps both halves live, and stops the rule
     depending on a library behaviour that has moved between versions.
 
-    **This is a wider set than `_is_on_this_machine` above, and the two are
+    **This is a wider set than `is_on_this_machine` above, and the two are
     deliberately not merged.** That one governs an *exemption* — cleartext is
     permitted because nothing crosses a network — and widening an exemption
     permits more; this one governs a *refusal*, and widening it refuses more. A
@@ -322,7 +322,7 @@ def _is_a_loopback_host(host: str | None) -> bool:
     return address.is_loopback
 
 
-def _is_a_deployment(environment: object) -> bool:
+def is_a_deployment(environment: object) -> bool:
     """Whether this process is running anywhere other than a development stack.
 
     An exact comparison against the one development name, so `staging`,
@@ -733,7 +733,7 @@ class Settings(BaseSettings):
         No value is quoted, as in every validator here.
         """
         parsed = urlsplit(value)
-        if parsed.scheme == "https" or _is_on_this_machine(parsed.hostname):
+        if parsed.scheme == "https" or is_on_this_machine(parsed.hostname):
             return value
         raise ValueError(
             "would send the comment being classified, and any provider credential configured "
@@ -810,7 +810,7 @@ class Settings(BaseSettings):
         is asked to trust.
 
         **The host component, compared exactly**, and normalised once by
-        `_url_host` — the port, the scheme and the path are not part of the
+        `url_host` — the port, the scheme and the path are not part of the
         question, since a container reaching `mock-idp` on any port reaches the
         mock, and neither is the case nor a trailing dot. A substring search for
         the service name would read as the same rule and would refuse
@@ -822,9 +822,9 @@ class Settings(BaseSettings):
         `_describe_invalid_settings`, which is what says *which* of the five is
         wrong without echoing what it holds.
         """
-        if not _is_a_deployment(info.data.get("environment")):
+        if not is_a_deployment(info.data.get("environment")):
             return value
-        if _url_host(value) == MOCK_IDENTITY_PROVIDER_HOST:
+        if url_host(value) == MOCK_IDENTITY_PROVIDER_HOST:
             raise ValueError(
                 "addresses the mock identity provider this repository ships for development — "
                 f"the Compose service {MOCK_IDENTITY_PROVIDER_HOST}, which signs an id_token for "
@@ -858,7 +858,7 @@ class Settings(BaseSettings):
         login page asking for the credentials the real provider would have asked
         for.
 
-        **A class, not a catalog** — `_is_a_loopback_host` carries why. The
+        **A class, not a catalog** — `is_a_loopback_host` carries why. The
         `127.0.0.0/8` and IPv4-mapped spellings are the ones a list of three
         misses, and the review that raised this arrived with a fourth spelling
         already in it.
@@ -870,9 +870,9 @@ class Settings(BaseSettings):
         what it is sent over. An exemption that returned early would leave the
         finding open with every other row green.
         """
-        if not _is_a_deployment(info.data.get("environment")):
+        if not is_a_deployment(info.data.get("environment")):
             return value
-        if _is_a_loopback_host(_url_host(value)):
+        if is_a_loopback_host(url_host(value)):
             raise ValueError(
                 "sends the browser to the machine it is running on rather than to an identity "
                 "provider — this value is resolved by the end user's computer, never by this "
@@ -917,16 +917,16 @@ class Settings(BaseSettings):
         configuration `.env.example` ships and CI copies to `.env`, and takes
         SPEC §14.3's exit criterion with it.
 
-        **The exemption is `_is_on_this_machine`, not the wider loopback class.**
+        **The exemption is `is_on_this_machine`, not the wider loopback class.**
         A provider beside the application is reached over the loopback interface
         where there is no wire to read, so refusing it would turn away a
         deployment while protecting nothing. Widening *that* set permits more
         cleartext; widening the refusal above refuses more addresses. They are
         two catalogs on purpose.
         """
-        if not _is_a_deployment(info.data.get("environment")):
+        if not is_a_deployment(info.data.get("environment")):
             return value
-        if urlsplit(value).scheme == "https" or _is_on_this_machine(_url_host(value)):
+        if urlsplit(value).scheme == "https" or is_on_this_machine(url_host(value)):
             return value
         raise ValueError(
             "would fetch or redirect over plain http to an address off this machine, where "
@@ -955,7 +955,7 @@ class Settings(BaseSettings):
 
         No value is quoted, for the reason the validator above gives.
         """
-        if _is_a_deployment(info.data.get("environment")) and value == (
+        if is_a_deployment(info.data.get("environment")) and value == (
             MOCK_IDENTITY_PROVIDER_CLIENT_ID
         ):
             raise ValueError(

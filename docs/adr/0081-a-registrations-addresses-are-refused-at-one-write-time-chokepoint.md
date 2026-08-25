@@ -28,15 +28,17 @@ vocabulary carries and the conclusions must be re-derived.
 **Where ADR 0077's vocabulary carries over, deliberately.** Four questions about
 a URL's host have already been answered here the hard way, and re-deriving any of
 them is `docs/MISTAKES.md` entry 13 — a hazard worked around in one of the two
-places facing it. `_url_host` reads a host the way a resolver does, brackets
+places facing it. `url_host` reads a host the way a resolver does, brackets
 stripped, case folded, and **exactly one** trailing dot removed, with an exact
-comparison after it so `mock-lms.example.edu.` is not swept up. `_is_on_this_
-machine` decides whether cleartext crosses no network. `_is_a_loopback_host`
-decides whether a host names the machine the *reader* is sitting at, as a class
-rather than a list, with the IPv4-mapped form unwrapped first.
-`_is_a_deployment` compares the environment name exactly, so `staging`,
+comparison after it so `mock-lms.example.edu.` is not swept up.
+`is_on_this_machine` decides whether cleartext crosses no network.
+`is_a_loopback_host` decides whether a host names the machine the *reader* is
+sitting at, as a class rather than a list, with the IPv4-mapped form unwrapped
+first. `is_a_deployment` compares the environment name exactly, so `staging`,
 `production`, `development-blue` and `pre-development` are all deployments.
-`app.models.lti` imports all four rather than writing them again.
+`app.models.lti` imports all four rather than writing them again — and all four
+lost a leading underscore in the doing, because it stopped being true the moment
+`app.config` was no longer their only caller.
 
 **Where it deliberately differs, and why.** ADR 0077 *exempts* `oidc_jwks_url`
 from its loopback rule, on the argument that a key-set sidecar reached by this
