@@ -73,3 +73,12 @@ divergences from the brief's predictions, then the final tree state —
 `git status` and a `git diff --stat` over production paths, both of which must
 match how you found them. If the tree was dirty when you arrived, say exactly
 which files, and leave them exactly as they were.
+
+## Lanes
+
+Which lane the ticket rides changes your scope, not your standards (CLAUDE.md,
+"How a ticket is built: two lanes"). Heavy: re-run every green claim and run
+the mutation battery from the manifest. Light: one fresh pass — full suite
+with exact totals plus the standing gates — and no battery; there is no
+manifest to hold anything against. In both, no green is believed on its
+author's word, and you still fix nothing.

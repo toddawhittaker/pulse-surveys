@@ -65,19 +65,19 @@ the conversation; his approval is the trigger, never your own assessment. Never
 use an admin override, never merge while CI is failing or red, never retarget a
 PR across epics — close it and re-cut the branch.
 
-## How a ticket is built
+## How a ticket is built: two lanes
 
-The orchestrating session designs and briefs; subagents build. The brief
-settles design decisions before dispatch — a decision left open in a brief
-comes back as a review finding. In order: `test-author` writes failing tests
-from the ticket and spec (it never reads the implementation; only it writes
-under `tests/`); the implementer confirms the reds, then codes to green without
-touching a test — a disputed test gets `docs/disputes/<TICKET>-NN.md` and a
-stop, and the orchestrator arbitrates from the disputed sources, escalating to
-Todd only when the spec is genuinely silent; `verifier` independently re-runs
-every green claim and the mutation battery — no green is believed on its
-author's word. Fix rounds are tests-first too, with the stopping rule declared
-before the round and recorded in the PR. Mechanics: `.claude/skills/build-ticket`.
+Every ticket's header carries a `**Lane:**` field, set at breakdown time; a
+missing field, any ⚠, or doubt means heavy. The heavy loop (`test-author`
+writes red; the implementer codes to green without touching a test, disputes
+via `docs/disputes/`; `verifier` re-runs every green claim and the mutation
+battery) guards the attacked surfaces: read paths, authz, the doors, token
+handling, guarded writers, key custody, CI gates. The light lane (`builder`
+writes code and ordinary tests together; `verifier` re-runs the gates fresh
+once, no battery) covers the rest. Neither lane believes a green on its
+author's word, and everything outside the loop — the per-PR security review
+included — stands unchanged in both. A light diff reaching a heavy surface
+stops and re-lanes in the PR record. Mechanics: `.claude/skills/build-ticket`.
 
 ## CI and build discipline
 

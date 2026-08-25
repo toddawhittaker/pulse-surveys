@@ -6,6 +6,7 @@
 **Security-relevant:** the gate flips (fidelity, not confidentiality); no
 line-by-line pass expected, but the landing views' strings are governed copy —
 see the last scope item.
+**Lane:** light
 
 ## Context
 
