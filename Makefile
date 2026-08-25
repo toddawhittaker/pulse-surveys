@@ -108,7 +108,7 @@ node-deps: ## Install the pinned Node closure — prerequisite of every npx gate
 	fi
 
 .PHONY: lint
-lint: node-deps ## ruff check + ruff format --check, eslint
+lint: node-deps ## ruff check + ruff format --check, eslint (root and frontend workspace)
 	$(call banner,ruff)
 	@ruff check . && ruff format --check .
 	$(call banner,eslint)
@@ -117,6 +117,8 @@ lint: node-deps ## ruff check + ruff format --check, eslint
 	else \
 		$(call skip,no package.json at the repository root); \
 	fi
+	$(call banner,eslint (frontend workspace))
+	@npm run lint --workspace frontend
 
 # mypy runs three times, and it has to: `backend/app`, `mock-lms/app` and
 # `mock-idp/app` are all packages called `app` (SPEC §13 names all three), and
@@ -125,7 +127,7 @@ lint: node-deps ## ruff check + ruff format --check, eslint
 # same three in the same order. See
 # docs/adr/0039-the-two-app-packages-are-typechecked-in-two-runs.md.
 .PHONY: typecheck
-typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit
+typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEmit (root and frontend workspace)
 	$(call banner,mypy)
 	@mypy
 	$(call banner,mypy mock-lms/app)
@@ -138,6 +140,8 @@ typecheck: node-deps ## mypy over backend/, mock-lms/ and mock-idp/ + tsc --noEm
 	else \
 		$(call skip,no package.json at the repository root); \
 	fi
+	$(call banner,tsc --noEmit (frontend workspace))
+	@npm run typecheck --workspace frontend
 
 # Needs a database to migrate: `make up` first. CI has its own Postgres service
 # for this job, provisioned with the same two roles the stack deploys.
@@ -267,21 +271,22 @@ docker-build: ## Build the images and check the stack against E0-02's and E0-03'
 		./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp >/dev/null; \
 	done
 
-# The workflow's `frontend` probe, in the Makefile's copy of it. E1-02 makes
-# `frontend/` a workspace member of the root package (ADR 0083), so the manifest
-# is committed from now on and its presence no longer says there is anything to
-# build; what this recipe runs is `npm run build` in that workspace, so both
-# copies of the condition name the script. Keeping the two in step is
-# CLAUDE.md's rule that `make ci` runs what the workflow runs.
+# Enforcing since E1-04, and the workflow's copy of this recipe lost the same
+# condition in the same change. It carried the `frontend` probe in shell — a
+# `[ -f frontend/package.json ]` and a `grep` for the `build` script, with a skip
+# notice in the `else` — because CLAUDE.md requires `make ci` to run the gates the
+# workflow runs.
+#
+# The Makefile is the worse of the two to forget. A workflow that skips a gate at
+# least skips it on a pull request somebody looks at; `make ci` prints its skip
+# line to the one person who was told to run it before pushing, and reports
+# success.
 .PHONY: frontend-build
-frontend-build: ## Production build + bundle budget
+frontend-build: node-deps ## Production build + bundle budget
 	$(call banner,frontend production build)
-	@if [ -f frontend/package.json ] && grep -Eq '"build"[[:space:]]*:[[:space:]]*"' frontend/package.json; then \
-		npm run build --workspace frontend && \
-		$(PYTHON) scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json; \
-	else \
-		$(call skip,frontend/package.json declares no build script yet); \
-	fi
+	@npm run build --workspace frontend
+	$(call banner,bundle budget)
+	@$(PYTHON) scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json
 
 # ---------------------------------------------------------------------------
 # Supply chain
