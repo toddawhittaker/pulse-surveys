@@ -9,6 +9,18 @@ Written after the fact. `GET /dev` reached the tool without a ticket and without
 record, and it is a become-any-user surface, which is the last kind of thing that
 should exist only in a docstring.
 
+**Amended 2026-08-25 by E1-05, in the context below and nowhere else.** Where
+this record says the page offers "a link to the mock LMS launcher", it now
+offers one launcher link per **registered platform**, at the origin of that
+registration's `authorization_endpoint`, and an honest line naming `make seed`
+when no platform is registered at all. The origin used to come from a
+process-wide setting, which rendered a link whatever the database held —
+including when it held nothing, which sent a developer to a port that answers
+nothing. The gate this record decides is untouched: the router is still included
+unconditionally and the handler still answers `404` outside development, and the
+page is a larger become-any-user surface for the change rather than a smaller
+one, since it now enumerates the registered platforms too.
+
 ## Context
 
 E0-18 put both entry doors on the tool, and walking either one by hand means

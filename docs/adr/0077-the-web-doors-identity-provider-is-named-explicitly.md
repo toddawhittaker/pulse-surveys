@@ -6,7 +6,12 @@
 **Supersedes in part:** [ADR 0075](0075-the-two-doors-addresses-are-settings-defaulted-to-the-development-stack.md)
 — the five `OIDC_*` fields only. The two launch-door fields, the per-value
 horizon rule, and the public client with no secret all stand exactly as written
-there.
+there. **One of those two launch-door fields is gone as of 2026-08-25**: E1-05
+moved the LTI platform's authorization endpoint onto the registration and
+deleted the setting, so where this record says "the two launch-door fields" it
+now covers `PUBLIC_BASE_URL` alone. Nothing this record decides changes with it,
+and the horizon rule reaches further than before — it now governs a database
+column as well as a setting.
 
 ## Context
 
@@ -268,4 +273,16 @@ and it is already named in every refusal message.
 - ADR 0075's remaining two fields keep their defaults on an argument that is now
   narrower and true: neither `PUBLIC_BASE_URL` nor
   `LTI_PLATFORM_AUTHORIZATION_ENDPOINT` names a service the base Compose file
-  starts.
+  starts. **Of those two, only `PUBLIC_BASE_URL` is still a setting**: E1-05
+  moved the LTI platform's authorization endpoint onto the registration and
+  deleted the field, so this sentence now covers one value rather than two.
+- **The four host helpers this record introduced have a second caller as of
+  E1-05.** `app.models.lti` imports `_url_host`, `_is_on_this_machine`,
+  `_is_a_loopback_host` and `_is_a_deployment` rather than re-deriving the
+  one-trailing-dot strip or the IPv4-mapped unwrap, which is
+  `docs/MISTAKES.md` entry 13's rule applied at the second place facing the same
+  question. What E1-05 does **not** inherit is this record's conclusions:
+  [ADR 0081](0081-a-registrations-addresses-are-refused-at-one-write-time-chokepoint.md)
+  re-derives them for database columns written through a console, adds a
+  link-local rule these settings do not carry, and says where the two records
+  differ and why.

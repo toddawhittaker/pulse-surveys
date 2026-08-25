@@ -16,20 +16,28 @@ rest" — is met by the column not existing. `jwks_url` is a public address and 
 keys behind it are public keys.
 
 The tool's *own* signing key is the one piece of key material an LTI 1.3
-deployment needs, and it is deliberately not here. It is not a per-platform
-value, nothing in this ticket reads it, and a key sitting in a table that no code
-opens is a credential at rest with no owner. E1 introduces it with the launch
-flow that uses it, and the epic README's configuration rule means it earns its
-`.env.example` line at the moment an `app.config.Settings` field resolves to it —
-not before. **So this ticket adds no configuration variable**, which is the
-honest answer to its definition-of-done item rather than a skipped one.
+deployment needs, and E0-08 deliberately did not add it: nothing then read it,
+and a key sitting in a table no code opens is a credential at rest with no owner.
+**E1-05 adds it, as `ToolSigningKey` below**, one row ahead of E1-06's signing
+code by one ticket — the two move together across E1-05/E1-06 because the
+registration document's keys are the column names on both sides. It still adds no
+configuration variable: custody is the database (`docs/adr/0082`), the seed
+generates it in development, and no `app.config.Settings` field resolves to it,
+which is what the epic README's rule keys the `.env.example` line on.
 
-**What a launch needs that is not here yet.** §7.3 leaves the platform's OIDC
-authorization endpoint to the registration, but E0-23 decided that the
-service-address columns for it are E1's, built with the sync that reads them;
-E0-18's launch door uses `Settings.lti_platform_authorization_endpoint` as its
-stand-in until then (`docs/adr/0075`). E0-08's scope names issuer, client ID,
-deployment IDs, JWKS URL and last fetch, and those are what this module builds.
+**The platform's service addresses arrived here in E1-05.** §7.3 leaves the OIDC
+authorization endpoint to the registration, and E0-23 put the columns for it in
+E1, with the code that reads them (`docs/adr/0075`); `authorization_endpoint` and
+`auth_token_url` below are them. E0-08's scope named issuer, client ID,
+deployment IDs, JWKS URL and last fetch, which is what this module built until
+now.
+
+**What a legitimate address is, is decided here too** (`docs/adr/0081`).
+`refuse_invalid_registration_addresses` below is the chokepoint every writer of
+an `lti_platform` row passes through. E0-24 item 1 left `jwks_url`
+credential-equivalent and unconstrained — it decides which keys may sign an
+accepted launch, and it is fetched server-side on every launch — and E1 is the
+epic that writes and fetches it, so E1 says what it may hold.
 
 **Nothing here is marked LMS-owned.** An `lms_` prefix (ADR 0014) marks a column
 Pulse may never edit. A registration is typed into the admin console by an
