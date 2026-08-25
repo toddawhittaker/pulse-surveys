@@ -32,9 +32,17 @@ been right every time. They carry it alone now.
 
 **A credential never reaches a log through this class**, and there are two ways
 in, so there are two guarantees. `DATABASE_URL`, `CARE_DATABASE_URL` and
-`REDIS_URL` carry passwords today; the AI provider key, the SMTP password, and
-the LTI private key are coming (§6.3), and SPEC §10 puts secrets in the
-environment precisely so they stay out of logs.
+`REDIS_URL` carry passwords today; the AI provider key and the SMTP password are
+coming (§6.3), and SPEC §10 puts secrets in the environment precisely so they
+stay out of logs.
+
+**The tool's LTI private key is not on that list, and was until E1-05.** It is a
+`tool_signing_key` row rather than a setting, because the `api` container and the
+celery worker have to sign with one key and a per-process or per-container key
+gives them two (`docs/adr/0082`). So no field here will ever hold it, and
+`.env.example` gains no placeholder for it — which matters more than it looks: a
+placeholder for a private key is a line somebody replaces with a real one and
+commits.
 
 *When the configuration is refused*, no value is quoted back. The failure names
 the variables at fault and says what is wrong with each, and it happens at
@@ -408,8 +416,9 @@ class Settings(BaseSettings):
     # copied into inherits it.
     #
     # Each URL below carries a password in the same position. The AI provider
-    # key (§6.3, E0-13), the SMTP password, and the LTI private key belong in
-    # this group when they land.
+    # key (§6.3, E0-13) and the SMTP password belong in this group when they
+    # land. The tool's LTI private key does not: E1-05 put it in a
+    # `tool_signing_key` row rather than a setting (`docs/adr/0082`).
     #
     # The cost is that reading one is `settings.database_url.get_secret_value()`
     # rather than `settings.database_url`. That is the point: extracting a
@@ -773,8 +782,8 @@ class Settings(BaseSettings):
         The message does not quote the value it rejected, and no validator in
         this class ever should. `__init__` already keeps validator messages out
         of the startup log, but a validator on a future secret-bearing field —
-        the SMTP password, the LTI private key — would otherwise put the value
-        one bypassed code path away from a log line. Cheaper to never write it.
+        the SMTP password, say — would otherwise put the value one bypassed code
+        path away from a log line. Cheaper to never write it.
         """
         try:
             ZoneInfo(value)
