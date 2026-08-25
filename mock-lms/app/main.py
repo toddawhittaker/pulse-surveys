@@ -480,21 +480,20 @@ def _register_token(app: FastAPI, settings: PlatformSettings, key: IssuerKey) ->
         `app.state.http` at request time rather than being closed over, so a test
         that installs its own after startup is the one this reads.
         """
-        media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
-        if media_type != FORM_MEDIA_TYPE:
-            return JSONResponse(
-                {
-                    "error": INVALID_REQUEST,
-                    "error_description": (
-                        f"The token request was posted as {media_type!r}. RFC 6749 §4.4.2 makes "
-                        f"an access token request {FORM_MEDIA_TYPE!r}."
-                    ),
-                },
-                status_code=400,
-            )
-        body = (await request.body()).decode("utf-8", errors="replace")
-        form = dict(parse_qsl(body, keep_blank_values=True))
         try:
+            media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+            if media_type != FORM_MEDIA_TYPE:
+                # Raised rather than answered here, so that every RFC 6749 §5.2
+                # body this endpoint sends is built in one place. Two
+                # construction sites is one place to forget when the shape
+                # changes (`docs/MISTAKES.md` entry 13).
+                raise TokenRequestError(
+                    INVALID_REQUEST,
+                    f"The token request was posted as {media_type!r}. RFC 6749 §4.4.2 makes an "
+                    f"access token request {FORM_MEDIA_TYPE!r}.",
+                )
+            body = (await request.body()).decode("utf-8", errors="replace")
+            form = dict(parse_qsl(body, keep_blank_values=True))
             granted = await run_in_threadpool(
                 granted_token, form, settings, key, request.app.state.http
             )

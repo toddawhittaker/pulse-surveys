@@ -309,13 +309,13 @@ class IssuerKey:
 
 
 class JwsError(ValueError):
-    """A compact JWS could not be read, or did not verify against the key given.
+    """A compact JWS could not be read at all: wrong shape, or an unreadable segment.
 
-    One exception for both, because a caller here answers the same way to each:
-    RFC 6749 §5.2 has a refused token request say the client did not
-    authenticate, and "your assertion is three segments of nonsense" and "your
-    assertion is signed by somebody else" are not distinctions a platform owes an
-    unauthenticated caller.
+    Raised by `parse` and by nothing else. Whether a token that *is* a JWS
+    verifies is a question with a boolean answer, which `verifies_with` gives, so
+    "this is not a token" and "this token is signed by somebody else" stay
+    distinguishable here — even though the caller in `app.tokens` deliberately
+    answers a refused token request the same way for both.
     """
 
 
