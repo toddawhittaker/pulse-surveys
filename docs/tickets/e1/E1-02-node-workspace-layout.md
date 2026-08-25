@@ -5,6 +5,7 @@
 **Depends on:** nothing
 **Security-relevant:** none line-by-line; gate fidelity is the risk here
 (MISTAKES entries 36 and 25), not confidentiality.
+**Lane:** light
 
 ## Context
 

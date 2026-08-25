@@ -1,6 +1,6 @@
 ---
 name: build-ticket
-description: Build one ticket through the orchestrated tests-first loop - test-author writes red, implementer turns green, verifier proves it, a fresh-context security pass reviews the diff. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and stops at a PR without merging.
+description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, implementer turns green, verifier proves it by battery), light rides builder-writes-code-and-tests with one fresh verifier pass; both get the fresh-context security review. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and stops at a PR without merging.
 ---
 
 # Build a ticket
@@ -13,6 +13,18 @@ finding or a wasted round.
 
 `$1` is the ticket ID (`E0-05`) or a loose ordinal ("ticket 3" means `E0-03`).
 If ambiguous, ask — building the wrong ticket wastes a whole loop.
+
+## 0. The lane
+
+Read the ticket header's `**Lane:**` field first. A missing field, a ⚠
+anywhere on the ticket, or doubt means **heavy** — steps 1 through 7 below.
+`**Lane:** light` means step 1, then the **Light lane** section at the end of
+this file in place of steps 2–5, then steps 6 and 7 unchanged. If mid-build
+the diff reaches a surface CLAUDE.md's lane rule names as heavy (read paths,
+authz, the doors, token handling, guarded writers, key custody, CI gates),
+stop and re-lane: what exists becomes the heavy lane's starting material, the
+tests get a `test-author` pass before they are trusted, and the PR records
+the switch.
 
 ## 1. Plan, before any agent
 
@@ -129,6 +141,24 @@ did.
   deliberately deferred with where it is recorded.
 - **Then stop. Do not merge.** Todd's written approval in conversation is the
   only merge trigger.
+
+## Light lane
+
+For tickets whose header says `**Lane:** light`. Step 1 runs in full — a
+lighter loop is not a lighter brief; the work order still settles decisions,
+names traps, and draws the boundary. Then:
+
+- Spawn `builder` with the work order. It writes implementation and ordinary
+  tests together: unit and integration tests asserting the acceptance
+  criteria, house style, no manifest, no mutation-naming docstrings, no
+  red-first commit ordering. The standing rules hold with no exceptions —
+  nothing skipped or xfailed to green, the §4.1 suite untouched, gate
+  tolerances moved only where the ticket owns the flip. It commits in small
+  steps and appends attempts to the epic's `.attempts/<TICKET>.md`.
+- Spawn `verifier` for one fresh pass: full suite with exact totals, `ruff
+  format --check`, `ruff check`, `mypy`, `alembic check` where schema moved.
+  No battery. No green is believed on the builder's word in this lane either.
+- Steps 6 (security review) and 7 (finish) are identical to the heavy lane.
 
 If a ticket spans sittings, resume the session (`claude --resume`) rather than
 starting fresh — the warm implementer's reasoning survives with it; the

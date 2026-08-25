@@ -6,6 +6,9 @@
 **Security-relevant:** none line-by-line — mock-only, development-only surface;
 the review checks it cannot leak into a deployed path (ADR 0038's posture) and
 that ADR 0035's signing bound holds.
+**Lane:** light — mock- and development-only surface; the fixtures' fidelity
+(each wrong launch provably wrong) is proven by E1-08's heavy-lane refusal
+tests, which consume them.
 
 ## Context
 

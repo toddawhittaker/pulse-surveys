@@ -222,6 +222,41 @@ pull request adds a `secrets.*` reference to a workflow without the repository
 owner agreeing to it first. Credentials never appear in commit messages, pull
 request bodies, test fixtures, seed data, or logs.
 
+## Two testing lanes
+
+Every ticket names its lane in its header's `**Lane:**` field, assigned when
+the epic's build order is written. A missing field means heavy, any ⚠ on the
+ticket or its epic means heavy, and doubt means heavy. The ticket file is the
+authority — an epic README's table may summarize, but the header decides.
+
+**Heavy** is the orchestrated tests-first loop, for the surfaces an attacker
+would aim at: §4/§4.1 read paths, authz and purview, the two entry doors and
+token handling, sanctioned writers, key and secret custody, changes to CI
+gates. A separate test author writes failing tests from the ticket and the
+spec before any implementation exists; the implementer may not modify tests
+(a hook enforces the wall) and escalates disagreements as dispute files; an
+independent verifier re-runs every green claim from scratch and a mutation
+battery proves each test can actually fail.
+
+**Light** is for everything else — frontend tooling, UI rendering, governed
+copy, plumbing that touches no guarded surface. One `builder` agent writes
+the code and ordinary tests together, and the verifier re-runs the gates
+once from scratch. No manifest, no mutation battery, no separate test
+author.
+
+What never varies by lane: CI green with nothing skipped or weakened, the
+§4.1 invariant suite, the independent security review on every pull request
+(SPEC §14.2 item 3), ADRs for contestable construction decisions, and the
+owner's written approval to merge. A light ticket whose diff turns out to
+reach a heavy surface stops and re-lanes, and the pull request records the
+switch.
+
+Future epics write the `**Lane:**` field on every ticket at breakdown time.
+E1 adopted the split mid-epic: its light tickets are E1-02, E1-03, E1-04 and
+E1-07, and every other E1 ticket is heavy — including E1-14 and E1-15, whose
+⚠ lives in their Security-relevant lines rather than in the build-order
+table.
+
 ## Definition of done
 
 Every epic — and by extension every ticket that composes it — carries the

@@ -5,6 +5,7 @@
 **Depends on:** E1-02
 **Security-relevant:** none line-by-line; supply-chain review of the two new
 majors per the standing dependency rules.
+**Lane:** light
 
 ## Context
 
