@@ -6,7 +6,7 @@ cannot verify a `client_assertion` this tool signs without the tool's public key
 so the tool has to publish one — and the route that does it is public, ungated,
 and one mistake away from publishing the private half instead.
 
-**Five properties, one test each, because each fails differently.**
+**Six properties, one test each, because each fails differently.**
 
   - **It answers in every environment.** Criterion 4's own words. A key set served
     only in development is a tool that cannot be registered anywhere it matters,
@@ -23,9 +23,15 @@ and one mistake away from publishing the private half instead.
     material.** Those are two assertions rather than one: a route can serve a
     correct public key *and* a `d` beside it, and it can serve a private-free
     document describing a key that signs nothing.
-  - **With no key stored, it refuses rather than serving an empty set.** The one
-    property here written after the code rather than before it, and the manifest
-    entry says so. A deployment with no `tool_signing_key` row is a real state —
+  - **Its numbers are spelled the way JOSE spells them**: base64url with no
+    padding (RFC 7518 §2). Its own test rather than a line in the one above,
+    because the two cannot be asked together — value equality is reached by
+    decoding, and decoding re-pads, so it forgives exactly the defect this pins.
+    The E1-06 mutation battery measured that: `.rstrip(b"=")` removed from the
+    encoder left the whole suite green.
+  - **With no key stored, it refuses rather than serving an empty set.** One of
+    the two properties here written after the code rather than before it, and the
+    manifest entry says so. A deployment with no `tool_signing_key` row is a real state —
     ADR 0082's seed runs only in development — and an empty key set is a document
     a platform accepts and stores, which turns "this tool has no key" into a
     refused assertion hours later at somebody else's service.
@@ -51,6 +57,7 @@ thing to check if they all go red together.
 
 import base64
 import json
+import re
 from typing import Any
 
 import pytest
@@ -70,6 +77,14 @@ TOOL_JWKS_PATH = "/lti/jwks"
 # accidental 500 is a failure here — see the test for why that distinction is the
 # whole point of the case.
 NO_SIGNING_KEY_STATUS = 503
+
+# The base64url alphabet, and **no padding character in it**. RFC 7515 appendix C
+# and RFC 7518 §2 both fix the encoding JOSE uses: base64url with the trailing
+# `=` removed, everywhere, without exception. Written as a whole-string match
+# rather than as a search for `=`, so that any other character that should not be
+# in a JWK's integer members — whitespace, a newline from a wrapped PEM, `+` or
+# `/` from standard base64 — is caught by the same assertion.
+UNPADDED_BASE64URL = re.compile(r"[A-Za-z0-9_-]+")
 
 # `tool_signing_key` and its one column, spelled as E1-05's work order spells them
 # and as `tests/integration/test_tool_signing_key_custody.py` does.
@@ -310,10 +325,23 @@ def test_the_published_key_is_the_public_half_of_the_stored_signing_key(
     **Both halves, because each catches what the other misses.** The public
     numbers are compared, which says the served key *is* this row's key and fails
     with two integers a reader can see. And a signature made with the stored
-    private key is verified against the served `n` and `e`, which says the served
-    encoding is one a verifier can actually use — a modulus written with padding,
-    or big-endian the wrong way round, compares unequal in the first half and
-    would be a puzzle without the second.
+    private key is verified against the served `n` and `e`, which says those
+    numbers are usable for the operation they exist for rather than merely equal —
+    big-endian the wrong way round survives neither, but a number that decodes
+    correctly and is refused by a verifier would be a puzzle without the second
+    half.
+
+    **This test says nothing about the *spelling* of `n` and `e`, and an earlier
+    version of this docstring claimed it did.** It said a modulus written with
+    padding compares unequal above, and that is false: both halves reach the
+    numbers through `decoded_base64url`, which re-pads before decoding, so a
+    served value that already carries `=` decodes to exactly the same integer and
+    every assertion here passes. Measured, not reasoned — the E1-06 mutation
+    battery dropped the `.rstrip(b"=")` from the encoder and the whole suite
+    stayed green. Decoding is the operation that forgives the defect, so a test
+    built on decoding cannot pin the encoding. `test_the_published_keys_numbers_
+    are_spelled_as_unpadded_base64url` below is where the spelling is pinned, by
+    looking at the strings and never decoding them.
 
     **The near miss it must survive**, and the reason the second half is not on
     its own: a verifier that accepts everything. So the same signature is checked
@@ -345,6 +373,77 @@ def test_the_published_key_is_the_public_half_of_the_stored_signing_key(
     other_public = rsa.RSAPublicNumbers(other_numbers.e, other_numbers.n).public_key()
     with pytest.raises(InvalidSignature):
         other_public.verify(signature, message, padding.PKCS1v15(), hashes.SHA256())
+
+
+def test_the_published_keys_numbers_are_spelled_as_unpadded_base64url(
+    stored_signing_key: tuple[str, Any], open_the_tool: Any
+) -> None:
+    """`n` and `e` carry no `=`, because JOSE's base64url has no padding.
+
+    **The mutation this exists to kill:** the `.rstrip(b"=")` dropped from the
+    encoder that writes these members, so the modulus is served ending in `==`.
+    RFC 7518 §2 and RFC 7515 appendix C both fix the encoding as base64url **with
+    the trailing padding removed**, without exception, so a document spelled this
+    way is one the specification forbids — and a strict JOSE implementation
+    refuses to parse it rather than tolerating it, which is a registration that
+    fails at the platform for a reason naming no key.
+
+    The second consequence is worse because it is silent. RFC 7638 computes a
+    thumbprint by hashing the members **as the JWK spells them**, so under this
+    mutation the digest depends on whether the reader normalised the padding away
+    before hashing. Two conformant platforms then compute two different `kid`
+    values for one key, and the tool — which writes its own into every assertion
+    header — agrees with at most one of them.
+
+    **Asserted on the strings, and deliberately never by decoding.** Decoding is
+    exactly the operation that forgives this defect: every base64url decoder in
+    this suite re-pads its input first (`decoded_base64url` above, and its twin in
+    `tests/fixtures/client_credentials.py`), so a padded value decodes to the
+    correct integer and any test built on a decode passes. That is not a
+    hypothesis — the E1-06 mutation battery ran this exact change and **the whole
+    suite stayed green**, which is `docs/MISTAKES.md` entry 3 arriving in the one
+    place that had claimed in writing to cover it. This test looks at the
+    characters.
+
+    **The near misses that must stay green, and which this test does not repeat.**
+    `test_the_published_key_is_the_public_half_of_the_stored_signing_key` is value
+    equality, reached through that forgiving decoder, and it stays green under the
+    mutation by construction — its docstring now says so rather than claiming
+    otherwise. `test_the_published_key_identifier_is_the_thumbprint_of_the_key_it_
+    names` stays green too, and for a sharper reason: it hashes whatever strings
+    the document carries, so the tool and this suite agree with each other about a
+    spelling they have both got wrong. Neither is weakened here and neither is
+    duplicated; the encoding is one property and it now has one test.
+
+    A whole-string match against the alphabet rather than a search for `=`, so the
+    other ways an integer member goes wrong — a `+` or `/` from standard base64, a
+    newline, surrounding whitespace — fail the same assertion.
+    """
+    key = the_one_key(served_key_set(open_the_tool()))
+
+    for member in ("n", "e"):
+        value = key.get(member)
+        assert isinstance(value, str) and value, (
+            f"The published key carries `{member}` {value!r}, so there is no spelling here to "
+            "judge. `test_the_published_key_set_carries_exactly_one_rsa_signing_key` owns that "
+            "failure."
+        )
+        assert "=" not in value, (
+            f"The published key spells `{member}` as {value!r}, which carries base64 padding. "
+            "RFC 7518 §2 fixes JOSE's encoding as base64url with the trailing `=` removed, so "
+            "this is a document the specification forbids and a strict implementation refuses to "
+            "parse. It also makes the key's RFC 7638 thumbprint depend on whether the reader "
+            "strips the padding before hashing — two conformant platforms compute two `kid` "
+            "values for one key, and the tool agrees with at most one of them. Every test here "
+            "that reaches these members by decoding passes over this, because decoding re-pads "
+            "first; that is why this one reads the string."
+        )
+        assert UNPADDED_BASE64URL.fullmatch(value), (
+            f"The published key spells `{member}` as {value!r}, which is not base64url. RFC 7515 "
+            "appendix C allows `A-Z`, `a-z`, `0-9`, `-` and `_` and nothing else — `+` and `/` "
+            "are standard base64's alphabet and mean different bits, and whitespace or a newline "
+            "is a value some readers strip and others hand straight to a decoder."
+        )
 
 
 def test_the_published_key_set_carries_no_private_key_material(
