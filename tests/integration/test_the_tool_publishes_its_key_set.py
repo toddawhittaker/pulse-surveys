@@ -6,7 +6,7 @@ cannot verify a `client_assertion` this tool signs without the tool's public key
 so the tool has to publish one — and the route that does it is public, ungated,
 and one mistake away from publishing the private half instead.
 
-**Four properties, one test each, because each fails differently.**
+**Five properties, one test each, because each fails differently.**
 
   - **It answers in every environment.** Criterion 4's own words. A key set served
     only in development is a tool that cannot be registered anywhere it matters,
@@ -23,6 +23,12 @@ and one mistake away from publishing the private half instead.
     material.** Those are two assertions rather than one: a route can serve a
     correct public key *and* a `d` beside it, and it can serve a private-free
     document describing a key that signs nothing.
+  - **With no key stored, it refuses rather than serving an empty set.** The one
+    property here written after the code rather than before it, and the manifest
+    entry says so. A deployment with no `tool_signing_key` row is a real state —
+    ADR 0082's seed runs only in development — and an empty key set is a document
+    a platform accepts and stores, which turns "this tool has no key" into a
+    refused assertion hours later at somebody else's service.
 
 **Why the key is planted rather than seeded.** `tests/integration/
 test_tool_signing_key_custody.py` owns what the seed writes. What is under test
@@ -48,6 +54,7 @@ import json
 from typing import Any
 
 import pytest
+from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
@@ -55,6 +62,14 @@ pytestmark = pytest.mark.integration
 # list: this is a public URL a platform is registered with, so a spelling nobody
 # fixed is a spelling that changes under whoever already stored it.
 TOOL_JWKS_PATH = "/lti/jwks"
+
+# What the route answers where this deployment holds no signing key. 503 rather
+# than 404 or 500: the route exists and this installation is not ready to serve
+# it, which is what "service unavailable" means and what a deployment's own
+# monitoring is already watching for. It is asserted as an equality, so an
+# accidental 500 is a failure here — see the test for why that distinction is the
+# whole point of the case.
+NO_SIGNING_KEY_STATUS = 503
 
 # `tool_signing_key` and its one column, spelled as E1-05's work order spells them
 # and as `tests/integration/test_tool_signing_key_custody.py` does.
@@ -376,6 +391,94 @@ def test_the_published_key_set_carries_no_private_key_material(
         "The published key set carries PEM private-key armour, which is either the key this row "
         f"holds or another one the route handled on the way past. Body begins "
         f"{response.text[:300]!r}."
+    )
+
+
+def test_the_route_refuses_rather_than_serving_an_empty_key_set_when_no_key_is_stored(
+    db_session: Any, open_the_tool: Any
+) -> None:
+    """With no `tool_signing_key` row, `GET /lti/jwks` refuses. It does not serve `[]`.
+
+    **Written after the implementation**, unlike everything else in this module,
+    and the manifest says so. The behaviour was reported rather than derived from
+    the ticket, so this test carries no credit for having predicted it — what it
+    is worth is that the decision cannot now be reversed silently.
+
+    **Why an empty key set is the wrong answer, and it is not a close call.** A
+    deployment with no key is a real state and not a hypothetical one: ADR 0082
+    generates the key in the seed, the seed runs only in development, and that
+    record's own consequence section says "a non-development deployment has no
+    signing key" and books the supply route as deferred work. So the first real
+    platform this tool is registered at will fetch this document, and `{"keys":
+    []}` is a **valid** JWK Set — a platform accepts it, stores it, and reports the
+    registration as complete. Nothing is wrong until an assertion arrives hours
+    later and is refused with an error that names no key, at somebody else's
+    service, with no way back to this container. A 503 is the same fact delivered
+    at the moment it can still be acted on, to the party who can act on it.
+
+    **The mutation this test exists to kill** is exactly the alternative that was
+    rejected: a route that answers 200 with an empty `keys` array on an empty
+    table. Every other test in this module plants a row first, so all of them stay
+    green against it — this is the only place in the suite that looks at the
+    unplanted case at all.
+
+    **The near miss, and this assertion deliberately separates them.** A route
+    that *crashes* on the empty table — an unguarded `.one()`, a `None` handed to
+    a PEM loader — answers 500, and a 500 is also "the tool did not serve a key
+    set". Reading them as the same thing would be the whole finding lost: one is a
+    decision this deployment can monitor and the other is an unhandled exception
+    whose next refactor could as easily produce a 200. So the status is asserted
+    as an **equality** against 503 and a 500 fails, which is a real cost — a
+    correct-in-spirit implementation that raises rather than returns goes red
+    here — and it is the cost worth paying, because the difference between
+    deciding and crashing is the only thing this case is about.
+
+    **What the body must not be.** Not a specific error shape: the ticket does not
+    spell one and pinning one would settle an interface from the test side.
+    Only the forbidden state — a document carrying a `keys` member, which is what
+    a platform's key-set reader looks for and stores. A body that is not JSON at
+    all passes that, and rightly: nothing stores it either.
+
+    **The guard comes first**, because "no key is stored" is the premise of every
+    sentence above and a table that quietly held a row would make this test a
+    report about something else entirely (`docs/MISTAKES.md` entry 3). Nothing in
+    this database's fixtures seeds a signing key —
+    `test_tool_signing_key_custody.py` rests on the same fact — and `committed_rows`
+    removes what the tests above plant, so a non-zero count here is a leak to
+    chase rather than an assertion to relax.
+    """
+    stored = int(
+        db_session.execute(text(f"SELECT count(*) FROM public.{SIGNING_KEYS}")).scalar_one()  # noqa: S608
+    )
+    assert stored == 0, (
+        f"`{SIGNING_KEYS}` already holds {stored} row(s), so this test is asking what the route "
+        "does with a key rather than without one — which is what every other test in this module "
+        "asks. Nothing in the session database's fixtures seeds a signing key and `committed_rows` "
+        "removes the rows the tests above plant, so this is a leak from somewhere rather than the "
+        "ordinary state."
+    )
+
+    response = open_the_tool().get(TOOL_JWKS_PATH)
+
+    assert response.status_code == NO_SIGNING_KEY_STATUS, (
+        f"`GET {TOOL_JWKS_PATH}` answered {response.status_code} with no key stored, and this "
+        f"deployment's answer to that is {NO_SIGNING_KEY_STATUS}. A 200 is the case this test "
+        "exists for: an empty key set is a valid JWK Set that a platform accepts and stores, and "
+        "the failure then arrives hours later as an assertion refused with an error naming no "
+        "key. A 500 is the other reading and is not the same thing — it is an unhandled exception "
+        "rather than a decision, and the next refactor of it could as easily answer 200. Body "
+        f"begins {response.text[:300]!r}."
+    )
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    assert not (isinstance(body, dict) and "keys" in body), (
+        f"The refusal carries a `keys` member: {json.dumps(body)[:300]}. A platform's key-set "
+        "reader looks for exactly that and will store what it finds, so a refusal shaped like a "
+        "key set is the disclosure this status code was chosen to avoid — with the added "
+        "confusion of a status saying the opposite of the body."
     )
 
 
