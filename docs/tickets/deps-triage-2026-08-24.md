@@ -62,6 +62,46 @@ peers on `typescript >=4.8.4 <6.1.0`. The two move together or not at all.
 **Done when** both majors land in one change, `npm ci` resolves, and the
 exact-pin equality guard and all four Node-facing gates stay green.
 
+**Measured 2026-08-25 by E1-03, and the pair cannot move yet. The "done when"
+above stays open.** The ticket's own escape clause applies: no released
+`typescript-eslint` accepts TypeScript 7, so nothing was pinned and no
+resolution was forced. What was measured, all of it by execution rather than
+read off a changelog:
+
+- Every version of `typescript-eslint` ever published — 1,546 of them, stable
+  and pre-release, read out of the registry packument — declares a `typescript`
+  peer range no wider than `>=4.8.4 <6.1.0`. That widest range starts at
+  8.57.3-alpha.3 and runs through the current stable 8.68.0 (published
+  2026-08-24) and the 8.68.1 canary. There is no 9.x line: the package's
+  dist-tags are `latest` 8.68.0, `canary` 8.68.1-alpha.3, and the historical
+  `rc-v8`. The four member packages — `parser`, `typescript-estree`,
+  `eslint-plugin`, `utils` — carry the same range at 8.68.0. TypeScript's
+  `latest` is 7.0.2 and its 6.x line stopped at 6.0.3, so `<6.1.0` admits
+  exactly the 6.0.3 this repository already pins and nothing newer.
+- `npm install --dry-run --save-exact typescript@7.0.2 typescript-eslint@8.68.0`
+  exits 1 with `ERESOLVE`, naming the same peer range. That is #83's failure
+  again against the newest pair available, not against the pair #83 proposed.
+- Forcing it is not merely a rule this repository declines to break; it does
+  not work. In a scratch copy of the manifest and the checked files,
+  `npm install --legacy-peer-deps` of that pair exits 0, and then
+  `npx tsc --noEmit` exits 0 — TypeScript 7.0.2 accepts this repository's
+  TypeScript, so the compiler half is ready — while
+  `npx eslint . --max-warnings=0` exits 2 before it reads a single file, on
+  `Error: typescript-eslint does not support TS 7.0.` thrown from
+  `typescript-eslint/dist/index.js`. A forced resolution would trade a red
+  install for a red lint gate, which is why `--legacy-peer-deps`, `overrides`
+  and `resolutions` were all refused rather than weighed.
+- Upstream agrees with the measurement. typescript-eslint's dependency-versions
+  documentation still publishes `>=4.8.4 <6.1.0` as its supported range, and
+  its issue #12518, "TypeScript 7.0.2 Support", is closed as not planned.
+
+The retry trigger is mechanical, so nobody has to track upstream intentions:
+`npm view typescript-eslint peerDependencies` reports a `typescript` range whose
+upper bound admits 7.x. Until it does, this entry's owner stays E1 only in the
+sense that E1 measured it; the move itself belongs to whichever epic is running
+when that range widens. E1-03's record is
+`docs/tickets/e1/.attempts/E1-03.md`.
+
 ### 4. `@types/node` tracks the runtime — owner: E1
 
 #81 (20.19.43 → 26.2.0) was green because nothing ties `@types/node` to the
