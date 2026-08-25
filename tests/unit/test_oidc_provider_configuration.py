@@ -214,7 +214,7 @@ NON_LOOPBACK_IP_LITERAL = "203.0.113.10"
 
 # The three spellings the **transport rule's exemption** is asserted over. A
 # different question from the class above, and a separate constant on purpose: this
-# is `app.config`'s existing `_is_on_this_machine`, whose own pairs live in
+# is `app.config`'s existing `is_on_this_machine`, whose own pairs live in
 # `tests/unit/test_ai_provider_configuration.py`, and this ticket widens the refusal
 # rather than that exemption. Whether one helper ends up serving both is the
 # implementation's call — nothing here asserts that a cleartext `127.0.0.2` *token*
@@ -1439,7 +1439,7 @@ def test_a_trailing_dot_on_a_host_that_is_not_the_mock_is_accepted(
     covered by a new row, because the whole cost of a multi-dot strip is that
     `mock-idp..` would be read as the mock and refused — and `mock-idp..` resolves
     nowhere, so that refusal protects nothing and costs nothing. The implementation
-    records the same limit at `_url_host`; if it ever becomes worth guarding, the
+    records the same limit at `url_host`; if it ever becomes worth guarding, the
     row is `mock-idp..` and it belongs beside the refusals above rather than here.
     """
     configure(

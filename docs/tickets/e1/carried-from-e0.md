@@ -98,6 +98,19 @@ fail if both went to the same address — and `LTI_PLATFORM_AUTHORIZATION_ENDPOI
 is gone from `Settings` and `.env.example`, rather than left as a default the
 column falls back to.
 
+**Closed 2026-08-25 by E1-05.** The endpoint is a column on `lti_platform`,
+read in `begin_a_launch` off the row the issuer resolved to and carried on the
+`Initiation`, so the row that decides the client ID is the row that decides the
+address.
+`tests/integration/test_registration_endpoints_are_per_platform.py` registers
+two platforms with endpoints that differ in host as well as in path and asserts
+each redirect against its own row and *against not being the other's*. The
+setting is deleted from both places rather than demoted: a registration that
+states no endpoint is refused with `LaunchRefusedError`, because a fallback
+would be this entry re-opened under another name. `docs/adr/0075` records the
+supersession, and `docs/adr/0081` decides what a legitimate value for the column
+is.
+
 ## The client-credentials grant, and the four things that move with it
 
 E0-15 left NRPS and AGS unauthenticated on the mock platform, deliberately, and

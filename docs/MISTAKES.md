@@ -272,7 +272,7 @@ file and check the status, or run the gate bare.
 
 ## 31. "Running it twice is safe" was tested only against a database the loader itself had filled
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/31-running-it-twice-is-safe-was-tested-only-against.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/31-running-it-twice-is-safe-was-tested-only-against.md)
 
 ## 27. A guard that reads a command as text refused a command that was only reading
 

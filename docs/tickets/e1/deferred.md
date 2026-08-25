@@ -29,6 +29,12 @@ Every E1 pull request that defers something adds it here in the same PR.
    add one; their reviews must ask the question.
    **Done when** both reviews have asked it and recorded the answer, or a
    structural source for the list exists.
+   *E1-05 asked it and the answer is no.* It adds one table,
+   `tool_signing_key`, holding an `id` and a private key PEM. It carries no
+   subject, no name and no address, nothing joins it to a person, and nothing
+   reads it until E1-06 signs with it — so `PERSON_TABLES` is unchanged.
+   Recorded in [ADR 0082](../../adr/0082-the-tools-signing-key-lives-in-the-database.md)
+   and beside the model. E1-11 still owes its half.
 
 3. **The two E0-34 planted-file tests have a not-load-bearing message
    check.** Pytest assertion rewriting satisfies the check without the
@@ -41,3 +47,42 @@ Every E1 pull request that defers something adds it here in the same PR.
    rests on it, but it runs only in the ordinary suite, not the isolated
    §4.1 pass.
    **Done when** it carries the marker and the isolated pass collects it.
+
+## From E1-05 — registration owns its endpoints and its keys
+
+1. **A non-development deployment has no way to supply the tool's signing key.**
+   Custody is a `tool_signing_key` row
+   ([ADR 0082](../../adr/0082-the-tools-signing-key-lives-in-the-database.md)),
+   and the only thing that writes one is the demo seed, which refuses to run
+   anywhere but development (ADR 0063). So a deployment has no key, and nothing
+   deployed signs today — E1-06 and E1-11 both run against the mock platform in
+   development — which is what makes the gap survivable for now rather than a
+   hole. It is a deliberate omission, not an oversight: the alternative was a
+   configuration variable holding a private key, which
+   [ADR 0082](../../adr/0082-the-tools-signing-key-lives-in-the-database.md)
+   rejects, and inventing a supply route before anything needs one would fix the
+   shape of it in the wrong ticket.
+   **Done when** a non-development deployment has a documented and tested way to
+   put a signing key in that table — with the rotation question answered too,
+   since the one-row rule forbids the two-key overlap a real rotation needs.
+   **Owner:** the epic that first registers a real platform and therefore first
+   needs a production signer.
+
+2. **The address rules judge spellings, not addresses** (security review,
+   LOW). Rules 3 and 4 of ADR 0081 accept `127.1`, bare-decimal and
+   dotted-hex literals, and resolver-backed names (`metadata.google.internal`)
+   for the exact addresses they refuse — ADR 0081's residue paragraph holds
+   the measurements. Capped by rule 1 (cleartext off this machine is refused
+   regardless of spelling) and by the seed being the only writer today.
+   **Done when** the two helpers resolve the host and judge every returned
+   address, or refuse integer/dotted-hex host literals, with test pairs on
+   both sides — before E11's console becomes a second writer.
+
+3. **The write-time chokepoint is a call convention** (security review,
+   LOW). Nothing — mapper event, sweep, or grant — makes a future writer of
+   `lti_platform` call `refuse_invalid_registration_addresses`; a writer
+   going through SQLAlchemy without the call is as unjudged as the raw-SQL
+   writer ADR 0081 records.
+   **Done when** the call is structural (a `before_insert`/`before_update`
+   event on `LtiPlatform`) or a sweep asserts every write site calls it —
+   in the same change that adds the second writer, E11 at the latest.

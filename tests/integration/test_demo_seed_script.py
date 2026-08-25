@@ -81,6 +81,7 @@ from datetime import date
 from importlib import import_module
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from sqlalchemy import Uuid, create_engine, select
@@ -100,6 +101,20 @@ MAPPINGS = "lead_faculty_mapping"
 PLATFORMS = "lti_platform"
 DEPLOYMENTS = "lti_deployment"
 USERS = "user"
+
+# E1-05's two columns on `lti_platform`, spelled by that ticket. The first is the
+# browser-facing endpoint a launch is redirected to; the second is the token
+# endpoint the tool fetches server-side, which this ticket deliberately leaves
+# NULL — the mock has no token endpoint until E1-06, and a registration naming an
+# endpoint that answers nothing is a record asserting something untrue.
+AUTHORIZATION_ENDPOINT_COLUMN = "authorization_endpoint"
+AUTH_TOKEN_URL_COLUMN = "auth_token_url"  # noqa: S105 - a column name, not a credential
+
+# The hosts a browser on the developer's own machine reaches this stack by. The
+# development override binds every published port to `127.0.0.1`, so these two
+# are the whole set — and neither of them is a Compose service name, which is the
+# distinction ADR 0075's per-value horizon rule turns on.
+BROWSER_REACHABLE_HOSTS = ("localhost", "127.0.0.1")
 
 # SPEC §2.1's containment hierarchy, outermost first. A copy of the tuple in
 # `tests/fixtures/supervision.py`; see the module docstring on copies.
@@ -838,6 +853,31 @@ def mock_platform_addresses(base_compose: dict[str, Any], service_name: str) -> 
     return {value for value in values if value.startswith("http") and host in value}
 
 
+def published_host_port(override: dict[str, Any], service_name: str) -> str | None:
+    """The host port `docker-compose.override.yml` publishes one service on.
+
+    Read out of the file rather than written here, for the reason
+    `mock_platform_addresses` reads the issuer out of Compose: the port a
+    developer's browser reaches the platform on is a fact about that file, and a
+    constant in a test is a second copy of it that nothing keeps in step.
+
+    Long form only (`127.0.0.1:8080:8000`), which is what the override uses
+    throughout — every published port there is bound to the loopback interface
+    deliberately, and a mapping written any other way is a change worth failing
+    on rather than parsing around.
+    """
+    services = override.get("services") or {}
+    service = services.get(service_name) or {}
+    ports = service.get("ports") if isinstance(service, dict) else None
+    if not isinstance(ports, list):
+        return None
+    for entry in ports:
+        parts = str(entry).split(":")
+        if len(parts) == 3:
+            return parts[1]
+    return None
+
+
 def names_the_mock_platform(value: Any, addresses: set[str], service_name: str) -> bool:
     """Whether one stored value identifies the in-repo mock platform.
 
@@ -1079,6 +1119,7 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
     demo_database: Any,
     metadata_tables: dict[str, Any],
     base_compose: dict[str, Any],
+    override_compose: dict[str, Any],
     mock_lms_service: str,
     mock_lms_config: Any,
 ) -> None:
@@ -1091,8 +1132,8 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
     13 is about — and the shape E0-31 item 3 raises against a different literal in
     this same script. This is the comparison.
 
-    **Two authorities, not one, and the second is the point.** Three of the four
-    values are Compose literals (ADR 0037). The fourth, the key-set URL, is not in
+    **Three authorities, not one, and the second and third are the point.** Three
+    of the values are Compose literals (ADR 0037). The key-set URL is not in
     `docker-compose.yml` at all: the platform composes it from its own issuer and
     `mock-lms/app/config.py`'s `JWKS_PATH`. A guard whose whole inventory was the
     Compose `environment:` block would report clean over that value forever,
@@ -1100,6 +1141,17 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
     `docs/MISTAKES.md` entry 35 is about, found here by the E0-31 security review.
     So the fixture imports the mock's own configuration module and the path is
     compared against the constant that defines it.
+
+    **E1-05's authorization endpoint is the third, and it is denominated in a
+    currency neither of the others holds.** It is the only value here on the
+    *browser* horizon (ADR 0075): the address a developer's own browser is
+    redirected to, which is the published host port in
+    `docker-compose.override.yml` rather than anything on the Compose network.
+    The mock publishes `{issuer}/oidc/authorize` in its own `/registration`
+    document, and that value is right for a container and wrong for this column —
+    so the path is checked against the platform's `AUTHORIZATION_PATH` and the
+    origin against what the override publishes, and the assertion that the host
+    is *not* the service name is what says the two horizons were not merged.
 
     **What breaks without it is not cosmetic.** If somebody changes the mock's
     `MOCK_LMS_CLIENT_ID` in the Compose file, the seeded registration goes on
@@ -1172,6 +1224,63 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
         "drifted."
     )
 
+    # E1-05's column, and it is the one value here that is **not** the address
+    # the platform publishes for itself. The mock's `/registration` document
+    # advertises `{issuer}/oidc/authorize`, which is the spelling one container
+    # uses to reach another; this column is handed to a *browser* on the
+    # developer's own machine, which cannot resolve `mock-lms` at all (ADR 0075's
+    # per-value horizon rule). So the two halves are checked against the two
+    # authorities that own them: the path against the platform's own
+    # `AUTHORIZATION_PATH`, and the origin against the address the development
+    # override publishes it at.
+    authorization_path = getattr(mock_lms_config, "AUTHORIZATION_PATH", None)
+    assert isinstance(authorization_path, str) and authorization_path.startswith("/"), (
+        f"`mock-lms/app/config.py` defines no absolute `AUTHORIZATION_PATH` (found "
+        f"{authorization_path!r}), so the seeded authorization endpoint has nothing to be checked "
+        "against and this half of the comparison would pass over an absence."
+    )
+    seeded_endpoint = seeded_row.get(AUTHORIZATION_ENDPOINT_COLUMN)
+    assert seeded_endpoint, (
+        f"The seeded mock registration has no `{AUTHORIZATION_ENDPOINT_COLUMN}` (the row holds "
+        f"{sorted(seeded_row)}). E1-05 makes it a property of the registration and refuses a "
+        "launch from a platform that states none, so a seed that leaves it NULL leaves the "
+        "development stack unlaunchable — which is E0's exit criterion, inherited."
+    )
+    seeded_split = urlsplit(str(seeded_endpoint))
+    assert seeded_split.path == authorization_path, (
+        f"The seeded authorization endpoint is {seeded_endpoint!r} and the mock platform serves "
+        f"its authorization endpoint at {authorization_path!r}. A path that disagrees is a "
+        "browser redirected to a 404 on the right host, which surfaces as a launch that never "
+        "arrives with nothing naming the two files that drifted."
+    )
+    assert seeded_split.hostname != mock_lms_service, (
+        f"The seeded authorization endpoint is {seeded_endpoint!r}, which names the Compose "
+        f"service `{mock_lms_service}`. That is the address one container reaches another by, and "
+        "this column is a string handed to a browser on the developer's own machine — which "
+        "resolves no Compose service name. ADR 0075's per-value horizon rule is exactly this "
+        "distinction, and the mock's own `/registration` document publishes the container "
+        "spelling, so copying that value into the column is the mistake this asserts against."
+    )
+    assert seeded_split.hostname in BROWSER_REACHABLE_HOSTS, (
+        f"The seeded authorization endpoint is {seeded_endpoint!r}, whose host "
+        f"{seeded_split.hostname!r} is none of {list(BROWSER_REACHABLE_HOSTS)}. A browser on the "
+        "developer's machine reaches this stack on the loopback interface and nowhere else; the "
+        "development override publishes every service that way."
+    )
+    published = published_host_port(override_compose, mock_lms_service)
+    assert published, (
+        f"`docker-compose.override.yml` publishes no host port for `{mock_lms_service}`, so the "
+        "browser-facing origin has nothing to be checked against and this assertion would pass "
+        "over an absence. The override is what makes the launch page reachable from a browser at "
+        "all."
+    )
+    assert str(seeded_split.port) == published, (
+        f"The seeded authorization endpoint is {seeded_endpoint!r} and the development override "
+        f"publishes `{mock_lms_service}` on host port {published}. A browser sent to any other "
+        "port reaches nothing, and the two files that have to agree are this seed and that "
+        "override."
+    )
+
     expected_deployment = environment.get("MOCK_LMS_DEPLOYMENT_ID")
     assert expected_deployment, (
         f"`docker-compose.yml` configures the `{mock_lms_service}` service with no "
@@ -1186,6 +1295,182 @@ def test_the_seeded_mock_registration_is_the_registration_compose_configures(
         f"The mock platform's seeded deployments are {sorted(seeded_deployments)} and "
         f"`docker-compose.yml` configures {expected_deployment!r}. A launch carries the "
         "deployment it came from, so the tool has to hold the one the platform will send."
+    )
+
+
+def test_the_seeded_mock_registration_states_no_token_endpoint(
+    seeded_demo: Any,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+    base_compose: dict[str, Any],
+    mock_lms_service: str,
+) -> None:
+    """E1-05 leaves `auth_token_url` NULL, and that is a decision rather than an omission.
+
+    The mock platform has no token endpoint: its discovery document advertises
+    none, because E0-14 built none and "an advertised endpoint that answers
+    nothing is a record asserting something untrue" — the platform's own words,
+    in `mock-lms/app/main.py`. E1-06 builds it, and fills this column in the same
+    change, which is why the carried entry insists the client-credentials grant
+    lands as one change covering all four parts.
+
+    **The mutation this kills:** a seed that fills the column with a plausible
+    address — `{issuer}/oidc/token` is one line and looks like tidiness — which
+    makes the registration claim an endpoint that 404s. The tool would then
+    attempt a client-credentials grant against it the moment E1-06 ships a
+    service client, and the failure would surface as a token request that
+    returns HTML.
+
+    The column is asserted to *exist* first, so that "it is NULL" cannot pass
+    because there is no such column (`docs/MISTAKES.md` entry 3).
+    """
+    seeded(seeded_demo)
+    platforms = require_table(metadata_tables, PLATFORMS)
+    assert AUTH_TOKEN_URL_COLUMN in platforms.c, (
+        f"`{PLATFORMS}` has no `{AUTH_TOKEN_URL_COLUMN}` column — it has "
+        f"{[column.name for column in platforms.columns]}. E1-05 adds it beside the authorization "
+        "endpoint, and 'the seed leaves it unset' is true of a column that does not exist in a "
+        "way that says nothing."
+    )
+
+    addresses = mock_platform_addresses(base_compose, mock_lms_service)
+    with reading(demo_database, metadata_tables) as rows:
+        registrations = rows_of(rows, PLATFORMS)
+
+    naming_the_mock = [
+        row
+        for row in registrations
+        if names_the_mock_platform(row.get("issuer"), addresses, mock_lms_service)
+    ]
+    assert len(naming_the_mock) == 1, (
+        f"Expected exactly one seeded `{PLATFORMS}` row whose issuer names the mock and found "
+        f"{len(naming_the_mock)}. An earlier test owns that failure."
+    )
+
+    assert naming_the_mock[0].get(AUTH_TOKEN_URL_COLUMN) is None, (
+        f"The seeded mock registration states a token endpoint: "
+        f"{naming_the_mock[0].get(AUTH_TOKEN_URL_COLUMN)!r}. The mock platform has none until "
+        "E1-06 builds one, and a registration naming an address that answers nothing is exactly "
+        "the record the platform's own discovery document refuses to be. E1-06 fills this column "
+        "in the change that creates the endpoint."
+    )
+
+
+def test_the_seed_fills_the_authorization_endpoint_on_a_registration_that_predates_it(
+    demo_databases: Any,
+    plant_in: Any,
+    metadata_tables: dict[str, Any],
+    base_compose: dict[str, Any],
+    mock_lms_service: str,
+    mock_lms_paths: Any,
+) -> None:
+    """A development database seeded before E1-05 gets the column filled, not a second row.
+
+    Every developer's database already holds the mock's registration, written by
+    a seed that had no such column. The migration cannot fill it — a `NOT NULL`
+    column would have needed a fabricated backfill, which is half of why the
+    column is nullable — so the seed's idempotent re-run is what completes those
+    rows, and a launch from the mock is refused until it does.
+
+    **The mutation this kills:** an upsert that inserts the new columns and does
+    not update them on a matched row, which is the default shape of `ON CONFLICT
+    ... DO UPDATE` when a later ticket adds a column and forgets the `SET` clause.
+    Nothing else would notice: the row is there, the seed exits zero, and the
+    launch door refuses every launch from the mock with a message about a
+    registration that states no endpoint.
+
+    **The old-shape row is planted rather than seeded**, which is the whole point.
+    Run against a database this seed itself filled, the row already carries the
+    column and a seed that never updates a matched row passes — the rows found
+    and the rows written are the same set by construction (`docs/MISTAKES.md`
+    entry 31, and ADR 0064).
+
+    **The row's identity is asserted to survive**, not just its contents. `user`
+    and `lti_deployment` both carry a foreign key to this row, so completing a
+    registration by deleting and re-inserting it either fails on those references
+    or takes them with it — which is a different repair from the one this ticket
+    asks for, and one that would quietly discard a development database's
+    launches.
+
+    **It reads `mock_lms_paths` and not `mock_lms_config`**, and the difference is
+    the whole reason this test could not run when it was first written. That
+    second fixture holds the mock's `app` package resolved for the length of the
+    body, which makes this repository's own `app` unimportable — and
+    `demo_databases()` migrates a database in process, whose first act is
+    `from app.models import Base`. The strings are read out and the resolution
+    closed before anything here runs; `docs/disputes/E1-05-02.md` has the
+    measurement and the ruling, and the fixture's docstring has the rule.
+    """
+    platforms = require_table(metadata_tables, PLATFORMS)
+    assert AUTHORIZATION_ENDPOINT_COLUMN in platforms.c, (
+        f"`{PLATFORMS}` has no `{AUTHORIZATION_ENDPOINT_COLUMN}` column — it has "
+        f"{[column.name for column in platforms.columns]}. E1-05 adds it, and until it exists "
+        "there is nothing here for the seed to fill."
+    )
+    services = base_compose.get("services") or {}
+    service = services.get(mock_lms_service) or {}
+    environment = service.get("environment") if isinstance(service, dict) else None
+    assert isinstance(environment, dict) and environment.get("MOCK_LMS_ISSUER"), (
+        f"`docker-compose.yml` configures the `{mock_lms_service}` service with no "
+        "`MOCK_LMS_ISSUER`, so there is no issuer to plant an old-shape registration under and "
+        "the seed would simply write its own row beside this test's."
+    )
+
+    demo = demo_databases()
+    planted = plant_in(
+        demo,
+        PLATFORMS,
+        None,
+        **{
+            "issuer": environment["MOCK_LMS_ISSUER"],
+            "client_id": environment.get("MOCK_LMS_CLIENT_ID"),
+            "jwks_url": f"{environment['MOCK_LMS_ISSUER']}{mock_lms_paths.jwks}",
+            AUTHORIZATION_ENDPOINT_COLUMN: None,
+        },
+    )
+
+    run = demo.run()
+    assert run.succeeded, (
+        "The seed failed against a database already holding the mock's registration from before "
+        "E1-05's column existed. That is the state of every development database this ticket "
+        f"lands on, so this is the upgrade path failing rather than a guard working.\n"
+        f"{run.report()}"
+    )
+
+    addresses = mock_platform_addresses(base_compose, mock_lms_service)
+    with reading(demo, metadata_tables) as rows:
+        registrations = rows_of(rows, PLATFORMS)
+
+    naming_the_mock = [
+        row
+        for row in registrations
+        if names_the_mock_platform(row.get("issuer"), addresses, mock_lms_service)
+    ]
+    assert len(naming_the_mock) == 1, (
+        f"{len(naming_the_mock)} rows name the mock platform after seeding a database that "
+        "already held its registration. One row was planted and the seed matches rather than "
+        f"inserts (ADR 0064): issuers {sorted(str(row.get('issuer')) for row in registrations)}."
+    )
+    completed = naming_the_mock[0]
+
+    assert completed["id"] == planted["id"], (
+        "The seed replaced the registration it found rather than completing it. `user` and "
+        f"`{DEPLOYMENTS}` both reference this row by key, so a replacement either fails on those "
+        "references or carries them away with it — and a development database's launches go with "
+        "them."
+    )
+    assert completed.get(AUTHORIZATION_ENDPOINT_COLUMN), (
+        f"The seed left `{AUTHORIZATION_ENDPOINT_COLUMN}` unset on the registration that was "
+        "already there. Every developer's database holds one of these, written before the column "
+        "existed, and a launch from the mock is refused until it is filled — so an upsert that "
+        "writes the new column only on insert leaves the whole development stack unlaunchable "
+        "while `make seed` exits zero."
+    )
+    assert str(completed[AUTHORIZATION_ENDPOINT_COLUMN]).endswith(mock_lms_paths.authorization), (
+        f"The completed registration names {completed[AUTHORIZATION_ENDPOINT_COLUMN]!r}, which "
+        f"does not end at the mock platform's own authorization path "
+        f"{mock_lms_paths.authorization!r}. The value written on an update has to be the value "
+        "written on an insert; the test that pins the whole address owns the rest of it."
     )
 
 

@@ -349,12 +349,31 @@ jobs:
       # suite is where someone looks for them. The duplication is the same shape
       # as `ci-selftest` re-running the classifier battery, and for the same
       # reason: a guard inside a job the classifier can switch off is not a guard.
+      # E1-05 adds two entries here, both widenings.
+      #
+      # The third private-key id is the control one level out. The matcher
+      # control above proves that `holds_pem_private_key` reads a header; it
+      # says nothing about the *walk*, and the sweep asserts that a walk
+      # produced an empty list — which is what a walk that pruned too far
+      # produces too (docs/MISTAKES.md entry 35). That control belongs beside
+      # the sweep it protects, in the same job, or the protected run is the one
+      # without it.
+      #
+      # The fourth entry is a whole module rather than node ids, and the
+      # granularity is deliberate: every test in
+      # `test_the_process_wide_authorization_endpoint_is_gone.py` is either the
+      # sweep or one of its three controls, so the file is exactly the set that
+      # has to travel together, and a control added later comes with it instead
+      # of being forgotten here. Its subject is every tracked file, `docs/`
+      # included, which is why it is in this job at all.
       - name: Repository-wide sweeps that a docs-only diff must not switch off
         run: |
           pytest -q \
             "tests/unit/test_no_unresolved_merge_conflicts.py::test_the_index_holds_no_conflict_marker" \
             "tests/unit/test_mock_lms_service.py::test_no_private_key_material_is_committed_to_the_repository" \
-            "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one"
+            "tests/unit/test_mock_lms_service.py::test_the_private_key_matcher_finds_a_private_key_and_ignores_a_public_one" \
+            "tests/unit/test_mock_lms_service.py::test_the_sweep_itself_finds_a_planted_key_and_not_a_tree_without_one" \
+            "tests/unit/test_the_process_wide_authorization_endpoint_is_gone.py"
 
   # The job keeps its id and its display name. Branch protection's required-check
   # list keys on the display name, and renaming it is a change to that list

@@ -83,10 +83,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti]
 MOCK_LMS_TOOL_LOGIN_URL_VARIABLE = "MOCK_LMS_TOOL_LOGIN_URL"
 MOCK_LMS_TOOL_LAUNCH_URL_VARIABLE = "MOCK_LMS_TOOL_LAUNCH_URL"
 
-# Where the tool is told to send a browser to begin the launch. `.invalid` is
-# reserved by RFC 2606; the value is one no implementation could arrive at by
-# accident, which is why the launch-door module chose it and why this one reuses
-# the spelling rather than inventing a second.
+# Where this platform's registration says to send a browser to begin the launch —
+# a column since E1-05, a setting before it. `.invalid` is reserved by RFC 2606;
+# the value is one no implementation could arrive at by accident, which is why
+# the launch-door module chose it and why this one reuses the spelling rather
+# than inventing a second.
 CONFIGURED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e0-18-configured-authorize"
 
 # The LTI 1.3 claims this module reads, spelled as the specification spells them.
@@ -236,12 +237,9 @@ def tool(
     tool_doors: Any, door_contract: Any, platform: Any, jwks_url: str, register_platform: Any
 ) -> Any:
     """The application, registered for this platform and able to reach it in process."""
-    register_platform(platform.require_offers()[0], jwks_url)
+    register_platform(platform.require_offers()[0], jwks_url, CONFIGURED_AUTHORIZATION_ENDPOINT)
     return tool_doors(
-        {
-            door_contract.settings["public_base_url"]: door_contract.public_base_url,
-            door_contract.settings["lti_authorization_endpoint"]: CONFIGURED_AUTHORIZATION_ENDPOINT,
-        },
+        {door_contract.settings["public_base_url"]: door_contract.public_base_url},
         {urlsplit(jwks_url).hostname: platform},
     )
 
