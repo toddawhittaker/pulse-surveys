@@ -7,7 +7,9 @@
 # both places. The Node checkers read the root `package.json`, which E0-40 split
 # from `frontend/package.json`: eslint, tsc and `npm audit` run over the
 # TypeScript this repository holds today, and the production build and bundle
-# budget still wait for the E1 scaffold. If it passes here
+# budget still wait for the E1 scaffold — for its `build` script now rather than
+# for its manifest, since E1-02 made `frontend/` a workspace member of the root
+# package and the manifest is committed (ADR 0083). If it passes here
 # it should pass there; when the two drift, the workflow is the source of truth
 # and this file is the bug.
 #
@@ -265,14 +267,20 @@ docker-build: ## Build the images and check the stack against E0-02's and E0-03'
 		./scripts/ci/wait_for_health.sh api worker beat mock-lms mock-idp >/dev/null; \
 	done
 
+# The workflow's `frontend` probe, in the Makefile's copy of it. E1-02 makes
+# `frontend/` a workspace member of the root package (ADR 0083), so the manifest
+# is committed from now on and its presence no longer says there is anything to
+# build; what this recipe runs is `npm run build` in that workspace, so both
+# copies of the condition name the script. Keeping the two in step is
+# CLAUDE.md's rule that `make ci` runs what the workflow runs.
 .PHONY: frontend-build
 frontend-build: ## Production build + bundle budget
 	$(call banner,frontend production build)
-	@if [ -f frontend/package.json ]; then \
-		cd frontend && npm run build && cd .. && \
+	@if [ -f frontend/package.json ] && grep -Eq '"build"[[:space:]]*:[[:space:]]*"' frontend/package.json; then \
+		npm run build --workspace frontend && \
 		$(PYTHON) scripts/ci/check_bundle_size.py frontend/dist --budget ci/bundle-budget.json; \
 	else \
-		$(call skip,no frontend/package.json yet); \
+		$(call skip,frontend/package.json declares no build script yet); \
 	fi
 
 # ---------------------------------------------------------------------------

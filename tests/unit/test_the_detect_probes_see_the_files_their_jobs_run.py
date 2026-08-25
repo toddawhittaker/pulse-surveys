@@ -21,8 +21,15 @@ truth about where Node code lives:
 
 - **`node`** — `package.json` at the repository root. It gates `npm audit`, the
   licence scan, `tsc` and `eslint`, all of which run at the root.
-- **`frontend`** — `frontend/package.json`. It gates the production build and the
-  bundle budget, which are still legitimately waiting for the E1 scaffold.
+- **`frontend`** — the frontend package's `build` script. It gates the production
+  build and the bundle budget, which are still legitimately waiting for the E1
+  scaffold. **E1-02 narrowed this one**, and the narrowing is the same subject as
+  the split: `frontend/` is now a member of the root npm workspace (ADR 0083), so
+  `frontend/package.json` is committed from E1-02 onwards and its presence stopped
+  answering the question the probe asks. What the job runs is `npm run build` in
+  that workspace, and the stub E1-02 lands declares no scripts at all — so a probe
+  reading the file's existence would run the production build against a package
+  with no build, on every pull request, having still built nothing.
 - **`evals`** — unchanged.
 - **`e2e` is gone.** PR #61 made the Playwright gate unconditional on the specs
   being present, so nothing has consumed that output since; an emitted boolean
@@ -110,6 +117,31 @@ WITHDRAWN = ("e2e",)
 # A `name=value` line as the probe writes it into `$GITHUB_OUTPUT`.
 EMITTED = re.compile(r"^(?P<name>[A-Za-z0-9_-]+)=(?P<value>.*)$")
 
+# The two frontend manifests the `frontend` probe has to tell apart from E1-02
+# onwards: the workspace stub, which exists so the repository has one lockfile and
+# one resolution, and the scaffold, which is the first tree with something to
+# build. They are written out as real manifests rather than as the marker line the
+# other planted files carry, because the probe now reads the file's content.
+FRONTEND_MANIFEST = "frontend/package.json"
+
+WORKSPACE_STUB = json.dumps(
+    {"name": "@pulse-surveys/frontend", "version": "0.0.0", "private": True}, indent=2
+)
+
+SCAFFOLD_WITH_A_BUILD = json.dumps(
+    {
+        "name": "@pulse-surveys/frontend",
+        "version": "0.0.0",
+        "private": True,
+        "scripts": {"dev": "vite", "build": "tsc -b && vite build"},
+    },
+    indent=2,
+)
+
+# One file to plant: a path, or a `(path, content)` pair where the probe reads
+# what the file says rather than counting that it is there.
+PlantedFile = str | tuple[str, str]
+
 # Every case is a planted tree and the whole answer the probe must give over it.
 # The whole answer rather than the one key each case is about, so that a probe
 # which turns `node` on whenever `frontend` is on cannot pass by being right about
@@ -118,7 +150,7 @@ EMITTED = re.compile(r"^(?P<name>[A-Za-z0-9_-]+)=(?P<value>.*)$")
 # The first case is the one that makes the rest mean anything: over a tree with
 # nothing in it every probe must answer false. A probe that answered true to
 # everything would satisfy every other case here perfectly.
-CASES = (
+CASES: tuple[tuple[str, tuple[PlantedFile, ...], dict[str, str]], ...] = (
     (
         "an empty repository",
         (),
@@ -140,14 +172,29 @@ CASES = (
         {FRONTEND: "false", NODE: "true", EVALS: "false"},
     ),
     (
-        "a frontend package manifest, which is what E1 will land",
-        ("frontend/package.json",),
+        "the workspace stub E1-02 lands: a frontend manifest with nothing to build",
+        ((FRONTEND_MANIFEST, WORKSPACE_STUB),),
+        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+    ),
+    (
+        "the E1-04 scaffold: a frontend manifest that declares a build",
+        ((FRONTEND_MANIFEST, SCAFFOLD_WITH_A_BUILD),),
         {FRONTEND: "true", NODE: "false", EVALS: "false"},
     ),
     (
-        "both manifests, once the E1 scaffold sits beside the root toolchain",
-        ("package.json", "frontend/package.json"),
+        "the tree E1-02 leaves: the root toolchain and the workspace stub beside it",
+        ("package.json", (FRONTEND_MANIFEST, WORKSPACE_STUB)),
+        {FRONTEND: "false", NODE: "true", EVALS: "false"},
+    ),
+    (
+        "both, once the E1-04 scaffold fills the workspace member",
+        ("package.json", (FRONTEND_MANIFEST, SCAFFOLD_WITH_A_BUILD)),
         {FRONTEND: "true", NODE: "true", EVALS: "false"},
+    ),
+    (
+        "a frontend manifest that is not a manifest at all",
+        (FRONTEND_MANIFEST,),
+        {FRONTEND: "false", NODE: "false", EVALS: "false"},
     ),
     (
         "a package manifest in some other subdirectory",
@@ -620,13 +667,23 @@ def inside_the_frontend_tree(step: dict[str, Any]) -> str | None:
     return None
 
 
-def planted_tree(root: Path, files: tuple[str, ...]) -> Path:
-    """A repository tree holding exactly `files`, each with a line of content."""
+def planted_tree(root: Path, files: tuple[PlantedFile, ...]) -> Path:
+    """A repository tree holding exactly `files`.
+
+    An entry is a path, which gets a marker line, or a `(path, content)` pair for
+    the files a probe reads rather than counts. The `frontend` probe is the second
+    kind from E1-02 onwards: `frontend/package.json` is committed by the workspace
+    layout, so the probe asks what the manifest declares, and a table that could
+    only plant paths could no longer state the case it turns on.
+    """
     root.mkdir(parents=True)
-    for relative in files:
+    for entry in files:
+        relative, content = (
+            entry if isinstance(entry, tuple) else (entry, f"planted by {Path(__file__).name}\n")
+        )
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"planted by {Path(__file__).name}\n", encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
     return root
 
 
@@ -688,6 +745,14 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
     exist. `frontend/package.json` alone must leave `node` false, and
     `package.json` alone must leave `frontend` false.
 
+    **E1-02 adds a pair to the frontend half, and the pair is the point.** The
+    workspace layout (ADR 0083) commits `frontend/package.json` from now on, so
+    the probe reads what the manifest declares rather than that it is there: the
+    stub, which has no scripts, must answer false, and the E1-04 scaffold, which
+    declares a `build`, must answer true. Either case alone is satisfied by a
+    probe that is stuck — false always, or true always — which is why they are
+    planted as a pair and compared against the whole mapping.
+
     **The empty-tree case comes first and it is the case the others rest on.**
     Several cases below assert that a probe answers *true*, and a probe that
     answered true to everything would satisfy all of them while turning every
@@ -702,10 +767,12 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
     **The mutation this survives:** point the `node` probe at
     `frontend/package.json`, or at `[ -f package.json ] || [ -f frontend/package.json ]`,
     which is the tempting one-line version of this split and makes the two
-    booleans indistinguishable. **The near miss that must stay green:** any
-    spelling of the same question — `[ -f package.json ]`, `test -f ./package.json`,
-    a `find -maxdepth 1` — since this judges what the probe emits and not how it
-    decides.
+    booleans indistinguishable; or put the `frontend` probe back to
+    `[ -f frontend/package.json ]`, which from E1-02 onwards is true of every
+    checkout. **The near miss that must stay green:** any spelling of the same
+    question — `[ -f package.json ]`, `test -f ./package.json`, a
+    `find -maxdepth 1`, a JSON reader in place of the `grep` — since this judges
+    what the probe emits and not how it decides.
     """
     assert (
         ci_workflow
@@ -759,7 +826,10 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
             "",
             f"`{FRONTEND}` stays, and it is a different question: the production build and the "
             "bundle budget are still waiting for the E1 scaffold. The two must be able to "
-            "disagree, which is why the table plants each manifest without the other.",
+            "disagree, which is why the table plants each manifest without the other. From E1-02 "
+            "it is a narrower question than 'is the manifest there', because the workspace layout "
+            "(ADR 0083) commits `frontend/package.json` on every branch — so what it asks is "
+            "whether that package declares the `build` the job runs.",
             "",
             f"The comparison is over the whole mapping, so {list(WITHDRAWN)} showing up here is a "
             "probe that outlived its reader rather than a harmless extra line.",
