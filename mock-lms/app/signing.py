@@ -91,6 +91,31 @@ def base64url_uint(value: int) -> str:
     return base64url(value.to_bytes(width, "big"))
 
 
+def pkcs1_v15_encoded(signing_input: bytes, width: int) -> bytes:
+    """The EMSA-PKCS1-v1_5 encoding of `signing_input`, `width` octets wide.
+
+    `0x00 0x01`, then `0xFF` padding, then `0x00`, then the DigestInfo (RFC 8017
+    §9.2). The padding is what makes RS256 a signature scheme rather than a raw
+    exponentiation of a digest, and a verifier that skips it accepts a forgery.
+
+    One function because signing and verifying are the same encoding read in two
+    directions: signing raises this to the private exponent, and verifying raises
+    a signature to the public one and compares the result against it. Two copies
+    of this arithmetic would be two chances to get the padding wrong, and only
+    one of them would be caught by a test that signs and verifies with this file.
+    """
+    digest_info = SHA256_DIGEST_INFO_PREFIX + hashlib.sha256(signing_input).digest()
+    padding_length = width - len(digest_info) - 3
+    if padding_length < 8:
+        # RFC 8017's own bound: fewer than eight padding octets means the key is
+        # too small for the digest. Unreachable at 2048 bits, and loud rather
+        # than silent if MODULUS_BITS is ever lowered.
+        raise ValueError(
+            f"A {width * 8}-bit modulus is too small to sign a SHA-256 digest under PKCS#1 v1.5."
+        )
+    return b"\x00\x01" + b"\xff" * padding_length + b"\x00" + digest_info
+
+
 def is_probable_prime(candidate: int) -> bool:
     """Miller-Rabin with random bases, after trial division by the small primes.
 
@@ -227,23 +252,12 @@ class IssuerKey:
     def sign(self, signing_input: bytes) -> bytes:
         """An RS256 signature over `signing_input` (RFC 8017 §8.2.1, §9.2).
 
-        The encoded message is `0x00 0x01`, then `0xFF` padding, then `0x00`,
-        then the DigestInfo — the padding is what makes this a signature scheme
-        rather than a raw exponentiation of a digest, and a verifier that skips
-        it accepts a forgery.
+        The encoding is `pkcs1_v15_encoded` above, raised to the private
+        exponent; verification is the same encoding compared against a signature
+        raised to a public one.
         """
-        digest_info = SHA256_DIGEST_INFO_PREFIX + hashlib.sha256(signing_input).digest()
         width = self.modulus_width
-        padding_length = width - len(digest_info) - 3
-        if padding_length < 8:
-            # RFC 8017's own bound: fewer than eight padding octets means the
-            # key is too small for the digest. Unreachable at 2048 bits, and
-            # loud rather than silent if MODULUS_BITS is ever lowered.
-            raise ValueError(
-                f"A {self.modulus.bit_length()}-bit modulus is too small to sign a SHA-256 "
-                "digest under PKCS#1 v1.5."
-            )
-        encoded = b"\x00\x01" + b"\xff" * padding_length + b"\x00" + digest_info
+        encoded = pkcs1_v15_encoded(signing_input, width)
         signature = pow(int.from_bytes(encoded, "big"), self.private_exponent, self.modulus)
         return signature.to_bytes(width, "big")
 
