@@ -282,11 +282,13 @@ jobs:
           # that glob answer true and the job then fails on the import.
           if [ -f tests/evals/runner.py ]; then emit evals true; else emit evals false; fi
           #
-          # There is deliberately no `e2e` probe. PR #61 made the Playwright gate
-          # unconditional on the specs being present, so nothing consumed that
-          # output; a boolean nobody reads is a probe whose wrongness has no
-          # symptom, which is the failure this comment's first paragraph is
-          # about. E0-40 decision 5 removed it.
+          # There is deliberately no `e2e` probe and no `frontend` one. PR #61
+          # made the Playwright gate unconditional on the specs being present and
+          # E1-04 made the four frontend gates enforcing, so in each case nothing
+          # consumed the output any more; a boolean nobody reads is a probe whose
+          # wrongness has no symptom, which is the failure this comment's first
+          # paragraph is about. E0-40 decision 5 removed the first, E1-04 the
+          # second.
 
   # ==========================================================================
   # FAST GATES — everything else waits on these.

@@ -58,6 +58,18 @@ a coverage reduction: the gate ran over no tree before this change and runs over
 no tree after it, and the narrowed probe is true of exactly the trees
 `npm run build` works on.
 
+> **Amended 2026-08-25 — E1-04 has happened, and the narrowed probe is gone with
+> it.** That ticket landed the scaffold and made all four frontend gates
+> enforcing, so the production build and the bundle budget stopped consulting the
+> `frontend` boolean and it was withdrawn in the same change: a probe whose last
+> reader goes away is one whose wrongness produces no symptom at all. The
+> paragraph above is left as written rather than rewritten, because the narrowing
+> was right for the three tickets it was load-bearing and that reasoning is the
+> price E1-04 paid rather than an argument that turned out wrong. `node` is
+> untouched and still gates `npm audit` and the licence scan. Where the frontend
+> is served from, and the Node build stage the api image gained, are
+> [0086](0086-the-spa-is-served-by-the-app-factory-at-app.md)'s.
+
 ## Alternatives rejected
 
 **Move all the Node tooling under `frontend/`.** The tidiest-looking option and
@@ -108,12 +120,14 @@ honestly declaring itself tolerant.
   way the `frontend` probe now names the `build` script. This is the ordinary
   cost of a placeholder file and it is worth stating, because the failure it
   produces is silent.
-- **The `frontend` probe reads the manifest's text with `grep`**, since the
+- ~~**The `frontend` probe reads the manifest's text with `grep`**, since the
   `detect` job installs no toolchain. It can be wrong in one direction only: a
   dependency literally named `build` makes it answer true, the production build
   then fails loudly on the next pull request, and somebody fixes it. It cannot
   answer false over a package that declares a build, which is the direction
-  entry 36 is about.
+  entry 36 is about.~~ **Withdrawn 2026-08-25 with the probe itself (E1-04).**
+  The `grep` is gone from `.github/workflows/ci.yml` and from the `Makefile`, so
+  there is no longer a way for it to be wrong in either direction.
 - **`npm ci` inside `frontend/` still works**, because npm walks up to the root
   lockfile, and it installs the whole workspace at the root while writing no
   lockfile of its own. Convenient, and worth knowing about: a reader who sees

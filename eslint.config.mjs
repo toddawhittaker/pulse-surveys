@@ -1,5 +1,6 @@
-// The eslint flat config for the TypeScript this repository holds — the
-// Playwright harness and the SPEC §9.2 specs (E0-40 decision 2).
+// The eslint flat config for the root TypeScript — the Playwright harness and
+// the SPEC §9.2 specs (E0-40 decision 2). The frontend has its own, at
+// `frontend/eslint.config.mjs`, and both are run by the same CI job (E1-04).
 //
 // The checked file set is the same one `tsconfig.json` includes, deliberately:
 // two checkers reading two different lists is how one of them ends up green
@@ -31,8 +32,11 @@ export default tseslint.config(
       'playwright-report/**',
       'test-results/**',
       'reports/**',
-      // The E1 scaffold, when it lands, brings its own eslint config. This
-      // config is about the root TypeScript, which is the split E0-40 makes.
+      // The frontend brings its own eslint config, with the React rules and the
+      // DOM this one has no business knowing about (E1-04). It is checked by
+      // `npm run lint --workspace frontend`, in the same job that runs this
+      // one — the split is which config reads which tree, not which tree gets
+      // read.
       'frontend/**',
     ],
   },
