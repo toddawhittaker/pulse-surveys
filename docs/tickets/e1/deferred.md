@@ -178,3 +178,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    further than the bound plus a stated skew allowance beyond the platform's
    clock, proven by a pair on both sides of that line — in the same change as
    item 1, E1-11 at latest.
+
+3. **The unpadded-spelling pin covers one key set of three.** The battery's
+   survivor taught that decode-based assertions forgive how a JWK integer is
+   spelled, and the fix pinned the strings — but only on the tool's
+   `/lti/jwks`. The same encoder shape exists in `mock-lms/app/signing.py`
+   and the mock IdP's copy, and both serve key sets this tool's launch
+   verification parses; nothing asserts their `n` and `e` are unpadded.
+   All three encoders are correct today (named by the implementer, the same
+   defect one level out).
+   **Done when** a test pins the unpadded base64url spelling of every served
+   key set — the mock LMS's and the mock IdP's beside the tool's — owed with
+   the first ticket that touches either mock's signing surface, E1-07 or
+   E1-08, whichever lands first.
