@@ -309,8 +309,17 @@ EXPENSIVE_COMMANDS: dict[str, re.Pattern[str]] = {
     "the dependency audit or the licence scan": re.compile(
         r"^\s*(?:pip-audit|pip-licenses)\b", re.MULTILINE
     ),
-    "an npm install or production build": re.compile(
-        r"^\s*npm\s+(?:ci|run\s+build)\b", re.MULTILINE
+    # **Widened by E1-04, and the widening is the point of it.** It read
+    # `npm (ci|run build)`, which was every npm command in this workflow while the
+    # frontend gates were tolerant. That ticket adds `npm run typecheck` and
+    # `npm run lint` in the frontend workspace, and those are two more minutes of
+    # real work per pull request — including on a pull request that changes a line
+    # of Markdown and no TypeScript at all. A pattern that named only the two
+    # commands it knew would leave the new steps outside every guard test in this
+    # module, which is `docs/MISTAKES.md` entry 35's shape: an inventory that
+    # shrinks in silence when the thing it inventories grows.
+    "an npm install or workspace script": re.compile(
+        r"^\s*npm\s+(?:ci|run\s+[A-Za-z0-9:_-]+)\b", re.MULTILINE
     ),
 }
 
@@ -353,11 +362,14 @@ EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
     # thing the guarded structure cannot shrink. E0-37 item 11 is what stops the
     # seventh needing a third review pass to be noticed.
     #
-    # It is free today only because `detect.outputs.frontend` is false. Once the
-    # scaffold lands it is an `npm ci` and a production build.
+    # It was free while `detect.outputs.frontend` was false. E1-04 lands the
+    # scaffold and withdraws that probe, so from then on it is an `npm ci`, a
+    # production build and a bundle budget on every pull request that is not
+    # documentation-only — which is what turns this entry from a placeholder into a
+    # live guard.
     "frontend-build": (
         "the frontend production build and the bundle budget",
-        EXPENSIVE_COMMANDS["an npm install or production build"],
+        EXPENSIVE_COMMANDS["an npm install or workspace script"],
     ),
     # The seventh, moved here from `GATES_THAT_NEED_NO_SHORT_CIRCUIT` by E0-40
     # decision 6. E0-38 exempted it because its work never ran: with
@@ -371,9 +383,16 @@ EXPENSIVE_GATES: dict[str, tuple[str, re.Pattern[str]]] = {
     # The exemption is the entry that costs coverage when it is wrong — a job in
     # that set is a job no guard test iterates — so moving it here is the
     # direction that adds a control rather than removing one.
+    #
+    # E1-04 gives it two more: `npm run typecheck` and `npm run lint` in the
+    # frontend workspace, which is how those two checkers come to read the
+    # application. They are inside this floor because the pattern above was widened
+    # to reach them, rather than by being listed — a list would have to be
+    # remembered, and this dict is the one E0-38's second review pass found a job
+    # missing from.
     "lint-frontend": (
-        "the Node dependency install, tsc and eslint",
-        EXPENSIVE_COMMANDS["an npm install or production build"],
+        "the Node dependency install, tsc and eslint, at the root and in the workspace",
+        EXPENSIVE_COMMANDS["an npm install or workspace script"],
     ),
 }
 
@@ -2535,6 +2554,17 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
         "this module — it sweeps tests/ to build its own guards, and an inert diff "
         "that switched it off would be switching off the assertions about itself, "
         "which the guard below covers by checking the job rather than the module"
+    ),
+    # E1-04's token sweep. It matches the detector because it enumerates through
+    # `git ls-files`, which is the ordinary idiom here, and its pathspec is
+    # `frontend/` — every file it can possibly read is outside the inert set, so a
+    # diff that could plant a raw hex, the host's blue or a forbidden typeface
+    # already runs the whole pipeline. The samples it checks its readers against
+    # are copied literals rather than reads of `design/tokens.css`, which is inert;
+    # if it is ever taught to read that file, this entry stops being true and the
+    # module belongs in the unconditional job instead.
+    "tests/unit/test_the_frontend_source_uses_tokens_only.py": (
+        "sweeps tracked files under frontend/ only, and nothing under frontend/ is inert"
     ),
 }
 

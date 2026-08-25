@@ -43,6 +43,38 @@ def run(script: str, *args: str) -> int:
     ).returncode
 
 
+def run_refusing(script: str, *args: str) -> tuple[int, bool]:
+    """A checker's exit status, and whether it got there by crashing.
+
+    For the cases whose expected answer is a *refusal*. `== 1` alone does not say
+    one happened: an uncaught exception also exits 1, so a checker that throws
+    `FileNotFoundError` on a missing directory satisfies "missing dist fails"
+    while having no rule about missing directories at all. That is
+    `docs/MISTAKES.md` entry 3 — a test passing for a reason unrelated to what it
+    asserts — and it is a live risk here, because the case being added is
+    precisely the one where the path is not there.
+
+    The wording of the refusal is deliberately not asserted. What is asserted is
+    that the script decided.
+    """
+    # S603: as above — this interpreter and a checker script from this directory.
+    completed = subprocess.run(  # noqa: S603
+        [sys.executable, str(HERE / script), *args],
+        capture_output=True,
+        text=True,
+    )
+    return completed.returncode, "Traceback (most recent call last)" in (
+        completed.stdout + completed.stderr
+    )
+
+
+# What a refusal looks like: exit 1, and no traceback in the output. Spelled out
+# rather than shared with the `REFUSED` the invariant-assertion section defines
+# further down — that one is a different pair about a different checker, and one
+# name for two shapes is how they would come to be read as the same thing.
+REFUSED_WITHOUT_CRASHING = (1, False)
+
+
 # ---------------------------------------------------------------------------
 # check_licenses.py
 # ---------------------------------------------------------------------------
@@ -502,6 +534,18 @@ with tempfile.TemporaryDirectory() as tmp:
     # -----------------------------------------------------------------------
     # check_bundle_size.py
     # -----------------------------------------------------------------------
+    # **Two of these cases changed answer in E1-04, and the change is the ticket.**
+    # A missing `frontend/dist` and a dist holding no JavaScript were notes that
+    # exited 0, which was right while the gate was tolerant: the build had nothing
+    # to produce, so measuring nothing was the honest outcome and ADR 0002's notice
+    # said so. E1-04 makes the production build enforcing, so this script now runs
+    # only ever *after* a build that was required to succeed — and in that world
+    # "there is no dist" and "the dist has no JavaScript" are not notes about an
+    # absent frontend, they are the two ways a build can appear to succeed and
+    # produce nothing. Exiting 0 on either is the gate reporting green over an
+    # empty measurement, which ADR 0083 rejected in advance for this exact script:
+    # "two gates would report green having measured an empty tree… a gate turned on
+    # and made meaningless".
     budget = d / "budget.json"
     budget.write_text(json.dumps({"max_entry_js_gzip_bytes": 4096, "max_initial_gzip_bytes": 8192}))
 
@@ -514,6 +558,21 @@ with tempfile.TemporaryDirectory() as tmp:
         "bundle: within budget exits 0",
         run("check_bundle_size.py", str(dist), "--budget", str(budget)),
         0,
+    )
+
+    # A dist that exists, was produced by something, and carries no JavaScript at
+    # all — the shape a build leaves when its entry point moved, when it wrote to
+    # another directory, or when a plugin swallowed the bundle. It is the case that
+    # tells "the budget was measured and met" apart from "nothing was measured",
+    # and the two are the same exit code without it.
+    empty_dist = d / "dist-without-javascript"
+    (empty_dist / "assets").mkdir(parents=True)
+    (empty_dist / "index.html").write_text("<!doctype html><html></html>")
+    (empty_dist / "assets" / "index-abc.css").write_text("body{margin:0}")
+    check(
+        "bundle: a dist with no JavaScript is refused",
+        run_refusing("check_bundle_size.py", str(empty_dist), "--budget", str(budget)),
+        REFUSED_WITHOUT_CRASHING,
     )
 
     # Seeded, so the fixture is deterministic, but effectively incompressible —
@@ -529,15 +588,87 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
     check(
-        "bundle: missing dist exits 0",
-        run("check_bundle_size.py", str(d / "no-dist"), "--budget", str(budget)),
-        0,
+        "bundle: a missing dist is refused",
+        run_refusing("check_bundle_size.py", str(d / "no-dist"), "--budget", str(budget)),
+        REFUSED_WITHOUT_CRASHING,
     )
 
     # Sanity: the oversized fixture really is oversized after gzip, so the
     # assertion above is testing the budget and not a quirk of compression.
     if len(gzip.compress(big, compresslevel=9)) <= 4096:
         failures.append("bundle: fixture compressed below the budget; test is vacuous")
+
+    # -----------------------------------------------------------------------
+    # ci/bundle-budget.json — the numbers the gate reads
+    # -----------------------------------------------------------------------
+    # E1-04's scope: "The bundle budget's number is set here and recorded where the
+    # gate reads it, with one sentence on how it was chosen." The numbers
+    # themselves are not asserted — they are the implementer's measurement against
+    # the first real production build, and a test that pinned them would be a
+    # second copy of the budget with no way to move (`docs/MISTAKES.md` entry 19).
+    # What is asserted is that the file the gate reads still declares both limits,
+    # and that what it says about where they came from is no longer the sentence it
+    # says today.
+    BUDGET_ENTRY_KEY = "max_entry_js_gzip_bytes"
+    BUDGET_INITIAL_KEY = "max_initial_gzip_bytes"
+
+    # Copied whole out of `ci/bundle-budget.json`, the line it begins on included —
+    # `docs/MISTAKES.md` entry 3, whose rule is that a canary retyped from where you
+    # think a sentence starts is the thing the canary exists to disprove. The
+    # sentence spans two array elements, so the needle is the part of it inside the
+    # first: a search for the whole sentence would match nothing and report a
+    # re-baselined file whatever the file said.
+    BUDGET_COMMENT_AS_IT_STOOD = (
+        '    "Starting values are an estimate, not a measurement: the frontend does not",\n'
+        '    "exist yet. Expected occupants are React 19, TanStack Router and Query, and",\n'
+    )
+    BUDGET_PLACEHOLDER = "Starting values are an estimate, not a measurement"
+
+    check(
+        "bundle: the estimate search can see the sentence it refuses",
+        BUDGET_PLACEHOLDER in BUDGET_COMMENT_AS_IT_STOOD,
+        True,
+    )
+
+    committed_budget_path = HERE.parent.parent / "ci" / "bundle-budget.json"
+    committed_budget_text = (
+        committed_budget_path.read_text() if committed_budget_path.is_file() else ""
+    )
+    committed_budget = json.loads(committed_budget_text) if committed_budget_text else {}
+
+    for key in (BUDGET_ENTRY_KEY, BUDGET_INITIAL_KEY):
+        value = committed_budget.get(key)
+        check(
+            f"bundle: the committed budget declares a positive {key}",
+            isinstance(value, int) and not isinstance(value, bool) and value > 0,
+            True,
+        )
+
+    # Any key whose value is prose. The spelling is not pinned — the file uses
+    # `_comment` today and JSON has no comments, so some key has to carry the
+    # rationale and which one is not a decision this test makes.
+    rationale = [
+        value
+        for key, value in committed_budget.items()
+        if key not in (BUDGET_ENTRY_KEY, BUDGET_INITIAL_KEY)
+        and any(str(line).strip() for line in (value if isinstance(value, list) else [value]))
+    ]
+    check(
+        "bundle: the committed budget records how its numbers were chosen",
+        bool(rationale),
+        True,
+    )
+
+    # The forbidden state rather than the permitted one (`docs/MISTAKES.md` entry
+    # 2): what "recorded with one sentence on how it was chosen" rules out is the
+    # sentence that is there now, which says in as many words that the numbers were
+    # never measured because the frontend did not exist. E1-04 is the ticket where
+    # it does.
+    check(
+        "bundle: the committed budget no longer calls its numbers an estimate",
+        BUDGET_PLACEHOLDER in committed_budget_text,
+        False,
+    )
 
     # -----------------------------------------------------------------------
     # check_invariant_assertions.py
@@ -767,7 +898,11 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 # ---------------------------------------------------------------------------
-total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + len(CLASSIFIER_CASES) + 15 + 16
+# 4 licence cases, 8 invariant-report cases, 9 bundle cases (E1-04 took the bundle
+# section from 3 to 9: two exit codes changed answer with the gate flip, and the
+# committed budget file gained four checks of its own), 16 invariant-assertion
+# cases.
+total = len(LICENSE_CASES) + 2 * len(BODY_CASES) + len(CLASSIFIER_CASES) + 21 + 16
 if failures:
     print(f"FAIL: {len(failures)} of {total} checks failed:", file=sys.stderr)
     for line in failures:
