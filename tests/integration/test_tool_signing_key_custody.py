@@ -373,12 +373,29 @@ def test_the_seed_refuses_to_generate_a_signing_key_outside_a_development_enviro
 
     The twin of
     `tests/integration/test_demo_seed_script.py::test_the_seed_refuses_to_register_the_mock_outside_a_development_environment`,
-    and it is here for the same reason that one is there: `main` checks the
-    environment before it opens a connection, so a subprocess test can only ever
-    observe the script exiting non-zero and would go on observing that if the
-    check at this particular write were deleted. Reaching past `main` is the only
-    way to ask whether *this* write is bound to the guard or merely downstream of
-    it.
+    and it starts from the same fact: `main` checks the environment before it
+    opens a connection, so a subprocess test can only ever observe the script
+    exiting non-zero and would go on observing that if the check at this
+    particular write were deleted. Reaching past `main` is **necessary** to ask
+    whether this write is bound to the guard.
+
+    **It is not sufficient, and the first draft of this test stopped there.** It
+    called `seed(session, deployed)`, which is one function further out than
+    `main` and still upstream of this write: `seed` calls `seed_mock_platform`
+    first, whose own `check_environment_is_development` fires before
+    `seed_tool_signing_key` is reached at all. So the `SeedError` it caught and
+    the empty table it asserted both came from the **mock platform's** guard, and
+    deleting the guard from `seed_tool_signing_key` — or moving it below the write
+    — left the test green. The E1-05 mutation battery measured both variants; that
+    is `docs/MISTAKES.md` entry 3 in the place its own docstring claimed to have
+    closed, which is the way that entry usually arrives.
+
+    **So the refusal is posed at the function itself**, below, and that is the
+    half that kills the mutation. The `seed`-level case is kept underneath it as a
+    second assertion rather than deleted, because "both guards fire, and the first
+    one costs no writes" is a real property of the composition — but it can no
+    longer be mistaken for evidence about this write, and its comment says which
+    guard it is watching.
 
     **What a deployment gets from the miss.** A key generated in a production
     database by a script nobody meant to run there is the private half of the
@@ -388,10 +405,10 @@ def test_the_seed_refuses_to_generate_a_signing_key_outside_a_development_enviro
 
     **The control is at the bottom, on the same database.** A refusal leaves an
     empty table, and an empty table is also what an unmigrated database, a broken
-    read or a `seed` that never generates a key looks like
-    (`docs/MISTAKES.md` entry 3). So the same call is then made with the same
-    session machinery under the development name, and the only thing that differs
-    between the two halves is the environment.
+    read or a generation that never writes a key looks like (`docs/MISTAKES.md`
+    entry 3). So the same call is made with the same session machinery under the
+    development name, and the only thing that differs between it and the refusal
+    above it is the environment — one call, one argument, two outcomes.
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
@@ -416,38 +433,64 @@ def test_the_seed_refuses_to_generate_a_signing_key_outside_a_development_enviro
 
     engine = create_engine(demo.database.superuser_url)
     try:
+        # The refusal, posed at the function that owns the write. Nothing else in
+        # the seed runs, so the `SeedError` here can only be this guard and the
+        # empty table can only be this guard's doing.
         with Session(bind=engine) as session:
             with pytest.raises(seed_module.SeedError) as refusal:
-                seed_module.seed(session, deployed)
-            # Read inside the failed transaction, before the rollback: a guard
-            # moved below the write would leave the row visible here and
-            # invisible to any assertion made afterwards. ADR 0068's ordering
-            # claim is that a refusal costs no writes at all.
+                generate(session, deployed)
+            # Read inside the transaction, before the rollback: a guard moved
+            # below the write would leave the row visible here and invisible to
+            # any assertion made afterwards. ADR 0068's ordering claim is that a
+            # refusal costs no writes at all. A Python exception does not abort
+            # the database transaction, so this read is the one that sees such a
+            # write.
             written_before_the_refusal = signing_key_rows(session, table)
             session.rollback()
 
         assert not written_before_the_refusal, (
             f"The refusal came after the write: {len(written_before_the_refusal)} "
-            f"`{SIGNING_KEYS}` row(s) were already in the transaction when `seed` raised. Nothing "
-            "persists, so this is not a hole — it is the ordering ADR 0068 claims, and a guard "
-            "that runs after the row it guards is one refactor away from a guard that does not "
-            "run at all."
+            f"`{SIGNING_KEYS}` row(s) were already in the transaction when `seed_tool_signing_key` "
+            "raised. Nothing persists, so this is not a hole — it is the ordering ADR 0068 claims, "
+            "and a guard that runs after the row it guards is one refactor away from a guard that "
+            "does not run at all."
         )
         assert seed_module.ENVIRONMENT_VARIABLE in str(refusal.value), (
-            f"`seed` refused, and not over the environment: {str(refusal.value)!r}. A refusal for "
-            "another reason would pass this test while leaving the key generation unguarded."
+            f"`seed_tool_signing_key` refused, and not over the environment: "
+            f"{str(refusal.value)!r}. A refusal for another reason would pass this test while "
+            "leaving the key generation unguarded."
         )
 
         with demo.connect() as connection:
             after_the_refusal = signing_key_rows(connection, table)
         assert not after_the_refusal, (
-            f"`seed` generated a tool signing key with {seed_module.ENVIRONMENT_VARIABLE} set to "
-            "'production'."
+            f"`seed_tool_signing_key` generated a key with {seed_module.ENVIRONMENT_VARIABLE} set "
+            "to 'production'."
+        )
+
+        # Defence in depth, and **not** evidence about the write above. `seed`
+        # calls `seed_mock_platform` first, so the refusal here is whichever guard
+        # comes first — today the mock platform's. What it asserts is the
+        # composition: a whole-script call under a deployment's environment
+        # leaves no key behind, whichever guard stopped it.
+        with Session(bind=engine) as session:
+            with pytest.raises(seed_module.SeedError):
+                seed_module.seed(session, deployed)
+            session.rollback()
+
+        with demo.connect() as connection:
+            after_the_whole_seed = signing_key_rows(connection, table)
+        assert not after_the_whole_seed, (
+            f"`seed` left {len(after_the_whole_seed)} `{SIGNING_KEYS}` row(s) behind under "
+            f"{seed_module.ENVIRONMENT_VARIABLE}='production'. The refusal above says this write's "
+            "own guard holds; this says nothing upstream of it writes a key on the way to being "
+            "refused."
         )
 
         # The control. Everything above is satisfied by an empty table, and this
         # is what says the table was empty because the guard refused rather than
-        # because nothing here can write or read a key.
+        # because nothing here can write or read a key. One argument differs from
+        # the refusal at the top of this test.
         with Session(bind=engine) as session:
             generate(session, {**deployed, "ENVIRONMENT": "development"})
             session.commit()
