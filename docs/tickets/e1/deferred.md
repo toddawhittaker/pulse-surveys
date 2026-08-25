@@ -153,3 +153,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    and a `frame-ancestors` directive naming who may frame the app — with a
    test pinning each header. Scheduled before E2 puts real survey content in
    the SPA.
+
+## From E1-06 — the mock learns the client-credentials grant
+
+1. **The mock's token endpoint does not track `jti`.** A tool-signed assertion
+   can be replayed for a second token anywhere inside its 300-second life; the
+   ticket's six refusals do not include replay, and refusing one needs state
+   the endpoint deliberately does not keep yet. Named by the implementer
+   rather than found by review.
+   **Done when** the endpoint refuses a second request presenting an
+   already-seen `jti` within the lifetime bound, proven by a pair (fresh
+   `jti` granted, replayed `jti` refused) — at latest with E1-11, whose
+   client's conformance claims otherwise rest on an endpoint that cannot
+   notice a replay.
