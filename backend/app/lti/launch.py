@@ -11,10 +11,14 @@ to `app.services.session`.
 **Two legs.** The platform's launch page posts an OIDC third-party-initiated
 login to `/lti/login` carrying `iss`, `login_hint`, `target_link_uri` and
 `lti_message_hint`; `begin_a_launch` runs `pylti1p3`'s `OIDCLogin`, which mints
-the `state` and `nonce`, stores them in in-flight cookies (`app.lti.fastapi_adapter`)
-and redirects to the platform's authorization endpoint. The platform answers by
-posting a signed `id_token` back to `/lti/launch` with that `state`, and
-`verified_launch` checks it.
+the `state` and `nonce`, and remembers the `state` -> `nonce` mapping
+**server-side** (`app.lti.in_flight`) rather than in a cookie — so a launch inside
+a cookie-blocked LMS iframe validates all the same (ADR 0089). Then it redirects
+to the platform's authorization endpoint. The platform answers by posting a signed
+`id_token` back to `/lti/launch` with that `state`, and `verified_launch` looks
+the `state` up server-side, checks the `nonce` against it, and validates the rest.
+Nothing about the handshake requires a third-party cookie (SPEC §7.3); the session
+a valid launch issues is likewise cookieless (`app.services.session`).
 
 **Each refusal is classified by which check failed, never by string-matching the
 library's message.** `pylti1p3`'s `LtiException` interpolates the offending claim
@@ -46,6 +50,7 @@ import time
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 from pylti1p3.exception import LtiException, OIDCException
@@ -57,12 +62,12 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, is_development
 from app.lti.fastapi_adapter import (
-    CookieJar,
-    FastApiCookieService,
-    FastApiLaunchDataStorage,
     FastApiRedirect,
     FastApiRequest,
+    NoOpCookieService,
+    NoOpLaunchDataStorage,
 )
+from app.lti.in_flight import consume_launch, look_up_launch, remember_launch
 from app.lti.registration import MultipleRegistrationsError, OrmToolConf
 from app.lti.replay_guard import NonceReplayedError, claim_nonce
 from app.services.tokens import TokenVerificationError, key_set
@@ -122,6 +127,12 @@ CLOCK_SKEW_TOLERANCE_SECONDS = 300
 # be remembered for as long as the launch that spent it could be replayed; this
 # is generous for a launch a browser delivers immediately.
 NONCE_LEDGER_LIFETIME_SECONDS = 3600
+
+# How long an in-flight launch handshake is remembered before the daily purge may
+# reclaim it. Five minutes, the same bound the retired login cookie had (ADR
+# 0078): a login a browser follows completes at once, and a launch that has not
+# come back in five minutes is not coming back.
+IN_FLIGHT_LIFETIME_SECONDS = 300
 
 # The one place in `app/lti/` that logs. One WARNING per refusal, carrying only
 # the guard name — never a claim, a token, or a form value (SPEC §10, criterion
@@ -191,35 +202,33 @@ class _FastApiMessageLaunch(MessageLaunch):  # type: ignore[type-arg]
 
 
 def _adapter(
-    form: Mapping[str, str], jar: CookieJar, settings: Settings
-) -> tuple[FastApiRequest, FastApiCookieService, FastApiLaunchDataStorage]:
-    """The three adapter objects a login or a launch is driven through."""
-    request = FastApiRequest(form, jar_cookies(jar), secure=not is_development(settings))
-    return request, FastApiCookieService(jar), FastApiLaunchDataStorage(jar)
+    form: Mapping[str, str], settings: Settings
+) -> tuple[FastApiRequest, NoOpCookieService, NoOpLaunchDataStorage]:
+    """The three adapter objects `pylti1p3` requires, the cookie/storage inert.
+
+    The launch handshake is validated against `app.lti.in_flight`, not through
+    `pylti1p3`'s state cookie and nonce storage, so those two are no-ops here — see
+    the adapter module. Only the request (the parsed form) carries anything real.
+    """
+    request = FastApiRequest(form, secure=not is_development(settings))
+    return request, NoOpCookieService(), NoOpLaunchDataStorage()
 
 
-def jar_cookies(jar: CookieJar) -> dict[str, str]:
-    """The request cookies the jar holds, as the adapter request reads them."""
-    return {name: jar.read(name) or "" for name in jar.incoming_names()}
-
-
-def begin_a_launch(
-    session: Session, settings: Settings, form: Mapping[str, str], jar: CookieJar
-) -> str:
+def begin_a_launch(session: Session, settings: Settings, form: Mapping[str, str]) -> str:
     """Turn a platform's login initiation into the authorization request it expects.
 
-    Runs `pylti1p3`'s `OIDCLogin`: it resolves the registration (its client id and
-    authorization endpoint), mints a fresh `state` and `nonce`, writes them to the
-    in-flight cookies through `jar`, and returns the URL to redirect the browser
-    to. The two hints go back exactly as they arrived — they are the platform's
-    opaque values, and a tool that dropped either gets a launch for whoever the
-    platform guesses, or none at all.
+    Runs `pylti1p3`'s `OIDCLogin` to resolve the registration (its client id and
+    authorization endpoint), mint a fresh `state` and `nonce`, and build the
+    redirect URL. Then it records the `state` -> `nonce` mapping **server-side**
+    (`app.lti.in_flight.remember_launch`) rather than in a cookie, so the launch
+    can validate it even inside a cookie-blocked iframe (ADR 0089). The caller
+    commits the write. The two hints go back exactly as they arrived.
 
     A registration that does not exist, names more than one client, or states no
     authorization endpoint is refused rather than defaulted — the same guards
     E0-18 held, preserved through the adapter.
     """
-    request, cookies, storage = _adapter(form, jar, settings)
+    request, cookies, storage = _adapter(form, settings)
     tool_conf = OrmToolConf(session)
     oidc = _FastApiOIDCLogin(request, tool_conf, SessionService(request), cookies, storage)
     launch_url = f"{settings.public_base_url.rstrip('/')}{LAUNCH_PATH}"
@@ -241,7 +250,18 @@ def begin_a_launch(
             "know where to send the browser to continue the launch. An administrator completes the "
             "registration before it can launch this tool (SPEC §2)."
         ) from incomplete
-    return redirect.get_redirect_url()
+
+    url = redirect.get_redirect_url()
+    # The `state` and `nonce` `OIDCLogin` minted are in the authorization request's
+    # query; read them back and remember the mapping server-side.
+    params = dict(parse_qsl(urlsplit(url).query))
+    remember_launch(
+        session,
+        state=params.get("state", ""),
+        nonce=params.get("nonce", ""),
+        expires_at=datetime.now(UTC) + timedelta(seconds=IN_FLIGHT_LIFETIME_SECONDS),
+    )
+    return url
 
 
 def verified_launch(
@@ -249,21 +269,28 @@ def verified_launch(
     http: httpx.Client,
     settings: Settings,
     form: Mapping[str, str],
-    jar: CookieJar,
 ) -> dict[str, Any]:
     """The claims of a launch this tool is willing to act on, or a `LaunchRefusedError`.
 
     Everything downstream reads what this returns and never the token, so no
     unverified claim reaches a landing page. Each refusal is logged with the guard
-    name alone and raised as a claim-free subclass.
+    name alone and raised as a claim-free subclass, **and consumes the in-flight
+    `state`** — a `state` is good once, so one that led to a refusal is deleted and
+    a correct `state` replayed after a refusal finds nothing and is refused. A
+    *successful* launch does not consume its `state`: the replay of a whole valid
+    launch is caught by the nonce ledger, which is where single-use of a spent
+    launch belongs. The caller commits either way.
     """
+    delivered_state = form.get("state") or ""
     try:
-        return _validate(session, http, form, jar, settings)
+        return _validate(session, http, form, settings, delivered_state)
     except NonceReplayedError as replay:
         logger.warning("NonceReplayedError")
+        consume_launch(session, state=delivered_state)
         raise LaunchRefusedError(str(replay)) from replay
     except LaunchRefusedError as refusal:
         logger.warning(type(refusal).__name__)
+        consume_launch(session, state=delivered_state)
         raise
 
 
@@ -271,8 +298,8 @@ def _validate(
     session: Session,
     http: httpx.Client,
     form: Mapping[str, str],
-    jar: CookieJar,
     settings: Settings,
+    delivered_state: str,
 ) -> dict[str, Any]:
     """Run the checks in order; raise the specific refusal the first failing one names.
 
@@ -280,7 +307,7 @@ def _validate(
     passed, so a launch refused for any earlier reason leaves its nonce unspent
     and the legitimate retry open.
     """
-    request, cookies, storage = _adapter(form, jar, settings)
+    request, cookies, storage = _adapter(form, settings)
     tool_conf = OrmToolConf(session)
     launch = _FastApiMessageLaunch(
         request, tool_conf, SessionService(request), cookies, launch_data_storage=storage
@@ -289,11 +316,10 @@ def _validate(
     # this module's own checks, so the library is told not to repeat them.
     launch.set_jwt_verify_options({"verify_aud": False, "verify_exp": False, "verify_iat": False})
 
-    # 1. `state` round-trips — the cheapest check, refusing an unsolicited launch first.
-    try:
-        launch.validate_state()
-    except LtiException as failure:
-        raise StateRefused("The launch returns a `state` this tool did not issue.") from failure
+    # 1. A `state` is present at all — the cheapest check, refusing an unsolicited
+    # launch first (an absent `state` is `missing_state`).
+    if not delivered_state:
+        raise StateRefused("The launch carries no `state`, which every launch must return.")
 
     # 2. The token is a well-formed JWS this module can read the header and body of.
     try:
@@ -304,26 +330,35 @@ def _validate(
     body = launch._jwt.get("body", {})
     header = launch._jwt.get("header", {})
 
-    # 3. Clock skew, on the decoded (still unverified) claims — before the
+    # 3. The `state` names a launch this tool started and is still holding — read
+    # server-side (`app.lti.in_flight`), never from a cookie, so a cookie-blocked
+    # iframe validates all the same (ADR 0089). The expected `nonce` comes back
+    # with it. A `state` this tool never issued, or one already consumed by a
+    # refusal, is `tampered_state`/unsolicited.
+    expected_nonce = look_up_launch(session, state=delivered_state, now=datetime.now(UTC))
+    if expected_nonce is None:
+        raise StateRefused("The launch returns a `state` this tool did not issue.")
+
+    # 4. The token carries the `nonce` this tool is expecting for that `state`
+    # (anti-injection). Single-use of a spent launch is the replay ledger's job, at
+    # the end.
+    token_nonce = body.get("nonce")
+    if not token_nonce:
+        raise NonceRefused("The launch carries no `nonce`, which every launch must return.")
+    if str(token_nonce) != expected_nonce:
+        raise NonceRefused("The launch returns a `nonce` this tool did not send.")
+
+    # 5. Clock skew, on the decoded (still unverified) claims — before the
     # signature, so an expired-but-validly-signed launch is refused for its clock
     # and not miscounted as a signature failure.
     _refuse_clock_skew(body)
 
-    # 4. The `nonce` is one this tool issued at login (anti-injection). Single-use
-    # is the replay ledger's job, at the end.
-    try:
-        launch.validate_nonce()
-    except LtiException as failure:
-        raise NonceRefused(
-            "The launch carries no `nonce`, or one this tool did not send."
-        ) from failure
-
-    # 5. The issuer resolves to a registration, and the audience is that
+    # 6. The issuer resolves to a registration, and the audience is that
     # registration's client. Resolved here rather than through the library's own
     # step so the two failures classify apart.
     registration = _resolve_registration(session, body)
 
-    # 6. The algorithm is the one this tool pins, and the signature verifies
+    # 7. The algorithm is the one this tool pins, and the signature verifies
     # against the registration's published keys — fetched through the repo's httpx
     # client and handed to the launch, never through `pylti1p3`'s own connection.
     if header.get("alg") not in LAUNCH_SIGNATURE_ALGORITHMS:
@@ -347,18 +382,18 @@ def _validate(
     except LtiException as failure:
         raise SignatureRefused("The launch's signature did not verify.") from failure
 
-    # 7. The deployment is one registered under this platform.
+    # 8. The deployment is one registered under this platform.
     _refuse_unregistered_deployment(session, body)
 
-    # 8. The message type is one this tool serves.
+    # 9. The message type is one this tool serves.
     if body.get(MESSAGE_TYPE_CLAIM) != RESOURCE_LINK_MESSAGE_TYPE:
         raise MessageTypeRefused("The launch is a message type this tool does not serve.")
 
-    # 9. The LTI version is the one this tool speaks.
+    # 10. The LTI version is the one this tool speaks.
     if body.get(VERSION_CLAIM) != LTI_VERSION:
         raise VersionRefused("The launch states an LTI version this tool does not speak.")
 
-    # 10. Spend the nonce — single-use, and only now that everything else holds.
+    # 11. Spend the nonce — single-use, and only now that everything else holds.
     claim_nonce(
         session,
         nonce=str(body["nonce"]),

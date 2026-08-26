@@ -78,6 +78,7 @@ from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 __all__ = [
     "LtiDeployment",
     "LtiLaunchNonce",
+    "LtiLaunchState",
     "LtiPlatform",
     "RegistrationAddressError",
     "ToolSigningKey",
@@ -460,4 +461,64 @@ class LtiLaunchNonce(UuidPrimaryKey, Base):
     # removes; keeping it would refuse a *fresh* launch that happened to mint the
     # same random nonce, which is astronomically unlikely but not a reason to
     # grow the ledger without bound.
+    expires_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
+
+
+class LtiLaunchState(UuidPrimaryKey, Base):
+    """One in-flight launch handshake, held server-side between login and launch.
+
+    A launch is two requests: `/lti/login` mints a `state` and a `nonce` and sends
+    the browser to the platform, and `/lti/launch` receives the platform's signed
+    answer with that `state` beside it. Something has to remember, between the two,
+    that this tool started this flow and which `nonce` it is expecting back — `state`
+    is the cross-site-request-forgery defence and `nonce` the injection defence, and
+    both are defences only if the second request can be tied to the first.
+
+    **This table is that memory, and it is server-side on purpose** (E1-08, ADR
+    0089). E0-18 held it in a signed cookie (ADR 0078), and E1-08's first cut kept
+    it in `pylti1p3`'s in-flight cookies — but a launch runs inside the LMS's
+    cross-site iframe, where the browser blocks a third-party cookie *whatever its
+    attributes say*, so the handshake cookie is dropped on the launch's POST and
+    the launch cannot validate. SPEC §7.3 asks that "no third-party cookie is ever
+    required"; keeping the handshake here rather than in a cookie is what makes that
+    true. The session that a valid launch issues is already cookieless (a fragment
+    the SPA captures — `app.services.session`); this finishes the other half.
+
+    **Single-use, as a server-side property.** `app.lti.in_flight.consume_launch`
+    deletes the row on a refusal, so a correct `state` replayed after a refusal
+    finds nothing and is refused — the burn-after-use ADR 0078's cookie had. A row
+    is *not* deleted on a successful launch: the replayed-nonce test needs the
+    second delivery of a whole valid launch to reach the nonce ledger and be
+    refused there as `NonceReplayedError`, and single-use of a *spent* launch is the
+    nonce ledger's job (`LtiLaunchNonce`), not this table's. A successful `state`
+    lingers only until its short expiry, which the daily purge reclaims.
+
+    **Not a person table.** It holds a `state`, a `nonce` and an expiry — no
+    subject, name or address — so `PERSON_TABLES` does not change and no
+    identity-separated view is owed.
+
+    **`pulse_app` holds `SELECT`, `INSERT` and `DELETE`** (`lti_launch_state_grants_v001.sql`):
+    `INSERT` to remember a launch at login, `SELECT` to read the expected `nonce`
+    back at launch, `DELETE` to consume it on refusal and to purge the expired tail.
+    `UPDATE` stays withheld — a handshake row is written once and read once, never
+    rewritten. The entry belongs in `RUNTIME_BASE_TABLE_PRIVILEGES`
+    (`docs/disputes/E1-08-05.md`).
+    """
+
+    __tablename__ = "lti_launch_state"
+    # The launch is looked up by the `state` the platform echoes back, so that is
+    # the unique key; `expires_at` is indexed for the daily purge.
+    __table_args__ = (
+        UniqueConstraint("state", name="uq_lti_launch_state_state"),
+        Index("ix_lti_launch_state_expires_at", "expires_at"),
+    )
+
+    # The opaque `state` this tool minted at login and the platform returns. Text
+    # for the same reason the nonce is.
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    # The `nonce` this tool expects the launch's signed token to carry. The launch
+    # reads it back here and refuses a token whose nonce is not this one.
+    nonce: Mapped[str] = mapped_column(Text, nullable=False)
+    # When this handshake may be purged: a few minutes, because a login a browser
+    # follows completes at once. A row past this is a launch that never came back.
     expires_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)

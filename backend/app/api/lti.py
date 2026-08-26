@@ -46,7 +46,6 @@ from app.api.deps import (
     refused,
 )
 from app.db import get_session
-from app.lti.fastapi_adapter import CookieJar
 from app.lti.launch import (
     LAUNCH_PATH,
     LOGIN_PATH,
@@ -112,22 +111,20 @@ async def login(request: Request, session: Session = Depends(get_session)) -> Re
     """Answer a platform's login initiation with an authorization request.
 
     `pylti1p3`'s `OIDCLogin` (`app.lti.launch.begin_a_launch`) mints the `state`
-    and `nonce` and writes them to the in-flight cookies through the jar; this
-    handler applies the jar to the redirect it returns. E0-18's single signed
-    login cookie is gone from this door — its state/nonce role is now the library's
-    (ADR 0089, `docs/disputes/E1-08-01.md`).
+    and `nonce` and remembers the mapping server-side (`app.lti.in_flight`); this
+    handler commits that write so the launch, a separate request, can read it. No
+    cookie is set here at all — E0-18's signed login cookie is gone from this door
+    and its state/nonce role is the server-side handshake store now (ADR 0089).
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
-    jar = CookieJar(request.cookies)
     try:
-        url = await run_in_threadpool(begin_a_launch, session, settings, form, jar)
+        url = await run_in_threadpool(begin_a_launch, session, settings, form)
     except LaunchRefusedError as refusal:
         return refused(str(refusal))
 
-    response = RedirectResponse(url, status_code=FOUND)
-    jar.apply(response)
-    return response
+    await run_in_threadpool(session.commit)
+    return RedirectResponse(url, status_code=FOUND)
 
 
 @router.post(LAUNCH_PATH, summary="LTI 1.3 launch: verify the token and issue a session")
@@ -137,27 +134,23 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     On a valid launch the door issues the session `app.services.session` defines,
     sets the session and CSRF cookies, and returns a fragment redirect to the
     role's landing route (`launch_landing_or_refusal`) — the response contract
-    E1-08 replaces E0-18's inline landing page with. The session is committed only
-    on success, which is what makes the claimed nonce single-use survive to the
-    next request; a refusal rolls back, leaving the nonce unspent for a legitimate
-    retry.
+    E1-08 replaces E0-18's inline landing page with.
 
-    The in-flight cookies are burned on a refusal: a `state` and a `nonce` are
-    good once, and one left in the browser is one an attacker can present again.
-    A successful launch leaves them, because the Postgres replay ledger is what
-    enforces single-use once a launch is admitted, and the second delivery must
-    reach it to be refused as a replay rather than earlier as a stale state.
+    The session is committed on both paths, and each commit persists a different
+    thing. On success it persists the claimed nonce, which is what makes the
+    launch single-use survive to the next request. On a refusal it persists the
+    consumed in-flight `state` (`verified_launch` deleted it, burn-after-use), so a
+    correct `state` replayed after a refusal finds nothing and is refused too.
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
-    jar = CookieJar(request.cookies)
     try:
         claims = await run_in_threadpool(
-            verified_launch, session, request.app.state.http, settings, form, jar
+            verified_launch, session, request.app.state.http, settings, form
         )
     except LaunchRefusedError as refusal:
         answer: Response = refused(str(refusal))
-        jar.burn(answer)
+        await run_in_threadpool(session.commit)
         return answer
 
     await run_in_threadpool(session.commit)
