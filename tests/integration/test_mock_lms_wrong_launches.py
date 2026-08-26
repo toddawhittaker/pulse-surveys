@@ -84,6 +84,14 @@ ONLY_TEACHING_ASSISTANT_ROLE = "only_teaching_assistant_role"
 ONLY_MENTOR_ROLE = "only_mentor_role"
 TITLELESS_CONTEXT = "titleless_context"
 
+# Added by E1-10, and the pair to the mint above rather than a variant of it.
+# Todd's ruling of 2026-08-26 splits the titleless case in two: a context with no
+# `label` at all cannot identify a course, so that launch is refused and recorded;
+# a context that keeps its `label` and has lost only its `title` is the one that
+# proves the `PREFIX NUMBER` fallback. Two mints, because a launch wrong two ways
+# is two tests that cannot tell which rule fired — E1-07's own rule, kept here.
+TITLELESS_CONTEXT_WITH_LABEL = "titleless_context_with_label"
+
 ALL_SELECTORS: tuple[str, ...] = (
     FOREIGN_SIGNATURE,
     RIGHT_KEY_TAMPERED_CLAIMS,
@@ -103,7 +111,15 @@ ALL_SELECTORS: tuple[str, ...] = (
     ONLY_TEACHING_ASSISTANT_ROLE,
     ONLY_MENTOR_ROLE,
     TITLELESS_CONTEXT,
+    TITLELESS_CONTEXT_WITH_LABEL,
 )
+
+# The separator E1-10 splits a context label on, and how many parts it expects:
+# "exactly `PREFIX-NUMBER-CODE` on hyphens". Asserted of this mint because the
+# fallback title it exists to prove is built out of two of those three parts, so a
+# label of another shape makes the fixture useless for the thing it is for.
+LABEL_SEPARATOR = "-"
+LABEL_PARTS = 3
 
 # The LTI 1.3 message claims, spelled as `test_mock_lms_launch.py` spells them
 # and as the specification spells them — not this suite's choice.
@@ -615,6 +631,77 @@ def test_titleless_context_carries_id_alone(mock_platform: Any) -> None:
     assert "title" not in context, "`titleless_context`'s context claim still carries `title`."
     assert "label" not in context, "`titleless_context`'s context claim still carries `label`."
     assert context.get("id"), "Canary: `id` — the one claim LTI 1.3 requires — is still present."
+    assert (
+        mock_platform.verifies(id_token) is not None
+    ), "An edge fixture is a valid launch — it must still verify."
+
+
+def test_titleless_context_with_label_loses_its_title_and_nothing_else(
+    mock_platform: Any,
+) -> None:
+    """E1-10's fallback fixture: a context claim with its `label` and no `title`.
+
+    This is the mint E1-10's criterion 4 is reworded onto. `titleless_context`
+    above carries `id` alone, which identifies no course at all — a launch E1-10
+    refuses and records — so it cannot be the fixture that proves a *title*
+    fallback. This one can: the label is still there, E1-10 parses `PREFIX` and
+    `NUMBER` out of it, and `course.lms_title` is written as "PREFIX NUMBER" with
+    `title_is_fallback` set.
+
+    **Asserted against a launch minted with no selector at all, not against a
+    written-down expectation.** The whole claim of this mint is that it differs
+    from an ordinary launch by exactly one member, and the only way to say that
+    without transcribing the mock's seed into this file is to mint both and
+    compare. A mint that also dropped `label`, or renamed `id`, or changed the
+    course it is about, fails here rather than becoming E1-10's silent second
+    defect (`docs/MISTAKES.md` entry 3: a launch wrong two ways tells the tool-side
+    test nothing about which rule fired).
+
+    The label's shape is asserted too, because it is what the fallback is built
+    from — a label that stopped being `PREFIX-NUMBER-CODE` would leave criterion 4
+    testing a course nobody could name.
+    """
+    _, plain_token, _ = mint(mock_platform, defect=None)
+    _, plain_claims, _ = header_claims_and_signature(plain_token)
+    plain_context = plain_claims.get(CONTEXT_CLAIM)
+    assert isinstance(plain_context, dict) and plain_context.get("title"), (
+        f"An ordinary launch's context claim is {plain_context!r}, which carries no `title`. Then "
+        "this mint deletes nothing and the comparison below is between two identical claims — "
+        "which would pass against a selector that did not exist."
+    )
+
+    _, id_token, _ = mint(mock_platform, defect=TITLELESS_CONTEXT_WITH_LABEL)
+    _, claims, _ = header_claims_and_signature(id_token)
+    context = claims.get(CONTEXT_CLAIM)
+    assert isinstance(
+        context, dict
+    ), f"`titleless_context_with_label`'s context claim is {context!r} rather than an object."
+
+    assert "title" not in context, (
+        f"`titleless_context_with_label`'s context claim still carries `title` "
+        f"({context.get('title')!r}). The defect this mint is named for is the missing title."
+    )
+    label = context.get("label")
+    assert label, (
+        f"`titleless_context_with_label`'s context claim carries no `label` (it carries "
+        f"{sorted(context)}). That is `titleless_context`'s defect, not this one — and the two "
+        "are deliberately separate mints, because E1-10 refuses the label-less launch and "
+        "provisions from this one."
+    )
+    assert isinstance(label, str) and label.count(LABEL_SEPARATOR) == LABEL_PARTS - 1, (
+        f"The context label is {label!r}, and E1-10 parses exactly "
+        f"`PREFIX{LABEL_SEPARATOR}NUMBER{LABEL_SEPARATOR}CODE`. The fallback title this mint "
+        "exists to prove is the first two of those three parts, so a label of another shape makes "
+        "this fixture unusable for the criterion it was minted for."
+    )
+
+    expected = {name: value for name, value in plain_context.items() if name != "title"}
+    assert context == expected, (
+        f"`titleless_context_with_label`'s context claim is {context!r} and an ordinary launch's, "
+        f"with `title` removed, is {expected!r}. This mint is supposed to carry exactly one "
+        "difference from a correct launch. A second difference makes E1-10's fallback test unable "
+        "to say which of the two the tool reacted to."
+    )
     assert (
         mock_platform.verifies(id_token) is not None
     ), "An edge fixture is a valid launch — it must still verify."

@@ -2747,6 +2747,55 @@ MEMBER_OF_ROLES = """
 # The definer is not here: it is not a connection role, and
 # `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
 # pins its four grants as an equality already.
+#   - `pulse_app` **reads** `prefix`, `term`, `start_letter_map`, `course`,
+#     `section` and `user`, and **inserts** `course`, `section`, `user` and
+#     `launch_defect`. This is E1-10's launch-time provisioning, and it is the
+#     first grant in this set that lets the application write a relation SPEC §2.1
+#     puts on the *LMS's* side — so it is the entry that most needs its sentence.
+#     **What it is for.** §2.1 gives courses and sections two arrival paths,
+#     "hourly roster sync + launch-time ingestion", and §7.3 makes the first staff
+#     launch of a section the thing that discovers it at all: "it has no way of its
+#     own to learn that a section exists. So the first staff launch of a section
+#     bootstraps every later sync of it." The reads are the look-ups that launch
+#     has to make before it may write anything — the prefix the context label
+#     names, the term whose dates contain the day of the launch, that term's
+#     start-letter map row, and the course, section and user rows an upsert has to
+#     find before it decides to insert.
+#     **This is the grant ADR 0045 deferred, arriving narrowed rather than
+#     widened.** That record wanted the opposite instrument — "refusing the
+#     *application role* `INSERT`/`UPDATE` on these tables would be structural
+#     rather than a convention" — and could not have it, because "the launch path
+#     and E1's roster sync are the same connection, so the grant would have to
+#     distinguish a sanctioned writer from an unsanctioned one, and no such
+#     separation exists in E0." E1-10 does not solve that: one connection still
+#     serves both. What it does is spend the smallest grant its writer needs, so
+#     that the *database* refuses everything outside it and `guard_write`'s
+#     sanction catalog (ADR 0090) is what refuses the rest in Python. The two are
+#     different instruments and neither replaces the other.
+#     **No `DELETE`, no `TRUNCATE`, and no table-wide `UPDATE` anywhere.** The
+#     verbs withheld are the assertion here as they are on `classification`: a
+#     launch discovers rows and never removes them, so a connection that could
+#     delete a `course` could take a term's reports with it. `UPDATE` is granted
+#     only at column grain, below.
+#     **`user` has no `UPDATE` at all**, which is the narrowest entry in the group
+#     and deliberate: ADR 0045 puts `user` in the guarded set because
+#     "`user.lms_user_id` is the `sub` claim verbatim … and §4 keys every response
+#     to it", so the row is insert-if-absent and never rewritten. Withholding
+#     `UPDATE` makes that a property of the database rather than a rule the next
+#     writer has to remember, in exactly the shape §8's append-only
+#     `classification` grant takes.
+#     **What these tables carry, for §4.1.** `prefix`, `term`, `start_letter_map`,
+#     `course` and `section` are org and calendar configuration and hold no
+#     personal data. `user` does not either: E0-10 separates identity onto
+#     `user_identity`, which this role holds no privilege on by any mechanism —
+#     the three `invariant`-marked refusals above are what say so — and `user`
+#     itself carries the `sub` claim, which E1-01 keeps out of every view and which
+#     no grant here makes readable through one. `launch_defect` is E1-10's own
+#     append-only record, and its field set is enumerated and asserted in
+#     `tests/integration/test_launch_provisioning_defects.py`: a defect kind, an
+#     issuer, a deployment, a context id and a timestamp, and never a subject, a
+#     name or an email.
+#     Decided and spent in E1-10.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -2760,6 +2809,55 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "lti_launch_state", "SELECT"),
         (APPLICATION_ROLE, "lti_launch_state", "INSERT"),
         (APPLICATION_ROLE, "lti_launch_state", "DELETE"),
+        (APPLICATION_ROLE, "prefix", "SELECT"),
+        (APPLICATION_ROLE, "term", "SELECT"),
+        (APPLICATION_ROLE, "start_letter_map", "SELECT"),
+        (APPLICATION_ROLE, "course", "SELECT"),
+        (APPLICATION_ROLE, "course", "INSERT"),
+        (APPLICATION_ROLE, "section", "SELECT"),
+        (APPLICATION_ROLE, "section", "INSERT"),
+        (APPLICATION_ROLE, "user", "SELECT"),
+        (APPLICATION_ROLE, "user", "INSERT"),
+        (APPLICATION_ROLE, "launch_defect", "INSERT"),
+    }
+)
+
+# The column-scoped grants, as `(role, relation, column, privilege)`. **A second
+# constant rather than a fourth member on the one above**, because the two are
+# read out of different catalogs — `pg_class.relacl` and `pg_attribute.attacl` —
+# and `has_table_privilege` reports nothing at all about the entries here.
+#
+# **This set was empty until E1-10, and it says so.** Every grant this scheme
+# wrote before then was table-level, which is why
+# `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
+# below could treat a runtime role named in *any* column ACL as a widening by
+# definition. That is no longer true, and the change is deliberate rather than a
+# convenience: the alternative was `UPDATE` on `course` and `section` table-wide,
+# which is strictly more than E1-10's writer needs and which would have handed the
+# application connection the ability to rewrite a section's derived calendar —
+# ADR 0021's four columns, whose whole rule is that `apply_section_code` is the
+# only thing that writes them.
+#
+# The three entries, and why each is the narrowest that does the job:
+#
+#   - `course(lms_title)` — a launch corrects a fallback title once the platform
+#     supplies a real one, and follows the platform when it renames a course. SPEC
+#     §2.1 makes the title the LMS's, so following it is the rule rather than an
+#     edit.
+#   - `course(title_is_fallback)` — Pulse's own record of which of those two the
+#     stored title is (ADR 0091), written by the same statement.
+#   - `section(lms_context_memberships_url)` — SPEC §7.3's stored roster service
+#     address, updated when a later staff launch advertises a different one.
+#
+# What is *not* here is the assertion: no `UPDATE` on `course.lms_number`, on
+# `section.lms_section_code`, on any of ADR 0021's four calendar columns, or on
+# `user` in any form. A launch discovers those and never revises them, and the
+# database is what says so.
+RUNTIME_COLUMN_PRIVILEGES = frozenset(
+    {
+        (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
+        (APPLICATION_ROLE, "course", "title_is_fallback", "UPDATE"),
+        (APPLICATION_ROLE, "section", "lms_context_memberships_url", "UPDATE"),
     }
 )
 
@@ -3177,14 +3275,21 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
     hands over `SELECT` on `user_identity`.
 
     **And through `COLUMN_GRANTEES` beside it, because `has_table_privilege` is
-    blind to a column grant.** The expected set at column level is *empty*: every
-    grant this scheme writes is table-level — ADR 0043's enumeration and E0-13's
-    `SELECT, INSERT` on `classification` alike — so a runtime role named in any
-    column ACL on a base table is a widening by definition. Without this,
+    blind to a column grant.** `RUNTIME_COLUMN_PRIVILEGES` is the expected set at
+    column level, compared as an equality in both directions exactly as the table
+    set is. **It was empty until E1-10**, because every grant this scheme wrote
+    before then was table-level — ADR 0043's enumeration and E0-13's
+    `SELECT, INSERT` on `classification` alike — and a runtime role named in any
+    column ACL was therefore a widening by definition. E1-10 spends three
+    column-scoped `UPDATE`s deliberately, in preference to the table-wide `UPDATE`
+    on `course` and `section` that would otherwise have been needed; the constant
+    carries the sentence for each. Without this half,
     `GRANT UPDATE (verdict) ON public.classification TO pulse_app` would leave the
     append-only property broken with this test green, which is the same shape as
     the identity finding one table over and would have been left open by fixing
-    only that one.
+    only that one. And the *missing* half of the column comparison is what stops a
+    later ticket quietly dropping one of E1-10's three, which would leave a launch
+    unable to correct a fallback title and nothing saying why.
 
     **The mutation it exists to survive**: `GRANT SELECT ON public.enrollment TO
     pulse_app` — the convenience grant E0-33 names, added to make one query work,
@@ -3251,20 +3356,29 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
 
     held = privileges_held(db_session, RUNTIME_ROLES, tables)
     on_columns = db_session.execute(text(COLUMN_GRANTEES)).mappings().all()
+    held_on_columns = {
+        (row["grantee"], row["relation"], row["column_name"], row["privilege"])
+        for row in on_columns
+        if row["grantee"] in RUNTIME_ROLES and row["relation"] in tables
+    }
     beyond_on_tables = [
         f"{role} holds {privilege} on public.{relation}"
         for role, relation, privilege in held - RUNTIME_BASE_TABLE_PRIVILEGES
     ]
     beyond_on_columns = [
-        f"{row['grantee']} holds {row['privilege']} on public.{row['relation']}"
-        f".{row['column_name']}"
-        for row in on_columns
-        if row["grantee"] in RUNTIME_ROLES and row["relation"] in tables
+        f"{role} holds {privilege} on public.{relation}.{column}"
+        for role, relation, column, privilege in held_on_columns - RUNTIME_COLUMN_PRIVILEGES
     ]
     beyond = sorted(beyond_on_tables + beyond_on_columns)
     missing = sorted(
-        f"{role} should hold {privilege} on public.{relation}"
-        for role, relation, privilege in RUNTIME_BASE_TABLE_PRIVILEGES - held
+        [
+            f"{role} should hold {privilege} on public.{relation}"
+            for role, relation, privilege in RUNTIME_BASE_TABLE_PRIVILEGES - held
+        ]
+        + [
+            f"{role} should hold {privilege} on public.{relation}.{column}"
+            for role, relation, column, privilege in RUNTIME_COLUMN_PRIVILEGES - held_on_columns
+        ]
     )
     assert not beyond and not missing, (
         f"Beyond what this scheme grants: {beyond}. Missing from it: {missing}. The connection "
@@ -3280,14 +3394,15 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
         "**An entry naming a column** — `…public.classification.verdict` rather than "
         "`…public.classification` — is a grant `has_table_privilege` does not report at all, so "
         "it is read out of `pg_attribute.attacl` instead. The expected set at column level is "
-        "empty: every grant this scheme writes is table-level, so a runtime role named in any "
-        "column ACL is a widening by definition, and on an append-only table it is the whole of "
-        "how append-only stops being true.\n\n"
+        "`RUNTIME_COLUMN_PRIVILEGES`, which held nothing until E1-10 and now holds exactly three "
+        "column-scoped `UPDATE`s, each with its sentence. Anything else at column grain is a "
+        "widening by definition, and on an append-only table it is the whole of how append-only "
+        "stops being true.\n\n"
         "The second list means this scheme has lost a grant it needs: without `SELECT` on "
         "`role_assignment` the Care path cannot resolve the actor whose assignment it is about, "
         "and without `INSERT` on `classification` the moderation classifier cannot record a "
         "verdict. Each entry in `RUNTIME_BASE_TABLE_PRIVILEGES` carries the sentence it comes "
-        "from.\n\n"
+        "from, and so does each entry in `RUNTIME_COLUMN_PRIVILEGES` beside it.\n\n"
         "**How to tell a legitimate new grant from a widening**, because this test cannot and the "
         "reader has to. Four questions, in order:\n"
         "  1. Does anything in the tree issue it? If no `.sql` file under `backend/app/views_sql/` "
