@@ -39,8 +39,32 @@ that is tampered with, or one that expired an hour ago, is produced by wrapping 
 tool's own call to the token endpoint rather than by editing a string. Both leave
 every other property of the flow intact, which is what keeps a 4xx meaning the one
 thing the test names (`docs/MISTAKES.md` entry 3).
+
+**E1-09 changes what a successful web login looks like, and adds the error
+branch.** Two things move.
+
+The landing is no longer a `200` carrying inline HTML. E1-08 retired that shape on
+the launch door, and E1-09 brings this door onto the same shared session module: a
+successful web login answers `302` to `/app/<role>#session=<jwt>` with the session
+and CSRF cookies set. So `landed_with_session` replaces `lands_on` throughout, and
+the three constants below name E1-04's **route segments** rather than the testids
+the old inline page carried. Nothing is deleted here — every test that asserted the
+old shape asserts the new one, because each is still about which role a session
+lands as, which is the property that did not change.
+
+The second half is new. A refusal arriving as a redirect — the user cancelled, the
+provider declined — is a branch this door had no code for at all, and Batch F
+(E0-30) taught the mock provider RFC 6749 §4.1.2.1's error redirects so it could be
+driven here for real rather than typed into a query string. The last section of
+this module is that branch: the calm page when the returned `state` matches the
+carried login, the ordinary refusal when it does not, and the four things that must
+not happen on either — no session, no code spent, no untrusted text rendered, no
+untrusted text logged.
 """
 
+import base64
+import json
+import logging
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -78,10 +102,17 @@ UNREGISTERED_CLIENT_ID = "a-client-this-provider-issues-no-token-to"
 # roles → leadership empty view, `CARE` → Care empty view, `ADMIN` → admin empty
 # view". The leadership set is §2's reporting chain; Care and Admin are the two
 # roles §2 gives this door and no other.
+#
+# **The three below are E1-04 route segments now, not testids.** E1-09 puts this
+# door on the session-issuing shape E1-08 built, so "lands on the Care view" is a
+# `302` to `/app/care#session=<jwt>` rather than a page carrying
+# `pulse-landing-care`. The five testids still exist — the SPA renders them at
+# those routes — and `door_contract.landing_testids` still names them, which is
+# what `refused` reads to say that a refusal served nobody's landing.
 LEADERSHIP_ROLES = ("VP_ACADEMICS", "DEAN", "ASSISTANT_DEAN", "CHAIR", "LEAD_FACULTY")
-LEADERSHIP_VIEW = "pulse-landing-leadership"
-CARE_VIEW = "pulse-landing-care"
-ADMIN_VIEW = "pulse-landing-admin"
+LEADERSHIP_ROUTE = "leadership"
+CARE_ROUTE = "care"
+ADMIN_ROUTE = "admin"
 
 # The launch-door route the two-hat person reaches by her other assignment.
 # E1-04's route group name — was `pulse-landing-instructor`, the testid
@@ -133,6 +164,63 @@ CERTAINLY_STILL_VALID_SECONDS = 30
 # What RFC 7636 requires of a public client, and what E0-16's provider refuses
 # anything else for.
 REQUIRED_CHALLENGE_METHOD = "S256"
+
+# ---------------------------------------------------------------------------
+# E1-09's error branch.
+# ---------------------------------------------------------------------------
+
+# The calm page's `data-testid`, from E1-09's contract. It is not one of the five
+# landing testids and it is not the refusal page: three distinguishable answers,
+# because "the person cancelled" and "somebody sent this tool an error redirect it
+# cannot account for" are different events and the person in front of the screen is
+# owed different words for them.
+CANCELLED_TESTID = "web-login-cancelled"
+
+# A subject the mock provider's seed does not carry. **This module's own
+# spelling**, deliberately not the one `tests/integration/test_mock_idp_error_
+# redirects.py` uses: a test module importing its sibling depends on where pytest
+# put `tests/` on `sys.path`, and an import error is not a red (see the note on the
+# mock platform's variables above). Naming somebody the provider will not sign in
+# is how a cancel is produced through a login form that offers no cancel control —
+# `mock-idp/app/pages.py` builds one select and one submit button — and RFC 6749
+# §4.1.2.1 gives both events the same answer: `access_denied` with the `state`
+# echoed.
+UNKNOWN_SUBJECT = "e1-09-nobody"
+
+# RFC 6749 §4.1.2.1's codes, and the four E1-09 lets the log repeat verbatim. The
+# fifth value is the near miss: a code outside the set, which is logged as the
+# literal word below and never echoed. Both halves are needed — a door that logged
+# `unrecognized` for everything satisfies the unknown-code test and tells an
+# operator nothing, and a door that echoed everything satisfies the four and hands
+# an attacker a log-injection surface.
+ACCESS_DENIED = "access_denied"
+LOGGED_ERROR_CODES = (
+    "invalid_request",
+    ACCESS_DENIED,
+    "unsupported_response_type",
+    "invalid_scope",
+)
+UNRECOGNISED_CODE_LOGGED_AS = "unrecognized"
+AN_UNKNOWN_ERROR_CODE = "e1-09-not-an-rfc-6749-error-code"
+
+# Two values a provider — or anyone who can put a browser in front of this
+# callback — may write into an error redirect. RFC 6749 §4.1.2.1 puts no grammar on
+# either beyond the request encoding, so both are attacker-chosen text, and E1-09
+# renders neither, logs neither and echoes neither. Distinct strings, so a failure
+# says which one got through, and both are unmistakable in a page or a log line.
+UNTRUSTED_DESCRIPTION = "e1-09-untrusted-error-description-marker"
+UNTRUSTED_ERROR_URI = "http://attacker.invalid/e1-09-untrusted-error-uri-marker"
+
+# The tool's own logging namespace. `app.lti.launch` (E1-08) is the established
+# spelling for a door's logger, so the application's loggers live under `app.`, and
+# the scans below read that namespace rather than every record pytest captured:
+# `httpx` logging one of the tool's own outbound calls, or a library echoing a URL,
+# would otherwise decide both the leak assertion and the code assertion for reasons
+# that have nothing to do with what this door wrote. If the web door logs under a
+# name outside `app.`, that is a finding to raise rather than a line to widen —
+# a log line the application's own namespace does not cover is one nothing here
+# reads.
+APPLICATION_LOGGER_ROOT = "app"
 
 # The capability table. E0-09 criterion 10: "No LTI claim, no OIDC claim, and no
 # LMS role may ever produce a `CARE` assignment." A row here is what *holding* a
@@ -192,22 +280,115 @@ def views_in(response: Any, contract: Any) -> list[str]:
     return [testid for testid in contract.landing_testids if testid in response.text]
 
 
-def lands_on(response: Any, contract: Any, expected: str) -> None:
-    """The response is the landing page for `expected`, and for nothing else."""
-    assert response.status_code == 200, (
-        f"The web login was answered {response.status_code} rather than 200. Body begins "
-        f"{response.text[:400]!r}."
+def session_cookie_names() -> tuple[str, str]:
+    """`SESSION_COOKIE` and `CSRF_COOKIE`, or a failure naming where E1-08 put them.
+
+    Read out of the shared session module rather than transcribed, so this suite
+    and the launch door's cannot end up asserting about two different cookie names
+    (`docs/MISTAKES.md` entry 13). E1-09 issues its sessions through that same
+    module — "same type, same custody" — so the names are not this door's to choose.
+    """
+    try:
+        from app.services.session import CSRF_COOKIE, SESSION_COOKIE
+    except ModuleNotFoundError as missing:  # pragma: no cover - a red, not a branch
+        pytest.fail(
+            f"`app.services.session` does not import ({missing}). E1-08's module layout names "
+            "`SESSION_COOKIE`/`CSRF_COOKIE` there, and E1-09 issues the web door's session "
+            "through the same module."
+        )
+    return SESSION_COOKIE, CSRF_COOKIE
+
+
+def cookie_names_set_by(response: Any) -> set[str]:
+    """The names of every cookie a response sets, without asserting there are any."""
+    return {header.split("=", 1)[0].strip() for header in response.headers.get_list("set-cookie")}
+
+
+def landed_with_session(response: Any, contract: Any, role: str) -> str:
+    """The web login redirected to `/app/<role>#session=<token>`, both cookies set.
+
+    E1-09 puts this door on the shape E1-08 settled for the launch door, and this
+    is that door's own `redirected_to_role` assertion made about this one: a `302`
+    whose `Location` is `/app/<segment>#session=<token>`, with `pulse_session`
+    beside it. The exact-prefix check on `Location` is also what rules out a query
+    string sneaking in between the path and the fragment — `/app/care?x=y#session=`
+    fails this `startswith` — which is the whole reason the design puts the token in
+    a fragment: a fragment reaches neither an access log nor a `Referer` header.
+
+    The CSRF cookie is required here as well as the session cookie, which the launch
+    door asserts in its own cookie-attribute test rather than in its redirect
+    helper: E1-09's contract for a successful web login is both cookies, and a door
+    that set one of the two would leave the SPA with a session it cannot make a
+    write with. Returns the token so a caller can go on to say something about it.
+    """
+    session_cookie, csrf_cookie = session_cookie_names()
+
+    assert response.status_code in (302, 303, 307), (
+        f"A completed web login answered {response.status_code} rather than a redirect. Body "
+        f"begins {response.text[:400]!r}. E1-09 retires E0-18's `200` + inline HTML landing: the "
+        "web door issues a session through E1-08's module and redirects, exactly as the launch "
+        "door does."
     )
-    found = views_in(response, contract)
-    assert found == [expected], (
-        f"The landing page carries {found or 'no landing testid at all'}, and E0-18 has this "
-        f"session land on `{expected}`. Every other view's testid has to be absent as well as "
-        "this one present: a page carrying several is right about none of them."
+    location = response.headers.get("location") or ""
+    prefix = f"/app/{role}#session="
+    assert location.startswith(prefix), (
+        f"A completed web login redirected to `{location}`, which does not start with `{prefix}`. "
+        "E1-08's interface ruling, which E1-09 adopts unchanged: a 302 whose `Location` is "
+        "`/app/<segment>#session=<token>`, segment lowercased."
+    )
+    token = location[len(prefix) :]
+    assert token, f"The redirect `{location}` carries `session=` with an empty token."
+
+    names = cookie_names_set_by(response)
+    assert session_cookie in names, (
+        f"No `Set-Cookie` names {session_cookie!r} on a web login that redirected to `/app/{role}`."
+        f" Cookies set: {sorted(names)}. The redirect carries the session cookie alongside the "
+        "fragment token."
+    )
+    assert csrf_cookie in names, (
+        f"No `Set-Cookie` names {csrf_cookie!r} on a web login that redirected to `/app/{role}`. "
+        f"Cookies set: {sorted(names)}. E1-08's session model issues the two together; a session "
+        "without its CSRF cookie is one the SPA can read and cannot write with."
+    )
+    return token
+
+
+def no_session_was_issued(response: Any, what: str) -> None:
+    """Nothing in this response hands the caller a session. The forbidden state.
+
+    Three ways a session could leave this door, and all three are checked, because
+    a door that stopped setting the cookie and went on redirecting with the fragment
+    would satisfy a cookie-only check while handing the token over (`docs/MISTAKES.md`
+    entry 2 — assert the forbidden state, and assert all of it).
+    """
+    session_cookie, csrf_cookie = session_cookie_names()
+
+    names = cookie_names_set_by(response)
+    handed = sorted(names & {session_cookie, csrf_cookie})
+    assert not handed, (
+        f"The tool set {handed} while answering {what}. That is a session, issued on a path that "
+        "authenticated nobody."
+    )
+    location = response.headers.get("location") or ""
+    assert "session=" not in location, (
+        f"The tool answered {what} with `Location: {location}`, which carries a session token in "
+        "the URL. The fragment is how a *successful* login hands the session to the browser."
+    )
+    assert "session=" not in response.text, (
+        f"The body the tool answered {what} with carries `session=`. Body begins "
+        f"{response.text[:400]!r}."
     )
 
 
 def refused(response: Any, contract: Any, what: str) -> None:
-    """The tool refused, and rendered nobody's landing page while doing it."""
+    """The tool refused, and handed the caller nothing on the way out.
+
+    **E1-09 adds the second half.** Under E0-18 a landing was a rendered page, so
+    "no landing testid in the body" was the whole of what a refusal had to avoid.
+    A landing is a session now, so the thing a refusal must not do is issue one —
+    and that check is live where the testid check has become a formality kept for
+    the door that renders the old inline page.
+    """
     assert 400 <= response.status_code < 500, (
         f"The tool answered {response.status_code} to {what}. E0-18 requires a 4xx: this is auth "
         f"code, and the callback is where a token from an unauthenticated caller first reaches "
@@ -219,6 +400,7 @@ def refused(response: Any, contract: Any, what: str) -> None:
         "refusal that serves a landing page has admitted the session and merely said so in the "
         "status line."
     )
+    no_session_was_issued(response, what)
 
 
 def person_holding(provider: Any, role: str, *, and_a_launch_assignment: bool = False) -> Any:
@@ -250,10 +432,10 @@ def identifying_strings(provider: Any, except_for: Any) -> list[str]:
     """Every seeded person's address and subject, apart from one person's own.
 
     The signed-in person's own identifiers are excluded deliberately. A landing
-    page naming who is signed in is legitimate; a landing page naming *anybody
-    else* has enumerated people, and E0-18 says the leadership and Care views are
-    empty by design because nothing here computes a purview to populate them
-    (ADR 0003, §2.1).
+    that names who is signed in is legitimate — the session token carries its own
+    subject, by construction — and a landing that names *anybody else* has
+    enumerated people, which nothing in E1 computes a purview to do (ADR 0003,
+    §2.1: `transitive_purview` still raises).
     """
     mine = {value for value in except_for.values() if isinstance(value, str) and value}
     found: list[str] = []
@@ -263,6 +445,52 @@ def identifying_strings(provider: Any, except_for: Any) -> list[str]:
             if isinstance(value, str) and value and value not in mine:
                 found.append(value)
     return found
+
+
+def claims_text_of(token: str) -> str:
+    """The decoded claim set of a compact JWS, as text, without verifying anything.
+
+    Nothing here is checking a signature — `tests/unit/test_session_module.py` does
+    that — and the secret the web door signs with is not a value this suite is
+    given. What this is for is the §4.1 scans below, and it exists because a
+    base64url payload defeats a substring search completely: a session token
+    carrying a name would sail through a scan of the raw response, and the scan
+    would report a clean page while the leak sat in the very bytes it read
+    (`docs/MISTAKES.md` entry 3).
+    """
+    parts = token.split(".")
+    assert len(parts) == 3, (
+        f"The fragment carried {token!r}, which is not a compact JWS (three dot-separated "
+        "segments), so there is no claim set to decode and the scan below would be reading a "
+        "shorter response than the caller received."
+    )
+    padded = parts[1] + "=" * (-len(parts[1]) % 4)
+    decoded = base64.urlsafe_b64decode(padded).decode("utf-8", "replace")
+    try:
+        json.loads(decoded)
+    except ValueError as broken:
+        pytest.fail(
+            f"The session token's payload does not decode to JSON ({broken}); it decodes to "
+            f"{decoded[:200]!r}. A scan over garbage finds nothing and reports a clean session."
+        )
+    return decoded
+
+
+def everything_the_caller_received(response: Any, token: str) -> str:
+    """The whole of what one redirect hands a browser: status line, headers, body, claims.
+
+    A landing is a `302` now, so `response.text` is empty or nearly so, and a scan
+    over it would pass against anything at all. What the caller actually receives is
+    the `Location` — fragment included — every `Set-Cookie`, the body, and the claims
+    inside the session token, and all four are here.
+    """
+    parts = [
+        response.headers.get("location") or "",
+        *response.headers.get_list("set-cookie"),
+        response.text,
+        claims_text_of(token),
+    ]
+    return "\n".join(parts)
 
 
 @pytest.fixture
@@ -549,29 +777,41 @@ def test_two_web_logins_carry_a_fresh_state_and_a_fresh_nonce(
 
 
 # ---------------------------------------------------------------------------
-# The landing pages, one per role §2 gives this door.
+# The landings, one per role §2 gives this door. E1-09 criterion 1: "a seeded
+# leadership, Care, and admin identity each logs in and lands on their E1-04
+# route with a session."
 # ---------------------------------------------------------------------------
 
 
-def test_the_dean_lands_on_the_leadership_view(
+def test_the_dean_lands_on_the_leadership_route_with_a_session(
     tool: Any, door_contract: Any, provider: Any
 ) -> None:
-    """E0-18's criterion: the dean's web login lands on the leadership view.
+    """Criterion 1, the leadership third: a dean's web login reaches `/app/leadership`.
 
     The whole flow is real — authorization request, login form, code, and a
     server-side exchange carrying the verifier — so this fails if any link is
     missing. It is the first of three, and the three together are what make the
     dispatch on the roles claim observable at all.
+
+    **Dies if the door still answers E0-18's inline `200`**, which is the shape
+    E1-09 retires, and dies if it redirects without issuing a session: both cookies
+    and a non-empty fragment token are required, so a redirect to the right route
+    carrying nothing is a person sent to a page they cannot use.
     """
     response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
 
-    lands_on(response, door_contract, LEADERSHIP_VIEW)
+    token = landed_with_session(response, door_contract, LEADERSHIP_ROUTE)
+
+    assert token.count(".") == 2, (
+        f"The fragment's `session=` value is {token!r}, which does not have the three dot-"
+        "separated segments a compact JWS has, so it is not a signed session token."
+    )
 
 
-def test_the_care_office_lands_on_the_care_view(
+def test_the_care_office_lands_on_the_care_route_with_a_session(
     tool: Any, door_contract: Any, provider: Any
 ) -> None:
-    """`CARE` → the Care empty view (§6.2, and E0-18's route description).
+    """Criterion 1, the Care third: `CARE` → `/app/care` (§6.2, and E0-18's route list).
 
     The Care office rather than the person who also teaches: she is the subject of
     her own test below, and picking whichever of the two the document listed first
@@ -579,62 +819,135 @@ def test_the_care_office_lands_on_the_care_view(
     """
     response = logged_in(tool, door_contract, provider, person_holding(provider, "CARE"))
 
-    lands_on(response, door_contract, CARE_VIEW)
+    landed_with_session(response, door_contract, CARE_ROUTE)
 
 
-def test_the_administrator_lands_on_the_admin_view(
+def test_the_administrator_lands_on_the_admin_route_with_a_session(
     tool: Any, door_contract: Any, provider: Any
 ) -> None:
-    """`ADMIN` → the admin empty view, the last of the three the web door serves.
+    """Criterion 1, the admin third: `ADMIN` → `/app/admin`, the last of the three.
 
     **Dies if the role dispatch falls through to a default.** A tool that landed
-    everything it did not recognise on one view passes the leadership test and the
+    everything it did not recognise on one route passes the leadership test and the
     Care test if Care is checked explicitly; Admin is the case that catches the
     fallback, because it is last in E0-18's precedence order.
     """
     response = logged_in(tool, door_contract, provider, person_holding(provider, "ADMIN"))
 
-    lands_on(response, door_contract, ADMIN_VIEW)
+    landed_with_session(response, door_contract, ADMIN_ROUTE)
+
+
+def test_the_web_doors_session_and_csrf_cookies_carry_the_session_adrs_attributes(
+    open_web_door: Any, door_contract: Any, provider: Any
+) -> None:
+    """`HttpOnly` on the session cookie and not on the CSRF one; `SameSite=None`; `path=/`.
+
+    Criterion 1's "with a session" is not only that two cookies appear — it is that
+    they are the cookies E1-08's session ADR describes, because E1-09's scope says
+    "same type, same custody". **Dies if this door sets its own cookies rather than
+    going through the shared module**, which is the tempting shortcut and which
+    produces a session that works and a CSRF cookie the SPA cannot read.
+
+    **The production half is not posed here, and that is deliberate rather than an
+    omission.** `Secure` flips with `ENVIRONMENT`, and no web login can complete
+    outside development in this harness: E0-39 refuses the mock provider's
+    addresses there, so `open_web_door(environment=...)` swaps in unreachable
+    placeholders and the flow never reaches a token endpoint (see that fixture's
+    docstring). The flip is asserted over the same `set_session_cookie` by
+    `tests/integration/test_lti_launch_door.py::test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes`,
+    parametrized over both environments, and the login cookie's own flip is asserted
+    on this door below — the one route that redirects without calling the provider.
+    """
+    session_cookie, csrf_cookie = session_cookie_names()
+    # `environment=DEVELOPMENT` is named rather than left ambient: `open_web_door`
+    # only swaps the mock provider out for a non-development environment, so this
+    # keeps the flow completable while making the environment the `Secure`
+    # assertion below is measured against a value this test set.
+    tool = open_web_door(environment=DEVELOPMENT)
+
+    response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
+    landed_with_session(response, door_contract, LEADERSHIP_ROUTE)
+
+    headers = cookies_set_by(response, "a completed web login")
+    by_name = {header.split("=", 1)[0].strip(): header for header in headers}
+    session_header = by_name[session_cookie]
+    csrf_header = by_name[csrf_cookie]
+
+    assert "httponly" in attributes_of(session_header), (
+        f"The session cookie carries no `HttpOnly`: {session_header!r}. It holds the session "
+        "token itself, and a script that can read it can steal the session."
+    )
+    assert "httponly" not in attributes_of(csrf_header), (
+        f"The CSRF cookie carries `HttpOnly`: {csrf_header!r}. E1-08: `CSRF_COOKIE` is not "
+        "`HttpOnly` because the SPA echoes it in `X-Pulse-CSRF`, and a script that cannot read "
+        "it cannot echo it."
+    )
+    for name, header in (("session", session_header), ("CSRF", csrf_header)):
+        lowered = header.lower()
+        assert "samesite=none" in lowered, (
+            f"The {name} cookie does not carry `SameSite=None`: {header!r}. One session module "
+            "serves both doors, and the launch door's runs inside a cross-site iframe for the "
+            "whole visit."
+        )
+        assert "path=/" in lowered, f"The {name} cookie does not carry `path=/`: {header!r}."
+    assert SECURE_ATTRIBUTE not in attributes_of(session_header), (
+        f"The session cookie carries `Secure` under `{ENVIRONMENT_VARIABLE}` "
+        f"{DEVELOPMENT!r}: {session_header!r}. A `Secure` cookie is not sent to "
+        "`http://localhost`, so every web login on a developer's laptop would land on a page "
+        "with no session."
+    )
 
 
 @pytest.mark.invariant
 def test_the_leadership_view_names_nobody_but_the_person_signed_in(
     tool: Any, door_contract: Any, provider: Any
 ) -> None:
-    """SPEC §4.1 over the one view that would otherwise list people.
+    """SPEC §4.1 over the one landing that would otherwise list people.
 
     E0-18: the leadership landing views "are empty *by design* and must not
     traverse" `transitive_purview`, which raises (ADR 0003). So the honest
-    assertion is that the page names nobody but its own caller — a page that
-    enumerated the institution would have obtained that list from somewhere, and
-    there is nowhere in E0 it could legitimately have come from.
+    assertion is that what the caller receives names nobody but its own caller — a
+    landing that enumerated the institution would have obtained that list from
+    somewhere, and there is nowhere in E1 it could legitimately have come from.
 
-    Two guards keep this from passing on emptiness, which is what
-    `docs/MISTAKES.md` entry 3 is about here. The landing testid has to be present,
-    so a 404 or a blank body fails rather than passes; and the scan is shown
-    finding the very strings it reports absent, so a search that has gone blind
-    says so instead of reporting a clean page.
+    **What "what the caller receives" means changed under E1-09, and the scan
+    changed with it.** The old shape was a rendered page and `response.text` was
+    the whole of it. The new shape is a `302` with an almost empty body, so a scan
+    of the body alone would be a scan of nothing — and the part that now carries
+    data, the session token in the fragment, is base64url and defeats a substring
+    search outright. So the haystack is the `Location`, every `Set-Cookie`, the
+    body, and the token's decoded claim set (`docs/MISTAKES.md` entry 3: a test
+    that can be satisfied by emptiness is not a test).
+
+    Three guards keep it from passing on emptiness. The redirect has to be the
+    leadership one with a session, so a 4xx or a door that was never reached fails
+    rather than passes; the token's payload has to decode to JSON, so a scan over
+    garbage says so; and the scan is shown finding the very strings it reports
+    absent.
     """
     dean = person_holding(provider, "DEAN")
     response = logged_in(tool, door_contract, provider, dean)
-    lands_on(response, door_contract, LEADERSHIP_VIEW)
+    token = landed_with_session(response, door_contract, LEADERSHIP_ROUTE)
+    received = everything_the_caller_received(response, token)
 
     others = identifying_strings(provider, dean)
     assert others, (
         "No seeded person other than the dean publishes an address or a subject, so this test has "
-        "nothing to look for and would pass against a page listing the whole institution."
+        "nothing to look for and would pass against a landing listing the whole institution."
     )
     canary = " ".join(others)
     assert all(value in canary for value in others), (
         "The scan below cannot find these strings in a sample built out of them, so its silence "
-        "about the landing page means nothing."
+        "about the landing means nothing."
     )
 
-    leaked = sorted({value for value in others if value in response.text})
+    leaked = sorted({value for value in others if value in received})
     assert not leaked, (
-        f"The leadership landing page carries {leaked}, which identify seeded people other than "
-        "the dean who signed in. E0-18 makes this view empty by design: purview is not computed "
-        "in E0, so a page that lists people got that list from somewhere §4.1 does not sanction."
+        f"The leadership landing carries {leaked}, which identify seeded people other than the "
+        "dean who signed in. That set is read from the whole of what the browser received — the "
+        "redirect, its cookies, its body and the session token's claims. Purview is not computed "
+        "in E1, so a landing that names people got that list from somewhere §4.1 does not "
+        "sanction."
     )
 
 
@@ -642,17 +955,18 @@ def test_the_leadership_view_names_nobody_but_the_person_signed_in(
 def test_the_care_view_names_nobody_but_the_person_signed_in(
     tool: Any, door_contract: Any, provider: Any
 ) -> None:
-    """The same, for the one view SPEC §6.2 spends a paragraph on.
+    """The same, for the one surface SPEC §6.2 spends a paragraph on.
 
     E0-18: "The Care page shows a heading and nothing else — read §6.2 before
     writing even that." Care is the one role in this system that can re-identify a
-    student, so a Care landing page that arrived carrying anybody is the most
-    expensive version of this mistake. Same two guards as above, for the same
-    reason.
+    student, so a Care landing that arrived carrying anybody is the most expensive
+    version of this mistake. Same three guards as above, over the same haystack —
+    redirect, cookies, body, and the session token's decoded claims.
     """
     care = person_holding(provider, "CARE")
     response = logged_in(tool, door_contract, provider, care)
-    lands_on(response, door_contract, CARE_VIEW)
+    token = landed_with_session(response, door_contract, CARE_ROUTE)
+    received = everything_the_caller_received(response, token)
 
     others = identifying_strings(provider, care)
     assert others, (
@@ -662,14 +976,14 @@ def test_the_care_view_names_nobody_but_the_person_signed_in(
     canary = " ".join(others)
     assert all(value in canary for value in others), (
         "The scan below cannot find these strings in a sample built out of them, so its silence "
-        "about the landing page means nothing."
+        "about the landing means nothing."
     )
 
-    leaked = sorted({value for value in others if value in response.text})
+    leaked = sorted({value for value in others if value in received})
     assert not leaked, (
-        f"The Care landing page carries {leaked}. §6.2 keeps the Care surface to the threat queue "
-        "and nothing else, and E0 builds no queue — so this page has one heading's worth of "
-        "content and any identifier on it came from a read nothing sanctions."
+        f"The Care landing carries {leaked}. §6.2 keeps the Care surface to the threat queue and "
+        "nothing else, and E1 builds no queue — so any identifier the browser received here came "
+        "from a read nothing sanctions."
     )
 
 
@@ -691,7 +1005,7 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
     rests on a sentence in a comment is an exception that stops being true without
     anyone noticing. So the sentence is asserted here, against the whole flow, as
     the Care person: authorization request, login form, code, server-side
-    exchange, landing page, and not one row anywhere.
+    exchange, the landing redirect, and not one row anywhere.
 
     The Care half is the one that must never move. E0-09: "No LTI claim, no OIDC
     claim, and no LMS role may ever produce a `CARE` assignment… a claim-to-Care
@@ -707,8 +1021,9 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
     early.
 
     Two guards keep this from passing on nothing having happened: the flow has to
-    land on the Care view, so a 4xx or a door that was never reached fails rather
-    than passes; and the counter is shown reading a table the migration filled, so
+    land on `/app/care` with a session, so a 4xx or a door that was never reached
+    fails rather than passes; and the counter is shown reading a table the
+    migration filled, so
     a reader pointed at an empty or unmigrated database says so instead of
     reporting a clean flow. `committed_rows` is taken for its teardown alone — it
     removes whatever appeared during the test, so a door that does write leaves a
@@ -727,7 +1042,7 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
 
     care = person_holding(provider, "CARE")
     response = logged_in(tool, door_contract, provider, care)
-    lands_on(response, door_contract, CARE_VIEW)
+    landed_with_session(response, door_contract, CARE_ROUTE)
 
     after = {name: committed_row_count(migrated_engine, name) for name in counted}
 
@@ -1019,7 +1334,7 @@ def test_a_session_minted_seconds_ago_is_still_accepted(
 
     response = logged_in(tool, door_contract, provider, person_holding(provider, "DEAN"))
 
-    lands_on(response, door_contract, LEADERSHIP_VIEW)
+    landed_with_session(response, door_contract, LEADERSHIP_ROUTE)
 
 
 # ---------------------------------------------------------------------------
@@ -1056,12 +1371,13 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     seed the other person is missing from, and the fact worth asserting — that one
     published identity opens both — is not stated anywhere.
 
-    **The launch half only, reconciled for E1-08 by dispute E1-08-03.** The Care
-    half stays exactly as E0-18/E1-09 built it — a web login lands on `200` +
-    `pulse-landing-care`, unchanged by this ticket. The launch half does not:
-    E1-08 retires the launch door's inline `200` + testid contract in favour of a
-    `302` to `/app/instructor#session=<jwt>`, so "she opens the instructor view by
-    launch" is now asserted as that redirect rather than as a rendered page.
+    **Both halves are the redirect shape now.** E1-08 retired the launch door's
+    inline `200` + testid contract in favour of a `302` to
+    `/app/instructor#session=<jwt>` (dispute E1-08-03), and E1-09 does the same to
+    this door, so her Care half is a `302` to `/app/care#session=<jwt>` with the
+    session and CSRF cookies set. Neither half is a rendered page any more, and the
+    fact this test exists for is untouched by that: one published identity opens
+    both doors, and each door dispatches her on the assignment that opens it.
     """
     hers = person_holding(provider, "CARE", and_a_launch_assignment=True)
     lms_user_id = hers.get("lms_user_id")
@@ -1073,7 +1389,7 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
 
     web = open_web_door()
     care_landing = logged_in(web, door_contract, provider, hers)
-    lands_on(care_landing, door_contract, CARE_VIEW)
+    landed_with_session(care_landing, door_contract, CARE_ROUTE)
 
     platform = mock_platforms(
         {
@@ -1207,7 +1523,7 @@ def test_a_session_re_signed_by_this_suite_still_lands_the_care_view(
     """The control for the two tests below, and they are worth nothing without it.
 
     The claims are the provider's own, unchanged, signed again by the key set this
-    tool is configured to verify against. If this lands on the Care view then the
+    tool is configured to verify against. If this lands on `/app/care` then the
     machinery — the key, the served JWK Set, the `kid`, the re-encoding — produces
     sessions this door accepts, and a refusal below can only be the one claim it
     changed. If it does not, the tests below are red about the harness rather than
@@ -1224,7 +1540,7 @@ def test_a_session_re_signed_by_this_suite_still_lands_the_care_view(
     response = logged_in(tool, door_contract, provider, person_holding(provider, "CARE"))
 
     assert seen, "The tool never redeemed its code, so nothing was re-signed and nothing is proved."
-    lands_on(response, door_contract, CARE_VIEW)
+    landed_with_session(response, door_contract, CARE_ROUTE)
 
 
 def test_a_session_also_carrying_an_lti_roles_claim_lands_where_its_own_claim_names(
@@ -1238,7 +1554,7 @@ def test_a_session_also_carrying_an_lti_roles_claim_lands_where_its_own_claim_na
     """The foreign vocabulary is **ignored**, not merely outranked.
 
     A session stating `CARE` in this door's own roles claim and the LIS Instructor
-    role in the LTI claim lands on the Care view. This is the boundary control on
+    role in the LTI claim lands on `/app/care`. This is the boundary control on
     the refusal below: a door that refused any session carrying an unfamiliar claim
     would satisfy that one while being wrong about this, and a door that read both
     vocabularies and happened to prefer its own would pass this and fail that.
@@ -1265,7 +1581,7 @@ def test_a_session_also_carrying_an_lti_roles_claim_lands_where_its_own_claim_na
         f"{sorted(seen[0]) if seen else 'nothing — the code was never redeemed'}), so this test is "
         "not about a door choosing between two vocabularies."
     )
-    lands_on(response, door_contract, CARE_VIEW)
+    landed_with_session(response, door_contract, CARE_ROUTE)
 
 
 def test_a_session_stating_only_an_lti_roles_claim_is_refused(
@@ -1603,7 +1919,7 @@ def test_a_login_hint_is_inert_to_the_landing_a_correct_login_reaches(
 
     **Dies if the hint changes the outcome of an otherwise identical flow.** The
     dean signs in both ways — hinted as herself and with no hint at all — and lands
-    on the leadership view each time. The hint is presentational: it may change what
+    on `/app/leadership` each time. The hint is presentational: it may change what
     the provider's form pre-selects, and nothing about the session the tool ends up
     with. This is the boundary pair for the security test below: that one proves the
     hint cannot override a *different* identity, and this proves it does not disturb
@@ -1613,10 +1929,10 @@ def test_a_login_hint_is_inert_to_the_landing_a_correct_login_reaches(
     hint = subject_of(dean)
 
     hinted = logged_in_with_hint(tool, door_contract, provider, hint, dean)
-    lands_on(hinted, door_contract, LEADERSHIP_VIEW)
+    landed_with_session(hinted, door_contract, LEADERSHIP_ROUTE)
 
     plain = logged_in(tool, door_contract, provider, dean)
-    lands_on(plain, door_contract, LEADERSHIP_VIEW)
+    landed_with_session(plain, door_contract, LEADERSHIP_ROUTE)
 
 
 def test_a_login_hint_does_not_decide_which_identity_is_signed_in(
@@ -1626,19 +1942,635 @@ def test_a_login_hint_does_not_decide_which_identity_is_signed_in(
 
     The flow is begun hinting the dean and then signed in, at the provider, as the
     administrator. The session that comes back is the administrator's, so the tool
-    must land on the admin view — the hint named the dean and it counts for nothing.
-    A tool that read `login_hint` into any security decision would land on the
-    leadership view here, granting a caller whatever they wrote in a query
+    must land on `/app/admin` — the hint named the dean and it counts for nothing.
+    A tool that read `login_hint` into any security decision would land on
+    `/app/leadership` here, granting a caller whatever they wrote in a query
     parameter. Identity is the verified `id_token`'s to state and the hint's never
     (§4.1, and E0-09 criterion 10 for why a caller-chosen role must not stick).
 
-    The two views are distinct testids, and `lands_on` requires the admin one
-    present *and* every other absent, so a page that carried both — the hint's and
-    the token's — is wrong about the one it named.
+    The two landings are distinct routes, and `landed_with_session` compares the
+    whole `Location` prefix rather than searching for a substring, so a redirect to
+    the leadership route — or to anything but `/app/admin#session=` — fails here
+    whichever of the two identities decided it.
     """
     dean_hint = subject_of(person_holding(provider, "DEAN"))
     administrator = person_holding(provider, "ADMIN")
 
     response = logged_in_with_hint(tool, door_contract, provider, dean_hint, administrator)
 
-    lands_on(response, door_contract, ADMIN_VIEW)
+    landed_with_session(response, door_contract, ADMIN_ROUTE)
+
+
+# ---------------------------------------------------------------------------
+# E1-09's error branch: the redirect that carries `error` instead of `code`.
+#
+# Three answers this door has to keep apart. A refusal whose `state` matches the
+# login this browser started is the person who cancelled, and they get the calm
+# page. A refusal whose `state` does not match — or that arrives with no login
+# cookie to compare against — is a redirect this tool cannot account for, and it
+# gets the ordinary refusal. Neither issues a session, neither spends a code, and
+# neither repeats a syllable of what it was handed.
+#
+# The genuine article is driven through the provider rather than typed: E0-30
+# taught the mock RFC 6749 §4.1.2.1's error redirects for this, and a `state` the
+# provider echoed is a different fact from a `state` this file copied out of a
+# dictionary. The variants that a conformant provider will not produce — a
+# mismatched `state`, an `error` beside a `code`, an error code outside the
+# registry — are delivered to the callback directly, which is exactly the shape
+# they arrive in when somebody who is not the provider sends them.
+# ---------------------------------------------------------------------------
+
+
+def error_parameters(location: str | None, what: str) -> dict[str, str]:
+    """The query of an authorization error redirect, or a failure saying what came back."""
+    assert location, f"The provider sent no redirect at all for {what}."
+    returned = query_of(location)
+    assert returned.get("error"), (
+        f"The provider's answer to {what} carries no `error` (it carries {sorted(returned)}). RFC "
+        "6749 §4.1.2.1 puts the code in that parameter, and without one there is no error branch "
+        "to deliver."
+    )
+    return returned
+
+
+def cancelled_at_the_provider(
+    tool: Any, contract: Any, provider: Any
+) -> tuple[dict[str, str], dict[str, str]]:
+    """One real cancel: begin a login at the tool, and be refused at the provider.
+
+    The tool's own authorization request is carried to the provider, and the login
+    form is submitted naming a subject the seed does not carry — which is how a
+    cancel is produced through a form that has no cancel control, and which
+    `tests/integration/test_mock_idp_error_redirects.py` establishes answers
+    `access_denied` with the `state` echoed. Answers both halves: the parameters the
+    tool sent, and the parameters the provider sent back.
+
+    Nothing is asserted about the provider's answer here beyond its being an error
+    redirect at all — `test_the_cancel_driver_reaches_an_access_denied_redirect_carrying_the_tools_own_state`
+    is the control that says this machinery produces the shape it claims to, and it
+    must be green for anything below to mean anything.
+    """
+    parameters = begin(tool, contract)
+    attempt = provider.begin_from(list(parameters.items()), "")
+    form = provider.require_login_form(attempt)
+    submission = dict(provider.offered_identities(attempt)[0])
+    submission[provider.identity_field(form)] = UNKNOWN_SUBJECT
+
+    submitted = provider.submit_login(attempt, submission)
+
+    return parameters, error_parameters(
+        submitted.location, f"a login naming the unknown subject {UNKNOWN_SUBJECT!r}"
+    )
+
+
+def calm_page(response: Any, contract: Any, what: str) -> None:
+    """The person cancelled: E1-09's calm page, and no session anywhere on it.
+
+    Distinct from `refused` in every respect a test can see — the status, the
+    testid, and the fact that this one is a page somebody is meant to read rather
+    than a refusal. Both are checked, because a door that answered the calm page
+    with a 4xx would be right about the words and wrong about the event, and a door
+    that answered 200 with the refusal's own body would be the reverse.
+    """
+    assert response.status_code == 200, (
+        f"The tool answered {response.status_code} to {what}. E1-09: a refusal carrying the "
+        "`state` this browser was sent is the person cancelling, and it lands them on a calm page "
+        f"— HTTP 200, server-rendered. Body begins {response.text[:400]!r}."
+    )
+    assert CANCELLED_TESTID in response.text, (
+        f"The tool answered {what} with a 200 that does not carry `{CANCELLED_TESTID}` (body "
+        f"begins {response.text[:400]!r}). That testid is E1-09's contract for the calm page, and "
+        "it is what tells this suite — and E1-15's browser proof — that the person was met with "
+        "the cancel copy rather than with somebody else's screen."
+    )
+    found = views_in(response, contract)
+    assert not found, (
+        f"The tool answered {what} with a page carrying {found}. A cancelled login lands nobody "
+        "on a landing view."
+    )
+    no_session_was_issued(response, what)
+
+
+def application_log_text(caplog: pytest.LogCaptureFixture) -> str:
+    """Everything the application's own loggers said, joined.
+
+    Scoped to the `app.` namespace rather than every record pytest captured, for
+    the reason `APPLICATION_LOGGER_ROOT` gives: a library that echoed a URL would
+    otherwise decide both the leak assertions and the code assertions below.
+    """
+    records = [
+        record
+        for record in caplog.records
+        if record.name == APPLICATION_LOGGER_ROOT
+        or record.name.startswith(f"{APPLICATION_LOGGER_ROOT}.")
+    ]
+    return "\n".join(record.getMessage() for record in records)
+
+
+def token_endpoint_spy(token_endpoint_path: str, seen: list[str]) -> Any:
+    """An `around` hook that records every call to the provider's token endpoint.
+
+    The forbidden call, watched at the seam rather than inferred from the answer.
+    `docs/MISTAKES.md` entry 2: assert the forbidden state — a door that took the
+    error branch and *then* redeemed the code anyway would answer exactly the same
+    page, and only this sees it.
+    """
+
+    def around(request: Any, deliver: Any) -> Any:
+        if urlsplit(str(request.url)).path == token_endpoint_path:
+            seen.append(str(request.url))
+        return deliver()
+
+    return around
+
+
+# ---------------------------------------------------------------------------
+# The machinery, before anything is asserted with it. Two must-be-green
+# controls: a red here means these tests are broken, not that the door is.
+# ---------------------------------------------------------------------------
+
+
+def test_the_cancel_driver_reaches_an_access_denied_redirect_carrying_the_tools_own_state(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """The control for every cancel below: the driver really does produce a cancel.
+
+    **Dies if `cancelled_at_the_provider` stops posing the question it names** —
+    if the provider signs the unknown subject in, if it answers a page instead of a
+    redirect, if it stops echoing the `state`, or if the tool's own authorization
+    request stops reaching it. Each of those turns the tests below into statements
+    about a flow that never happened, and every one of them would leave those tests
+    *green*, because a callback handed nothing useful refuses, and a refusal is what
+    half of them expect.
+
+    Green today and green after the implementer's work: it asserts about the mock
+    provider and the tool's login initiation, neither of which E1-09 changes.
+    """
+    parameters, returned = cancelled_at_the_provider(tool, door_contract, provider)
+
+    assert returned.get("error") == ACCESS_DENIED, (
+        f"The provider refused the unknown subject as {returned.get('error')!r} rather than "
+        f"{ACCESS_DENIED!r}. RFC 6749 §4.1.2.1 assigns that code to a request the resource owner "
+        "or the authorization server denied, and it is the code a cancelling person produces."
+    )
+    assert returned.get("state") == parameters.get("state"), (
+        f"The provider sent back `state` {returned.get('state')!r}; the tool's own authorization "
+        f"request carried {parameters.get('state')!r}. The tests below turn on the tool comparing "
+        "those two, so a driver that cannot deliver a matching pair cannot ask the question."
+    )
+    assert "code" not in returned, (
+        f"The provider's refusal carries a `code` ({returned.get('code')!r}). An error redirect "
+        "grants nothing; a refusal that also issues a code is a different event entirely and the "
+        "cancel tests below would be about it."
+    )
+
+
+def test_the_application_log_scan_catches_a_description_planted_in_a_log_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Plants the untrusted description on an `app.` logger and requires the catch.
+
+    **Dies if `application_log_text` is satisfied by emptiness** — no records, the
+    wrong namespace, a filter that quietly matches nothing — which is the failure
+    mode of every leak scan that has stopped finding anything to look for
+    (`docs/MISTAKES.md` entry 9: a guard nobody has watched catch its own case is a
+    comment). Needs no implementation: it is green now, and if it is not, the
+    silence of the log assertions below means nothing whatever they report.
+    """
+    planted = f"{APPLICATION_LOGGER_ROOT}.e1_09_log_scan_control"
+    caplog.set_level(logging.DEBUG)
+
+    logging.getLogger(planted).warning(
+        "a refusal line that deliberately repeats what it was handed: %s", UNTRUSTED_DESCRIPTION
+    )
+
+    text = application_log_text(caplog)
+    assert UNTRUSTED_DESCRIPTION in text, (
+        f"The scan read {text!r} from the `{APPLICATION_LOGGER_ROOT}.` namespace and did not find "
+        f"{UNTRUSTED_DESCRIPTION!r}, which was just logged there. Every assertion below that a "
+        "description did *not* reach a log line is worthless until this passes."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The calm page, and the refusal it must not be confused with. Criterion 2's
+# integration half and the whole of criterion 3, in pairs.
+# ---------------------------------------------------------------------------
+
+
+def test_a_cancelled_login_whose_state_matches_shows_the_calm_page_and_issues_no_session(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion 2, and criterion 3's accepting direction. The user cancelled.
+
+    A real cancel, driven through the provider, delivered to the callback the
+    browser would have carried it to. **Dies if the door has no error branch at
+    all** — today it reads `code`, finds none, and refuses, which is fail-closed and
+    is not what the person is owed. **Dies if it issues a session anyway**, which
+    `no_session_was_issued` checks in all three places a session could leave: the
+    two cookies, the `Location`, and the body.
+
+    Its pair is every refusal below: this is the one case in the whole section
+    where the answer is 200, and the three that differ from it by exactly one
+    thing — a `state` that does not match, no `state`, no cookie — must not reach
+    it.
+    """
+    _, returned = cancelled_at_the_provider(tool, door_contract, provider)
+
+    response = tool.get(door_contract.oidc_callback, params=returned)
+
+    calm_page(response, door_contract, "a login the person cancelled at the provider")
+
+
+def test_an_error_redirect_carrying_a_state_the_tool_never_issued_is_refused_not_calmed(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion 3: the forged error redirect, refused **distinctly** from a real cancel.
+
+    The redirect is a real one — the provider's own `error`, produced by a real
+    refusal — and the single thing wrong with it is a `state` this tool never sent.
+    That is the shape an attacker sends: a browser that has a login in flight is
+    handed somebody else's refusal, and a door that reads `error` and renders the
+    calm page without comparing anything shows the cancel copy to a person who
+    cancelled nothing, having accepted a redirect it cannot account for.
+
+    **Dies if `state` is checked only when present, or not checked on this branch.**
+    Both halves are asserted rather than the status alone: `refused` covers the 4xx
+    and the absent session, and the calm testid must be absent, because "refused
+    distinctly" is a claim about the two answers being different and a door that
+    served the calm page with a 400 would satisfy a status-only check.
+    """
+    _, returned = cancelled_at_the_provider(tool, door_contract, provider)
+    forged = {**returned, "state": "a-state-this-tool-never-issued"}
+
+    response = tool.get(door_contract.oidc_callback, params=forged)
+
+    refused(response, door_contract, "an error redirect carrying a `state` the tool never issued")
+    assert CANCELLED_TESTID not in response.text, (
+        f"The tool answered an error redirect whose `state` it never issued with a page carrying "
+        f"`{CANCELLED_TESTID}`. E1-09 keeps the two apart: the calm page says 'you cancelled', and "
+        "this browser cancelled nothing — somebody handed it a refusal belonging to another flow, "
+        "or to none."
+    )
+
+
+def test_an_error_redirect_carrying_no_state_at_all_is_refused_not_calmed(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """The absent case, which the mismatch above does not cover.
+
+    `if state and state != carried` passes the test above and fails this one, and
+    sending nothing is how that defence is defeated. A different mutation is a
+    different case — the same pair the `code` branch already carries
+    (`test_a_callback_carrying_no_state_at_all_is_refused`), now on the branch that
+    has never had it.
+    """
+    _, returned = cancelled_at_the_provider(tool, door_contract, provider)
+    stateless = {name: value for name, value in returned.items() if name != "state"}
+
+    response = tool.get(door_contract.oidc_callback, params=stateless)
+
+    refused(response, door_contract, "an error redirect carrying no `state` at all")
+    assert CANCELLED_TESTID not in response.text, (
+        f"The tool answered an error redirect carrying no `state` with `{CANCELLED_TESTID}`. "
+        "Nothing was compared, so nothing is known about which login this belongs to."
+    )
+
+
+def test_an_error_redirect_delivered_without_the_login_cookie_is_refused_not_calmed(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """The other side of the comparison: the carried value, rather than the returned one.
+
+    Exactly one thing differs from the calm-page test — the browser is not carrying
+    the login cookie — so this separates "the returned `state` looks plausible" from
+    "the returned `state` matches the one this browser was actually sent". **Dies if
+    an absent or unreadable cookie is treated as a match**, which is what a
+    comparison against an empty default does, and which would make every forged
+    error redirect a calm page for any browser with no login in flight.
+
+    The cookie is cleared on the client rather than never set, so the flow that
+    produced this `state` is the same real flow the calm-page test drives: the
+    difference is what the browser sends back, which is the caller's to choose.
+    """
+    _, returned = cancelled_at_the_provider(tool, door_contract, provider)
+    tool.cookies.clear()
+
+    response = tool.get(door_contract.oidc_callback, params=returned)
+
+    refused(response, door_contract, "an error redirect delivered with no login cookie")
+    assert CANCELLED_TESTID not in response.text, (
+        f"The tool answered an error redirect from a browser carrying no login cookie with "
+        f"`{CANCELLED_TESTID}`. There was nothing to compare the returned `state` against, so this "
+        "is a redirect the tool cannot account for rather than a cancel it can."
+    )
+
+
+def test_an_error_redirect_carrying_a_code_as_well_never_reaches_the_token_endpoint(
+    open_web_door: Any, door_contract: Any, provider: Any, token_endpoint_path: str
+) -> None:
+    """Criterion 3: `error` wins over `code`, and the code is not spent.
+
+    A conformant provider sends one or the other. This sends both — a real code, one
+    the provider genuinely issued for this tool, beside an `error` — because a door
+    that looks for `code` first will find one, redeem it, and hand out a session for
+    a flow it was told had failed. Fail-safe means the error branch is taken before
+    anything else is read.
+
+    **Asserted at the seam, not inferred from the page.** The forbidden thing here
+    is a *call*, and a door that redeemed the code and then discarded the token
+    would answer exactly the same page as one that never called at all
+    (`docs/MISTAKES.md` entry 2). Its pair is the next test, which shows this same
+    spy seeing the call when the callback is supposed to make one — without that,
+    `not seen` is satisfied by a spy wired to nothing.
+    """
+    seen: list[str] = []
+    tool = open_web_door(around=token_endpoint_spy(token_endpoint_path, seen))
+
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    response = tool.get(
+        door_contract.oidc_callback,
+        params={"code": submitted.code, "state": submitted.state, "error": ACCESS_DENIED},
+    )
+
+    assert not seen, (
+        f"The tool redeemed its code at the token endpoint ({seen}) while answering a callback "
+        f"that stated `error={ACCESS_DENIED}`. The provider said this login failed; spending the "
+        "code anyway means an unauthenticated caller can make this tool burn a code, and — if the "
+        "exchange succeeds — that `error` decides nothing at all."
+    )
+    calm_page(response, door_contract, "an error redirect that also carried a code")
+
+
+def test_a_callback_carrying_a_code_and_no_error_does_reach_the_token_endpoint(
+    open_web_door: Any, door_contract: Any, provider: Any, token_endpoint_path: str
+) -> None:
+    """The control for the test above: the same spy, on the flow that must call.
+
+    **This is what makes `not seen` mean "the door refused to redeem" rather than
+    "the spy sees nothing".** One parameter differs between the two tests — the
+    `error` — and everything else, the tool, the seam, the spy and the code, is the
+    same. A spy watching the wrong path, an `around` hook the fixture never
+    installed, or a token endpoint the tool stopped calling would leave that test
+    passing and this one failing, which is exactly the direction the information
+    should point (`docs/MISTAKES.md` entry 35: require the guard to find the thing
+    on a subject that certainly has it).
+    """
+    seen: list[str] = []
+    tool = open_web_door(around=token_endpoint_spy(token_endpoint_path, seen))
+
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    response = tool.get(
+        door_contract.oidc_callback, params={"code": submitted.code, "state": submitted.state}
+    )
+
+    assert seen, (
+        "The tool redeemed nothing at the token endpoint on a callback carrying a valid `code` and "
+        "a matching `state`. Either this spy watches a path the tool does not call, or the happy "
+        "path has stopped exchanging its code — and until this passes, the `error`-wins test above "
+        "proves nothing."
+    )
+    landed_with_session(response, door_contract, LEADERSHIP_ROUTE)
+
+
+# ---------------------------------------------------------------------------
+# What the error branch may repeat, and what it may not: `error_description`
+# and `error_uri` are attacker-chosen text; the code is a value from a
+# four-member set.
+# ---------------------------------------------------------------------------
+
+
+def test_the_calm_page_never_repeats_the_error_description_or_error_uri(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """Criterion 3: nothing attacker-supplied is echoed to the browser.
+
+    **Dies if either value reaches the response** — rendered into the page, put in a
+    header, or reflected in a redirect. RFC 6749 §4.1.2.1 puts no grammar on either,
+    so both are text somebody else wrote, and a page that repeats them is a page
+    whose words an attacker chooses: "your account is locked, call this number" over
+    the tool's own name and styling, with a link of their choosing beside it.
+
+    Two guards, because this is the shape that passes on emptiness. The calm page
+    has to render, so a 404 or a blank body fails rather than passes; and the scan
+    is shown finding both markers in a sample built out of them, so a comparison
+    that has gone blind says so (`docs/MISTAKES.md` entry 3). The whole response is
+    read, headers included, not the body alone.
+    """
+    _, returned = cancelled_at_the_provider(tool, door_contract, provider)
+    hostile = {
+        **returned,
+        "error_description": UNTRUSTED_DESCRIPTION,
+        "error_uri": UNTRUSTED_ERROR_URI,
+    }
+
+    response = tool.get(door_contract.oidc_callback, params=hostile)
+
+    calm_page(response, door_contract, "a cancel carrying an untrusted description and URI")
+    untrusted = (UNTRUSTED_DESCRIPTION, UNTRUSTED_ERROR_URI)
+    canary = " ".join(untrusted)
+    assert all(marker in canary for marker in untrusted), (
+        "The scan below cannot find these markers in a sample built out of them, so its silence "
+        "about the calm page means nothing."
+    )
+    received = "\n".join([*(f"{n}: {v}" for n, v in response.headers.items()), response.text])
+    echoed = sorted(marker for marker in untrusted if marker in received)
+    assert not echoed, (
+        f"The calm page repeats {echoed} back to the browser. Body begins "
+        f"{response.text[:400]!r}. E1-09: `error_description` and `error_uri` are untrusted text — "
+        "never rendered, never echoed. The page says what happened in the tool's own words."
+    )
+
+
+@pytest.mark.parametrize("code", LOGGED_ERROR_CODES)
+def test_the_error_branch_logs_the_registered_code_and_never_the_description(
+    tool: Any, door_contract: Any, provider: Any, caplog: pytest.LogCaptureFixture, code: str
+) -> None:
+    """Criterion 3: the log line carries the error code, and nothing else it was handed.
+
+    All four members of E1-09's set, one case each, because a closed set is only a
+    closed set if each member is shown going through it — a door that recognised
+    `access_denied` and called the other three unrecognised would pass a
+    single-value test and lose the operator three of the four things this line
+    exists to tell them (`docs/MISTAKES.md` entry 35). The near miss is the next
+    test, and the pair is the point: without it "log the code" is satisfied by
+    echoing whatever arrives.
+
+    **Dies if the description reaches the log.** A log line is not a safe place for
+    attacker-chosen text: it is read by an operator, aggregated, and searched, and
+    it is where an injected line goes to be believed. §10's no-PII rule is the same
+    rule from the other end.
+    """
+    caplog.set_level(logging.DEBUG)
+    _, returned = cancelled_at_the_provider(tool, door_contract, provider)
+    hostile = {
+        **returned,
+        "error": code,
+        "error_description": UNTRUSTED_DESCRIPTION,
+        "error_uri": UNTRUSTED_ERROR_URI,
+    }
+
+    tool.get(door_contract.oidc_callback, params=hostile)
+
+    logged = application_log_text(caplog)
+    assert code in logged, (
+        f"No log line from the `{APPLICATION_LOGGER_ROOT}.` namespace names {code!r}. Captured: "
+        f"{logged!r}. E1-09 lets the log repeat the error code, and only the error code — an "
+        "operator who cannot tell `access_denied` from `invalid_scope` cannot tell a person "
+        "cancelling from the tool being misconfigured."
+    )
+    leaked = sorted(
+        marker for marker in (UNTRUSTED_DESCRIPTION, UNTRUSTED_ERROR_URI) if marker in logged
+    )
+    assert not leaked, (
+        f"The log carries {leaked}, which arrived in the query string of an error redirect. "
+        f"Captured: {logged!r}. E1-09: the log line carries only the error code."
+    )
+
+
+def test_an_error_code_outside_the_set_is_logged_as_unrecognized_and_never_echoed(
+    tool: Any, door_contract: Any, provider: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The near miss for the four above: a code that is not one of them.
+
+    **This is what makes those four mean "recognised" rather than "echoed".** The
+    `error` parameter is as attacker-chosen as the description is; a door that
+    writes it into a log line verbatim has the same log-injection surface, reached
+    through the one parameter it was allowed to repeat. So the set is closed by
+    exact comparison, and everything else logs one fixed word.
+
+    **Dies if the comparison is a prefix, a substring or a case-fold** — none of
+    which this value would defeat, and all of which are how a closed set stops being
+    closed. And dies if the unknown code is echoed anywhere in the log.
+    """
+    caplog.set_level(logging.DEBUG)
+    _, returned = cancelled_at_the_provider(tool, door_contract, provider)
+    hostile = {
+        **returned,
+        "error": AN_UNKNOWN_ERROR_CODE,
+        "error_description": UNTRUSTED_DESCRIPTION,
+    }
+
+    tool.get(door_contract.oidc_callback, params=hostile)
+
+    logged = application_log_text(caplog)
+    assert UNRECOGNISED_CODE_LOGGED_AS in logged, (
+        f"No log line from the `{APPLICATION_LOGGER_ROOT}.` namespace carries "
+        f"{UNRECOGNISED_CODE_LOGGED_AS!r}. Captured: {logged!r}. E1-09: a code outside "
+        f"{list(LOGGED_ERROR_CODES)} is logged as that literal word, so the operator learns an "
+        "error redirect arrived without the tool repeating a string somebody else chose."
+    )
+    assert AN_UNKNOWN_ERROR_CODE not in logged, (
+        f"The log repeats {AN_UNKNOWN_ERROR_CODE!r}, an error code from outside E1-09's set, "
+        f"verbatim. Captured: {logged!r}. That parameter is attacker-chosen text exactly as "
+        "`error_description` is."
+    )
+    assert UNTRUSTED_DESCRIPTION not in logged, (
+        f"The log carries {UNTRUSTED_DESCRIPTION!r} alongside an unrecognised code. Captured: "
+        f"{logged!r}."
+    )
+
+
+# ---------------------------------------------------------------------------
+# One login buys one attempt. Both error-branch answers burn the login cookie.
+# ---------------------------------------------------------------------------
+
+
+def test_the_calm_page_burns_the_login_cookie_so_the_matching_code_cannot_be_redeemed_after(
+    open_web_door: Any, door_contract: Any, provider: Any, token_endpoint_path: str
+) -> None:
+    """The calm page clears the login cookie on the way out. Criterion 2's second half.
+
+    **Dies if the error branch renders and returns without clearing.** The cookie
+    holds the `state`, the `nonce` and the PKCE verifier — the one secret binding an
+    authorization code to this client — and a browser that still carries it after
+    the flow has ended is one an attacker gets as many attempts against as they
+    like. E0-18 made the refusal path burn it; E1-09 adds a second way out of the
+    flow, and a new exit that skips the cleanup is exactly how that guarantee is
+    quietly lost.
+
+    Asserted behaviourally rather than by reading a `Set-Cookie`: what matters is
+    that the login is over, and the way to show that is that the *correct* code and
+    `state` for the same login are refused afterwards. Guarded, because that
+    refusal could otherwise be a spent code rather than a burned cookie — the spy
+    says the calm page redeemed nothing, so the code is still unspent when it is
+    delivered.
+    """
+    seen: list[str] = []
+    tool = open_web_door(around=token_endpoint_spy(token_endpoint_path, seen))
+
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    calmed = tool.get(
+        door_contract.oidc_callback,
+        params={"state": submitted.state, "error": ACCESS_DENIED},
+    )
+    calm_page(calmed, door_contract, "a cancel carrying the state of a login still in flight")
+    assert not seen, (
+        f"The calm page redeemed the code at the token endpoint ({seen}), so the refusal below "
+        "could be a code that has already been spent rather than a cookie that was burned."
+    )
+
+    replayed = answer_to(
+        lambda: complete(tool, door_contract, submitted),
+        "the correct `code` and `state` for a login the calm page should have ended",
+    )
+
+    assert 400 <= replayed.status_code < 500, (
+        f"After showing the calm page, the tool answered {replayed.status_code} to the correct "
+        "`code` and `state` for the same login. One login buys one attempt: the cookie holding the "
+        "state, the nonce and the PKCE verifier is cleared on the way out of the error branch, and "
+        "a branch that leaves it in place leaves the verifier live in a browser that has finished "
+        "with it."
+    )
+    no_session_was_issued(replayed, "a code replayed after the calm page")
+
+
+def test_a_refused_error_redirect_burns_the_login_cookie_too(
+    open_web_door: Any, door_contract: Any, provider: Any, token_endpoint_path: str
+) -> None:
+    """The pair to the test above, on the branch that refuses rather than calms.
+
+    **Dies if only one of the two exits clears the cookie**, which is the likely
+    shape of the mistake: the calm page is the branch a developer is thinking about
+    when they write the cleanup, and the mismatched-`state` path is the one that
+    falls out of an `else`. It is also the branch where leaving the cookie live
+    matters most — an attacker who can deliver one forged error redirect can deliver
+    a hundred, and every one of them is a free attempt at a browser that is still
+    carrying the verifier.
+
+    Same guard as above: the refusal must not have spent the code, or the second
+    refusal says nothing about the cookie.
+    """
+    seen: list[str] = []
+    tool = open_web_door(around=token_endpoint_spy(token_endpoint_path, seen))
+
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    rejected = tool.get(
+        door_contract.oidc_callback,
+        params={"state": "a-state-this-tool-never-issued", "error": ACCESS_DENIED},
+    )
+    refused(rejected, door_contract, "an error redirect carrying a `state` the tool never issued")
+    assert not seen, (
+        f"The refusal redeemed the code at the token endpoint ({seen}), so the refusal below could "
+        "be a spent code rather than a burned cookie."
+    )
+
+    replayed = answer_to(
+        lambda: complete(tool, door_contract, submitted),
+        "the correct `code` and `state` for a login a refused error redirect should have ended",
+    )
+
+    assert 400 <= replayed.status_code < 500, (
+        f"After refusing an error redirect it could not account for, the tool answered "
+        f"{replayed.status_code} to the correct `code` and `state` for the login that browser had "
+        "in flight. Both ways out of the error branch clear the single-use cookie."
+    )
+    no_session_was_issued(replayed, "a code replayed after a refused error redirect")
