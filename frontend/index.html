@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      No stylesheet link and no font link. The three faces docs/DESIGN_BRIEF.md
+      names are declared in design/tokens.css with fallbacks that are already on
+      the machine, and loading the webfonts themselves is deferred: Pulse renders
+      inside somebody's LMS in an iframe, so a font fetch from here is a
+      third-party request made on a student's behalf from inside their
+      institution's page. E0-18 made the same call for the server-rendered
+      landings. docs/tickets/e1/deferred.md carries the decision and its
+      "done when".
+    -->
+    <title>Pulse Surveys</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

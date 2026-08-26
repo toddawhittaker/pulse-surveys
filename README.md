@@ -31,8 +31,10 @@ The schema is real now. Migrations create the containment hierarchy
 (institution through section), the term calendar and start-letter map, the
 identity tables with `user` split from `user_identity`, the LTI registration
 tables, and role assignments with the supervision graph. What sits on top of it
-does not exist yet: no read views, no authorization, no HTTP routes beyond
-`/healthz`, and no frontend. The job runtime is wired but does no work — the
+does not exist yet: no read views, no authorization, and no HTTP routes beyond
+`/healthz`. The frontend exists and is deliberately empty: React, TypeScript and
+Vite, served by the application at `/app`, with one blank landing view per role
+area and nothing behind any of them. The job runtime is wired but does no work — the
 beat schedule is empty, and the only task is a `ping` that proves the round
 trip. The AI side has its typed contracts and versioned prompt directory but no
 gateway to call a provider with.
@@ -585,9 +587,10 @@ authenticate.
 
 ```sh
 make ci             # every gate, in the same order as CI
-make lint           # ruff check + ruff format --check
-make typecheck      # mypy, strict over app/services/
+make lint           # ruff check + ruff format --check, eslint (root + frontend)
+make typecheck      # mypy, strict over app/services/; tsc (root + frontend)
 make test           # pytest with coverage
+make frontend-build # the production build and the bundle budget
 make migrate        # alembic upgrade head, against the running stack
 make lock           # recompile the lockfiles after editing dependencies
 ```

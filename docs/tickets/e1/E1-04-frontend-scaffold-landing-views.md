@@ -6,7 +6,9 @@
 **Security-relevant:** the gate flips (fidelity, not confidentiality); no
 line-by-line pass expected, but the landing views' strings are governed copy —
 see the last scope item.
-**Lane:** light
+**Lane:** heavy — re-laned from light by Todd on 2026-08-25, before the build
+started: four gate flips plus the epic's first frontend surface is the loop's
+work, not one builder's.
 
 ## Context
 

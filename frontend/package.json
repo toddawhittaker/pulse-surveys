@@ -2,6 +2,27 @@
   "name": "@pulse-surveys/frontend",
   "version": "0.0.0",
   "private": true,
-  "description": "The SPEC §13 frontend package. A workspace member of the root package (ADR 0083) and deliberately empty: E1-04 lands React 19, TypeScript and Vite here, along with the `build` script the production-build and bundle-budget gates wait for.",
-  "license": "MIT"
+  "description": "The SPEC §13 frontend package: React 19, TypeScript and Vite, with TanStack Router over the five role areas. A workspace member of the root package (ADR 0083), so there is no lockfile here — `npm ci` at the root installs it and `npm run <script> --workspace frontend` runs these scripts. eslint, typescript and typescript-eslint are the root package's and are resolved by hoisting, so this package and the root gate are one toolchain rather than two.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p .",
+    "lint": "eslint . --max-warnings=0"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.170.32",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "tailwindcss": "4.3.3",
+    "vite": "8.2.2"
+  }
 }

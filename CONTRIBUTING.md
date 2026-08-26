@@ -252,10 +252,12 @@ reach a heavy surface stops and re-lanes, and the pull request records the
 switch.
 
 Future epics write the `**Lane:**` field on every ticket at breakdown time.
-E1 adopted the split mid-epic: its light tickets are E1-02, E1-03, E1-04 and
+E1 adopted the split mid-epic: its light tickets are E1-02, E1-03 and
 E1-07, and every other E1 ticket is heavy — including E1-14 and E1-15, whose
 ⚠ lives in their Security-relevant lines rather than in the build-order
-table.
+table. E1-04 was listed light here and re-laned heavy by Todd on 2026-08-25,
+before its build started; where this list and a ticket header disagree, the
+header is the authority.
 
 ## Definition of done
 

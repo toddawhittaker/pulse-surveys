@@ -3,6 +3,13 @@
 # mock-idp/Dockerfile (E0-16). One file serves all three, because Docker reads
 # it per build *context* and all three are built from the repository root.
 #
+# E1-04 gives `backend/Dockerfile` a Node stage that builds the frontend, so the
+# root manifest, the root lockfile, `frontend/` and `design/tokens.css` are now
+# build inputs and are re-included below. The trap that shape sets is worth
+# naming: this file denies everything and re-includes by name, so a stage added
+# without its re-includes builds over an empty context and fails on a missing
+# file rather than on a missing rule.
+#
 # Deny everything, then name what the build needs. The other way round — listing
 # what to exclude — fails open: a file added later is in the context until
 # someone remembers to exclude it, and `.env` is the file that matters most. It
@@ -34,6 +41,34 @@
 !backend
 !mock-lms
 !mock-idp
+
+# The frontend build stage's inputs (E1-04). The root manifest and lockfile are
+# the whole workspace's resolution (ADR 0083), `design/tokens.css` is the single
+# source `frontend/src/styles.css` imports from outside its own package, and
+# `frontend/` is the application.
+!package.json
+!package-lock.json
+!design/tokens.css
+!frontend
+
+# Re-excluded inside `frontend/`, because re-including a directory re-includes
+# everything under it. `node_modules` and `dist` are the two that matter: both
+# are gitignored, both exist on every developer's machine, and either one in the
+# context would be copied over the layer the stage just built — a host build
+# shipped instead of the image's own, which is `docs/MISTAKES.md` entry 12.
+frontend/node_modules
+frontend/dist
+
+# And the secret-shaped names, for the reason the header gives about `.gitignore`
+# being unanchored. Vite reads `.env` files from the package root, so
+# `frontend/.env` and `frontend/.env.local` are conventional files a developer
+# will have and git will refuse to track.
+frontend/.env
+frontend/.env.*
+frontend/**/.env
+frontend/**/.env.*
+frontend/**/*.pem
+frontend/**/*.key
 
 # Re-excluded inside the directories re-included above. Secrets first: these
 # mirror .gitignore, so a file git refuses to track cannot reach a layer either.

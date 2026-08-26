@@ -1,4 +1,4 @@
-"""Each `detect` probe sees the file its own job runs — E0-36 findings 1 and 2, E0-40.
+"""Each `detect` probe sees the file its own job runs — E0-36 findings 1 and 2, E0-40, E1-04.
 
 The `detect` job probes the tree and emits booleans; each gate job runs its real
 steps only when its boolean is true, and prints a `::notice::` otherwise (ADR
@@ -19,18 +19,22 @@ is not due until E1: `npm audit`, the licence scan, `tsc` and `eslint` all
 reported green over a tree they never read. So the probe is split to tell the
 truth about where Node code lives:
 
-- **`node`** — `package.json` at the repository root. It gates `npm audit`, the
-  licence scan, `tsc` and `eslint`, all of which run at the root.
-- **`frontend`** — the frontend package's `build` script. It gates the production
-  build and the bundle budget, which are still legitimately waiting for the E1
-  scaffold. **E1-02 narrowed this one**, and the narrowing is the same subject as
-  the split: `frontend/` is now a member of the root npm workspace (ADR 0083), so
-  `frontend/package.json` is committed from E1-02 onwards and its presence stopped
-  answering the question the probe asks. What the job runs is `npm run build` in
-  that workspace, and the stub E1-02 lands declares no scripts at all — so a probe
-  reading the file's existence would run the production build against a package
-  with no build, on every pull request, having still built nothing.
-- **`evals`** — unchanged.
+- **`node`** — `package.json` at the repository root. It gates `npm audit` and the
+  licence scan, both of which run at the root. It gated `tsc` and `eslint` too
+  until E1-04, which is the ticket that lands the application those two check:
+  ADR 0002 makes removing a tolerance an acceptance criterion of the ticket that
+  lands the code, so those steps now run unconditionally and consult no probe.
+  `tests/unit/test_the_frontend_gates_stopped_being_tolerant.py` is where that is
+  asserted.
+- **`frontend` is gone, and E1-04 is what removed it.** It named the frontend
+  package's `build` script and gated the production build and the bundle budget
+  while both were still legitimately waiting for the E1 scaffold. E1-04 lands the
+  scaffold and makes all four frontend gates enforcing, so the last thing reading
+  that boolean stopped reading it — and an emitted boolean nothing consults is a
+  probe whose wrongness has no symptom, which is why it is withdrawn in the same
+  change rather than left emitting.
+- **`evals`** — unchanged. E2 turns the AI eval floors enforcing (SPEC §14.3), so
+  that gate is still legitimately tolerant and its probe still decides something.
 - **`e2e` is gone.** PR #61 made the Playwright gate unconditional on the specs
   being present, so nothing has consumed that output since; an emitted boolean
   nothing reads is a probe whose wrongness has no symptom.
@@ -65,6 +69,16 @@ assertion at the foot of this module rather than a module of its own: the ticket
 allows one new test file and it is spent on the invariant-gate guard, and of the
 files this ticket may touch, this is the one whose subject is a gate reporting
 success over a check that did not honestly pass.
+
+**E1-04 is the fourth ticket in this file's history, and it removes rather than
+repairs.** It lands the frontend scaffold and makes all four frontend gates
+enforcing, which takes the `frontend` probe's last two readers away — so the probe
+goes, its cases become cases about a probe that must not be there, and the two
+recipes carrying the same condition in the `Makefile` lose it too. The direction
+matters: every earlier instance in this file was a probe that had gone blind, and
+the repair each time was to make it see. A probe with nothing left to decide is the
+same hazard reached from the other end, because the honest answer to a question
+nobody asks is not to answer it.
 
 **The probe has a second copy, and the mutation battery found it unguarded.** The
 `Makefile` carries the same condition for `lint`, `typecheck`, `audit` and
@@ -107,21 +121,30 @@ DETECT_JOB = "detect"
 NODE = "node"
 FRONTEND = "frontend"
 EVALS = "evals"
-PROBES = (FRONTEND, NODE, EVALS)
+PROBES = (NODE, EVALS)
 
-# Emitted until E0-40 and consumed by nothing since PR #61 made the Playwright
-# gate unconditional. Named here rather than merely left out of `PROBES`, so that
-# the failure a lingering probe produces says which one it is.
-WITHDRAWN = ("e2e",)
+# Probes that were emitted and are not any more. Named here rather than merely left
+# out of `PROBES`, so that the failure a lingering probe produces says which one it
+# is.
+#
+# `e2e` went in E0-40: PR #61 made the Playwright gate unconditional on the specs
+# being present, and nothing had consumed the boolean since. `frontend` goes in
+# E1-04 for the same reason arrived at from the other direction — its two
+# consumers, the production build and the bundle budget, stop being tolerant, so
+# the question it asks is no longer asked by anything.
+WITHDRAWN = ("e2e", FRONTEND)
 
 # A `name=value` line as the probe writes it into `$GITHUB_OUTPUT`.
 EMITTED = re.compile(r"^(?P<name>[A-Za-z0-9_-]+)=(?P<value>.*)$")
 
-# The two frontend manifests the `frontend` probe has to tell apart from E1-02
-# onwards: the workspace stub, which exists so the repository has one lockfile and
-# one resolution, and the scaffold, which is the first tree with something to
-# build. They are written out as real manifests rather than as the marker line the
-# other planted files carry, because the probe now reads the file's content.
+# The two frontend manifests the `frontend` probe used to tell apart: the
+# workspace stub E1-02 landed, which exists so the repository has one lockfile and
+# one resolution, and the scaffold E1-04 fills, which is the first tree with
+# something to build. **They are kept now that the probe is gone, and they are the
+# sharpest cases in the table.** Every case compares the whole emitted mapping, so
+# a tree with a buildable frontend in it — the one tree a lingering `frontend`
+# probe would answer `true` over — is where a probe that outlived its readers is
+# caught rather than merely reported missing from an `outputs:` block.
 FRONTEND_MANIFEST = "frontend/package.json"
 
 WORKSPACE_STUB = json.dumps(
@@ -154,7 +177,7 @@ CASES: tuple[tuple[str, tuple[PlantedFile, ...], dict[str, str]], ...] = (
     (
         "an empty repository",
         (),
-        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
     (
         "the tree PR #61 left: a manifest, a lockfile and TypeScript at the root",
@@ -164,67 +187,67 @@ CASES: tuple[tuple[str, tuple[PlantedFile, ...], dict[str, str]], ...] = (
             "playwright.config.ts",
             "tests/e2e/lms/launch.spec.ts",
         ),
-        {FRONTEND: "false", NODE: "true", EVALS: "false"},
+        {NODE: "true", EVALS: "false"},
     ),
     (
         "a root package manifest and nothing else",
         ("package.json",),
-        {FRONTEND: "false", NODE: "true", EVALS: "false"},
+        {NODE: "true", EVALS: "false"},
     ),
     (
-        "the workspace stub E1-02 lands: a frontend manifest with nothing to build",
+        "the workspace stub E1-02 landed: a frontend manifest with nothing to build",
         ((FRONTEND_MANIFEST, WORKSPACE_STUB),),
-        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
     (
         "the E1-04 scaffold: a frontend manifest that declares a build",
         ((FRONTEND_MANIFEST, SCAFFOLD_WITH_A_BUILD),),
-        {FRONTEND: "true", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
     (
-        "the tree E1-02 leaves: the root toolchain and the workspace stub beside it",
+        "the tree E1-02 left: the root toolchain and the workspace stub beside it",
         ("package.json", (FRONTEND_MANIFEST, WORKSPACE_STUB)),
-        {FRONTEND: "false", NODE: "true", EVALS: "false"},
+        {NODE: "true", EVALS: "false"},
     ),
     (
         "both, once the E1-04 scaffold fills the workspace member",
         ("package.json", (FRONTEND_MANIFEST, SCAFFOLD_WITH_A_BUILD)),
-        {FRONTEND: "true", NODE: "true", EVALS: "false"},
+        {NODE: "true", EVALS: "false"},
     ),
     (
         "a frontend manifest that is not a manifest at all",
         (FRONTEND_MANIFEST,),
-        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
     (
         "a package manifest in some other subdirectory",
         ("tools/package.json",),
-        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
     (
         "the eval runner that `python -m tests.evals.runner` imports",
         ("tests/evals/__init__.py", "tests/evals/runner.py"),
-        {FRONTEND: "false", NODE: "false", EVALS: "true"},
+        {NODE: "false", EVALS: "true"},
     ),
     (
         "an eval set in a subdirectory beside the runner",
         ("tests/evals/__init__.py", "tests/evals/runner.py", "tests/evals/validity/cases.py"),
-        {FRONTEND: "false", NODE: "false", EVALS: "true"},
+        {NODE: "false", EVALS: "true"},
     ),
     (
         "an eval directory holding no Python at all",
         ("tests/evals/README.md",),
-        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
     (
         "e2e specs, which no probe answers for any more",
         ("tests/e2e/lms/launch.spec.ts", "tests/e2e/idp/login.spec.ts"),
-        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
     (
         "an e2e directory holding no specs",
         ("tests/e2e/README.md",),
-        {FRONTEND: "false", NODE: "false", EVALS: "false"},
+        {NODE: "false", EVALS: "false"},
     ),
 )
 
@@ -245,17 +268,22 @@ RUNS_AT_THE_ROOT = {
     "eslint": re.compile(r"\beslint\b"),
 }
 
-# The two gates that keep waiting on `frontend/package.json`, and the near miss
-# this whole module needs. E0-38's second review pass found that adding a guard to
-# `frontend-build` had been done with a blanket edit over
-# `if: needs.detect.outputs.frontend == 'true'`, a string that appears in three
-# jobs — so a blanket edit is the documented way this file gets changed, and a
-# blanket `frontend` → `node` rename would satisfy every assertion about the four
-# tools above while pointing the production build at a manifest that is not the
-# one it builds from.
-RUNS_IN_THE_FRONTEND_TREE = {
-    "the production build": re.compile(r"\bnpm\s+run\s+build\b"),
-    "the bundle budget": re.compile(r"\bcheck_bundle_size\.py\b"),
+# The two of those four that still *wait* on the probe, which from E1-04 is a
+# narrower set than the four that run at the root.
+#
+# `tsc` and `eslint` were tolerant gates: they ran when a probe said there was
+# TypeScript to read and printed a notice when it did not. E1-04 is the ticket that
+# lands the application they check, and ADR 0002 makes removing a tolerance an
+# acceptance criterion of the ticket that lands the code — so those two now run
+# unconditionally, and `tests/unit/test_the_frontend_gates_stopped_being_tolerant.py`
+# asserts that they consult no probe at all. `npm audit` and the licence scan are
+# in a job this ticket does not touch and keep the guard they have.
+#
+# The wider set above is still used, for the short-circuit rule and as the canary:
+# each of the four has to be findable in the workflow before any verdict about it
+# counts.
+WAITS_ON_THE_NODE_PROBE = {
+    tool: RUNS_AT_THE_ROOT[tool] for tool in ("npm audit", "the npm licence scan")
 }
 
 # `needs.detect.outputs.<name>`, wherever it appears — a step's `if:`, or a `${{ }}`
@@ -324,9 +352,49 @@ MAKEFILE_NODE_TARGETS = {
     "licenses": "the npm licence scan",
 }
 
-# The target that must go on naming the other manifest, and the control that
-# proves the reader below can see a qualified path at all.
+# The target that used to name the other manifest, and now must name none.
+#
+# **It was this module's control until E1-04**, on `docs/MISTAKES.md` entry 35's
+# rule that a guard which only ever reports absence cannot say what it can see: the
+# four node targets are asserted to name no qualified manifest, and a reader blind
+# to qualified paths would report them all clean over a Makefile that was entirely
+# wrong. `frontend-build` was the subject that certainly had one.
+#
+# E1-04 takes the probe out of that recipe — the production build and the bundle
+# budget stop being tolerant — so the control moves to a sample instead, copied
+# whole out of the recipe as it stood. The sample is the better control anyway,
+# because it goes on exercising the reader after the tree has stopped containing
+# an example, which is the state every removed tolerance leaves behind.
 MAKEFILE_FRONTEND_TARGET = "frontend-build"
+
+# The condition E1-04 deletes, copied whole out of the `frontend-build` recipe —
+# the line it begins on included, `docs/MISTAKES.md` entry 3. `qualified_manifests`
+# is run over this before it is trusted over the Makefile, so a reader that has
+# gone blind says so instead of reporting four clean targets.
+MAKEFILE_PROBE_AS_IT_STOOD = (
+    "\t@if [ -f frontend/package.json ] && "
+    'grep -Eq \'"build"[[:space:]]*:[[:space:]]*"\' frontend/package.json; then \\'
+)
+
+# What that recipe must run once the branch is gone, found by the command rather
+# than by the line. Both must be there: a recipe that lost its tolerance and its
+# work together satisfies every "no longer probes" assertion perfectly.
+MAKEFILE_PRODUCTION_BUILD = re.compile(r"\bnpm\s+run\s+build\b")
+MAKEFILE_BUNDLE_BUDGET = re.compile(r"\bcheck_bundle_size\.py\b")
+
+# The frontend workspace scripts the fast gate runs in `.github/workflows/ci.yml`,
+# which `make ci` has to run too. CLAUDE.md: `make ci` runs the same gates as the
+# workflow, and where the two disagree the workflow is right and the Makefile is
+# the bug — a disagreement whose whole cost falls on the person told to run `make
+# ci` before pushing, since their green is over checks that never ran.
+MAKEFILE_WORKSPACE_CHECKS = {
+    "the frontend type check": re.compile(r"\bnpm\s+run\s+typecheck\b"),
+    "the frontend lint": re.compile(r"\bnpm\s+run\s+lint\b"),
+}
+
+# The target `make ci` is, and the one every gate has to be reachable from. A
+# recipe nothing runs is not a gate.
+MAKEFILE_PIPELINE_TARGET = "ci"
 
 # A target line: a name at the start of a line, then a colon that is not `:=`,
 # then its prerequisites. `.PHONY` and the variable assignments above the targets
@@ -569,6 +637,25 @@ def installed_by_a_prerequisite(
     return None
 
 
+def reachable_from(name: str, targets: dict[str, MakefileTarget]) -> set[str]:
+    """Every target `make <name>` would run, itself included.
+
+    make builds a target's prerequisites to completion before its own recipe, so
+    the closure is what one invocation actually runs. A gate in a recipe nothing
+    reaches is not a gate: `make ci` is what CLAUDE.md tells people to run before
+    pushing, and a check outside that closure is one they are never told about.
+    """
+    found: set[str] = set()
+    pending = [name]
+    while pending:
+        current = pending.pop()
+        if current in found or current not in targets:
+            continue
+        found.add(current)
+        pending.extend(targets[current].prerequisites)
+    return found
+
+
 def qualified_manifests(recipe: str) -> list[str]:
     """Every `package.json` in this recipe that is reached through a directory."""
     return [
@@ -742,16 +829,15 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
     The frontend cases are the other direction and they are not decoration: a
     single probe renamed rather than split would answer true to both, and the
     production build would then run `npm run build` in a directory that does not
-    exist. `frontend/package.json` alone must leave `node` false, and
-    `package.json` alone must leave `frontend` false.
+    exist. `frontend/package.json` alone must still leave `node` false.
 
-    **E1-02 adds a pair to the frontend half, and the pair is the point.** The
-    workspace layout (ADR 0083) commits `frontend/package.json` from now on, so
-    the probe reads what the manifest declares rather than that it is there: the
-    stub, which has no scripts, must answer false, and the E1-04 scaffold, which
-    declares a `build`, must answer true. Either case alone is satisfied by a
-    probe that is stuck — false always, or true always — which is why they are
-    planted as a pair and compared against the whole mapping.
+    **E1-04 withdraws the `frontend` probe and keeps both of its trees.** The
+    workspace stub and the scaffold that declares a `build` are the two trees that
+    probe told apart, and the second is the only tree in this table over which a
+    surviving copy of it would answer `true`. Since every case compares the whole
+    emitted mapping, planting that tree is what catches a probe that outlived its
+    readers — a boolean nothing consults is one whose wrongness produces no
+    symptom, and the next gate wired to it inherits an answer nobody has checked.
 
     **The empty-tree case comes first and it is the case the others rest on.**
     Several cases below assert that a probe answers *true*, and a probe that
@@ -759,20 +845,17 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
     tolerance in this pipeline into a permanent lie in the other direction.
 
     **The whole emitted mapping is compared, not the key each case is named for.**
-    That is how a withdrawn probe is caught: `e2e` has been consumed by nothing
-    since PR #61 made the Playwright gate unconditional, and a boolean nothing
-    reads is one whose wrongness has no symptom. If it is still emitted, every case
-    here fails.
+    That is how a withdrawn probe is caught: neither `e2e` nor `frontend` has a
+    reader left, and a boolean nothing reads is one whose wrongness has no symptom.
+    If either is still emitted, every case here fails.
 
     **The mutation this survives:** point the `node` probe at
     `frontend/package.json`, or at `[ -f package.json ] || [ -f frontend/package.json ]`,
-    which is the tempting one-line version of this split and makes the two
-    booleans indistinguishable; or put the `frontend` probe back to
-    `[ -f frontend/package.json ]`, which from E1-02 onwards is true of every
-    checkout. **The near miss that must stay green:** any spelling of the same
-    question — `[ -f package.json ]`, `test -f ./package.json`, a
-    `find -maxdepth 1`, a JSON reader in place of the `grep` — since this judges
-    what the probe emits and not how it decides.
+    which is the tempting one-line version of the split and makes two questions one;
+    or leave the `frontend` probe in the job after its consumers stopped reading it.
+    **The near miss that must stay green:** any spelling of the same question —
+    `[ -f package.json ]`, `test -f ./package.json`, a `find -maxdepth 1` — since
+    this judges what the probe emits and not how it decides.
     """
     assert (
         ci_workflow
@@ -824,12 +907,11 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
             "`eslint` went on asking about `frontend/package.json` — a path that does not exist "
             "and is not due until E1. Four gates green over a tree they never read.",
             "",
-            f"`{FRONTEND}` stays, and it is a different question: the production build and the "
-            "bundle budget are still waiting for the E1 scaffold. The two must be able to "
-            "disagree, which is why the table plants each manifest without the other. From E1-02 "
-            "it is a narrower question than 'is the manifest there', because the workspace layout "
-            "(ADR 0083) commits `frontend/package.json` on every branch — so what it asks is "
-            "whether that package declares the `build` the job runs.",
+            f"`{FRONTEND}` is gone, and E1-04 removed it: that ticket lands the scaffold and makes "
+            "the production build and the bundle budget enforcing, so the two jobs that read the "
+            "boolean stopped reading it. The trees it used to tell apart are still planted here, "
+            "because the one holding a manifest with a `build` script is the one a surviving copy "
+            "of the probe would answer `true` over.",
             "",
             f"The comparison is over the whole mapping, so {list(WITHDRAWN)} showing up here is a "
             "probe that outlived its reader rather than a harmless extra line.",
@@ -843,27 +925,31 @@ def test_every_detect_probe_answers_true_over_a_tree_that_holds_what_its_job_run
 def test_the_detect_job_publishes_no_probe_that_nothing_reads(
     ci_workflow_path: Path, ci_workflow: dict[str, Any]
 ) -> None:
-    """E0-40 decision 5: the `e2e` output goes, and the probe list is closed.
+    """E0-40 decision 5 and E1-04: a probe goes when its last reader does.
 
     PR #61 made the Playwright gate unconditional on the specs being present —
     they are committed, so §9.2's both-doors requirement is enforced rather than
-    tolerated — and `detect.outputs.e2e` has had no reader since. An emitted
-    boolean that nothing consults is worse than an unused variable: it is a probe
-    whose wrongness produces no symptom at all, so nobody finds out it is wrong,
-    and the next gate wired to it inherits an answer nothing has ever checked.
-    E0-36 found this one wrong; the repair landed, and then its reader went away.
+    tolerated — and `detect.outputs.e2e` had no reader after it. E1-04 does the
+    same to `frontend`: it lands the scaffold and makes the production build and
+    the bundle budget enforcing, and those two were the whole of that boolean's
+    readership. An emitted boolean that nothing consults is worse than an unused
+    variable: it is a probe whose wrongness produces no symptom at all, so nobody
+    finds out it is wrong, and the next gate wired to it inherits an answer
+    nothing has ever checked. E0-36 found `evals` and `e2e` wrong; the repair
+    landed, and then one of the readers went away.
 
-    The set is asserted closed in both directions. A missing `node` is the gate
-    that cannot run; a lingering `e2e` is the probe nobody reads; an output nobody
-    here has heard of is a decision that was made without the ticket, and it fails
-    with the name in the message rather than passing quietly.
+    The set is asserted closed in both directions. A missing `node` is a gate that
+    cannot run; a lingering `e2e` or `frontend` is a probe nobody reads; an output
+    nobody here has heard of is a decision that was made without the ticket, and
+    it fails with the name in the message rather than passing quietly.
 
-    **The mutation this survives:** leave the `e2e` line in the job's `outputs:`
-    block after deleting the probe that fills it, which is the half of the removal
-    that is easy to miss and leaves every reader of it holding an empty string —
-    and `'' != 'true'`, so a gate guarded that way silently runs on everything.
-    **The near miss that must stay green:** a probe whose *implementation* changed
-    while its name did not, since this asserts names and readers rather than shell.
+    **The mutation this survives:** leave the withdrawn line in the job's
+    `outputs:` block after deleting the probe that fills it, which is the half of
+    the removal that is easy to miss and leaves every reader of it holding an empty
+    string — and `'' != 'true'`, so a gate guarded that way silently runs on
+    everything. **The near miss that must stay green:** a probe whose
+    *implementation* changed while its name did not, since this asserts names and
+    readers rather than shell.
     """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
     job = jobs.get(DETECT_JOB)
@@ -875,18 +961,20 @@ def test_the_detect_job_publishes_no_probe_that_nothing_reads(
     published = set((job.get("outputs") or {}).keys())
     assert published == set(PROBES), "\n".join(
         [
-            f"The `{DETECT_JOB}` job publishes {sorted(published)} and E0-40 settles "
-            f"{sorted(PROBES)}.",
+            f"The `{DETECT_JOB}` job publishes {sorted(published)} and E0-40 and E1-04 between "
+            f"them settle {sorted(PROBES)}.",
             f"  missing:  {sorted(set(PROBES) - published) or 'nothing'}",
             f"  lingering: {sorted(published - set(PROBES)) or 'nothing'}",
             "",
-            f"{list(WITHDRAWN)} is the one to expect here. It has been consumed by nothing since "
-            "PR #61 made the Playwright gate unconditional, and E0-40 decision 5 removes it with "
-            "this test in the same change.",
+            f"{list(WITHDRAWN)} are the ones to expect here. `e2e` has been consumed by nothing "
+            "since PR #61 made the Playwright gate unconditional (E0-40 decision 5); `frontend` "
+            "loses its last two readers in E1-04, which lands the scaffold and makes the "
+            "production build and the bundle budget enforcing.",
             "",
-            f"`{NODE}` missing is the other direction and the more expensive one: the four gates "
-            "E0-40 exists for have nothing to wait on, so either they run unconditionally or they "
-            "go on asking `frontend` — and this file's history says the second is what happens.",
+            f"`{NODE}` missing is the other direction: `npm audit` and the licence scan have "
+            "nothing to wait on, so either they run unconditionally — a decision, and one for a "
+            "ticket rather than for a deletion — or they go back to asking `frontend`, and this "
+            "file's history says the second is what happens.",
         ]
     )
 
@@ -911,19 +999,28 @@ def test_the_detect_job_publishes_no_probe_that_nothing_reads(
 def test_the_node_facing_gates_wait_on_the_root_package_manifest(
     ci_workflow_path: Path, ci_workflow: dict[str, Any]
 ) -> None:
-    """E0-40's scope: audit, licence scan, tsc and eslint run at the root, on the `node` probe.
+    """E0-40's scope, as E1-04 leaves it: audit and the licence scan wait on `node`.
 
     This is the half the probe cannot assert about itself. A `node` output emitted
-    by a correct probe and read by nothing leaves all four gates exactly where they
+    by a correct probe and read by nothing leaves the gates exactly where they
     are — waiting on a manifest that does not exist, printing a notice, reporting
     success — with the battery above fully green. That is `docs/MISTAKES.md` entry
     2: the fix ships, and nothing asserts the thing the fix was for.
 
     Two properties per gate, and both come from the ticket rather than from the
     file: it consults `node`, and it does not consult `frontend`; and it runs at
-    the repository root, where the manifest, the lockfile and the TypeScript
-    actually are. A step that kept `working-directory: frontend` while reading
-    `node` would install and audit nothing, because the directory is not there.
+    the repository root, where the manifest and the lockfile actually are. A step
+    that kept `working-directory: frontend` while reading `node` would install and
+    audit the wrong package.
+
+    **`tsc` and `eslint` are no longer in this set, and E1-04 is why.** They were
+    tolerant gates over TypeScript that did not exist; E1-04 lands the application
+    they check, and ADR 0002 makes removing a tolerance an acceptance criterion of
+    the ticket that lands the code. They now run unconditionally, and
+    `tests/unit/test_the_frontend_gates_stopped_being_tolerant.py` asserts that the
+    job holding them consults no probe at all. They stay in the canary below,
+    because a gate that has vanished from the workflow altogether is a finding
+    whichever set it belongs to.
 
     **The gates are found by the command that runs them, not by the job that holds
     them.** E0-40 does not settle whether `lint-frontend` keeps its name once tsc
@@ -932,11 +1029,11 @@ def test_the_node_facing_gates_wait_on_the_root_package_manifest(
     something first, so a tool spelled a new way — `npm run typecheck` for `tsc` —
     fails as an unfindable gate rather than as a gate that passed unexamined.
 
-    **The mutation this survives:** add the `node` probe and change nothing else,
-    which is a green pipeline whose four gates still do not run. **The near miss
-    that must stay green:** any job layout at all — one Node job or four, the
-    conditions on the steps or on a wrapper — since this asks which probe the step
-    that runs the tool consults.
+    **The mutation this survives:** point `npm audit` or the licence scan back at
+    `frontend`, or drop their guard entirely while the probe stays — a pipeline
+    whose remaining probe decides nothing. **The near miss that must stay green:**
+    any job layout at all — one Node job or four, the conditions on the steps or on
+    a wrapper — since this asks which probe the step that runs the tool consults.
     """
     jobs = jobs_of(ci_workflow, ci_workflow_path)
 
@@ -957,13 +1054,13 @@ def test_the_node_facing_gates_wait_on_the_root_package_manifest(
             "is spelled a new way and the pattern needs pointing at it.",
             "",
             "This is the canary rather than a formality: with the patterns matching nothing, a "
-            "workflow in which all four gates still asked `frontend` would pass this test.",
+            "workflow in which every gate still asked `frontend` would pass this test.",
         ]
     )
 
     wrong_probe: list[str] = []
     wrong_directory: list[str] = []
-    for tool, pattern in RUNS_AT_THE_ROOT.items():
+    for tool, pattern in WAITS_ON_THE_NODE_PROBE.items():
         for job_name, label, step in steps_running(jobs, pattern):
             read = detect_outputs_read_by(step)
             if NODE not in read:
@@ -986,18 +1083,20 @@ def test_the_node_facing_gates_wait_on_the_root_package_manifest(
             *wrong_probe,
             "",
             "E0-40 decision 1: the `node` probe — `[ -f package.json ]` at the repository root — "
-            "gates `npm audit`, the licence scan, `tsc` and `eslint`. PR #61 committed the "
-            "manifest, the lockfile and the TypeScript those four read; every one of them went on "
-            "asking about `frontend/package.json`, which is not there and is not due until E1.",
+            "gates `npm audit` and the licence scan. PR #61 committed the manifest and the "
+            "lockfile those two read; both went on asking about `frontend/package.json`, which "
+            "was not there and was not due until E1.",
             "",
             "The failure has no symptom, which is why it survived a review: each step switches "
             "itself off by its own `if:`, the notice step runs in its place, and the job reports "
-            "**success**. `npm audit` runs clean at the root today — CI simply never calls it.",
+            "**success**. `npm audit` ran clean at the root the whole time — CI simply never "
+            "called it.",
             "",
-            "A step consulting no probe at all is reported here too. Running the four "
-            "unconditionally is a different decision from the one the ticket settled, and one the "
-            "E1 tree would have to live with; if it is the right one, it belongs in the ticket "
-            "rather than in a condition nobody wrote.",
+            "A step consulting no probe at all is reported here too. Running these two "
+            "unconditionally is a different decision from the one E0-40 settled, and it is the "
+            "decision E1-04 takes for `tsc` and `eslint` — deliberately, in a ticket, with the "
+            "tolerance branch removed in the same change. If it is right for the supply-chain "
+            "gate as well, it belongs in a ticket rather than in a condition nobody wrote.",
         ]
     )
 
@@ -1006,84 +1105,30 @@ def test_the_node_facing_gates_wait_on_the_root_package_manifest(
             "These gates wait on the root manifest and then run somewhere else:",
             *wrong_directory,
             "",
-            "The manifest, the lockfile and the TypeScript are at the repository root. A step "
-            "that reads `node` and then changes into `frontend/` fails outright once the probe "
-            "answers true, because that directory does not exist until E1 — a red rather than a "
-            "silence, but a red produced by a half-applied split.",
+            "The manifest and the lockfile these two read are at the repository root, and the "
+            "root lockfile is the whole workspace's resolution (ADR 0083). An audit or a licence "
+            "scan run inside the member package is asking about a subset of what ships.",
             "",
-            "A gate that genuinely needs to read the frontend tree as well should say so in a "
-            "step of its own, waiting on the `frontend` probe.",
+            "A gate that genuinely needs to work inside the frontend tree should say so in a step "
+            "of its own — which is what the fast gate's workspace checks do, and they wait on no "
+            "probe at all.",
         ]
     )
 
 
-def test_the_frontend_build_gates_still_wait_on_the_frontend_package_manifest(
-    ci_workflow_path: Path, ci_workflow: dict[str, Any]
-) -> None:
-    """The other half of the split, and the near miss the test above cannot see.
-
-    `npm run build` and the bundle budget are about a frontend that does not exist
-    yet, and E0-40 leaves them exactly where they are: waiting on
-    `frontend/package.json`, correctly answering false, correctly printing their
-    notice. The split is only honest if the two probes stay different questions.
-
-    **This is a control, not a criterion of its own**, and it is here because of
-    how this file gets edited. E0-38's second review pass found that adding a guard
-    to `frontend-build` had been done with a blanket edit over
-    `if: needs.detect.outputs.frontend == 'true'` — a string that appears in three
-    jobs — which gave `lint-frontend` four guards it could not evaluate. E0-40 asks
-    for exactly that string to be changed in some of those places and not others.
-    A blanket rename passes every assertion in the test above and points the
-    production build at a manifest that is not the one it builds from.
-
-    **The mutation this survives:** rename every `detect.outputs.frontend` to
-    `detect.outputs.node`. **The near miss that must stay green:** a step that
-    reads both because it genuinely needs both — nothing here forbids that for
-    these two gates, only the reverse.
-    """
-    jobs = jobs_of(ci_workflow, ci_workflow_path)
-
-    unfindable = [
-        f"  {tool} — nothing in {ci_workflow_path.name} runs {pattern.pattern!r}"
-        for tool, pattern in RUNS_IN_THE_FRONTEND_TREE.items()
-        if not steps_running(jobs, pattern)
-    ]
-    assert not unfindable, "\n".join(
-        [
-            "These gates could not be found in the workflow, so this control asserted nothing:",
-            *unfindable,
-            "",
-            "This test is what stops a blanket rename of `detect.outputs.frontend` passing as a "
-            "probe split, and it can only do that while it can still find the two gates that must "
-            "not be renamed.",
-        ]
-    )
-
-    renamed: list[str] = []
-    for tool, pattern in RUNS_IN_THE_FRONTEND_TREE.items():
-        for job_name, label, step in steps_running(jobs, pattern):
-            read = detect_outputs_read_by(step)
-            if FRONTEND not in read:
-                renamed.append(
-                    f"  {job_name} / {label!r} runs {tool} and consults "
-                    f"{sorted(read) or 'no probe at all'}"
-                )
-
-    assert not renamed, "\n".join(
-        [
-            f"These gates no longer wait on the `{FRONTEND}` probe:",
-            *renamed,
-            "",
-            "E0-40 decision 1: 'the production-build and bundle-budget gates keep waiting on "
-            "`frontend/package.json`, which is still legitimately absent until E1'. Pointing them "
-            "at the root manifest makes them run on every pull request from now on, in a "
-            "directory that holds no application to build.",
-            "",
-            "The likely cause is a blanket edit. The string this ticket changes appears in "
-            "several jobs and only some of them are its subject — which is how E0-38's second "
-            "review pass found four unevaluable guards on `lint-frontend`.",
-        ]
-    )
+# E1-04 removed a test here, and the reason belongs in the file rather than only
+# in a pull request. `test_the_frontend_build_gates_still_wait_on_the_frontend_package_manifest`
+# asserted that the production build and the bundle budget go on waiting on the
+# `frontend` probe. It was a control against a blanket edit — E0-38's second
+# review pass found `if: needs.detect.outputs.frontend == 'true'` edited across
+# three jobs at once, and a blanket rename would have passed every other assertion
+# in this module. E1-04 withdraws that probe, so the property it held is now false
+# by decision, and the same hazard is covered from the other side without a second
+# copy of it: `test_the_detect_job_publishes_no_probe_that_nothing_reads` fails if
+# anything in the workflow still reads `detect.outputs.frontend`, which is what a
+# blanket rename leaves behind, and
+# `tests/unit/test_the_frontend_gates_stopped_being_tolerant.py` requires those two
+# gates to consult no probe at all and to still run.
 
 
 def test_the_node_facing_gates_short_circuit_on_a_documentation_only_diff(
@@ -1330,11 +1375,16 @@ def test_the_makefile_node_targets_probe_the_root_manifest_too() -> None:
 
     **The mutation this kills:** put `frontend/` back in front of the manifest in
     any one of the four recipes while `ci.yml` keeps the root probe. **The near
-    miss that must stay green:** `frontend-build`, which must go on naming
-    `frontend/package.json` — and which is also this test's control, because a
-    reader that could not see a qualified path would report all four targets clean
-    without having read anything (`docs/MISTAKES.md` entry 35: require the guard to
-    find the thing on a subject that certainly has it).
+    miss that must stay green:** any spelling of the root probe — `[ -f
+    package.json ]`, `test -f package.json`, a shell function taking the path.
+
+    **The control moved in E1-04.** It used to be `frontend-build`, the one recipe
+    that certainly named a qualified manifest, because a reader blind to qualified
+    paths would report all four targets clean having read nothing
+    (`docs/MISTAKES.md` entry 35). That ticket deletes the probe out of that recipe,
+    so the reader is exercised against the condition as it stood instead — copied
+    whole, entry 3 — which keeps the control working after the tree has stopped
+    holding an example of the thing it looks for.
     """
     assert MAKEFILE.is_file(), (
         f"{MAKEFILE} does not exist, so nothing runs the pipeline's gates locally and CLAUDE.md's "
@@ -1349,12 +1399,14 @@ def test_the_makefile_node_targets_probe_the_root_manifest_too() -> None:
         "than the Makefile having been emptied."
     )
 
-    control = recipes.get(MAKEFILE_FRONTEND_TARGET, "")
-    assert qualified_manifests(control), (
-        f"The `{MAKEFILE_FRONTEND_TARGET}` recipe names no manifest reached through a directory, "
-        "and it is supposed to name `frontend/package.json` — E0-40 leaves the production build "
-        "and the bundle budget waiting for the E1 scaffold.\n"
-        f"  read: {control or 'no recipe at all'}\n"
+    assert qualified_manifests(MAKEFILE_PROBE_AS_IT_STOOD) == [
+        "frontend/package.json",
+        "frontend/package.json",
+    ], (
+        "The reader does not see a manifest reached through a directory in the condition E1-04 "
+        "deletes, copied whole out of the `frontend-build` recipe:\n"
+        f"  {MAKEFILE_PROBE_AS_IT_STOOD}\n"
+        f"  read: {qualified_manifests(MAKEFILE_PROBE_AS_IT_STOOD)}\n"
         "\n"
         "This is the control for the assertions below rather than a criterion of its own. They "
         "say the four node targets name no qualified manifest, and a reader that cannot see a "
@@ -1418,6 +1470,179 @@ def test_the_makefile_node_targets_probe_the_root_manifest_too() -> None:
             "`.github/workflows/ci.yml` the workflow is right and the Makefile is the bug. A "
             "Makefile that silently skips what CI runs is that disagreement in the direction "
             "nobody sees until CI is red on somebody else's branch.",
+        ]
+    )
+
+
+def test_the_makefile_frontend_build_runs_the_gate_rather_than_probing_for_it() -> None:
+    """E1-04, the Makefile's copy: the production build and the bundle budget stop being optional.
+
+    The recipe carries the workflow's tolerance in shell — `[ -f
+    frontend/package.json ] && grep -Eq '"build"…'`, and a `skip` notice in the
+    else — because CLAUDE.md requires `make ci` to run the gates the workflow runs.
+    When the workflow's condition goes, this one has to go with it, and the
+    Makefile is the worse of the two to forget: a workflow that skips a gate at
+    least skips it on a pull request somebody looks at, while `make ci` prints its
+    skip line to the one person who was told to run it before pushing and reports
+    success.
+
+    **Both halves are asserted, and the second is the one a careless removal
+    loses.** The probe goes, *and* the build and the budget stay — a recipe that
+    lost its condition and its body together passes every "no longer probes"
+    assertion in this module perfectly.
+
+    **The mutation this kills:** delete the `if`/`else` and the commands inside it
+    together, or leave the `grep` in place after the workflow's flip. **The near
+    miss that must stay green:** any spelling of the two commands, in any order,
+    and a `$(PYTHON)` or a `python3` in front of the budget check — this reads what
+    is run, not how it is written.
+    """
+    assert MAKEFILE.is_file(), (
+        f"{MAKEFILE} does not exist, so CLAUDE.md's 'run `make ci` before pushing' names a file "
+        "that is gone."
+    )
+
+    targets = makefile_targets(MAKEFILE.read_text(encoding="utf-8"))
+    target = targets.get(MAKEFILE_FRONTEND_TARGET)
+    assert target is not None, (
+        f"There is no `{MAKEFILE_FRONTEND_TARGET}` target in {MAKEFILE.name} (there are "
+        f"{sorted(targets)}). It is the local half of the production-build and bundle-budget "
+        "gates, and `make build-gates` names it."
+    )
+
+    recipe = target.script
+    unrun = [
+        what
+        for what, pattern in (
+            ("the production build", MAKEFILE_PRODUCTION_BUILD),
+            ("the bundle budget", MAKEFILE_BUNDLE_BUDGET),
+        )
+        if not pattern.search(recipe)
+    ]
+    assert not unrun, "\n".join(
+        [
+            f"The `{MAKEFILE_FRONTEND_TARGET}` recipe no longer runs {unrun}:",
+            f"  {recipe or 'no recipe at all'}",
+            "",
+            "This is the control for the assertion below rather than an afterthought. That one "
+            "says the recipe probes for no manifest, and a recipe that runs nothing at all "
+            "satisfies it completely — which is what deleting the whole `if` block leaves behind.",
+        ]
+    )
+
+    probed = qualified_manifests(recipe)
+    assert not probed, "\n".join(
+        [
+            f"The `{MAKEFILE_FRONTEND_TARGET}` recipe still probes {probed} before it runs:",
+            f"  {recipe}",
+            "",
+            "E1-04 makes the production build and the bundle budget enforcing, and ADR 0002 makes "
+            "removing the tolerance an acceptance criterion of the ticket that lands the code. "
+            "The workflow's copy of this condition goes in the same change; a Makefile that keeps "
+            "it prints its skip line and exits 0, so `make ci` is green over two gates it never "
+            "ran.",
+            "",
+            "ADR 0083 rejected the mirror image of this — 'a gate turned on and made meaningless' "
+            "— for the same pair of gates. Left in place after the flip, the condition is a "
+            "switch nobody is watching: the manifest is committed and declares a build, so it is "
+            "true on every checkout until somebody renames a script.",
+        ]
+    )
+
+
+def test_make_ci_runs_the_frontend_checks_the_workflow_runs(
+    ci_workflow_path: Path, ci_workflow: dict[str, Any]
+) -> None:
+    """The second copy again, for the two checks E1-04 adds — `docs/MISTAKES.md` entry 13.
+
+    E1-04 gives the fast gate two new steps: `npm run typecheck` and `npm run lint`
+    in the frontend workspace, which is how `tsc` and `eslint` come to read the
+    application rather than only `playwright.config.ts` and the §9.2 specs. The
+    Makefile is the other place those gates are run from, and CLAUDE.md is explicit
+    about the relationship: "`make ci` runs the same gates as
+    `.github/workflows/ci.yml`… when the two drift, the workflow is the source of
+    truth and this file is the bug."
+
+    This is the same hazard this module already guards for the probe itself, and it
+    has already happened twice in this pair of files — the `mock-lms` health wait
+    that took two tickets to reach the Makefile, and the `npm ci` before `npx` that
+    the workflow had and the Makefile did not. A check in one caller and not the
+    other is worse than one in neither, because the person who runs `make ci` before
+    pushing is told the tree is clean by a gate that never ran.
+
+    **The requirement is derived from the workflow rather than written down here.**
+    What the Makefile must run is whatever the fast gate runs; the workflow half is
+    required to be non-empty first, so that a fast gate which never gained the steps
+    fails as a workflow finding rather than as a silent pass here.
+
+    **Where the recipes live is not asserted** — `lint`, `typecheck`, a target of
+    their own — only that `make ci` reaches them. A recipe outside that closure is
+    a check nobody is told to run.
+
+    **What this cannot see**, said rather than implied away: a root package script
+    of the same name would satisfy it. The workflow half requires the step to name
+    the workspace it checks; this half asks only that the command is reached, since
+    the Makefile may legitimately spell it `--workspaces` and run every member.
+
+    **The mutation this kills:** add the two steps to `ci.yml` and stop. **The near
+    miss that must stay green:** any placement and any flag spelling, and running
+    both from one recipe.
+    """
+    assert (
+        MAKEFILE.is_file()
+    ), f"{MAKEFILE} does not exist, so there is no second copy of these gates to keep in step."
+
+    jobs = jobs_of(ci_workflow, ci_workflow_path)
+    workflow_text = "\n".join(
+        line
+        for job in jobs.values()
+        for script in run_scripts(job)
+        for line in command_lines(script)
+    )
+
+    in_the_workflow = [
+        what for what, pattern in MAKEFILE_WORKSPACE_CHECKS.items() if pattern.search(workflow_text)
+    ]
+    assert in_the_workflow, "\n".join(
+        [
+            f"{ci_workflow_path.name} runs neither of the frontend workspace checks, so this test "
+            "asserted nothing about the Makefile.",
+            "",
+            "E1-04 adds `npm run typecheck` and `npm run lint` for the frontend workspace to the "
+            "fast gate. Until the workflow runs them there is nothing for `make ci` to keep in "
+            "step with, and `test_the_fast_gate_type_checks_and_lints_the_frontend_workspace` is "
+            "where that failure is diagnosed.",
+        ]
+    )
+
+    targets = makefile_targets(MAKEFILE.read_text(encoding="utf-8"))
+    reachable = reachable_from(MAKEFILE_PIPELINE_TARGET, targets)
+    assert len(reachable) > 1, (
+        f"`make {MAKEFILE_PIPELINE_TARGET}` reaches {sorted(reachable)}, which is not a pipeline. "
+        "Either the target is gone or the prerequisite walk cannot read this Makefile, and either "
+        "way the assertion below would report every check missing."
+    )
+
+    reachable_recipes = "\n".join(targets[name].script for name in sorted(reachable))
+    missing = [
+        f"  {what} — nothing `make {MAKEFILE_PIPELINE_TARGET}` runs matches {pattern.pattern!r}"
+        for what, pattern in MAKEFILE_WORKSPACE_CHECKS.items()
+        if what in in_the_workflow and not pattern.search(reachable_recipes)
+    ]
+
+    assert not missing, "\n".join(
+        [
+            f"`make {MAKEFILE_PIPELINE_TARGET}` does not run checks the workflow's fast gate runs:",
+            *missing,
+            f"  reachable targets: {sorted(reachable)}",
+            "",
+            "CLAUDE.md: run `make ci` before pushing, and where it disagrees with the workflow "
+            "the workflow is right and the Makefile is the bug. The disagreement this produces "
+            "is invisible in the direction that matters — the local run passes, and the pull "
+            "request is where the type error or the lint error appears.",
+            "",
+            "Where the two commands go is not this test's business. That `make ci` reaches them "
+            "is.",
         ]
     )
 

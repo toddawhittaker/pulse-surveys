@@ -104,3 +104,46 @@ Every E1 pull request that defers something adds it here in the same PR.
    entry 3's "done when", unchanged.
    **Owner:** whichever epic is running when that range widens; it is no longer
    E1's to wait for.
+
+## From E1-04 — frontend scaffold and the five empty landing views
+
+1. **The three webfonts are declared and not loaded.** `design/tokens.css`
+   names Literata, Schibsted Grotesk and Spline Sans Mono with system-safe
+   fallbacks (`Georgia, serif`, `'Helvetica Neue', sans-serif`,
+   `ui-monospace, monospace`), and nothing fetches the real faces — no
+   `<link>` in `frontend/index.html`, no `@font-face`, no self-hosted files.
+   The five landing views therefore render in the fallbacks today.
+
+   This is E0-18's reasoning carried forward rather than a new one: Pulse
+   renders inside somebody's LMS in an iframe, so a Google Fonts request from
+   here is a third-party fetch made on a student's behalf from inside their
+   institution's page, and choosing between self-hosting the files and going
+   without is a decision that deserves a real screen to be judged against.
+   `docs/DESIGN_BRIEF.md` treats the type contrast as load-bearing — "how the
+   tool reads as its own considered thing inside the host" — so going without
+   is a real cost and not the safe default it looks like.
+
+   **Done when** the strategy is decided (self-host the four faces in the
+   bundle, or ship the fallbacks and say so in the brief) and built, with
+   E2's first real screen, where there is something to look at while
+   deciding. Whichever way it goes, `design/tokens.css` stays the place the
+   families are named.
+
+2. **The application sends no security response headers.** No route sets
+   `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, or
+   a framing policy; `backend/app/main.py` carries no header middleware at
+   all. This is pre-existing and app-wide rather than this ticket's doing —
+   E1-04 is simply the first ticket to serve real HTML and JavaScript from
+   the app factory, which is what makes the absence worth recording.
+
+   The header set has to be designed rather than copied from a hardening
+   checklist: Pulse renders inside an LMS iframe, so the usual first move —
+   refuse framing outright — would break every launch. `frame-ancestors` has
+   to admit the platforms that may frame the app, and the CSP has to allow
+   what the bundle legitimately loads while still refusing inline script.
+
+   **Done when** the app factory attaches a deliberate header set to every
+   response — a CSP, `X-Content-Type-Options: nosniff`, a `Referrer-Policy`,
+   and a `frame-ancestors` directive naming who may frame the app — with a
+   test pinning each header. Scheduled before E2 puts real survey content in
+   the SPA.

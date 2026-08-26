@@ -28,8 +28,9 @@ same PR, and the end of the epic runs a cleanup pass over the file.
 
 Every ticket header carries a `**Lane:**` field (CLAUDE.md, "How a ticket is
 built: two lanes"; adopted mid-epic by `process/two-lane-testing`). In this
-breakdown **E1-02, E1-03, E1-04 and E1-07 ride the light lane**; every other
-ticket is heavy — including E1-14 and E1-15, whose ⚠ lives in their
+breakdown **E1-02, E1-03 and E1-07 ride the light lane** (E1-04 was listed
+light here and re-laned heavy by Todd on 2026-08-25, before its build started;
+the ticket header is the authority); every other ticket is heavy — including E1-14 and E1-15, whose ⚠ lives in their
 Security-relevant lines rather than in the table below. A missing field means
 heavy.
 

@@ -1,0 +1,41 @@
+{
+  // The frontend's own compiler configuration. It references nothing outside
+  // this package and nothing outside it references this: the root
+  // `tsconfig.json` covers `playwright.config.ts` and the SPEC §9.2 specs, which
+  // is a different job for a different runtime, and E0-40 is the ticket that
+  // learned what happens when one checker is pointed at the wrong tree.
+  //
+  // The compiler itself is the root package's `typescript`, resolved by npm
+  // workspace hoisting (ADR 0083). One compiler for the whole repository, so
+  // `npm run typecheck --workspace frontend` and the root `npx tsc --noEmit`
+  // cannot come to disagree about the language.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // `vite/client` is what declares the side-effect import of a stylesheet and
+    // the other asset module shapes Vite resolves. Without it `import
+    // './styles.css'` is an error about a module with no type declarations,
+    // which is TypeScript being right about a file it cannot know Vite handles.
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+
+    // `noEmit` because Vite compiles: `tsc` is only ever a checker here, exactly
+    // as it is at the repository root.
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "vite.config.ts"]
+}
