@@ -323,3 +323,12 @@ part of the guard: pass `--` before any list that came from a diff or a glob, an
 refuse leading-dash arguments in the script too. A decision made before your logic
 runs is still your decision. Test the near miss that distinguishes the fix from
 doing nothing.
+
+## 39. A gate run was invalidated by edits that landed while it ran
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
+
+**Rule.** While a gate runs, the tree it runs in is read-only — no edits, no
+checkouts, no restores. A verdict is valid only for the tree it started on; if
+the tree moved mid-run, the verdict is void and the run is repeated, whatever it
+printed.
