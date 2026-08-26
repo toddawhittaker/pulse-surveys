@@ -44,6 +44,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     Computed,
     Date,
     Enum,
@@ -297,6 +298,24 @@ class Course(UuidPrimaryKey, Base):
     )
     lms_number: Mapped[str] = mapped_column(Text, nullable=False)
     lms_title: Mapped[str] = mapped_column(Text, nullable=False)
+    # **Pulse's own record of where `lms_title` came from** (E1-10, ADR 0091), and
+    # the one column on this table that carries no `lms_` prefix and is not
+    # derived. `lms_title` is `NOT NULL` and a platform is entitled to send a
+    # context with no title at all, so launch-time ingestion writes "PREFIX
+    # NUMBER" — "BIOL 215" — and sets this. It is what lets a later launch replace
+    # a guess with the platform's real title and never replace a real title with a
+    # guess; unmarked, the two are indistinguishable and every correction is
+    # somebody's judgement call.
+    #
+    # `false` by default, so a row written by any other path — the seed, a
+    # migration — claims the title it holds is the platform's, which is true of
+    # every row that existed before this column did. Its `PULSE_OWNED_COLUMNS`
+    # entry in `tests/unit/test_no_lms_owned_table_carries_an_unmarked_column.py`
+    # is what stops E0-35's rule-1 sweep reading it as an LMS-owned column nobody
+    # marked.
+    title_is_fallback: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     level: Mapped[CourseLevel] = mapped_column(
         Enum(CourseLevel, name="course_level"),
         Computed(COURSE_LEVEL_DERIVATION, persisted=True),
@@ -398,3 +417,21 @@ class Section(UuidPrimaryKey, Base):
     # to guess.
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     modality: Mapped[Modality] = mapped_column(Enum(Modality, name="modality"), nullable=False)
+    # **SPEC §7.3's stored roster service address**, arriving with E1-10. "The
+    # roster service address arrives as a claim on that launch and is stored,
+    # which is what gives the scheduled job the discovery it otherwise lacks — it
+    # has no way of its own to learn that a section exists."
+    #
+    # LMS-owned and so `lms_`-prefixed (ADR 0014): the platform publishes the
+    # address in its Names and Role Provisioning Service claim and Pulse only
+    # keeps what it was handed. Written on a **staff** launch only — §7.3 makes
+    # the launching person's role the authorization for the trigger — through
+    # `app.services.provisioning`, which is the sanctioned writer, and read by
+    # E1-11's sync.
+    #
+    # Nullable, and NULL is §7.3's never-synced state rather than a missing
+    # value: a section discovered before any staff launch advertised a service,
+    # or a platform that publishes none, has no address to hold and a sync has
+    # nothing to call. A fabricated default would be an address pointing nowhere
+    # that reads as configuration.
+    lms_context_memberships_url: Mapped[str | None] = mapped_column(Text, nullable=True)

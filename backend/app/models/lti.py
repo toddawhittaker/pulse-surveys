@@ -39,6 +39,14 @@ credential-equivalent and unconstrained — it decides which keys may sign an
 accepted launch, and it is fetched server-side on every launch — and E1 is the
 epic that writes and fetches it, so E1 says what it may hold.
 
+**The launch-time records live here too, beside the registration they are about.**
+`LtiLaunchNonce` and `LtiLaunchState` are E1-08's replay ledger and in-flight
+handshake, and `LaunchDefect` is E1-10's append-only record of a launch whose
+context could not be ingested. None of the three is a registration, and all three
+are keyed by what a launch carries — an issuer, a deployment, a nonce, a state —
+so SPEC §13's "one module per aggregate" puts them with the tables those values
+resolve against rather than with the org hierarchy a defect happens to name.
+
 **Nothing here is marked LMS-owned.** An `lms_` prefix (ADR 0014) marks a column
 Pulse may never edit. A registration is typed into the admin console by an
 administrator (SPEC §2, Admin: "LTI registration"), so every column in this
@@ -49,10 +57,11 @@ chooses it.
 
 import ipaddress
 from datetime import datetime
+from enum import StrEnum
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, Text, UniqueConstraint, text
+from sqlalchemy import Enum, ForeignKey, Index, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 # ADR 0077's host vocabulary, imported rather than re-derived. Each of these
@@ -76,6 +85,8 @@ from app.config import (
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 __all__ = [
+    "LaunchDefect",
+    "LaunchDefectKind",
     "LtiDeployment",
     "LtiLaunchNonce",
     "LtiLaunchState",
@@ -522,3 +533,95 @@ class LtiLaunchState(UuidPrimaryKey, Base):
     # When this handshake may be purged: a few minutes, because a login a browser
     # follows completes at once. A row past this is a launch that never came back.
     expires_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
+
+
+class LaunchDefectKind(StrEnum):
+    """The five ways launch-time ingestion refuses a context (E1-10, ADR 0091).
+
+    A closed set, held as a Postgres enum type rather than as free text, for the
+    reason `app.models.org`'s two enums give: the set belongs in the database
+    rather than in a convention every later reader has to remember. E11 builds
+    the admin surface that reads this table, and an open column would leave it
+    rendering whatever string the next writer invents.
+
+    **The member values are the wire strings and the labels in the database.**
+    They are what a record says and what a hand-written `INSERT` writes, so the
+    type is declared with `values_callable` rather than storing the member names
+    — the two spellings would otherwise differ by case alone, which is the kind
+    of difference nobody notices until a query returns nothing.
+    """
+
+    UNPARSEABLE_CONTEXT_LABEL = "unparseable_context_label"
+    UNKNOWN_PREFIX = "unknown_prefix"
+    OUT_OF_BAND_COURSE_NUMBER = "out_of_band_course_number"
+    NO_TERM_FOR_LAUNCH_DATE = "no_term_for_launch_date"
+    SECTION_CODE_UNDERIVABLE = "section_code_underivable"
+
+
+class LaunchDefect(UuidPrimaryKey, Base):
+    """One launch whose context could not be ingested — append-only (E1-10).
+
+    SPEC §7.3 makes a staff launch the thing that discovers a course and a
+    section; §8 and ADR 0015 make an out-of-band course number "a defect to see,
+    not a row to accept". A refusal that only skipped the write would leave an
+    instructor looking at a product with nothing in it and nobody able to say
+    why, which is `docs/MISTAKES.md` entry 26 — the fallback path swallowing the
+    defect that triggered it. This row is that visibility, and E11 reads it.
+
+    **A refusal here never fails the launch.** The person is authenticated and
+    lands; it is the context that could not be read, so their `user` row is
+    written and the course and section are not.
+
+    **The field set is exactly five values beside the key, and the omissions are
+    the point** (SPEC §10: no student personal information in logs). A defect is a
+    fact about a *course* — which platform, which deployment, which context, when,
+    and which rule fired. Never the `sub` claim, which E1-01 keeps out of every
+    view and which is the join key every response in the product hangs from; never
+    a name or an email; never the claims payload, which carries both. The
+    enumeration is asserted as an equality in
+    `tests/integration/test_launch_provisioning_defects.py`, in both directions, so
+    a sixth column is a conversation rather than a commit.
+
+    **`context_id` is nullable and the other two are not.** LTI 1.3 requires `iss`
+    and the deployment claim on every launch and this tool refuses one without
+    them before provisioning is reached; the context claim itself is optional, and
+    a launch carrying none is an `unparseable_context_label` with nothing to name.
+
+    **`pulse_app` holds `INSERT` and nothing else** (`launch_defect_grants_v001.sql`).
+    Withholding `SELECT` keeps the read path E11's decision rather than this
+    ticket's — and it shapes the writer: without `SELECT` an `INSERT ... RETURNING`
+    is refused too, so the primary key is generated in Python, exactly as
+    `LtiLaunchNonce` above does and for the same reason.
+
+    **Not a person table.** No subject, no name, no address, so `PERSON_TABLES`
+    does not change and no identity-separated view is owed.
+    """
+
+    __tablename__ = "launch_defect"
+
+    # Which rule refused the launch. A record naming the wrong rule is worse than
+    # no record: it is a wrong answer to the one question E11's surface exists to
+    # ask, and it reads as though somebody checked.
+    kind: Mapped[LaunchDefectKind] = mapped_column(
+        Enum(
+            LaunchDefectKind,
+            name="launch_defect_kind",
+            values_callable=lambda enumeration: [member.value for member in enumeration],
+        ),
+        nullable=False,
+    )
+    # The `iss` claim: which platform the launch came from. Text, as every issuer
+    # in this module is — its length is the platform's business.
+    issuer: Mapped[str] = mapped_column(Text, nullable=False)
+    # The deployment claim: which installation of this tool inside that platform.
+    # Without it a defect can only say that something went wrong somewhere.
+    deployment_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # The context claim's `id` — the only handle E11 has on *which course* could
+    # not be read. Nullable: see the class docstring.
+    context_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When the launch was refused, defaulted to the insert moment so the writer
+    # supplies nothing and no caller can record a time of its own choosing.
+    # `AwareDateTime` refuses a naive value at the bind boundary (ADR 0019).
+    created_at: Mapped[datetime] = mapped_column(
+        AwareDateTime, nullable=False, server_default=text("now()")
+    )
