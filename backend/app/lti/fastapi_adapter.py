@@ -36,8 +36,6 @@ from pylti1p3.redirect import Redirect
 from pylti1p3.request import Request
 from starlette.responses import Response
 
-from app.config import Settings
-
 __all__ = [
     "IN_FLIGHT_COOKIE_PREFIX",
     "CookieJar",
@@ -65,9 +63,8 @@ class CookieJar:
     door makes a state and a nonce single-use.
     """
 
-    def __init__(self, request_cookies: Mapping[str, str], settings: Settings) -> None:
+    def __init__(self, request_cookies: Mapping[str, str]) -> None:
         self._incoming = dict(request_cookies)
-        self._settings = settings
         self._to_set: list[tuple[str, str, int | None]] = []
 
     def read(self, name: str) -> str | None:

@@ -119,7 +119,7 @@ async def login(request: Request, session: Session = Depends(get_session)) -> Re
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
-    jar = CookieJar(request.cookies, settings)
+    jar = CookieJar(request.cookies)
     try:
         url = await run_in_threadpool(begin_a_launch, session, settings, form, jar)
     except LaunchRefusedError as refusal:
@@ -150,7 +150,7 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
-    jar = CookieJar(request.cookies, settings)
+    jar = CookieJar(request.cookies)
     try:
         claims = await run_in_threadpool(
             verified_launch, session, request.app.state.http, settings, form, jar
