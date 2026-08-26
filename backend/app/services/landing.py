@@ -1,4 +1,4 @@
-"""Which empty view a verified token lands on, and the page it lands on — E0-18.
+"""Which view a verified token lands on, and the two pages a door still renders.
 
 This is the seam E0-18's boundary section asks for by name: "the seam to leave
 is one function that maps a verified token to a landing role, called from both
@@ -36,29 +36,37 @@ wrong: a web door reading the LTI claim would take role names from the vocabular
 the LMS controls. So the caller says which door it is, and that is one branch in
 each router rather than a second place the vocabularies are known.
 
-**Every page is empty, and that is the design rather than a stub.** SPEC §4.1's
-visibility invariants and §6.2's Care surface both say what these screens may
-show; E0 computes none of it. So each page carries a heading naming the view, one
-line saying nothing is here yet, and no identifier of any kind — not even the
-signed-in person's own, which would be legitimate and which nothing needs.
+**The five landing pages themselves are gone from here.** E0-18 rendered them
+inline, and both doors answer a `302` now — the launch door since E1-08, the web
+door since E1-09 — so the SPA renders what a person actually reads
+(`frontend/src/lib/landings.ts`, ADR 0086). This module kept the headings for as
+long as it served them and no longer: two copies of the same five headings, one
+of them rendered by nobody, is `docs/MISTAKES.md` entry 13 with the drift still
+ahead of it. What stays is the seam that chooses *which* view — and two pages
+that are still server-rendered because there is no SPA route for either: the
+refusal a door answers when it cannot admit somebody, and the calm page a
+cancelled web login gets.
 
-`@pytest.mark.invariant` tests hold four of the five pages to that, each asserted
-against the rendered body rather than a returned value, and each naming its own
-door's module:
+**Neither of those pages names anybody, and that is the design.** SPEC §4.1's
+visibility invariants and §6.2's Care surface say what any of this tool's screens
+may show, and a door that has refused somebody has computed nothing to show.
+`@pytest.mark.invariant` tests hold what a browser *receives* to that, at both
+doors — the redirect, its cookies, its body and the session token's own decoded
+claims, rather than a rendered body:
 
-  - the **leadership** and **Care** pages, in
-    `tests/integration/test_web_login_door.py`: neither page names anybody but
-    the person signed in;
-  - the **student** and **instructor** pages, in
-    `tests/integration/test_the_launch_views_name_nobody.py`: neither page names
+  - the **leadership** and **Care** landings, in
+    `tests/integration/test_web_login_door.py`: neither names anybody but the
+    person signed in;
+  - the **student** and **instructor** landings, in
+    `tests/integration/test_the_launch_views_name_nobody.py`: neither names
     anybody but the person who launched, and neither carries a section code, a
     course number or a roster count. E0-41 added that module because the launch
     door — the only door a student enters through — had carried no
     `invariant`-marked test at all, so the isolated §4.1 pass walked past the
-    student page entirely.
+    student surface entirely.
 
-The **admin** page has no `invariant`-marked test of its own; what covers it is
-the web door's ordinary dispatch tests.
+The **admin** landing has no `invariant`-marked test of its own; what covers it
+is the web door's ordinary dispatch tests.
 
 **This module is a named exception to E0-09's Care tripwire, and it was
 arbitrated rather than assumed.** E0-09 criterion 10 says no LTI claim and no
@@ -91,14 +99,7 @@ from enum import Enum, StrEnum, auto
 from html import escape
 from typing import Any
 
-__all__ = [
-    "Door",
-    "LandingRole",
-    "cancelled_page",
-    "landing_page",
-    "landing_role_for",
-    "refusal_page",
-]
+__all__ = ["Door", "LandingRole", "cancelled_page", "landing_role_for", "refusal_page"]
 
 # What a refused entry says. Deliberately one sentence and a reason, with no
 # retry link: there is nowhere for a browser to go from here that is not the
@@ -152,12 +153,18 @@ class Door(Enum):
 
 
 class LandingRole(StrEnum):
-    """The five empty views E0 can land somebody on, by the testid each carries.
+    """The five views a door can land somebody on, by the testid each carries.
 
-    The value *is* the `data-testid`, so the contract a Playwright spec addresses
-    and the contract this module implements are the same string rather than two
-    strings that have to agree. `mock-idp/app/pages.py` names its own controls
-    the same way and for the same reason.
+    The value *is* the `data-testid` the SPA's landing route puts on the page, so
+    the contract a Playwright spec addresses and the contract the frontend
+    implements are the same string rather than two strings that have to agree.
+    `mock-idp/app/pages.py` names its own controls the same way and for the same
+    reason.
+
+    The **name**, lowercased, is the route segment — `fragment_redirect` builds
+    `/app/<name>#session=` out of it and `frontend/src/router.tsx` mounts the same
+    segments (ADR 0086). So both halves of this enum are a contract with the
+    frontend: the name addresses the route and the value addresses the page.
     """
 
     STUDENT = "pulse-landing-student"
@@ -165,35 +172,6 @@ class LandingRole(StrEnum):
     LEADERSHIP = "pulse-landing-leadership"
     CARE = "pulse-landing-care"
     ADMIN = "pulse-landing-admin"
-
-
-# What each view is called and what it says while it is empty. One tuple per
-# role, so adding a view is one entry rather than a template plus a branch.
-VIEW_HEADINGS: dict[LandingRole, tuple[str, str]] = {
-    LandingRole.STUDENT: (
-        "Your weekly check-in",
-        "There is no survey open for you yet. When one opens, it appears here.",
-    ),
-    LandingRole.INSTRUCTOR: (
-        "Your section report",
-        "There are no responses to report yet. Reports appear here once a week has closed.",
-    ),
-    LandingRole.LEADERSHIP: (
-        "Your roll-up",
-        "There is nothing to roll up yet. Sections you oversee appear here once they report.",
-    ),
-    # §6.2 keeps the Care surface to the threat queue and nothing else, and E0
-    # builds no queue. One heading's worth of content, and the design brief gives
-    # this screen no motion at all.
-    LandingRole.CARE: (
-        "Community standards queue",
-        "Nothing needs attention.",
-    ),
-    LandingRole.ADMIN: (
-        "Pulse console",
-        "There is nothing to administer yet.",
-    ),
-}
 
 
 def stated_roles(claim: Any) -> tuple[str, ...]:
@@ -272,9 +250,10 @@ def landing_role_for(claims: Mapping[str, Any], *, door: Door) -> LandingRole | 
 
 # The page, as one f-string rather than a template engine: there is one layout,
 # it has two variables, and nothing in the locked closure renders templates. The
-# style block is inline for the same reason — E0 serves no static assets, and a
-# stylesheet route would be a second thing to keep in step with `tokens.css`
-# until E1's frontend replaces both.
+# style block is inline for the same reason, and it stays inline now that the SPA
+# exists: these two pages are answered at a door, before any session, and a page
+# that pulled a stylesheet out of the SPA's bundle would depend on an asset the
+# person being refused may never have loaded.
 #
 # The pulse line is the brief's empty-state variant: flat, in mist, with the
 # rounded caps the motif is drawn with. Flat is what it means here — nothing has
@@ -327,22 +306,6 @@ PAGE = """<!doctype html>
 """
 
 
-def landing_page(role: LandingRole) -> str:
-    """The empty view for `role`, as a whole HTML document.
-
-    Everything interpolated is a constant from this module, so the escaping below
-    changes nothing today. It is written anyway: the day somebody puts a section
-    title or a person's name in a heading, the escaping is already where it has
-    to be rather than something a reviewer has to notice is missing.
-    """
-    heading, empty_state = VIEW_HEADINGS[role]
-    return PAGE.format(
-        testid=escape(role.value, quote=True),
-        heading=escape(heading),
-        empty_state=escape(empty_state),
-    )
-
-
 def refusal_page(reason: str) -> str:
     """The page a refused launch or a refused web login gets, in the same layout.
 
@@ -352,8 +315,10 @@ def refusal_page(reason: str) -> str:
     filled with a name of its own so the markup stays one template.
 
     `reason` is written by `app.lti.launch` or by `app.api.auth` and is never
-    assembled from the request. It is escaped anyway, for the reason
-    `landing_page` gives about its own constants.
+    assembled from the request. It is escaped anyway: everything interpolated is
+    a constant today, and the escaping is written for the day somebody puts a
+    section title or a person's name in one of these slots — so it is already
+    where it has to be rather than something a reviewer has to notice is missing.
     """
     return PAGE.format(
         testid="pulse-entry-refused",
