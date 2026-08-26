@@ -111,11 +111,14 @@ OPAQUE_VALUE_BYTES = 32
 TOKEN_TIMEOUT_SECONDS = 10.0
 
 # The error codes this tool will repeat in a log line, compared exactly. Four of
-# RFC 6749 §4.1.2.1's registry: the ones that tell an operator something they can
-# act on — somebody declined (`access_denied`), or this tool's own authorization
-# request is malformed, asks for a response type the provider will not issue, or
-# asks for a scope it will not grant. Everything else, including the registry's
-# remaining members, logs `UNRECOGNISED_ERROR_CODE` instead.
+# RFC 6749 §4.1.2.1's registry, fixed by E1-09's contract: the person declined
+# (`access_denied`), or this tool's own authorization request is malformed, asks
+# for a response type the provider will not issue, or asks for a scope it will
+# not grant. Everything else logs `UNRECOGNISED_ERROR_CODE` instead — including
+# the registry's other three, which is a real cost: an operator reading
+# `unrecognized` cannot tell `server_error` from a string somebody invented. Both
+# are outside the set on purpose, because "repeat it, it looks like a real code"
+# is exactly the judgement this set exists to take away from the reader.
 #
 # **A closed set, and closed by exact membership.** `error` is as attacker-chosen
 # as `error_description` is — anyone who can put a browser in front of this

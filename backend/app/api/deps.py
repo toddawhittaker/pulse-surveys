@@ -201,9 +201,11 @@ def carried_across(secret: bytes, sealed: str | None) -> dict[str, Any] | None:
 def clear_carried(response: Response, name: str) -> None:
     """Delete the cookie, because the login it belonged to is over.
 
-    Called on the way out of both second legs, whether they admitted the caller
-    or refused: a `state` is good once, and one left in the browser is one an
-    attacker can replay into a second callback.
+    Called on every way out of the web door's callback — the session it issues,
+    the refusal, and the cancel branch — because a `state` is good once, and one
+    left in the browser is one an attacker can replay into a second callback. The
+    launch door had a second caller here until E1-08 moved its handshake into a
+    server-side store; it now sets no login cookie to clear (ADR 0089).
     """
     response.delete_cookie(name, path="/")
 

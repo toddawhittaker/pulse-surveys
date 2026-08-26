@@ -87,6 +87,13 @@ only when it is exactly one of four registry members; anything else logs
   the five-minute in-flight value does not.
 - **Restarting the API still invalidates every web login in flight**, and the
   browser gets a refusal rather than a session.
+- **An unauthenticated caller can write one log line per request.** The error
+  branch logs before it compares anything, so anyone who can reach
+  `/auth/oidc/callback?error=…` produces a `warning`. The line is bounded — one
+  short sentence and a value from a four-member set or the word `unrecognized`,
+  never a string the caller wrote — so the exposure is log volume and nothing
+  else, and it is the same exposure the launch door's refusal logging already
+  carries. Named here rather than left for a reviewer to find.
 - **Two handshake mechanisms exist, one per door, and that is now on purpose.**
   Anyone reading `app/api/deps.py` beside `app/lti/in_flight.py` sees a
   difference that looks like drift; the module docstring and this record say
