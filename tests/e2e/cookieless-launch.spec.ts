@@ -36,7 +36,18 @@
 
 import { test, expect, type Frame, type Page } from '@playwright/test';
 
-test.use({ launchOptions: { args: ['--test-third-party-cookie-phaseout'] } });
+// `--disable-features=LocalNetworkAccessChecks`: Chromium 151's Local Network
+// Access blocks the synthesized wrapper's loopback subframe to the mock LMS
+// (localhost:8080) because a `page.route`-fulfilled page has no real origin
+// Chromium will call non-public. LNA is orthogonal to what this test proves —
+// the cookie/fragment/Bearer handoff — and only trips here because the dev
+// stack runs on loopback; a real cross-site deployment uses routable
+// hostnames LNA never blocks. Restores the intended test; does not weaken it.
+test.use({
+  launchOptions: {
+    args: ['--test-third-party-cookie-phaseout', '--disable-features=LocalNetworkAccessChecks'],
+  },
+});
 
 const MOCK_LMS_ORIGIN = 'http://localhost:8080/';
 const TOOL_ORIGIN = 'http://localhost:8000';
