@@ -361,10 +361,7 @@ def _validate(
     # 7. The algorithm is the one this tool pins, and the signature verifies
     # against the registration's published keys — fetched through the repo's httpx
     # client and handed to the launch, never through `pylti1p3`'s own connection.
-    if header.get("alg") not in LAUNCH_SIGNATURE_ALGORITHMS:
-        raise SignatureRefused(
-            "The launch's `id_token` is signed with an algorithm this tool does not accept."
-        )
+    _refuse_unpinned_algorithm(header)
     try:
         keys = dict(key_set(http, registration.get_key_set_url()))
     except TokenVerificationError as failure:
@@ -415,6 +412,28 @@ def _refuse_clock_skew(body: Mapping[str, Any]) -> None:
         raise ClockSkewRefused("The launch was minted too far in the future to be honoured.")
     if expires_at < now - CLOCK_SKEW_TOLERANCE_SECONDS:
         raise ClockSkewRefused("The launch expired too long ago to be honoured.")
+
+
+def _refuse_unpinned_algorithm(header: Mapping[str, Any]) -> None:
+    """Refuse a launch whose JWS header names an algorithm this tool does not pin.
+
+    ADR 0073's closing condition, applied to the adapter: the accepted algorithm
+    is a hardcoded constant here (`LAUNCH_SIGNATURE_ALGORITHMS`), never read from
+    the token or from configuration, so an `alg: none` or an HMAC-with-the-public-
+    key confusion is refused by this module before the signature is verified.
+
+    **This is defence in depth, and a small standalone unit on purpose.**
+    `pylti1p3`'s own key/algorithm matching independently refuses both of those
+    today — its `get_public_key` only accepts a key whose `alg` matches the
+    header's, and the platform publishes RS256 keys — so end-to-end the two guards
+    agree and mutating this one alone leaves the integration tests green. Pulling
+    the pin into its own function is what lets it be exercised directly, so a break
+    in *this* guard is caught here rather than masked by the library's.
+    """
+    if header.get("alg") not in LAUNCH_SIGNATURE_ALGORITHMS:
+        raise SignatureRefused(
+            "The launch's `id_token` is signed with an algorithm this tool does not accept."
+        )
 
 
 def _resolve_registration(session: Session, body: Mapping[str, Any]) -> Any:
