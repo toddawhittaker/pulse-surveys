@@ -91,13 +91,31 @@ from enum import Enum, StrEnum, auto
 from html import escape
 from typing import Any
 
-__all__ = ["Door", "LandingRole", "landing_page", "landing_role_for", "refusal_page"]
+__all__ = [
+    "Door",
+    "LandingRole",
+    "cancelled_page",
+    "landing_page",
+    "landing_role_for",
+    "refusal_page",
+]
 
 # What a refused entry says. Deliberately one sentence and a reason, with no
 # retry link: there is nowhere for a browser to go from here that is not the
 # platform or the provider it came from, and a link built out of a request that
 # just failed validation is the open redirect both doors exist to refuse.
 REFUSAL_HEADING = "This did not open"
+
+# What a cancelled web login says (E1-09). Calm and non-blaming, per
+# `docs/DESIGN_BRIEF.md`'s tone: the person declined to sign in, or the provider
+# declined for them, and neither is a fault to report back. It says what is true —
+# nothing was changed, nobody is signed in — and stops there. No retry link, for
+# the reason above, and not a syllable of what the provider sent: `error_description`
+# and `error_uri` are text an attacker chooses, and a page that repeated them would
+# be a page whose words they wrote, under this tool's own name and styling.
+CANCELLED_TESTID = "web-login-cancelled"
+CANCELLED_HEADING = "Sign-in did not finish"
+CANCELLED_MESSAGE = "Nothing was changed and nobody is signed in. You can start again when ready."
 
 # The claim each door states its roles in. Neither is this project's to choose:
 # the first is spelled by LTI 1.3, and the second is what E0-16's provider issues
@@ -341,4 +359,25 @@ def refusal_page(reason: str) -> str:
         testid="pulse-entry-refused",
         heading=escape(REFUSAL_HEADING),
         empty_state=escape(reason),
+    )
+
+
+def cancelled_page() -> str:
+    """The page a cancelled web login gets, in the same layout (E1-09).
+
+    **It takes no argument at all**, and that is the security property rather than
+    a convenience: the only thing this door knows about a cancel is what the
+    provider's redirect said, every parameter in that redirect is attacker-chosen
+    text, and a function with nowhere to put such text cannot be talked into
+    rendering it. What the page says is three constants from this module.
+
+    It carries no landing testid, like `refusal_page`, so a cancel serves nobody's
+    view; and its own testid is not the refusal's, because a suite — and a person —
+    has to be able to tell "you cancelled" from "this tool was handed something it
+    could not account for".
+    """
+    return PAGE.format(
+        testid=escape(CANCELLED_TESTID, quote=True),
+        heading=escape(CANCELLED_HEADING),
+        empty_state=escape(CANCELLED_MESSAGE),
     )

@@ -6,7 +6,8 @@ that mints them to the redirect that checks them. The launch door carried one
 too until E1-08 moved its handshake into a server-side store (ADR 0089); this
 cookie is the web door's alone now, and ADR 0093 says why it stays. The second
 is the small amount of scaffolding both doors share around their answers: the
-two status codes, the refusal page, and the tail that turns verified claims into a session and a landing redirect,
+two status codes, the refusal page, the calm page a cancelled web login gets,
+and the tail that turns verified claims into a session and a landing redirect,
 or into a refusal. §13 names this module for "auth context, role scoping,
 n-threshold guards"; the first of those is what this is, and the other two
 arrive with the screens that need them.
@@ -80,7 +81,7 @@ from fastapi.responses import HTMLResponse
 from starlette.responses import Response
 
 from app.config import Settings, is_development
-from app.services.landing import Door, landing_role_for, refusal_page
+from app.services.landing import Door, cancelled_page, landing_role_for, refusal_page
 from app.services.session import (
     fragment_redirect,
     issue_csrf_token,
@@ -96,6 +97,7 @@ __all__ = [
     "LTI_LOGIN_COOKIE",
     "OIDC_LOGIN_COOKIE",
     "REFUSED",
+    "cancelled",
     "carried_across",
     "carry_across",
     "clear_carried",
@@ -209,6 +211,19 @@ def clear_carried(response: Response, name: str) -> None:
 def refused(reason: str) -> HTMLResponse:
     """A 4xx page carrying the reason and no landing view."""
     return HTMLResponse(refusal_page(reason), status_code=REFUSED)
+
+
+def cancelled() -> HTMLResponse:
+    """The calm page a cancelled or provider-refused web login gets (E1-09).
+
+    A 200 rather than a 4xx, and a page of its own rather than `refused` above,
+    because nothing went wrong: somebody declined to sign in, or the provider
+    declined for them, and both are ordinary. The distinction is the whole of what
+    E1-09's error branch is for — "you cancelled" and "this tool was handed a
+    refusal it cannot account for" are different events, and the person in front
+    of the screen is owed different words for them.
+    """
+    return HTMLResponse(cancelled_page())
 
 
 def landing_with_session(

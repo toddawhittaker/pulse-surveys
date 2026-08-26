@@ -34,10 +34,23 @@ this browser no longer holds — the login cookie is cleared on every way out of
 the callback — and the session itself never appears in a URL a browser writes
 down, because `fragment_redirect` hands it over in a fragment, which reaches
 neither an access log nor a `Referer` header.
+
+**A redirect that carries `error` is a first-class branch, not a missing `code`
+(E1-09).** The person cancelled, or the provider declined for them. RFC 6749
+§4.1.2.1 says that answer arrives at this same callback, and the branch is taken
+before anything else is read: the token endpoint is never called and no code is
+ever spent on it, even when a caller sends `error` and `code` together. Which of
+two answers the caller gets turns on the returned `state` — a matching one is
+this browser's own cancelled login and gets the calm page, anything else is a
+redirect this tool cannot account for and gets the ordinary refusal — and what
+either answer repeats is nothing: `error_description` and `error_uri` are text
+somebody else wrote, and the log line carries the error code alone, and only when
+it is one of four known values.
 """
 
 import base64
 import hashlib
+import logging
 import secrets
 from typing import Any
 
@@ -50,6 +63,7 @@ from starlette.responses import Response
 from app.api.deps import (
     FOUND,
     OIDC_LOGIN_COOKIE,
+    cancelled,
     carried_across,
     carry_across,
     clear_carried,
@@ -62,6 +76,10 @@ from app.services.landing import Door
 from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
 router = APIRouter(tags=["auth"])
+
+# This module's own logger, under the `app.` namespace every application logger
+# lives in (`app.lti.launch` is the established spelling for a door's).
+logger = logging.getLogger(__name__)
 
 # Where this tool answers. The provider's registered redirect URI is built from
 # `PUBLIC_BASE_URL` plus `CALLBACK_PATH`, and `mock-idp/app/config.py` defaults
@@ -91,6 +109,24 @@ OPAQUE_VALUE_BYTES = 32
 # `app.services.tokens` gives about the key-set timeout: this request happens
 # inside a browser redirect, and there is one right answer.
 TOKEN_TIMEOUT_SECONDS = 10.0
+
+# The error codes this tool will repeat in a log line, compared exactly. Four of
+# RFC 6749 §4.1.2.1's registry: the ones that tell an operator something they can
+# act on — somebody declined (`access_denied`), or this tool's own authorization
+# request is malformed, asks for a response type the provider will not issue, or
+# asks for a scope it will not grant. Everything else, including the registry's
+# remaining members, logs `UNRECOGNISED_ERROR_CODE` instead.
+#
+# **A closed set, and closed by exact membership.** `error` is as attacker-chosen
+# as `error_description` is — anyone who can put a browser in front of this
+# callback writes it — so a door that wrote it into a log line verbatim would have
+# handed over a log-injection surface through the one parameter it was allowed to
+# repeat. A prefix, substring or case-folded comparison is the same hole with more
+# steps. Widening the set is a decision with a test behind it, not a line to edit.
+LOGGED_ERROR_CODES = frozenset(
+    {"invalid_request", "access_denied", "unsupported_response_type", "invalid_scope"}
+)
+UNRECOGNISED_ERROR_CODE = "unrecognized"
 
 
 class SessionRefusedError(Exception):
@@ -222,6 +258,55 @@ def verified_session(
     return claims
 
 
+def loggable_error_code(error: str) -> str:
+    """The error code as it may be written to a log, or the one word that stands in.
+
+    The whole of what makes `LOGGED_ERROR_CODES` a closed set: exact membership,
+    one fixed word for everything else, and no path by which a string the caller
+    chose reaches a log line.
+    """
+    return error if error in LOGGED_ERROR_CODES else UNRECOGNISED_ERROR_CODE
+
+
+def cancelled_or_refused(error: str, state: str, carried: dict[str, Any] | None) -> Response:
+    """The answer to a callback that came back carrying `error` (E1-09).
+
+    Two answers, and the returned `state` is what decides between them. A `state`
+    that matches the login this browser started is the person who cancelled — or a
+    provider that declined for them — and they get the calm page: this browser
+    began the login that was refused, so the refusal is an account of something it
+    did. Anything else is a redirect this tool cannot account for and gets the
+    ordinary refusal: a mismatched `state`, no `state` at all, or no readable login
+    cookie to compare one against. **An absent value is never a match** — both
+    sides have to be there and be equal — because a comparison against an empty
+    default would calm every browser with no login in flight, which is precisely
+    the browser an attacker sends a forged error redirect to.
+
+    `same_opaque_value` is the one comparison helper for this: constant-time, and
+    with an answer rather than a `TypeError` for a `state` outside ASCII
+    (`docs/MISTAKES.md` entry 13 — the same hazard the `code` branch already
+    works around, and a second copy of the workaround is how one of the two gets
+    it wrong).
+
+    **One log line, written before the comparison**, so both ways out of this
+    branch are visible and neither can be the one somebody forgets. It carries the
+    error code and nothing else — not `error_description`, not `error_uri`, and not
+    a code from outside the closed set. `warning` rather than `info` because this
+    application configures no logging at all, so an `info` line is one no operator
+    would ever see.
+    """
+    logger.warning("A web login came back refused by the provider: %s", loggable_error_code(error))
+
+    expected = str((carried or {}).get("state") or "")
+    if state and expected and same_opaque_value(state, expected):
+        return cancelled()
+    return refused(
+        "That sign-in came back refused by the identity provider, and this tool cannot tell which "
+        "sign-in it belongs to. Nobody has been signed in. Start again from where you opened Pulse "
+        "Surveys."
+    )
+
+
 @router.get(LOGIN_PATH, summary="Start a web login against the identity provider")
 def begin_web_login(request: Request) -> Response:
     """Send the browser to the provider with a fresh state, nonce and challenge.
@@ -280,11 +365,29 @@ async def finish_web_login(request: Request) -> Response:
     the key-set fetch are synchronous, and `run_in_threadpool` is what keeps them
     off the event loop.
 
-    The cookie is cleared whichever way this goes. A `state` is good once, and
-    the provider has already spent the code.
+    **`error` is read first, and a redirect carrying one goes no further.** RFC
+    6749 §4.1.2.1 says a provider sends `error` *or* `code`, never both, so a
+    callback carrying both is one nobody conformant sent — and a door that looked
+    for `code` first would find one, redeem it, and hand out a session for a login
+    it had just been told had failed. Taking the branch first is what makes that
+    impossible rather than unlikely: on this path the token endpoint is not
+    reached and no code is spent.
+
+    The cookie is cleared whichever way this goes — all three ways, now. A `state`
+    is good once; the provider has already spent the code; and the branch a person
+    cancelled on is exactly the one where an uncleared cookie leaves the PKCE
+    verifier live in a browser that has finished with it.
     """
     settings: Settings = request.app.state.settings
     carried = carried_across(request.app.state.login_secret, request.cookies.get(OIDC_LOGIN_COOKIE))
+
+    error = request.query_params.get("error")
+    if error:
+        answer: Response = cancelled_or_refused(
+            error, request.query_params.get("state") or "", carried
+        )
+        clear_carried(answer, OIDC_LOGIN_COOKIE)
+        return answer
 
     try:
         claims = await run_in_threadpool(
@@ -296,7 +399,7 @@ async def finish_web_login(request: Request) -> Response:
             carried,
         )
     except SessionRefusedError as refusal:
-        answer: Response = refused(str(refusal))
+        answer = refused(str(refusal))
         clear_carried(answer, OIDC_LOGIN_COOKIE)
         return answer
 
