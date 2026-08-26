@@ -2694,6 +2694,40 @@ MEMBER_OF_ROLES = """
 #     confidentiality one — the application role can now read the tool's private
 #     signing key, which is the cost ADR 0082 accepts and records.
 #     Decided in ADR 0082 and spent in E1-06.
+#   - `pulse_app` **inserts and deletes** on `lti_launch_nonce`, and holds nothing
+#     else on it. E1-08's replay guard (`app.lti.replay_guard.claim_nonce`) spends
+#     a launch's nonce with `INSERT` on the application connection as the last
+#     step of every valid launch — SPEC §9.1's single-use replay requirement — and
+#     `purge_expired_nonces` reclaims the expired tail with `DELETE`, the
+#     Celery-beat housekeeping ADR 0089 gives the Postgres-backed ledger in place
+#     of a TTL Redis would have supplied for free.
+#     **`INSERT` and `DELETE` only, no `SELECT` and no `UPDATE`.** The claim
+#     reads single-use off a unique-constraint violation on the nonce column
+#     rather than a targeted read, and the primary key is generated in Python
+#     rather than read back with `RETURNING` — so nothing on this connection ever
+#     needs to select the table. A spent nonce is never rewritten, so `UPDATE`
+#     stays withheld too.
+#     **It carries no personal data.** The table holds a nonce, a consumed-at
+#     timestamp and an expiry — no subject, no name, no address — so SPEC §4.1's
+#     `PERSON_TABLES` does not change and no identity-separated view is owed.
+#     Decided and spent in E1-08.
+#   - `pulse_app` **reads, inserts and deletes** on `lti_launch_state`, and holds
+#     nothing else on it. This is the server-side handshake store dispute
+#     E1-08-01 resolved E1-08 onto: `app.lti.in_flight.remember_launch` records
+#     the handshake at `/lti/login` (`INSERT`), `look_up_launch` reads the
+#     expected `nonce` back at `/lti/launch` to validate the token against it
+#     (`SELECT`), and `consume_launch`/`purge_expired_launch_states` enforce
+#     single-use and reclaim the expired tail (`DELETE`) — ADR 0089 records the
+#     decision. Unlike `lti_launch_nonce` above, this table needs `SELECT`: the
+#     nonce ledger only ever checks for a conflict, but the handshake is a
+#     look-up the launch reads an answer out of.
+#     **`SELECT`, `INSERT`, `DELETE`, no `UPDATE`.** A handshake row is written
+#     once at login and read once at launch; nothing on this connection ever
+#     rewrites one, so `UPDATE` stays withheld.
+#     **It carries no personal data.** The table holds a `state`, a `nonce` and
+#     an expiry — no subject, no name, no address — so SPEC §4.1's
+#     `PERSON_TABLES` does not change and no identity-separated view is owed.
+#     Decided and spent in E1-08.
 #
 # **Hand-written and derived from the record, not read out of the grant files**
 # (`docs/MISTAKES.md` entry 19), which is the same decision
@@ -2721,6 +2755,11 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "lti_platform", "SELECT"),
         (APPLICATION_ROLE, "lti_deployment", "SELECT"),
         (APPLICATION_ROLE, "tool_signing_key", "SELECT"),
+        (APPLICATION_ROLE, "lti_launch_nonce", "INSERT"),
+        (APPLICATION_ROLE, "lti_launch_nonce", "DELETE"),
+        (APPLICATION_ROLE, "lti_launch_state", "SELECT"),
+        (APPLICATION_ROLE, "lti_launch_state", "INSERT"),
+        (APPLICATION_ROLE, "lti_launch_state", "DELETE"),
     }
 )
 

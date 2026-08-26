@@ -16,8 +16,14 @@ than in a router because each is one per application:
   place a test can route, and one connection pool instead of a fresh TCP
   handshake per launch;
 * **one per-process secret**, on `app.state.login_secret`, which signs the
-  short-lived cookie both doors carry a `state` and a `nonce` in. What that
-  costs, and why it is not a configured value, is in `app.api.deps`.
+  short-lived cookie the web door carries a `state` and a `nonce` in. What that
+  costs, and why it is not a configured value, is in `app.api.deps`. E1-08 took
+  the launch door off it — `pylti1p3`'s own in-flight cookies replace it there —
+  and left it for the web door until E1-09;
+* **one configured session secret**, on `app.state.session_secret`, which signs
+  the session `app.services.session` issues on a valid launch. Configured rather
+  than per-process (ADR 0089), so the session survives a restart, and read here
+  once as bytes so the session module is never handed a `SecretStr`.
 
 E1-04 gives it a fourth: **the built single-page application, mounted at
 `/app`** — SPEC §13's "FastAPI app factory, router mount, SPA static serve".
@@ -197,7 +203,20 @@ def create_app() -> FastAPI:
     # Per application, so two applications in one process cannot read each
     # other's login cookies, and per *process*, so a restart invalidates the
     # logins that were in flight. `app.api.deps` states both consequences.
+    #
+    # **Still the web door's, not the launch door's.** E1-08 moved the launch
+    # door onto `pylti1p3`, whose in-flight `state`/`nonce` cookies replace the
+    # ADR-0078 login cookie there; but `app.api.auth`'s web door still carries a
+    # `state`/`nonce`/PKCE cookie signed with this per-process secret, and
+    # retiring it is E1-09's, with the web-door test that changes with it. So this
+    # stays until then.
     app.state.login_secret = secrets.token_bytes(LOGIN_SECRET_BYTES)
+    # The session-signing key (E1-08, ADR 0089), as bytes — one configured secret
+    # shared across processes, so a session survives a restart, unlike the
+    # per-process login secret above. Read once here and handed to the launch
+    # door through `app.state`, so `app.services.session` is called with a `bytes`
+    # key and never reads configuration itself.
+    app.state.session_secret = settings.session_secret.get_secret_value().encode("utf-8")
 
     app.include_router(health.router)
     app.include_router(lti.router)

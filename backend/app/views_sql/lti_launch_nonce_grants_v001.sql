@@ -1,0 +1,53 @@
+-- What the application may do to the launch replay ledger — ticket E1-08,
+-- SPEC §7.3, SPEC §9.1, ADR 0001, ADR 0089.
+--
+-- E1-08 moves launch validation onto pylti1p3 and adds the depth E0 skipped,
+-- including single-use nonces: `app.lti.replay_guard.claim_nonce` spends a nonce
+-- exactly once with `INSERT ... ON CONFLICT (nonce) DO NOTHING`, on the
+-- connection `pulse_app` holds — the launch's own connection. Until this file it
+-- held nothing on `public.lti_launch_nonce`, so the claim would have been refused
+-- by Postgres with 42501 rather than by the replay guard, and every valid launch
+-- (which claims its nonce as its last step) with it.
+--
+-- **INSERT and DELETE, and nothing else.** This is the exception a ledger
+-- requires and it is the only runtime grant in the set that lets `pulse_app`
+-- write a base table for its own sake rather than a moderation record.
+--
+--   - INSERT is what `claim_nonce` spends the nonce with. It reads single-use
+--     off the row count of the conflict, so it needs no SELECT, and SELECT stays
+--     withheld: nothing reads this table back, and a role that could enumerate
+--     spent nonces learns which launches happened without adding any defence.
+--   - DELETE is what `purge_expired_nonces` reclaims the expired tail with, on
+--     the daily Celery beat — the replacement for the native TTL a Redis store
+--     would have had (ADR 0089). The worker builds `Settings` the same way the
+--     api container does and connects as `pulse_app`, so the purge runs here.
+--   - UPDATE stays withheld: a spent nonce is never rewritten, only inserted and
+--     later deleted, and a role that could rewrite `expires_at` could keep a
+--     replay window open. The verbs withheld are the assertion.
+--
+-- **A base table rather than a read view, the same exception the two grants
+-- before it took** (`lti_registration_grants_v001.sql`,
+-- `tool_signing_key_grants_v001.sql`). SPEC §4.1 routes a read path through an
+-- identity-separated view because the reason is identity; this table holds a
+-- nonce, the moment it was consumed and the moment it expires, and no person. A
+-- view over it would select every column of its source and exist only to satisfy
+-- the shape of the rule.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal; which launch nonces have been spent is no part of that
+-- surface, and the role that can reach a student's name gets no privilege it has
+-- no use for (ADR 0001, SPEC §6.2).
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade drops the table** (this revision creates it), so unlike the
+-- grants on tables that outlive their revision there is nothing left to revoke —
+-- the privileges go with the relation. `RUNTIME_BASE_TABLE_PRIVILEGES` in
+-- `tests/integration/test_identity_grants.py` is the hand-written record this
+-- widening is measured against; E1-08 adds its two entries there in the same
+-- change, which is where the widening has its loud conversation (ADR 0043).
+
+GRANT INSERT, DELETE ON public.lti_launch_nonce TO pulse_app;

@@ -57,6 +57,7 @@ launch belongs to a student and which to an instructor is learned by minting the
 and reading the LIS roles claim, rather than by naming a seeded user identifier.
 """
 
+import logging
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -132,17 +133,15 @@ PRODUCTION = "production"
 # because a `Set-Cookie` attribute name is case-insensitive.
 SECURE_ATTRIBUTE = "secure"
 
-# A `state` that is well formed as a form field and not representable as ASCII.
+# A `nonce` that is well formed as a form field and not representable as ASCII.
 # `secrets.compare_digest` raises `TypeError` rather than answering `False` when
 # either side is a `str` outside ASCII, so this is the value that separates "the
-# tool compared and refused" from "the tool crashed on the way to comparing".
-NON_ASCII_STATE = "é"
+# tool compared and refused" from "the tool crashed on the way to comparing". Its
+# `state` counterpart, `NON_ASCII_STATE`, retired with the two login-cookie tests
+# dispute E1-08-01 removed — the cookieless handshake's own single-use property
+# is proved by `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_
+# refusal` instead, which needs no non-ASCII value at all.
 NON_ASCII_NONCE = "é"
-
-# What each of those two lands on, per E0-18: "Learner → student empty view,
-# Instructor → instructor empty view".
-STUDENT_VIEW = "pulse-landing-student"
-INSTRUCTOR_VIEW = "pulse-landing-instructor"
 
 # How far back the platform's clock is wound to mint a launch that is certainly
 # expired, and how far back to mint one that is certainly not. The first is longer
@@ -376,19 +375,13 @@ def views_in(response: Any, contract: Any) -> list[str]:
     return [testid for testid in contract.landing_testids if testid in response.text]
 
 
-def lands_on(response: Any, contract: Any, expected: str) -> None:
-    """The response is the landing page for `expected`, and for nothing else."""
-    assert response.status_code == 200, (
-        f"The launch was answered {response.status_code} rather than 200. Body begins "
-        f"{response.text[:400]!r}."
-    )
-    found = views_in(response, contract)
-    assert found == [expected], (
-        f"The landing page carries {found or 'no landing testid at all'}, and E0-18 has this "
-        f"launch land on `{expected}`. Every other view's testid has to be absent as well as this "
-        "one present: a page carrying several is a page that is right about none of them, and it "
-        "is what a template rendering all five behind a condition that never fires looks like."
-    )
+# `lands_on` (the `200` + inline-HTML + single-testid assertion) lived here.
+# Removed by E1-08's reconciliation pass: every caller was updated to
+# `redirected_to_role` (defined in the `# E1-08` section below), which checks
+# the `302` + fragment + `pulse_session` cookie contract that replaces it —
+# see ADR 0089 and the per-test "Updated by E1-08's reconciliation pass"
+# notes above. `views_in` stays: `refused()` still uses it to prove a refusal
+# rendered nobody's landing page.
 
 
 def refused(response: Any, contract: Any, what: str) -> None:
@@ -446,40 +439,21 @@ def re_signed_launch(
 
 
 # ---------------------------------------------------------------------------
-# The landing pages. E0-18: a launch lands on the view its verified roles name.
+# The landing pages. E0-18 originally had two tests here — one per role —
+# asserting the launch landed on a `200` page of inline HTML carrying a
+# `pulse-landing-*` testid. **Removed by E1-08's reconciliation pass**: that
+# response contract is retired outright by E1-08's session model (ADR 0089;
+# see the `# E1-08` section below) in favour of a `302` to
+# `/app/<role>#session=<token>` with the session and CSRF cookies set, and
+# the two tests this section now runs *are* those two tests, mechanically
+# identical in setup (`launched(tool, door_contract, platform,
+# offer_for_role(platform, LEARNER_ROLE_URI / INSTRUCTOR_ROLE_URI))`) and
+# differing only in which contract they check the result against —
+# `test_a_valid_launch_redirects_with_a_session_to_the_role_named_route` and
+# `test_an_instructors_valid_launch_redirects_to_the_instructor_route`, both
+# in the `# E1-08` section. Keeping the old pair here would have been the
+# same two flows asserted twice, once against a contract E1-08 retires.
 # ---------------------------------------------------------------------------
-
-
-def test_a_learner_launch_lands_on_the_student_view(
-    tool: Any, door_contract: Any, platform: Any
-) -> None:
-    """The whole door, end to end, for the role SPEC §2 gives the launch door only.
-
-    Every part of the flow is real: the platform's own launch form is posted at
-    `/lti/login`, the tool's redirect is answered at the platform's authorization
-    endpoint, and the signed `id_token` that comes back is delivered to
-    `/lti/launch`. Nothing is minted independently, so this fails if any link in
-    the chain is missing — which is the point of having it before the refusals.
-    """
-    response = launched(tool, door_contract, platform, offer_for_role(platform, LEARNER_ROLE_URI))
-
-    lands_on(response, door_contract, STUDENT_VIEW)
-
-
-def test_an_instructor_launch_lands_on_the_instructor_view(
-    tool: Any, door_contract: Any, platform: Any
-) -> None:
-    """The same door, the other role, and the pair is what makes either mean anything.
-
-    A tool that rendered one view for every launch satisfies the test above on its
-    own. E0-18's landing rule is a *dispatch* on the verified roles claim, and a
-    dispatch is only observable across two inputs.
-    """
-    response = launched(
-        tool, door_contract, platform, offer_for_role(platform, INSTRUCTOR_ROLE_URI)
-    )
-
-    lands_on(response, door_contract, INSTRUCTOR_VIEW)
 
 
 # ---------------------------------------------------------------------------
@@ -830,6 +804,13 @@ def test_a_launch_minted_seconds_ago_is_still_accepted(
 
     The wind-back is short enough to sit inside any `id_token` lifetime a platform
     would issue, so this token is valid by every reading.
+
+    **Updated by E1-08's reconciliation pass.** The E0-18 assertion was
+    `lands_on(response, door_contract, STUDENT_VIEW)` — a `200` page of inline
+    HTML carrying `pulse-landing-student`. E1-08's session model (ADR 0089)
+    retires that contract: acceptance is now a `302` to
+    `/app/student#session=<token>` with the session cookie set, which is what
+    `redirected_to_role` (defined in the `# E1-08` section below) checks.
     """
     offer = offer_for_role(platform, LEARNER_ROLE_URI)
     started = initiate(tool, door_contract, offer)
@@ -839,7 +820,7 @@ def test_a_launch_minted_seconds_ago_is_still_accepted(
 
     response = land(tool, door_contract, id_token, state)
 
-    lands_on(response, door_contract, STUDENT_VIEW)
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
 def test_a_launch_carrying_a_state_the_tool_never_issued_is_refused(
@@ -937,6 +918,11 @@ def test_a_launch_re_signed_with_the_registered_key_is_still_accepted(
     they changed. If it does *not*, every one of them is a red about the harness
     rather than about the door, and this is where that shows (`docs/MISTAKES.md`
     entry 3).
+
+    **Updated by E1-08's reconciliation pass.** Was `lands_on(response,
+    door_contract, STUDENT_VIEW)` — the `200`+inline-HTML contract E1-08's
+    session model (ADR 0089) retires. Acceptance is now the `302` to
+    `/app/student#session=<token>` `redirected_to_role` checks.
     """
     response = re_signed_launch(
         tool_verifying_against_this_suites_key,
@@ -947,7 +933,7 @@ def test_a_launch_re_signed_with_the_registered_key_is_still_accepted(
         lambda claims: claims,
     )
 
-    lands_on(response, door_contract, STUDENT_VIEW)
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
 @pytest.mark.parametrize("web_role", WEB_DOOR_ROLES)
@@ -1072,6 +1058,11 @@ def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_name
 
     It is expected to pass today, and its value is in what it stops the fix from
     being: refusing anything that smells of the web vocabulary is not the fix.
+
+    **Updated by E1-08's reconciliation pass.** Was `lands_on(response,
+    door_contract, STUDENT_VIEW)` — the `200`+inline-HTML contract E1-08's
+    session model (ADR 0089) retires. Acceptance is now the `302` to
+    `/app/student#session=<token>` `redirected_to_role` checks.
     """
     claim, published = web_vocabulary
     assert "CARE" in published, (
@@ -1093,7 +1084,7 @@ def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_name
         adjust,
     )
 
-    lands_on(response, door_contract, STUDENT_VIEW)
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
 def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_is_refused(
@@ -1166,13 +1157,19 @@ def answer_to(deliver: Any, what: str) -> Any:
 
 
 def cookies_set_by(response: Any, purpose: str) -> list[str]:
-    """Every `Set-Cookie` header on a response, or a failure saying there were none."""
+    """Every `Set-Cookie` header on a response, or a failure saying there were none.
+
+    Both current callers ask about a `/lti/launch` response, not `/lti/login`'s —
+    dispute E1-08-01's ruling took the login step's cookie away entirely, so the
+    only cookies this door sets any more are the session and CSRF cookies a
+    *valid launch* issues.
+    """
     headers = response.headers.get_list("set-cookie")
     assert headers, (
-        f"The login initiation set no cookie at all when {purpose} (it answered "
-        f"{response.status_code} with headers {sorted(response.headers)}). E0-18 puts `state` and "
-        "`nonce` 'into a short-lived signed cookie', and with no cookie there is nothing for the "
-        "launch endpoint to compare against — and nothing for this test to read an attribute off."
+        f"The launch set no cookie at all when {purpose} (it answered {response.status_code} "
+        f"with headers {sorted(response.headers)}). E1-08's session model issues the session and "
+        "CSRF cookies on a valid launch's own response, and with no cookie there is nothing for "
+        "this test to read an attribute off."
     )
     return headers
 
@@ -1182,112 +1179,80 @@ def attributes_of(header: str) -> set[str]:
     return {part.split("=", 1)[0].strip().lower() for part in header.split(";")[1:]}
 
 
-def test_the_login_cookie_is_marked_secure_outside_development(
-    open_launch_door: Any, door_contract: Any, platform: Any
+# **Reconciled by dispute E1-08-01's ruling.** The two tests that used to sit
+# here — `test_the_login_cookie_is_marked_secure_outside_development` and
+# `test_the_login_cookie_is_not_marked_secure_in_development` — asserted
+# `Secure`-outside-development on an ADR-0078 login-state cookie. E1-08-01
+# settled the open question the reconciliation pass had flagged: the launch
+# door builds the cookieless handshake E1-08-05's grant serves
+# (`lti_launch_state`, `app.lti.in_flight`) rather than an in-flight cookie at
+# all — a browser blocks a third-party cookie inside a cross-site iframe
+# whatever its attributes say, which is exactly what criterion 2 needs
+# avoided (SPEC §7.3). **`/lti/login` sets no cookie of any kind.** Both tests
+# are removed rather than updated: there is no cookie left for either to
+# assert an attribute of. The `Secure`-outside-development guarantee is not
+# lost — it lives on the one cookie this door does set, the long-lived
+# session cookie, and is already asserted in both environment modes by
+# `test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes`
+# above, which this reconciliation confirmed still covers it before removing
+# these two.
+def test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    tamper_with: Any,
+    claims_in_token: Any,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """**Dies if the cookie is issued without `Secure`.**
+    """The server-side handshake's single-use property, proven from the outside.
 
-    The launch cookie carries the `state` and `nonce` a launch is judged against.
-    Without `Secure` a browser sends it over plain HTTP, so anyone on the path can
-    read it — and this is auth code, where E0-18 says "absence of basic
-    state/nonce/signature checks is not tolerable even briefly". The attribute is
-    free and the omission is invisible in every test that does not look for it.
+    **Replaces `test_a_launch_whose_state_is_not_ascii_is_refused_and_the_
+    cookie_is_burned`**, renamed and rebuilt per dispute E1-08-01's ruling: the
+    launch door carries no login cookie at all any more — `state`/`nonce` are
+    held server-side, in `lti_launch_state` (dispute E1-08-05's grant), keyed
+    by `state`. The implementer's exact rule this test proves: on **any**
+    refusal, the handshake row for the *delivered* `state` is deleted,
+    whatever refused it. A non-ASCII `state` no longer proves this — it only
+    ever consumed `state="é"` itself, a value that was never a real handshake
+    row — so this uses a **state-independent** refusal instead: a bad
+    signature. The first delivery carries the tool's own real `state` and is
+    refused for the signature alone; the same `state`, presented again with a
+    fresh, validly-signed token, finds no handshake row left and is refused by
+    `StateRefused` specifically.
 
-    Its pair is the next test: the flag has to be conditional, because a `Secure`
-    cookie is not sent to `http://localhost` and would break the development flow
-    this whole ticket exists to open.
+    **Dies if the handshake row survives an unrelated refusal.** A door that
+    deletes the row only when the launch *succeeds*, or only when the refusal
+    is itself about `state`, passes a version of this test that never
+    replays and fails this one: the row from the first (signature-refused)
+    delivery has to already be gone by the second. **Dies too if the second
+    delivery is refused for the wrong reason** — a fresh, validly-signed
+    token with every other claim correct is delivered, so a refusal that is
+    not `StateRefused` specifically means this test found some other defect
+    and mistook it for the one it is about.
     """
-    tool = open_launch_door(environment=PRODUCTION)
-    offer = platform.require_offers()[0]
-
-    response = initiate(tool, door_contract, offer)
-
-    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {PRODUCTION!r}"):
-        assert SECURE_ATTRIBUTE in attributes_of(header), (
-            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
-            f"{PRODUCTION!r}, and it carries no `Secure` attribute. That cookie holds the `state` "
-            "and `nonce` this door judges a launch by, and without `Secure` a browser will send it "
-            "over plain HTTP to anyone who can put a request in front of it."
-        )
-
-
-def test_the_login_cookie_is_not_marked_secure_in_development(
-    open_launch_door: Any, door_contract: Any, platform: Any
-) -> None:
-    """The near miss for the test above: `Secure` unconditionally breaks the laptop.
-
-    E0-18's whole point is that `docker compose up` yields a launchable-into system,
-    and a browser reaches it at `http://localhost:8000`. A `Secure` cookie is not
-    sent back over that, so the launch that set it is refused for a mismatched
-    `state` — which reads as a broken door rather than as a cookie flag.
-
-    Without this, "always set `Secure`" satisfies the requirement above and is the
-    wrong fix.
-    """
-    tool = open_launch_door(environment=DEVELOPMENT)
-    offer = platform.require_offers()[0]
-
-    response = initiate(tool, door_contract, offer)
-
-    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {DEVELOPMENT!r}"):
-        assert SECURE_ATTRIBUTE not in attributes_of(header), (
-            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
-            f"{DEVELOPMENT!r}. A `Secure` cookie is not sent to `http://localhost`, so every launch "
-            "from the mock LMS on a developer's laptop arrives with no cookie and is refused for a "
-            "`state` mismatch."
-        )
-
-
-def test_a_launch_whose_state_is_not_ascii_is_refused_and_the_cookie_is_burned(
-    tool: Any, door_contract: Any, platform: Any
-) -> None:
-    """**Dies if the comparison crashes instead of refusing.**
-
-    `secrets.compare_digest` raises `TypeError` when either side is a `str` holding
-    a character outside ASCII, so a `state` of `é` takes a door that compares
-    directly out through the error handler rather than through the refusal. The
-    crash is fail-closed — nobody is admitted — which is why it survives a suite
-    that only asks whether the launch succeeded. What it skips is everything the
-    refusal path does on the way out, and on this door that is the single-use
-    cookie.
-
-    So both halves are asserted, and the second is the one worth having: after the
-    refusal, the launch the tool itself set up — correct `state`, correct token —
-    is delivered and must also be refused, because the cookie it would have been
-    judged against is gone. `test_a_learner_launch_lands_on_the_student_view` is
-    the control for that half: it is this same sequence without the `é` attempt,
-    and it answers 200.
-    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
     offer = offer_for_role(platform, LEARNER_ROLE_URI)
     started = initiate(tool, door_contract, offer)
     parameters = query_of(redirect_target(started, "a registered platform began a launch"))
     id_token, state, _ = authorize(platform, parameters)
-    assert state, "The platform returned no `state`, so there is no correct value to replay below."
-
-    crashed = answer_to(
-        lambda: land(tool, door_contract, id_token, NON_ASCII_STATE),
-        f"a launch whose `state` was {NON_ASCII_STATE!r}",
+    assert state, (
+        "The platform returned no `state`, so there is no handshake row for this test to prove "
+        "was consumed."
     )
 
-    assert crashed.status_code != 500, (
-        f"The tool answered 500 to a launch whose `state` was {NON_ASCII_STATE!r}. That is "
-        "`secrets.compare_digest` raising `TypeError` on a non-ASCII `str` rather than answering "
-        f"`False`. Body begins {crashed.text[:400]!r}."
-    )
-    refused(crashed, door_contract, f"a launch whose `state` was {NON_ASCII_STATE!r}")
+    first = land(tool, door_contract, tamper_with(id_token), state)
+    refused(first, door_contract, "a launch whose payload was altered after signing")
+    caplog.clear()
 
-    replayed = answer_to(
-        lambda: land(tool, door_contract, id_token, state),
-        "the correct `state` for a login initiation whose cookie a refusal should have burned",
-    )
+    second = land(tool, door_contract, id_token, state)
 
-    assert 400 <= replayed.status_code < 500, (
-        f"After refusing the non-ASCII `state`, the tool answered {replayed.status_code} to the "
-        "correct `state` for the same login initiation. The cookie holding it should have been "
-        "cleared on the way out of the refusal: one login initiation buys one attempt, and a "
-        "refusal that leaves the cookie in place hands an attacker as many tries as they like at "
-        "a `state` the browser is still carrying."
+    refused(
+        second,
+        door_contract,
+        "the same `state` presented again, with a fresh validly-signed token, after an unrelated "
+        "refusal already consumed the handshake row",
     )
+    assert_guard_fired(caplog, guard=STATE_REFUSED, claims=claims_in_token(id_token))
 
 
 def test_a_launch_whose_nonce_is_not_ascii_is_refused_rather_than_crashing(
@@ -1380,3 +1345,493 @@ def test_a_refusal_does_not_name_the_key_set_address_the_tool_could_not_reach(
         "Compose service name: it is useless to the browser that received it and it is the "
         "network map to anyone else."
     )
+
+
+# ---------------------------------------------------------------------------
+# E1-08 — the launch door on `pylti1p3`. Every E1-07 `WRONG_DEFECT` refused by
+# its specific guard, a positive control under the new session-issuing
+# contract, the replay guard proven within one process and across a fresh
+# session, and the session/CSRF cookies' attributes in both environment
+# modes.
+#
+# **The response shape changes under this ticket.** `landing_or_refusal` no
+# longer renders a 200 page of inline HTML: E1-08's module layout has it
+# "issue a session, set the session and CSRF cookies, and return
+# `fragment_redirect(role, token)`" — a 302 to `/app/<role>#session=<jwt>`.
+# The sections above this one test the door as E0-18 built it and are not
+# touched here; `docs/tickets/e1/E1-08-launch-door-pylti1p3.md`'s own module
+# layout retires that contract, and reconciling the tests above — several
+# assert `response.status_code == 200` and a `pulse-landing-*` testid in the
+# body, which a correct E1-08 no longer produces — is outside this ticket's
+# test list as handed to this test-author. Flagged in the test-author's
+# report rather than silently rewritten.
+# ---------------------------------------------------------------------------
+
+# `logging.getLogger("app.lti.launch")` — the plan's own name for the launch
+# door's logger, the one place a refusal is allowed to say anything at all:
+# "Add `logging.getLogger("app.lti.launch")`, one `WARNING` per refusal
+# carrying **only** the guard name — never claims, token, or form."
+LAUNCH_LOGGER_NAME = "app.lti.launch"
+
+# The ten `LaunchRefusedError` subclasses named for this test-author, each
+# "classified by which pylti1p3 validate step raised" and each with "its own
+# constant, claim-free message". Spelled exactly as named; this suite does
+# not invent one.
+SIGNATURE_REFUSED = "SignatureRefused"
+AUDIENCE_REFUSED = "AudienceRefused"
+ISSUER_REFUSED = "IssuerRefused"
+NONCE_REFUSED = "NonceRefused"
+NONCE_REPLAYED = "NonceReplayedError"
+DEPLOYMENT_REFUSED = "DeploymentRefused"
+MESSAGE_TYPE_REFUSED = "MessageTypeRefused"
+VERSION_REFUSED = "VersionRefused"
+STATE_REFUSED = "StateRefused"
+CLOCK_SKEW_REFUSED = "ClockSkewRefused"
+
+# E1-07's fifteen `WRONG_DEFECTS`, copied — not imported — for the reason
+# `tests/integration/test_mock_lms_wrong_launches.py`'s own module docstring
+# gives: both mocks declare a package named `app`, so importing either by
+# name from a module outside its own package is the collision ADR 0039
+# describes.
+FOREIGN_SIGNATURE = "foreign_signature"
+RIGHT_KEY_TAMPERED_CLAIMS = "right_key_tampered_claims"
+ALG_NONE = "alg_none"
+HS256_CONFUSION = "hs256_confusion"
+WRONG_AUD = "wrong_aud"
+WRONG_ISS = "wrong_iss"
+MISSING_NONCE = "missing_nonce"
+REUSED_NONCE = "reused_nonce"
+UNREGISTERED_DEPLOYMENT = "unregistered_deployment"
+UNKNOWN_MESSAGE_TYPE = "unknown_message_type"
+WRONG_VERSION = "wrong_version"
+TAMPERED_STATE = "tampered_state"
+MISSING_STATE = "missing_state"
+IAT_FUTURE = "iat_future"
+EXP_PAST = "exp_past"
+
+# The fourteen non-replay defects, each mapped to the one guard this test-
+# author was told fires for it — "SignatureRefused for the four signature/alg
+# cases, AudienceRefused, IssuerRefused, NonceRefused, ..., DeploymentRefused,
+# MessageTypeRefused, VersionRefused, StateRefused, ClockSkewRefused".
+# `REUSED_NONCE` is not here: it needs two deliveries of the same artifact,
+# which the generic driver below only ever makes one of, so it has its own
+# test.
+DEFECT_GUARDS: dict[str, str] = {
+    FOREIGN_SIGNATURE: SIGNATURE_REFUSED,
+    RIGHT_KEY_TAMPERED_CLAIMS: SIGNATURE_REFUSED,
+    ALG_NONE: SIGNATURE_REFUSED,
+    HS256_CONFUSION: SIGNATURE_REFUSED,
+    WRONG_AUD: AUDIENCE_REFUSED,
+    WRONG_ISS: ISSUER_REFUSED,
+    MISSING_NONCE: NONCE_REFUSED,
+    UNREGISTERED_DEPLOYMENT: DEPLOYMENT_REFUSED,
+    UNKNOWN_MESSAGE_TYPE: MESSAGE_TYPE_REFUSED,
+    WRONG_VERSION: VERSION_REFUSED,
+    TAMPERED_STATE: STATE_REFUSED,
+    MISSING_STATE: STATE_REFUSED,
+    IAT_FUTURE: CLOCK_SKEW_REFUSED,
+    EXP_PAST: CLOCK_SKEW_REFUSED,
+}
+
+# The leak vocabulary criterion 6 names: "no claim payload, no name or email,
+# and no `lms_user_id`" — plus `deployment_id`, named for this test-author
+# too. Membership in this tuple is not a claim that a launch carries every
+# one of these; `assert_no_claim_leaked` below reads only the members
+# `claims` actually holds a real value for.
+LEAK_VOCABULARY = ("sub", "name", "email", "lms_user_id", DEPLOYMENT_ID_CLAIM)
+
+# E1-04's own route group names — "student, instructor, leadership, care,
+# admin" — used here only as the path segment `fragment_redirect` is expected
+# to build, `/app/<role>`.
+STUDENT_ROLE = "student"
+INSTRUCTOR_ROLE = "instructor"
+
+
+def mint_defect(tool: Any, contract: Any, platform: Any, offer: Any, defect: str | None) -> Any:
+    """Drive a real `/lti/login`, then a platform mint carrying `defect`, state/nonce matched.
+
+    pylti1p3's login step stores what it issued — a cookie, platform storage,
+    or a database row, per the adapter's own choice — and judges a launch
+    against that record. `MockPlatform.mint()` on its own builds an
+    authorization request independent of any tool, so a defect posed through
+    it alone would be refused for a `state`/`nonce` the tool never issued,
+    whatever else about it is wrong (`docs/MISTAKES.md` entry 3: a launch
+    wrong two ways tells this suite nothing about which guard fired). So this
+    drives `/lti/login` for real first, and hands the platform back its own
+    `state`/`nonce` to mint against — the same values a browser would have
+    carried on to the platform.
+    """
+    started = initiate(tool, contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    assert parameters.get("state") and parameters.get("nonce"), (
+        "The tool's own login initiation carries no `state`/`nonce` to mint a defect against, so "
+        "no launch built from it could be judged as anything but a `state`/`nonce` mismatch."
+    )
+    return platform.mint(offer, state=parameters["state"], nonce=parameters["nonce"], defect=defect)
+
+
+def redirected_to_role(response: Any, contract: Any, role: str) -> str:
+    """The launch redirected to `/app/<role>#session=<token>`, `pulse_session` set.
+
+    E1-08's interface ruling, verbatim: "a 302 whose `Location` is
+    `/app/<segment>#session=<token>`, where `<segment>` is the role name
+    lowercased ... Assert the `Location` starts with `/app/student#session=`
+    (or the instructor route) and that `Set-Cookie` carries `pulse_session`."
+    The exact-prefix check on `Location` is also what rules out a query
+    string sneaking in between the path and the fragment — a value like
+    `/app/student?x=y#session=...` fails this `startswith`, so a separate
+    query-string check would only repeat what this already proves for the
+    one path this suite cares about.
+    """
+    try:
+        from app.services.session import SESSION_COOKIE
+    except ModuleNotFoundError as missing:
+        pytest.fail(
+            f"`app.services.session` does not import ({missing}). E1-08's interface ruling names "
+            '`SESSION_COOKIE = "pulse_session"` there.'
+        )
+
+    assert response.status_code in (302, 303, 307), (
+        f"A valid launch answered {response.status_code} rather than a redirect. Body begins "
+        f"{response.text[:300]!r}. E1-08: `landing_or_refusal` 'issues a session, sets the "
+        "session and CSRF cookies, and returns `fragment_redirect(role, token)`.'"
+    )
+    location = response.headers.get("location") or ""
+    prefix = f"/app/{role}#session="
+    assert location.startswith(prefix), (
+        f"A launch redirected to `{location}`, which does not start with `{prefix}`. E1-08's "
+        "interface ruling: a 302 whose `Location` is `/app/<segment>#session=<token>`, segment "
+        "lowercased."
+    )
+    token = location[len(prefix) :]
+    assert token, f"The redirect `{location}` carries `session=` with an empty token."
+
+    headers = cookies_set_by(response, f"a valid launch redirecting to `/app/{role}`")
+    names = {header.split("=", 1)[0].strip() for header in headers}
+    assert SESSION_COOKIE in names, (
+        f"No `Set-Cookie` names {SESSION_COOKIE!r} on a launch that redirected to `/app/{role}`. "
+        f"Cookies set: {sorted(names)}. E1-08's ruling: the redirect carries the session cookie "
+        "alongside the fragment token."
+    )
+    return token
+
+
+def assert_no_claim_leaked(caplog: pytest.LogCaptureFixture, *, claims: dict[str, Any]) -> str:
+    """Every WARNING captured from `app.lti.launch` carries none of `claims`'s own values.
+
+    Reads the leak vocabulary off `claims` itself rather than a fixed
+    blocklist, per this test-author's instruction, so a launch carrying no
+    `email` claim, say, is not asked to prove a negative about a value that
+    was never there. **The canary is the values themselves**: at least one
+    member of `LEAK_VOCABULARY` has to actually be present with a real value,
+    or this check would pass against a log that printed the whole claims
+    dict verbatim (`docs/MISTAKES.md` entry 3). Returns the captured text so
+    a caller can also assert which guard's name it carries.
+    """
+    records = [record for record in caplog.records if record.name == LAUNCH_LOGGER_NAME]
+    assert records, (
+        f"No log record at all was captured from `{LAUNCH_LOGGER_NAME}`. E1-08: 'Add "
+        f'logging.getLogger("{LAUNCH_LOGGER_NAME}"), one `WARNING` per refusal carrying only the '
+        "guard name.' Without a captured record, every assertion below is vacuous."
+    )
+    haystack = "\n".join(record.getMessage() for record in records)
+
+    values = {
+        str(claims[member]) for member in LEAK_VOCABULARY if claims.get(member) not in (None, "")
+    }
+    assert values, (
+        f"This launch's own claims carry a real value under none of {LEAK_VOCABULARY}, so this "
+        "check has nothing to look for and would pass against a log line that printed the claims "
+        "dict verbatim."
+    )
+    leaked = sorted(value for value in values if value in haystack)
+    assert not leaked, (
+        f"The captured log from `{LAUNCH_LOGGER_NAME}` carries {leaked}, drawn straight from this "
+        f"launch's own claims. §10: no student PII in logs. Captured: {haystack!r}"
+    )
+    return haystack
+
+
+def assert_guard_fired(
+    caplog: pytest.LogCaptureFixture, *, guard: str, claims: dict[str, Any]
+) -> None:
+    """The refusal's log names `guard` specifically, and none of `claims`'s own values.
+
+    Combines both of what E1-08 asks of every refusal test: which guard
+    fired, and criterion 6's no-claim-leak. **Dies if a refusal is checked by
+    a bare 4xx**: a door that refused every one of the fifteen
+    `WRONG_DEFECTS` with the same generic message would pass `refused()`
+    fifteen times and this check zero.
+    """
+    haystack = assert_no_claim_leaked(caplog, claims=claims)
+    assert guard in haystack, (
+        f"The captured log from `{LAUNCH_LOGGER_NAME}` is {haystack!r}, which does not name "
+        f"{guard!r}. E1-08 classifies a refusal 'by which pylti1p3 validate step raised', never "
+        f"by string-matching the library's own message — and this refusal should be {guard} "
+        "specifically."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The control for `assert_no_claim_leaked`, in the module that is its only
+# caller. A must-be-green control: if this is red, the fifteen refusal
+# tests' silence about a leak means nothing (`docs/MISTAKES.md` entry 9 —
+# never cite a guard that has not been run against the case it is supposed
+# to catch).
+# ---------------------------------------------------------------------------
+
+
+def test_assert_no_claim_leaked_catches_a_value_planted_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Plants a claim value into a log line on the real logger and requires the catch.
+
+    **Dies if `assert_no_claim_leaked` is satisfied by emptiness** — an empty
+    `values` set, an empty `records` list — which is exactly the failure mode
+    of a leak scan that has quietly stopped finding anything to look for.
+    This test needs no implementation beyond this module's own helper, so it
+    is green now; if it is not, the fifteen refusal tests' use of the helper
+    means nothing whatever they report.
+    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    logging.getLogger(LAUNCH_LOGGER_NAME).warning(
+        "SignatureRefused (this line deliberately carries a planted subject: "
+        "e1-08-planted-leak-subject)"
+    )
+
+    with pytest.raises(AssertionError):
+        assert_no_claim_leaked(caplog, claims={"sub": "e1-08-planted-leak-subject"})
+
+
+# ---------------------------------------------------------------------------
+# The positive control. Criterion 1's happy-path half, under the new
+# session-issuing contract every refusal below is judged against.
+# ---------------------------------------------------------------------------
+
+
+def test_a_valid_launch_redirects_with_a_session_to_the_role_named_route(
+    tool: Any, door_contract: Any, platform: Any
+) -> None:
+    """A Learner's launch redirects to `/app/student#session=...`, `pulse_session` set.
+
+    **Dies if the door still renders inline HTML** (the E0-18 contract this
+    ticket retires), and dies if the redirect carries the session as a query
+    string rather than a fragment — `redirected_to_role`'s exact-prefix check
+    on `Location` (`/app/student#session=`) is what rules a query string out:
+    a query string inserted between the path and the fragment breaks that
+    prefix match, which is the design's whole reason to prefer a fragment —
+    it reaches neither the access log nor a `Referer` header.
+    """
+    response = launched(tool, door_contract, platform, offer_for_role(platform, LEARNER_ROLE_URI))
+
+    token = redirected_to_role(response, door_contract, STUDENT_ROLE)
+
+    assert token.count(".") == 2, (
+        f"The fragment's `session=` value is {token!r}, which does not have the three dot-"
+        "separated segments a compact JWS has, so it is not a signed session token."
+    )
+
+
+def test_an_instructors_valid_launch_redirects_to_the_instructor_route(
+    tool: Any, door_contract: Any, platform: Any
+) -> None:
+    """The pair to the test above — one role is not enough to show a dispatch."""
+    response = launched(
+        tool, door_contract, platform, offer_for_role(platform, INSTRUCTOR_ROLE_URI)
+    )
+
+    redirected_to_role(response, door_contract, INSTRUCTOR_ROLE)
+
+
+# ---------------------------------------------------------------------------
+# The fifteen refusals. Criterion 1's negative half, criterion 6 on every one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("defect", "guard"), sorted(DEFECT_GUARDS.items()))
+def test_a_launch_carrying_one_e1_07_defect_is_refused_by_its_specific_guard(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    caplog: pytest.LogCaptureFixture,
+    defect: str,
+    guard: str,
+) -> None:
+    """Fourteen of E1-07's fifteen `WRONG_DEFECTS` (`reused_nonce` has its own test below).
+
+    **Dies if any one of these is checked by a bare 4xx** rather than by
+    which guard fired: a door that refused every defect the same way, or
+    that refused this one for a *different* reason than the one it is named
+    for, passes `refused()` and fails `assert_guard_fired`. **Dies if a claim
+    value reaches the log** — criterion 6, asserted on the same capture.
+    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, defect)
+
+    response = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(response, door_contract, f"a launch minted with `defect={defect}`")
+    assert_guard_fired(caplog, guard=guard, claims=minted.claims)
+
+
+def test_a_replayed_nonce_is_refused_by_the_replay_guard_not_by_a_generic_nonce_check(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`reused_nonce`, E1-07's fifteenth defect, and criterion 3's within-process half.
+
+    The first delivery is the control — it must be accepted, or a refusal
+    below could be catching a launch that was broken for some other reason
+    entirely. The second delivery is the identical `(id_token, state)` pair,
+    presented again: refused, and refused specifically by
+    `NonceReplayedError` rather than by the ordinary `NonceRefused` a
+    missing or mismatched nonce gets — a different guard for a different
+    mutation, and a loose assertion ("refused, somehow, by something
+    nonce-shaped") would not tell the two apart.
+    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, REUSED_NONCE)
+
+    first = land(tool, door_contract, minted.id_token, minted.state)
+    redirected_to_role(first, door_contract, STUDENT_ROLE)
+
+    second = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(second, door_contract, "the same launch, presented to `/lti/launch` a second time")
+    assert_guard_fired(caplog, guard=NONCE_REPLAYED, claims=minted.claims)
+
+
+def test_a_claimed_nonce_is_refused_after_the_store_is_reopened_as_a_fresh_session(
+    migrated_engine: Any,
+) -> None:
+    """Criterion 3's other half: "across process restart if the store outlives the process".
+
+    `app.lti.replay_guard.claim_nonce` is driven directly, across two
+    independent `Session` objects bound to the same engine — the shape "the
+    process restarted and reopened the store" takes when nothing in a test
+    can actually kill a process. **Dies if the first claim only lived in
+    that session's own identity map** — an in-memory set kept on the session
+    object, say — because a second, freshly opened `Session` would see
+    nothing of it and this would pass for the wrong reason
+    (`docs/MISTAKES.md` entry 3): that is exactly why this uses a second
+    `Session`, not a second call on the first one.
+    """
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from sqlalchemy.orm import Session
+
+    try:
+        from app.lti.replay_guard import NonceReplayedError, claim_nonce
+    except ModuleNotFoundError as missing:
+        pytest.fail(
+            f"`app.lti.replay_guard` does not import ({missing}). E1-08's module layout: "
+            "'`backend/app/lti/replay_guard.py` (new) — `claim_nonce(session, *, nonce, "
+            "expires_at)` ... Its only caller is `launch.py`.'"
+        )
+
+    nonce = f"e1-08-replay-guard-{uuid4().hex}"
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+
+    first_session = Session(bind=migrated_engine)
+    try:
+        claim_nonce(first_session, nonce=nonce, expires_at=expires_at)
+        first_session.commit()
+    finally:
+        first_session.close()
+
+    second_session = Session(bind=migrated_engine)
+    try:
+        with pytest.raises(NonceReplayedError):
+            claim_nonce(second_session, nonce=nonce, expires_at=expires_at)
+    finally:
+        second_session.rollback()
+        second_session.close()
+
+
+# ---------------------------------------------------------------------------
+# The session and CSRF cookies' attributes, in both environment modes.
+# Criterion 5's first half.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("environment", (DEVELOPMENT, PRODUCTION))
+def test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes(
+    open_launch_door: Any, door_contract: Any, platform: Any, environment: str
+) -> None:
+    """`HttpOnly` on the session cookie and absent on the CSRF one; `SameSite=None`
+    on both; `Secure` flips with the environment; `path=/` on both.
+
+    Read off a real `/lti/launch` response rather than called as a unit,
+    because the plan gives `set_session_cookie`/`issue_csrf_cookie` no
+    Python-level signature to call directly — only the attributes they must
+    produce, on "the Starlette `Response`". This is the observable contract
+    those functions exist to produce, whatever their own call shape turns
+    out to be.
+    """
+    try:
+        from app.services.session import CSRF_COOKIE, SESSION_COOKIE
+    except ModuleNotFoundError as missing:
+        pytest.fail(
+            f"`app.services.session` does not import ({missing}). E1-08's module layout puts "
+            "`SESSION_COOKIE`/`CSRF_COOKIE` there."
+        )
+
+    tool = open_launch_door(environment=environment)
+    response = launched(tool, door_contract, platform, offer_for_role(platform, LEARNER_ROLE_URI))
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
+
+    headers = cookies_set_by(response, f"a valid launch under ENVIRONMENT={environment!r}")
+    by_name = {header.split("=", 1)[0].strip(): header for header in headers}
+    assert SESSION_COOKIE in by_name, (
+        f"No `Set-Cookie` names {SESSION_COOKIE!r} (the headers set: {sorted(by_name)}). E1-08's "
+        "session module names this constant as the session cookie."
+    )
+    assert CSRF_COOKIE in by_name, (
+        f"No `Set-Cookie` names {CSRF_COOKIE!r} (the headers set: {sorted(by_name)}). "
+        "`SameSite=None` 'is live because of' this exact cookie, and E1-08's session module names "
+        "it."
+    )
+
+    session_header = by_name[SESSION_COOKIE]
+    csrf_header = by_name[CSRF_COOKIE]
+    session_attrs = attributes_of(session_header)
+    csrf_attrs = attributes_of(csrf_header)
+
+    if environment == PRODUCTION:
+        assert SECURE_ATTRIBUTE in session_attrs and SECURE_ATTRIBUTE in csrf_attrs, (
+            f"Under ENVIRONMENT='production' at least one of the session/CSRF cookies carries no "
+            f"`Secure`: session={session_header!r}, csrf={csrf_header!r}."
+        )
+    else:
+        assert SECURE_ATTRIBUTE not in session_attrs and SECURE_ATTRIBUTE not in csrf_attrs, (
+            "A cookie carries `Secure` under ENVIRONMENT='development': "
+            f"session={session_header!r}, csrf={csrf_header!r}. A `Secure` cookie is not sent to "
+            "`http://localhost`, so every launch from the mock LMS on a developer's laptop would "
+            "arrive with no cookie."
+        )
+
+    assert "httponly" in session_attrs, (
+        f"The session cookie carries no `HttpOnly`: {session_header!r}. It holds the session "
+        "token itself, and a script that can read it can steal the session."
+    )
+    assert "httponly" not in csrf_attrs, (
+        f"The CSRF cookie carries `HttpOnly`: {csrf_header!r}. The plan: `CSRF_COOKIE` is not "
+        "`HttpOnly` because 'the SPA echoes it in `X-Pulse-CSRF`' — a script that cannot read it "
+        "cannot echo it."
+    )
+
+    for name, header in (("session", session_header), ("CSRF", csrf_header)):
+        lowered = header.lower()
+        assert "samesite=none" in lowered, (
+            f"The {name} cookie does not carry `SameSite=None`: {header!r}. The plan: the tool is "
+            "inside a cross-site iframe for the whole visit, so `Lax` would drop the cookie on "
+            "every in-iframe request."
+        )
+        assert "path=/" in lowered, f"The {name} cookie does not carry `path=/`: {header!r}."

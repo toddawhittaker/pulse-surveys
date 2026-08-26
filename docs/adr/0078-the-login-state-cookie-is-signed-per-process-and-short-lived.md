@@ -91,3 +91,19 @@ look like a broken door.
 - E1 replaces this outright with its session model. When it does, the module
   docstring and this record go together: the cookie names, the lifetime and the
   per-process key are all in `deps.py` and nowhere else.
+
+**Superseded in part 2026-08-26 by E1-08
+([0089](0089-the-session-both-doors-issue-and-the-launch-nonce-ledger.md)) — the
+launch door only.** That ticket moved the launch door onto `pylti1p3` and holds
+its `state`/`nonce` handshake in a **server-side store** (`app.lti.in_flight`)
+rather than a cookie, so the `pulse_lti_login` cookie and
+`LOGIN_COOKIE_LIFETIME_SECONDS` no longer govern that door — which sets no login
+cookie at all now. This record still stands for the *web* door, which keeps the
+per-process `app.state.login_secret` and its `pulse_oidc_login` cookie until E1-09.
+This record's properties are preserved and, in one respect, strengthened: a cookie
+inside the LMS's cross-site iframe is blocked by the browser whatever its
+attributes say, so `Secure`-outside-development on an in-flight *cookie* could not
+be met there anyway; 0089 moves the handshake off the cookie entirely, so
+single-use / burn-after-use is a server-side property and there is no in-flight
+cookie left to mark `Secure`. `docs/disputes/E1-08-01.md` records the ruling and
+the reconciliation of this record's three tests.

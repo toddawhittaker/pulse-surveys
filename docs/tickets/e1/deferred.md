@@ -219,3 +219,25 @@ Every E1 pull request that defers something adds it here in the same PR.
    than a copied literal — proven by a test that the served list and
    `ALL_SELECTORS` agree. Natural to build alongside E1-08, whose Playwright
    spec is the consumer this would most directly help.
+
+## From E1-08 — the launch door on pylti1p3
+
+1. **The algorithm pin is not proven load-bearing end-to-end.**
+   `app.lti.launch._refuse_unpinned_algorithm` is ADR 0073's closing
+   condition — the accepted algorithm is a hardcoded constant, refusing an
+   `alg: none` or an HMAC-with-the-public-key confusion before the signature
+   is checked. It is defence in depth: `pylti1p3`'s own key/algorithm matching
+   independently refuses both today (`get_public_key` accepts only a key whose
+   `alg` matches the header's, and the platform publishes RS256 keys), so
+   mutating this pin alone leaves the launch green — the verifier's one
+   survivor. Extracting it into its own helper lets a unit test call it
+   directly and catch a break in *this* guard; what a unit test cannot show is
+   that the pin is load-bearing *end-to-end* — that the whole door refuses a
+   launch `pylti1p3`'s matching would otherwise accept — because there is no
+   live forgery: both layers agree.
+   **Done when** a mock platform variant publishes a permissive-algorithm key
+   set — a JWK a confused verifier would accept an `alg: none` or HS256 token
+   against — and an end-to-end refusal test drives a launch signed that way and
+   asserts the door still refuses it, so the pin's removal turns a green launch
+   red. Owed to the ticket that gives a mock platform a permissive-alg mint (a
+   natural companion to E1-07's wrong-launch selectors).

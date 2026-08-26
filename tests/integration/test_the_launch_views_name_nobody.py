@@ -8,13 +8,17 @@ never be skipped — walked past the student page entirely.
 **What is asserted, and against what.** SPEC §4: "Identity is never displayed to
 instructors or any leadership role, in any view, including CSV exports", and
 §4.1 item 1 keeps comparables, benchmarks and other sections away from students.
-E0-18 renders both of these pages empty by design — no purview is computed in E0
-(ADR 0003), no roster is synced, no report exists — so the honest reading of that
-for these two surfaces is: the page names nobody but the person who launched, and
-it carries no section code, no course number and no roster count. Each is
-asserted against the **rendered body**, exactly as
-`tests/integration/test_web_login_door.py`'s three landing invariants are: what a
-browser received, not what a function returned.
+E0-18 rendered both of these as empty pages by design — no purview was computed
+(ADR 0003), no roster synced, no report existed — and E1-08 removes the page
+itself, answering a `302` and a session instead (see "Reconciled for E1-08"
+below). Either way the honest reading for these two surfaces is: nothing this
+door answers with names anybody but the person who launched, and none of it
+carries a section code, a course number or a roster count. Each is asserted
+against **what a browser actually received** — the rendered body while E0-18
+stood, `response_surface` (headers, body and the session token's own decoded
+claims) since E1-08 — exactly as `tests/integration/test_web_login_door.py`'s
+three landing invariants are: what a browser received, not what a function
+returned.
 
 **Every value scanned for is live.** The people come from the launches the mock
 platform signs and from the NRPS rosters it serves; the section codes and course
@@ -36,11 +40,13 @@ green means anything:
     string §2.2 makes a section identifiable by;
   - a landing page gaining a roster count — "23 students enrolled", which is a
     figure about a section computed from data this door has no business reading;
-  - **the near miss**: the assertion passing because the fixture rendered an
-    error page instead of the landing page. A 4xx body names nobody either. So
-    every test below lands first — `lands_on` requires this page's own testid
-    present *and* the other four absent — and then shows its scan finding the
-    very strings it is about to report absent (`docs/MISTAKES.md` entry 3).
+  - **the near miss**: the assertion passing because the fixture provoked a
+    refusal instead of a real launch. A 4xx names nobody either. So every test
+    below lands first — `redirected_to_role` requires the `302` this door
+    answers with on the happy path, to the right role's route, since E1-08
+    (`lands_on`'s `200` + testid before it) — and then shows its scan finding
+    the very strings it is about to report absent (`docs/MISTAKES.md` entry
+    3).
 
 **What is deliberately not asserted here.** The ticket's criterion also names a
 "comparison figure". Nothing in E0 computes one: there is no comparison set, no
@@ -65,10 +71,31 @@ module drives launches with. A test module importing its sibling depends on wher
 pytest put `tests/` on `sys.path`, and an import error is not a red — the same
 reason `test_web_login_door.py` keeps its own copy of the platform's variable
 names rather than reaching next door for them.
+
+**Reconciled for E1-08, arbitrated by dispute E1-08-03.** E1-08 retires the
+`200` + inline landing HTML this whole module was written against: a valid
+launch now answers a `302` to `/app/<role>#session=<jwt>` (ADR 0089), with the
+session and CSRF cookies set, and renders no page at all on the happy path.
+That is not a weaker confidentiality surface — it is a smaller one, and this
+module's invariants move with it rather than being dropped. `lands_on`
+(`200` + testid) is replaced by `redirected_to_role` (`302` +
+`/app/<role>#session=`); every scan that used to read `response.text` alone
+now reads `response_surface` — the response's headers (`Location`
+included, still in its raw encoded form, and every `Set-Cookie`), its body
+(normally empty; scanned anyway), and the session token's own claims,
+decoded (not verified — a confidentiality scan does not need the signature
+checked to read what anyone intercepting the redirect already could) and
+stringified. The `RenderedText` HTML reader and the CSS/SVG-shaped plants it
+existed to see past are gone with the markup they read: there is no
+stylesheet, no graphic and no rendered text left to confuse a scan, so a
+direct regex match over the response surface is simpler and at least as
+strict. What is unchanged is the shape of every test: land, scan for a
+specific class of leak, and prove first that the scan can find what it is
+about to report absent.
 """
 
+import json
 import re
-from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -101,16 +128,21 @@ RESOURCE_LINK_CLAIM = LTI_CLAIM + "resource_link"
 MEMBERSHIP_ROLE = "http://purl.imsglobal.org/vocab/lis/v2/membership#"
 INSTRUCTOR_ROLE_URI = f"{MEMBERSHIP_ROLE}Instructor"
 LEARNER_ROLE_URI = f"{MEMBERSHIP_ROLE}Learner"
-STUDENT_VIEW = "pulse-landing-student"
-INSTRUCTOR_VIEW = "pulse-landing-instructor"
 
-# The two pages this door serves, as the parameters of every test below. Both
-# pages are asserted by every rule here rather than one each: an instructor page
-# listing students and a student page listing classmates are the same defect, and
-# a rule proved on one page says nothing about the other.
+# E1-04's route group names — "student, instructor, leadership, care, admin"
+# — used here only as the path segment `redirected_to_role` expects,
+# `/app/<role>`. Replaces the `pulse-landing-*` testid constants E0-18's
+# inline HTML carried; there is no testid left to carry one.
+STUDENT_ROLE = "student"
+INSTRUCTOR_ROLE = "instructor"
+
+# The two ways this door answers, as the parameters of every test below. Both
+# are asserted by every rule here rather than one each: an instructor response
+# naming students and a student response naming classmates are the same
+# defect, and a rule proved on one says nothing about the other.
 LANDING_PAGES = (
-    pytest.param(LEARNER_ROLE_URI, STUDENT_VIEW, id="student"),
-    pytest.param(INSTRUCTOR_ROLE_URI, INSTRUCTOR_VIEW, id="instructor"),
+    pytest.param(LEARNER_ROLE_URI, STUDENT_ROLE, id="student"),
+    pytest.param(INSTRUCTOR_ROLE_URI, INSTRUCTOR_ROLE, id="instructor"),
 )
 
 # Where a person's name, address or subject rides — in a launch's claims (the
@@ -160,40 +192,17 @@ SMALLEST_TELLABLE_COUNT = 2
 # something else, and the two are told apart by seeing the text it sat in.
 CONTEXT_CHARACTERS = 60
 
-# Elements whose contents a browser never renders as words. **This is the repair
-# E0-41's verification round forced**: the first version of the roster-count test
-# scanned `response.text` whole and reported 4, 5, 6 and 7 as leaked roster sizes,
-# every one of them out of the inline stylesheet and the decorative SVG in
-# `landing.py`'s page template — hex colours (`#F6F8F4`, `#5B7269`), spacing
-# tokens (`--space-4`), a `line-height: 1.5`, a `stroke-width="2.5"`. No count was
-# rendered anywhere. `HTMLParser` treats their contents as raw text, so no tag
-# inside them is parsed either.
-RAW_ELEMENTS = frozenset({"style", "script"})
-
-# The graphic, whose drawing instructions are numbers and whose text is text.
-GRAPHIC_ELEMENT = "svg"
-
-# What is read or spoken from inside a graphic. `<text>` and `<tspan>` are drawn;
-# `<title>` and `<desc>` are the SVG accessibility pair a screen reader announces;
-# `<foreignObject>` holds ordinary HTML rendered inside the graphic (spelled in
-# lower case because `HTMLParser` folds tag names). A count in any of them is a
-# count on the page, and a reader that stopped at the `<svg>` boundary would be
-# the mutation the planted control below exists to catch.
-SPOKEN_INSIDE_A_GRAPHIC = frozenset({"text", "tspan", "title", "desc", "foreignobject"})
-
-# Where a graphic certainly ends, whatever the markup says. An unclosed `<svg>`
-# would otherwise swallow every text node after it — measured by the security pass
-# over this reader — so the document's own closing tags reset the state: a graphic
-# cannot outlive the body it is drawn in.
-DOCUMENT_BOUNDARIES = frozenset({"body", "html"})
-
-# Attributes a screen reader speaks. SPEC §4.1 item 1 names aria labels in the
-# same breath as charts, text and tooltips. **Collected from every element,
-# including the ones whose contents are skipped**: `<svg aria-label="18 students
-# in your section">` is the standard accessible-chart pattern, so an attribute
-# scan that stopped where the text scan stops would miss the first shape §4.1
-# item 1 names — which is what it did until the security pass ran it.
-READABLE_ATTRIBUTES = ("aria-label", "aria-description", "aria-valuetext", "title", "alt")
+# The elements-and-attributes reader that used to live here — `RAW_ELEMENTS`,
+# `GRAPHIC_ELEMENT`, `SPOKEN_INSIDE_A_GRAPHIC`, `DOCUMENT_BOUNDARIES`,
+# `READABLE_ATTRIBUTES` and the `RenderedText` `HTMLParser` subclass below
+# them — existed to read past a stylesheet and a decorative SVG that E0-18's
+# inline landing page carried, so that a hex colour or a spacing token was
+# never mistaken for a roster count. **Removed by E1-08's reconciliation**:
+# there is no markup left to misread. A valid launch now answers a `302`
+# with no rendered body at all, so the surface a leak could ride on is
+# headers, an empty body, and the session token's own claims — plain text
+# and structured data, never CSS or an SVG. `response_surface` below reads
+# all three directly; a regex over it needs no reader in front of it.
 
 # A number a reader would read as a number. The lookarounds are what tell `23` in
 # "23 students" from the `4` in `--space-4`, the `6` in `#F6F8F4` and the `5` in
@@ -321,33 +330,90 @@ def landed(
     return tool.post(contract.lti_launch, data=body), dict(decode(id_token))
 
 
-def views_in(response: Any, contract: Any) -> list[str]:
-    """Which of the five landing testids the body carries."""
-    return [testid for testid in contract.landing_testids if testid in response.text]
+def redirected_to_role(response: Any, role: str) -> str:
+    """The launch redirected to `/app/<role>#session=<token>`, and the token itself.
 
-
-def lands_on(response: Any, contract: Any, expected: str) -> None:
-    """The response is the landing page for `expected`, and for nothing else.
-
-    **This is the positive control every scan below rests on.** A 4xx refusal page,
-    a 500, an empty body and a page that was never reached all name nobody and
-    carry no section code, so a scan run over one of them reports a clean page
-    while having looked at nothing the ticket is about (`docs/MISTAKES.md` entry
-    3). Requiring the other four testids absent as well as this one present is the
-    same discipline the two door modules use: a page carrying several is right
-    about none of them.
+    **This is the positive control every scan below rests on**, the same
+    discipline `lands_on` enforced before E1-08 retired the page it checked:
+    a 4xx refusal, a 500, or a redirect to the wrong role all fail here
+    rather than silently passing a scan that looked at nothing the ticket is
+    about (`docs/MISTAKES.md` entry 3). This module's own copy of
+    `test_lti_launch_door.py::redirected_to_role` — not imported, for the
+    reason this module's own docstring gives about its sibling.
     """
-    assert response.status_code == 200, (
-        f"The launch was answered {response.status_code} rather than 200, so what follows would be "
-        f"asserted about a refusal page rather than about a landing page. Body begins "
-        f"{response.text[:400]!r}."
+    assert response.status_code in (302, 303, 307), (
+        f"The launch was answered {response.status_code} rather than a redirect, so what follows "
+        f"would be asserted about a refusal page rather than about the session this door issues. "
+        f"Body begins {response.text[:400]!r}."
     )
-    found = views_in(response, contract)
-    assert found == [expected], (
-        f"The landing page carries {found or 'no landing testid at all'}, and this launch lands on "
-        f"`{expected}` (E0-18: 'Learner → student empty view, Instructor → instructor empty view'). "
-        "Every other view's testid has to be absent as well as this one present."
+    location = response.headers.get("location") or ""
+    prefix = f"/app/{role}#session="
+    assert location.startswith(prefix), (
+        f"The launch redirected to `{location}`, which does not start with `{prefix}`. E1-08's "
+        "interface ruling: a 302 whose `Location` is `/app/<segment>#session=<token>`, and "
+        "'Learner → student, Instructor → instructor' is unchanged from E0-18's own dispatch."
     )
+    token = location[len(prefix) :]
+    assert token, f"The redirect `{location}` carries `session=` with an empty token."
+    return token
+
+
+# The `SessionClaims` fields E1-08's interface ruling names — `door`, `role`,
+# `sub`, `iss`, `jti`, `iat`, `exp` — and nothing else. **Not asserted as an
+# exact set below**: a benign field arriving later should not turn this test
+# red for a reason unrelated to what it guards. Asserted instead as an
+# *absence* of the key names an actual leak would add — `docs/MISTAKES.md`
+# entry 2's own preference for the forbidden state over the permitted one,
+# because it keeps working when a legitimate new opaque field arrives.
+FORBIDDEN_SESSION_CLAIM_KEYS = frozenset(
+    {
+        "name",
+        "given_name",
+        "family_name",
+        "middle_name",
+        "email",
+        "section",
+        "section_code",
+        "course",
+        "course_number",
+        "roster",
+        "roster_count",
+        "enrollment",
+        "enrollment_count",
+        "members",
+    }
+)
+
+
+def session_claims_of(response: Any, role: str, decode: Any) -> dict[str, Any]:
+    """The session token's own decoded claims, off the fragment `redirected_to_role` reads.
+
+    Decoded, not verified: this module holds no copy of `SESSION_SECRET`, and
+    a confidentiality scan does not need the signature checked to read what
+    anyone intercepting the redirect could already read unverified. `decode`
+    is `claims_in_token`, the same bare-JWS splitter the launch's own
+    `id_token` claims are read with below.
+    """
+    return dict(decode(redirected_to_role(response, role)))
+
+
+def response_surface(response: Any, session_claims: dict[str, Any]) -> str:
+    """Everything a browser, a proxy log, or a script reading this response could see.
+
+    E1-08 renders no page on the happy path, so there is no markup left for a
+    reader to parse around: what a leak could ride on is the response's
+    headers (`Location` included, still in its raw encoded form, and every
+    `Set-Cookie`), its body (normally empty on a redirect; scanned anyway),
+    and the session token's own claims — decoded and stringified, so a leak
+    *inside* the token counts as well as one beside it.
+    """
+    header_text = " ".join(f"{name}: {value}" for name, value in response.headers.items())
+    return " ".join([header_text, response.text, json.dumps(session_claims, default=str)])
+
+
+def numbers_in(surface: str) -> set[str]:
+    """Every number a reader would read as a number, out of a response surface."""
+    return {match.group(1) for match in STANDALONE_NUMBER.finditer(surface)}
 
 
 def own_identifiers(claims: dict[str, Any]) -> set[str]:
@@ -454,97 +520,6 @@ def roster_counts(platform: Any) -> set[int]:
     return {count for count in counts if count >= SMALLEST_TELLABLE_COUNT}
 
 
-class RenderedText(HTMLParser):
-    """What a reader reads: text nodes, plus the attributes a screen reader speaks.
-
-    A landing page is markup, and most of the characters in it are instructions to
-    a browser rather than words to a person. Counting digits across all of them
-    reports a stylesheet's spacing scale as a roster size, which is exactly what
-    the first version of the test below did. So the numbers are counted over what
-    a browser would show and what a screen reader would say, and nothing else.
-
-    **Four decisions, each of which could have made this blind. The third and the
-    fourth are repairs from E0-42's security pass, which ran this reader over the
-    shapes below and watched it miss them.**
-
-      - `style` and `script` contents are dropped. Neither can put a word on the
-        page, and both are full of numbers. `HTMLParser` treats their contents as
-        raw text, so no tag inside them is parsed either.
-      - `svg` contents are dropped **except** `<text>`, `<tspan>`, `<title>`,
-        `<desc>` and `<foreignObject>`, which are drawn, announced, or ordinary
-        HTML laid out inside the graphic. A count rendered in any of them is a
-        count on the page.
-      - **Readable attributes are collected from every element, skipped ones
-        included.** An `aria-label` is spoken whatever it is attached to, and
-        `<svg aria-label="18 students in your section">` is *the* accessible-chart
-        pattern — so is `<g aria-label="…">` on a group inside one. The first
-        version collected attributes only after the skip check, which made the one
-        shape §4.1 item 1 names first invisible while the docstring claimed to
-        cover it.
-      - **A graphic cannot outlive the document.** `</body>` and `</html>` reset
-        every state, because an unclosed `<svg>` otherwise swallows every text
-        node to the end of the input. What an unclosed graphic still costs is the
-        text between it and the end of the body: that text is genuinely
-        unreachable to a parser that cannot know where the author meant the
-        graphic to stop, and it is a bounded loss rather than the whole page. The
-        planted control appends its content after `</html>`, so the reader is
-        proved alive even on a page whose graphic never closes.
-
-    Nesting is counted rather than name-matched, so a `<title>` inside a
-    `<foreignObject>` inside an `<svg>` resolves in the right order.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.raw = 0
-        self.graphic = 0
-        self.spoken = 0
-        self.readable: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        # Before any skip decision: an attribute is spoken wherever it sits.
-        self.readable += [value for name, value in attrs if name in READABLE_ATTRIBUTES and value]
-        if tag in RAW_ELEMENTS:
-            self.raw += 1
-        elif tag == GRAPHIC_ELEMENT:
-            self.graphic += 1
-        elif self.graphic and tag in SPOKEN_INSIDE_A_GRAPHIC:
-            self.spoken += 1
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in DOCUMENT_BOUNDARIES:
-            self.raw = self.graphic = self.spoken = 0
-        elif tag in RAW_ELEMENTS:
-            self.raw = max(0, self.raw - 1)
-        elif tag == GRAPHIC_ELEMENT:
-            self.graphic = max(0, self.graphic - 1)
-            if not self.graphic:
-                self.spoken = 0
-        elif self.graphic and tag in SPOKEN_INSIDE_A_GRAPHIC:
-            self.spoken = max(0, self.spoken - 1)
-
-    def handle_data(self, data: str) -> None:
-        if not self.raw and (not self.graphic or self.spoken):
-            self.readable.append(data)
-
-
-def readable_text(body: str) -> str:
-    """Everything in `body` a person would read or hear, joined by spaces.
-
-    Joined rather than concatenated so two fragments cannot spell a number
-    neither of them contains.
-    """
-    reader = RenderedText()
-    reader.feed(body)
-    reader.close()
-    return " ".join(reader.readable)
-
-
-def numbers_read_from(body: str) -> set[str]:
-    """Every number a reader would read as a number, out of a rendered page."""
-    return {match.group(1) for match in STANDALONE_NUMBER.finditer(readable_text(body))}
-
-
 def around(body: str, needle: str) -> str:
     """The text a suspected leak sits in, so a failure can be acted on in one read."""
     at = body.find(needle)
@@ -554,114 +529,132 @@ def around(body: str, needle: str) -> str:
 
 
 @pytest.mark.invariant
-@pytest.mark.parametrize(("role_uri", "view"), LANDING_PAGES)
+@pytest.mark.parametrize(("role_uri", "role"), LANDING_PAGES)
 def test_a_launch_landing_page_names_nobody_but_the_person_who_launched(
     tool: Any,
     door_contract: Any,
     platform: Any,
     claims_in_token: Any,
     role_uri: str,
-    view: str,
+    role: str,
 ) -> None:
-    """SPEC §4 over the two pages a launch can reach.
+    """SPEC §4 over the two ways a launch answers.
 
     "Identity is never displayed to instructors or any leadership role, in any
-    view" — and E0-18 renders both of these pages empty *by design*, because
-    nothing in E0 computes a purview (ADR 0003) or syncs a roster. So a page
-    carrying a seeded person's name, address or subject obtained it from a read
-    nothing sanctions, and on the student page it would be a classmate.
+    view" — and **E1-08 renders no view at all** on this door's happy path: a
+    valid launch now answers a `302` carrying a session in the URL fragment,
+    never an HTML page (ADR 0089). That narrows what could possibly leak to
+    the response's headers, its (normally empty) body, and the session
+    token's own claims — `response_surface` reads all three — and a page
+    carrying a seeded person's name, address or subject would still have
+    obtained it from a read nothing sanctions; on the student side it would
+    be a classmate.
 
-    **The mutation this kills:** a landing page gaining a seeded person's display
-    name — a "signed in as" line built from the launch's `name` claim would be
-    excluded here as the caller's own, so what this catches is the version that
-    reaches past the caller: a roster fetched over NRPS because the launch carries
-    the service URL, or a template that lists the section's members.
+    **Reconciled for E1-08 by dispute E1-08-03**, preserving this test's
+    original intent against the new response shape: `lands_on` (`200` +
+    testid) is replaced by `redirected_to_role` (`302` +
+    `/app/<role>#session=`), and the scan reads `response_surface` in place
+    of `response.text` alone. The session token's claim *keys* are checked
+    too, against `FORBIDDEN_SESSION_CLAIM_KEYS`, which nothing before this
+    ticket needed because there was no session token to carry a key at all.
 
-    **The two guards that keep a green meaningful.** The launch has to land on
-    this page's own testid, so a refusal page fails rather than passes; and the
-    scan is shown finding the very strings it reports absent, so a search that has
-    gone blind says so instead of reporting a clean page (`docs/MISTAKES.md`
-    entry 3).
+    **The mutation this kills:** a session claim, a cookie, or (were a page
+    ever rendered again) a body gaining a seeded person's display name — a
+    "signed in as" value built from the launch's `name` claim would be
+    excluded here as the caller's own, so what this catches is the version
+    that reaches past the caller: a roster claim added to the session token
+    because the launch carried the NRPS service URL, or a cookie built from a
+    membership fetch.
+
+    **The two guards that keep a green meaningful.** The launch has to reach
+    the new redirect shape for this role, so a refusal fails rather than
+    passes; and the scan is shown finding the very strings it reports absent,
+    so a search that has gone blind says so instead of reporting a clean
+    response (`docs/MISTAKES.md` entry 3).
     """
     response, claims = landed(
         tool, door_contract, platform, offer_for_role(platform, role_uri), claims_in_token
     )
-    lands_on(response, door_contract, view)
+    session_claims = session_claims_of(response, role, claims_in_token)
+
+    forbidden_keys = sorted(FORBIDDEN_SESSION_CLAIM_KEYS & set(session_claims))
+    assert not forbidden_keys, (
+        f"The session token carries {forbidden_keys} (it carries {sorted(session_claims)}). "
+        "E1-08's interface ruling gives the session an opaque `sub`, `iss`, `role`, `door` and "
+        "`jti` — never a name, a section or a roster."
+    )
 
     mine = own_identifiers(claims)
     others = other_peoples_identifiers(platform, mine)
     assert others, (
         "No seeded launch and no seeded roster publishes a name, an address or a subject other "
         f"than the launching person's own ({sorted(mine)}), so this test has nothing to look for "
-        "and would pass against a page listing the whole institution."
+        "and would pass against a response naming the whole institution."
     )
     canary = " ".join(others)
     assert all(value in canary for value in others), (
         "The scan below cannot find these strings in a sample built out of them, so its silence "
-        "about the landing page means nothing."
+        "about the response means nothing."
     )
 
-    leaked = sorted({value for value in others if value in response.text})
+    surface = response_surface(response, session_claims)
+    leaked = sorted({value for value in others if value in surface})
     assert not leaked, (
-        f"The `{view}` landing page carries {leaked}, which identify seeded people other than the "
-        f"one who launched. First occurrence: {around(response.text, leaked[0])!r}. SPEC §4 keeps "
-        "identity out of every view, and E0-18 renders this page empty by design — no purview is "
-        "computed in E0 and no roster is synced, so a page that names somebody got that name from "
-        "somewhere §4.1 does not sanction."
+        f"This `{role}` launch's response carries {leaked}, which identify seeded people other "
+        f"than the one who launched. First occurrence: {around(surface, leaked[0])!r}. SPEC §4 "
+        "keeps identity out of every view, and E1-08 renders no view at all on this door's happy "
+        "path — a response that names somebody got that name from somewhere §4.1 does not "
+        "sanction, whether in a header, a cookie, or the session token itself."
     )
 
 
 @pytest.mark.invariant
-@pytest.mark.parametrize(("role_uri", "view"), LANDING_PAGES)
+@pytest.mark.parametrize(("role_uri", "role"), LANDING_PAGES)
 def test_a_launch_landing_page_carries_no_section_code_or_course_number(
     tool: Any,
     door_contract: Any,
     platform: Any,
     claims_in_token: Any,
     role_uri: str,
-    view: str,
+    role: str,
 ) -> None:
-    """The section half of the criterion: neither page identifies a section.
+    """The section half of the criterion: neither response identifies a section.
 
     §2.2 makes `{startLetter}{ordinal}{modality}` the string a section is known by
-    and §8 makes the prefixed number the course; between them they are how a page
-    says *which* class this is. E0-18's landing pages show a heading and nothing
-    else, and E0 has no section-scoped read path at all — so a code or a number on
-    either page came out of the launch claims and was rendered, which is the first
-    step of the page that eventually shows one section's figures beside another's
-    (§4.1 item 1).
+    and §8 makes the prefixed number the course; between them they are how a
+    response says *which* class this is. **E1-08 renders no view at all** on
+    this door's happy path, and E0 (and E1-08) has no section-scoped read path
+    either — so a code or a number anywhere in the response came out of the
+    launch claims and leaked somewhere it should not have, which is the first
+    step of the page that eventually shows one section's figures beside
+    another's (§4.1 item 1).
 
-    **The mutation this kills:** a landing page gaining the launched section's
-    code — the context header reading `NURS 8100 · Q2FF` that anybody would add to
-    a page rendered from a launch that carries exactly those strings.
+    **Reconciled for E1-08 by dispute E1-08-03.** `lands_on` is replaced by
+    `redirected_to_role`, and both halves now scan `response_surface` — the
+    response's headers, its body, and the session token's own decoded claims
+    — rather than `response.text` alone. **The `RenderedText` reader this
+    test used to lean on is gone**, and so are the CSS/SVG plants it existed
+    to see past: there is no stylesheet and no graphic left in a `302` with
+    an empty body, so a direct `STANDALONE_NUMBER` match over the surface is
+    simpler and at least as strict as the reader was — the class of false
+    positive the reader guarded against (a hex colour, a spacing token) no
+    longer has anywhere to hide in.
 
-    **The near miss it must survive:** the page still lands, so an error page
-    cannot pass this by carrying nothing; and the codes and numbers are read out
-    of what the platform publishes, so a scan looking for strings the seed no
-    longer uses fails on the guard rather than reporting a clean page.
+    **The mutation this kills:** the launched section's code or course number
+    reaching a header, a cookie, or the session token — `NURS 8100 · Q2FF`
+    riding along in whatever this door still adds to a response once the
+    inline landing page is gone.
 
-    **The course-number half reads rendered text**, through the same
-    `RenderedText` reader the roster-count test uses. It was never red, and it was
-    the same defect one seed change away: counting every digit run in the whole
-    body collects the stylesheet's palette and spacing scale, so a seeded course
-    number that happened to equal a hex fragment would have been reported as a
-    leak — which is precisely how the roster-count test failed its first run.
-    Closing the class in one round beats meeting it again in another test. The
-    reader is proved here rather than by borrowing that test's proof: a real
-    course number is planted into this page's content and the scan has to find it.
-
-    **The section-code half still reads the whole body, deliberately.** A code is
-    `{startLetter}{ordinal}{modality}` — uppercase, ending `WW` or `FF` — which is
-    not a shape a spacing scale or a palette produces, and a code sitting in a
-    `data-` attribute or a comment is a leak worth catching even though no reader
-    would speak it. The residual is named rather than implied: an uppercase hex
-    colour can spell one (`#A1FF…`), and if that ever happens the failure prints
-    the surrounding text, which makes it one read to tell a palette from a section.
+    **The near miss it must survive:** the launch still has to reach the new
+    redirect shape, so a refusal response cannot pass this by carrying
+    nothing; and the codes and numbers are read out of what the platform
+    publishes, so a scan looking for strings the seed no longer uses fails on
+    the guard rather than reporting a clean response.
     """
     response, _ = landed(
         tool, door_contract, platform, offer_for_role(platform, role_uri), claims_in_token
     )
-    lands_on(response, door_contract, view)
+    session_claims = session_claims_of(response, role, claims_in_token)
 
     codes, numbers = section_identifiers(platform)
     assert codes, (
@@ -672,8 +665,8 @@ def test_a_launch_landing_page_carries_no_section_code_or_course_number(
     )
     assert numbers, (
         "No string the platform publishes about a seeded section carries anything shaped like a "
-        "§8 course number, so the course-number half of this test would pass against a page "
-        "printing one. E0-15: 'Every seeded course needs a title and a number in SPEC §8's bands'."
+        "§8 course number, so the course-number half of this test would pass against a response "
+        "carrying one. E0-15: 'Every seeded course needs a title and a number in SPEC §8's bands'."
     )
     # A prefix chosen for the sample rather than taken from the seed: what the
     # course-number pattern has to be shown finding is a number written the way a
@@ -682,155 +675,118 @@ def test_a_launch_landing_page_carries_no_section_code_or_course_number(
     sample = " ".join(sorted(codes)) + " " + " ".join(f"XYZ {number}" for number in sorted(numbers))
     assert all(code in sample for code in codes), (
         "The code scan cannot find these codes in a sample built out of them, so its silence about "
-        "the landing page means nothing."
+        "the response means nothing."
     )
     assert {match.group("number") for match in COURSE_NUMBER.finditer(sample)} >= numbers, (
         "The course-number pattern cannot find these numbers in a sample written the way a course "
-        "number is written, so its silence about the landing page means nothing."
-    )
-    # And the reader, on the page under test. The two assertions above prove the
-    # *patterns* are not blind; this proves that what the patterns are given —
-    # `RenderedText`'s idea of what the page says — still contains a course number
-    # when the page carries one. A reader narrowed one element too far reports a
-    # clean page exactly as confidently as a correct one does.
-    planted = sorted(numbers)[0]
-    assert planted in numbers_read_from(response.text + f"<p>XYZ {planted}</p>"), (
-        f"The scan cannot find the course number {planted} planted into this page's rendered "
-        "content, so its silence about the real page says nothing (`docs/MISTAKES.md` entry 3). "
-        "`RenderedText` drops `style` and `script` contents and a graphic's drawing instructions — "
-        "keeping the text it draws or announces, and keeping readable attributes wherever they sit "
-        "— and `STANDALONE_NUMBER` rejects a digit run touching a letter, digit, hyphen, dot or "
-        "hash; if either has gone one step too far, this is where it shows."
+        "number is written, so its silence about the response means nothing."
     )
 
-    body = response.text
-    found_codes = sorted({code for code in codes if code in body})
-    found_numbers = sorted(numbers & numbers_read_from(body))
+    surface = response_surface(response, session_claims)
+    # The reader's replacement, proved on the surface under test rather than
+    # assumed: a real course number is planted into it and the plain scan has
+    # to find it, the same discipline `RenderedText` was proved with — a scan
+    # narrowed one step too far reports a clean response exactly as
+    # confidently as a correct one does.
+    planted = sorted(numbers)[0]
+    assert planted in numbers_in(surface + f" XYZ {planted}"), (
+        f"The scan cannot find the course number {planted} planted into this response's surface, "
+        "so its silence about the real response says nothing (`docs/MISTAKES.md` entry 3). "
+        "`STANDALONE_NUMBER` rejects a digit run touching a letter, digit, hyphen, dot or hash; if "
+        "it has gone one step too far, this is where it shows."
+    )
+
+    found_codes = sorted({code for code in codes if code in surface})
+    found_numbers = sorted(numbers & numbers_in(surface))
     first = (found_codes or found_numbers or [""])[0]
     assert not found_codes and not found_numbers, (
-        f"The `{view}` landing page carries section code(s) {found_codes} and course number(s) "
-        f"{found_numbers}, which the platform publishes about its seeded sections. First "
-        f"occurrence: {around(body, first)!r}.\n"
-        "E0-18 renders this page "
-        "empty; a page that says which section this is has begun rendering the launch's context "
-        "claim, and §2.2's code is the whole identity of a section.\n"
-        "The course numbers are read out of the rendered text, so a digit from the stylesheet "
-        "cannot reach them; a code is searched for in the whole body, so one in a `data-` "
-        "attribute is caught too. If what is reported is not a section after all — an uppercase "
-        "hex colour can spell a code — the surrounding text printed here is what says so, and the "
-        "defect is then in this test rather than in the door."
+        f"This `{role}` launch's response carries section code(s) {found_codes} and course "
+        f"number(s) {found_numbers}, which the platform publishes about its seeded sections. "
+        f"First occurrence: {around(surface, first)!r}.\n"
+        "E1-08 renders no view at all on the happy path; a response that says which section this "
+        "is has begun leaking the launch's context claim into a header, a cookie, or the session "
+        "token itself, and §2.2's code is the whole identity of a section.\n"
+        "If what is reported is not a section after all — an uppercase hex fragment can spell a "
+        "code, and a large enough number can coincide with a course number's shape — the "
+        "surrounding text printed here is what says so, and the defect is then in this test "
+        "rather than in the door."
     )
 
 
 @pytest.mark.invariant
-@pytest.mark.parametrize(("role_uri", "view"), LANDING_PAGES)
+@pytest.mark.parametrize(("role_uri", "role"), LANDING_PAGES)
 def test_a_launch_landing_page_carries_no_roster_count(
     tool: Any,
     door_contract: Any,
     platform: Any,
     claims_in_token: Any,
     role_uri: str,
-    view: str,
+    role: str,
 ) -> None:
-    """The numeric half: neither page reports how many people are in the section.
+    """The numeric half: nothing in the response reports how many people are in the section.
 
     A roster count is a figure computed about a section from data this door has no
-    business reading — E0 syncs no roster, and §7.3's NRPS sync is E1's. On the
-    student page it is also a fact about classmates. It is asserted rather than
+    business reading — E1's NRPS sync is E1-11's, not this ticket's. On the
+    student side it is also a fact about classmates. It is asserted rather than
     assumed because the launch carries the names-and-role service URL, so the
-    count is one fetch away from any template that wants to look busy.
+    count is one fetch away from any code that wants to look busy.
 
-    **The mutation this kills:** a landing page gaining "N students enrolled",
-    whether shown or only spoken through an aria label (§4.1 item 1 names those
-    beside charts and text).
+    **Reconciled for E1-08 by dispute E1-08-03.** `lands_on` is replaced by
+    `redirected_to_role`, and the scan reads `response_surface` in place of
+    `response.text`. **The four-shape plant control is now one shape**, and
+    that is a real simplification rather than a quiet weakening: the other
+    three existed to prove `RenderedText` could see a count written as an
+    `aria-label`, on a graphic, or inside one — shapes that only exist inside
+    rendered markup, and E1-08 renders none. A `302` with an empty body has
+    exactly one place left for a number to ride: the surface
+    `response_surface` already reads (headers, body, decoded session
+    claims), so one plant proves the plain scan finds a number there.
 
-    **The near miss, and it is now the more interesting half.** The first version
-    of this test counted digits across `response.text` whole and went red on both
-    pages, reporting 4, 5, 6 and 7 as leaked roster sizes — every one of them out
-    of the inline stylesheet and the decorative SVG: `#F6F8F4`, `--space-4`,
-    `line-height: 1.5`, `stroke-width="2.5"`. No count was rendered anywhere. So
-    the scan now reads only what a browser would show and a screen reader would
-    say, and **the narrowing is itself a way to blind this test**: a reader that
-    dropped attributes, or stopped at the `<svg>` boundary, or a number pattern
-    that rejected too much, would report a clean page just as confidently as the
-    old one reported a dirty one. That is the mutation the control below exists
-    for — it plants a real roster size into this very page four ways and requires
-    the narrowed scan to find all four. A word boundary alone would not have been
-    the fix either: `\\b4\\b` matches inside `--space-4`.
-
-    **Two of those four plants are E0-42's security pass**, which ran the reader
-    over the accessible-chart pattern and watched it miss: `<svg aria-label="18
-    students in your section">` and a `<g aria-label="…">` inside the graphic were
-    both invisible, because attributes were collected only after the skip check.
-    The control went green over that hole, which is the whole reason a control
-    plants the shapes an implementer would actually write rather than the shape
-    the test's author had in mind.
+    **The mutation this kills:** the launched section's member count reaching
+    a header, a cookie, or the session token — "N students enrolled" riding
+    along in whatever this door still adds to a response once the inline
+    landing page and its aria-labelled chart are gone.
 
     SPEC §4.1 item 7's comparison figures are **not** asserted here and this is
-    the ticket's own boundary: nothing in E0 computes one, and the spec assigns
-    that assertion to E4.
+    the ticket's own boundary: nothing in E1-08 computes one, and the spec
+    assigns that assertion to E4.
     """
     response, _ = landed(
         tool, door_contract, platform, offer_for_role(platform, role_uri), claims_in_token
     )
-    lands_on(response, door_contract, view)
+    session_claims = session_claims_of(response, role, claims_in_token)
 
     counts = roster_counts(platform)
     assert counts, (
         f"No seeded roster has {SMALLEST_TELLABLE_COUNT} or more members, or more than that many "
-        "learners, so there is no roster count this test could recognise on a page. E0-15 seeds "
-        "rosters and `tests/integration/test_mock_lms_nrps_roster.py` is where their size is "
-        "asserted."
+        "learners, so there is no roster count this test could recognise on a response. E0-15 "
+        "seeds rosters and `tests/integration/test_mock_lms_nrps_roster.py` is where their size "
+        "is asserted."
     )
 
-    # The control, run against the page under test rather than against a sample of
-    # this file's own making: a real roster size is planted four ways and the
-    # narrowed scan has to find every one. The last two are the shapes E0-42's
-    # security pass caught this reader missing — a count on a chart is written as
-    # an `aria-label` on the `<svg>` itself or on a `<g>` inside it far more often
-    # than it is written as a paragraph — and the control was green over that hole
-    # until they were added. A reader that skips too much is the failure this
-    # catches, and it is the failure a scan reporting "no numbers" cannot be told
-    # from.
+    surface = response_surface(response, session_claims)
+    # The control, run against the surface under test rather than against a
+    # sample of this file's own making: a real roster size is planted and the
+    # scan has to find it. A word boundary alone would not be enough —
+    # `\b4\b` matches inside a token like `--space-4` — which is why
+    # `STANDALONE_NUMBER`'s own lookarounds are proved here too.
     planted = sorted(counts)[0]
-    plants = (
-        ("rendered content", f"<p>{planted} students enrolled</p>"),
-        ("an aria label", f'<span aria-label="{planted} learners">roster</span>'),
-        ("an aria label on the graphic itself", f'<svg aria-label="{planted} students"></svg>'),
-        (
-            "an aria label inside the graphic",
-            f'<svg><g aria-label="{planted} learners"></g></svg>',
-        ),
-    )
-    unseen = [
-        shape
-        for shape, plant in plants
-        if str(planted) not in numbers_read_from(response.text + plant)
-    ]
-    assert not unseen, (
-        f"The scan cannot find {planted} planted into this page as {unseen}, so its silence about "
-        "the real page says nothing (`docs/MISTAKES.md` entry 3). This reader drops `style` and "
-        "`script` contents and a graphic's drawing instructions — keeping `<text>`, `<tspan>`, "
-        "`<title>`, `<desc>` and `<foreignObject>` — and keeps the attributes a screen reader "
-        "speaks **wherever they sit, the graphic included**. If the narrowing has gone one element "
-        "too far, or `STANDALONE_NUMBER` now rejects a number in prose, this is where it shows, "
-        f"and what the reader made of the first planted page was "
-        f"{readable_text(response.text + plants[0][1])[:400]!r}."
+    plant = f" {planted} students enrolled"
+    assert str(planted) in numbers_in(surface + plant), (
+        f"The scan cannot find {planted} planted into this response's surface, so its silence "
+        "about the real response says nothing (`docs/MISTAKES.md` entry 3). If "
+        "`STANDALONE_NUMBER` now rejects a number in prose, this is where it shows."
     )
 
-    read = numbers_read_from(response.text)
-    reported = sorted(count for count in counts if str(count) in read)
-    sat_in = around(readable_text(response.text), str(reported[0])) if reported else ""
+    reported = sorted(count for count in counts if str(count) in numbers_in(surface))
+    sat_in = around(surface, str(reported[0])) if reported else ""
     assert not reported, (
-        f"The `{view}` landing page shows or speaks {reported}, which is the size of a seeded "
-        f"roster (or the number of learners in one). Where it sits in the rendered text: "
-        f"{sat_in!r}. "
-        "E0 syncs no roster — §7.3's names-and-role sync is E1's — so a count on this page was "
-        "fetched from the platform at render time, and on the student page it is a fact about "
-        "classmates.\n"
-        "The scan reads text nodes, text drawn or announced inside a graphic, and the attributes a "
-        "screen reader speaks wherever they sit — so a number from the stylesheet cannot reach it, "
-        "and an `aria-label` on a chart can. If this number is still not a roster count — a year, "
-        "a version — the rendered text printed above is what says so, and the defect is then in "
-        "this test rather than in the door."
+        f"This `{role}` launch's response carries {reported}, which is the size of a seeded "
+        f"roster (or the number of learners in one). Where it sits: {sat_in!r}. E0/E1-08 sync no "
+        "roster — §7.3's names-and-role sync is E1-11's — so a count anywhere in this response "
+        "(a header, a cookie, or the session token) was fetched from the platform at issue time, "
+        "and on the student side it is a fact about classmates.\n"
+        "If this number is not a roster count after all — a year, a version, part of an "
+        "encoded token that happened to spell a standalone run — the text printed above is what "
+        "says so, and the defect is then in this test rather than in the door."
     )

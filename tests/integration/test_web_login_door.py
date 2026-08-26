@@ -83,8 +83,11 @@ LEADERSHIP_VIEW = "pulse-landing-leadership"
 CARE_VIEW = "pulse-landing-care"
 ADMIN_VIEW = "pulse-landing-admin"
 
-# The launch-door view the two-hat person reaches by her other assignment.
-INSTRUCTOR_VIEW = "pulse-landing-instructor"
+# The launch-door route the two-hat person reaches by her other assignment.
+# E1-04's route group name — was `pulse-landing-instructor`, the testid
+# E0-18's inline HTML carried, before E1-08 retired that contract (dispute
+# E1-08-03) in favour of a `302` to `/app/<role>#session=`.
+INSTRUCTOR_ROLE = "instructor"
 
 # The mock platform's configuration surface again, for the one test that drives
 # both doors. Kept here rather than imported from the launch module: a test module
@@ -1052,6 +1055,13 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     Both doors in one test on purpose. Split in two, each half is satisfied by a
     seed the other person is missing from, and the fact worth asserting — that one
     published identity opens both — is not stated anywhere.
+
+    **The launch half only, reconciled for E1-08 by dispute E1-08-03.** The Care
+    half stays exactly as E0-18/E1-09 built it — a web login lands on `200` +
+    `pulse-landing-care`, unchanged by this ticket. The launch half does not:
+    E1-08 retires the launch door's inline `200` + testid contract in favour of a
+    `302` to `/app/instructor#session=<jwt>`, so "she opens the instructor view by
+    launch" is now asserted as that redirect rather than as a rendered page.
     """
     hers = person_holding(provider, "CARE", and_a_launch_assignment=True)
     lms_user_id = hers.get("lms_user_id")
@@ -1117,7 +1127,21 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
         door_contract.lti_launch, data={"id_token": id_token, "state": state}
     )
 
-    lands_on(instructor_landing, door_contract, INSTRUCTOR_VIEW)
+    assert instructor_landing.status_code in (302, 303, 307), (
+        f"Her launch answered {instructor_landing.status_code} rather than a redirect. E1-08 "
+        "retires the launch door's `200` + inline HTML: `landing_or_refusal` now issues a "
+        f"session and redirects. Body begins {instructor_landing.text[:300]!r}."
+    )
+    location = instructor_landing.headers.get("location") or ""
+    prefix = f"/app/{INSTRUCTOR_ROLE}#session="
+    assert location.startswith(prefix), (
+        f"Her launch redirected to `{location}`, which does not start with `{prefix}`. E1-08's "
+        "interface ruling: a 302 whose `Location` is `/app/<segment>#session=<token>`, and her "
+        "teaching assignment is what makes the launch door dispatch her to the instructor route."
+    )
+    assert location[
+        len(prefix) :
+    ], f"The redirect `{location}` carries `session=` with an empty token."
 
 
 # ---------------------------------------------------------------------------

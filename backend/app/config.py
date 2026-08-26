@@ -453,6 +453,22 @@ class Settings(BaseSettings):
         description="SQLAlchemy URL for the Care queue's database connection (SPEC §6.2).",
     )
     redis_url: SecretStr = Field(description="Redis URL for the Celery broker and result backend.")
+    # The key both entry doors sign the session JWT with (E1-08, ADR 0089).
+    # `SecretStr` for the reason the block above gives — it is a symmetric HMAC
+    # secret, so a leak forges any session — and required with no default, because
+    # a defaulted signing secret is a key every deployment shares and every reader
+    # of this repository knows. Generate one per deployment with
+    # `secrets.token_urlsafe(32)`; `.env.example` carries an obvious placeholder.
+    #
+    # Unlike the tool's LTI private key (a `tool_signing_key` row, ADR 0082), this
+    # one is a single-line symmetric secret the api container and any future
+    # replica must share so a restart does not invalidate a sitting session — the
+    # exact case ADR 0082's "keep the key out of settings" reasons do not reach,
+    # since none of them is about a one-line shared secret. ADR 0089 records the
+    # split.
+    session_secret: SecretStr = Field(
+        description="Key the session JWT is signed with (SPEC §7.3, ADR 0089)."
+    )
     # The AI provider credential (§6.3: "AI provider (base URL, model, masked
     # key)"). `SecretStr` for the reason the block above gives, and it is the
     # field that reason was written for: `app.ai.gateway` hands this value to a
