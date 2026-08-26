@@ -191,3 +191,31 @@ Every E1 pull request that defers something adds it here in the same PR.
    key set — the mock LMS's and the mock IdP's beside the tool's — owed with
    the first ticket that touches either mock's signing surface, E1-07 or
    E1-08, whichever lands first.
+   *E1-07 closed the mock LMS's third*: `tests/integration/test_mock_lms_
+   launch.py::test_the_published_keys_numbers_are_spelled_as_unpadded_
+   base64url`, built the same way as the tool's own and proven against the
+   same mutation (`.rstrip(b"=")` dropped from `mock-lms/app/signing.py`'s
+   `base64url`) before being trusted. The mock IdP's copy is untouched by
+   E1-07 and stays open, owed to whichever ticket next touches `mock-idp/app/
+   signing.py`'s encoder.
+
+## From E1-07 — the mock mints deliberately wrong launches
+
+1. **The defect selector vocabulary is copied, not shared.** `?defect=<name>`
+   answers to `app.wrong_launches.ALL_SELECTORS`, and nothing outside
+   `mock-lms/` can import that tuple by name — `mock-lms/app` and
+   `mock-idp/app` are both packages called `app` (SPEC §13), the collision
+   ADR 0039 already records for mypy. `tests/integration/test_mock_lms_
+   wrong_launches.py` therefore holds its own copy of all eighteen strings,
+   and E1-08's Playwright spec (the ticket this vocabulary exists for) will
+   need a third. A rename in `app.wrong_launches` with no matching rename
+   in a copy fails loudly — the dispatcher's 400 names the value it did not
+   recognise — but only once something actually calls it with the stale
+   name. See ADR 0088's Consequences.
+   **Done when** one source serves the vocabulary to every consumer that
+   is not `mock-lms/` itself — a `/mock/defects` inspection route the mock
+   serves its own selector list from, most likely, so a Playwright spec (or
+   this suite) can assert against what the mock says it answers to rather
+   than a copied literal — proven by a test that the served list and
+   `ALL_SELECTORS` agree. Natural to build alongside E1-08, whose Playwright
+   spec is the consumer this would most directly help.
