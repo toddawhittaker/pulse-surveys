@@ -45,6 +45,15 @@ that sees both which field came from the platform and which column it went into.
 If it lands without calling `guard_write`, nothing fails, and ADR 0045's rule
 becomes a description of something the codebase used to intend.
 
+**What actually arrived first, 2026-08-26.** Not the roster sync: E1-10's
+launch-time provisioning (`app.services.provisioning`) writes `course`, `section`
+and `user` — three of the four — and it is the writer this sweep's live assertion
+finally has as a subject. It calls `guard_write` with a sanction the catalog in
+ADR 0090 backs, so the rule this ticket wrote holds against it as written. The
+paragraph above still describes E1-11's sync, which is the first writer of
+`enrollment` and of the `INSTRUCTOR` row and inherits the mechanism rather than
+the question.
+
 Read first: [ADR 0045](../../adr/0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md),
 ADR 0014, ADR 0021, SPEC §2.1, and `docs/MISTAKES.md` entries 2 and 3.
 

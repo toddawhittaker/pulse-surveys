@@ -9,6 +9,11 @@ can write it"), and the staff-only trigger rule for storing the roster address.
 
 ## Context
 
+**Settled 2026-08-26 in this ticket: ADR 0090 is the mechanism** — a sanctioned
+writer calls `guard_write` and passes a `WriteSanction` that `SANCTIONED_WRITERS`
+has to back, and ADR 0091 records what a launch provisions and what it writes
+down instead. The paragraph below is what was true when the ticket was written.
+
 This is the first code that writes LMS-owned relations, which makes it the
 ticket that settles **ADR 0069's open half**: `guard_write(table="course")`
 refuses unconditionally today, every write path is required by the E0-35 sweep
@@ -107,8 +112,14 @@ creates `user`, not `person`).
    covers the forbidden state.
 3. The E0-35 sweep still fails a planted unsanctioned writer, and the new
    sanctioned path passes it — both directions run, per MISTAKES entry 9.
-4. The title-less mint provisions a course whose `lms_title` carries the
-   decided fallback; a titled launch stores the platform's title.
+4. A launch whose context carries its `label` and no `title` provisions a
+   course whose `lms_title` carries the decided fallback, marked as a fallback;
+   a titled launch stores the platform's title. **Reworded 2026-08-26 on Todd's
+   ruling**, because the title-less case is two cases: E1-07's
+   `titleless_context` mint carries `id` alone, which identifies no course at
+   all, so it is refused and recorded under criterion 5's shape rather than
+   provisioned from a guess. E1-10 adds a second mint — `label` kept, `title`
+   deleted — and that one is the fixture this criterion is about.
 5. An out-of-band course number is refused and recorded; nothing is written.
 
 ## Out of scope

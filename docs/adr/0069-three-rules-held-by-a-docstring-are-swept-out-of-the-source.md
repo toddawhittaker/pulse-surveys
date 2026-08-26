@@ -193,3 +193,19 @@ lands: it either calls `guard_write` and something about that call distinguishes
 it from an unsanctioned one, or ADR 0045 records why a sanctioned writer does not
 call the chokepoint at all — and whichever it is, the sweep's rule is restated to
 match, in the same pull request as the writer.
+
+**Done, 2026-08-26, in E1-10 — the first branch of that "done when".**
+[ADR 0090](0090-a-sanctioned-writer-passes-the-chokepoint-by-being-in-a-catalog.md)
+is the mechanism: a sanctioned writer calls `guard_write` and passes a
+`WriteSanction` the catalog `authz.SANCTIONED_WRITERS` has to back, and the guard
+consults that catalog rather than the sanction it was handed. Nothing here is
+softened and **no exclusion list was added**: "the module names the guard" is
+exactly as true of `app.services.provisioning` as of anything else. The sweep's
+rule is restated in its own module docstring in the same pull request, as this
+paragraph requires, and that module's live assertion stops being vacuous in the
+same change —
+`test_the_launch_writer_is_a_routed_write_site_this_sweep_can_actually_see`
+requires the detector to *find* the launch writer's writes and then to clear them,
+so the sweep's silence about the application is no longer the silence of an empty
+subject set. The two paragraphs above stand as the record of what was true until
+then; their present tense no longer is.
