@@ -331,30 +331,46 @@ def test_the_schedule_beat_reads_is_the_one_the_schedule_module_exposes(
     )
 
 
+# E1-08's entry — the daily purge of the launch replay ledger — and the only
+# thing landed in the beat schedule as of this ticket. ADR 0089: the launch
+# nonce is stored in Postgres rather than Redis, "and that the native TTL a
+# Redis store would have had is replaced by a daily Celery-beat purge." SPEC
+# §9.1 requires single-use nonces; a ledger only ever appended to (`INSERT`,
+# per `RUNTIME_BASE_TABLE_PRIVILEGES` in `test_identity_grants.py`) grows
+# without bound absent this job, so it is part of what makes the
+# Postgres-over-Redis choice sustainable rather than an optional extra.
+PURGE_NONCES_SCHEDULE_KEY = "purge-expired-launch-nonces"
+PURGE_NONCES_TASK_NAME = f"{TASKS_MODULE}.purge_launch_nonces"
+
+
 def test_the_beat_schedule_holds_no_real_entries_yet(
     configured_env: dict[str, str],
     import_app_module: Callable[[str], ModuleType | None],
     celery_application_in: Callable[[ModuleType], Any],
 ) -> None:
-    """E0-03 scope: the schedule module is "empty of real entries".
+    """E1-08 lands the first real entry; this test is the record of it, not of emptiness.
 
-    Every scheduled job in the product is somebody else's ticket — window
-    open and close is E2, Monday reports are E4, roster sync is E1, retention
-    purges are E13 — and E0-03 puts all of them out of scope explicitly. An
-    entry that lands here now runs on a beat whose only verification is that it
-    starts.
+    **Rewritten by E1-08, per this test's own instruction at E0-03.** The
+    original docstring: "This test is a record with a shelf life, and that is
+    deliberate. The first real entry is meant to make it fail, so that adding
+    it is a conversation about which ticket owns the job rather than a line
+    that slips in. Whoever lands that entry rewrites this test in the same
+    change." E1-08 is that ticket — `purge-expired-launch-nonces`, running
+    `app.jobs.tasks.purge_launch_nonces` (ADR 0089's daily purge of the
+    replay ledger `app.lti.replay_guard` claims nonces into). Every *other*
+    scheduled job named at E0-03 stays out of scope: window open/close is E2,
+    Monday reports are E4, roster sync is E1-11, retention purges are E13. If
+    one of those has now landed too, this test is again the record that has
+    to change with it.
 
-    **This test is a record with a shelf life, and that is deliberate.** The
-    first real entry is meant to make it fail, so that adding it is a
-    conversation about which ticket owns the job rather than a line that slips
-    in. Whoever lands that entry rewrites this test in the same change.
-
-    The empty assertion is the weak half of the pair and is not left to stand on
-    its own: an empty schedule is exactly what a module that does not exist
-    would produce, so `app.jobs.schedules` is imported first and asserted to be
-    real. The wiring test above — that the entries this module holds are the
-    ones beat reads — is the other half, and without it "empty" here would be
-    indistinguishable from "connected to nothing".
+    The name-and-task assertion is the strong half of the pair and is not
+    left to stand on its own: a module that does not exist produces an empty
+    schedule that would vacuously fail to contain anything, so
+    `app.jobs.schedules` is imported first and asserted to be real. The
+    wiring test above — that the entries this module holds are the ones beat
+    reads — is the other half, and without it "the schedule holds this entry"
+    here would be indistinguishable from "this module holds it, unread by
+    beat".
     """
     schedules = import_app_module(SCHEDULES_MODULE)
     assert schedules is not None, MISSING_MODULE_MESSAGE.format(module=SCHEDULES_MODULE)
@@ -362,12 +378,30 @@ def test_the_beat_schedule_holds_no_real_entries_yet(
     application = require_application(import_app_module, celery_application_in)
     entries = dict(application.conf.beat_schedule or {})
 
-    assert not entries, (
-        f"The beat schedule declares {sorted(entries)}. E0-03 puts every real scheduled "
-        "task out of scope: window scheduling is E2, reports are E4, roster sync is E1, "
-        "retention is E13. If one of those has now landed, this test is the record that "
-        "has to change with it — say which ticket owns the entry and assert what it is, "
-        "rather than deleting the assertion."
+    assert set(entries) == {PURGE_NONCES_SCHEDULE_KEY}, (
+        f"The beat schedule declares {sorted(entries)}, not exactly "
+        f"{{{PURGE_NONCES_SCHEDULE_KEY!r}}}. E1-08 lands the first real entry — the daily purge "
+        "of the launch replay ledger, ADR 0089 — and no other ticket has landed one yet: window "
+        "scheduling is E2, reports are E4, roster sync is E1-11, retention is E13. If one of "
+        "those has now landed too, this test is again the record that has to change with it — "
+        "say which ticket owns the new entry and assert what it is, rather than widening this "
+        "equality to a superset check."
+    )
+
+    entry = entries[PURGE_NONCES_SCHEDULE_KEY]
+    task = entry.get("task") if isinstance(entry, dict) else getattr(entry, "task", None)
+    assert task == PURGE_NONCES_TASK_NAME, (
+        f"`{PURGE_NONCES_SCHEDULE_KEY}` runs {task!r}, not {PURGE_NONCES_TASK_NAME!r}. E1-08's "
+        "entry has to run the nonce-purge task specifically, or the schedule fires something "
+        "beat was never told to run."
+    )
+    schedule = (
+        entry.get("schedule") if isinstance(entry, dict) else getattr(entry, "schedule", None)
+    )
+    assert schedule, (
+        f"`{PURGE_NONCES_SCHEDULE_KEY}` declares no `schedule` ({schedule!r}). ADR 0089 gives "
+        "the nonce ledger 'a daily Celery-beat purge' in place of the native TTL a Redis store "
+        "would have supplied — an entry with no period runs on no cadence at all."
     )
 
 
