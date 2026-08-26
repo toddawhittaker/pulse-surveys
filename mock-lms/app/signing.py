@@ -31,6 +31,7 @@ them rather than against this docstring:
 
 import base64
 import hashlib
+import hmac
 import json
 import math
 import secrets
@@ -240,6 +241,24 @@ class IssuerKey:
         header and the `kid` in the published key set cannot disagree: they are
         the same function of the same modulus.
         """
+        return base64url(hashlib.sha256(self.public_key_material()).digest())
+
+    def public_key_material(self) -> bytes:
+        """The canonical bytes this key's public half is described by.
+
+        RFC 7638's canonical JWK — `e`, `kty`, `n`, sorted and compact — which
+        `key_id` hashes for the thumbprint above. **Also, deliberately, what
+        `app.wrong_launches`'s `hs256_confusion` mint uses as an HMAC secret.**
+        That mint is the classic RS256-to-HS256 algorithm-confusion bypass: a
+        verifier that reads `alg` off the token it is checking, rather than
+        fixing the algorithm itself, and is handed "the public key" as generic
+        key material, is fooled by a token whose HMAC was computed with that
+        exact material. ADR 0035 bars a PEM library on this side of the wall, so
+        this canonical encoding — already served, byte for byte, as three
+        members of every JWKS response — is what "the public key, as bytes"
+        means on this mock. See
+        `docs/adr/0088-a-query-parameter-selects-one-wrong-launch-per-mint.md`.
+        """
         canonical = json.dumps(
             {
                 "e": base64url_uint(self.public_exponent),
@@ -249,7 +268,7 @@ class IssuerKey:
             separators=(",", ":"),
             sort_keys=True,
         )
-        return base64url(hashlib.sha256(canonical.encode("utf-8")).digest())
+        return canonical.encode("utf-8")
 
     def public_jwk(self) -> dict[str, Any]:
         """The public half, as one entry of a JWK Set (RFC 7517).
@@ -293,6 +312,58 @@ class IssuerKey:
         encoded_claims = base64url(json.dumps(claims, separators=(",", ":")).encode("utf-8"))
         signing_input = f"{encoded_header}.{encoded_claims}".encode("ascii")
         return f"{signing_input.decode('ascii')}.{base64url(self.sign(signing_input))}"
+
+
+def compact_jws_header_and_claims(
+    header: dict[str, Any], claims: dict[str, Any]
+) -> tuple[str, bytes]:
+    """The encoded `header.claims` half of a compact JWS, and the signing input.
+
+    Factored out of `IssuerKey.compact_jws` so that `unsigned_compact_jws` and
+    `hs256_compact_jws` below build the identical two segments a real RS256
+    token would carry — the encoding is the header a JWT decoder reads
+    regardless of whether anything about to follow it is a real signature.
+    """
+    encoded_header = base64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    encoded_claims = base64url(json.dumps(claims, separators=(",", ":")).encode("utf-8"))
+    return (
+        f"{encoded_header}.{encoded_claims}",
+        f"{encoded_header}.{encoded_claims}".encode("ascii"),
+    )
+
+
+def unsigned_compact_jws(claims: dict[str, Any]) -> str:
+    """`claims` as a compact JWS carrying `alg: none` and no signature at all.
+
+    E1-07's `alg_none` mint. RFC 7519 permits an unsecured JWT — `alg: none`,
+    an empty third segment — and it is the one case this module does not sign,
+    on purpose: the defect is that there is nothing here to verify, so building
+    one out of `hashlib`/`hmac`/`pow` would be arithmetic in search of a point.
+    The trailing dot keeps the compact-JWS shape at three segments, the way a
+    real unsecured JWT is written, so a reader splitting on `.` finds an empty
+    signature rather than a token that looks truncated.
+    """
+    joined, _ = compact_jws_header_and_claims({"alg": "none", "typ": "JWT"}, claims)
+    return f"{joined}."
+
+
+def hs256_compact_jws(claims: dict[str, Any], secret: bytes, kid: str) -> str:
+    """`claims` as a compact JWS, HMAC-SHA256'd under `secret` rather than signed.
+
+    E1-07's `hs256_confusion` mint — the classic RS256-to-HS256 algorithm
+    confusion bypass. `hmac`, stdlib, over `pow`: an HMAC is not RSA arithmetic
+    and does not belong beside `sign`'s modular exponentiation, but it is the
+    same bound ADR 0035 draws — standard library only, mock-only. `kid` is a
+    parameter rather than always this file's own key, so a caller can carry the
+    real platform key's id into the header, which is what makes the confusion
+    attack the attack it is: a token whose header points at a real RS256 key but
+    whose signature is an HMAC.
+    """
+    joined, signing_input = compact_jws_header_and_claims(
+        {"alg": "HS256", "typ": "JWT", "kid": kid}, claims
+    )
+    signature = hmac.new(secret, signing_input, hashlib.sha256).digest()
+    return f"{joined}.{base64url(signature)}"
 
 
 # ---------------------------------------------------------------------------
