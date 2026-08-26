@@ -201,7 +201,25 @@ LOGGED_ERROR_CODES = (
     "invalid_scope",
 )
 UNRECOGNISED_CODE_LOGGED_AS = "unrecognized"
+
+# Three values that are outside the set, each outside it for a different reason,
+# so that only an exact comparison answers "outside" for all three. A single
+# stranger is not enough and this file learned that from a mutation battery: the
+# first version sent the first of these alone, and a `startswith` comparison and a
+# `.lower()` comparison both survived, because a value sharing no prefix and no
+# case variant with any member is outside the set under every one of them.
+#
+# The tail on the third is a newline and a line that reads like a log record,
+# which is what a prefix comparison would carry into the log and is the injection
+# `backend/app/api/auth.py`'s own module comment names as the reason for the set.
 AN_UNKNOWN_ERROR_CODE = "e1-09-not-an-rfc-6749-error-code"
+CODES_OUTSIDE_THE_SET = {
+    "a code from outside the registry": AN_UNKNOWN_ERROR_CODE,
+    "a case variant of a set member": ACCESS_DENIED.upper(),
+    "a set member with an injected tail": (
+        f"{ACCESS_DENIED}\nWARNING e1-09-injected-log-line: not written by this application"
+    ),
+}
 
 # Two values a provider — or anyone who can put a browser in front of this
 # callback — may write into an error redirect. RFC 6749 §4.1.2.1 puts no grammar on
@@ -1445,7 +1463,7 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
 
     assert instructor_landing.status_code in (302, 303, 307), (
         f"Her launch answered {instructor_landing.status_code} rather than a redirect. E1-08 "
-        "retires the launch door's `200` + inline HTML: `landing_or_refusal` now issues a "
+        "retires the launch door's `200` + inline HTML: `landing_with_session` issues a "
         f"session and redirects. Body begins {instructor_landing.text[:300]!r}."
     )
     location = instructor_landing.headers.get("location") or ""
@@ -2432,10 +2450,11 @@ def test_the_error_branch_logs_the_registered_code_and_never_the_description(
     )
 
 
+@pytest.mark.parametrize("case", sorted(CODES_OUTSIDE_THE_SET))
 def test_an_error_code_outside_the_set_is_logged_as_unrecognized_and_never_echoed(
-    tool: Any, door_contract: Any, provider: Any, caplog: pytest.LogCaptureFixture
+    tool: Any, door_contract: Any, provider: Any, caplog: pytest.LogCaptureFixture, case: str
 ) -> None:
-    """The near miss for the four above: a code that is not one of them.
+    """The near misses for the four above: three values that are not one of them.
 
     **This is what makes those four mean "recognised" rather than "echoed".** The
     `error` parameter is as attacker-chosen as the description is; a door that
@@ -2443,31 +2462,48 @@ def test_an_error_code_outside_the_set_is_logged_as_unrecognized_and_never_echoe
     through the one parameter it was allowed to repeat. So the set is closed by
     exact comparison, and everything else logs one fixed word.
 
-    **Dies if the comparison is a prefix, a substring or a case-fold** — none of
-    which this value would defeat, and all of which are how a closed set stops being
-    closed. And dies if the unknown code is echoed anywhere in the log.
+    **Three values, because "exact" has three ways of being not quite exact**, and
+    a single stranger distinguishes none of them — the first version of this test
+    sent only a code sharing no prefix and no case variant with any set member, and
+    the mutation battery walked past both of the comparisons below.
+
+      - `a code from outside the registry` kills a comparison dropped altogether:
+        `error` written to the log with no set consulted.
+      - `a case variant of a set member` kills `error.lower() in LOGGED_ERROR_CODES`
+        and every other case-fold. `ACCESS_DENIED` is not `access_denied`: RFC 6749
+        §4.1.2.1 spells its codes in one case and nothing obliges a caller to.
+      - `a set member with an injected tail` kills
+        `any(error.startswith(known) for known in ...)` and the `in`-a-string
+        substring test. The tail is what a prefix comparison would carry into the
+        log — a second line, reading as a record of its own, which is the reason
+        `backend/app/api/auth.py`'s own module comment gives for the set existing.
+
+    Each is caught by the *first* assertion rather than the echo check, and that is
+    worth knowing when one goes red: under either loose comparison the door
+    recognises the value and logs a code, so the word `unrecognized` never appears.
+    The echo assertions below it are the second net, for a comparison that answers
+    "outside" and repeats the string anyway.
     """
+    sent = CODES_OUTSIDE_THE_SET[case]
     caplog.set_level(logging.DEBUG)
     _, returned = cancelled_at_the_provider(tool, door_contract, provider)
-    hostile = {
-        **returned,
-        "error": AN_UNKNOWN_ERROR_CODE,
-        "error_description": UNTRUSTED_DESCRIPTION,
-    }
+    hostile = {**returned, "error": sent, "error_description": UNTRUSTED_DESCRIPTION}
 
     tool.get(door_contract.oidc_callback, params=hostile)
 
     logged = application_log_text(caplog)
     assert UNRECOGNISED_CODE_LOGGED_AS in logged, (
         f"No log line from the `{APPLICATION_LOGGER_ROOT}.` namespace carries "
-        f"{UNRECOGNISED_CODE_LOGGED_AS!r}. Captured: {logged!r}. E1-09: a code outside "
-        f"{list(LOGGED_ERROR_CODES)} is logged as that literal word, so the operator learns an "
-        "error redirect arrived without the tool repeating a string somebody else chose."
+        f"{UNRECOGNISED_CODE_LOGGED_AS!r} for {case} ({sent!r}). Captured: {logged!r}. E1-09 "
+        f"compares `error` to {list(LOGGED_ERROR_CODES)} exactly and logs that literal word for "
+        "everything else — so a door that answered `unrecognized` for a plain stranger and not "
+        "for this one is matching on a prefix, a substring or a case-fold, and its set is not "
+        "closed."
     )
-    assert AN_UNKNOWN_ERROR_CODE not in logged, (
-        f"The log repeats {AN_UNKNOWN_ERROR_CODE!r}, an error code from outside E1-09's set, "
-        f"verbatim. Captured: {logged!r}. That parameter is attacker-chosen text exactly as "
-        "`error_description` is."
+    assert sent not in logged, (
+        f"The log repeats {sent!r} ({case}) verbatim. Captured: {logged!r}. That parameter is "
+        "attacker-chosen text exactly as `error_description` is, and repeating it is the "
+        "log-injection surface the closed set exists to remove."
     )
     assert UNTRUSTED_DESCRIPTION not in logged, (
         f"The log carries {UNTRUSTED_DESCRIPTION!r} alongside an unrecognised code. Captured: "
