@@ -77,6 +77,7 @@ from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 __all__ = [
     "LtiDeployment",
+    "LtiLaunchNonce",
     "LtiPlatform",
     "RegistrationAddressError",
     "ToolSigningKey",
@@ -399,3 +400,64 @@ class ToolSigningKey(UuidPrimaryKey, Base):
     # a second factor, and one in the environment moves custody back to the place
     # ADR 0082 rejects. What protects this column is the grant on it.
     private_key_pem: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class LtiLaunchNonce(UuidPrimaryKey, Base):
+    """A launch nonce this tool has already spent — the replay ledger (E1-08).
+
+    A launch carries a `nonce` this tool minted at login, and a nonce is
+    single-use: replaying the whole signed `id_token` a second time is the replay
+    attack §9.1 names, and the signature, issuer, audience and clock are all still
+    valid on the second delivery. So `app.lti.replay_guard.claim_nonce` records
+    the nonce here **after every other check has passed**, with
+    `INSERT ... ON CONFLICT (nonce) DO NOTHING`: the first delivery inserts and
+    the launch proceeds, the second collides and is refused as
+    `NonceReplayedError`. The claim rides inside the launch's own `Session`, so it
+    commits with the rest of the launch or not at all.
+
+    **Postgres rather than Redis** (ADR 0089). Every other launch-validation input
+    already lives here — `LtiPlatform`, `LtiDeployment`, `ToolSigningKey` — and
+    the launch already opens one `Session` the claim joins, so the unique index
+    gives atomic single-use for free. Redis is the disposable task-queue broker,
+    and making it the record of which credentials were already spent would pull a
+    disposability-assuming component into an auth boundary. Redis's one advantage,
+    native TTL, is replaced by `purge_expired_nonces` on a daily Celery beat.
+
+    **Not a person table.** It holds a nonce, the moment it was consumed and the
+    moment it expires — no subject, no name, no address — so `PERSON_TABLES` does
+    not change and no identity-separated view is owed.
+
+    **`pulse_app` holds `INSERT` and `DELETE` and nothing else**, granted by
+    `lti_launch_nonce_grants_v001.sql`: `INSERT` for `claim_nonce`, which needs no
+    `SELECT` because it reads single-use off the row count of the conflict, and
+    `DELETE` for `purge_expired_nonces`. The write privileges are the exception a
+    ledger requires — the launch door is the one path that spends a nonce — and
+    the entry is recorded in `RUNTIME_BASE_TABLE_PRIVILEGES` in the §4.1 grants
+    suite, where the widening has its loud conversation.
+    """
+
+    __tablename__ = "lti_launch_nonce"
+    # A launch is refused by the *conflict*, so the uniqueness is on `nonce` and
+    # it is the index `INSERT ... ON CONFLICT` targets. `expires_at` is indexed so
+    # the daily purge deletes the expired tail without scanning the whole ledger.
+    __table_args__ = (
+        UniqueConstraint("nonce", name="uq_lti_launch_nonce_nonce"),
+        Index("ix_lti_launch_nonce_expires_at", "expires_at"),
+    )
+
+    # The opaque `nonce` this tool minted at login and the launch echoed back.
+    # Text, not a bounded string, for the same reason the issuer and client id
+    # are: its length is the platform's business, not a column limit's.
+    nonce: Mapped[str] = mapped_column(Text, nullable=False)
+    # When the nonce was spent, defaulted to the insert moment. Recorded for
+    # forensics and nothing reads it in a hot path; `AwareDateTime` refuses a
+    # naive value at the bind boundary (ADR 0019).
+    consumed_at: Mapped[datetime] = mapped_column(
+        AwareDateTime, nullable=False, server_default=text("now()")
+    )
+    # When this row may be purged: the launch nonce's own lifetime, set by
+    # `claim_nonce`'s caller. A row past this is dead weight the daily purge
+    # removes; keeping it would refuse a *fresh* launch that happened to mint the
+    # same random nonce, which is astronomically unlikely but not a reason to
+    # grow the ledger without bound.
+    expires_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
