@@ -71,6 +71,17 @@ AGS_CLAIM = "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"
 # differently fails there first, by name.
 CONTEXT_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/context"
 
+# E1-08. The query parameter `mock-lms/app/wrong_launches.py` reads off an
+# authorization request to select one of E1-07's deliberately wrong (or
+# near-miss) mints by name. **This module's own copy of the string**, not an
+# import of `app.wrong_launches.DEFECT_QUERY_PARAM`: both mocks declare a
+# package named `app` (SPEC §13), and importing either by name from a module
+# outside its own package is the collision `docs/adr/0039-the-two-app-
+# packages-are-typechecked-in-two-runs.md` describes — the same reason
+# `tests/integration/test_mock_lms_wrong_launches.py` keeps its own copy
+# rather than importing the mock's.
+DEFECT_QUERY_PARAM = "defect"
+
 # The media types the Advantage services exchange, from NRPS 2.0 and AGS 2.0.
 # Sent rather than assumed, because sending them is what a tool does. All four
 # end in `+json`, which is also what lets a FastAPI endpoint declaring a JSON
@@ -412,6 +423,7 @@ class MockPlatform:
         *,
         state: str | None = None,
         nonce: str | None = None,
+        defect: str | None = None,
     ) -> SignedLaunch:
         """Drive one launch to the point a tool would receive the `id_token`.
 
@@ -422,6 +434,17 @@ class MockPlatform:
         `id_token` out of what comes back. Nothing is called that a real tool
         would not call, so a launch minted here and a launch a browser produces
         are the same launch.
+
+        `defect`, added for E1-08, selects one of E1-07's deliberately wrong (or
+        near-miss) launches by name — `?defect=foreign_signature` and the rest
+        of `mock-lms/app/wrong_launches.py::ALL_SELECTORS`. `None`, the default,
+        takes the exact code path this method took before E1-07 existed: that
+        ticket's own module docstring promises its addition is additive, and
+        this keyword is what keeps that promise here too. A caller that wants a
+        defective launch to still be judged against a real tool's own `state`/
+        `nonce` — the shape a door test needs, since pylti1p3's login step
+        stores what it issued — passes them through the `state`/`nonce`
+        keywords above rather than letting this method invent fresh ones.
         """
         chosen = offer or self.require_offers()[0]
         request = dict(AUTHORIZATION_REQUEST_CONSTANTS)
@@ -438,13 +461,14 @@ class MockPlatform:
             ("auth",),
             "receives the tool's authorization request and answers with a signed `id_token`",
         )
+        query = {} if defect is None else {DEFECT_QUERY_PARAM: defect}
         # POST where the route accepts it, GET otherwise. Which of the two a
         # tool uses is the tool's choice under OIDC, so the endpoint's own
         # declaration decides rather than this file.
         if path in self.paths("POST"):
-            response = self.client.post(path, data=request)
+            response = self.client.post(path, data=request, params=query)
         else:
-            response = self.client.get(path, params=request)
+            response = self.client.get(path, params={**request, **query})
 
         id_token, returned_state, posted_to = self.read_authorization_response(response, path)
         return SignedLaunch(
