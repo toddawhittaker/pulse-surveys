@@ -128,3 +128,22 @@ Every E1 pull request that defers something adds it here in the same PR.
    E2's first real screen, where there is something to look at while
    deciding. Whichever way it goes, `design/tokens.css` stays the place the
    families are named.
+
+2. **The application sends no security response headers.** No route sets
+   `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, or
+   a framing policy; `backend/app/main.py` carries no header middleware at
+   all. This is pre-existing and app-wide rather than this ticket's doing —
+   E1-04 is simply the first ticket to serve real HTML and JavaScript from
+   the app factory, which is what makes the absence worth recording.
+
+   The header set has to be designed rather than copied from a hardening
+   checklist: Pulse renders inside an LMS iframe, so the usual first move —
+   refuse framing outright — would break every launch. `frame-ancestors` has
+   to admit the platforms that may frame the app, and the CSP has to allow
+   what the bundle legitimately loads while still refusing inline script.
+
+   **Done when** the app factory attaches a deliberate header set to every
+   response — a CSP, `X-Content-Type-Options: nosniff`, a `Referrer-Policy`,
+   and a `frame-ancestors` directive naming who may frame the app — with a
+   test pinning each header. Scheduled before E2 puts real survey content in
+   the SPA.
