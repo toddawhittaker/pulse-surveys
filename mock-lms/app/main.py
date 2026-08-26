@@ -18,6 +18,11 @@ The routes are closures over the settings, the seed and the key for the same
 reason. Nothing reaches a key through a global, so there is no arrangement of
 imports that lets two applications share one.
 
+**Since E1-07, the authorization endpoint also mints deliberately wrong
+launches**, chosen by an optional `?defect=` query parameter — additive only:
+a request that omits it runs the two lines it always ran, and everything about
+what a named defect does lives in `app.wrong_launches`, not here. See ADR 0088.
+
 **Configuration is read here, at build time**, not in a lifespan handler and not
 per request. The test fixture in `tests/fixtures/app_imports.py` sets the
 environment around the import and the factory call and restores it before
@@ -141,6 +146,7 @@ from app.tokens import (
     TokenRequestError,
     granted_token,
 )
+from app.wrong_launches import DEFECT_QUERY_PARAM, WrongLaunchMinter
 
 SERVICE_NAME = "mock-lms"
 
@@ -392,7 +398,11 @@ def _register_oidc_metadata(app: FastAPI, settings: PlatformSettings, key: Issue
 
 
 def _register_authorization(
-    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, key: IssuerKey
+    app: FastAPI,
+    settings: PlatformSettings,
+    platform: SeededPlatform,
+    key: IssuerKey,
+    wrong_launches: WrongLaunchMinter,
 ) -> None:
     """The authorization endpoint, which is where a launch is actually signed."""
 
@@ -420,6 +430,13 @@ def _register_authorization(
         obligation to it: the value is the tool's, and a platform that
         re-encoded it breaks the tool's cross-site request forgery check in a way
         that reads as a bug in the tool.
+
+        **E1-07's whole surface is one `if` below.** `?defect=` is read from the
+        URL's query string regardless of `request.method`, because a defect
+        selector is this suite's own instruction to the mock rather than
+        anything an OIDC authorization request carries — it never reaches
+        `resolve_launch`, and a request naming no defect at all runs the exact
+        two lines it ran before this module existed. See ADR 0088.
         """
         if request.method == "POST":
             media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -445,11 +462,22 @@ def _register_authorization(
             # redirector is built.
             raise HTTPException(status_code=400, detail=str(refusal)) from refusal
 
-        id_token = key.compact_jws(id_token_claims(resolved, settings))
+        defect = request.query_params.get(DEFECT_QUERY_PARAM)
+        if defect is None:
+            id_token = key.compact_jws(id_token_claims(resolved, settings))
+            response_state = resolved.state
+        else:
+            try:
+                minted = wrong_launches.mint(defect, resolved, settings)
+            except AuthorizationRequestError as refusal:
+                raise HTTPException(status_code=400, detail=str(refusal)) from refusal
+            id_token = minted.id_token
+            response_state = minted.state
+
         return HTMLResponse(
             authorization_response_page(
                 id_token=id_token,
-                state=resolved.state,
+                state=response_state,
                 redirect_uri=resolved.redirect_uri,
             )
         )
@@ -798,6 +826,7 @@ def create_app() -> FastAPI:
     platform = seeded_platform()
     key = IssuerKey.generate()
     grades = GradeBook(settings=settings)
+    wrong_launches = WrongLaunchMinter(key)
     http = httpx.Client(timeout=OUTBOUND_TIMEOUT_SECONDS)
 
     @asynccontextmanager
@@ -825,7 +854,7 @@ def create_app() -> FastAPI:
 
     _register_health_and_pages(app, settings, platform)
     _register_oidc_metadata(app, settings, key)
-    _register_authorization(app, settings, platform, key)
+    _register_authorization(app, settings, platform, key, wrong_launches)
     _register_token(app, settings, key)
     _register_nrps(app, settings, platform)
     _register_ags(app, settings, platform, grades)
