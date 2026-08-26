@@ -2711,6 +2711,23 @@ MEMBER_OF_ROLES = """
 #     timestamp and an expiry — no subject, no name, no address — so SPEC §4.1's
 #     `PERSON_TABLES` does not change and no identity-separated view is owed.
 #     Decided and spent in E1-08.
+#   - `pulse_app` **reads, inserts and deletes** on `lti_launch_state`, and holds
+#     nothing else on it. This is the server-side handshake store dispute
+#     E1-08-01 resolved E1-08 onto: `app.lti.in_flight.remember_launch` records
+#     the handshake at `/lti/login` (`INSERT`), `look_up_launch` reads the
+#     expected `nonce` back at `/lti/launch` to validate the token against it
+#     (`SELECT`), and `consume_launch`/`purge_expired_launch_states` enforce
+#     single-use and reclaim the expired tail (`DELETE`) — ADR 0089 records the
+#     decision. Unlike `lti_launch_nonce` above, this table needs `SELECT`: the
+#     nonce ledger only ever checks for a conflict, but the handshake is a
+#     look-up the launch reads an answer out of.
+#     **`SELECT`, `INSERT`, `DELETE`, no `UPDATE`.** A handshake row is written
+#     once at login and read once at launch; nothing on this connection ever
+#     rewrites one, so `UPDATE` stays withheld.
+#     **It carries no personal data.** The table holds a `state`, a `nonce` and
+#     an expiry — no subject, no name, no address — so SPEC §4.1's
+#     `PERSON_TABLES` does not change and no identity-separated view is owed.
+#     Decided and spent in E1-08.
 #
 # **Hand-written and derived from the record, not read out of the grant files**
 # (`docs/MISTAKES.md` entry 19), which is the same decision
@@ -2740,6 +2757,9 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "tool_signing_key", "SELECT"),
         (APPLICATION_ROLE, "lti_launch_nonce", "INSERT"),
         (APPLICATION_ROLE, "lti_launch_nonce", "DELETE"),
+        (APPLICATION_ROLE, "lti_launch_state", "SELECT"),
+        (APPLICATION_ROLE, "lti_launch_state", "INSERT"),
+        (APPLICATION_ROLE, "lti_launch_state", "DELETE"),
     }
 )
 

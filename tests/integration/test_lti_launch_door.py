@@ -133,11 +133,14 @@ PRODUCTION = "production"
 # because a `Set-Cookie` attribute name is case-insensitive.
 SECURE_ATTRIBUTE = "secure"
 
-# A `state` that is well formed as a form field and not representable as ASCII.
+# A `nonce` that is well formed as a form field and not representable as ASCII.
 # `secrets.compare_digest` raises `TypeError` rather than answering `False` when
 # either side is a `str` outside ASCII, so this is the value that separates "the
-# tool compared and refused" from "the tool crashed on the way to comparing".
-NON_ASCII_STATE = "é"
+# tool compared and refused" from "the tool crashed on the way to comparing". Its
+# `state` counterpart, `NON_ASCII_STATE`, retired with the two login-cookie tests
+# dispute E1-08-01 removed — the cookieless handshake's own single-use property
+# is proved by `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_
+# refusal` instead, which needs no non-ASCII value at all.
 NON_ASCII_NONCE = "é"
 
 # How far back the platform's clock is wound to mint a launch that is certainly
@@ -1154,13 +1157,19 @@ def answer_to(deliver: Any, what: str) -> Any:
 
 
 def cookies_set_by(response: Any, purpose: str) -> list[str]:
-    """Every `Set-Cookie` header on a response, or a failure saying there were none."""
+    """Every `Set-Cookie` header on a response, or a failure saying there were none.
+
+    Both current callers ask about a `/lti/launch` response, not `/lti/login`'s —
+    dispute E1-08-01's ruling took the login step's cookie away entirely, so the
+    only cookies this door sets any more are the session and CSRF cookies a
+    *valid launch* issues.
+    """
     headers = response.headers.get_list("set-cookie")
     assert headers, (
-        f"The login initiation set no cookie at all when {purpose} (it answered "
-        f"{response.status_code} with headers {sorted(response.headers)}). E0-18 puts `state` and "
-        "`nonce` 'into a short-lived signed cookie', and with no cookie there is nothing for the "
-        "launch endpoint to compare against — and nothing for this test to read an attribute off."
+        f"The launch set no cookie at all when {purpose} (it answered {response.status_code} "
+        f"with headers {sorted(response.headers)}). E1-08's session model issues the session and "
+        "CSRF cookies on a valid launch's own response, and with no cookie there is nothing for "
+        "this test to read an attribute off."
     )
     return headers
 
@@ -1170,133 +1179,80 @@ def attributes_of(header: str) -> set[str]:
     return {part.split("=", 1)[0].strip().lower() for part in header.split(";")[1:]}
 
 
-# **Flagged, not touched, by E1-08's reconciliation pass.** The two tests
-# below assert attributes of the ADR-0078 login-state cookie — the one
-# `/lti/login` itself sets, carrying `state`/`nonce` for the *login* step,
-# never the launch happy path `redirected_to_role` covers. E1-08's own module
-# layout says plainly: "Retire the ADR-0078 login cookies whose state/nonce
-# role pylti1p3's in-flight handling now covers" — but *what* pylti1p3's
-# in-flight handling uses instead (a differently-named cookie with the same
-# attributes, platform storage, postMessage, something else — SPEC §7.3 names
-# multiple patterns) is an adapter-internal decision this test-author cannot
-# read (`backend/app/lti/fastapi_adapter.py` is implementation) and the E1-08
-# interface ruling does not settle. So per that ruling's own instruction —
-# "flag it rather than guessing" — these are left exactly as E0-18 wrote them
-# rather than updated on a guess about what replaced their subject. If the
-# ADR-0078 cookie name/mechanism survives unchanged, these stay green as
-# written; if it does not, they need a decision this test-author does not
-# have enough to make, not a rewrite.
-def test_the_login_cookie_is_marked_secure_outside_development(
-    open_launch_door: Any, door_contract: Any, platform: Any
+# **Reconciled by dispute E1-08-01's ruling.** The two tests that used to sit
+# here — `test_the_login_cookie_is_marked_secure_outside_development` and
+# `test_the_login_cookie_is_not_marked_secure_in_development` — asserted
+# `Secure`-outside-development on an ADR-0078 login-state cookie. E1-08-01
+# settled the open question the reconciliation pass had flagged: the launch
+# door builds the cookieless handshake E1-08-05's grant serves
+# (`lti_launch_state`, `app.lti.in_flight`) rather than an in-flight cookie at
+# all — a browser blocks a third-party cookie inside a cross-site iframe
+# whatever its attributes say, which is exactly what criterion 2 needs
+# avoided (SPEC §7.3). **`/lti/login` sets no cookie of any kind.** Both tests
+# are removed rather than updated: there is no cookie left for either to
+# assert an attribute of. The `Secure`-outside-development guarantee is not
+# lost — it lives on the one cookie this door does set, the long-lived
+# session cookie, and is already asserted in both environment modes by
+# `test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes`
+# above, which this reconciliation confirmed still covers it before removing
+# these two.
+def test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    tamper_with: Any,
+    claims_in_token: Any,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """**Dies if the cookie is issued without `Secure`.**
+    """The server-side handshake's single-use property, proven from the outside.
 
-    The launch cookie carries the `state` and `nonce` a launch is judged against.
-    Without `Secure` a browser sends it over plain HTTP, so anyone on the path can
-    read it — and this is auth code, where E0-18 says "absence of basic
-    state/nonce/signature checks is not tolerable even briefly". The attribute is
-    free and the omission is invisible in every test that does not look for it.
+    **Replaces `test_a_launch_whose_state_is_not_ascii_is_refused_and_the_
+    cookie_is_burned`**, renamed and rebuilt per dispute E1-08-01's ruling: the
+    launch door carries no login cookie at all any more — `state`/`nonce` are
+    held server-side, in `lti_launch_state` (dispute E1-08-05's grant), keyed
+    by `state`. The implementer's exact rule this test proves: on **any**
+    refusal, the handshake row for the *delivered* `state` is deleted,
+    whatever refused it. A non-ASCII `state` no longer proves this — it only
+    ever consumed `state="é"` itself, a value that was never a real handshake
+    row — so this uses a **state-independent** refusal instead: a bad
+    signature. The first delivery carries the tool's own real `state` and is
+    refused for the signature alone; the same `state`, presented again with a
+    fresh, validly-signed token, finds no handshake row left and is refused by
+    `StateRefused` specifically.
 
-    Its pair is the next test: the flag has to be conditional, because a `Secure`
-    cookie is not sent to `http://localhost` and would break the development flow
-    this whole ticket exists to open.
+    **Dies if the handshake row survives an unrelated refusal.** A door that
+    deletes the row only when the launch *succeeds*, or only when the refusal
+    is itself about `state`, passes a version of this test that never
+    replays and fails this one: the row from the first (signature-refused)
+    delivery has to already be gone by the second. **Dies too if the second
+    delivery is refused for the wrong reason** — a fresh, validly-signed
+    token with every other claim correct is delivered, so a refusal that is
+    not `StateRefused` specifically means this test found some other defect
+    and mistook it for the one it is about.
     """
-    tool = open_launch_door(environment=PRODUCTION)
-    offer = platform.require_offers()[0]
-
-    response = initiate(tool, door_contract, offer)
-
-    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {PRODUCTION!r}"):
-        assert SECURE_ATTRIBUTE in attributes_of(header), (
-            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
-            f"{PRODUCTION!r}, and it carries no `Secure` attribute. That cookie holds the `state` "
-            "and `nonce` this door judges a launch by, and without `Secure` a browser will send it "
-            "over plain HTTP to anyone who can put a request in front of it."
-        )
-
-
-def test_the_login_cookie_is_not_marked_secure_in_development(
-    open_launch_door: Any, door_contract: Any, platform: Any
-) -> None:
-    """The near miss for the test above: `Secure` unconditionally breaks the laptop.
-
-    E0-18's whole point is that `docker compose up` yields a launchable-into system,
-    and a browser reaches it at `http://localhost:8000`. A `Secure` cookie is not
-    sent back over that, so the launch that set it is refused for a mismatched
-    `state` — which reads as a broken door rather than as a cookie flag.
-
-    Without this, "always set `Secure`" satisfies the requirement above and is the
-    wrong fix.
-    """
-    tool = open_launch_door(environment=DEVELOPMENT)
-    offer = platform.require_offers()[0]
-
-    response = initiate(tool, door_contract, offer)
-
-    for header in cookies_set_by(response, f"`{ENVIRONMENT_VARIABLE}` was {DEVELOPMENT!r}"):
-        assert SECURE_ATTRIBUTE not in attributes_of(header), (
-            f"The login initiation set `{header}` with `{ENVIRONMENT_VARIABLE}` set to "
-            f"{DEVELOPMENT!r}. A `Secure` cookie is not sent to `http://localhost`, so every launch "
-            "from the mock LMS on a developer's laptop arrives with no cookie and is refused for a "
-            "`state` mismatch."
-        )
-
-
-# **Flagged, not touched, by E1-08's reconciliation pass.** This is a
-# refusal test (4xx expected — its contract does not change per the E1-08
-# ruling) whose *second half* asserts the ADR-0078 login-state cookie was
-# burned after the refusal — the same subject the flag above names, and the
-# same reason it is left alone rather than guessed at.
-def test_a_launch_whose_state_is_not_ascii_is_refused_and_the_cookie_is_burned(
-    tool: Any, door_contract: Any, platform: Any
-) -> None:
-    """**Dies if the comparison crashes instead of refusing.**
-
-    `secrets.compare_digest` raises `TypeError` when either side is a `str` holding
-    a character outside ASCII, so a `state` of `é` takes a door that compares
-    directly out through the error handler rather than through the refusal. The
-    crash is fail-closed — nobody is admitted — which is why it survives a suite
-    that only asks whether the launch succeeded. What it skips is everything the
-    refusal path does on the way out, and on this door that is the single-use
-    cookie.
-
-    So both halves are asserted, and the second is the one worth having: after the
-    refusal, the launch the tool itself set up — correct `state`, correct token —
-    is delivered and must also be refused, because the cookie it would have been
-    judged against is gone. `test_a_learner_launch_lands_on_the_student_view` is
-    the control for that half: it is this same sequence without the `é` attempt,
-    and it answers 200.
-    """
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
     offer = offer_for_role(platform, LEARNER_ROLE_URI)
     started = initiate(tool, door_contract, offer)
     parameters = query_of(redirect_target(started, "a registered platform began a launch"))
     id_token, state, _ = authorize(platform, parameters)
-    assert state, "The platform returned no `state`, so there is no correct value to replay below."
-
-    crashed = answer_to(
-        lambda: land(tool, door_contract, id_token, NON_ASCII_STATE),
-        f"a launch whose `state` was {NON_ASCII_STATE!r}",
+    assert state, (
+        "The platform returned no `state`, so there is no handshake row for this test to prove "
+        "was consumed."
     )
 
-    assert crashed.status_code != 500, (
-        f"The tool answered 500 to a launch whose `state` was {NON_ASCII_STATE!r}. That is "
-        "`secrets.compare_digest` raising `TypeError` on a non-ASCII `str` rather than answering "
-        f"`False`. Body begins {crashed.text[:400]!r}."
-    )
-    refused(crashed, door_contract, f"a launch whose `state` was {NON_ASCII_STATE!r}")
+    first = land(tool, door_contract, tamper_with(id_token), state)
+    refused(first, door_contract, "a launch whose payload was altered after signing")
+    caplog.clear()
 
-    replayed = answer_to(
-        lambda: land(tool, door_contract, id_token, state),
-        "the correct `state` for a login initiation whose cookie a refusal should have burned",
-    )
+    second = land(tool, door_contract, id_token, state)
 
-    assert 400 <= replayed.status_code < 500, (
-        f"After refusing the non-ASCII `state`, the tool answered {replayed.status_code} to the "
-        "correct `state` for the same login initiation. The cookie holding it should have been "
-        "cleared on the way out of the refusal: one login initiation buys one attempt, and a "
-        "refusal that leaves the cookie in place hands an attacker as many tries as they like at "
-        "a `state` the browser is still carrying."
+    refused(
+        second,
+        door_contract,
+        "the same `state` presented again, with a fresh validly-signed token, after an unrelated "
+        "refusal already consumed the handshake row",
     )
+    assert_guard_fired(caplog, guard=STATE_REFUSED, claims=claims_in_token(id_token))
 
 
 def test_a_launch_whose_nonce_is_not_ascii_is_refused_rather_than_crashing(
