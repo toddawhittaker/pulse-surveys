@@ -1,29 +1,35 @@
 """What a router needs from the request that is not the request (SPEC §13).
 
-Today that is two things. The first is the short-lived signed cookie both entry
-doors use to carry a `state`, a `nonce` and — on the web door — a PKCE verifier
-from the redirect that mints them to the redirect that checks them. The second is
-the small amount of scaffolding both doors share around their answers: the two
-status codes, the refusal page, and the tail that turns verified claims into a
-landing view or a refusal and clears the cookie either way. §13 names this module
-for "auth context, role scoping, n-threshold guards"; the first of those is what
-this is, and the other two arrive with the screens that need them.
+Today that is two things. The first is the short-lived signed cookie the **web**
+door uses to carry a `state`, a `nonce` and a PKCE verifier from the redirect
+that mints them to the redirect that checks them. The launch door carried one
+too until E1-08 moved its handshake into a server-side store (ADR 0089); this
+cookie is the web door's alone now, and ADR 0093 says why it stays. The second
+is the small amount of scaffolding both doors share around their answers: the
+two status codes, the refusal page, and the tail that turns verified claims into a session and a landing redirect,
+or into a refusal. §13 names this module for "auth context, role scoping,
+n-threshold guards"; the first of those is what this is, and the other two
+arrive with the screens that need them.
 
-**Why a cookie at all.** Both flows leave the tool and come back: `/lti/login`
-sends a browser to the platform and `/lti/launch` receives what the platform
-signed; `/auth/oidc/login` sends it to the provider and `/auth/oidc/callback`
-receives the code. `state` is the cross-site request forgery defence and `nonce`
-is the replay defence, and both are only defences if the second request can be
-shown to have come from the same browser as the first. Something has to hold
-them in between, and in a system with no session model yet the browser is the
-only place there is.
+**Why a cookie at all.** The web login leaves the tool and comes back:
+`/auth/oidc/login` sends a browser to the provider and `/auth/oidc/callback`
+receives the code. `state` is the cross-site request forgery defence, `nonce` is
+the replay defence, and the PKCE verifier is the whole of what binds the code to
+this client. All three are only defences if the second request can be shown to
+have come from the same browser as the first, so something has to hold them in
+between.
 
-**Why it is signed rather than stored.** A row in a table is where E1 puts this
-(its breakdown owns platform-side state storage for cookieless iframes), and a
-signed cookie is what E0 can have without inventing that schema. Signed rather
-than plain because the whole point of `state` is that the caller did not choose
-it: an unsigned cookie is a value the caller writes, and comparing a
-caller-supplied `state` against a caller-supplied cookie proves nothing at all.
+**Why it is signed rather than stored — and why it stays a cookie (ADR 0093).**
+A row in a table is what E1-08 built for the launch door, because a cookie
+cannot survive the LMS's cross-site iframe: browsers block it there whatever its
+attributes say. No iframe is involved in a web login. `/auth/oidc/callback` is a
+top-level navigation the browser makes to this tool's own address, which a
+`SameSite=Lax` cookie rides, so the reason the launch handshake had to move does
+not reach this door — and a second, differently shaped handshake store would be
+a schema and a purge beat bought for nothing. Signed rather than plain because
+the whole point of `state` is that the caller did not choose it: an unsigned
+cookie is a value the caller writes, and comparing a caller-supplied `state`
+against a caller-supplied cookie proves nothing at all.
 
 **The secret is per process and is generated at startup.** `app.state` holds
 `secrets.token_bytes(32)` minted in `create_app`, so:
@@ -32,35 +38,36 @@ caller-supplied `state` against a caller-supplied cookie proves nothing at all.
   gets a refusal rather than a session;
 * **more than one API process cannot serve one login**, because the second
   process cannot read the first one's cookie. Compose runs one `api` container
-  and E0 is a single-process system, so this is true today and would be the
+  and this is a single-process system, so this is true today and would be the
   first thing to break under a second replica.
 
-Both are stated rather than hidden, and neither is worth fixing here: E1's
-unified session model replaces this mechanism outright. What is deliberately
-*not* done is to add a configured secret for it — an `.env.example` entry is a
-promise that a value is worth setting, and this one has a two-ticket life.
+Both are stated rather than hidden. A login dying on a restart is the safe
+direction for a five-minute in-flight value — unlike the session itself, which is
+signed with a *configured* secret precisely so a restart does not log a sitting
+person out (ADR 0089). What is deliberately *not* done is to add a configured
+secret for this one as well: an `.env.example` entry is a promise that a value is
+worth setting, and the price of not making it is the replica limit above, named
+in ADR 0093's consequences rather than discovered.
 
-**`Secure` everywhere except development.** The cookie holds the `state` and
-`nonce` a launch is judged against, and on the web door the PKCE verifier as
-well — which is the whole of what binds an authorization code to this client,
-since it is a public one with no secret. A browser sends a cookie without
-`Secure` over plain HTTP, so anyone on the path reads all three. The flag cannot
-simply be on, either: a `Secure` cookie is not sent to `http://localhost`, and
-E0-18 exists to make `docker compose up` launchable-into on a laptop, so an
-unconditional flag would refuse every development flow for a `state` mismatch and
-look like a broken door. So it is on unless `ENVIRONMENT` is exactly
-`development`, which is the same question `app/main.py` asks before it serves
-`/docs`, asked through the same predicate, `app.config.is_development`. The
-question is asked once, here, rather than at each door: two copies of it is
+**`Secure` everywhere except development.** The cookie holds the `state`, the
+`nonce` and the PKCE verifier — the last of which is the whole of what binds an
+authorization code to this client, since it is a public one with no secret. A
+browser sends a cookie without `Secure` over plain HTTP, so anyone on the path
+reads all three. The flag cannot simply be on, either: a `Secure` cookie is not
+sent to `http://localhost`, and `docker compose up` has to be signable-into on a
+laptop, so an unconditional flag would refuse every development flow for a
+`state` mismatch and look like a broken door. So it is on unless `ENVIRONMENT` is
+exactly `development`, which is the same question `app/main.py` asks before it
+serves `/docs`, asked through the same predicate, `app.config.is_development`.
+The question is asked once, here, rather than at each door: two copies of it is
 `docs/MISTAKES.md` entry 13, and one door left insecure is invisible.
 
-**`SameSite=Lax`, not `None`.** An LTI launch is posted back to the tool from
-the platform's authorization endpoint, which is a cross-*site* POST in a real
-deployment and would need `SameSite=None; Secure` for the cookie to ride along —
-and that, in an LMS iframe, is exactly the cookieless problem E1's boundary
-section owns. On the development stack every service is `localhost` on a
-different port, which is one site, so `Lax` carries. Widening it here would ship
-the weaker cookie for the length of E0 and buy a deployment nobody has.
+**`SameSite=Lax`, not `None`.** The one request that has to carry this cookie is
+the provider's redirect back to `/auth/oidc/callback`, which is a top-level GET
+navigation — exactly what `Lax` is written to allow, cross-site or not. `None`
+would widen the cookie to every cross-site subrequest and buy this door nothing:
+the cross-site POST that needed `None`, and the iframe that made even `None`
+insufficient, both belonged to the launch door, and neither exists here.
 """
 
 import time
@@ -73,7 +80,7 @@ from fastapi.responses import HTMLResponse
 from starlette.responses import Response
 
 from app.config import Settings, is_development
-from app.services.landing import Door, landing_page, landing_role_for, refusal_page
+from app.services.landing import Door, landing_role_for, refusal_page
 from app.services.session import (
     fragment_redirect,
     issue_csrf_token,
@@ -92,8 +99,7 @@ __all__ = [
     "carried_across",
     "carry_across",
     "clear_carried",
-    "landing_or_refusal",
-    "launch_landing_or_refusal",
+    "landing_with_session",
     "refused",
     "with_query",
 ]
@@ -205,63 +211,55 @@ def refused(reason: str) -> HTMLResponse:
     return HTMLResponse(refusal_page(reason), status_code=REFUSED)
 
 
-def landing_or_refusal(
+def landing_with_session(
     claims: Mapping[str, Any],
     *,
     door: Door,
-    cookie: str,
-    no_role_reason: str,
-) -> Response:
-    """The last step of both second legs: land the caller, or refuse, and clear.
-
-    Verified claims come in; the view their roles name goes out, or `no_role_reason`
-    on a refusal page when this door has no view for any role they state. The
-    carried cookie is deleted either way, because a `state` is good once.
-
-    `door`, `cookie` and `no_role_reason` are the whole of what differs between
-    the launch door and the web door. The two refusal sentences are deliberately
-    not the same — each door tells the caller something true only of that door —
-    so the sentence is an argument rather than a constant here.
-    """
-    role = landing_role_for(claims, door=door)
-    answer: Response = refused(no_role_reason) if role is None else HTMLResponse(landing_page(role))
-    clear_carried(answer, cookie)
-    return answer
-
-
-def launch_landing_or_refusal(
-    claims: Mapping[str, Any],
-    *,
     settings: Settings,
     secret: bytes,
     no_role_reason: str,
 ) -> Response:
-    """The launch door's last step: issue a session and land, or refuse (E1-08).
+    """The last step of both second legs: issue a session and land, or refuse.
 
-    The launch-door twin of `landing_or_refusal` above, and deliberately its own
-    function rather than a branch inside it. That one renders a landing page
-    inline and is what the *web* door still does (E1-09 moves it onto the session
-    model, with the web-door test that changes with it); this one issues the
-    session `app.services.session` defines and hands it over as a fragment
-    redirect with the session and CSRF cookies set. The two doors' answers diverge
-    here exactly as ADR 0073 said they would, so the divergence is two functions
-    and not one function with a mode.
+    Verified claims come in; a session `app.services.session` defines goes out,
+    handed over as a fragment redirect to the role's landing route with the
+    session and CSRF cookies set — or `no_role_reason` on a refusal page when this
+    door has no view for any role the claims state. E1-08 put the launch door on
+    this shape and E1-09 brought the web door onto it, which is what makes the two
+    doors' sessions the same type with the same custody.
 
-    `landing_role_for(claims, door=Door.LAUNCH)` is called unchanged — E1-08 does
-    not touch role resolution (E1-13's) — and a launch stating a role this door
+    `door` and `no_role_reason` are the whole of what differs between them. The
+    two refusal sentences are deliberately not the same — each door tells the
+    caller something true only of that door — so the sentence is an argument
+    rather than a constant here.
+
+    `landing_role_for(claims, door=door)` is called unchanged — neither ticket
+    touches role resolution (E1-13's) — and a caller stating a role this door
     serves no view for is refused rather than landed on a default.
+
+    **Clearing the login cookie is the caller's**, not this function's: the launch
+    door has no login cookie left to clear (ADR 0089), and the web door clears its
+    own on every way out of the callback rather than on this one.
 
     The CSRF token is bound to the session's own `jti`, which is read back off the
     issued token: `issue_session` mints the `jti` and returns the token, and
     `verified_session` is the one way to read the claims it put inside.
     """
-    role = landing_role_for(claims, door=Door.LAUNCH)
+    role = landing_role_for(claims, door=door)
     if role is None:
         return refused(no_role_reason)
     token = issue_session(
-        door=Door.LAUNCH,
+        door=door,
         role=role,
         sub=str(claims.get("sub") or ""),
+        # Whoever issued the token this session was minted from: the LMS platform
+        # at the launch door, the identity provider at the web door. The same
+        # claim at both doors and never `None` — `SessionClaims` types `iss` as
+        # `str | None`, but `issue_session` puts the value straight into a JWT
+        # payload and PyJWT raises `TypeError` on a non-string `iss`, so `None`
+        # is a value that module cannot actually issue. See ADR 0093's
+        # consequences, which name the sentence in `app.services.session` this
+        # falsifies and the ticket that owns the repair.
         iss=claims.get("iss"),
         secret=secret,
     )

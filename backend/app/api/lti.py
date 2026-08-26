@@ -42,7 +42,7 @@ from starlette.responses import Response
 
 from app.api.deps import (
     FOUND,
-    launch_landing_or_refusal,
+    landing_with_session,
     refused,
 )
 from app.db import get_session
@@ -54,6 +54,7 @@ from app.lti.launch import (
     verified_launch,
 )
 from app.lti.registration import JWKS_PATH, NoSigningKeyError, published_key_set
+from app.services.landing import Door
 
 # What a caller is told when this deployment holds no signing key. Short on
 # purpose: the route is public in every environment, and the operator's copy of
@@ -133,8 +134,9 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
 
     On a valid launch the door issues the session `app.services.session` defines,
     sets the session and CSRF cookies, and returns a fragment redirect to the
-    role's landing route (`launch_landing_or_refusal`) — the response contract
-    E1-08 replaces E0-18's inline landing page with.
+    role's landing route (`landing_with_session`) — the response contract E1-08
+    replaces E0-18's inline landing page with, and the one the web door joined in
+    E1-09.
 
     The session is committed on both paths, and each commit persists a different
     thing. On success it persists the claimed nonce, which is what makes the
@@ -154,8 +156,9 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
         return answer
 
     await run_in_threadpool(session.commit)
-    return launch_landing_or_refusal(
+    return landing_with_session(
         claims,
+        door=Door.LAUNCH,
         settings=settings,
         secret=request.app.state.session_secret,
         no_role_reason=(

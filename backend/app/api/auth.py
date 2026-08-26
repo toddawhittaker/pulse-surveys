@@ -1,9 +1,10 @@
-"""The web door: `GET /auth/oidc/login` and `GET /auth/oidc/callback` (E0-18).
+"""The web door: `GET /auth/oidc/login` and `GET /auth/oidc/callback` (E0-18, E1-09).
 
 SPEC §2 gives every role except instructor and student a second way in, and
 E0-16 built the provider it goes through. This module is the tool's half: an
-OAuth 2.0 authorization code flow with PKCE, landing the caller on the empty view
-their **verified** roles claim names.
+OAuth 2.0 authorization code flow with PKCE, issuing the session
+`app.services.session` defines and redirecting to the route the caller's
+**verified** roles claim names.
 
 **A new module, and §13 does not name it.** §13's `api/` list is
 `deps.py, lti.py, student.py, instructor.py, leadership.py, care.py, admin.py` —
@@ -24,10 +25,15 @@ the redirect a browser writes to its history, which is the one place PKCE exists
 to keep it out of. E0-16's provider refuses anything else, so an omission here
 would surface as a flow that does not complete rather than as a downgrade.
 
-**Rendering at the callback URL leaves `code` in browser history.** That is
-acceptable for a development-only flow with no session behind it, it is named
-here rather than discovered later, and it goes when E1's session model lands and
-the callback starts answering with a redirect.
+**The callback URL carries `code`, so a browser writes it into its history.**
+E0-18 named this and expected E1's session model to end it; it does not, quite,
+because the browser records the address it navigated to whatever that address
+answers with. What E1-09 changes is everything downstream: the code in that
+history entry is spent, single-use at the provider, and bound to a PKCE verifier
+this browser no longer holds — the login cookie is cleared on every way out of
+the callback — and the session itself never appears in a URL a browser writes
+down, because `fragment_redirect` hands it over in a fragment, which reaches
+neither an access log nor a `Referer` header.
 """
 
 import base64
@@ -47,7 +53,7 @@ from app.api.deps import (
     carried_across,
     carry_across,
     clear_carried,
-    landing_or_refusal,
+    landing_with_session,
     refused,
     with_query,
 )
@@ -266,9 +272,9 @@ def begin_web_login(request: Request) -> Response:
     return response
 
 
-@router.get(CALLBACK_PATH, summary="Finish a web login and render the view")
+@router.get(CALLBACK_PATH, summary="Finish a web login and issue a session")
 async def finish_web_login(request: Request) -> Response:
-    """Redeem the code, verify the session, and render the view its roles name.
+    """Redeem the code, verify the session, and hand it over — or answer the refusal.
 
     `async def` for the reason `app.api.lti` gives at length: the exchange and
     the key-set fetch are synchronous, and `run_in_threadpool` is what keeps them
@@ -294,12 +300,15 @@ async def finish_web_login(request: Request) -> Response:
         clear_carried(answer, OIDC_LOGIN_COOKIE)
         return answer
 
-    return landing_or_refusal(
+    landed = landing_with_session(
         claims,
         door=Door.WEB,
-        cookie=OIDC_LOGIN_COOKIE,
+        settings=settings,
+        secret=request.app.state.session_secret,
         no_role_reason=(
             "That sign-in states no role this tool has a view for, so there is nothing to show "
             "you. SPEC §2 gives instructors and students the LMS launch rather than this door."
         ),
     )
+    clear_carried(landed, OIDC_LOGIN_COOKIE)
+    return landed
