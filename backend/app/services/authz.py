@@ -103,6 +103,7 @@ from app.views_sql.queries import (
 
 __all__ = [
     "LMS_OWNED_TABLES",
+    "SANCTIONED_WRITERS",
     "ActorScope",
     "AuthzError",
     "CareIsNotComposableError",
@@ -112,11 +113,14 @@ __all__ = [
     "Purview",
     "ScopedReader",
     "UnknownAssignmentError",
+    "UnknownSanctionedWriterError",
+    "WriteSanction",
     "guard_write",
     "holds_care",
     "own_grant",
     "raw_comments_permitted",
     "resolve_scope",
+    "sanction_for",
     "scoped_reader",
     "transitive_purview",
 ]
@@ -195,6 +199,19 @@ class LmsOwnedWriteRefused(AuthzError):  # noqa: N818
     is not rejected by the LMS and does not error, it is overwritten at the next
     hourly roster sync, so the symptom is a value that changes back by itself and
     reads as a sync bug.
+    """
+
+
+class UnknownSanctionedWriterError(LookupError):
+    """`sanction_for` was asked for a writer `SANCTIONED_WRITERS` does not name.
+
+    **Deliberately outside `AuthzError`.** Every member of that family is a
+    refusal an entry point turns into an answer for a caller, and this is not
+    one: the argument is a writer's name written in the source, so an unknown
+    name is a bug in the calling module rather than a decision about a request.
+    Inside the family it would be caught by somebody's `except AuthzError` and
+    reported as "you may not do that", which is a wrong answer to a question
+    nobody asked.
     """
 
 
@@ -865,7 +882,90 @@ LMS_OWNED_ASSIGNMENT_ROLE: Final[AssignmentRole] = AssignmentRole.INSTRUCTOR
 ROLE_ASSIGNMENT_TABLE: Final[str] = "role_assignment"
 
 
-def guard_write(*, table: str, assignment_role: AssignmentRole | None = None) -> None:
+@dataclass(frozen=True)
+class WriteSanction:
+    """One writer's permission to pass this chokepoint for a named set of tables.
+
+    A value rather than a handle onto the catalog, and frozen rather than merely
+    conventional: a caller holding a mutable sanction could add a table to the
+    very object `sanction_for` handed it, and if that object shared the catalog's
+    own `frozenset` the widening would reach every later caller in the process
+    with nothing recording it.
+
+    **Holding one is not the permission.** `guard_write` reads
+    `SANCTIONED_WRITERS` and never `sanction.tables`, so a hand-built sanction
+    naming an uncatalogued writer — or naming more tables than the catalog grants
+    its writer — is refused exactly as no sanction at all would be. That is the
+    difference between this and a bypass flag, and ADR 0090 is the record.
+    """
+
+    writer: str
+    tables: frozenset[str]
+
+
+# Every writer sanctioned to pass this chokepoint, and the tables each may write.
+# **The authority, not the argument** (ADR 0090): `guard_write` consults this
+# mapping, so a caller cannot authorize itself by constructing the sanction it
+# wants.
+#
+# **One entry today, and adding a second is the conversation.** `launch_provisioning`
+# is `app.services.provisioning`, E1-10's launch-time ingestion: SPEC §2.1 gives
+# courses and sections two arrival paths, "hourly roster sync + launch-time
+# ingestion", and §7.3 makes the first staff launch of a section the only thing
+# that discovers it at all. `user` is here because ADR 0045 already named "the
+# launch path that creates a `user` row" as a sanctioned writer when it put `user`
+# in the guarded set.
+#
+# **`enrollment` is deliberately absent**, and so is the `INSTRUCTOR`
+# `role_assignment` row: a launch proves one person's presence, not a roster, and
+# E1-11's sync adds its own entry here in the pull request that needs it.
+#
+# **The inventory is pinned in a test, not here** (`docs/MISTAKES.md` entry 35).
+# `tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py` compares this
+# mapping against a hand-written copy as an equality, so a writer or a table added
+# here is a visible diff in a test file this module cannot shrink.
+SANCTIONED_WRITERS: Final[Mapping[str, frozenset[str]]] = {
+    "launch_provisioning": frozenset({"course", "section", "user"}),
+}
+
+
+def sanction_for(writer: str) -> WriteSanction:
+    """The catalogued sanction for `writer`, or a failure naming it.
+
+    Raises `UnknownSanctionedWriterError` for a name the catalog does not hold,
+    rather than answering with an empty sanction: a lookup that handed out
+    something for every name would make `SANCTIONED_WRITERS` a comment, and an
+    empty sanction would fail at the first `guard_write` call with a message
+    about a table instead of about the name that was wrong.
+    """
+    tables = SANCTIONED_WRITERS.get(writer)
+    if tables is None:
+        raise UnknownSanctionedWriterError(
+            f"{writer!r} is not a sanctioned writer. `SANCTIONED_WRITERS` in app/services/authz.py "
+            f"names {sorted(SANCTIONED_WRITERS)}, and a writer is added to it in the pull request "
+            "that needs it, with the sentence it rests on (ADR 0090)."
+        )
+    return WriteSanction(writer=writer, tables=tables)
+
+
+def _catalog_grants(sanction: WriteSanction | None, table: str) -> bool:
+    """Whether the catalog grants `sanction`'s writer this table.
+
+    The catalog is read here and the sanction is read only for the name it was
+    issued under. A sanction whose `tables` a caller widened, or whose `writer`
+    a caller invented, grants nothing.
+    """
+    if sanction is None:
+        return False
+    return table in SANCTIONED_WRITERS.get(sanction.writer, frozenset())
+
+
+def guard_write(
+    *,
+    table: str,
+    assignment_role: AssignmentRole | None = None,
+    sanction: WriteSanction | None = None,
+) -> None:
     """Refuse a write to data the LMS owns. SPEC §8: "never hand-edited in Pulse."
 
     Called by every application write path before it writes. It answers nothing
@@ -876,12 +976,22 @@ def guard_write(*, table: str, assignment_role: AssignmentRole | None = None) ->
     `assignment_role` is read only for `role_assignment` and is `None` everywhere
     else, because no other table in this schema carries a row whose ownership
     depends on a column value.
+
+    **With no `sanction` the answer is unconditional refusal on the guarded set**,
+    which is the behaviour every caller in this project that is not a catalogued
+    writer gets and the property ADR 0090 was designed around. With one, the
+    *catalog* decides: `sanction_for` is how a writer obtains it, and a sanction
+    the catalog does not back refuses exactly as none would. The teaching-instructor
+    row below is outside the mechanism entirely — no sanction reaches it, because
+    no catalogued writer is granted `role_assignment`.
     """
-    if table in LMS_OWNED_TABLES:
+    if table in LMS_OWNED_TABLES and not _catalog_grants(sanction, table):
+        sanctioned = "" if sanction is None else f" `{sanction.writer}` is not sanctioned for it."
         raise LmsOwnedWriteRefused(
             f"public.{table} holds LMS-owned data and Pulse never hand-edits it (SPEC 2.1, 8). An "
             "edit here is not rejected by the LMS and does not error: it is overwritten at the "
             "next hourly roster sync, so the symptom is a value that changes back by itself."
+            f"{sanctioned}"
         )
 
     if table == ROLE_ASSIGNMENT_TABLE and assignment_role is LMS_OWNED_ASSIGNMENT_ROLE:
