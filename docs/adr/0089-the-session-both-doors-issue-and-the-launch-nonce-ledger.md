@@ -135,3 +135,13 @@ the opposite).
   back (a look-up, not a blind insert like the nonce ledger); `UPDATE` withheld (a
   handshake row is written once and read once). No identity column, so no view is
   owed. Its `RUNTIME_BASE_TABLE_PRIVILEGES` entries are `docs/disputes/E1-08-05.md`.
+- **Known residue: the algorithm pin is not proven load-bearing end-to-end.**
+  `app.lti.launch._refuse_unpinned_algorithm` enforces ADR 0073's closing
+  condition (a hardcoded algorithm list, refusing `alg: none` and the HMAC-with-
+  the-public-key confusion) as defence in depth. `pylti1p3`'s own key/algorithm
+  matching independently refuses both today, so end-to-end the two guards agree
+  and removing the pin alone leaves the launch green — there is no live forgery
+  the app refuses that the library would not. The pin is now a standalone helper a
+  unit test can drive directly; a test proving it *load-bearing end-to-end* needs
+  a mock platform that publishes a permissive-algorithm key set, which `docs/tickets/
+  e1/deferred.md` carries with a done-when.
