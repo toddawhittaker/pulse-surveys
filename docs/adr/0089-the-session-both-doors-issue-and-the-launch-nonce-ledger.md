@@ -103,8 +103,14 @@ the opposite).
   is superseded in part** — for the launch door only. The ADR-0078 `pulse_lti_login`
   cookie's state/nonce role is now the server-side handshake store
   (`app.lti.in_flight`); the launch door sets no login cookie at all.
-  `app.state.login_secret` and the web door's `pulse_oidc_login` cookie stay until
-  E1-09. ADR 0078's security properties are preserved and, in one respect,
+  `app.state.login_secret` and the web door's `pulse_oidc_login` cookie stay —
+  **and stayed for good.** E1-09 took up the question this line deferred to it and
+  kept the cookie handshake at that door, because the iframe that forced the launch
+  handshake server-side has no counterpart at a door reached by top-level
+  navigation
+  ([0093](0093-the-web-door-keeps-the-cookie-carried-login-handshake.md)). This
+  supersession is launch-door-only, permanently rather than for one ticket.
+  ADR 0078's security properties are preserved and, in one respect,
   strengthened: single-use / burn-after-use is enforced server-side
   (`consume_launch`), and the `Secure`-outside-development guarantee it wanted on
   the in-flight carrier is unnecessary because there *is* no in-flight cookie to
