@@ -54,6 +54,21 @@ the opposite).
   `claim_nonce` spends a nonce with a plain `INSERT` whose unique-constraint
   violation is the replay, claimed only after every other check passes; the daily
   `purge_expired_nonces` beat task replaces the native TTL Redis would have had.
+- **The launch *handshake* is server-side too** (`lti_launch_state`,
+  `app.lti.in_flight`), keyed by `state` and holding the expected `nonce`. `/lti/login`
+  records the mapping; `/lti/launch` looks the returned `state` up and validates
+  the token's `nonce` against it — not through `pylti1p3`'s state cookie and nonce
+  storage, which become no-ops (`app.lti.fastapi_adapter`). **This is what makes
+  criterion 2 and SPEC §7.3's "no third-party cookie is ever required" genuinely
+  true:** a cookie carrying the handshake is a third-party cookie inside the LMS
+  iframe, and a browser blocks it *whatever its attributes say*, so a cookie
+  handshake cannot complete under third-party-cookie blocking; a server-side one
+  does. Single-use is a server-side property — `consume_launch` deletes the row on
+  a refusal, so a correct `state` replayed after a refusal is refused (the
+  burn-after-use ADR 0078's cookie had). A *successful* launch does not consume its
+  `state`: the replay of a whole valid launch reaches the nonce ledger and is
+  refused there, which is where single-use of a spent launch belongs. So the only
+  cookie a launch ever sets is the session cookie above.
 
 ## Alternatives rejected
 
@@ -71,26 +86,36 @@ the opposite).
   lives in Postgres and the launch already opens one `Session` the claim rides
   inside; making the disposable task-queue broker the record of which credentials
   were spent pulls a disposability-assuming component into an auth boundary.
+- **A cookie for the launch handshake** (the first cut, and E0-18's ADR-0078
+  approach) — dropped by the browser inside a cross-site iframe whatever its
+  attributes say, so it cannot meet criterion 2 / §7.3; and its `Secure`-outside-
+  development guarantee collided with the criterion-5 test, which drives a full
+  launch over `http` where a `Secure` cookie would drop. **Redis for the handshake
+  store** — its native TTL and the accepted "a login dying on restart is the safe
+  direction" (ADR 0078) both fit the in-flight case better than the durable nonce
+  ledger; rejected only for one consistent mechanism with that ledger (the launch
+  already opens the `Session`, and the store needs no disposability Redis uniquely
+  offers).
 
 ## Consequences
 
 - **[0078](0078-the-login-state-cookie-is-signed-per-process-and-short-lived.md)
-  is superseded in part** — for the launch door only. The ADR-0078
-  `pulse_lti_login` cookie's state/nonce role is now `pylti1p3`'s in-flight cookies
-  (`app.lti.fastapi_adapter`); `app.state.login_secret` and the web door's copy of
-  that cookie stay until E1-09. The security property (a `Secure`-outside-
-  development, single-use, burned-after-use in-flight carrier) does **not** fully
-  transfer to those in-flight cookies: the launch handshake's second leg is a
-  cross-site POST that must carry them, and a `Secure` cookie drops over `http`, so
-  the in-flight cookies are non-`Secure` and the `Secure`-outside-development
-  guarantee lives on the session cookie. `docs/disputes/E1-08-01.md` records the
-  three ADR-0078 tests this reconciles and the tension with the criterion-5 cookie
-  test.
-- **The cookieless path covers the *session*, not yet the *handshake*.** The
-  in-flight state and nonce are still on cookies, which survive the same-site
-  development stack but would be blocked in a genuinely cross-site cookie-blocked
-  iframe. `pylti1p3`'s platform-storage/postMessage path for a fully cookie-blocked
-  handshake is deliberately not built here; it is follow-up work.
+  is superseded in part** — for the launch door only. The ADR-0078 `pulse_lti_login`
+  cookie's state/nonce role is now the server-side handshake store
+  (`app.lti.in_flight`); the launch door sets no login cookie at all.
+  `app.state.login_secret` and the web door's `pulse_oidc_login` cookie stay until
+  E1-09. ADR 0078's security properties are preserved and, in one respect,
+  strengthened: single-use / burn-after-use is enforced server-side
+  (`consume_launch`), and the `Secure`-outside-development guarantee it wanted on
+  the in-flight carrier is unnecessary because there *is* no in-flight cookie to
+  protect — the handshake never leaves the server.
+- **The cookieless path now covers the whole launch — handshake and session.**
+  Neither the handshake (server-side store) nor the session (fragment/Bearer)
+  requires a third-party cookie, so a launch completes inside a fully
+  cookie-blocked cross-site iframe (criterion 2, §7.3). The only cookie a launch
+  sets is the session cookie, and the SPA does not depend on it. `docs/disputes/
+  E1-08-01.md` records Todd's ruling that produced this (the first cut carried the
+  handshake in cookies, which cannot meet criterion 2).
 - **One new weak-copyleft dependency enters the runtime closure.** `pylti1p3`
   verifies a launch's JWS with **`jwcrypto`** (LGPLv3+), the first such library
   joining the two psycopg rows [0073](0073-the-tool-verifies-launches-with-pyjwt-rather-than-adopting-pylti1p3.md)
@@ -105,3 +130,8 @@ the opposite).
   is never rewritten). The entry belongs in `RUNTIME_BASE_TABLE_PRIVILEGES`;
   `docs/disputes/E1-08-02.md` records that it lives in a test file the implementer
   could not edit.
+- **`pulse_app` gains `SELECT`, `INSERT` and `DELETE` on `lti_launch_state`** — the
+  handshake store's grant. `SELECT` because the launch reads the expected `nonce`
+  back (a look-up, not a blind insert like the nonce ledger); `UPDATE` withheld (a
+  handshake row is written once and read once). No identity column, so no view is
+  owed. Its `RUNTIME_BASE_TABLE_PRIVILEGES` entries are `docs/disputes/E1-08-05.md`.
