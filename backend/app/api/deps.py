@@ -74,6 +74,14 @@ from starlette.responses import Response
 
 from app.config import Settings, is_development
 from app.services.landing import Door, landing_page, landing_role_for, refusal_page
+from app.services.session import (
+    fragment_redirect,
+    issue_csrf_token,
+    issue_session,
+    set_csrf_cookie,
+    set_session_cookie,
+    verified_session,
+)
 
 __all__ = [
     "FOUND",
@@ -85,6 +93,7 @@ __all__ = [
     "carry_across",
     "clear_carried",
     "landing_or_refusal",
+    "launch_landing_or_refusal",
     "refused",
     "with_query",
 ]
@@ -218,3 +227,51 @@ def landing_or_refusal(
     answer: Response = refused(no_role_reason) if role is None else HTMLResponse(landing_page(role))
     clear_carried(answer, cookie)
     return answer
+
+
+def launch_landing_or_refusal(
+    claims: Mapping[str, Any],
+    *,
+    settings: Settings,
+    secret: bytes,
+    no_role_reason: str,
+) -> Response:
+    """The launch door's last step: issue a session and land, or refuse (E1-08).
+
+    The launch-door twin of `landing_or_refusal` above, and deliberately its own
+    function rather than a branch inside it. That one renders a landing page
+    inline and is what the *web* door still does (E1-09 moves it onto the session
+    model, with the web-door test that changes with it); this one issues the
+    session `app.services.session` defines and hands it over as a fragment
+    redirect with the session and CSRF cookies set. The two doors' answers diverge
+    here exactly as ADR 0073 said they would, so the divergence is two functions
+    and not one function with a mode.
+
+    `landing_role_for(claims, door=Door.LAUNCH)` is called unchanged — E1-08 does
+    not touch role resolution (E1-13's) — and a launch stating a role this door
+    serves no view for is refused rather than landed on a default.
+
+    The CSRF token is bound to the session's own `jti`, which is read back off the
+    issued token: `issue_session` mints the `jti` and returns the token, and
+    `verified_session` is the one way to read the claims it put inside.
+    """
+    role = landing_role_for(claims, door=Door.LAUNCH)
+    if role is None:
+        return refused(no_role_reason)
+    token = issue_session(
+        door=Door.LAUNCH,
+        role=role,
+        sub=str(claims.get("sub") or ""),
+        iss=claims.get("iss"),
+        secret=secret,
+    )
+    session = verified_session(token, secret)
+    if session is None:
+        # A token this function issued with `secret`, read back with the same
+        # `secret`, verifies by construction; this guards the type rather than a
+        # real state, so a genuine failure here is a bug loud enough to name.
+        raise RuntimeError("A session this door just issued failed to verify against its own key.")
+    response: Response = fragment_redirect(role, token)
+    set_session_cookie(response, token, settings)
+    set_csrf_cookie(response, issue_csrf_token(session.jti, secret), settings)
+    return response

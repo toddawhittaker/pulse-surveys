@@ -295,6 +295,4 @@ def fragment_redirect(role: LandingRole, token: str) -> RedirectResponse:
     not written down anywhere on the way. `<role>` is the role name lowercased,
     which is the SPA route the landing view lives at (`frontend/src/router.tsx`).
     """
-    return RedirectResponse(
-        f"{SPA_MOUNT}/{role.name.lower()}#session={token}", status_code=FOUND
-    )
+    return RedirectResponse(f"{SPA_MOUNT}/{role.name.lower()}#session={token}", status_code=FOUND)

@@ -26,9 +26,10 @@ that the ledger lives in Postgres (ADR 0089).
 """
 
 from datetime import datetime
+from uuid import uuid4
 
-from sqlalchemy import delete
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import delete, insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.lti import LtiLaunchNonce
@@ -39,8 +40,9 @@ __all__ = ["NonceReplayedError", "claim_nonce", "purge_expired_nonces"]
 class NonceReplayedError(Exception):
     """The nonce this launch carries has already been spent by an earlier launch.
 
-    Raised by `claim_nonce` on the `ON CONFLICT` no-op. Carries no claim value
-    and no part of any token — like every launch refusal, it reaches a log line
+    Raised by `claim_nonce` when inserting the nonce violates its unique index.
+    Carries no claim value and no part of any token — like every launch refusal,
+    it reaches a log line
     and a page, and a nonce is part of a credential (SPEC §10). The launch door
     translates it into a claim-free refusal and logs only this class's name.
     """
@@ -49,30 +51,32 @@ class NonceReplayedError(Exception):
 def claim_nonce(session: Session, *, nonce: str, expires_at: datetime) -> None:
     """Spend `nonce` once, or raise `NonceReplayedError` if it was already spent.
 
-    Inserts the nonce and lets the unique index decide: a first claim inserts one
-    row, a replay inserts none. No `SELECT` is issued and none is needed — the
-    conflict *is* the answer — which is why `pulse_app` holds `INSERT` on this
-    table and not `SELECT`.
+    Inserts the nonce inside a savepoint and lets the unique index decide: a first
+    claim inserts the row, a replay violates the `nonce` constraint and the
+    savepoint's rollback turns that into `NonceReplayedError` without poisoning the
+    caller's transaction. No `SELECT` is ever issued — the constraint violation
+    *is* the answer — which is why `pulse_app` holds only `INSERT` on this table.
+
+    The `id` is generated here rather than by the column's `gen_random_uuid()`
+    default: a server-generated key makes SQLAlchemy append `RETURNING id`, and
+    `RETURNING` a column would need `SELECT`. Supplying it keeps the write a bare
+    `INSERT`.
 
     The write is left uncommitted: it belongs to the caller's `Session` and
     commits with the rest of the launch, so a launch that fails after the claim
-    for an unrelated reason leaves the nonce unspent and the legitimate retry
-    open.
+    for an unrelated reason leaves the nonce unspent and the legitimate retry open.
     """
-    statement = (
-        insert(LtiLaunchNonce)
-        .values(nonce=nonce, expires_at=expires_at)
-        .on_conflict_do_nothing(index_elements=["nonce"])
-        .returning(LtiLaunchNonce.id)
+    statement = insert(LtiLaunchNonce.__table__).values(  # type: ignore[arg-type]
+        id=uuid4(), nonce=nonce, expires_at=expires_at
     )
-    # A first claim returns the new row's id; a replay conflicts, inserts
-    # nothing, and returns no row. `rowcount` is unreliable once `RETURNING` is
-    # present, so the presence of a returned row is the verdict.
-    if session.execute(statement).first() is None:
+    try:
+        with session.begin_nested():
+            session.execute(statement)
+    except IntegrityError as conflict:
         raise NonceReplayedError(
             "This launch has already been delivered once. A launch nonce is single-use, and "
             "presenting the same signed launch a second time is refused."
-        )
+        ) from conflict
 
 
 def purge_expired_nonces(session: Session, *, now: datetime) -> int:
@@ -84,4 +88,4 @@ def purge_expired_nonces(session: Session, *, now: datetime) -> int:
     `expires_at` index rather than scanning, and the caller commits.
     """
     result = session.execute(delete(LtiLaunchNonce).where(LtiLaunchNonce.expires_at < now))
-    return result.rowcount or 0
+    return result.rowcount or 0  # type: ignore[attr-defined]

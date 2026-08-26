@@ -1,61 +1,93 @@
 """Beginning an LTI 1.3 launch, and deciding whether the one that came back holds.
 
-SPEC §7.3 and E0-18. The platform half of this protocol is `mock-lms/app/launch.py`,
-built by E0-14, which said in as many words that validating what it produces was
-somebody else's work. This module is that somebody, for the depth E0 needs.
+SPEC §7.3, §9.1, E1-08. ADR 0073 deferred `pylti1p3` to "the ticket that
+restructures this code anyway"; this is that ticket, and the launch door now
+validates on the library rather than by hand (`app.services.tokens` keeps the web
+door). What E0-18 skipped and E1 owns is here: single-use nonces (a Postgres
+ledger, `app.lti.replay_guard`), clock-skew windows, and state round-trip
+integrity — with the survival of a launch inside a cookie-blocked LMS iframe left
+to `app.services.session`.
 
-**What E1 owns and this deliberately does not do**, from E0-18's boundary
-section: replay windows, clock-skew tolerance, cookieless iframes, platform-side
-state storage, provisioning, any `user` row for a launching subject, any session
-that outlives the launch, and any purview computation. What is here is the set
-E0-18's acceptance criteria name — signature, `aud`, `iss`, `deployment_id`,
-`exp`, `state`, `nonce` — because "absence of *basic* state/nonce/signature
-checks is not tolerable even briefly".
+**Two legs.** The platform's launch page posts an OIDC third-party-initiated
+login to `/lti/login` carrying `iss`, `login_hint`, `target_link_uri` and
+`lti_message_hint`; `begin_a_launch` runs `pylti1p3`'s `OIDCLogin`, which mints
+the `state` and `nonce`, stores them in in-flight cookies (`app.lti.fastapi_adapter`)
+and redirects to the platform's authorization endpoint. The platform answers by
+posting a signed `id_token` back to `/lti/launch` with that `state`, and
+`verified_launch` checks it.
 
-**The order of the two legs, since they are easy to confuse.** The platform's
-launch page posts an OIDC third-party-initiated login request to `/lti/login`
-carrying `iss`, `login_hint`, `target_link_uri` and `lti_message_hint`; neither
-`state` nor `nonce` exists yet, and both are *this tool's* to mint. The tool then
-sends the browser to the platform's authorization endpoint, and the platform
-answers by posting a signed `id_token` back to `/lti/launch` with the tool's own
-`state` beside it.
+**Each refusal is classified by which check failed, never by string-matching the
+library's message.** `pylti1p3`'s `LtiException` interpolates the offending claim
+value, so forwarding it to a page or a log is the exact leak SPEC §10 forbids.
+Instead the validate steps are called individually and each failure is turned
+into a fixed `LaunchRefusedError` subclass with its own constant, claim-free
+message; the door logs only the subclass name. The order the checks run in is
+this module's, chosen so that one deliberately-wrong launch (E1-07's mints) trips
+exactly the guard it is named for.
 
-**Nothing here is lenient**, for the reason E0-14 gives about its own half: this
-is the first tool code a real token reaches, and it is the first thing E1 reads.
-Every refusal is a `LaunchRefusedError` naming what failed, and the router turns it
-into a 4xx page rather than a redirect — answering a request that failed
-validation by redirecting to an address it supplied is how an open redirector is
-built.
+**The algorithm list is a constant here** (ADR 0073's closing condition): the
+launch signature is RS256 and the header's `alg` is checked against that constant
+before the signature is verified, so an `alg: none` or an HMAC-with-the-public-key
+confusion is refused by this module and never reaches a verifier that might read
+`alg` off the token.
+
+**The key set is fetched through `app.state.http`**, the repo's one httpx client,
+the way `app.services.tokens` fetches the web door's — never through `pylti1p3`'s
+own `requests` connection, which is unreachable from a test and bound by no
+timeout this application sets. The fetched keys are handed to the launch, so the
+library verifies against them without opening a second HTTP path.
+
+**A refusal is a page, never a redirect** (open-redirector discipline, unchanged),
+and never quotes what was sent.
 """
 
-import secrets
+import logging
+import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-import jwt
-from sqlalchemy import select
+from pylti1p3.exception import LtiException, OIDCException
+from pylti1p3.message_launch import MessageLaunch
+from pylti1p3.oidc_login import OIDCLogin
+from pylti1p3.redirect import Redirect
+from pylti1p3.session import SessionService
 from sqlalchemy.orm import Session
 
-from app.config import Settings
-from app.models.lti import LtiDeployment, LtiPlatform
-from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
+from app.config import Settings, is_development
+from app.lti.fastapi_adapter import (
+    CookieJar,
+    FastApiCookieService,
+    FastApiLaunchDataStorage,
+    FastApiRedirect,
+    FastApiRequest,
+)
+from app.lti.registration import MultipleRegistrationsError, OrmToolConf
+from app.lti.replay_guard import NonceReplayedError, claim_nonce
+from app.services.tokens import TokenVerificationError, key_set
 
 __all__ = [
     "LAUNCH_PATH",
     "LOGIN_PATH",
-    "Initiation",
+    "AudienceRefused",
+    "ClockSkewRefused",
+    "DeploymentRefused",
+    "IssuerRefused",
     "LaunchRefusedError",
+    "MessageTypeRefused",
+    "NonceRefused",
+    "SignatureRefused",
+    "StateRefused",
+    "VersionRefused",
     "begin_a_launch",
     "verified_launch",
 ]
 
-# Where this tool answers. Written here rather than in the router because
-# `redirect_uri` is built from `LAUNCH_PATH` and the router declares the same
-# path, and two copies of a URL a platform compares *exactly* is the shape
-# `docs/MISTAKES.md` entry 13 is about. Both mocks default to these paths
-# (`mock-lms/app/config.py`), which is what makes the stack work unconfigured.
+# Where this tool answers. Written here rather than in the router because the
+# launch `redirect_uri` is built from `LAUNCH_PATH`, and the platform compares it
+# exactly; two copies of a URL a platform compares exactly is `docs/MISTAKES.md`
+# entry 13.
 LOGIN_PATH = "/lti/login"
 LAUNCH_PATH = "/lti/launch"
 
@@ -64,245 +96,331 @@ LAUNCH_PATH = "/lti/launch"
 # reads.
 LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
 DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"
+MESSAGE_TYPE_CLAIM = f"{LTI_CLAIM_PREFIX}message_type"
+VERSION_CLAIM = f"{LTI_CLAIM_PREFIX}version"
 
-# What the OIDC implicit flow the LTI 1.3 security framework specifies requires
-# a tool to ask for. Constants rather than settings: LTI fixes all three, and a
-# knob for any of them could only ever be turned to a value no platform serves.
-AUTHORIZATION_REQUEST_CONSTANTS = {
-    "scope": "openid",
-    "response_type": "id_token",
-    "response_mode": "form_post",
-    "prompt": "none",
-}
+# The one message type this tool serves and the one LTI version it speaks. Deep
+# Linking is out of scope (the epic README), so a `LtiDeepLinkingRequest` is a
+# real message type this tool recognises as LTI and still refuses.
+RESOURCE_LINK_MESSAGE_TYPE = "LtiResourceLinkRequest"
+LTI_VERSION = "1.3.0"
 
-# Bytes behind a `state` and a `nonce`. 24 urlsafe bytes is 32 characters of
-# base64 and is far past anything guessable; the values are opaque to the
-# platform, which hands both back untouched.
-#
-# Named for what it sizes rather than for the property it has, because
-# `app.api.auth` has a constant of its own for the same *kind* of value at a
-# different size: 32, which is RFC 7636's minimum PKCE verifier length and is
-# load-bearing there. One name holding two numbers in two modules reads as
-# shared and is not.
-STATE_NONCE_BYTES = 24
+# The only signature algorithm a launch may carry, checked against the token
+# header before the signature is verified. A hardcoded constant, never read from
+# the token or from configuration — ADR 0073's closing condition, applied to the
+# adapter. RS256 is what the IMS security framework specifies for an LTI 1.3
+# launch.
+LAUNCH_SIGNATURE_ALGORITHMS = ("RS256",)
+
+# How far a launch's `iat`/`exp` may sit outside this tool's clock and still be
+# honoured. Five minutes covers ordinary machine-clock drift between a platform
+# and this tool without honouring a token minted an hour early or expired an hour
+# ago — the two `iat_future`/`exp_past` mints push their timestamps far past this.
+CLOCK_SKEW_TOLERANCE_SECONDS = 300
+
+# The lifetime of a claimed nonce in the replay ledger. A spent nonce need only
+# be remembered for as long as the launch that spent it could be replayed; this
+# is generous for a launch a browser delivers immediately.
+NONCE_LEDGER_LIFETIME_SECONDS = 3600
+
+# The one place in `app/lti/` that logs. One WARNING per refusal, carrying only
+# the guard name — never a claim, a token, or a form value (SPEC §10, criterion
+# 6). The web door and every downstream reader read `verified_launch`'s return
+# value, never the token.
+logger = logging.getLogger("app.lti.launch")
 
 
 class LaunchRefusedError(Exception):
     """A launch cannot be admitted, and why in words a person can act on.
 
     Carries no claim value and no part of any token — a refusal reaches an HTML
-    page and possibly a log, and a launch token is a credential (SPEC §10).
+    page and a log, and a launch token is a credential (SPEC §10). The subclasses
+    below name which check refused; the door logs the subclass name and turns the
+    message into a 4xx page.
     """
 
 
-@dataclass(frozen=True)
-class Initiation:
-    """The authorization request a login initiation produces, and what to remember.
-
-    `parameters` rather than a finished URL: the router assembles the redirect
-    out of these and `authorization_endpoint` (`app.api.deps.with_query`).
-
-    **`authorization_endpoint` is read off the registration that resolved this
-    launch**, and it is the whole of E1-05's first criterion. It was a
-    process-wide setting while `lti_platform` had no column for it (ADR 0075),
-    which is right for one registered platform and wrong for two: a launch from
-    platform B resolved B's registration and then sent the browser to A's
-    address, carrying B's client ID and this tool's `state` and `nonce`. Carried
-    on the initiation rather than looked up again in the router, so the row that
-    decided the client ID is unarguably the row that decides the address.
-    """
-
-    parameters: dict[str, str]
-    state: str
-    nonce: str
-    authorization_endpoint: str
+class SignatureRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The signature, the algorithm, or the key that signed the launch did not hold."""
 
 
-def registered_platform(session: Session, issuer: str) -> LtiPlatform:
-    """The one `lti_platform` row for `issuer`, or a refusal.
-
-    **The lookup is by issuer alone, and the request's own `client_id` is
-    ignored.** Every value a platform needs is present in the initiation request
-    it sends, so a login endpoint that assembled its redirect out of those values
-    would work perfectly against the one platform anybody tests with and would
-    redirect a browser to whoever asked — an open redirect with the launch
-    protocol's name on it. Reading the client ID out of the row is what makes the
-    registration, rather than the caller, decide which tool this is.
-
-    **More than one row for one issuer is refused rather than guessed.** LTI 1.3
-    allows it — one LMS registering this tool twice, a pilot beside production,
-    which is why `lti_platform` is unique on `(issuer, client_id)` and not on the
-    issuer — and the initiation request carries `client_id` so a tool can tell
-    them apart. Doing that needs a rule for what happens when the caller names a
-    client the issuer did not register, and E1 writes it with the multi-tenant
-    work that needs it. Until then a second registration is a loud refusal
-    instead of a silent choice between two.
-    """
-    if not issuer.strip():
-        raise LaunchRefusedError(
-            "The login initiation names no `iss`, so there is no platform to look up."
-        )
-    rows = list(session.execute(select(LtiPlatform).where(LtiPlatform.issuer == issuer)).scalars())
-    if not rows:
-        raise LaunchRefusedError(
-            "No registration exists for the platform that began this launch. An administrator "
-            "registers a platform before it can launch this tool (SPEC §2)."
-        )
-    if len(rows) > 1:
-        raise LaunchRefusedError(
-            "More than one registration exists for that platform, and this tool cannot yet tell "
-            "which of them began the launch."
-        )
-    return rows[0]
+class AudienceRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch was issued for a different tool than this one."""
 
 
-def begin_a_launch(session: Session, settings: Settings, form: Mapping[str, str]) -> Initiation:
+class IssuerRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """No registration exists for the platform that began this launch."""
+
+
+class NonceRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch carries no `nonce`, or one this tool did not issue."""
+
+
+class DeploymentRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch names a deployment this tool was never installed into."""
+
+
+class MessageTypeRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch is a message type this tool does not serve."""
+
+
+class VersionRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch states an LTI version this tool does not speak."""
+
+
+class StateRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch returns a `state` this tool did not issue, or none at all."""
+
+
+class ClockSkewRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch was minted too far in the future, or expired too long ago."""
+
+
+class _FastApiOIDCLogin(OIDCLogin):  # type: ignore[type-arg]
+    """`pylti1p3`'s OIDC login, redirecting through this adapter's `Redirect`."""
+
+    def get_redirect(self, url: str) -> Redirect[str]:
+        return FastApiRedirect(url)
+
+
+class _FastApiMessageLaunch(MessageLaunch):  # type: ignore[type-arg]
+    """`pylti1p3`'s message launch, reading params off the parsed form."""
+
+    def _get_request_param(self, key: str) -> str:
+        return str(self._request.get_param(key))
+
+
+def _adapter(
+    form: Mapping[str, str], jar: CookieJar, settings: Settings
+) -> tuple[FastApiRequest, FastApiCookieService, FastApiLaunchDataStorage]:
+    """The three adapter objects a login or a launch is driven through."""
+    request = FastApiRequest(form, jar_cookies(jar), secure=not is_development(settings))
+    return request, FastApiCookieService(jar), FastApiLaunchDataStorage(jar)
+
+
+def jar_cookies(jar: CookieJar) -> dict[str, str]:
+    """The request cookies the jar holds, as the adapter request reads them."""
+    return {name: jar.read(name) or "" for name in jar.incoming_names()}
+
+
+def begin_a_launch(
+    session: Session, settings: Settings, form: Mapping[str, str], jar: CookieJar
+) -> str:
     """Turn a platform's login initiation into the authorization request it expects.
 
-    The two hints go back exactly as they arrived. They are the platform's own
-    opaque values — who is launching, and from which placement — and a tool that
-    dropped either gets a launch for whoever the platform guesses, or none at
-    all.
+    Runs `pylti1p3`'s `OIDCLogin`: it resolves the registration (its client id and
+    authorization endpoint), mints a fresh `state` and `nonce`, writes them to the
+    in-flight cookies through `jar`, and returns the URL to redirect the browser
+    to. The two hints go back exactly as they arrived — they are the platform's
+    opaque values, and a tool that dropped either gets a launch for whoever the
+    platform guesses, or none at all.
 
-    **A registration that states no authorization endpoint is refused, not
-    defaulted.** The column is nullable because a row written before E1-05 has no
-    value for it, so NULL means "not stated" — and the answer to "not stated" is
-    that an administrator completes the registration. A fallback to any
-    process-wide address would be the finding E1-05 closes, re-opened under
-    another name: one string standing in for every registration that does not
-    carry its own.
+    A registration that does not exist, names more than one client, or states no
+    authorization endpoint is refused rather than defaulted — the same guards
+    E0-18 held, preserved through the adapter.
     """
-    platform = registered_platform(session, form.get("iss", ""))
-    endpoint = (platform.authorization_endpoint or "").strip()
-    if not endpoint:
-        raise LaunchRefusedError(
+    request, cookies, storage = _adapter(form, jar, settings)
+    tool_conf = OrmToolConf(session)
+    oidc = _FastApiOIDCLogin(request, tool_conf, SessionService(request), cookies, storage)
+    launch_url = f"{settings.public_base_url.rstrip('/')}{LAUNCH_PATH}"
+    try:
+        redirect = oidc.get_redirect_object(launch_url)
+    except OIDCException as refusal:
+        raise IssuerRefused(
+            "No registration exists for the platform that began this launch, or it did not carry "
+            "the login hint a launch must. An administrator registers a platform before it can "
+            "launch this tool (SPEC §2)."
+        ) from refusal
+    except MultipleRegistrationsError as conflict:
+        raise IssuerRefused(str(conflict)) from conflict
+    except AssertionError as incomplete:
+        # `OIDCLogin` asserts the registration states an authorization endpoint;
+        # a NULL one means the registration was never completed.
+        raise IssuerRefused(
             "That platform's registration states no authorization endpoint, so this tool does not "
             "know where to send the browser to continue the launch. An administrator completes the "
             "registration before it can launch this tool (SPEC §2)."
-        )
-    state = secrets.token_urlsafe(STATE_NONCE_BYTES)
-    nonce = secrets.token_urlsafe(STATE_NONCE_BYTES)
-
-    parameters = {
-        **AUTHORIZATION_REQUEST_CONSTANTS,
-        "client_id": platform.client_id,
-        # Built from `PUBLIC_BASE_URL` and never from the incoming request. The
-        # platform compares this exactly against the launch URL it registered, so
-        # a value taken from the request's `Host` header or from its
-        # `target_link_uri` would be a redirect URI the caller chose.
-        "redirect_uri": f"{settings.public_base_url.rstrip('/')}{LAUNCH_PATH}",
-        "state": state,
-        "nonce": nonce,
-    }
-    for hint in ("login_hint", "lti_message_hint"):
-        value = form.get(hint)
-        if value:
-            parameters[hint] = value
-
-    return Initiation(
-        parameters=parameters, state=state, nonce=nonce, authorization_endpoint=endpoint
-    )
-
-
-def registered_deployment(session: Session, platform: LtiPlatform, deployment_id: Any) -> None:
-    """Refuse a launch from a placement this tool was never installed into.
-
-    `lti_deployment` is a table nothing else in E0 reads, which is exactly why
-    this check is the easiest of the seven to leave out: a tool that resolves the
-    platform by `iss` and stops has a launch door that works for every test
-    anybody writes. A deployment distinguishes one installation of a tool inside
-    an LMS from another, and a launch naming an unregistered one came from a
-    place nobody installed this tool.
-    """
-    if not isinstance(deployment_id, str) or not deployment_id:
-        raise LaunchRefusedError(
-            "The launch carries no `deployment_id` claim, so which installation of this tool it "
-            "came from is not stated (LTI 1.3 core)."
-        )
-    found = session.execute(
-        select(LtiDeployment.id).where(
-            LtiDeployment.lti_platform_id == platform.id,
-            LtiDeployment.deployment_id == deployment_id,
-        )
-    ).first()
-    if found is None:
-        raise LaunchRefusedError(
-            "That platform has no deployment of this tool registered under the identifier the "
-            "launch names."
-        )
+        ) from incomplete
+    return redirect.get_redirect_url()
 
 
 def verified_launch(
     session: Session,
     http: httpx.Client,
+    settings: Settings,
     form: Mapping[str, str],
-    carried: Mapping[str, Any] | None,
+    jar: CookieJar,
 ) -> dict[str, Any]:
-    """The claims of a launch this tool is willing to act on.
+    """The claims of a launch this tool is willing to act on, or a `LaunchRefusedError`.
 
-    Everything downstream reads what this returns and never the token, so there
-    is no path by which an unverified claim reaches a landing page.
-
-    The order is deliberate. `state` is compared **first**, before anything is
-    fetched or parsed, because it is the only check that costs nothing and it is
-    what makes an unsolicited launch cheap to refuse. The issuer is resolved from
-    the token's unverified claims next — which is not trust, it is the only way
-    to find out whose key to check the signature with, and the signature check
-    immediately afterwards is what binds the two together.
+    Everything downstream reads what this returns and never the token, so no
+    unverified claim reaches a landing page. Each refusal is logged with the guard
+    name alone and raised as a claim-free subclass.
     """
-    if carried is None:
-        raise LaunchRefusedError(
-            "This launch carries no login this tool started, so there is nothing to check its "
-            "`state` and `nonce` against. It may simply have taken too long."
-        )
-
-    delivered_state = form.get("state") or ""
-    expected_state = str(carried.get("state") or "")
-    if not delivered_state or not expected_state:
-        raise LaunchRefusedError("The launch carries no `state`, which every launch must return.")
-    if not same_opaque_value(delivered_state, expected_state):
-        raise LaunchRefusedError("The launch returns a `state` this tool did not issue.")
-
-    token = form.get("id_token") or ""
-    if not token:
-        raise LaunchRefusedError("The launch carries no `id_token`, so there is nothing to verify.")
-
-    # Unverified, and used for exactly one thing: choosing whose published key to
-    # check the signature against. That is not a decision made on trust — a tool
-    # cannot know which key to fetch without reading who claims to have signed,
-    # and the signature check immediately below is what makes the claim true or
-    # refuses it. Every claim any caller reads comes out of `verified_claims`.
     try:
-        stated = jwt.decode(token, options={"verify_signature": False})
-    except jwt.PyJWTError as failure:
-        raise LaunchRefusedError("The launch's `id_token` is not a readable JWT.") from failure
-    issuer = str(stated.get("iss") or "")
+        return _validate(session, http, form, jar, settings)
+    except NonceReplayedError as replay:
+        logger.warning("NonceReplayedError")
+        raise LaunchRefusedError(str(replay)) from replay
+    except LaunchRefusedError as refusal:
+        logger.warning(type(refusal).__name__)
+        raise
 
-    platform = registered_platform(session, issuer)
 
+def _validate(
+    session: Session,
+    http: httpx.Client,
+    form: Mapping[str, str],
+    jar: CookieJar,
+    settings: Settings,
+) -> dict[str, Any]:
+    """Run the checks in order; raise the specific refusal the first failing one names.
+
+    The claim is spent last (`claim_nonce`), only after every other check has
+    passed, so a launch refused for any earlier reason leaves its nonce unspent
+    and the legitimate retry open.
+    """
+    request, cookies, storage = _adapter(form, jar, settings)
+    tool_conf = OrmToolConf(session)
+    launch = _FastApiMessageLaunch(
+        request, tool_conf, SessionService(request), cookies, launch_data_storage=storage
+    ).set_auto_validation(False)
+    # The signature step verifies the JWS only; audience, expiry and issued-at are
+    # this module's own checks, so the library is told not to repeat them.
+    launch.set_jwt_verify_options({"verify_aud": False, "verify_exp": False, "verify_iat": False})
+
+    # 1. `state` round-trips — the cheapest check, refusing an unsolicited launch first.
     try:
-        claims = verified_claims(
-            http,
-            token,
-            jwks_url=platform.jwks_url,
-            issuer=platform.issuer,
-            audience=platform.client_id,
+        launch.validate_state()
+    except LtiException as failure:
+        raise StateRefused("The launch returns a `state` this tool did not issue.") from failure
+
+    # 2. The token is a well-formed JWS this module can read the header and body of.
+    try:
+        launch.validate_jwt_format()
+    except LtiException as failure:
+        raise SignatureRefused("The launch's `id_token` is not a readable JWT.") from failure
+
+    body = launch._jwt.get("body", {})
+    header = launch._jwt.get("header", {})
+
+    # 3. Clock skew, on the decoded (still unverified) claims — before the
+    # signature, so an expired-but-validly-signed launch is refused for its clock
+    # and not miscounted as a signature failure.
+    _refuse_clock_skew(body)
+
+    # 4. The `nonce` is one this tool issued at login (anti-injection). Single-use
+    # is the replay ledger's job, at the end.
+    try:
+        launch.validate_nonce()
+    except LtiException as failure:
+        raise NonceRefused(
+            "The launch carries no `nonce`, or one this tool did not send."
+        ) from failure
+
+    # 5. The issuer resolves to a registration, and the audience is that
+    # registration's client. Resolved here rather than through the library's own
+    # step so the two failures classify apart.
+    registration = _resolve_registration(session, body)
+
+    # 6. The algorithm is the one this tool pins, and the signature verifies
+    # against the registration's published keys — fetched through the repo's httpx
+    # client and handed to the launch, never through `pylti1p3`'s own connection.
+    if header.get("alg") not in LAUNCH_SIGNATURE_ALGORITHMS:
+        raise SignatureRefused(
+            "The launch's `id_token` is signed with an algorithm this tool does not accept."
         )
-    except TokenVerificationError as refusal:
-        raise LaunchRefusedError(str(refusal)) from refusal
+    try:
+        keys = dict(key_set(http, registration.get_key_set_url()))
+    except TokenVerificationError as failure:
+        # The key set could not be fetched or was not a usable JWK Set. The
+        # message carries no address (`app.services.tokens`'s own discipline), and
+        # this refusal carries none either — a refusal that named the server-side
+        # key-set host would publish the tool's topology to whoever provoked it.
+        raise SignatureRefused(
+            "The launch could not be verified: the platform's key set could not be read."
+        ) from failure
+    registration.set_key_set(keys)
+    launch._registration = registration
+    try:
+        launch.validate_jwt_signature()
+    except LtiException as failure:
+        raise SignatureRefused("The launch's signature did not verify.") from failure
 
-    expected_nonce = str(carried.get("nonce") or "")
-    delivered_nonce = str(claims.get("nonce") or "")
-    if not delivered_nonce or not expected_nonce:
-        raise LaunchRefusedError("The launch carries no `nonce`, which every launch must return.")
-    if not same_opaque_value(delivered_nonce, expected_nonce):
-        raise LaunchRefusedError("The launch returns a `nonce` this tool did not send.")
+    # 7. The deployment is one registered under this platform.
+    _refuse_unregistered_deployment(session, body)
 
-    registered_deployment(session, platform, claims.get(DEPLOYMENT_ID_CLAIM))
+    # 8. The message type is one this tool serves.
+    if body.get(MESSAGE_TYPE_CLAIM) != RESOURCE_LINK_MESSAGE_TYPE:
+        raise MessageTypeRefused("The launch is a message type this tool does not serve.")
 
-    # `lti_platform.jwks_fetched_at` is deliberately left unwritten. It is the
-    # column that would record a key-set fetch, and E0-18 caches no key set — so
-    # writing it would record a fetch nothing ever reads, on a connection that
-    # holds `SELECT` and no `UPDATE` (lti_registration_grants_v001.sql). The
-    # ticket that adds caching writes it with the code that reads it.
-    return claims
+    # 9. The LTI version is the one this tool speaks.
+    if body.get(VERSION_CLAIM) != LTI_VERSION:
+        raise VersionRefused("The launch states an LTI version this tool does not speak.")
+
+    # 10. Spend the nonce — single-use, and only now that everything else holds.
+    claim_nonce(
+        session,
+        nonce=str(body["nonce"]),
+        expires_at=datetime.now(UTC) + timedelta(seconds=NONCE_LEDGER_LIFETIME_SECONDS),
+    )
+    return dict(body)
+
+
+def _refuse_clock_skew(body: Mapping[str, Any]) -> None:
+    """Refuse a launch minted too far in the future or expired too long ago."""
+    now = int(time.time())
+    issued_at = body.get("iat")
+    expires_at = body.get("exp")
+    if not isinstance(issued_at, int) or not isinstance(expires_at, int):
+        raise ClockSkewRefused(
+            "The launch carries no readable `iat`/`exp`, so its age cannot be judged."
+        )
+    if issued_at > now + CLOCK_SKEW_TOLERANCE_SECONDS:
+        raise ClockSkewRefused("The launch was minted too far in the future to be honoured.")
+    if expires_at < now - CLOCK_SKEW_TOLERANCE_SECONDS:
+        raise ClockSkewRefused("The launch expired too long ago to be honoured.")
+
+
+def _resolve_registration(session: Session, body: Mapping[str, Any]) -> Any:
+    """The `pylti1p3` registration for this launch's issuer and audience, or a refusal.
+
+    `IssuerRefused` when no row registers the issuer (or more than one does, which
+    this tool cannot yet tell apart), `AudienceRefused` when the launch's audience
+    is not that registration's client — the two failures the library folds into
+    one generic "registration not found".
+    """
+    issuer = str(body.get("iss") or "")
+    tool_conf = OrmToolConf(session)
+    try:
+        registration = tool_conf.find_registration_by_issuer(issuer)
+    except MultipleRegistrationsError as conflict:
+        raise IssuerRefused(str(conflict)) from conflict
+    if registration is None:
+        raise IssuerRefused("No registration exists for the platform that began this launch.")
+
+    audience = body.get("aud")
+    client_id = audience[0] if isinstance(audience, list) else audience
+    if client_id != registration.get_client_id():
+        raise AudienceRefused("The launch was issued for a different tool than this one.")
+    return registration
+
+
+def _refuse_unregistered_deployment(session: Session, body: Mapping[str, Any]) -> None:
+    """Refuse a launch from a placement this tool was never installed into."""
+    deployment_id = body.get(DEPLOYMENT_ID_CLAIM)
+    if not isinstance(deployment_id, str) or not deployment_id:
+        raise DeploymentRefused(
+            "The launch carries no `deployment_id`, so which installation of this tool it came "
+            "from is not stated."
+        )
+    issuer = str(body.get("iss") or "")
+    audience = body.get("aud")
+    client_id = audience[0] if isinstance(audience, list) else audience
+    tool_conf = OrmToolConf(session)
+    deployment = tool_conf.find_deployment_by_params(issuer, deployment_id, str(client_id or ""))
+    if deployment is None:
+        raise DeploymentRefused(
+            "That platform has no deployment of this tool registered under the identifier the "
+            "launch names."
+        )

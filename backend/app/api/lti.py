@@ -42,15 +42,11 @@ from starlette.responses import Response
 
 from app.api.deps import (
     FOUND,
-    LTI_LOGIN_COOKIE,
-    carried_across,
-    carry_across,
-    clear_carried,
-    landing_or_refusal,
+    launch_landing_or_refusal,
     refused,
-    with_query,
 )
 from app.db import get_session
+from app.lti.fastapi_adapter import CookieJar
 from app.lti.launch import (
     LAUNCH_PATH,
     LOGIN_PATH,
@@ -59,7 +55,6 @@ from app.lti.launch import (
     verified_launch,
 )
 from app.lti.registration import JWKS_PATH, NoSigningKeyError, published_key_set
-from app.services.landing import Door
 
 # What a caller is told when this deployment holds no signing key. Short on
 # purpose: the route is public in every environment, and the operator's copy of
@@ -116,60 +111,60 @@ def jwks(session: Session = Depends(get_session)) -> dict[str, Any]:
 async def login(request: Request, session: Session = Depends(get_session)) -> Response:
     """Answer a platform's login initiation with an authorization request.
 
-    The `state` and `nonce` minted downstream ride back to `/lti/launch` in a
-    short-lived signed cookie (`app.api.deps`), which is the only place this
-    process remembers them. E1's platform-storage and cookieless work replaces
-    that mechanism.
+    `pylti1p3`'s `OIDCLogin` (`app.lti.launch.begin_a_launch`) mints the `state`
+    and `nonce` and writes them to the in-flight cookies through the jar; this
+    handler applies the jar to the redirect it returns. E0-18's single signed
+    login cookie is gone from this door — its state/nonce role is now the library's
+    (ADR 0089, `docs/disputes/E1-08-01.md`).
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
+    jar = CookieJar(request.cookies, settings)
     try:
-        initiation = await run_in_threadpool(begin_a_launch, session, settings, form)
+        url = await run_in_threadpool(begin_a_launch, session, settings, form, jar)
     except LaunchRefusedError as refusal:
         return refused(str(refusal))
 
-    response = RedirectResponse(
-        with_query(initiation.authorization_endpoint, initiation.parameters),
-        status_code=FOUND,
-    )
-    carry_across(
-        response,
-        LTI_LOGIN_COOKIE,
-        request.app.state.login_secret,
-        {"state": initiation.state, "nonce": initiation.nonce},
-        settings,
-    )
+    response = RedirectResponse(url, status_code=FOUND)
+    jar.apply(response)
     return response
 
 
-@router.post(LAUNCH_PATH, summary="LTI 1.3 launch: verify the token and render the view")
+@router.post(LAUNCH_PATH, summary="LTI 1.3 launch: verify the token and issue a session")
 async def launch(request: Request, session: Session = Depends(get_session)) -> Response:
-    """Verify what the platform posted back and render the view its roles name.
+    """Verify what the platform posted back, issue a session, and hand it over.
 
-    Rendered directly in the response — no session, no redirect. There is nowhere
-    else to go in a system that does nothing yet, and inventing a session here is
-    the E1 work E0-18's boundary section keeps out.
+    On a valid launch the door issues the session `app.services.session` defines,
+    sets the session and CSRF cookies, and returns a fragment redirect to the
+    role's landing route (`launch_landing_or_refusal`) — the response contract
+    E1-08 replaces E0-18's inline landing page with. The session is committed only
+    on success, which is what makes the claimed nonce single-use survive to the
+    next request; a refusal rolls back, leaving the nonce unspent for a legitimate
+    retry.
 
-    The cookie is cleared on the way out whichever way this goes: a `state` is
-    good once, and one left in the browser is one an attacker can replay into a
-    second launch.
+    The in-flight cookies are burned on a refusal: a `state` and a `nonce` are
+    good once, and one left in the browser is one an attacker can present again.
+    A successful launch leaves them, because the Postgres replay ledger is what
+    enforces single-use once a launch is admitted, and the second delivery must
+    reach it to be refused as a replay rather than earlier as a stale state.
     """
+    settings = request.app.state.settings
     form = form_body(await request.body())
-    carried = carried_across(request.app.state.login_secret, request.cookies.get(LTI_LOGIN_COOKIE))
-
+    jar = CookieJar(request.cookies, settings)
     try:
         claims = await run_in_threadpool(
-            verified_launch, session, request.app.state.http, form, carried
+            verified_launch, session, request.app.state.http, settings, form, jar
         )
     except LaunchRefusedError as refusal:
         answer: Response = refused(str(refusal))
-        clear_carried(answer, LTI_LOGIN_COOKIE)
+        jar.burn(answer)
         return answer
 
-    return landing_or_refusal(
+    await run_in_threadpool(session.commit)
+    return launch_landing_or_refusal(
         claims,
-        door=Door.LAUNCH,
-        cookie=LTI_LOGIN_COOKIE,
+        settings=settings,
+        secret=request.app.state.session_secret,
         no_role_reason=(
             "The launch states no role this tool has a view for, so there is nothing to show you."
         ),

@@ -38,14 +38,19 @@ from typing import Any
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from pylti1p3.deployment import Deployment
+from pylti1p3.registration import Registration
+from pylti1p3.tool_config import ToolConfAbstract
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.lti import ToolSigningKey
+from app.models.lti import LtiDeployment, LtiPlatform, ToolSigningKey
 
 __all__ = [
     "JWKS_PATH",
+    "MultipleRegistrationsError",
     "NoSigningKeyError",
+    "OrmToolConf",
     "public_jwk",
     "published_key_set",
     "rfc7638_thumbprint",
@@ -81,6 +86,104 @@ class NoSigningKeyError(RuntimeError):
     failure then arrives hours later, at that platform, as an assertion refused
     for a reason that names no key.
     """
+
+
+class MultipleRegistrationsError(Exception):
+    """One issuer resolves to more than one registration, and this tool refuses.
+
+    LTI 1.3 allows it — one LMS registering this tool twice, a pilot beside
+    production — which is why `lti_platform` is unique on `(issuer, client_id)`
+    and not on the issuer. Telling two registrations for one issuer apart needs a
+    rule for what a launch that names a client the issuer did not register does,
+    and E1's multi-tenant work writes it; until then a second registration is a
+    loud refusal rather than a silent choice between two. `app.lti.launch`'s
+    `registered_platform` refuses the same way at the launch, and this preserves
+    it inside the `pylti1p3` adapter's own lookup so a future caller through the
+    library gets the refusal, not `pylti1p3`'s default "pick one".
+    """
+
+
+class OrmToolConf(ToolConfAbstract[Any]):
+    """`pylti1p3`'s tool configuration, backed by `lti_platform`/`lti_deployment`.
+
+    `pylti1p3` reaches a registration through this interface: the OIDC login step
+    asks for a platform's client id and authorization endpoint, and the launch
+    steps ask for the same registration and its deployments. `pylti1p3`'s own
+    subclasses read a static dict or a JSON file; this one reads the two tables
+    the admin console writes, on the session the request already holds.
+
+    **The `>1`-row refusal is preserved.** `pylti1p3`'s stock config picks the
+    first registration for an issuer; SPEC §2's model is that a second one is
+    ambiguous, so `find_registration_by_issuer` raises `MultipleRegistrationsError`
+    rather than choosing — the same guard `app.lti.launch.registered_platform`
+    holds, kept here so a lookup through the library cannot lose it.
+
+    **The key set is left unset.** `Registration.get_key_set_url` carries the
+    `jwks_url`, but the launch door fetches the key set through the repo's httpx
+    client (`app.state.http`) the way `app.services.tokens` does, and hands it to
+    the launch — never letting `pylti1p3` open its own `requests` connection. So
+    this fills in everything but the keys.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def _platforms_for(self, iss: str) -> list[LtiPlatform]:
+        return list(
+            self._session.execute(select(LtiPlatform).where(LtiPlatform.issuer == iss)).scalars()
+        )
+
+    def _registration(self, row: LtiPlatform) -> Registration:
+        registration = Registration()
+        registration.set_issuer(row.issuer)
+        registration.set_client_id(row.client_id)
+        registration.set_key_set_url(row.jwks_url)
+        # Both are nullable — a registration written before E1-05 states neither.
+        # Set them only when present; a NULL authorization endpoint is refused at
+        # the login (`app.lti.launch.begin_a_launch`), not fabricated here.
+        if row.authorization_endpoint is not None:
+            registration.set_auth_login_url(row.authorization_endpoint)
+        if row.auth_token_url is not None:
+            registration.set_auth_token_url(row.auth_token_url)
+        return registration
+
+    def find_registration_by_issuer(self, iss: str, *args: Any, **kwargs: Any) -> Registration:
+        rows = self._platforms_for(iss)
+        if len(rows) > 1:
+            raise MultipleRegistrationsError(
+                "More than one registration exists for that platform, and this tool cannot yet "
+                "tell which of them began the launch."
+            )
+        return self._registration(rows[0]) if rows else None  # type: ignore[return-value]
+
+    def find_registration_by_params(
+        self, iss: str, client_id: str, *args: Any, **kwargs: Any
+    ) -> Registration:
+        rows = [row for row in self._platforms_for(iss) if row.client_id == client_id]
+        return self._registration(rows[0]) if rows else None  # type: ignore[return-value]
+
+    def find_deployment(self, iss: str, deployment_id: str) -> Deployment | None:
+        rows = self._platforms_for(iss)
+        if len(rows) != 1:
+            return None
+        return self._deployment(rows[0], deployment_id)
+
+    def find_deployment_by_params(
+        self, iss: str, deployment_id: str, client_id: str, *args: Any, **kwargs: Any
+    ) -> Deployment | None:
+        rows = [row for row in self._platforms_for(iss) if row.client_id == client_id]
+        if len(rows) != 1:
+            return None
+        return self._deployment(rows[0], deployment_id)
+
+    def _deployment(self, platform: LtiPlatform, deployment_id: str) -> Deployment | None:
+        found = self._session.execute(
+            select(LtiDeployment.id).where(
+                LtiDeployment.lti_platform_id == platform.id,
+                LtiDeployment.deployment_id == deployment_id,
+            )
+        ).first()
+        return Deployment().set_deployment_id(deployment_id) if found is not None else None
 
 
 def base64url_uint(value: int) -> str:
