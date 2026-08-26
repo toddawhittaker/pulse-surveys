@@ -82,10 +82,10 @@ function publishedPeople(node: unknown, found: Published[] = []): Published[] {
 // distinguishes the Care office from the person who holds Care *and* teaches —
 // without it "the Care person" is whichever of the two the document lists first.
 async function signInAs(page: Page, role: string): Promise<void> {
-  const registration = await page.evaluate(async () => {
+  const registration: unknown = await page.evaluate(async () => {
     const answer = await fetch('/mock/registration', { headers: { accept: 'application/json' } });
     if (!answer.ok) throw new Error(`/mock/registration answered ${answer.status}`);
-    return answer.json();
+    return (await answer.json()) as unknown;
   });
 
   const holders = publishedPeople(registration).filter((person) => {
