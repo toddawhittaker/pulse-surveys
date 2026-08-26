@@ -389,7 +389,9 @@ cryptography==50.0.0 \
     --hash=sha256:f59e38625469987d7ef6d495323c55e7db6c212eaf6112267e0d3b565a2e9c9f \
     --hash=sha256:f89831ef99dd7dd169ab06d63a831adb9e20a87aac6d380266bbda5823349169 \
     --hash=sha256:fd9192b7b70c573d7f214eb1ae35e00d359f6f5e4b27c7e21e30de1fc6204645
-    # via pulse-surveys (pyproject.toml)
+    # via
+    #   jwcrypto
+    #   pulse-surveys (pyproject.toml)
 distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
@@ -629,6 +631,12 @@ jiter==0.16.0 \
     --hash=sha256:f4444a83f946605990c98f625cdd3d2725bfb818158760c5748c653170a20e0e \
     --hash=sha256:fb08c276dd02dac3a284acdd02cacc630d2e3cd6572a4b85519f35cbd133c3de
     # via openai
+jwcrypto==1.5.9 \
+    --hash=sha256:30b1c9afc898eefd112c31d836eb2d7a4c6febcac95d4aa727e963cd42911d8e \
+    --hash=sha256:dbbbfcdad7a6fc40cf3d5a635b11115fc42591b7ab869a36ad347a516a6e1c5d
+    # via
+    #   pulse-surveys (pyproject.toml)
+    #   pylti1p3
 kombu==5.6.2 \
     --hash=sha256:8060497058066c6f5aed7c26d7cd0d3b574990b09de842a8c5aaed0b92cc5a55 \
     --hash=sha256:efcfc559da324d41d61ca311b0c64965ea35b4c55cc04ee36e55386145dace93
@@ -961,6 +969,12 @@ pydantic-settings==2.15.0 \
 pyjwt==2.13.0 \
     --hash=sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423 \
     --hash=sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728
+    # via
+    #   pulse-surveys (pyproject.toml)
+    #   pylti1p3
+pylti1p3==2.0.0 \
+    --hash=sha256:e0c6c53f8633abc3a20c20c71d7d26a4c946c9e8d33143dd8b1a5a1c3797e89a \
+    --hash=sha256:ebb95ff1397c21190f63cf47427e3b57cdc80e0fc524f2e35e68d78c603cae5a
     # via pulse-surveys (pyproject.toml)
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
@@ -1095,7 +1109,9 @@ regex==2026.7.19 \
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
-    # via tiktoken
+    # via
+    #   pylti1p3
+    #   tiktoken
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
@@ -1246,10 +1262,12 @@ typing-extensions==4.16.0 \
     # via
     #   alembic
     #   fastapi
+    #   jwcrypto
     #   openai
     #   opentelemetry-api
     #   pydantic
     #   pydantic-core
+    #   pylti1p3
     #   sqlalchemy
     #   typing-inspection
 typing-inspection==0.4.4 \
