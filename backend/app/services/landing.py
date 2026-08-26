@@ -81,10 +81,18 @@ verified `CARE` roles claim on the Care empty view. The collision was ruled on
 The property the ruling rests on is behavioural, not argued: nothing here writes
 a `role_assignment`, the Care queue does not exist, and the reveal is gated twice
 on a live assignment in the database — `app.services.safety` before it calls, and
-`reveal_student_identity` again inside its own body. A `CARE` claim buys an empty
-page in E0, and after the third review round it buys even that only at the web
-door. E1 replaces claim-derived landing roles with the assignment model, and the
-exception goes with them.
+`reveal_student_identity` again inside its own body. **What a `CARE` claim buys
+changed under E1-09, and the ruling did not.** It bought an empty page under
+E0-18; it now buys a session naming the Care role and a redirect to the empty
+`/app/care` route, which is a credential where the page was not. The gates are
+unmoved by that: every read on the Care surface is authorised out of
+`role_assignment` through the authz chokepoint (E0-11) and never out of a session
+claim, so the claim grants nothing still — and
+`tests/integration/test_web_login_door.py::test_the_web_door_writes_no_row_for_the_care_person_it_lands`
+drives the whole flow as the Care person and requires the row counts unchanged.
+After the third review round the claim reaches even this far only at the web
+door. E1-13 replaces claim-derived landing roles with the assignment model, and
+the exception goes with them.
 
 The markup follows `docs/DESIGN_BRIEF.md` and `design/tokens.css`: chalk ground,
 spruce ink, Literata for the heading and Schibsted Grotesk for the body, the flat
