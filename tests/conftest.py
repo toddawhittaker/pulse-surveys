@@ -37,6 +37,9 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/doors.py` — E0-18 PR 1: this project's own two doors, built here
     and driven in process against the mocks.
   - `fixtures/suite_keys.py` — the key set this suite signs its own tokens with.
+  - `fixtures/client_credentials.py` — E1-06: the tool's key set, the assertions a
+    client-credentials grant is asked with, and the seam a mock platform fetches
+    that key set through.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -57,4 +60,5 @@ pytest_plugins = (
     "fixtures.seed",
     "fixtures.doors",
     "fixtures.suite_keys",
+    "fixtures.client_credentials",
 )

@@ -2669,6 +2669,31 @@ MEMBER_OF_ROLES = """
 #     Recorded here because widening this constant is exactly the conversation
 #     this equality exists to force — a grant file may not justify its own grant.
 #     Decided by the orchestrator on 2026-08-21, on E0-18 PR 1.
+#   - `pulse_app` **reads** `tool_signing_key`, and holds nothing else on it.
+#     E1-06 publishes the tool's key set at `/lti/jwks` and E1-11 signs a
+#     `client_assertion` with the same row, both on the application connection, so
+#     without `SELECT` the tool cannot present its own identity to any platform.
+#     Three things make this the narrowest grant that does the job, and they are
+#     worth stating because this is the only entry in this set that names a
+#     **private key**.
+#     **The grant is deliberately late.** ADR 0082 left the table grantless in
+#     E1-05 — "a runtime role holding read access to a private key it never opens
+#     is a credential at rest with no owner" — and put the grant in the ticket
+#     whose code spends it, which is this one. Nothing before E1-06 could have
+#     needed it, and a grant that had arrived with the schema would have sat
+#     unused for a ticket.
+#     **`SELECT` alone.** The seed writes the row and the seed runs as the
+#     superuser (ADR 0009, ADR 0063), so `INSERT` and `UPDATE` stay withheld — an
+#     application connection that could write this column could rotate the tool's
+#     identity, which ADR 0082 forbids outright, and could do it invisibly because
+#     a fresh key signs perfectly.
+#     **It carries no personal data.** ADR 0082's own consequence section answers
+#     the §4.1 question: "`tool_signing_key` is not a person table. It holds no
+#     subject, no name and no address, so SPEC §4.1's `PERSON_TABLES` does not
+#     change." What this grant widens is the credential surface rather than the
+#     confidentiality one — the application role can now read the tool's private
+#     signing key, which is the cost ADR 0082 accepts and records.
+#     Decided in ADR 0082 and spent in E1-06.
 #
 # **Hand-written and derived from the record, not read out of the grant files**
 # (`docs/MISTAKES.md` entry 19), which is the same decision
@@ -2695,6 +2720,7 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "classification", "INSERT"),
         (APPLICATION_ROLE, "lti_platform", "SELECT"),
         (APPLICATION_ROLE, "lti_deployment", "SELECT"),
+        (APPLICATION_ROLE, "tool_signing_key", "SELECT"),
     }
 )
 

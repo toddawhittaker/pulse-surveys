@@ -76,6 +76,20 @@ Advantage services. An advertised endpoint that answers nothing is worse than an
 absent one: it fails at the point of use, in a tool, with a 404 that reads as the
 tool's bug.
 
+> **Closed 2026-08-25 by E1-06.** The rule stands and the state it described is
+> over. E0-15 built the Advantage services without a token endpoint, and E1-06
+> built one — so this document now states `auth_token_url` and the discovery
+> document a `token_endpoint`, both landing in the same change as the endpoint
+> that answers there. The rule is what decided that order: the carried entry
+> [`docs/tickets/e1/carried-from-e0.md`](../tickets/e1/carried-from-e0.md)
+> insists the grant lands as one change over all four parts, and this consequence
+> is half of the reason. What the endpoint decides is
+> [ADR 0084](0084-the-mock-platforms-token-endpoint-bounds-an-assertion-at-five-minutes.md).
+>
+> The paragraph above it applies too, and this is the ticket it warned about:
+> `auth_token_url` is the new registration field, checked against
+> `lti_platform`'s columns rather than named in the protocol's vocabulary.
+
 **It is one more unauthenticated endpoint on a service that must not be
 deployed.** It publishes nothing secret — every value in it is public by design,
 and the JWKS URL serves public keys — but it is another reason the boundary in

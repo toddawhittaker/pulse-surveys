@@ -271,11 +271,19 @@ def registration_values(settings: PlatformSettings) -> dict[str, str]:
     """The registration, keyed by the column each value goes in.
 
     Keyed by column name rather than by protocol term — `jwks_url`, not
-    `jwks_uri` — because the audience is someone filling in `lti_platform` and
-    `lti_deployment` from E0-08, and "one step" should mean the names match. The
-    two endpoint URLs are the pair E0-08's own module docstring says arrive with
-    the code that calls them; they are published here because a registration form
-    will want them the moment E1 exists.
+    `jwks_uri`; `auth_token_url`, not `token_endpoint` — because the audience is
+    someone filling in `lti_platform` and `lti_deployment` from E0-08, and "one
+    step" should mean the names match. The endpoint URLs are the set E0-08's own
+    module docstring says arrive with the code that calls them; they are
+    published here because a registration form will want them the moment E1
+    exists.
+
+    **`auth_token_url` is E1-06's, and it lands with the endpoint it names.**
+    ADR 0036's rule is that nothing here is advertised unless it is served, so
+    this key was absent while the platform had no token endpoint. The carried
+    entry insists the two move together for the other half of the same reason: a
+    developer who pastes this document into `lti_platform` and finds no token
+    address has a registration `ServiceConnector` cannot make one call with.
 
     One function, two audiences: this builds both the JSON at `/registration` and
     the block on the launch page, so a human and a script cannot be told
@@ -288,6 +296,7 @@ def registration_values(settings: PlatformSettings) -> dict[str, str]:
         "deployment_id": settings.deployment_id,
         "jwks_url": settings.jwks_url,
         "authorization_endpoint": settings.authorization_url,
+        "auth_token_url": settings.token_url,
         "openid_configuration": settings.discovery_url,
     }
 

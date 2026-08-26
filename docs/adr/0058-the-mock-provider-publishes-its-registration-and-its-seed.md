@@ -93,8 +93,9 @@ registration, which this provider does not implement. A path spelling
 "registration" outside the mock namespace either has to be advertised as that
 endpoint — a record asserting something untrue, which
 [ADR 0036](0036-the-mock-platform-publishes-its-registration-as-a-document.md)
-already refuses for the platform's absent `token_endpoint` — or be an
-unadvertised protocol-looking route for every client to wonder about.
+already refuses for the platform's then-absent `token_endpoint` (E1-06 built one;
+the rule this cites is unchanged) — or be an unadvertised protocol-looking route
+for every client to wonder about.
 
 **Compose literals only, with no document.** The values *are* Compose literals
 ([ADR 0037](0037-the-mock-platform-is-configured-by-compose-literals.md), and

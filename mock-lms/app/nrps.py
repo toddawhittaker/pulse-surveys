@@ -37,6 +37,14 @@ from app.seed import MockContext, MockEnrollment, SeededPlatform
 # for and a tool that does not is unaffected.
 MEMBERSHIP_CONTAINER_MEDIA_TYPE = "application/vnd.ims.lti-nrps.v2.membershipcontainer+json"
 
+# The scope NRPS 2.0 names for reading a context's membership — the string a tool
+# asks this platform's token endpoint for before it reads a roster (E1-06).
+# Written beside the service it belongs to, the way `app.ags` writes its four, so
+# that what the token endpoint advertises is the service's own word for itself
+# rather than a second copy that can drift out of step with it. It is the only
+# scope NRPS 2.0 defines: a roster has no write side.
+MEMBERSHIP_SCOPE = "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
+
 # Where an enrollment window rides, and the namespace is the message. `.invalid`
 # can never resolve, so nobody can mistake this for a published specification,
 # and the path says which specification it is *extending*.

@@ -159,6 +159,34 @@ performed the way `pylti1p3` performs one — token requested with a tool-signed
 assertion, token attached, container returned — rather than an unauthenticated
 `GET` that happens to answer.
 
+**Closed 2026-08-25 by E1-06**, as one change over all four parts. Part 1: the
+mock's discovery document advertises `token_endpoint`, built from
+`mock-lms/app/config.py`'s new `TOKEN_PATH`, and the platform serves a `POST`
+there. Part 2: `scopes_supported` is composed in `mock-lms/app/tokens.py` from
+`app.ags::ADVERTISED_SCOPES` and `app.nrps::MEMBERSHIP_SCOPE` with `openid` still
+at its head, and the token endpoint grants off that same tuple, so a scope
+advertised but not grantable is no longer expressible. Part 3: the `/registration`
+document states `auth_token_url` — the column name, not `token_endpoint` — and
+`scripts/seed.py` writes the same address into the seeded mock row, on the
+issuer's horizon rather than the browser's, through E1-05's chokepoint. Part 4:
+the tool publishes its key set at `GET /lti/jwks` (`backend/app/lti/
+registration.py`), public in every environment, one RSA key whose `kid` is its
+RFC 7638 thumbprint and never the private half — and `pulse_app` gained `SELECT`
+on `tool_signing_key` with the code that spends it, in
+`tool_signing_key_grants_v001.sql`.
+
+The platform fetches that key set to verify the assertion, so part 4 is
+load-bearing rather than decorative, and
+`tests/integration/test_mock_lms_client_credentials_grant.py` asserts the fetch
+happened as well as the grant. The whole sequence is exercised in raw HTTP by
+`test_a_roster_is_read_with_a_token_obtained_the_way_a_service_connector_obtains_one`,
+and the six refusals each carry the request they differ from by one thing.
+**What is deliberately not closed here**: the Advantage services still answer
+without a token. E1-06 rules that enforcement pairs with E1-11's client, and this
+entry's own "done when" asks for the grant rather than for the refusal.
+`docs/adr/0084` records what the token endpoint decides and `docs/adr/0085` what
+the tool's key set does.
+
 **Also read E0-35 before writing the roster sync** — a pointer rather than a
 copy, because that ticket owns the question and restating it here would give it
 two homes.

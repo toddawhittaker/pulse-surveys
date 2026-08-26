@@ -1,0 +1,61 @@
+-- What the application may read of the tool's own signing key — ticket E1-06,
+-- SPEC §7.3, SPEC §8, ADR 0001, ADR 0082.
+--
+-- E1-06 publishes the tool's key set at GET /lti/jwks and E1-11 signs a
+-- `client_assertion` with the same row. Both run on the connection pulse_app
+-- holds, which until this file held nothing on public.tool_signing_key — E1-05
+-- created the table and deliberately granted nothing, so the route would have
+-- been refused by Postgres with 42501 rather than by anything the ticket is
+-- about.
+--
+-- **The grant is late on purpose, and this file is where it is spent.** ADR 0082:
+-- "a runtime role holding read access to a private key it never opens is a
+-- credential at rest with no owner". Nothing before E1-06 read the key, so the
+-- grant lands with the code that reads it rather than with the schema that holds
+-- it, and `tests/integration/test_identity_grants.py` is where that widening has
+-- its loud conversation — `RUNTIME_BASE_TABLE_PRIVILEGES` is hand-written from
+-- the record and a grant file may not justify its own grant.
+--
+-- **SELECT, and nothing else.** The seed writes the row and the seed runs as the
+-- superuser (ADR 0009, ADR 0063), so INSERT, UPDATE and DELETE stay withheld. An
+-- application connection that could write this column could rotate the tool's
+-- identity — which ADR 0082 forbids outright — and could do it invisibly,
+-- because a fresh key signs perfectly and nothing goes wrong until a platform
+-- that already fetched the old public half refuses an assertion hours later.
+--
+-- **A grant on a base table rather than a read view, and this is the same
+-- exception lti_registration_grants_v001.sql took.** SPEC §4.1's rule is that a
+-- read path goes through an identity-separated view, and the reason is identity:
+-- a view selects the columns a caller may see and omits the ones §8 protects.
+-- This table holds one column, a PEM, and no person — ADR 0082's own consequence
+-- section answers the question: "it holds no subject, no name and no address, so
+-- SPEC §4.1's PERSON_TABLES does not change". There is no identity to separate,
+-- so a view here would select every column of its source and exist to satisfy
+-- the shape of the rule.
+--
+-- **What this widens is the credential surface, not the confidential one**, and
+-- that is worth saying plainly because this is the only grant in the set that
+-- names a private key. The application role can now read the key the tool's
+-- whole LTI identity rests on. That is the cost ADR 0082 accepts and records,
+-- and what keeps it bounded is that the role holds SELECT alone, that the value
+-- never leaves the process it is read into — `app.lti.registration` publishes
+-- the modulus and the public exponent, never the PEM — and that pulse_care is
+-- granted nothing at all here.
+--
+-- **pulse_care is granted nothing.** The Care queue reaches a threat comment and
+-- the audited reveal; the tool's signing key is no part of that surface, and the
+-- role that can reach a student's name gets no privilege it has no use for
+-- (ADR 0001, SPEC §6.2).
+--
+-- **USAGE ON SCHEMA public is not granted again here.** identity_grants_v001.sql
+-- grants it to pulse_app and identity_grants_v002.sql restates it; an ACL entry
+-- records no history, so a third grant would be indistinguishable from those and
+-- any matching revoke would remove all of them.
+--
+-- **The downgrade does have something to revoke.** The table is E1-05's and
+-- outlives this revision, so a privilege granted here would survive a downgrade
+-- that dropped nothing. The revision's `downgrade()` writes the REVOKE rather
+-- than a second file, because ADR 0041 makes a versioned file the immutable
+-- record of what an upgrade applied and an un-grant is not a record of anything.
+
+GRANT SELECT ON public.tool_signing_key TO pulse_app;

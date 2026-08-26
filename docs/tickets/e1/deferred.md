@@ -62,6 +62,12 @@ Every E1 pull request that defers something adds it here in the same PR.
    [ADR 0082](../../adr/0082-the-tools-signing-key-lives-in-the-database.md)
    rejects, and inventing a supply route before anything needs one would fix the
    shape of it in the wrong ticket.
+   *E1-06 made the gap visible rather than closing it.* The tool publishes its
+   key set at `GET /lti/jwks` now, and a deployment holding no row answers `503`
+   there — loud at the point the key is missing, rather than an empty key set a
+   platform would accept and store
+   ([ADR 0085](../../adr/0085-the-tools-key-set-is-public-in-every-environment.md)).
+   Nothing about the supply route changed.
    **Done when** a non-development deployment has a documented and tested way to
    put a signing key in that table — with the rotation question answered too,
    since the one-row rule forbids the two-key overlap a real rotation needs.
@@ -147,3 +153,41 @@ Every E1 pull request that defers something adds it here in the same PR.
    and a `frame-ancestors` directive naming who may frame the app — with a
    test pinning each header. Scheduled before E2 puts real survey content in
    the SPA.
+
+## From E1-06 — the mock learns the client-credentials grant
+
+1. **The mock's token endpoint does not track `jti`.** A tool-signed assertion
+   can be replayed for a second token anywhere inside its 300-second life; the
+   ticket's six refusals do not include replay, and refusing one needs state
+   the endpoint deliberately does not keep yet. Named by the implementer
+   rather than found by review.
+   **Done when** the endpoint refuses a second request presenting an
+   already-seen `jti` within the lifetime bound, proven by a pair (fresh
+   `jti` granted, replayed `jti` refused) — at latest with E1-11, whose
+   client's conformance claims otherwise rest on an endpoint that cannot
+   notice a replay.
+
+2. **The lifetime bound trusts the signer's own dates** (security review,
+   LOW). `exp - iat` are both the assertion's claims, so a signer who dates
+   both in the future mints an assertion that passes every check and stays
+   spendable until its far-future `exp`. Exploiting it needs the tool's
+   private key, and this is the development-only mock, which is what keeps it
+   LOW; ADR 0084's decision 1 now states the measured boundary (the bound
+   caps a leaked assertion, not a hostile signer).
+   **Done when** the endpoint also refuses an assertion whose `exp` lies
+   further than the bound plus a stated skew allowance beyond the platform's
+   clock, proven by a pair on both sides of that line — in the same change as
+   item 1, E1-11 at latest.
+
+3. **The unpadded-spelling pin covers one key set of three.** The battery's
+   survivor taught that decode-based assertions forgive how a JWK integer is
+   spelled, and the fix pinned the strings — but only on the tool's
+   `/lti/jwks`. The same encoder shape exists in `mock-lms/app/signing.py`
+   and the mock IdP's copy, and both serve key sets this tool's launch
+   verification parses; nothing asserts their `n` and `e` are unpadded.
+   All three encoders are correct today (named by the implementer, the same
+   defect one level out).
+   **Done when** a test pins the unpadded base64url spelling of every served
+   key set — the mock LMS's and the mock IdP's beside the tool's — owed with
+   the first ticket that touches either mock's signing surface, E1-07 or
+   E1-08, whichever lands first.

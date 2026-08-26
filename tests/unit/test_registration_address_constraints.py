@@ -122,12 +122,17 @@ DEPLOYED_REGISTRATION = {
 # The registration `scripts/seed.py` writes for the mock, which every one of
 # these rules has to accept in development or the demo stack stops seeding. The
 # key set URL is ADR 0068's literal, the authorization endpoint is E1-05's
-# development value, and `auth_token_url` is NULL until E1-06 builds the endpoint
-# it would name.
+# development value, and the token endpoint is E1-06's — it was NULL while the
+# mock had no token endpoint, and it names one now that the mock serves one.
+#
+# **That third value is what makes this the sharpest row in the module.** It is
+# cleartext, on the mock's own Compose service name, which rules 1 and 2 both
+# refuse outside development — so a validator missing either environment
+# condition stops `make seed`, and with it E0's exit criterion.
 DEVELOPMENT_REGISTRATION = {
     AUTHORIZATION_ENDPOINT: "http://localhost:8080/oidc/authorize",
     JWKS_URL: f"http://{MOCK_SERVICE}:8000/.well-known/jwks.json",
-    AUTH_TOKEN_URL: None,
+    AUTH_TOKEN_URL: f"http://{MOCK_SERVICE}:8000/token",
 }
 
 # Environments that are not the development one, as templates: the development
@@ -493,8 +498,14 @@ def test_the_registration_the_seed_writes_is_accepted_in_development() -> None:
 
     All three values at once, because that is how the seed calls it: the mock's
     cleartext key set on a Compose service name, the browser-facing endpoint on
-    loopback where a developer's browser reaches the platform, and
-    `auth_token_url` NULL until E1-06 builds the endpoint it would name.
+    loopback where a developer's browser reaches the platform, and — since E1-06
+    gave the mock a token endpoint — a cleartext `auth_token_url` on that same
+    Compose service name.
+
+    **That third value sharpened this test rather than changing its subject.**
+    While it was NULL it exercised nothing: NULL passes every rule by decision.
+    Now it is an address rules 1 and 2 both refuse outside development, so this
+    row is refused by any validator that lost either environment condition.
 
     **The mutation this kills:** any of the four rules written without its
     environment condition.
@@ -765,11 +776,14 @@ def test_a_null_address_passes_the_chokepoint_outside_development(
     """NULL is not an address, so there is nothing here for these rules to judge.
 
     Both new columns are nullable by decision: an existing registration predates
-    them, and E1-06 fills `auth_token_url` when the endpoint it would name
-    exists. A validator that refused NULL would make the migration need a
-    fabricated backfill and would stop this ticket's own seed, which writes
-    `auth_token_url` as NULL deliberately — a registration naming an endpoint
-    that answers nothing is a record asserting something untrue.
+    them, and NULL means "not stated" rather than a default. A validator that
+    refused NULL would make the migration need a fabricated backfill, and it
+    would refuse every registration an administrator has not finished — which is
+    a different situation from one written wrongly, with a different repair. The
+    seed itself no longer writes a NULL into either column: E1-05 filled the
+    authorization endpoint and E1-06 filled `auth_token_url` when the endpoint it
+    names came to exist, so what this rule protects now is the *unfinished*
+    registration rather than this repository's own.
 
     **The mutation this kills:** a rule that treats a missing value as a failed
     scheme check — `url.startswith("https://")` on `None` raises, and a rule
@@ -784,11 +798,13 @@ def test_a_null_address_passes_the_chokepoint_outside_development(
 
 @pytest.mark.parametrize("column", NULLABLE_COLUMNS)
 def test_a_null_address_passes_the_chokepoint_in_development(column: str) -> None:
-    """The same in development, where the seed actually writes one.
+    """The same in development, where a half-finished registration is likeliest.
 
-    Its own row rather than a parameter of the test above, because the seed's
-    call is a development call and a rule that refused NULL only there would stop
-    `make seed` while every deployment row stayed green.
+    Its own row rather than a parameter of the test above, because a rule that
+    refused NULL only in development would be invisible to every deployment row
+    here — and development is where a registration gets typed in a piece at a
+    time. It stopped being a statement about `scripts/seed.py` when E1-06 filled
+    the second of the two columns; the seed now writes an address into both.
     """
     judge(development_environment(), registration(**{column: None}))
 

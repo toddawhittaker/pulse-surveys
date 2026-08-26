@@ -1,11 +1,18 @@
 """What the mock platform reads from its environment, and what it refuses to.
 
-Five values, all of them addresses. Four are the registration a tool is given —
+Six values, all of them addresses. Four are the registration a tool is given —
 the issuer, the client ID, the deployment ID, and where the tool's own launch
 lands — and the fifth is where the launch page posts, which is the tool's
 third-party login-initiation URL. E0-14's sixth acceptance criterion is about the
 last two being distinct: the form's **action** is the login-initiation URL, and
 `target_link_uri` is a claim naming where the tool should put the user.
+
+**The sixth is E1-06's, and it is the tool's registration at this platform
+rather than this platform's own address.** A `client_assertion` is signed by the
+tool, so the platform verifies it against the tool's published key set and has to
+know where that is — the same thing a real LMS is told when a tool is registered
+with it. It sits beside the other two `MOCK_LMS_TOOL_*` addresses because it is
+the third fact this platform holds about the tool it serves.
 
 **A plain dataclass rather than `pydantic-settings`, deliberately.** A
 `BaseSettings` subclass reads a `.env` file out of the working directory if it is
@@ -42,6 +49,7 @@ CLIENT_ID_VARIABLE = "MOCK_LMS_CLIENT_ID"
 DEPLOYMENT_ID_VARIABLE = "MOCK_LMS_DEPLOYMENT_ID"
 TOOL_LOGIN_URL_VARIABLE = "MOCK_LMS_TOOL_LOGIN_URL"
 TOOL_LAUNCH_URL_VARIABLE = "MOCK_LMS_TOOL_LAUNCH_URL"
+TOOL_JWKS_URL_VARIABLE = "MOCK_LMS_TOOL_JWKS_URL"
 
 # Where this service answers on the Compose network, and where `api` does. Not
 # `localhost`: a launch is a browser redirect between two containers, and the
@@ -50,6 +58,12 @@ TOOL_LAUNCH_URL_VARIABLE = "MOCK_LMS_TOOL_LAUNCH_URL"
 DEFAULT_ISSUER = "http://mock-lms:8000"
 DEFAULT_TOOL_LOGIN_URL = "http://api:8000/lti/login"
 DEFAULT_TOOL_LAUNCH_URL = "http://api:8000/lti/launch"
+
+# Where the tool publishes the key set this platform verifies a `client_assertion`
+# against (E1-06). `api`, not `localhost`: this is a fetch one container makes of
+# another, so it is on the same horizon as the two addresses above and on the
+# opposite one from anything a browser resolves.
+DEFAULT_TOOL_JWKS_URL = "http://api:8000/lti/jwks"
 
 # The registration identifiers. Fixed strings rather than generated ones: a
 # developer pastes them into `lti_platform` and `lti_deployment` once, and a
@@ -70,6 +84,14 @@ DISCOVERY_PATH = "/.well-known/openid-configuration"
 JWKS_PATH = "/.well-known/jwks.json"
 AUTHORIZATION_PATH = "/oidc/authorize"
 REGISTRATION_PATH = "/registration"
+
+# Where a tool asks for an access token (E1-06). RFC 6749 §3.2 makes the token
+# endpoint a `POST`, and this is the address the discovery document advertises,
+# the `/registration` document states as `auth_token_url`, and every
+# `client_assertion` names as its `aud`. One constant, so those three cannot
+# disagree — a platform advertising one address and verifying against another
+# refuses every assertion a conformant client sends.
+TOKEN_PATH = "/token"  # noqa: S105 - a route path, not a credential
 
 # The LTI Advantage services (E0-15). Every one of them hangs off a context,
 # because that is what NRPS 2.0 and AGS 2.0 scope them to: a roster is one
@@ -124,6 +146,7 @@ class PlatformSettings:
     deployment_id: str
     tool_login_url: str
     tool_launch_url: str
+    tool_jwks_url: str
 
     @classmethod
     def from_environment(cls, environment: dict[str, str] | None = None) -> "PlatformSettings":
@@ -147,6 +170,7 @@ class PlatformSettings:
             deployment_id=source.get(DEPLOYMENT_ID_VARIABLE, DEFAULT_DEPLOYMENT_ID),
             tool_login_url=source.get(TOOL_LOGIN_URL_VARIABLE, DEFAULT_TOOL_LOGIN_URL),
             tool_launch_url=source.get(TOOL_LAUNCH_URL_VARIABLE, DEFAULT_TOOL_LAUNCH_URL),
+            tool_jwks_url=source.get(TOOL_JWKS_URL_VARIABLE, DEFAULT_TOOL_JWKS_URL),
         )
         settings.validate()
         return settings
@@ -167,6 +191,7 @@ class PlatformSettings:
                 (DEPLOYMENT_ID_VARIABLE, self.deployment_id),
                 (TOOL_LOGIN_URL_VARIABLE, self.tool_login_url),
                 (TOOL_LAUNCH_URL_VARIABLE, self.tool_launch_url),
+                (TOOL_JWKS_URL_VARIABLE, self.tool_jwks_url),
             )
             if not value.strip()
         )
@@ -186,6 +211,16 @@ class PlatformSettings:
     def authorization_url(self) -> str:
         """Where a tool sends its authorization request."""
         return f"{self.issuer}{AUTHORIZATION_PATH}"
+
+    @property
+    def token_url(self) -> str:
+        """Where this platform issues access tokens, as a tool would store it.
+
+        Absolute, for the reason `absolute` gives about every other endpoint: a
+        tool reads this out of a discovery document fetched from somewhere else
+        entirely, so a relative address names a path on the tool.
+        """
+        return f"{self.issuer}{TOKEN_PATH}"
 
     @property
     def discovery_url(self) -> str:

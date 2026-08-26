@@ -332,16 +332,21 @@ MOCK_PLATFORM_JWKS_URL = f"{MOCK_PLATFORM_ISSUER}/.well-known/jwks.json"
 MOCK_PLATFORM_BROWSER_ORIGIN = "http://localhost:8080"
 MOCK_PLATFORM_AUTHORIZATION_ENDPOINT = f"{MOCK_PLATFORM_BROWSER_ORIGIN}/oidc/authorize"
 
-# **The mock's token endpoint is deliberately not seeded, and NULL is the
-# statement.** `mock-lms` has none: its discovery document advertises none,
-# because E0-14 built none and an advertised endpoint that answers nothing is a
-# record asserting something untrue — the platform's own words. **E1-06 builds
-# the endpoint and fills this column in the same change**, which is why the
-# carried entry insists the client-credentials grant lands as one change over
-# all four parts. Scheduled work, not a deferral. A plausible
-# `{issuer}/oidc/token` written here is one line, looks like tidiness, and makes
-# the registration claim an address that 404s.
-MOCK_PLATFORM_AUTH_TOKEN_URL: str | None = None
+# **Where the mock issues access tokens** (E1-06, `mock-lms/app/config.py`'s
+# `TOKEN_PATH`). This column was NULL until the endpoint existed, because a
+# registration naming an address that answers nothing is the record the
+# platform's own discovery document refuses to be; the carried entry is why the
+# two moved in one change, and this is that change.
+#
+# **On the issuer's horizon, not the browser's**, which is what makes it differ
+# from its neighbour two constants up. The authorization endpoint is a string a
+# developer's *browser* resolves, so it carries `localhost` and a published host
+# port; this one is fetched by the `api` container over the Compose network,
+# exactly as `jwks_url` is. The two are right in two different currencies, and
+# copying either into the other is a registration that fails at the point of use.
+# ADR 0075's per-value horizon rule, and ADR 0081 rule 4 refuses link-local on
+# precisely these two columns for the same reason.
+MOCK_PLATFORM_AUTH_TOKEN_URL = f"{MOCK_PLATFORM_ISSUER}/token"
 
 # The size of the tool's own RSA key (E1-05). 2048 is the floor every conformant
 # LTI 1.3 platform accepts for an RS256 assertion, and it is the number to raise
@@ -1194,14 +1199,16 @@ def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> Lt
     provisioning — E1's, by SPEC §14.3. What this row does is make that launch
     reach the code at all.
 
-    **The authorization endpoint is written on an update as well as on an
-    insert**, which `upsert` does for every value it is given and which matters
-    here more than usual: every development database already holds this
-    registration, written before E1-05's column existed, and a launch from the
-    mock is refused until the column is filled. The migration cannot fill it —
-    that is half of why the column is nullable — so this re-run is the upgrade
-    path, and it completes the row rather than replacing it, because `user` and
-    `lti_deployment` both key to it.
+    **Both endpoint columns are written on an update as well as on an insert**,
+    which `upsert` does for every value it is given and which matters here more
+    than usual: every development database already holds this registration,
+    written before E1-05's columns existed, and a launch from the mock is refused
+    until the authorization endpoint is filled. The migration cannot fill either
+    — that is half of why they are nullable — so this re-run is the upgrade path,
+    and it completes the row rather than replacing it, because `user` and
+    `lti_deployment` both key to it. `auth_token_url` arrives the same way in
+    E1-06, so a developer who seeded before this ticket gets the token endpoint
+    from the next `make seed` rather than from a hand-written `UPDATE`.
     """
     check_environment_is_development(configuration)
     refuse_invalid_registration_addresses(

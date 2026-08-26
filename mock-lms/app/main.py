@@ -74,10 +74,14 @@ filter and the paging as well as the path.
 """
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from urllib.parse import parse_qsl, unquote
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.ags import (
@@ -109,6 +113,7 @@ from app.config import (
     RESULT_PATH,
     RESULTS_PATH,
     SCORES_PATH,
+    TOKEN_PATH,
     PlatformSettings,
 )
 from app.launch import (
@@ -128,13 +133,29 @@ from app.paging import (
 )
 from app.seed import MockContext, SeededPlatform, seeded_platform
 from app.signing import SIGNATURE_ALGORITHM, IssuerKey
+from app.tokens import (
+    ADVERTISED_SCOPES,
+    CLIENT_CREDENTIALS_GRANT,
+    INVALID_REQUEST,
+    TOKEN_ENDPOINT_AUTH_METHOD,
+    TokenRequestError,
+    granted_token,
+)
 
 SERVICE_NAME = "mock-lms"
 
 SUMMARY = "A development-only LTI 1.3 platform to launch Pulse from (SPEC §9.2)."
 
-# How an OIDC authorization request arrives when a tool posts it.
+# How an OIDC authorization request arrives when a tool posts it, and how an
+# OAuth 2.0 token request does (RFC 6749 §4.4.2).
 FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+
+# How long this platform waits on the one fetch it makes: the tool's key set,
+# when it verifies a `client_assertion`. Bounded rather than left to httpx's
+# default because the address is configured, so a wrong one is a request that
+# hangs rather than one that fails — and a token endpoint that hangs is a tool
+# that hangs. The backend sets the same bound on its own client.
+OUTBOUND_TIMEOUT_SECONDS = 5.0
 
 # How many path segments come before the user identifier in `RESULT_PATH`.
 # Counted off `RESULTS_PATH` rather than written as a number, so that moving
@@ -241,11 +262,15 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # gradebook is built per application exactly as the issuer key is, so two
 # platforms started in one process hold two gradebooks (ADR 0049).
 #
-# None of them is authenticated. A real platform puts its Advantage services
-# behind an OAuth 2.0 client-credentials grant; E0-14 built no token endpoint
-# and E0-15 specifies none, and the ticket's out-of-scope list says whichever
-# of E1 and E3 needs a token first is where that grant belongs. An endpoint
-# that answered 401 today would answer it to a tool with nothing to present.
+# **None of them is authenticated, and since E1-06 that is a gap rather than an
+# absence.** A real platform puts its Advantage services behind an OAuth 2.0
+# client-credentials grant. E0-14 built no token endpoint and E0-15 specified
+# none, so an endpoint that answered 401 then would have answered it to a tool
+# with nothing to present; E1-06 built the grant (`app.tokens`), and the token a
+# tool obtains there is presentable here but not required. E1-06 rules that
+# enforcement pairs with E1-11's client — a service that started refusing before
+# a conformant client existed would be refusing this repository's own tests —
+# and E1-11 is the ticket that closes it.
 
 
 def require_context(platform: SeededPlatform, context_id: str) -> MockContext:
@@ -308,26 +333,39 @@ def _register_oidc_metadata(app: FastAPI, settings: PlatformSettings, key: Issue
     def discovery() -> dict[str, Any]:
         """What a tool reads to find the endpoints, rather than guessing paths.
 
-        Only what this platform actually serves is advertised. There is still no
-        `token_endpoint` here, and E0-15 did not add one: its Advantage services
-        answer unauthenticated, because no ticket yet says what a tool would sign
-        a client assertion with. An advertised endpoint that answers nothing is a
-        record asserting something untrue.
+        Only what this platform actually serves is advertised. **E1-06 adds the
+        `token_endpoint` and the service scopes**, in the same change as the
+        endpoint that answers there and the `auth_token_url` the registration
+        document states — parts 1, 2 and 3 of the four the carried entry moves
+        together, because a token endpoint with no scopes, or scopes with no
+        registered address, still leaves `ServiceConnector` unable to make a
+        single call and looks finished from here.
 
-        The Advantage services are not advertised here either, and that is the
-        protocol rather than an omission: NRPS and AGS are announced per launch,
-        in the claims of the `id_token`, because both are scoped to the context
-        the launch came from. There is no institution-wide roster URL to publish.
+        `scopes_supported` is **extended** rather than replaced. The launch flow
+        already asks for `openid`, and a platform that swapped it for the service
+        scopes would break the door it already serves — `app.tokens` composes the
+        list from the services' own constants for that reason, and the token
+        endpoint answers off the same tuple, so nothing is advertised that no
+        token can be had for.
+
+        The Advantage services are not advertised here, and that is the protocol
+        rather than an omission: NRPS and AGS are announced per launch, in the
+        claims of the `id_token`, because both are scoped to the context the
+        launch came from. There is no institution-wide roster URL to publish.
         """
         return {
             "issuer": settings.issuer,
             "authorization_endpoint": settings.authorization_url,
+            "token_endpoint": settings.token_url,
             "jwks_uri": settings.jwks_url,
             "response_types_supported": ["id_token"],
             "response_modes_supported": ["form_post"],
+            "grant_types_supported": ["implicit", CLIENT_CREDENTIALS_GRANT],
+            "token_endpoint_auth_methods_supported": [TOKEN_ENDPOINT_AUTH_METHOD],
+            "token_endpoint_auth_signing_alg_values_supported": [SIGNATURE_ALGORITHM],
             "subject_types_supported": ["public"],
             "id_token_signing_alg_values_supported": [SIGNATURE_ALGORITHM],
-            "scopes_supported": ["openid"],
+            "scopes_supported": list(ADVERTISED_SCOPES),
             "claims_supported": ["iss", "sub", "aud", "exp", "iat", "nonce"],
         }
 
@@ -415,6 +453,53 @@ def _register_authorization(
                 redirect_uri=resolved.redirect_uri,
             )
         )
+
+
+def _register_token(app: FastAPI, settings: PlatformSettings, key: IssuerKey) -> None:
+    """The token endpoint: where a tool exchanges a signed assertion for a token."""
+
+    @app.post(
+        TOKEN_PATH, summary="OAuth 2.0: a client-credentials grant for the Advantage services"
+    )
+    async def token(request: Request) -> JSONResponse:
+        """Answer a client-credentials grant, or refuse it with an RFC 6749 code.
+
+        Every rule is in `app.tokens`; this reads the form and turns a refusal
+        into the response §5.2 describes. **400 rather than 401** even for
+        `invalid_client`: §5.2's 401 clause is scoped to a client authenticating
+        through the `Authorization` header, and a `client_assertion` in the body
+        is RFC 7523's profile instead.
+
+        `parse_qsl` rather than `Form(...)`, for the reason `authorize` above
+        gives: Starlette's form parsing asserts on `python-multipart`, which this
+        project does not lock.
+
+        **The verification runs in a threadpool** because it fetches the tool's
+        key set over a synchronous client and then does RSA arithmetic, and both
+        would block every other request on this process. The client comes off
+        `app.state.http` at request time rather than being closed over, so a test
+        that installs its own after startup is the one this reads.
+        """
+        try:
+            media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+            if media_type != FORM_MEDIA_TYPE:
+                # Raised rather than answered here, so that every RFC 6749 §5.2
+                # body this endpoint sends is built in one place. Two
+                # construction sites is one place to forget when the shape
+                # changes (`docs/MISTAKES.md` entry 13).
+                raise TokenRequestError(
+                    INVALID_REQUEST,
+                    f"The token request was posted as {media_type!r}. RFC 6749 §4.4.2 makes an "
+                    f"access token request {FORM_MEDIA_TYPE!r}.",
+                )
+            body = (await request.body()).decode("utf-8", errors="replace")
+            form = dict(parse_qsl(body, keep_blank_values=True))
+            granted = await run_in_threadpool(
+                granted_token, form, settings, key, request.app.state.http
+            )
+        except TokenRequestError as refusal:
+            return JSONResponse(refusal.response(), status_code=400)
+        return JSONResponse(granted.response())
 
 
 def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPlatform) -> None:
@@ -694,18 +779,37 @@ def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
 def create_app() -> FastAPI:
     """Build the platform: read the environment, seed it, and generate its key.
 
-    The four values below are the whole of this platform's state, and each
+    The five values below are the whole of this platform's state, and each
     `_register_*` call above takes the ones its routes need. They were closures
     over this function when every handler lived in it — a 440-line body with
     fourteen nested definitions — and they are parameters now, which is the only
     change: no route, no status code and no document moved.
+
+    **One outbound client, on `app.state.http`** (E1-06), which is the backend's
+    own arrangement and for the same two reasons: every server-side fetch this
+    platform makes goes through one place, so a test can route it, and the
+    timeout is set once rather than per call. Built here rather than in the
+    lifespan so that a caller which never runs one still gets a working
+    application, and closed by name in the lifespan rather than by reading the
+    attribute back, because a test replaces it and closing somebody else's client
+    at shutdown would be this application reaching into a fixture.
     """
     settings = PlatformSettings.from_environment()
     platform = seeded_platform()
     key = IssuerKey.generate()
     grades = GradeBook(settings=settings)
+    http = httpx.Client(timeout=OUTBOUND_TIMEOUT_SECONDS)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        """Close the client this factory opened, when the process stops serving."""
+        try:
+            yield
+        finally:
+            http.close()
 
     app = FastAPI(
+        lifespan=lifespan,
         title="Pulse Surveys — mock LMS",
         summary=SUMMARY,
         # No OpenAPI schema, and so no `/docs` and no `/redoc`. This service's
@@ -717,10 +821,12 @@ def create_app() -> FastAPI:
         openapi_url=None,
     )
     app.state.settings = settings
+    app.state.http = http
 
     _register_health_and_pages(app, settings, platform)
     _register_oidc_metadata(app, settings, key)
     _register_authorization(app, settings, platform, key)
+    _register_token(app, settings, key)
     _register_nrps(app, settings, platform)
     _register_ags(app, settings, platform, grades)
     _register_mock_inspection(app, grades)
