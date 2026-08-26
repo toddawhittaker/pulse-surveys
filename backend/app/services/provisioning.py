@@ -1,0 +1,567 @@
+"""Launch-time provisioning: what a verified launch discovers, and what it refuses.
+
+SPEC §2.1 gives courses and sections two arrival paths, "hourly roster sync +
+launch-time ingestion", and §7.3 makes the first of those the only thing that can
+bootstrap the second: the scheduled job "has no way of its own to learn that a
+section exists. So the first staff launch of a section bootstraps every later sync
+of it." This module is that path, and it is the first code in this project that
+writes a relation SPEC §2.1 puts on the LMS's side.
+
+**It runs after a launch has verified and before the person is sent anywhere.**
+`app.api.lti.launch` calls it with the claims `verified_launch` returned, so
+everything here is reading a token this tool has already checked the signature,
+issuer, audience, deployment, nonce and clock of. Nothing here validates a launch;
+this module decides what a valid launch *means* for the org.
+
+**A refusal here never fails the launch.** Every way a context can be unreadable
+ends in a `launch_defect` row and a return, and the person lands exactly as they
+would have. That is not leniency: the record is the visibility (`docs/MISTAKES.md`
+entry 26), and the alternative — a person who cannot get in because their course
+number is out of band — turns a data-quality problem into an outage for them. What
+does *not* end in a defect row is a bug in this module: those raise, and the launch
+door answers 500, because a writer that swallowed its own failures would be
+indistinguishable from one that had nothing to do.
+
+**Three writes, each through the chokepoint** (ADR 0045, ADR 0090). `course`,
+`section` and `user` are refused to every caller of `guard_write` that is not
+`launch_provisioning`, and this module is that writer: it holds a `WriteSanction`
+the catalog in `app.services.authz` grants, and calls the guard before each table's
+write in this module. The E0-35 sweep
+(`tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py`) reads
+this file syntactically, so the writes are spelled where it can see them and the
+guard is named here rather than in a helper somewhere else.
+
+**The calendar is not derived here.** ADR 0021 gives a section's length, start
+date, end date and modality exactly one writer, `apply_section_code`, and this
+module calls it and never assigns any of the four. A start position the term's map
+has no row for, or dates that would leave the term, is that service's refusal
+arriving here as a defect.
+
+**What is deliberately not done.** No roster sync is dispatched and no enrollment
+or teaching-instructor row is written — a launch proves one person's presence, not
+a roster, and E1-11 owns the sync, its debounce and its writes. No `person` row is
+created (E1-12, ADR 0024). Nothing reads `launch_defect` back: the application role
+holds `INSERT` on it and no `SELECT`, and E11 builds the surface that reads it.
+"""
+
+import logging
+import re
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any, Final
+from uuid import UUID, uuid4
+
+from sqlalchemy import insert, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.models.identity import User
+from app.models.lti import LaunchDefect, LaunchDefectKind, LtiPlatform
+from app.models.org import Course, Prefix, Section
+from app.models.term import Term
+from app.services.authz import WriteSanction, guard_write, sanction_for
+from app.services.landing import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
+from app.services.section_codes import SectionCodeError, apply_section_code
+
+__all__ = ["UnregisteredLaunchError", "provision_from_launch"]
+
+logger = logging.getLogger("app.services.provisioning")
+
+# This module's name in `authz.SANCTIONED_WRITERS`. Resolved once at import, so a
+# name the catalog does not hold fails when the process starts rather than on
+# somebody's launch (ADR 0090).
+SANCTION: Final[WriteSanction] = sanction_for("launch_provisioning")
+
+# The two claims a context arrives in, spelled as LTI 1.3 and the Names and Role
+# Provisioning Service specification spell them. Not this project's to choose, and
+# not imported from `app.lti.launch`: that module spells the claims it *validates*,
+# and these are the two it does not look at.
+LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
+CONTEXT_CLAIM = f"{LTI_CLAIM_PREFIX}context"
+DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"
+NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+
+# Where the roster service address sits inside that claim. The member name is the
+# NRPS specification's.
+MEMBERSHIPS_URL_MEMBER = "context_memberships_url"
+
+# The three members of a context claim this module reads. `id` is the only one LTI
+# 1.3 requires; `label` and `title` are both optional, and the whole of what this
+# module does with a context depends on which of them arrived.
+CONTEXT_ID_MEMBER = "id"
+CONTEXT_LABEL_MEMBER = "label"
+CONTEXT_TITLE_MEMBER = "title"
+
+# A context label is `PREFIX-NUMBER-CODE` — "BIOL-215-R3WW". Three parts on
+# hyphens, exactly: two parts name no section and four name nothing this schema
+# holds, and either is a label this tool cannot read rather than one to guess at.
+LABEL_SEPARATOR = "-"
+LABEL_PARTS = 3
+
+# SPEC §8's course-number bands, as the width rule and the two ranges. **This is a
+# second spelling of `app.models.org.COURSE_LEVEL_DERIVATION`**, which is the
+# stored generated column that derives `level` from the same bands, and the two
+# have to move together — §8 is the authority for both.
+#
+# It is here rather than left to the column on purpose. `course.level` is NOT NULL
+# and derives NULL outside the bands, so the database already refuses an
+# out-of-band number — but it refuses it as `null value in column "level"` in the
+# middle of a request, which is a 500 and not a refusal: the launch fails, the
+# person does not land, and nothing is recorded. §8 asks for the row to be
+# rejected at write time, and ADR 0015 calls an unexpected number "a defect to
+# see, not a row to accept". Seeing it means checking here first.
+#
+# **Width is part of the rule.** A three-digit number is valid only in `000`-`799`
+# and a four-digit one only in `8000`-`9999`, so `0099` is refused while `099` is
+# accepted: they are different strings that a numeric comparison would read as one
+# course, which is how one course acquires two spellings and two rows.
+THREE_DIGIT_NUMBER = re.compile(r"^[0-9]{3}$")
+FOUR_DIGIT_NUMBER = re.compile(r"^[0-9]{4}$")
+THREE_DIGIT_CEILING = 799
+FOUR_DIGIT_FLOOR = 8000
+FOUR_DIGIT_CEILING = 9999
+
+
+class UnregisteredLaunchError(LookupError):
+    """The launch's issuer and audience resolve to no `lti_platform` row.
+
+    Not a defect record and not a refusal: `verified_launch` resolves a launch
+    against exactly this registration before this module is reached, so a launch
+    that gets here with no platform row means the registration was deleted between
+    the two reads, or that this module was called from somewhere that skipped the
+    door. Both are conditions to see rather than to write down as a fact about a
+    course.
+    """
+
+
+@dataclass(frozen=True)
+class ContextLabel:
+    """One context label's three parts: `BIOL-215-R3WW` → BIOL, 215, R3WW."""
+
+    prefix: str
+    number: str
+    code: str
+
+
+def provision_from_launch(session: Session, claims: Mapping[str, Any]) -> None:
+    """Write what this launch discovered, or record why it could not be read.
+
+    The order is the rule and not an implementation detail. The `user` row is
+    written for **every** validated launch — a student's, a teaching assistant's,
+    a mentor's — because the person is authenticated whatever their role and
+    whatever their context turns out to be, and SPEC §4 keys every response they
+    will ever give to that row. Only then is the context looked at, and only for a
+    staff launch.
+
+    Nothing here commits: the caller owns the transaction, exactly as
+    `app.lti.replay_guard.claim_nonce` leaves its claim to ride inside the
+    launch's own session. `app.api.lti.launch` commits once this returns.
+    """
+    platform = _registered_platform(session, claims)
+    _record_the_launching_subject(session, platform, claims)
+    if _is_a_staff_launch(claims):
+        _ingest_the_context(session, claims)
+
+
+# ---------------------------------------------------------------------------
+# Who launched, and from where.
+# ---------------------------------------------------------------------------
+
+
+def _registered_platform(session: Session, claims: Mapping[str, Any]) -> LtiPlatform:
+    """The `lti_platform` row this launch was issued by and for.
+
+    Looked up by the pair rather than by the issuer alone, because that is what
+    identifies a registration: one LMS can register this tool twice — a pilot
+    beside production — and `sub` is unique per issuer, so the same person on two
+    registrations of one platform is one `user` row and on two platforms is two.
+    """
+    issuer = claims.get("iss")
+    audience = claims.get("aud")
+    client_id = audience[0] if isinstance(audience, list) else audience
+    platform = session.scalars(
+        select(LtiPlatform).where(LtiPlatform.issuer == issuer, LtiPlatform.client_id == client_id)
+    ).one_or_none()
+    if platform is None:
+        raise UnregisteredLaunchError(
+            "This launch resolves to no registered platform, which the door it came through has "
+            "already checked. Either the registration was removed between that check and this "
+            "one, or provisioning was reached without one."
+        )
+    return platform
+
+
+def _record_the_launching_subject(
+    session: Session, platform: LtiPlatform, claims: Mapping[str, Any]
+) -> None:
+    """Insert the launching subject's `user` row if it is absent, and never update it.
+
+    ADR 0045 puts `user` in the guarded set because "`user.lms_user_id` is the
+    `sub` claim verbatim (ADR 0014: the platform supplies the value and Pulse never
+    edits it) and §4 keys every response to it", and names "the launch path that
+    creates a `user` row" as the sanctioned writer. This is that path.
+
+    **Written for every verified launch**, whatever the role and whatever the
+    context turns out to be. The person is authenticated: a teaching assistant this
+    door has no view for is no less somebody E1-12 has to be able to link, and a
+    launch whose course could not be read is a defect in the *context*.
+
+    **Insert and let the unique constraint decide, rather than looking first.** The
+    row is insert-if-absent and never rewritten — nothing on it can be corrected,
+    and the application role holds no `UPDATE` on the table in any form — so
+    `UNIQUE (lti_platform_id, lms_user_id)` already answers the only question there
+    is, atomically and without a read. That is the same reasoning
+    `app.lti.replay_guard.claim_nonce` gives for spending a nonce with no `SELECT`,
+    and it is what keeps this module out of the way of E0-11's rule that a service
+    does not query an identity table
+    (`tests/unit/test_no_service_reads_an_identity_table_directly.py`): `user`
+    leads to identity, and the launch writer has no business reading it.
+    """
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not subject:
+        raise UnregisteredLaunchError(
+            "This launch carries no `sub`, which the door it came through has already required. "
+            "There is no subject for a `user` row to be."
+        )
+
+    guard_write(table="user", sanction=SANCTION)
+    with _tolerating_a_row_that_is_already_there(session, "the launching subject's user row"):
+        session.add(User(lti_platform_id=platform.id, lms_user_id=subject))
+        session.flush()
+
+
+def _is_a_staff_launch(claims: Mapping[str, Any]) -> bool:
+    """Whether this launch's roles authorize discovering a course and storing its roster address.
+
+    SPEC §7.3 makes the launching person's role the authorization for the trigger,
+    never the request: "The tool calls the roster service with its own credentials,
+    so the launching person's role authorizes the *trigger*." So this is an
+    authorization boundary and its set is closed and named.
+
+    **Exact string match on the context-instructor URN, never a substring.** The
+    TeachingAssistant sub-role is
+    `…/vocab/lis/v2/membership/Instructor#TeachingAssistant`, which contains the
+    word Instructor and is not one: over-inclusion hands a teaching assistant the
+    full roster — names and email addresses — that §7.3 does not authorize.
+    Under-inclusion costs nothing that lasts, because a real instructor's next
+    launch discovers the section.
+
+    **The leadership limb of §7.3's rule is not here, and its absence fails safe.**
+    §7.3 triggers on "an instructor or any leadership role", and a leadership role
+    is a live `role_assignment` in Pulse's own graph rather than a claim on the
+    launch — reaching it needs the `sub` → `user` → `person` link that E1-12
+    builds. Until then a dean's launch discovers nothing, which is a launch that
+    provisions late rather than one that provisions for the wrong person. E1-12
+    carries the accept-side criterion (ADR 0090, ADR 0091).
+    """
+    return INSTRUCTOR_ROLE_URI in stated_roles(claims.get(LTI_ROLES_CLAIM))
+
+
+# ---------------------------------------------------------------------------
+# What the context says, and the five ways it cannot be read.
+# ---------------------------------------------------------------------------
+
+
+def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
+    """Upsert the course and section this launch's context names, or record a defect.
+
+    Every look-up happens before any write, so that four of the five defects are
+    decided while nothing has been written at all. The fifth —
+    `section_code_underivable` — is ADR 0021's refusal and can only be known by
+    asking `apply_section_code`, which is why the two writes sit inside one
+    savepoint: a defect anywhere leaves course *and* section unwritten, and a
+    course row for a section that could never be completed is a row a later
+    correct launch would find and not recognise.
+    """
+    label = _parsed_label(claims)
+    if label is None:
+        _record_defect(session, claims, LaunchDefectKind.UNPARSEABLE_CONTEXT_LABEL)
+        return
+    if not _inside_the_bands(label.number):
+        _record_defect(session, claims, LaunchDefectKind.OUT_OF_BAND_COURSE_NUMBER)
+        return
+
+    prefix = session.scalars(select(Prefix).where(Prefix.code == label.prefix)).one_or_none()
+    if prefix is None:
+        _record_defect(session, claims, LaunchDefectKind.UNKNOWN_PREFIX)
+        return
+
+    term = _term_containing_today(session)
+    if term is None:
+        _record_defect(session, claims, LaunchDefectKind.NO_TERM_FOR_LAUNCH_DATE)
+        return
+
+    both_or_neither = session.begin_nested()
+    try:
+        course = _upsert_course(session, prefix.id, label, _platform_title(claims))
+        if course is not None:
+            _upsert_section(session, course, term, label, _roster_address(claims))
+    except SectionCodeError as refusal:
+        both_or_neither.rollback()
+        logger.warning("%s: %s", LaunchDefectKind.SECTION_CODE_UNDERIVABLE.value, refusal)
+        _record_defect(session, claims, LaunchDefectKind.SECTION_CODE_UNDERIVABLE)
+        return
+    both_or_neither.commit()
+
+
+def _parsed_label(claims: Mapping[str, Any]) -> ContextLabel | None:
+    """This launch's context label in three parts, or `None` if there is no reading it.
+
+    A context claim carrying `id` alone is LTI 1.3-conformant and a real platform
+    may send one, and there is nothing in it to resolve a prefix or a course number
+    from — so it is refused and recorded rather than provisioned from a guess.
+    Todd's ruling, 2026-08-26.
+    """
+    label = _context(claims).get(CONTEXT_LABEL_MEMBER)
+    if not isinstance(label, str):
+        return None
+    parts = label.split(LABEL_SEPARATOR)
+    if len(parts) != LABEL_PARTS or not all(parts):
+        return None
+    prefix, number, code = parts
+    return ContextLabel(prefix=prefix, number=number, code=code)
+
+
+def _inside_the_bands(number: str) -> bool:
+    """Whether SPEC §8 holds a band for this course number. See the constants above."""
+    if THREE_DIGIT_NUMBER.match(number):
+        return int(number) <= THREE_DIGIT_CEILING
+    if FOUR_DIGIT_NUMBER.match(number):
+        return FOUR_DIGIT_FLOOR <= int(number) <= FOUR_DIGIT_CEILING
+    return False
+
+
+def _term_containing_today(session: Session) -> Term | None:
+    """The term whose dates contain the day of this launch, or `None`.
+
+    Todd's ruling, 2026-08-26: "a new section belongs to the one term whose dates
+    contain the day of the launch". Not the only term and not the most recent one —
+    an empty `term` table and a table holding next year's term are different
+    situations with the same answer here, and taking whatever term exists would put
+    every section of the year into it.
+
+    **The day is UTC's**, because this function is handed no institution timezone
+    (ADR 0091 records the limit): a launch in the hours either side of a term
+    boundary can be read into the neighbouring day. The most recently started
+    containing term wins if an administrator has configured two that overlap, which
+    is a tie this schema permits and nothing else decides.
+    """
+    today = datetime.now(UTC).date()
+    return session.scalars(
+        select(Term)
+        .where(Term.start_date <= today, Term.end_date >= today)
+        .order_by(Term.start_date.desc())
+    ).first()
+
+
+def _context(claims: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The launch's context claim, or an empty mapping if it carries none."""
+    context = claims.get(CONTEXT_CLAIM)
+    return context if isinstance(context, Mapping) else {}
+
+
+def _platform_title(claims: Mapping[str, Any]) -> str | None:
+    """The title the platform states for this context, if it states one."""
+    title = _context(claims).get(CONTEXT_TITLE_MEMBER)
+    return title if isinstance(title, str) and title else None
+
+
+def _roster_address(claims: Mapping[str, Any]) -> str | None:
+    """The roster service address this launch advertises, if it advertises one.
+
+    SPEC §7.3: "The roster service address arrives as a claim on that launch and is
+    **stored**, which is what gives the scheduled job the discovery it otherwise
+    lacks." Read out of the claim rather than built from the issuer and a guessed
+    path: an address this tool assembled is one no platform published.
+    """
+    service = claims.get(NRPS_CLAIM)
+    address = service.get(MEMBERSHIPS_URL_MEMBER) if isinstance(service, Mapping) else None
+    return address if isinstance(address, str) and address else None
+
+
+# ---------------------------------------------------------------------------
+# The two writes.
+# ---------------------------------------------------------------------------
+
+
+def _upsert_course(
+    session: Session, prefix_id: UUID, label: ContextLabel, platform_title: str | None
+) -> Course | None:
+    """Find or create the course this label names, and correct its title if it needs it.
+
+    Keyed on `(prefix_id, lms_number)`, which is the course's identity in SPEC §8
+    and the unique constraint the schema already holds. `None` is answered when a
+    concurrent launch of the same never-before-seen course is mid-flight; see
+    `_tolerating_a_concurrent_insert`.
+
+    **The title has an owner and a marker** (ADR 0091). §2.1 makes the title the
+    LMS's, so a platform-supplied title is stored as sent and a changed one
+    replaces what is stored — the institution renamed the course, and a tool
+    showing the old name is showing something retired. When a context carries no
+    title, `course.lms_title` is NOT NULL and something has to be written, so
+    "PREFIX NUMBER" is written and `title_is_fallback` records that Pulse made it
+    up. That marker is what makes the two corrections asymmetric: a real title
+    replaces a fallback, and a fallback never replaces a real title.
+    """
+    guard_write(table="course", sanction=SANCTION)
+    course = _course_row(session, prefix_id, label.number)
+    if course is None:
+        with _tolerating_a_row_that_is_already_there(session, "the course this launch names"):
+            session.add(
+                Course(
+                    prefix_id=prefix_id,
+                    lms_number=label.number,
+                    lms_title=platform_title or _fallback_title(label),
+                    title_is_fallback=platform_title is None,
+                )
+            )
+            session.flush()
+        return _course_row(session, prefix_id, label.number)
+
+    if platform_title is not None and platform_title != course.lms_title:
+        course.lms_title = platform_title
+    if platform_title is not None and course.title_is_fallback:
+        course.title_is_fallback = False
+    session.flush()
+    return course
+
+
+def _course_row(session: Session, prefix_id: UUID, number: str) -> Course | None:
+    """The course one prefix holds under one number, if it holds one."""
+    return session.scalars(
+        select(Course).where(Course.prefix_id == prefix_id, Course.lms_number == number)
+    ).one_or_none()
+
+
+def _fallback_title(label: ContextLabel) -> str:
+    """The title stored when the platform states none: "BIOL 215".
+
+    Todd's ruling, 2026-08-26 — the label's prefix and number, spelled the way SPEC
+    §2.1 spells a course throughout. It is a placeholder that reads as a course
+    name rather than as an error, and `title_is_fallback` is what says it is one.
+    """
+    return f"{label.prefix} {label.number}"
+
+
+def _upsert_section(
+    session: Session, course: Course, term: Term, label: ContextLabel, address: str | None
+) -> None:
+    """Find or create the section this label's code names in this term, and store its address.
+
+    Keyed on `(course_id, term_id, lms_section_code)` — the same code runs again
+    next term, and a rule without the term would forbid that.
+
+    **The calendar comes from `apply_section_code` and from nothing here** (ADR
+    0021). Its refusals travel out of this function as `SectionCodeError` and reach
+    the caller, which writes the defect and leaves both rows unwritten.
+
+    **The address is stored on a staff launch and never cleared.** A staff launch
+    carrying no NRPS claim leaves whatever is there: a platform that stops
+    advertising a service has not moved the roster, and a section with no address
+    at all is §7.3's never-synced state rather than an error.
+    """
+    guard_write(table="section", sanction=SANCTION)
+    section = _section_row(session, course.id, term.id, label.code)
+    if section is None:
+        with _tolerating_a_row_that_is_already_there(session, "the section this launch names"):
+            session.add(
+                apply_section_code(
+                    session,
+                    Section(
+                        course_id=course.id,
+                        term_id=term.id,
+                        lms_section_code=label.code,
+                        lms_context_memberships_url=address,
+                    ),
+                )
+            )
+            session.flush()
+        return
+
+    if address is not None and section.lms_context_memberships_url != address:
+        section.lms_context_memberships_url = address
+        session.flush()
+
+
+def _section_row(session: Session, course_id: UUID, term_id: UUID, code: str) -> Section | None:
+    """The section one course holds under one code in one term, if it holds one."""
+    return session.scalars(
+        select(Section).where(
+            Section.course_id == course_id,
+            Section.term_id == term_id,
+            Section.lms_section_code == code,
+        )
+    ).one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# The record. One writer, one statement, five fields.
+# ---------------------------------------------------------------------------
+
+
+def _record_defect(session: Session, claims: Mapping[str, Any], kind: LaunchDefectKind) -> None:
+    """Write down that this launch's context could not be ingested, and what refused it.
+
+    **The one place a defect is written**, so that the field set is decided once
+    and every refusal above is one line. SPEC §10 keeps personal information out of
+    what gets written down, and the omissions are the design: no `sub`, which E1-01
+    keeps out of every view and which every response in the product is keyed to; no
+    name, no email address, no claims payload, which carries both. What is here is
+    a fact about a course — which platform, which deployment, which context, and
+    which rule fired.
+
+    **A bare `INSERT`, with the key generated here.** The application role holds
+    `INSERT` on this table and no `SELECT`, and Postgres checks the columns an
+    `INSERT ... RETURNING` returns against the reader's privileges — so letting
+    SQLAlchemy fetch the server-generated key would be refused, on a launch that
+    was otherwise fine. `app.lti.replay_guard.claim_nonce` supplies its key for the
+    identical reason.
+
+    The log line carries the kind and nothing more, which is strictly less than the
+    row it is about.
+    """
+    logger.warning("%s", kind.value)
+    session.execute(
+        insert(LaunchDefect.__table__).values(  # type: ignore[arg-type]
+            id=uuid4(),
+            kind=kind,
+            issuer=claims.get("iss"),
+            deployment_id=claims.get(DEPLOYMENT_ID_CLAIM),
+            context_id=_context(claims).get(CONTEXT_ID_MEMBER),
+        )
+    )
+
+
+@contextmanager
+def _tolerating_a_row_that_is_already_there(session: Session, what: str) -> Iterator[None]:
+    """Let a duplicate-key failure inside this block mean "the row this launch wanted exists".
+
+    Two situations, one rule. The launching subject's `user` row is inserted
+    without looking first, so every launch after somebody's first collides with the
+    row their first launch wrote — the ordinary case, and the constraint is what
+    makes the insert idempotent. And two staff launches of the same
+    never-before-seen section arriving together both read no row and both insert
+    one, so the second collides with the first. Neither is a defect in a launch or
+    a fact about a course: the row this launch wanted is there, which is the
+    outcome. Without this the second person's launch would answer 500, which is the
+    one thing provisioning may never cause.
+
+    A savepoint rather than the whole transaction, because a failed statement
+    aborts a Postgres transaction outright: without one, the launch's own commit
+    would fail too and a returning person's launch would take the nonce claim with
+    it.
+
+    Only a constraint violation is tolerated. Anything else travels, because a
+    writer that swallowed its own failures would be indistinguishable from one
+    that had nothing to do.
+    """
+    savepoint = session.begin_nested()
+    try:
+        yield
+    except IntegrityError:
+        savepoint.rollback()
+        logger.info("%s was already there.", what)
+    else:
+        savepoint.commit()
