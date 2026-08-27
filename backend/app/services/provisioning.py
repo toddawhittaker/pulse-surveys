@@ -31,6 +31,20 @@ write in this module. The E0-35 sweep
 this file syntactically, so the writes are spelled where it can see them and the
 guard is named here rather than in a helper somewhere else.
 
+**A refusal from the guard is caught here and never reaches the door.** Today the
+catalog grants all three tables, so it cannot happen; the day this module and the
+catalog disagree — a table added to a write site and not to the grant, or removed
+from the grant and not from the writer — the refusal would otherwise escape the
+launch request and lock everybody out of the product, which is the exact failure
+direction the ticket's rule forbids and on the one path where the guard is
+working. So a refusal is caught on the same atomic boundary a defect is, the write
+is skipped with nothing partial left behind, and the person lands. It is **logged
+at error level** and it writes **no `launch_defect` row**: a defect record is a
+fact about a launch's context, and this is a fact about this project's own code —
+the two belong on different surfaces, and the closed set of defect kinds says
+nothing about a writer that lost its grant. The log line is the visibility, and it
+is not optional (`docs/MISTAKES.md` entry 26).
+
 **The calendar is not derived here.** ADR 0021 gives a section's length, start
 date, end date and modality exactly one writer, `apply_section_code`, and this
 module calls it and never assigns any of the four. A start position the term's map
@@ -61,7 +75,7 @@ from app.models.identity import User
 from app.models.lti import LaunchDefect, LaunchDefectKind, LtiPlatform
 from app.models.org import Course, Prefix, Section
 from app.models.term import Term
-from app.services.authz import WriteSanction, guard_write, sanction_for
+from app.services.authz import LmsOwnedWriteRefused, WriteSanction, guard_write, sanction_for
 from app.services.landing import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.services.section_codes import SectionCodeError, apply_section_code
 
@@ -218,6 +232,12 @@ def _record_the_launching_subject(
     does not query an identity table
     (`tests/unit/test_no_service_reads_an_identity_table_directly.py`): `user`
     leads to identity, and the launch writer has no business reading it.
+
+    **A guard refusal here leaves nothing to undo**, because the chokepoint is
+    asked before the row is built — so this one needs no savepoint of its own, and
+    it is caught rather than allowed to escape for the reason the module docstring
+    gives. The context is still ingested afterwards: the two are independent, and a
+    grant this module has lost on `user` says nothing about its grant on `course`.
     """
     subject = claims.get("sub")
     if not isinstance(subject, str) or not subject:
@@ -226,7 +246,11 @@ def _record_the_launching_subject(
             "There is no subject for a `user` row to be."
         )
 
-    guard_write(table="user", sanction=SANCTION)
+    try:
+        guard_write(table="user", sanction=SANCTION)
+    except LmsOwnedWriteRefused as refusal:
+        _log_a_refused_write("user", refusal)
+        return
     with _tolerating_a_row_that_is_already_there(session, "the launching subject's user row"):
         session.add(User(lti_platform_id=platform.id, lms_user_id=subject))
         session.flush()
@@ -240,10 +264,16 @@ def _is_a_staff_launch(claims: Mapping[str, Any]) -> bool:
     so the launching person's role authorizes the *trigger*." So this is an
     authorization boundary and its set is closed and named.
 
-    **Exact string match on the context-instructor URN, never a substring.** The
-    TeachingAssistant sub-role is
-    `…/vocab/lis/v2/membership/Instructor#TeachingAssistant`, which contains the
-    word Instructor and is not one: over-inclusion hands a teaching assistant the
+    **Compared whole against the context-instructor URI, never by looking for the
+    word.** The two URIs are
+    `…/vocab/lis/v2/membership#Instructor` and
+    `…/vocab/lis/v2/membership/Instructor#TeachingAssistant`, and neither is a
+    substring of the other — so what a whole-value comparison defends against is
+    not one URI matching the other but the rule somebody writes instead:
+    `any("Instructor" in role for role in roles)`, which the TeachingAssistant
+    sub-role satisfies because it spells the parent role in its own path. That is
+    the natural implementation and it is correct on every launch tried by hand.
+    What it costs is §7.3's boundary: over-inclusion hands a teaching assistant the
     full roster — names and email addresses — that §7.3 does not authorize.
     Under-inclusion costs nothing that lasts, because a real instructor's next
     launch discovers the section.
@@ -274,6 +304,13 @@ def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
     savepoint: a defect anywhere leaves course *and* section unwritten, and a
     course row for a section that could never be completed is a row a later
     correct launch would find and not recognise.
+
+    **A guard refusal rides the same savepoint**, for the same reason and with a
+    different outcome. `guard_write` is asked before each of the two writes, so a
+    catalog that no longer grants `section` refuses after the course is written —
+    and that is exactly the partial row this boundary exists to prevent. It is
+    rolled back and logged, and unlike the five defects it writes no record: it is
+    a fact about this project's own code rather than about the launch's context.
     """
     label = _parsed_label(claims)
     if label is None:
@@ -302,6 +339,12 @@ def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
         both_or_neither.rollback()
         logger.warning("%s: %s", LaunchDefectKind.SECTION_CODE_UNDERIVABLE.value, refusal)
         _record_defect(session, claims, LaunchDefectKind.SECTION_CODE_UNDERIVABLE)
+        return
+    except LmsOwnedWriteRefused:
+        # Already logged, by the write site that knows which table it asked about.
+        # What is left to do is the undoing, and this is the only frame that holds
+        # the savepoint to undo it with.
+        both_or_neither.rollback()
         return
     both_or_neither.commit()
 
@@ -394,7 +437,7 @@ def _upsert_course(
     Keyed on `(prefix_id, lms_number)`, which is the course's identity in SPEC §8
     and the unique constraint the schema already holds. `None` is answered when a
     concurrent launch of the same never-before-seen course is mid-flight; see
-    `_tolerating_a_concurrent_insert`.
+    `_tolerating_a_row_that_is_already_there`.
 
     **The title has an owner and a marker** (ADR 0091). §2.1 makes the title the
     LMS's, so a platform-supplied title is stored as sent and a changed one
@@ -404,8 +447,16 @@ def _upsert_course(
     "PREFIX NUMBER" is written and `title_is_fallback` records that Pulse made it
     up. That marker is what makes the two corrections asymmetric: a real title
     replaces a fallback, and a fallback never replaces a real title.
+
+    A refusal is logged here, where the table it is about is known, and travels to
+    the savepoint in `_ingest_the_context`, which is the only frame holding
+    anything to undo.
     """
-    guard_write(table="course", sanction=SANCTION)
+    try:
+        guard_write(table="course", sanction=SANCTION)
+    except LmsOwnedWriteRefused as refusal:
+        _log_a_refused_write("course", refusal)
+        raise
     course = _course_row(session, prefix_id, label.number)
     if course is None:
         with _tolerating_a_row_that_is_already_there(session, "the course this launch names"):
@@ -461,8 +512,16 @@ def _upsert_section(
     carrying no NRPS claim leaves whatever is there: a platform that stops
     advertising a service has not moved the roster, and a section with no address
     at all is §7.3's never-synced state rather than an error.
+
+    A refusal is logged here and travels, exactly as `_upsert_course`'s does — and
+    it is the case that makes the shared savepoint load-bearing, because by this
+    point the course has been written and the two go together or not at all.
     """
-    guard_write(table="section", sanction=SANCTION)
+    try:
+        guard_write(table="section", sanction=SANCTION)
+    except LmsOwnedWriteRefused as refusal:
+        _log_a_refused_write("section", refusal)
+        raise
     section = _section_row(session, course.id, term.id, label.code)
     if section is None:
         with _tolerating_a_row_that_is_already_there(session, "the section this launch names"):
@@ -497,8 +556,36 @@ def _section_row(session: Session, course_id: UUID, term_id: UUID, code: str) ->
 
 
 # ---------------------------------------------------------------------------
-# The record. One writer, one statement, five fields.
+# The record. One writer, one statement, five fields — and the one refusal that
+# gets no record at all.
 # ---------------------------------------------------------------------------
+
+
+def _log_a_refused_write(table: str, refusal: LmsOwnedWriteRefused) -> None:
+    """Report that the chokepoint refused this module a write it is sanctioned for.
+
+    **Error level, and no `launch_defect` row.** The five defect kinds are facts
+    about a launch's *context* — a label nobody can parse, a prefix the org does
+    not hold — and this is a fact about this project's own code: the catalog in
+    `app.services.authz` and the write sites in this module disagree about what
+    `launch_provisioning` may write. Recording it as a defect would put a
+    deployment's bug on the surface E11 builds for data quality, under a kind the
+    closed enum does not have and should not grow. So the log line is the whole of
+    the visibility, and it is not optional — a refusal this module swallowed in
+    silence would leave provisioning quietly doing nothing
+    (`docs/MISTAKES.md` entry 26).
+
+    **It names the writer and the table and nothing else.** SPEC §10 keeps personal
+    information out of what gets written down, and there is none here to keep out:
+    the refusal's own message is built from the table name and static prose, and
+    nothing about the launching person reaches this line.
+    """
+    logger.error(
+        "The chokepoint refused the sanctioned writer %r its write to %r: %s",
+        SANCTION.writer,
+        table,
+        refusal,
+    )
 
 
 def _record_defect(session: Session, claims: Mapping[str, Any], kind: LaunchDefectKind) -> None:

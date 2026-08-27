@@ -35,9 +35,13 @@ module clear of E0-11's rule that a service does not query an identity table.
 E1-12 builds on that row existing for anyone who has launched.
 
 **A staff launch is the exact context-instructor URN, and nothing else yet.**
-Exact string match on
-`http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor` — never a
-substring, because the TeachingAssistant sub-role URN embeds the word. §7.3's
+A whole-value comparison against
+`http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor`. The rule it
+defends against is not one URI matching the other — the TeachingAssistant
+sub-role URN is `…/vocab/lis/v2/membership/Instructor#TeachingAssistant` and
+neither URI contains the other — but the implementation somebody writes instead,
+`any("Instructor" in role for role in roles)`, which that sub-role satisfies
+because it spells its parent role in its own path. §7.3's
 leadership limb is stated and **dormant**: resolving a launch subject to a live
 `role_assignment` needs the `sub` → `user` → `person` link only E1-12 builds, so
 until then a dean's launch discovers nothing. That fails safe — a launch that
@@ -76,6 +80,19 @@ Five fields beside the key: kind, issuer, deployment id, context id, timestamp �
 and never a `sub`, a name, an email or a claims payload (§10). Log lines on this
 path carry no more than the row. Course and section are written together or not at
 all; the `user` row lands either way, because the person is not what failed.
+
+**A refusal from `guard_write` is caught, logged at error level, and given no
+record.** It cannot happen while the catalog and this writer agree, and the day
+they stop agreeing — a table added to a write site and not to the grant, or
+dropped from the grant and not from the writer — the refusal would otherwise
+escape the launch request and lock every person out of the product. That is the
+failure direction this record's first rule forbids, arriving on the one path where
+the chokepoint is working, so it is caught on the same savepoint a defect is
+(nothing partial survives) and the person lands. It gets **no `launch_defect`
+row**: the five kinds are facts about a launch's context and this is a fact about
+this project's own code, and it would need a sixth kind that the closed set is
+pinned against having. The error line names the writer and the table and is the
+whole of the visibility.
 
 ## Alternatives rejected
 

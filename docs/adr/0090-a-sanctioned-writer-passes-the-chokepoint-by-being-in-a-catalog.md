@@ -109,6 +109,16 @@ a module holding a sanction can write those tables from any code path in it. The
 E0-35 sweep's own stated limit — the grain is the module, not the path — is
 unchanged and is the same limit.
 
+**A writer and the catalog can disagree, and the writer decides what that costs.**
+The refusal is a `LmsOwnedWriteRefused` like any other, so a sanctioned writer that
+lets it escape hands a code-or-configuration mistake to whoever was using the
+product at the time. `app.services.provisioning` catches it, undoes anything
+partial, logs at error level and lets the launch land (ADR 0091), because on that
+path an escape would lock people out of the product entirely. A later sanctioned
+writer running on a job rather than on a request may reasonably want the opposite
+— fail loudly, let the task retry — and this record does not decide that for it.
+What is not available is swallowing it in silence.
+
 **One entry is a small enough catalog that the test is the record.** With two or
 three entries this stays readable; past that, the equality test's failure message
 is the thing to invest in, not the mechanism.
