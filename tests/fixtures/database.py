@@ -20,6 +20,11 @@ using them:
     chose, and E0-37 item 7 deleted the rest: a fixture still setting
     `ALEMBIC_DATABASE_URL` would let an `env.py` written the rejected way pass
     this whole suite.
+  - **The migration leaves the process environment as it found it.** Alembic runs
+    in process here, and `migrations/env.py` is a documented reader of `.env`, so
+    the upgrade would otherwise load a developer's whole file into `os.environ`
+    for the rest of the session — a suite green on that machine and red in CI,
+    which has no `.env`. `whole_environment_restored` is what stops it.
 """
 
 import os
@@ -201,6 +206,43 @@ def environment(values: dict[str, str]) -> Iterator[None]:
                 os.environ[name] = previous
 
 
+@contextmanager
+def whole_environment_restored() -> Iterator[None]:
+    """Put `os.environ` back exactly as it was afterwards, names added included.
+
+    `environment` above restores the names it was handed. This one restores every
+    name there is, because what has to be undone here was not set by this file and
+    cannot be listed by it.
+
+    **`backend/migrations/env.py` is a documented third reader of `.env`** — its
+    own module docstring says so, "This file is the third reader of `.env`, after
+    `Settings` and the Compose files" — and it calls `load_dotenv` on the
+    repository root's `.env` at import. `migrated_database` below runs Alembic
+    **in process**, so that import loads a developer's whole `.env` into
+    `os.environ`, and without this it stays there for the rest of the pytest
+    session: `ENVIRONMENT=development` among everything else in the file.
+
+    A session that inherits a developer's `.env` that way passes locally and fails
+    in CI, which has no `.env` file at all. That is not hypothetical: it is what
+    E1-10's course-number band tests did, and the difference they turned on was
+    whether `ENVIRONMENT` was set — absent, the registration-address rules are in
+    force and the mock's own cleartext roster address is refused.
+
+    Which names the file holds is a developer's choice rather than this suite's,
+    so the whole mapping is snapshotted and the difference put back: names the
+    body added are removed, and names it changed are set back to what they were.
+    """
+    saved = dict(os.environ)
+    try:
+        yield
+    finally:
+        for name in [name for name in os.environ if name not in saved]:
+            del os.environ[name]
+        for name, value in saved.items():
+            if os.environ.get(name) != value:
+                os.environ[name] = value
+
+
 def alembic_config() -> Any:
     """The project's own Alembic configuration, pointed at its script directory.
 
@@ -373,10 +415,17 @@ def provisioned_database(postgres_container: Any) -> DatabaseUnderTest:
 
 @pytest.fixture(scope="session")
 def migrated_database(provisioned_database: DatabaseUnderTest) -> DatabaseUnderTest:
-    """`alembic upgrade head`, applied once for the whole session."""
+    """`alembic upgrade head`, applied once for the whole session.
+
+    **The process environment is restored around the upgrade**, not only the three
+    names `migration_environment` sets. Alembic runs here in process, which imports
+    `backend/migrations/env.py`, which loads the repository's `.env` — so anything
+    in a developer's file would otherwise be left in `os.environ` for every test
+    that ran afterwards. `whole_environment_restored` above has the incident.
+    """
     from alembic import command
 
-    with environment(migration_environment(provisioned_database)):
+    with whole_environment_restored(), environment(migration_environment(provisioned_database)):
         command.upgrade(alembic_config(), "head")
     return provisioned_database
 
@@ -430,12 +479,18 @@ def empty_database(
 @pytest.fixture
 def alembic_config_pointed_at(
     monkeypatch: pytest.MonkeyPatch,
-) -> Callable[[DatabaseUnderTest], Any]:
+) -> Iterator[Callable[[DatabaseUnderTest], Any]]:
     """Point Alembic at one database and hand back a `Config` to run commands with.
 
     The commands stay in the test — `command.upgrade`, `command.check` — because
     which one is being run is the subject of the test that runs it, and a
     fixture that ran them would move the assertion's verb into this file.
+
+    **The environment is restored around the test, not only around the names set
+    here.** The command the test runs executes `migrations/env.py`, which loads the
+    repository's `.env` into `os.environ`; `monkeypatch` cannot undo that, because
+    it only knows the names it set itself. Same hazard as `migrated_database`, in
+    the second place that faces it (`docs/MISTAKES.md` entry 13).
     """
 
     def prepare(database: DatabaseUnderTest) -> Any:
@@ -443,7 +498,8 @@ def alembic_config_pointed_at(
             monkeypatch.setenv(name, value)
         return alembic_config()
 
-    return prepare
+    with whole_environment_restored():
+        yield prepare
 
 
 @pytest.fixture(scope="session")

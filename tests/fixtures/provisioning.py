@@ -31,7 +31,9 @@ launch request, so a test that called it directly would say nothing about whethe
 the handler calls it at all. The second exists for the cases no mint can produce —
 a context label carrying an out-of-band course number, and a *second, different*
 platform title for one context — where the claims are still a real launch's, from
-a registered platform, with the one member under test rewritten.
+a registered platform, with the one member under test rewritten. The second states
+its own `ENVIRONMENT`, because building no door means nothing else in that chain
+sets one; the fixture says what running under the process's leftovers cost.
 
 **`provisioning_contract` is the vocabulary both modules read a launch through**:
 claim names, column names, the seven defect kinds, the mint selectors, and the
@@ -930,9 +932,11 @@ REGISTERED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e1-10-configure
 LANDING_PREFIX = "/app/"
 
 # `ENVIRONMENT`, spelled as `tests/unit/test_docs_exposure.py` and the launch-door
-# suite spell it. Set through `tool_doors` rather than with a bare `setenv`, so a
-# module that builds something out of `Settings` at import is built under the value
-# the test chose (`docs/MISTAKES.md` entry 3).
+# suite spell it. **Wherever an application is built, it is set through
+# `tool_doors`** rather than with a bare `setenv`, so a module that builds something
+# out of `Settings` at import is built under the value the test chose
+# (`docs/MISTAKES.md` entry 3). `registered_platform` below builds no application
+# and sets it directly; that fixture says why, and why the distinction holds there.
 ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
 
@@ -1135,6 +1139,7 @@ def launch_driver(launch_driver_in: Callable[..., LaunchDriver]) -> LaunchDriver
 
 @pytest.fixture
 def registered_platform(
+    monkeypatch: pytest.MonkeyPatch,
     provisioning_platform: Any,
     provisioning_jwks_url: str,
     register_platform: Any,
@@ -1150,7 +1155,49 @@ def registered_platform(
 
     `launch` is unavailable on what this returns, deliberately: a test that means
     to drive the whole route should ask for `launch_driver` and get the door.
+
+    **It runs under the development `ENVIRONMENT`, and the name is chosen here
+    rather than inherited.** Every other route to the writer states its
+    environment: a door-driven test gets the development name from `configured_env`
+    through `tool_doors`, and
+    `tests/integration/test_a_roster_address_is_judged_by_the_registration_rules.py`
+    asks `launch_driver_in` for a deployment's. This chain builds no door, so
+    before this line it ran under whatever the process happened to be holding —
+    which was a developer's `.env`, loaded into `os.environ` by the in-process
+    Alembic run (`whole_environment_restored` in `tests/fixtures/database.py` has
+    that incident). Locally that meant `development` and the band tests passed; in
+    CI, which has no `.env`, `ENVIRONMENT` was unset, and an unset value is a
+    deployment — `.env.example`: "Anything other than `development` is a
+    deployment". The registration-address rules were then in force, the mock's own
+    cleartext `http://mock-lms:8000/...` roster address was refused, and every
+    in-band course number was recorded as a `roster_address_refused` defect.
+
+    **A bare `setenv` is sound *here*, where the comment on `ENVIRONMENT_VARIABLE`
+    above says it is not in general.** That comment is about a module which builds
+    something out of `Settings` at import: nothing below re-imports the
+    application, so such a module would not see this. This fixture builds no
+    application at all — no `create_app`, no door — and the only reader is the
+    writer the test calls directly, in the test body, after this has run. If that
+    ever stopped being true the band tests would go red rather than quietly assert
+    something else, which is how this was found in the first place.
+
+    **The pin narrows what a band case can fail on; it does not soften it.** SPEC
+    §8's bands hold in every environment, and what the development name switches
+    off is a different rule, about the addresses this container fetches, asserted
+    under a deployment's name in the module quoted above. So the only defect an
+    in-band case can record is one about its number, which is what it claims to be
+    about (`docs/MISTAKES.md` entry 3).
     """
+    from app.config import DEVELOPMENT_ENVIRONMENT
+
+    assert isinstance(DEVELOPMENT_ENVIRONMENT, str) and DEVELOPMENT_ENVIRONMENT.strip(), (
+        f"`app.config.DEVELOPMENT_ENVIRONMENT` is {DEVELOPMENT_ENVIRONMENT!r}, so the name pinned "
+        "below is not a development environment and every test using this fixture would run under "
+        "a deployment without saying so. `tests/unit/test_registration_address_constraints.py` "
+        "reads the same constant and makes the same check."
+    )
+    monkeypatch.setenv(ENVIRONMENT_VARIABLE, DEVELOPMENT_ENVIRONMENT)
+
     registration = register_platform(
         provisioning_platform.require_offers()[0],
         provisioning_jwks_url,

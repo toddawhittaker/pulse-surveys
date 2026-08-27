@@ -46,6 +46,7 @@ from fixtures.database import (
     container_url,
     environment,
     migration_environment,
+    whole_environment_restored,
 )
 from fixtures.repo import ENV_EXAMPLE_PATH, REPO_ROOT, parse_dotenv
 from fixtures.supervision import seed_row
@@ -300,7 +301,12 @@ def migrated_demo_database(
                 database=name,
             ),
         )
-        with environment(migration_environment(database)):
+        # `whole_environment_restored` for the same reason `migrated_database` uses
+        # it: running Alembic in process executes `migrations/env.py`, which loads
+        # the repository's `.env` into `os.environ` and would otherwise leave it
+        # there for every test that follows (`docs/MISTAKES.md` entry 13 — the same
+        # hazard, worked around in every place that faces it).
+        with whole_environment_restored(), environment(migration_environment(database)):
             command.upgrade(alembic_config(), "head")
         yield DemoSeed(database)
     finally:
