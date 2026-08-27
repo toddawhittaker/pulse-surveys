@@ -399,9 +399,22 @@ def test_running_the_sync_twice_against_an_unchanged_roster_changes_no_row(
     runs against after the first hour is a database somebody else filled, including
     its own previous self.
 
-    **Row identity, not counts.** A sync that deleted an enrollment and re-inserted
-    it has changed the row that E3's participation history hangs off while leaving
-    every count identical.
+    **Row identity, not counts, and not column values either.** A sync that deleted
+    an enrollment and re-inserted it has changed the row that E3's participation
+    history hangs off while leaving every count identical — so the comparison is
+    over rows. But a comparison over a row's *columns* is still not a comparison of
+    rows, and a mutation battery proved it: an unconditional `UPDATE` on every
+    enrollment the sync re-read — the same values written straight back — survived
+    this test, because nothing visible in the row moved.
+
+    So each row is read with its `xmin`, the transaction that last wrote it
+    (`RosterRows.versioned`, which carries why `xmin` rather than `ctid`).
+    Postgres does not detect a no-op update: it writes a new tuple version, and the
+    version is the only place a rewrite that changes nothing shows up. The claim
+    that guards is the ticket's own — the sync is idempotent at row grain — and
+    the cost of losing it is not abstract: an hourly job rewriting every enrollment
+    in the institution is bloat, autovacuum churn, and a row history saying every
+    student was touched every hour.
 
     **`nrps_call` is deliberately excluded from the comparison**, and saying so is
     part of the assertion rather than an escape: D9 makes it one row per HTTP call,
@@ -426,7 +439,7 @@ def test_running_the_sync_twice_against_an_unchanged_roster_changes_no_row(
 
     run_a_sync(roster)
     watched = ("enrollment", "user", "user_identity", "role_assignment")
-    before = {name: sorted(map(dict, roster_rows.all_of(name)), key=repr) for name in watched}
+    before = {name: sorted(roster_rows.versioned(name), key=repr) for name in watched}
     calls_before = len(roster_rows.calls_for(synced_section.id))
 
     assert before["enrollment"] and before["user"], (
@@ -435,7 +448,7 @@ def test_running_the_sync_twice_against_an_unchanged_roster_changes_no_row(
     )
 
     run_a_sync(roster)
-    after = {name: sorted(map(dict, roster_rows.all_of(name)), key=repr) for name in watched}
+    after = {name: sorted(roster_rows.versioned(name), key=repr) for name in watched}
 
     changed = {name: (before[name], after[name]) for name in watched if before[name] != after[name]}
     assert not changed, (
@@ -448,7 +461,12 @@ def test_running_the_sync_twice_against_an_unchanged_roster_changes_no_row(
         + "\n\nOne of the two members was seeded out of band before the first sync ever ran, which "
         "is `docs/MISTAKES.md` entry 31's requirement: a sync that matches only the rows it wrote "
         "itself is idempotent against its own output and duplicates everything it meets in a "
-        "database somebody else filled — which is every database it will ever run against."
+        "database somebody else filled — which is every database it will ever run against.\n\n"
+        "**If the only thing that differs is `__row_version`, the values are identical and the "
+        "rows were still rewritten**: that column is each row's `xmin`, so a second sync issued an "
+        "`UPDATE` against a row it had nothing to change. That is the survivor a mutation battery "
+        "found here, and 'idempotent' has to mean the row was left alone rather than left looking "
+        "the same."
     )
     assert len(roster_rows.calls_for(synced_section.id)) > calls_before, (
         "The second run left no new `nrps_call` row, so it did not call the service at all and "

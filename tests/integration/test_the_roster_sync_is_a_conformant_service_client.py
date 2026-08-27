@@ -572,6 +572,116 @@ def test_every_page_of_a_roster_walk_leaves_a_call_record_carrying_its_response_
     )
 
 
+def test_a_refused_token_is_recorded_against_the_roster_url_with_the_token_endpoints_status(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    a_subject: Any,
+) -> None:
+    """The failure §6.1's console would otherwise read as the roster service refusing.
+
+    A sync makes two calls to two endpoints, and only one of them is the roster.
+    When the **token endpoint** answers an error, the roster is never asked at all —
+    so a call log that recorded nothing leaves the section looking never-synced
+    (SPEC §7.3's other state entirely), and one that recorded a row with no status
+    leaves it looking like a transport failure, which D9 gives a NULL
+    `response_code` as its single meaning. Neither says the thing an operator has
+    to act on: this deployment's credentials were refused, and the platform is up.
+
+    So the sync fetches its token eagerly and records what happened to it, against
+    the roster's own URL, carrying the token endpoint's status. That is the only
+    reason the eager fetch exists: `pylti1p3` gets a token per request by itself, so
+    dropping it is invisible to every conformance assertion in this module.
+
+    **The mutation this kills** — and it is the survivor a mutation battery found,
+    which is why this test was written after the fact: removing the eager
+    `ServiceConnector.get_access_token` before the walk, so the failure surfaces
+    from inside `get_members()` with no row written; and its quieter sibling,
+    keeping the fetch and discarding the status it came back with, so the row is
+    written with `response_code` NULL and reads as a call that never reached the
+    platform.
+
+    **The pair is inside the test.** The same section, the same roster, the same
+    wire — with the token endpoint restored, the sync ingests. Without that half,
+    every assertion here is satisfied by a sync that never works at all.
+
+    **What the sync does with the failure beyond recording it is deliberately not
+    asserted.** ADR 0090's consequences leave that to the writer — "a later
+    sanctioned writer running on a job rather than on a request may reasonably want
+    the opposite: fail loudly, let the task retry — and this record does not decide
+    that for it" — so a raise and a return are both permitted here and the one
+    thing that is not is swallowing it in silence, which is what the row asserts.
+    """
+    token_url = (synced_section.platform.discovery() or {}).get("token_endpoint")
+    assert isinstance(token_url, str) and token_url, (
+        "The mock platform advertises no `token_endpoint`, so this test has no endpoint to fail "
+        "and could not pose its question. `test_mock_lms_client_credentials_grant.py` is where "
+        "that absence is diagnosed."
+    )
+    member = a_subject("after-the-token-recovers")
+    service_wire.serve(compose_a_roster(synced_section, [roster_contract.member(member)]))
+    service_wire.failing(token_url, 500)
+
+    try:
+        roster_sync.call(
+            roster_sync.sync_one_section,
+            session=committed_rows.session,
+            section_id=synced_section.id,
+            http=service_wire.session(),
+        )
+        committed_rows.commit()
+    except Exception:
+        committed_rows.session.rollback()
+
+    recorded = roster_rows.calls_for(synced_section.id)
+    assert recorded, (
+        "The token endpoint answered 500 and the sync wrote no `nrps_call` row at all. SPEC §6.1 "
+        "puts 'NRPS and AGS call logs with response codes' on the admin console, and D9 makes "
+        "`nrps_call` the discriminator between a section that has never been synced and one that "
+        "has: with no row, a section whose tool is being refused a token every hour is "
+        "indistinguishable from a section whose platform never gave out a roster address."
+    )
+    refused = [row for row in recorded if row.get("response_code") == 500]
+    assert refused, (
+        f"The token endpoint answered 500 and the section's call rows are "
+        f"{[dict(row) for row in recorded]}. The status the tool met is what tells an operator "
+        "that the credentials were refused rather than that the roster service was: a NULL "
+        "`response_code` means a call that never reached the platform (D9), and this call reached "
+        "it and was answered."
+    )
+    assert all(row.get("url") == synced_section.address for row in refused), (
+        f"The refused call was recorded against {[row.get('url') for row in refused]} and this "
+        f"section's roster lives at {synced_section.address!r}. The row is the section's record of "
+        "an attempted sync, and §6.1's console reads it per section — a row carrying the token "
+        "endpoint's URL is a row about the platform's OAuth surface, which is not what a reader "
+        "looking at one section's roster history is asking about."
+    )
+    assert not roster_rows.enrollments(), (
+        "The token endpoint answered 500 and enrollments were written anyway, so members reached "
+        "the database over a call that was never authorised — which is the unauthenticated path "
+        "`test_the_sync_has_no_unauthenticated_path_to_the_roster` is about, arriving here."
+    )
+
+    service_wire.recovering(token_url)
+    roster_sync.call(
+        roster_sync.sync_one_section,
+        session=committed_rows.session,
+        section_id=synced_section.id,
+        http=service_wire.session(),
+    )
+    committed_rows.commit()
+
+    assert roster_rows.enrollments_for(member), (
+        "With the token endpoint answering again, the same section and the same roster ingested "
+        "nothing. So the assertions above hold of a sync that never works rather than of one that "
+        "recorded a refusal — and the failing half of this test would be about nothing."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Deferred E1-10 item 1 — whose credentials this section's roster is fetched with.
 # ---------------------------------------------------------------------------

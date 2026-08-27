@@ -450,12 +450,15 @@ class ServiceWire:
         module docstring for why a 200 from the roster is not.
       - **refuse what the ticket forbids**: an unauthenticated service read, and
         the roster filters the mock answers 400 for.
+      - **fail an endpoint on request**, so that a test can ask what the sync does
+        when the platform is up and one of its two endpoints is not.
     """
 
     def __init__(self, hosts: Mapping[str, Any]) -> None:
         self.hosts = dict(hosts)
         self.calls: list[ServiceCall] = []
         self.rosters: dict[str, ComposedRoster] = {}
+        self.failures: dict[str, int] = {}
         self.refuse_unauthenticated = False
         self.strip_authorization = False
 
@@ -478,6 +481,27 @@ class ServiceWire:
         something that refuses one.
         """
         self.refuse_unauthenticated = True
+
+    def failing(self, url: str, status_code: int) -> None:
+        """Answer `status_code` at `url`'s path instead of passing the request through.
+
+        For the one case the mock platform cannot be asked to produce and that
+        §6.1's call log exists to make legible: the platform is reachable, the
+        roster is there, and the **token endpoint** answers an error. A sync that
+        met that and recorded nothing would leave an operator reading a section
+        that looks never-synced; one that recorded it against the roster's URL with
+        no status would leave a section that looks like a transport failure. Which
+        of those it is is a question about the tool's credentials rather than about
+        the roster service, and the row is the only place the difference lives.
+
+        Keyed by path, like the composed rosters, because that is what the wire can
+        match on before it knows which application would have answered.
+        """
+        self.failures[urlsplit(url).path] = status_code
+
+    def recovering(self, url: str) -> None:
+        """Stop failing `url`, so a test can pose its own control in the same run."""
+        self.failures.pop(urlsplit(url).path, None)
 
     def stripping_the_authorization_header(self) -> None:
         """Deliver every service request with its `Authorization` header removed.
@@ -517,6 +541,18 @@ class ServiceWire:
         self.calls.append(ServiceCall(method, url, delivered, body))
 
         split = urlsplit(url)
+        # A configured failure answers before anything else, including the
+        # unauthenticated gate: a test that fails an endpoint is asking what the
+        # sync does when that endpoint is down, and an answer from any other branch
+        # here would be about something else.
+        failing = self.failures.get(split.path)
+        if failing is not None:
+            return _Answer(
+                failing,
+                {"content-type": "application/json"},
+                json.dumps({"error": "server_error"}).encode("utf-8"),
+            )
+
         roster = self.rosters.get(split.path)
         presented = {name.lower(): value for name, value in delivered.items()}.get(
             "authorization", ""
@@ -684,6 +720,11 @@ SECTION_CONTEXT_ID_COLUMN = "lms_context_id"
 # `nrps_call`: `id` uuid PK, `section_id` FK→section RESTRICT NOT NULL indexed,
 # `url` Text NOT NULL, `response_code` int NULL (NULL = transport failure),
 # `members_seen` int NULL, `called_at` AwareDateTime NOT NULL."
+# What `RosterRows.versioned` labels each row's writing transaction under. A name
+# no table declares, so it cannot collide with a column and cannot be mistaken for
+# one when a failure prints the row.
+ROW_VERSION = "__row_version"
+
 NRPS_CALL_TABLE = "nrps_call"
 NRPS_CALL_COLUMNS = frozenset(
     {"id", "section_id", "url", "response_code", "members_seen", "called_at"}
@@ -802,6 +843,39 @@ class RosterRows:
         """
         self.rows.session.rollback()
         return list(self.rows.session.execute(self.table(name).select()).mappings())
+
+    def versioned(self, name: str) -> list[dict[str, Any]]:
+        """Every row of one table, with the transaction that last wrote it.
+
+        **`xmin` is what makes "no row changed" a claim about rows rather than
+        about values**, and the difference is a measured one: a mutation battery
+        stood an unconditional `UPDATE` on every enrollment the sync re-read — the
+        same values written back — and the idempotence test survived it, because
+        the comparison it made was over column values and those did not move.
+
+        Postgres does not detect a no-op update. `UPDATE … SET ended_on = ended_on`
+        writes a new tuple version with a new `xmin`, so a rewrite that changes
+        nothing visible in the row is visible here and nowhere else in this suite.
+        What that guards is the production claim the ticket makes — the sync is
+        idempotent at row grain — and what it costs in a live database is real:
+        every hourly sync rewriting every enrollment in the institution is table
+        bloat, autovacuum churn, and a row-version history that says every student
+        was touched every hour.
+
+        `ctid` would answer the same question and is not used: it moves when
+        `VACUUM` moves a tuple, so it can differ between two reads nothing wrote
+        between. `xmin` names the writing transaction and moves only when
+        somebody writes.
+
+        Cast to text because `xid` is a type psycopg has no adapter for; the value
+        is compared, never interpreted.
+        """
+        from sqlalchemy import literal_column, select
+
+        self.rows.session.rollback()
+        table = self.table(name)
+        statement = select(table, literal_column("xmin::text").label(ROW_VERSION))
+        return [dict(row) for row in self.rows.session.execute(statement).mappings()]
 
     def enrollments(self) -> list[Any]:
         return self.all_of("enrollment")

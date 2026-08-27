@@ -115,6 +115,7 @@ def record_a_call(committed_rows: Any, roster_rows: Any, roster_contract: Any) -
 def test_a_launch_trigger_is_debounced_by_a_call_inside_the_window_and_not_by_one_outside_it(
     roster_sync: Any,
     synced_section: Any,
+    a_section_with_no_address: Any,
     committed_rows: Any,
     record_a_call: Any,
     enqueues: Any,
@@ -146,6 +147,20 @@ def test_a_launch_trigger_is_debounced_by_a_call_inside_the_window_and_not_by_on
     appends to the very thing the assertion compares against and `n == n + 1` is
     unsatisfiable by any implementation. A `len()` is the whole repair, and it is
     the form the two cases below already used.
+
+    **The third case runs against a section of its own, and that is the second
+    repair.** It used to seed its 301-second-old call onto the same section the
+    case above had just given a 299-second-old one, so the section's *most recent*
+    call was still inside the window and the enqueue was rightly refused — while
+    the failure message said "a section whose most recent call was 301 seconds
+    ago", which was false of the state the test had built. A test whose message
+    describes a state it did not create reports the implementation as wrong for
+    what the test did (`docs/MISTAKES.md` entry 3's shape, with the fixture as the
+    thing that passed for an unrelated reason). A fresh section carries exactly one
+    call, one second past the window, which is what the sentence claims and what
+    the rule is about. It is the addressless section, because the debounce reads
+    `nrps_call` and never the address — the test next door borrows it for the same
+    reason.
     """
     never_called = len(enqueues.calls)
     roster_sync.call(
@@ -174,18 +189,19 @@ def test_a_launch_trigger_is_debounced_by_a_call_inside_the_window_and_not_by_on
         "hour would otherwise ask the platform for one roster thirty times."
     )
 
-    record_a_call(synced_section.id, seconds_ago=DEBOUNCE_SECONDS + A_SECOND)
+    expired = a_section_with_no_address(synced_section)
+    record_a_call(expired, seconds_ago=DEBOUNCE_SECONDS + A_SECOND)
     before = len(enqueues.calls)
     roster_sync.call(
         roster_sync.request_section_sync,
         session=committed_rows.session,
-        section_id=synced_section.id,
+        section_id=expired,
     )
     assert len(enqueues.calls) == before + 1, (
-        f"A section whose most recent call was {DEBOUNCE_SECONDS + A_SECOND} seconds ago — one "
-        f"second past D9's {DEBOUNCE_SECONDS}-second window — was not enqueued. A debounce that "
-        "never expires is a section that syncs once and then only on the hour, and the launch "
-        "trigger SPEC §7.3 describes stops existing."
+        f"A section whose most recent — and only — call was {DEBOUNCE_SECONDS + A_SECOND} seconds "
+        f"ago, one second past D9's {DEBOUNCE_SECONDS}-second window, was not enqueued. A "
+        "debounce that never expires is a section that syncs once and then only on the hour, and "
+        "the launch trigger SPEC §7.3 describes stops existing."
     )
 
 
