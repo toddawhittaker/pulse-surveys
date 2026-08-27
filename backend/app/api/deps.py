@@ -77,11 +77,24 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import jwt
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 from app.config import Settings, is_development
-from app.services.landing import Door, cancelled_page, landing_role_for, refusal_page
+from app.services.identity import (
+    ResolvedIdentity,
+    identity_behind_a_launch,
+    person_behind_a_web_login,
+)
+from app.services.landing import (
+    Door,
+    cancelled_page,
+    landing_role_for,
+    no_account_page,
+    refusal_page,
+)
 from app.services.session import (
     fragment_redirect,
     issue_csrf_token,
@@ -102,6 +115,7 @@ __all__ = [
     "carry_across",
     "clear_carried",
     "landing_with_session",
+    "no_account",
     "refused",
     "with_query",
 ]
@@ -228,15 +242,34 @@ def cancelled() -> HTMLResponse:
     return HTMLResponse(cancelled_page())
 
 
-def landing_with_session(
+def no_account() -> HTMLResponse:
+    """The calm page a verified web login with no stored identity gets (E1-12).
+
+    A 200 and a page of its own, for `cancelled`'s reason applied to a different
+    event: nothing went wrong. The identity provider vouched for somebody and
+    Pulse has no record of them, which SPEC §2 makes an ordinary state — every
+    role in this system comes from Pulse's own records, and a provider asserts
+    authentication and not membership. A 4xx here would tell somebody who signed
+    in correctly that their sign-in failed, and send them to fix a password that
+    is fine.
+
+    Answered only at the web door. A launch that resolves to no `person` is not
+    this: the launch door has a view for a student, ADR 0028 gives a student a
+    `user` row and no person, and the session carries that absence.
+    """
+    return HTMLResponse(no_account_page())
+
+
+async def landing_with_session(
     claims: Mapping[str, Any],
     *,
     door: Door,
+    db: Session,
     settings: Settings,
     secret: bytes,
     no_role_reason: str,
 ) -> Response:
-    """The last step of both second legs: issue a session and land, or refuse.
+    """The last step of both second legs: resolve who this is, issue a session, land.
 
     Verified claims come in; a session `app.services.session` defines goes out,
     handed over as a fragment redirect to the role's landing route with the
@@ -250,9 +283,32 @@ def landing_with_session(
     caller something true only of that door — so the sentence is an argument
     rather than a constant here.
 
-    `landing_role_for(claims, door=door)` is called unchanged — neither ticket
-    touches role resolution (E1-13's) — and a caller stating a role this door
+    **E1-12 resolves the stored identity here, which is why both doors get it
+    from one edit.** A launch's `sub` reaches a `user` row and, through ADR 0024's
+    link, a `person`; a web login's `(issuer, sub)` reaches a `person` through the
+    linkage table. Both go through `app.services.identity`, which calls ADR 0094's
+    point resolvers rather than reading an identity table.
+
+    **Identity is resolved before the role, and the order is a decision.** At the
+    web door a subject with no linkage gets the calm no-account page whatever its
+    roles claim says: "this system has no record of you" is true earlier and more
+    simply than "no view for the role you state", and it is the answer E1-13 will
+    still be giving once the roles come out of the assignment model — which needs
+    a person before it can ask anything at all.
+
+    **A launch with no `person` still lands.** That is a student, or somebody an
+    administrator has not put in the people graph yet, and the session carries the
+    absence (ADR 0028, D1). Making it a refusal would lock every student out of the
+    product on the strength of a table nobody has filled in for them.
+
+    `landing_role_for(claims, door=door)` is called unchanged — this ticket
+    touches no role resolution (E1-13's) — and a caller stating a role this door
     serves no view for is refused rather than landed on a default.
+
+    **`async def`, and the resolution runs in a threadpool.** The session is
+    synchronous (ADR 0013) and both callers are `async def` handlers, so a
+    database read taken on the event loop would block every other request on the
+    process — the same seam `app.api.lti` puts every other blocking call through.
 
     **Clearing the login cookie is the caller's**, not this function's: the launch
     door has no login cookie left to clear (ADR 0089), and the web door clears its
@@ -262,6 +318,14 @@ def landing_with_session(
     issued token: `issue_session` mints the `jti` and returns the token, and
     `verified_session` is the one way to read the claims it put inside.
     """
+    if door is Door.WEB:
+        person = await run_in_threadpool(person_behind_a_web_login, db, claims)
+        if person is None:
+            return no_account()
+        identity = ResolvedIdentity(person_id=person, user_id=None)
+    else:
+        identity = await run_in_threadpool(identity_behind_a_launch, db, claims)
+
     role = landing_role_for(claims, door=door)
     if role is None:
         return refused(no_role_reason)
@@ -269,6 +333,8 @@ def landing_with_session(
         door=door,
         role=role,
         sub=str(claims.get("sub") or ""),
+        person_id=None if identity.person_id is None else str(identity.person_id),
+        user_id=None if identity.user_id is None else str(identity.user_id),
         # Whoever issued the token this session was minted from: the LMS platform
         # at the launch door, the identity provider at the web door. The same
         # claim at both doors and never `None` — `SessionClaims` types `iss` as

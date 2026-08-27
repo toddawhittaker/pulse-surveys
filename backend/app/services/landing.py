@@ -109,7 +109,14 @@ from typing import Any
 
 from app.models.identity import LEADERSHIP_ROLES
 
-__all__ = ["Door", "LandingRole", "cancelled_page", "landing_role_for", "refusal_page"]
+__all__ = [
+    "Door",
+    "LandingRole",
+    "cancelled_page",
+    "landing_role_for",
+    "no_account_page",
+    "refusal_page",
+]
 
 # What a refused entry says. Deliberately one sentence and a reason, with no
 # retry link: there is nowhere for a browser to go from here that is not the
@@ -127,6 +134,26 @@ REFUSAL_HEADING = "This did not open"
 CANCELLED_TESTID = "web-login-cancelled"
 CANCELLED_HEADING = "Sign-in did not finish"
 CANCELLED_MESSAGE = "Nothing was changed and nobody is signed in. You can start again when ready."
+
+# What a web login by somebody this system has no record of says (E1-12). A third
+# answer beside the two above, because it is a third event: the sign-in worked and
+# the provider vouched for the person, and Pulse simply holds no record of them.
+# "You cancelled", "this tool was handed something it cannot account for" and "we
+# do not know you" are three different things to be told, and the person in front
+# of the screen is owed the right one — telling somebody their sign-in failed when
+# it did not sends them to reset a password that is fine.
+#
+# It says what to do next, which the other two cannot: there is somebody to ask.
+# It names nobody and repeats nothing the provider sent — the subject and the
+# address in that token are the provider's text, and this page has nowhere to put
+# them.
+NO_ACCOUNT_TESTID = "no-account"
+NO_ACCOUNT_HEADING = "Pulse Surveys has no account for you yet"
+NO_ACCOUNT_MESSAGE = (
+    "You signed in correctly and nothing went wrong. Pulse Surveys keeps its own record of who "
+    "works here, and there is no record for you yet, so there is nothing to show. Ask whoever "
+    "administers Pulse Surveys at your institution to add you."
+)
 
 # The claim each door states its roles in. Neither is this project's to choose:
 # the first is spelled by LTI 1.3, and the second is what E0-16's provider issues
@@ -357,4 +384,31 @@ def cancelled_page() -> str:
         testid=escape(CANCELLED_TESTID, quote=True),
         heading=escape(CANCELLED_HEADING),
         empty_state=escape(CANCELLED_MESSAGE),
+    )
+
+
+def no_account_page() -> str:
+    """The page a verified web login with no stored identity gets (E1-12, D5).
+
+    **Takes no argument, for `cancelled_page`'s reason and one more.** Everything
+    this door knows about the person is in a token somebody else wrote, and the
+    two claims that identify them — the issuer and the subject — are exactly the
+    values a page must not repeat: the first is an address and the second is a
+    stable per-person key at the provider, which SPEC §8 and §10 keep off screens
+    and out of logs alike. A function with nowhere to put them cannot be talked
+    into rendering them.
+
+    It carries no landing testid, so a person with no record here reaches nobody's
+    view; and its own testid is neither the refusal's nor the cancel's, because
+    this is a third event and a suite — and a person — has to be able to tell the
+    three apart.
+
+    Rendered in the same layout and answered with the same status as the cancelled
+    page: this is not a failure, and a 4xx would be the tool telling somebody who
+    signed in correctly that they did something wrong.
+    """
+    return PAGE.format(
+        testid=escape(NO_ACCOUNT_TESTID, quote=True),
+        heading=escape(NO_ACCOUNT_HEADING),
+        empty_state=escape(NO_ACCOUNT_MESSAGE),
     )
