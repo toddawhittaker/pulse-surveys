@@ -332,3 +332,16 @@ doing nothing.
 checkouts, no restores. A verdict is valid only for the tree it started on; if
 the tree moved mid-run, the verdict is void and the run is repeated, whatever it
 printed.
+
+## 40. The suite ran under an environment nobody chose, and it was a different one in CI
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/40-the-suite-ran-under-an-environment-nobody-chose.md)
+
+**Rule.** A test whose subject reads the process environment states the value it
+runs under, in its own fixture chain. Anything a fixture runs in process brings
+its whole startup with it — a tool that loads `.env` loads it for every test
+that follows — so wrap such a run in a full snapshot-and-restore of the state it
+mutates, not an enumerated one: the names that need undoing are exactly the ones
+the fixture was never told. And when a suite is green locally and red in CI,
+probe what each process actually holds at the failing call; do not infer it from
+the fixtures that should have set it.

@@ -327,6 +327,13 @@ Every E1 pull request that defers something adds it here in the same PR.
    `os.environ` does not see would judge a development stack by a deployment's
    rules, and refuse the mock platform's own cleartext roster address on a
    developer's machine.
+   That cost materialized before this PR merged, in CI rather than on a
+   developer's machine: CI's pytest process has no `.env` and set no
+   `ENVIRONMENT`, so the ten in-band course-number tests recorded
+   `roster_address_refused` while every local run stayed green off a dotenv
+   leak. The test-side fix (the tests now state their environment, and the
+   leak is closed) is `docs/MISTAKES.md` entry 40; this done-when is unchanged
+   and remains the code-side half.
    **Done when** `provision_from_launch` takes the environment from `Settings` —
    the launch door already holds one on `request.app.state.settings`, so the
    thread is short — and a test drives a launch under a `.env`-only development
