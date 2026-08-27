@@ -99,6 +99,15 @@ SYNC_ROLES: dict[str, tuple[str, ...]] = {
     "session": ("session", "db", "db_session"),
     "section_id": ("section_id", "section"),
     "http": ("http", "requests_session", "requests", "http_session", "transport", "client"),
+    # The security round's F1: every URL the walk is about to fetch is judged by
+    # `refuse_invalid_fetched_address`, and those rules take the environment name.
+    # It reaches the sync from `Settings` — never from `os.environ`, which is the
+    # read E1-10 item 5 removed from the writer next door — so a test that means to
+    # run under a deployment's rules hands the settings it means. A sync that builds
+    # its own `Settings()` reads the process environment at call time instead, and
+    # `deployment_settings` below sets that too, so either shape is driven by the
+    # same fixture (`docs/MISTAKES.md` entry 40: the test states what it runs under).
+    "settings": ("settings", "config", "configuration"),
 }
 
 
@@ -395,13 +404,28 @@ class ComposedRoster:
     The page size is the caller's, so a test can put a member on a page that is
     not the first — `docs/MISTAKES.md` entry 3's shape is a paging test the first
     page satisfies, and AC2 asks for the member the *last* page holds.
+
+    `next_url` replaces the first page's `rel="next"` with an address of the
+    caller's choosing, which is the whole of the security round's F1: the walk
+    adopts a URL the *platform* chose, and a platform that has been compromised —
+    or a mock standing in for one — will point it at `169.254.169.254`. Nothing
+    else in this suite can produce that header, because every other next URL is
+    built from the URL that was requested.
     """
 
-    def __init__(self, path: str, context_id: str, members: Sequence[Mapping[str, Any]], size: int):
+    def __init__(
+        self,
+        path: str,
+        context_id: str,
+        members: Sequence[Mapping[str, Any]],
+        size: int,
+        next_url: str | None = None,
+    ):
         self.path = path
         self.context_id = context_id
         self.members = [dict(member) for member in members]
         self.size = size
+        self.next_url = next_url
 
     @property
     def pages(self) -> list[list[dict[str, Any]]]:
@@ -430,7 +454,9 @@ class ComposedRoster:
             "members": pages[index],
         }
         headers = {"content-type": NRPS_MEDIA_TYPE}
-        if index + 1 < len(pages):
+        if index == 0 and self.next_url is not None:
+            headers["link"] = f'<{self.next_url}>; rel="next"'
+        elif index + 1 < len(pages):
             following = f"{split.scheme}://{split.netloc}{split.path}?page={index + 2}"
             headers["link"] = f'<{following}>; rel="next"'
         return body, headers
@@ -459,6 +485,8 @@ class ServiceWire:
         self.calls: list[ServiceCall] = []
         self.rosters: dict[str, ComposedRoster] = {}
         self.failures: dict[str, int] = {}
+        self.answers: dict[str, tuple[int, dict[str, Any]]] = {}
+        self.redirects: dict[str, str] = {}
         self.refuse_unauthenticated = False
         self.strip_authorization = False
 
@@ -502,6 +530,31 @@ class ServiceWire:
     def recovering(self, url: str) -> None:
         """Stop failing `url`, so a test can pose its own control in the same run."""
         self.failures.pop(urlsplit(url).path, None)
+        self.answers.pop(urlsplit(url).path, None)
+        self.redirects.pop(urlsplit(url).path, None)
+
+    def answering(self, url: str, payload: Mapping[str, Any], status_code: int = 200) -> None:
+        """Answer `payload` at `url`'s path, with a status this endpoint would use.
+
+        For the security round's F3: a token endpoint that answers 200 with a body
+        carrying no `access_token` is a *well-formed* HTTP success that makes
+        `pylti1p3` raise `KeyError` reading `response["access_token"]`. That is the
+        shape the finding is about — not an error the sync was written to expect,
+        but an unexpected exception out of a library, from one platform, in the
+        middle of a walk over every section in the institution.
+        """
+        self.answers[urlsplit(url).path] = (status_code, dict(payload))
+
+    def redirecting(self, url: str, to: str) -> None:
+        """Answer a 302 at `url`'s path, pointing at `to`.
+
+        F1's other half. A redirect is the same bypass as a hostile `Link` header
+        and it arrives one step earlier: the address the walk judged is not the
+        address the request ends at, so a client that follows one has validated
+        nothing. `requests` follows redirects by default, which is what makes this
+        the quiet version.
+        """
+        self.redirects[urlsplit(url).path] = to
 
     def stripping_the_authorization_header(self) -> None:
         """Deliver every service request with its `Authorization` header removed.
@@ -551,6 +604,21 @@ class ServiceWire:
                 failing,
                 {"content-type": "application/json"},
                 json.dumps({"error": "server_error"}).encode("utf-8"),
+            )
+        redirected = self.redirects.get(split.path)
+        if redirected is not None:
+            return _Answer(
+                302,
+                {"location": redirected, "content-type": "application/json"},
+                b"{}",
+            )
+        canned = self.answers.get(split.path)
+        if canned is not None:
+            status, payload = canned
+            return _Answer(
+                status,
+                {"content-type": "application/json"},
+                json.dumps(payload).encode("utf-8"),
             )
 
         roster = self.rosters.get(split.path)
@@ -1224,16 +1292,76 @@ def compose_a_roster() -> Callable[..., ComposedRoster]:
     """Build a membership container this test wrote, for one section's address."""
 
     def build(
-        section: SyncedSection, members: Sequence[Mapping[str, Any]], size: int = 5
+        section: SyncedSection,
+        members: Sequence[Mapping[str, Any]],
+        size: int = 5,
+        next_url: str | None = None,
     ) -> ComposedRoster:
         return ComposedRoster(
             urlsplit(section.address or "").path,
             section.context_id,
             members,
             size,
+            next_url,
         )
 
     return build
+
+
+# The environment name the fetched-address rules are in force under, and a
+# platform address that passes them. **Both are forced by ADR 0081 rather than
+# chosen here**: every rule that record writes is "switched off where `ENVIRONMENT`
+# is exactly the development name", so a test of a refusal has to run somewhere a
+# refusal happens; and rule 1 refuses cleartext that leaves this machine, so the
+# platform a *legitimate* page is fetched from has to be `https`. Nothing is
+# actually encrypted — the wire answers in process — but the scheme is what the
+# rule reads, and posing the accepted half over `http` would make it a test of the
+# transport rule instead of a test of the address.
+A_DEPLOYMENT = "production"
+HTTPS_PLATFORM_ISSUER = "https://roster-platform.invalid"
+
+# Two addresses a fetched URL may never reach, and one it may. `169.254.169.254`
+# is ADR 0081 rule 4's own subject — "where the cloud metadata service answers
+# credentials to any request that reaches it on every major provider" — and rule 4
+# arrived in E1-10's round-3 review for exactly this reason. The loopback entry is
+# the SSRF that rule 3 does *not* cover, because that rule is about an address a
+# *browser* resolves: a fetched loopback URL is resolved by this container, which
+# is the opposite case and the classic one. `10.0.0.5` is the acceptance ADR 0081
+# stakes rule 4 on — "`169.254.169.254` refused and `10.0.0.5` accepted is one line
+# apart in the implementation and a product difference in the field".
+CLOUD_METADATA_HOST = "169.254.169.254"
+LOOPBACK_HOST = "127.0.0.1"
+PRIVATE_RANGE_HOST = "10.0.0.5"
+
+
+@pytest.fixture
+def deployment_settings(monkeypatch: pytest.MonkeyPatch, configured_env: dict[str, str]) -> Any:
+    """A `Settings` whose environment is a deployment's, with the process agreeing.
+
+    Two things at once, deliberately. The settings object is what a sync that
+    *takes* one is handed, and the process variable is what a sync that builds its
+    own `Settings()` reads at call time — so a test using this states the
+    environment it runs under whichever way the sync reaches it
+    (`docs/MISTAKES.md` entry 40), and neither shape can quietly run under
+    development's "everything is accepted".
+
+    `configured_env` first, so every documented variable has a value before
+    `Settings()` is constructed; then `ENVIRONMENT` is overwritten. The name is
+    asserted to be a deployment through `app.config`'s own predicate rather than
+    assumed, because a value that turned out to be the development name would
+    switch every rule under test off and leave the refusals below passing for
+    having nothing to refuse.
+    """
+    from app.config import DEVELOPMENT_ENVIRONMENT, Settings
+
+    assert A_DEPLOYMENT != DEVELOPMENT_ENVIRONMENT, (
+        f"`{A_DEPLOYMENT}` is this build's development environment name, so the address rules "
+        "would be switched off (ADR 0081: 'every one of them switched off where `ENVIRONMENT` is "
+        "exactly the development name') and every refusal in these tests would pass against a "
+        "validator that refuses nothing."
+    )
+    monkeypatch.setenv("ENVIRONMENT", A_DEPLOYMENT)
+    return Settings()
 
 
 @pytest.fixture
@@ -1289,6 +1417,12 @@ def roster_contract() -> Any:
         refused_filters = REFUSED_ROSTER_FILTERS
         nrps_claim = NRPS_CLAIM
         jwks_path = TOOL_JWKS_PATH
+
+        a_deployment = A_DEPLOYMENT
+        https_platform_issuer = HTTPS_PLATFORM_ISSUER
+        cloud_metadata_host = CLOUD_METADATA_HOST
+        loopback_host = LOOPBACK_HOST
+        private_range_host = PRIVATE_RANGE_HOST
 
         member = staticmethod(roster_member)
         window = staticmethod(enrollment_window)

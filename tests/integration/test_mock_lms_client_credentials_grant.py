@@ -1005,6 +1005,98 @@ def test_an_assertion_presented_twice_is_refused_the_second_time(
     )
 
 
+def test_a_jti_is_remembered_for_as_long_as_an_assertion_carrying_it_could_be_accepted(
+    platform: Any,
+    token_url: str,
+    client_id: str,
+    tool_key_pair: Any,
+    claims_for_an_assertion: Any,
+    wind_the_clock_back: Any,
+) -> None:
+    """The security round's F4: the prune horizon has to be the acceptance ceiling.
+
+    Two numbers in the same endpoint, one apart. A `jti` is forgotten after
+    `ASSERTION_LIFETIME_BOUND_SECONDS`; an assertion is accepted while
+    `exp <= now + lifetime + skew`. So an assertion whose `iat` sits inside the skew
+    allowance — an honest tool whose clock is a little fast, which is the case the
+    allowance exists for — is still live after its `jti` has been forgotten, and a
+    spent one replayed in that window is granted a **second** token off one
+    signature.
+
+    **How the window is reached without waiting five minutes.** The clock is wound
+    back for the first grant only, so the platform records the `jti` at `T` while
+    the assertion is dated `iat = T + skew`, `exp = T + lifetime + skew` — accepted,
+    because that is exactly the boundary the test below pins. Real time is then
+    `T + 310`: past the prune horizon as it stands, inside the one the fix gives it,
+    with the assertion still live for twenty seconds. Only the `jti` can refuse it.
+
+    **The mutation this kills**: the prune horizon left at
+    `ASSERTION_LIFETIME_BOUND_SECONDS`. Every other replay assertion in this module
+    presents its `jti` a second or two after recording it, so all of them stay
+    green — which is how this survived to the security review.
+
+    **What this pair cannot pose, said rather than hidden** (`docs/MISTAKES.md`
+    entry 14). The other half — "a `jti` past the horizon is forgotten" — is not
+    observable through this endpoint, and that is the *reason* the horizon is
+    `lifetime + skew` rather than something larger: past that point no assertion
+    carrying the `jti` can still be accepted, so a forgotten one and a remembered
+    one are both refused and both for the expiry. What is observable, and is
+    asserted, is that the store has not become a wall: a fresh `jti` after the
+    wound-back grant is still granted.
+    """
+    horizon = ASSERTION_LIFETIME_BOUND_SECONDS + ASSERTION_SKEW_ALLOWANCE_SECONDS
+    replayed_at = ASSERTION_LIFETIME_BOUND_SECONDS + 10
+    assert ASSERTION_LIFETIME_BOUND_SECONDS < replayed_at < horizon, (
+        f"This test replays a `jti` {replayed_at} seconds after it was recorded, and the window it "
+        f"means to land in is ({ASSERTION_LIFETIME_BOUND_SECONDS}, {horizon}) — past the prune "
+        "horizon as it stands and inside the one the fix gives it. Outside that window the "
+        "assertion is either still inside the old horizon, and refused for the `jti` whatever the "
+        "fix does, or expired, and refused for that instead."
+    )
+
+    with wind_the_clock_back(replayed_at):
+        aged = claims_for_an_assertion(
+            client_id,
+            token_url,
+            issued_at=time.time() + ASSERTION_SKEW_ALLOWANCE_SECONDS,
+            lifetime=ASSERTION_LIFETIME_BOUND_SECONDS,
+        )
+        assertion = tool_key_pair.sign(aged)
+        granted(
+            platform,
+            token_url,
+            token_request(assertion, NRPS_MEMBERSHIP_SCOPE),
+            f"An assertion dated {ASSERTION_SKEW_ALLOWANCE_SECONDS} seconds ahead of the "
+            "platform's clock, inside the stated skew allowance",
+        )
+
+    assert aged["exp"] > time.time(), (
+        f"The assertion this test replays expired at {aged['exp']} and it is now "
+        f"{int(time.time())}, so the endpoint would refuse it for its expiry and the refusal below "
+        "would say nothing about whether the `jti` was remembered."
+    )
+
+    refused(
+        platform,
+        token_url,
+        token_request(assertion, NRPS_MEMBERSHIP_SCOPE),
+        INVALID_GRANT,
+        f"The same assertion, `jti` {aged['jti']!r}, replayed {replayed_at} seconds after it was "
+        "first spent and still twenty seconds from expiry",
+        "The identical assertion was granted when it was first presented, and it is still live,",
+    )
+
+    granted(
+        platform,
+        token_url,
+        token_request(
+            tool_key_pair.sign(claims_for_an_assertion(client_id, token_url)),
+            NRPS_MEMBERSHIP_SCOPE,
+        ),
+        "A freshly minted assertion after the replayed one was refused",
+    )
+
+
 def test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_refused(
     platform: Any, token_url: str, client_id: str, tool_key_pair: Any, claims_for_an_assertion: Any
 ) -> None:

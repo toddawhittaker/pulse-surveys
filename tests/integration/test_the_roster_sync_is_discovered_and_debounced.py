@@ -305,3 +305,91 @@ def test_a_section_with_no_stored_address_is_never_called_and_stays_distinct_fro
         "makes SPEC §7.3's two states indistinguishable: 'a section with no roster and a section "
         "with no enrollments are different states and only one of them is a fault'."
     )
+
+
+@pytest.mark.parametrize("sabotaged", [0, 1], ids=["first-section", "second-section"])
+def test_one_sections_unexpected_failure_does_not_end_the_hourly_walk(
+    roster_sync: Any,
+    roster_platforms: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    a_subject: Any,
+    sabotaged: int,
+) -> None:
+    """The security round's F3: one platform cannot silence the others.
+
+    The scheduled walk catches the errors the sync was written to raise. What ends
+    an hour is the error it was not: a token endpoint answering `200` with a body
+    carrying no `access_token` makes `pylti1p3` raise `KeyError` reading
+    `response["access_token"]`, and a roster answering a bare JSON list makes it
+    raise `AttributeError`. Neither is a `RosterSyncError`, so it escapes the
+    per-section body and the loop ends — every section after the failing one goes
+    unsynced, for that hour and every hour the platform stays broken, with nothing
+    on §6.1's console saying so for the sections that were never reached.
+
+    **The sabotage is a 200 rather than an error status**, deliberately: a 500 is
+    already handled — `test_a_refused_token_is_recorded_against_the_roster_url_with_
+    the_token_endpoints_status` is that case — and would prove nothing about the
+    unexpected class. What this poses is a *well-formed HTTP success* whose body is
+    a shape the library does not expect.
+
+    **Parametrised over which section is broken, because order decides whether the
+    bug is visible.** If the walk syncs the healthy section first and dies on the
+    second, "the healthy one synced" is true of a walk that aborts — the test would
+    be green against exactly the defect it is for. Neither this test nor the fix
+    settles the walk's order, so both orders are run and each requires the *other*
+    section to have synced. One of the two puts the failure first, whatever the
+    order turns out to be.
+
+    **The mutation this kills**: narrowing the per-section `except` back to
+    `RosterSyncError`/`NoSigningKeyError`. Every other test in this suite drives one
+    section at a time and would stay green.
+    """
+    sections = [
+        roster_platforms("http://roster-walk-one.invalid"),
+        roster_platforms("http://roster-walk-two.invalid"),
+    ]
+    subjects = [a_subject("walk-one"), a_subject("walk-two")]
+    for section, subject in zip(sections, subjects, strict=True):
+        service_wire.serve(compose_a_roster(section, [roster_contract.member(subject)]))
+
+    broken = sections[sabotaged]
+    healthy = sections[1 - sabotaged]
+    token_url = (broken.platform.discovery() or {}).get("token_endpoint")
+    assert isinstance(token_url, str) and token_url, (
+        "The mock platform advertises no `token_endpoint`, so there is nothing to sabotage and "
+        "this test could not pose its question."
+    )
+    service_wire.answering(token_url, {"token_type": "Bearer", "expires_in": 3600})
+
+    try:
+        roster_sync.call(
+            roster_sync.sync_every_stored_address,
+            session=committed_rows.session,
+            http=service_wire.session(),
+        )
+        committed_rows.commit()
+    except Exception:
+        committed_rows.session.rollback()
+
+    assert roster_rows.enrollments_for(subjects[1 - sabotaged]), (
+        f"The section at {healthy.address!r} did not sync, and the only thing wrong with this run "
+        f"is that {broken.address!r}'s token endpoint answered a 200 with no `access_token` in it. "
+        "One platform's malformed response ended the hour for every other section in the "
+        "institution — which is what the scheduled walk's own docstring promises cannot happen, "
+        "and what an operator would see as a whole institution that stopped syncing rather than as "
+        "one platform that is broken."
+    )
+    assert not roster_rows.enrollments_for(subjects[sabotaged]), (
+        f"The sabotaged section at {broken.address!r} ingested members without ever obtaining a "
+        "token, so the sabotage did not take and this test asserted nothing about recovery."
+    )
+    assert roster_rows.calls_for(broken.id), (
+        f"The section at {broken.address!r} failed unexpectedly and left no `nrps_call` row, so "
+        "§6.1's console shows a section that was never attempted rather than one whose platform "
+        "answered something the tool could not read. The walk continuing is half the fix; the "
+        "other half is that the failure is recorded against the section it belongs to."
+    )

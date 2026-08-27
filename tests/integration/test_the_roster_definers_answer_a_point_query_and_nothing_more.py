@@ -48,6 +48,15 @@ CARE_ROLE = "pulse_care"
 RESOLVE_DEFINER = "pulse_resolve_definer"
 ROSTER_DEFINER = "pulse_roster_definer"
 
+# The third owner, from the security round's F2. `pulse_app` held a table-wide
+# `INSERT` on `role_assignment` until that finding: `guard_write` refuses only an
+# `INSTRUCTOR` row, so the connection every screen runs on could write a **`CARE`**
+# assignment — the row the reveal definers' live-CARE predicate is satisfied by —
+# and the database said nothing. A grant cannot restrict a column *value*, so the
+# only instrument that bounds the write to one role is a definer whose body writes
+# that role and takes no argument for it.
+INSTRUCTOR_DEFINER = "pulse_instructor_definer"
+
 # The three functions, spelled as `identity_resolution_v001.sql` and
 # `roster_email_v001.sql` spell them. Named rather than discovered: unlike E0-10's
 # reveal, whose signature that ticket deliberately left open, these are settled
@@ -66,6 +75,53 @@ RESOLVE_PLATFORM_USER = (
 )
 RESOLVE_PERSON_FOR_USER = "public.resolve_person_for_user(CAST(:user_id AS uuid))"
 RECORD_ROSTER_EMAIL = "public.record_roster_email(CAST(:user_id AS uuid), CAST(:email AS text))"
+RECORD_TEACHING_INSTRUCTOR = (
+    "public.record_teaching_instructor(CAST(:person_id AS uuid), CAST(:section_id AS uuid))"
+)
+
+# The role that function writes, and one it must never be able to write. `CARE` is
+# the second on purpose rather than any other: SPEC §6.2 gives that role the queue
+# where comment content and identity live, and E0-10's reveal definers check for a
+# *live* `CARE` assignment — so a write path that could produce one is a write path
+# that can grant itself re-identification.
+INSTRUCTOR_ROLE = "INSTRUCTOR"
+CARE_ASSIGNMENT_ROLE = "CARE"
+
+# The scope grain SPEC §2.1 gives each of those two roles. Named here rather than
+# discovered because the two tests below need a row that is *valid* for its role —
+# a `CARE` assignment scoped to a section is refused by E0-09's role-grain rule,
+# and a refusal test that met that rule instead of a missing privilege would be
+# green for the wrong reason (`docs/MISTAKES.md` entry 3).
+ROLE_GRAIN = {INSTRUCTOR_ROLE: "section", CARE_ASSIGNMENT_ROLE: "institution"}
+
+# One function's parameters, for the assertion that no argument names a role.
+FUNCTION_ARGUMENTS = """
+    SELECT coalesce(p.proargnames, ARRAY[]::text[]) AS names,
+           array(
+               SELECT format_type(a.argtype, NULL)
+               FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY AS a(argtype, idx)
+               ORDER BY a.idx
+           ) AS types
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = :name
+"""
+
+# Every table a role holds any privilege on at all, for the blast-radius bound on
+# the instructor definer. Asked through `has_table_privilege` so a privilege
+# reaching the role by membership counts.
+TABLES_A_ROLE_CAN_REACH = """
+    SELECT c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+                            'REFERENCES', 'TRIGGER']) AS p(privilege)
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('r', 'p')
+      AND has_table_privilege(:role, c.oid, p.privilege)
+    GROUP BY c.relname
+    ORDER BY 1
+"""
 
 # What the roster definer may do, and the whole of it — **derived from D7's
 # sentence rather than copied from the migration**, so this constant can be
@@ -171,13 +227,22 @@ class acting_as:  # noqa: N801 — a context manager used as a statement, not a 
         self.session.execute(text("RESET ROLE"))
 
 
-def refused(session: Any, statement: str, parameters: dict[str, Any] | None = None) -> Any:
-    """Run `statement` inside a savepoint; answer the error it provoked, or `None`."""
+def refused(session: Any, statement: Any, parameters: dict[str, Any] | None = None) -> Any:
+    """Run `statement` inside a savepoint; answer the error it provoked, or `None`.
+
+    Takes SQL as a string **or** an already-built Core statement, so the one test
+    that has to provoke a real `INSERT` — with real foreign keys, so that a refusal
+    is the privilege rather than a constraint — can hand over the insert it built
+    from the table's own metadata rather than assembling SQL text for columns this
+    suite discovers by following keys.
+    """
     from sqlalchemy.exc import DatabaseError
 
     savepoint = session.begin_nested()
     try:
-        session.execute(text(statement), parameters or {})
+        session.execute(
+            text(statement) if isinstance(statement, str) else statement, parameters or {}
+        )
     except DatabaseError as failure:
         savepoint.rollback()
         return failure
@@ -478,12 +543,24 @@ def test_the_care_role_may_not_execute_either_of_the_roster_definers(committed_r
     """
     reachable = []
     with acting_as(committed_rows.session, CARE_ROLE):
-        for call in (RESOLVE_PLATFORM_USER, RESOLVE_PERSON_FOR_USER, RECORD_ROSTER_EMAIL):
+        for call in (
+            RESOLVE_PLATFORM_USER,
+            RESOLVE_PERSON_FOR_USER,
+            RECORD_ROSTER_EMAIL,
+            RECORD_TEACHING_INSTRUCTOR,
+        ):
             statement = f"SELECT {call}"
             failure = refused(
                 committed_rows.session,
                 statement,
-                {"platform": None, "subject": None, "user_id": None, "email": None},
+                {
+                    "platform": None,
+                    "subject": None,
+                    "user_id": None,
+                    "email": None,
+                    "person_id": None,
+                    "section_id": None,
+                },
             )
             if failure is None or sqlstate(failure) != INSUFFICIENT_PRIVILEGE:
                 reachable.append((call, failure))
@@ -495,7 +572,10 @@ def test_the_care_role_may_not_execute_either_of_the_roster_definers(committed_r
         "obtain a name without leaving a record' — and `record_roster_email` runs as an owner "
         "holding `SELECT (identity_email)` on `user_identity`. `REVOKE ALL ON FUNCTION … FROM "
         "PUBLIC` is the line whose absence produces exactly this, and Postgres grants `EXECUTE` to "
-        f"`PUBLIC` by default. What the failures were: {reachable}."
+        f"`PUBLIC` by default. What the failures were: {reachable}.\n\n"
+        f"`record_teaching_instructor` is in this list from the security round's F2 and is the "
+        "sharpest of the four: it writes a `role_assignment` row, and the role that may already "
+        "read that table is the one whose own live-`CARE` assignment is what the reveal checks."
     )
 
 
@@ -554,4 +634,292 @@ def test_each_definer_holds_exactly_the_column_privileges_its_job_needs(
         "If a grant here is legitimate, it is recorded in the pull request that makes it, in this "
         "constant, with the sentence it rests on — the shape "
         "`tests/integration/test_identity_grants.py` uses for every other grant in this schema."
+    )
+
+
+# ---------------------------------------------------------------------------
+# F2 — the teaching instructor's row, written by a definer because a grant
+# cannot bound a column's value.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def an_assignable_pair(committed_rows: Any) -> dict[str, Any]:
+    """One `person` and one `section`, committed, for a teaching assignment.
+
+    Both are real rows rather than invented uuids, and that is what makes the
+    refusal below attributable: Postgres checks privileges before it checks
+    foreign keys, so an insert of nonsense is refused either way — but a *valid*
+    row refused with 42501 can only have been refused for the privilege, which is
+    the one thing this fix removes.
+    """
+    graph = committed_rows.graph
+    pair = {
+        "graph": graph,
+        "person": graph.person(),
+        "section": graph.scope("section"),
+        "institution": graph.scope("institution"),
+    }
+    committed_rows.commit()
+    return pair
+
+
+@pytest.mark.parametrize(
+    "role", [INSTRUCTOR_ROLE, CARE_ASSIGNMENT_ROLE], ids=["instructor", "care"]
+)
+def test_the_application_role_may_not_insert_a_role_assignment_of_any_role(
+    committed_rows: Any,
+    metadata_tables: dict[str, Any],
+    an_assignable_pair: dict[str, Any],
+    role: str,
+) -> None:
+    """The security round's F2: the table grant is gone, so the database refuses both.
+
+    E1-11 granted `pulse_app` a table-wide `INSERT` on `role_assignment` so the
+    sync could write the teaching instructor's row. `guard_write` refuses only an
+    `INSTRUCTOR` row — that is ADR 0090's rule and it is a *Python* rule — so a
+    `CARE` row went through unconditionally, on the connection every screen in the
+    product runs on. Before this ticket that role held nothing at all on the table
+    and the database was the control; the grant removed it.
+
+    **The `CARE` parameter is the finding and the `INSTRUCTOR` one is what stops a
+    half-fix.** A `CARE` assignment is the row E0-10's reveal definers check for —
+    "verifies a live `CARE` assignment itself" — so a write path that can produce
+    one can grant itself re-identification, and §4's "only by the Care role" is
+    undone without touching a single grant on `user_identity`. And an
+    implementation that kept the grant while narrowing it to INSTRUCTOR would still
+    hand the caller the choice of value, which is exactly what a grant cannot
+    restrict.
+
+    **The mutation this kills**: `GRANT INSERT ON public.role_assignment TO
+    pulse_app` in `roster_sync_grants_v001.sql`, restored. Nothing else in this
+    suite would mention it — the inventory in `test_identity_grants.py` would go
+    red only because this fix removes the entry there in the same change.
+
+    **Asserted on the SQLSTATE, not on "it failed".** The row is valid: a real
+    person, a real scope node at the grain SPEC §2.1 gives the role, and the role
+    column's own enumerated value. A constraint violation (23xxx) would mean this
+    test never reached the privilege check, and would pass just as green.
+    """
+    graph = an_assignable_pair["graph"]
+    table = metadata_tables["role_assignment"]
+    scope = graph.scope_overrides(ROLE_GRAIN[role], an_assignable_pair[ROLE_GRAIN[role]])
+    values = {
+        graph.role_column: graph.role_value(role),
+        graph.person_column: an_assignable_pair["person"],
+        **scope,
+    }
+
+    with acting_as(committed_rows.session, APPLICATION_ROLE):
+        failure = refused(committed_rows.session, table.insert().values(**values))
+
+    assert failure is not None, (
+        f"`{APPLICATION_ROLE}` inserted a `{role}` `role_assignment` row directly. SPEC §2.1 "
+        "computes the whole oversight surface from these rows, and for `CARE` the row is what "
+        "E0-10's reveal definers check before they return a name — so a connection that may write "
+        "one may grant itself re-identification. The security round's F2 drops the table grant and "
+        "routes the one legitimate write through `record_teaching_instructor`, whose body chooses "
+        "the role."
+    )
+    assert sqlstate(failure) == INSUFFICIENT_PRIVILEGE, (
+        f"The insert failed with SQLSTATE {sqlstate(failure)} rather than "
+        f"{INSUFFICIENT_PRIVILEGE}: {failure}. This row is valid — a committed person, a scope "
+        f"node at the grain §2.1 gives `{role}`, and the role column's own value — so a "
+        "constraint failure means the privilege check was never reached and this test would be "
+        "green whatever the grant says."
+    )
+
+
+def test_the_teaching_instructor_definer_writes_an_instructor_row_and_takes_no_role_argument(
+    committed_rows: Any,
+    roster_rows: Any,
+    an_assignable_pair: dict[str, Any],
+) -> None:
+    """F2's permitting half, and the reason a definer rather than a narrower grant.
+
+    A grant can bound which *table* and which *columns* a role may write. It cannot
+    bound a column's **value** — there is no `GRANT INSERT (role = 'INSTRUCTOR')` —
+    so the only instrument that makes "this writer may create a teaching instructor
+    and nothing else" a property of the database is a function whose body writes
+    the value and whose signature has nowhere to put another one. That is the same
+    argument D7 makes for the email write, which is why the two look alike.
+
+    **Two assertions and they are different in kind.** The row it writes is an
+    `INSTRUCTOR` row scoped to the section, with `reports_to` NULL — SPEC §2.1 and
+    ADR 0044 keep supervision edges out of E1. And the function *takes two uuids*:
+    a caller has no argument through which any other role could be requested, which
+    is the property that survives somebody later editing the body.
+
+    **The mutation this kills**: a function that takes the role as a parameter, or
+    interpolates one, or defaults it — each of which passes a behavioural test that
+    only ever calls it the intended way.
+
+    **The near miss it must not fire on**: the assignment being written at all. A
+    definer that refuses everything satisfies every refusal in this module and
+    leaves every roster instructor without the section's report.
+    """
+    graph = an_assignable_pair["graph"]
+
+    with acting_as(committed_rows.session, APPLICATION_ROLE):
+        committed_rows.session.execute(
+            text(f"SELECT {RECORD_TEACHING_INSTRUCTOR}"),
+            {
+                "person_id": an_assignable_pair["person"],
+                "section_id": an_assignable_pair["section"],
+            },
+        )
+    committed_rows.commit()
+
+    scope = graph.scope_overrides("section", an_assignable_pair["section"])
+    written = [
+        row
+        for row in roster_rows.assignments()
+        if row.get(graph.person_column) == an_assignable_pair["person"]
+        and all(row.get(name) == value for name, value in scope.items())
+    ]
+    assert len(written) == 1, (
+        f"`record_teaching_instructor` left {len(written)} assignment(s) for that person and "
+        f"section: {[dict(row) for row in written]}. It is the only way this ticket's sync writes "
+        "the teaching instructor's row now that the table grant is gone, so a function that writes "
+        "nothing leaves every instructor without the report and the moderation view §2.1 hangs off "
+        "that row."
+    )
+    assert written[0][graph.role_column] == graph.role_value(INSTRUCTOR_ROLE), (
+        f"The row carries role {written[0][graph.role_column]!r}. The whole point of the function "
+        f"is that the value is the body's and not the caller's: `{INSTRUCTOR_ROLE}`, hardcoded."
+    )
+    assert written[0].get(graph.reports_to_column) is None, (
+        f"The row carries a `{graph.reports_to_column}` edge "
+        f"({written[0].get(graph.reports_to_column)!r}). SPEC §2.1 and ADR 0044 keep supervision "
+        "edges out of E1 — they are E9's admin surface — so an edge written here is a supervision "
+        "claim no human made."
+    )
+
+    declared = (
+        committed_rows.session.execute(
+            text(FUNCTION_ARGUMENTS), {"name": "record_teaching_instructor"}
+        )
+        .mappings()
+        .all()
+    )
+    assert len(declared) == 1, (
+        f"`public` declares {len(declared)} functions called `record_teaching_instructor`. The "
+        "argument assertion below is about one signature, and an overload is a second way in."
+    )
+    assert list(declared[0]["types"]) == ["uuid", "uuid"], (
+        f"`record_teaching_instructor` takes {list(declared[0]['types'])}. Two uuids — a person "
+        "and a section — is the whole signature: a third parameter, or a text one, is somewhere a "
+        "caller could put a role, and then the guarantee is the body's discipline rather than the "
+        "function's shape."
+    )
+    named_role = [name for name in declared[0]["names"] if "role" in name.lower()]
+    assert not named_role, (
+        f"`record_teaching_instructor` declares parameters {list(declared[0]['names'])}, and "
+        f"{named_role} names a role. The function exists precisely because a grant cannot bound a "
+        "column's value; a parameter that can carry one hands the choice straight back to the "
+        "caller."
+    )
+
+
+def test_calling_the_teaching_instructor_definer_twice_leaves_one_assignment(
+    committed_rows: Any,
+    roster_rows: Any,
+    an_assignable_pair: dict[str, Any],
+) -> None:
+    """The idempotence the hourly sync depends on, now that the write moved.
+
+    E1-11's sync runs against every section every hour and checks
+    `public.assignment_scope` before it writes. Moving the write into a definer
+    moves the question with it: the function is what runs when the sync decides to
+    write, and two rows for one person and one section is a purview grant recorded
+    twice — which E11's people surfaces render, and which no `UNIQUE` anywhere in
+    this schema is stated to refuse.
+
+    **The mutation this kills**: a body that inserts unconditionally. It is invisible
+    to the sync's own idempotence test whenever that test's member resolves to no
+    person — the assignment is never attempted there — and it is exactly what an
+    `INSERT` written from D5's description does.
+
+    **The pair is the test above**, which requires the first call to write. Without
+    it, "one row after two calls" is satisfied by a function that writes none.
+    """
+    graph = an_assignable_pair["graph"]
+    for _ in range(2):
+        with acting_as(committed_rows.session, APPLICATION_ROLE):
+            committed_rows.session.execute(
+                text(f"SELECT {RECORD_TEACHING_INSTRUCTOR}"),
+                {
+                    "person_id": an_assignable_pair["person"],
+                    "section_id": an_assignable_pair["section"],
+                },
+            )
+        committed_rows.commit()
+
+    scope = graph.scope_overrides("section", an_assignable_pair["section"])
+    written = [
+        row
+        for row in roster_rows.assignments()
+        if row.get(graph.person_column) == an_assignable_pair["person"]
+        and all(row.get(name) == value for name, value in scope.items())
+    ]
+    assert len(written) == 1, (
+        f"Two calls for one person and one section left {len(written)} rows: "
+        f"{[dict(row) for row in written]}. The sync calls this once an hour for every section it "
+        "syncs, so an unconditional insert is a purview grant recorded again every hour — and "
+        "SPEC §2.1 computes purview by walking these rows."
+    )
+
+
+def test_the_teaching_instructor_definer_owner_reaches_no_table_but_the_one_it_writes(
+    db_session: Any,
+) -> None:
+    """The blast radius of the third door, bounded without pinning a grant the fix leaves open.
+
+    A `SECURITY DEFINER` function spends its **owner's** privileges, so what
+    `pulse_app` can be made to reach through this door is exactly what
+    `pulse_instructor_definer` holds. The fix settles that the owner holds `INSERT`
+    on `role_assignment` "and whatever `SELECT` the insert's own conflict handling
+    needs" — so the *shape* of the grant is deliberately open and an equality over
+    it would be this test choosing an implementation.
+
+    What is not open is which **tables** it may touch, and that is the assertion
+    worth having: one. An owner that also reached `user_identity` or `person` would
+    put a name behind a function the application connection may call, which is ADR
+    0001's scheme undone in one line and invisible to every other gate in this
+    build.
+
+    **The mutation this kills**: granting the new owner more than it needs — the
+    quickest fix for a body that will not compile, and one no behavioural test
+    would notice.
+
+    **The control**: it must reach `role_assignment`. An owner that holds nothing
+    satisfies "no table but one" perfectly and makes every call above fail for a
+    reason that reads as unrelated.
+    """
+    present = db_session.execute(
+        text(ROLE_EXISTS), {"role": INSTRUCTOR_DEFINER}
+    ).scalar_one_or_none()
+    assert present is not None, (
+        f"There is no `{INSTRUCTOR_DEFINER}` role. The security round's F2 creates it as the owner "
+        "of `record_teaching_instructor`, a NOLOGIN role that exists for nothing else so that what "
+        "the door opens is a list somebody can read."
+    )
+
+    reachable = {
+        row[0]
+        for row in db_session.execute(text(TABLES_A_ROLE_CAN_REACH), {"role": INSTRUCTOR_DEFINER})
+    }
+    assert "role_assignment" in reachable, (
+        f"`{INSTRUCTOR_DEFINER}` holds no privilege on `role_assignment` at all (it reaches "
+        f"{sorted(reachable)}). Then the function it owns cannot write the row it exists to write, "
+        "and the equality below would be satisfied by an owner that holds nothing anywhere."
+    )
+    assert reachable == {"role_assignment"}, (
+        f"`{INSTRUCTOR_DEFINER}` reaches {sorted(reachable)}. It owns one function that inserts one "
+        "row into one table, and every other table in that set is something `pulse_app` can be "
+        "made to reach by calling it — `user_identity` and `person` most of all, which carry the "
+        "names §4 keeps behind the Care door.\n\n"
+        "The *shape* of the grant on `role_assignment` is deliberately not pinned here: the fix "
+        "leaves `INSERT` plus whatever `SELECT` the conflict handling needs to the implementer. "
+        "Which tables it may touch is not open."
     )
