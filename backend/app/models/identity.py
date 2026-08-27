@@ -452,11 +452,14 @@ class AssignmentRole(StrEnum):
 # supervises.
 #
 # **Here rather than in a service, because two readers of different kinds need
-# it.** `app.services.landing` compares a *claim* against it to choose a landing
-# view, and that module retires in E1-13; `app.services.provisioning` compares a
-# launching person's own `role_assignment` rows against it to decide whether §7.3
-# authorizes the sync, and that one does not. A set that outlives one of its
-# readers belongs beside the enumeration it names, not inside either reader.
+# it**, and that is still true now that one of them has changed shape.
+# `app.services.provisioning` compares a launching person's own `role_assignment`
+# rows against it to decide whether §7.3 authorizes a roster sync;
+# `app.services.authz` maps every member onto the one leadership landing view
+# (`LANDING_FOR_ROLE`, E1-13). It used to be `app.services.landing` comparing a
+# *claim* against it, and that module is deleted — a set that outlives one of its
+# readers belongs beside the enumeration it names rather than inside either
+# reader, which is exactly what E1-12 moved it here for.
 #
 # Members rather than strings, so a role this schema does not have cannot be
 # written down here at all: a typo is an `AttributeError` at import. `StrEnum`

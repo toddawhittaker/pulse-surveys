@@ -54,7 +54,7 @@ from app.lti.launch import (
     verified_launch,
 )
 from app.lti.registration import JWKS_PATH, NoSigningKeyError, published_key_set
-from app.services.landing import Door
+from app.services.authz import Door
 from app.services.provisioning import provision_from_launch
 from app.services.roster_sync import request_section_sync
 
@@ -136,9 +136,12 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
 
     On a valid launch the door issues the session `app.services.session` defines,
     sets the session and CSRF cookies, and returns a fragment redirect to the
-    role's landing route (`landing_with_session`) — the response contract E1-08
-    replaces E0-18's inline landing page with, and the one the web door joined in
-    E1-09.
+    landing route (`landing_with_session`) — the response contract E1-08 replaces
+    E0-18's inline landing page with, and the one the web door joined in E1-09.
+    Which route that is comes from the launching person's own assignments and
+    enrollment from E1-13 on, never from the launch's roles claim (ADR 0098); a
+    verified launch by somebody nothing entitles to a view is answered with a calm
+    200 page rather than refused.
 
     The session is committed on both paths, and each commit persists a different
     thing. On success it persists the claimed nonce, which is what makes the
@@ -198,7 +201,4 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
         db=session,
         settings=settings,
         secret=request.app.state.session_secret,
-        no_role_reason=(
-            "The launch states no role this tool has a view for, so there is nothing to show you."
-        ),
     )

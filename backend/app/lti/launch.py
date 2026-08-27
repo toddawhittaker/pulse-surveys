@@ -47,7 +47,7 @@ and never quotes what was sent.
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -73,8 +73,12 @@ from app.lti.replay_guard import NonceReplayedError, claim_nonce
 from app.services.tokens import TokenVerificationError, key_set
 
 __all__ = [
+    "INSTRUCTOR_ROLE_URI",
     "LAUNCH_PATH",
+    "LEARNER_ROLE_URI",
     "LOGIN_PATH",
+    "LTI_ROLES_CLAIM",
+    "MEMBERSHIP_VOCABULARY",
     "AudienceRefused",
     "ClockSkewRefused",
     "DeploymentRefused",
@@ -86,6 +90,7 @@ __all__ = [
     "StateRefused",
     "VersionRefused",
     "begin_a_launch",
+    "stated_roles",
     "verified_launch",
 ]
 
@@ -103,6 +108,30 @@ LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
 DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"
 MESSAGE_TYPE_CLAIM = f"{LTI_CLAIM_PREFIX}message_type"
 VERSION_CLAIM = f"{LTI_CLAIM_PREFIX}version"
+
+# The claim a launch states its roles in, and the LIS v2 membership vocabulary it
+# draws them from. Not this project's to choose either: SPEC §7.3 asks for strict
+# LTI 1.3 core, and a role compared under any other name is a role no conformant
+# platform sends.
+#
+# **They live here since E1-13**, which deleted `app/services/landing.py` — the
+# module that used to hold them and to turn a roles claim into a landing view.
+# Nothing turns them into a view any more: which screen somebody opens on comes
+# from the assignment model (`app.services.authz.resolve_landing`, ADR 0098).
+# What still reads them, and lawfully, is SPEC §7.3's ingestion —
+# `app.services.provisioning` asks whether a launch is a staff launch, and
+# `app.services.roster_sync` asks which roster members teach — so they belong in
+# the module §13 describes as "launch validation, role/context resolution".
+#
+# **`LEARNER_ROLE_URI` is read by nothing under `app/` today**, and is kept
+# because a vocabulary held half here and half in whoever needs the other member
+# is the drift `docs/MISTAKES.md` entry 13 is about: `INSTRUCTOR_ROLE_URI` means
+# "this is a staff launch" at exactly one call site, and the constant naming its
+# counterpart is what lets the next reader check that reading.
+LTI_ROLES_CLAIM = f"{LTI_CLAIM_PREFIX}roles"
+MEMBERSHIP_VOCABULARY = "http://purl.imsglobal.org/vocab/lis/v2/membership#"
+INSTRUCTOR_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Instructor"
+LEARNER_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Learner"
 
 # The one message type this tool serves and the one LTI version it speaks. Deep
 # Linking is out of scope (the epic README), so a `LtiDeepLinkingRequest` is a
@@ -139,6 +168,24 @@ IN_FLIGHT_LIFETIME_SECONDS = 300
 # 6). The web door and every downstream reader read `verified_launch`'s return
 # value, never the token.
 logger = logging.getLogger("app.lti.launch")
+
+
+def stated_roles(claim: Any) -> tuple[str, ...]:
+    """The role strings in a roles claim, whatever shape the issuer sent it in.
+
+    LTI 1.3 makes this an array, and every conformant platform sends one. A single
+    string is accepted because some platforms send one, and a claim of any other
+    shape yields nothing rather than raising — an unusable claim and an absent
+    claim lead the callers to the same answer, and that answer is theirs to make.
+
+    **Here since E1-13**, with the vocabulary above; see the comment there for why
+    the module that used to hold it is gone and who still reads it.
+    """
+    if isinstance(claim, str):
+        return (claim,)
+    if isinstance(claim, Sequence):
+        return tuple(role for role in claim if isinstance(role, str))
+    return ()
 
 
 class LaunchRefusedError(Exception):

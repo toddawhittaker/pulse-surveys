@@ -77,6 +77,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.lti.launch import INSTRUCTOR_ROLE_URI, stated_roles
 from app.lti.registration import NoSigningKeyError, OrmToolConf
 from app.models.identity import AssignmentRole, Enrollment, User
 from app.models.lti import (
@@ -95,7 +96,6 @@ from app.services.authz import (
     sanction_for,
     teaching_instructor_assigned,
 )
-from app.services.landing import INSTRUCTOR_ROLE_URI, stated_roles
 
 __all__ = ["request_section_sync", "sync_all_rosters", "sync_section"]
 

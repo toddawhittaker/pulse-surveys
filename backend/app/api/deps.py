@@ -6,11 +6,26 @@ that mints them to the redirect that checks them. The launch door carried one
 too until E1-08 moved its handshake into a server-side store (ADR 0089); this
 cookie is the web door's alone now, and ADR 0093 says why it stays. The second
 is the small amount of scaffolding both doors share around their answers: the
-two status codes, the refusal page, the calm page a cancelled web login gets,
+two status codes, the four pages a door can answer with that are not a landing,
 and the tail that turns verified claims into a session and a landing redirect,
-or into a refusal. §13 names this module for "auth context, role scoping,
-n-threshold guards"; the first of those is what this is, and the other two
-arrive with the screens that need them.
+or into one of those pages. §13 names this module for "auth context, role
+scoping, n-threshold guards"; the first of those is what this is, and the other
+two arrive with the screens that need them.
+
+**The pages themselves live here from E1-13 on.** They were in
+`app/services/landing.py`, beside the claims-derived landing seam that ticket
+deleted — and this module's paragraph above had described them all along, since
+a door's answer is exactly the thing a router needs and is not a domain rule. A
+service module left holding four HTML templates and no decision would have been
+a module kept alive by its markup.
+
+**Four answers, four testids, because they are four different events**: this
+tool refuses your token (`pulse-entry-refused`, a 4xx); you cancelled, or your
+provider declined for you (`web-login-cancelled`); Pulse holds no record of you
+(`no-account`, E1-12); and Pulse holds your record and nothing in it gives you a
+view at this door (`no-access`, E1-13). The last three are 200s, because nothing
+went wrong in any of them, and the person in front of the screen is owed the
+right words and the right person to ask.
 
 **Why a cookie at all.** The web login leaves the tool and comes back:
 `/auth/oidc/login` sends a browser to the provider and `/auth/oidc/callback`
@@ -73,6 +88,7 @@ insufficient, both belonged to the launch door, and neither exists here.
 
 import time
 from collections.abc import Mapping
+from html import escape
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -83,17 +99,11 @@ from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 from app.config import Settings, is_development
+from app.services.authz import Door, resolve_landing
 from app.services.identity import (
     ResolvedIdentity,
     identity_behind_a_launch,
     person_behind_a_web_login,
-)
-from app.services.landing import (
-    Door,
-    cancelled_page,
-    landing_role_for,
-    no_account_page,
-    refusal_page,
 )
 from app.services.session import (
     fragment_redirect,
@@ -109,13 +119,19 @@ __all__ = [
     "LOGIN_COOKIE_LIFETIME_SECONDS",
     "LTI_LOGIN_COOKIE",
     "OIDC_LOGIN_COOKIE",
+    "PAGE",
     "REFUSED",
     "cancelled",
+    "cancelled_page",
     "carried_across",
     "carry_across",
     "clear_carried",
     "landing_with_session",
+    "no_access",
+    "no_access_page",
     "no_account",
+    "no_account_page",
+    "refusal_page",
     "refused",
     "with_query",
 ]
@@ -224,9 +240,246 @@ def clear_carried(response: Response, name: str) -> None:
     response.delete_cookie(name, path="/")
 
 
+# ---------------------------------------------------------------------------
+# The four pages a door can answer with that are not a landing.
+# ---------------------------------------------------------------------------
+
+# What a refused entry says. Deliberately one sentence and a reason, with no
+# retry link: there is nowhere for a browser to go from here that is not the
+# platform or the provider it came from, and a link built out of a request that
+# just failed validation is the open redirect both doors exist to refuse.
+REFUSAL_TESTID = "pulse-entry-refused"
+REFUSAL_HEADING = "This did not open"
+
+# What a cancelled web login says (E1-09). Calm and non-blaming, per
+# `docs/DESIGN_BRIEF.md`'s tone: the person declined to sign in, or the provider
+# declined for them, and neither is a fault to report back. It says what is true —
+# nothing was changed, nobody is signed in — and stops there. No retry link, for
+# the reason above, and not a syllable of what the provider sent:
+# `error_description` and `error_uri` are text an attacker chooses, and a page
+# that repeated them would be a page whose words they wrote, under this tool's own
+# name and styling.
+CANCELLED_TESTID = "web-login-cancelled"
+CANCELLED_HEADING = "Sign-in did not finish"
+CANCELLED_MESSAGE = "Nothing was changed and nobody is signed in. You can start again when ready."
+
+# What a web login by somebody this system has no record of says (E1-12). A third
+# answer beside the two above, because it is a third event: the sign-in worked and
+# the provider vouched for the person, and Pulse simply holds no record of them.
+# "You cancelled", "this tool was handed something it cannot account for" and "we
+# do not know you" are three different things to be told, and the person in front
+# of the screen is owed the right one — telling somebody their sign-in failed when
+# it did not sends them to reset a password that is fine.
+#
+# It says what to do next, which the other two cannot: there is somebody to ask.
+# It names nobody and repeats nothing the provider sent — the subject and the
+# address in that token are the provider's text, and this page has nowhere to put
+# them.
+NO_ACCOUNT_TESTID = "no-account"
+NO_ACCOUNT_HEADING = "Pulse Surveys has no account for you yet"
+NO_ACCOUNT_MESSAGE = (
+    "You signed in correctly and nothing went wrong. Pulse Surveys keeps its own record of who "
+    "works here, and there is no record for you yet, so there is nothing to show. Ask whoever "
+    "administers Pulse Surveys at your institution to add you."
+)
+
+# What somebody Pulse *does* hold a record of is told when nothing in that record
+# gives them a view at the door they came in by (E1-13). A fourth answer and a
+# fourth event: they are known here, and no live assignment this door admits and
+# no live enrollment entitles them to a screen.
+#
+# The message carries three things and no more. What is true; the LMS-launch hint,
+# because SPEC §2.1 gives the instructor the launch and no web login, so "I logged
+# in and there is nothing here" is the ordinary way somebody who teaches meets
+# this page; and who to ask, which is a different administrator from the one
+# `no-account` sends people to.
+NO_ACCESS_TESTID = "no-access"
+NO_ACCESS_HEADING = "There is nothing in Pulse Surveys for you yet"
+NO_ACCESS_MESSAGE = (
+    "Nothing went wrong and nobody is at fault. Pulse Surveys keeps its own record of who works "
+    "here and who is enrolled, and nothing in yours gives you a view at this door yet. If you "
+    "teach, open Pulse Surveys from inside one of your courses in the LMS rather than from here. "
+    "Otherwise, ask whoever administers Pulse Surveys at your institution."
+)
+
+# The page, as one f-string rather than a template engine: there is one layout,
+# it has three slots, and nothing in the locked closure renders templates. The
+# style block is inline for the same reason, and it stays inline now that the SPA
+# exists: these pages are answered at a door, before any session, and a page that
+# pulled a stylesheet out of the SPA's bundle would depend on an asset the person
+# being refused may never have loaded.
+#
+# The markup follows `docs/DESIGN_BRIEF.md` and `design/tokens.css`: chalk ground,
+# spruce ink, Literata for the heading and Schibsted Grotesk for the body, the
+# flat mist pulse line the brief gives to empty states, and nothing else. Flat is
+# what the line means here — nothing has arrived yet. The webfonts are **not**
+# linked: an LMS iframe fetching Google Fonts is a third-party request from inside
+# somebody's LMS, the stacks fall back to a serif and a grotesque that are already
+# there, and the SPA is where the real loading strategy belongs.
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{heading} · Pulse Surveys</title>
+<style>
+  :root {{
+    --chalk: #F6F8F4;
+    --spruce: #1E3932;
+    --spruce-60: #5B7269;
+    --mist: #93A5A0;
+    --marigold: #DFA320;
+    --font-display: 'Literata', Georgia, serif;
+    --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-7: 48px;
+  }}
+  :focus-visible {{ outline: 2px solid var(--marigold); outline-offset: 2px; }}
+  body {{
+    margin: 0;
+    background: var(--chalk);
+    color: var(--spruce);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.5;
+  }}
+  main {{ max-width: 720px; margin: 0 auto; padding: var(--space-7) var(--space-5); }}
+  h1 {{ font-family: var(--font-display); font-size: 25px; font-weight: 600; margin: 0; }}
+  .pulse {{ display: block; margin: var(--space-4) 0; }}
+  p {{ color: var(--spruce-60); margin: 0; }}
+</style>
+</head>
+<body>
+<main data-testid="{testid}">
+<h1>{heading}</h1>
+<svg class="pulse" width="120" height="8" viewBox="0 0 120 8" aria-hidden="true"
+     fill="none" stroke="var(--mist)" stroke-width="2.5" stroke-linecap="round">
+  <path d="M2 4 H118"/>
+</svg>
+<p>{empty_state}</p>
+</main>
+</body>
+</html>
+"""
+
+
+def refusal_page(reason: str) -> str:
+    """The page a refused launch or a refused web login gets, in the same layout.
+
+    **It carries no landing testid**, and that is a property both door suites
+    assert rather than a detail: a refusal that served a landing page has
+    admitted the caller and merely said so in the status line. The testid slot is
+    filled with a name of its own so the markup stays one template.
+
+    `reason` is written by `app.lti.launch` or by `app.api.auth` and is never
+    assembled from the request. It is escaped anyway: everything interpolated is
+    a constant today, and the escaping is written for the day somebody puts a
+    section title or a person's name in one of these slots — so it is already
+    where it has to be rather than something a reviewer has to notice is missing.
+    """
+    return PAGE.format(
+        testid=escape(REFUSAL_TESTID, quote=True),
+        heading=escape(REFUSAL_HEADING),
+        empty_state=escape(reason),
+    )
+
+
+def cancelled_page() -> str:
+    """The page a cancelled web login gets, in the same layout (E1-09).
+
+    **It takes no argument at all**, and that is the security property rather than
+    a convenience: the only thing this door knows about a cancel is what the
+    provider's redirect said, every parameter in that redirect is attacker-chosen
+    text, and a function with nowhere to put such text cannot be talked into
+    rendering it. What the page says is three constants from this module.
+
+    It carries no landing testid, like `refusal_page`, so a cancel serves nobody's
+    view; and its own testid is not the refusal's, because a suite — and a person —
+    has to be able to tell "you cancelled" from "this tool was handed something it
+    could not account for".
+    """
+    return PAGE.format(
+        testid=escape(CANCELLED_TESTID, quote=True),
+        heading=escape(CANCELLED_HEADING),
+        empty_state=escape(CANCELLED_MESSAGE),
+    )
+
+
+def no_account_page() -> str:
+    """The page a verified web login with no stored identity gets (E1-12).
+
+    **Takes no argument, for `cancelled_page`'s reason and one more.** Everything
+    this door knows about the person is in a token somebody else wrote, and the
+    two values that identify them — the issuer and the subject — are exactly the
+    ones a page must not repeat: the first is an address and the second is a
+    stable per-person key at the provider, which SPEC §8 and §10 keep off screens
+    and out of logs alike. A function with nowhere to put them cannot be talked
+    into rendering them.
+
+    It carries no landing testid, so a person with no record here reaches nobody's
+    view; and its own testid is none of the other three, because this is a
+    distinct event and a suite — and a person — has to be able to tell them apart.
+
+    Rendered in the same layout and answered with the same status as the cancelled
+    page: this is not a failure, and a 4xx would be the tool telling somebody who
+    signed in correctly that they did something wrong.
+    """
+    return PAGE.format(
+        testid=escape(NO_ACCOUNT_TESTID, quote=True),
+        heading=escape(NO_ACCOUNT_HEADING),
+        empty_state=escape(NO_ACCOUNT_MESSAGE),
+    )
+
+
+def no_access_page() -> str:
+    """The page a resolved person with nothing to land on gets (E1-13).
+
+    **Takes no argument**, which is `cancelled_page`'s and `no_account_page`'s
+    security property and is the whole of what this page improves on what it
+    replaces: both doors used to answer this event with a refusal built from a
+    sentence the router handed in, and a parameter is somewhere a role name, a
+    stated claim or a subject can arrive. A page assembled from constants cannot
+    repeat anything a caller chose, and the door suite asserts exactly that over
+    the values the doors held while rendering it.
+
+    It carries no landing testid, so somebody entitled to no view reaches nobody
+    else's; and its own testid is none of the other three, for the reason above.
+    """
+    return PAGE.format(
+        testid=escape(NO_ACCESS_TESTID, quote=True),
+        heading=escape(NO_ACCESS_HEADING),
+        empty_state=escape(NO_ACCESS_MESSAGE),
+    )
+
+
 def refused(reason: str) -> HTMLResponse:
     """A 4xx page carrying the reason and no landing view."""
     return HTMLResponse(refusal_page(reason), status_code=REFUSED)
+
+
+def no_access() -> HTMLResponse:
+    """The calm page a resolved person with nothing to land on gets (E1-13).
+
+    A 200 and a page of its own, for `cancelled`'s reason applied to a fourth
+    event: Pulse holds this person's record and nothing in it — no live
+    assignment this door admits, no live enrollment — entitles them to a view.
+    That is a real state rather than a fault: a member of staff whose assignment
+    has not been entered yet, a student between terms, or somebody whose one role
+    belongs to the other door.
+
+    **It replaces both doors' "no role this tool has a view for" refusals.** Those
+    were 4xx pages built from a sentence each router passed in, which is what
+    `landing_with_session`'s `no_role_reason` parameter was; a person who
+    authenticated correctly is owed plain words rather than a refusal, and a page
+    that takes no argument cannot repeat anything a caller chose.
+
+    **Answered at both doors, and after `no_account` at the web one.** "Pulse has
+    no record of you" and "nothing in your record gives you a view" are different
+    things to be told, and they send the person to two different administrators
+    for help; E1-12's check runs first and is unchanged.
+    """
+    return HTMLResponse(no_access_page())
 
 
 def cancelled() -> HTMLResponse:
@@ -267,21 +520,27 @@ async def landing_with_session(
     db: Session,
     settings: Settings,
     secret: bytes,
-    no_role_reason: str,
 ) -> Response:
     """The last step of both second legs: resolve who this is, issue a session, land.
 
     Verified claims come in; a session `app.services.session` defines goes out,
-    handed over as a fragment redirect to the role's landing route with the
-    session and CSRF cookies set — or `no_role_reason` on a refusal page when this
-    door has no view for any role the claims state. E1-08 put the launch door on
-    this shape and E1-09 brought the web door onto it, which is what makes the two
-    doors' sessions the same type with the same custody.
+    handed over as a fragment redirect to the landing route with the session and
+    CSRF cookies set — or one of the two calm pages when there is no view to hand
+    over. E1-08 put the launch door on this shape and E1-09 brought the web door
+    onto it, which is what makes the two doors' sessions the same type with the
+    same custody.
 
-    `door` and `no_role_reason` are the whole of what differs between them. The
-    two refusal sentences are deliberately not the same — each door tells the
-    caller something true only of that door — so the sentence is an argument
-    rather than a constant here.
+    **`door` is now the whole of what differs between them.** E1-13 removed the
+    other difference, `no_role_reason`: each door used to refuse a person with no
+    view with a 4xx and a sentence of its own, and both now answer the one calm
+    page `no_access` renders out of constants.
+
+    **What the claims are read for here is `sub` and `iss`, and nothing else.**
+    E1-13 ends the roles claim's authority over the landing — the view comes from
+    `app.services.authz.resolve_landing`, out of the person's own assignments and
+    enrollment (ADR 0098), because the person who administers an LMS writes what
+    its launches state. §7.3's provisioning still reads that claim lawfully,
+    upstream of here, to tell a staff launch from a student one.
 
     **E1-12 resolves the stored identity here, which is why both doors get it
     from one edit.** A launch's `sub` reaches a `user` row and, through ADR 0024's
@@ -289,26 +548,28 @@ async def landing_with_session(
     linkage table. Both go through `app.services.identity`, which calls ADR 0094's
     point resolvers rather than reading an identity table.
 
-    **Identity is resolved before the role, and the order is a decision.** At the
-    web door a subject with no linkage gets the calm no-account page whatever its
-    roles claim says: "this system has no record of you" is true earlier and more
-    simply than "no view for the role you state", and it is the answer E1-13 will
-    still be giving once the roles come out of the assignment model — which needs
-    a person before it can ask anything at all.
+    **Identity is resolved before the landing, and the order is a decision.** At
+    the web door a subject with no linkage gets the calm no-account page: "this
+    system has no record of you" is true earlier and more simply than "nothing in
+    your record gives you a view here", the two send the person to two different
+    administrators for help, and the landing resolution needs a person before it
+    can ask anything at all.
 
-    **A launch with no `person` still lands.** That is a student, or somebody an
-    administrator has not put in the people graph yet, and the session carries the
-    absence (ADR 0028, D1). Making it a refusal would lock every student out of the
-    product on the strength of a table nobody has filled in for them.
+    **A launch with no `person` still reaches the student question.** That is ADR
+    0028's student — a `user` row, an enrollment, and no assignment anywhere — and
+    the session carries the absence. Making it a refusal would lock every student
+    out of the product on the strength of a table nobody fills in for them.
 
-    `landing_role_for(claims, door=door)` is called unchanged — this ticket
-    touches no role resolution (E1-13's) — and a caller stating a role this door
-    serves no view for is refused rather than landed on a default.
+    **The web door resolves no `user`, so it can never answer student.** §2.1's
+    table gives the student row one entry point; `ResolvedIdentity` carries
+    `user_id=None` at this door by construction rather than by a branch inside the
+    resolver.
 
-    **`async def`, and the resolution runs in a threadpool.** The session is
+    **`async def`, and both blocking calls run in a threadpool.** The session is
     synchronous (ADR 0013) and both callers are `async def` handlers, so a
     database read taken on the event loop would block every other request on the
     process — the same seam `app.api.lti` puts every other blocking call through.
+    `resolve_landing` reads the database, so it goes through it too.
 
     **Clearing the login cookie is the caller's**, not this function's: the launch
     door has no login cookie left to clear (ADR 0089), and the web door clears its
@@ -326,9 +587,16 @@ async def landing_with_session(
     else:
         identity = await run_in_threadpool(identity_behind_a_launch, db, claims)
 
-    role = landing_role_for(claims, door=door)
+    role = await run_in_threadpool(
+        resolve_landing,
+        db,
+        door=door,
+        person_id=identity.person_id,
+        user_id=identity.user_id,
+        settings=settings,
+    )
     if role is None:
-        return refused(no_role_reason)
+        return no_access()
     token = issue_session(
         door=door,
         role=role,
