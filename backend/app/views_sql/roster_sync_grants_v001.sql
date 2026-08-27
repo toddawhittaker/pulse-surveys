@@ -30,13 +30,17 @@
 -- transition), so a connection able to delete an enrollment could erase the record
 -- a participation figure is computed from.
 --
--- **`role_assignment`: INSERT and no SELECT.** The row is the teaching instructor's
--- `INSTRUCTOR` assignment — SPEC §2.1's fifth owned item, and a purview grant,
--- since the whole oversight surface is computed from these rows. The sync needs to
--- know whether it has already written one and asks `public.assignment_scope`
--- (E0-11's view, which this role already reads) rather than the table, so no
--- table-grain read is spent here. No `UPDATE` and no `DELETE`: a connection able to
--- revise one could revoke a dean's purview.
+-- **`role_assignment`: no grant at all, and that is E1-11's security review, F2.**
+-- An earlier version of this file granted `pulse_app` a table-wide `INSERT` so the
+-- sync could write the teaching instructor's row. The review found the hole: a
+-- grant bounds a table and its columns, not a column's *value*, so the connection
+-- every screen runs on could write a `CARE` assignment — the row E0-10's reveal
+-- definers check for — as readily as the `INSTRUCTOR` one `guard_write` was the
+-- only thing refusing. The grant is gone; the one legitimate write goes through
+-- `public.record_teaching_instructor` (`teaching_instructor_v001.sql`), a
+-- `SECURITY DEFINER` function whose body writes `'INSTRUCTOR'`. Before this ticket
+-- `pulse_app` held nothing on this table and the database was the control; it is
+-- again. ADR 0096 records the reasoning.
 --
 -- **`nrps_call`: SELECT and INSERT.** E1-11's own record (D9), one row per NRPS HTTP
 -- call. It is SPEC §6.1's "NRPS and AGS call logs with response codes", the
@@ -51,7 +55,5 @@
 
 GRANT SELECT, INSERT ON public.enrollment TO pulse_app;
 GRANT UPDATE (ended_on, lms_window_start, lms_window_end) ON public.enrollment TO pulse_app;
-
-GRANT INSERT ON public.role_assignment TO pulse_app;
 
 GRANT SELECT, INSERT ON public.nrps_call TO pulse_app;

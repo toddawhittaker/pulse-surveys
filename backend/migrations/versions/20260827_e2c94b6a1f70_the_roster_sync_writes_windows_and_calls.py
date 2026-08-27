@@ -27,7 +27,7 @@ user it has no name for; a NOT NULL name would leave it inventing one or storing
 nothing. Nullable is a widening, so the downgrade below cannot simply put it back —
 see `downgrade`.
 
-**Three SQL files are executed**, in this order and for these reasons:
+**Four SQL files are executed**, in this order and for these reasons:
 
   - `identity_resolution_v001.sql` — ADR 0094's point-resolution functions, shipped
     byte-identical from E1-11 and E1-12. Whichever branch merges second replays it:
@@ -36,8 +36,12 @@ see `downgrade`.
   - `roster_email_v001.sql` — E1-11's D7, the one door an email address reaches
     `user_identity` through. Executed *after* the `identity_name` widening, because
     its function inserts a row naming only `user_id` and `identity_email`.
-  - `roster_sync_grants_v001.sql` — D8, what `pulse_app` may do on the three
-    relations the sync writes. Executed last, because it grants on `nrps_call`.
+  - `roster_sync_grants_v001.sql` — D8, what `pulse_app` may do on the relations the
+    sync writes. Executed after the table exists, because it grants on `nrps_call`.
+    The security review's F2 took `role_assignment` out of it.
+  - `teaching_instructor_v001.sql` — F2's replacement for that grant: the definer
+    the teaching-instructor row is written through, whose body writes `'INSTRUCTOR'`
+    so a grant that could not bound the role no longer has to (ADR 0096).
 
 **No data migration.** Every column added is nullable, `nrps_call` is empty, and
 the widening refuses nothing, so a database with rows in it needs nothing done to
@@ -57,7 +61,18 @@ down_revision: str | Sequence[str] | None = "e2b8f4a17c63"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-SCRIPTS = ("identity_resolution_v001", "roster_email_v001", "roster_sync_grants_v001")
+# `teaching_instructor_v001` is the security review's F2: it creates
+# `pulse_instructor_definer` and `record_teaching_instructor`, the definer the sync
+# writes the teaching-instructor row through now that `roster_sync_grants_v001` no
+# longer grants `role_assignment`. It joins this revision in place because the
+# branch is unpushed (ADR 0041's boundary is the push), so no database anyone keeps
+# is at this revision with the old grants file.
+SCRIPTS = (
+    "identity_resolution_v001",
+    "roster_email_v001",
+    "roster_sync_grants_v001",
+    "teaching_instructor_v001",
+)
 
 WINDOW_START_COLUMN = "lms_window_start"
 WINDOW_END_COLUMN = "lms_window_end"
@@ -108,13 +123,17 @@ BEGIN
             FROM pulse_roster_definer;
         REVOKE ALL ON public.user_identity FROM pulse_roster_definer;
     END IF;
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pulse_instructor_definer') THEN
+        REVOKE INSERT, SELECT ON public.role_assignment FROM pulse_instructor_definer;
+        REVOKE ALL ON public.role_assignment FROM pulse_instructor_definer;
+    END IF;
 END
 $$;
 """
 
 
 def upgrade() -> None:
-    """Add the window columns and the call log, widen the name, open the three doors."""
+    """Add the window columns and the call log, widen the name, open the four doors."""
     op.add_column(
         "enrollment", sa.Column(WINDOW_START_COLUMN, sa.DateTime(timezone=True), nullable=True)
     )
@@ -164,10 +183,12 @@ def downgrade() -> None:
     recorded in ADR 0094, and the repair is to re-run the other revision — which is
     a `CREATE OR REPLACE` replay and does nothing else.
 
-    **The definer roles are emptied rather than dropped**, which E0-10 decided for
-    `pulse_reveal_definer` and this follows; see `EMPTY_THE_DEFINER_ROLES` above for
-    what dropping them actually did.
+    **The three definer functions go together**, `record_teaching_instructor`
+    among them (the security review's F2), and the three definer roles are emptied
+    rather than dropped — which E0-10 decided for `pulse_reveal_definer` and this
+    follows; see `EMPTY_THE_DEFINER_ROLES` above for what dropping them actually did.
     """
+    op.execute("DROP FUNCTION IF EXISTS public.record_teaching_instructor(uuid, uuid)")
     op.execute("DROP FUNCTION IF EXISTS public.record_roster_email(uuid, text)")
     op.execute("DROP FUNCTION IF EXISTS public.resolve_person_for_user(uuid)")
     op.execute("DROP FUNCTION IF EXISTS public.resolve_platform_user(uuid, text)")
