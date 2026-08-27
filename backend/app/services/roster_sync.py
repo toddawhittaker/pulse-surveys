@@ -232,11 +232,12 @@ def sync_section(
         )
         return
 
-    connector = ServiceConnector(_registration_for(session, section), requests_session=http)
+    platform = _platform_for(session, section)
+    connector = ServiceConnector(_registration_for(session, platform), requests_session=http)
     members = _walked_roster(session, section_id, address, connector)
     if members is None:
         return
-    _ingest(session, section, members, _today(settings))
+    _ingest(session, section, platform.id, members, _today(settings))
 
 
 def sync_all_rosters(
@@ -342,19 +343,18 @@ def request_section_sync(session: Session, section_id: UUID) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _registration_for(session: Session, section: Section) -> Any:
-    """The `pylti1p3` registration this section's roster is fetched with.
+def _platform_for(session: Session, section: Section) -> LtiPlatform:
+    """The registration this section was discovered through, and the only one.
 
-    Resolved through `section.lti_deployment_id → lti_deployment → lti_platform`
-    and through nothing else. That chain is the section's own identity (ADR 0091):
-    a context identifier is unique inside one registration and meaningless across
-    registrations, so the registration that discovered a section is the only one
-    whose credentials mean anything at its roster address.
+    `section.lti_deployment_id → lti_deployment → lti_platform`, and nothing else.
+    That chain is the section's own identity (ADR 0091): a context identifier is
+    unique inside one registration and meaningless across registrations, so the
+    registration that discovered a section is the only one whose credentials mean
+    anything at its roster address, and the only one whose subject keys mean
+    anything in its roster. Deferred E1-10 item 1 is about both halves.
 
-    Built through `OrmToolConf`, which is the one construction path this tool has
-    for a registration — E1-11 taught it to fill in the tool's private key and
-    `kid` as well, so the inbound door and this outbound client read the same row
-    of `tool_signing_key` and a platform verifying either sees the same key.
+    Read once per section and handed to everything below it, so that "whose
+    platform is this" is answered in one place per sync rather than per member.
     """
     platform = session.scalars(
         select(LtiPlatform)
@@ -367,7 +367,23 @@ def _registration_for(session: Session, section: Section) -> Any:
             "resolves to no registered platform. A section is bound to the registration it was "
             "discovered through, and without one there are no credentials to call its roster with."
         )
+    return platform
 
+
+def _registration_for(session: Session, platform: LtiPlatform) -> Any:
+    """The `pylti1p3` registration for one platform row, ready to sign with.
+
+    Built through `OrmToolConf`, which is the one construction path this tool has
+    for a registration — E1-11 taught it to fill in the tool's private key and
+    `kid` as well, so the inbound door and this outbound client read the same row
+    of `tool_signing_key` and a platform verifying either sees the same key.
+
+    The two refusals are loud because they are facts about the *deployment* rather
+    than about one section: a registration with no token endpoint and a tool with
+    no signing key both mean nothing can be synced anywhere, and a sync that
+    swallowed either would leave an operator reading a product full of sections
+    that look never-synced.
+    """
     registration = OrmToolConf(session).find_registration_by_params(
         platform.issuer, platform.client_id
     )
@@ -570,6 +586,7 @@ def _today(settings: Settings | None) -> date:
 def _ingest(
     session: Session,
     section: Section,
+    platform_id: UUID,
     roster: Sequence[Mapping[str, Any]],
     today: date,
 ) -> None:
@@ -586,7 +603,7 @@ def _ingest(
 
     resolved: dict[str, UUID] = {}
     for member in members:
-        found = _resolve_member(session, section, member)
+        found = _resolve_member(session, platform_id, member)
         if found is not None:
             resolved[member.subject] = found
 
@@ -608,7 +625,7 @@ def _ingest(
             _close(session, row, ended_on=today, window_end=None)
 
 
-def _resolve_member(session: Session, section: Section, member: _Member) -> UUID | None:
+def _resolve_member(session: Session, platform_id: UUID, member: _Member) -> UUID | None:
     """This member's `user` row, written first if the deployment has never seen them.
 
     D6: the match is `(lti_platform_id, lms_user_id)` through
@@ -627,7 +644,6 @@ def _resolve_member(session: Session, section: Section, member: _Member) -> UUID
     revised, so a lookup before it would answer a question the constraint already
     answers atomically.
     """
-    platform_id = _platform_of(session, section)
     found = _resolved_user(session, platform_id, member.subject)
     if found is not None or member.unreadable:
         return found
@@ -649,19 +665,6 @@ def _resolve_member(session: Session, section: Section, member: _Member) -> UUID
         # again is the answer rather than a retry loop.
         savepoint.rollback()
     return _resolved_user(session, platform_id, member.subject)
-
-
-def _platform_of(session: Session, section: Section) -> UUID:
-    """The registration this section was discovered through, as a platform id."""
-    platform_id = session.scalars(
-        select(LtiDeployment.lti_platform_id).where(LtiDeployment.id == section.lti_deployment_id)
-    ).one_or_none()
-    if platform_id is None:
-        raise RosterSyncError(
-            f"section {section.id} is bound to deployment {section.lti_deployment_id}, which no "
-            "registration holds."
-        )
-    return platform_id
 
 
 def _resolved_user(session: Session, platform_id: UUID, subject: str) -> UUID | None:
