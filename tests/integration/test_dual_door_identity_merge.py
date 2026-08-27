@@ -17,9 +17,21 @@ read a session this way. `tests/unit/test_session_module.py` is where the signat
 is the subject.
 
 **Which view a person lands on is deliberately not asserted anywhere in this
-module.** E1-12 leaves `landing_role_for` reading the claim and E1-13 replaces it;
-a test here that pinned the route would go red on somebody else's ticket for a
-reason that has nothing to do with identity.
+module.** E1-13 resolves it from the assignment model; a test here that pinned the
+route would go red on somebody else's ticket for a reason that has nothing to do
+with identity. `claims_of_session` reads the fragment without looking at the
+segment in front of it, which is what keeps that true.
+
+**Every person here holds a live assignment, and E1-13 is why** (`docs/MISTAKES.md`
+entry 22). Until that ticket a verified launch landed on whatever its roles claim
+named and a web login on whatever the provider said, so identity could be asserted
+over subjects Pulse held nothing else about. From E1-13 on a door answers the calm
+no-access page unless the person's own rows entitle them to a view — so every
+subject below is given the one assignment that opens the door it enters by, in the
+open, in the test that drives it. That is one row per test and it is not this
+module's subject: what is asserted is still only which `person` the two doors
+resolve to. The rule that the assignment is what decides is asserted where it
+belongs, in `tests/integration/test_landing_resolves_from_assignments.py`.
 
 **The rows are seeded, not provisioned by a door.** `tests/fixtures/web_identity.py`
 writes the `person`, `user` and linkage rows each test means, committed, because the
@@ -73,6 +85,13 @@ SUBJECT_CLAIM = "sub"
 # instructor assignment that enters by launch. §2: "Entry doors are a property of
 # the assignment, not the person."
 CARE_ROLE = "CARE"
+
+# The two assignments this module hangs on the people it drives, so that E1-13's
+# doors have something to land them on. `INSTRUCTOR` is the role §2.1's table gives
+# the LTI launch; `CARE` is one of the two it gives the web login and no other. See
+# this module's docstring on why they are here at all.
+INSTRUCTOR_ROLE = "INSTRUCTOR"
+INSTITUTION_SCOPE = "institution"
 
 # The table a linkage row lives in, for the counts below. Spelled rather than
 # discovered for the same reason as the claims above.
@@ -143,6 +162,36 @@ def platform_id_of(registration: Any, rows: Any) -> Any:
     return registration.platform_row[rows.key_of(PLATFORM_TABLE)]
 
 
+def so_a_launch_can_land(committed_rows: Any, person_id: Any) -> None:
+    """One `INSTRUCTOR` assignment, so E1-13's launch door has a view to send this person to.
+
+    Not this module's subject and it says so: from E1-13 on a launch by a person
+    whose rows entitle them to nothing is answered with the calm no-access page,
+    which carries no session at all — and every assertion here is about the
+    `person_id` a session carries. One row, written in the open, is what keeps
+    these tests about identity (`docs/MISTAKES.md` entry 22).
+    """
+    committed_rows.graph.assign(INSTRUCTOR_ROLE, person=person_id)
+    committed_rows.commit()
+
+
+def so_a_web_login_can_land(committed_rows: Any, person_id: Any) -> None:
+    """One `CARE` assignment at the institution, the same repair at the other door.
+
+    §2.1's table gives Care the web login and no launch, and §2.1 puts it outside
+    the supervision graph entirely — hence the explicit null edge, which is the
+    shape `tests/integration/test_the_leadership_limb_of_a_staff_launch.py` writes
+    it in too.
+    """
+    committed_rows.graph.assign(
+        CARE_ROLE,
+        scope=committed_rows.graph.scope(INSTITUTION_SCOPE),
+        person=person_id,
+        reports_to=None,
+    )
+    committed_rows.commit()
+
+
 def one_person_row(rows: Any, person_id: str, what: str) -> Any:
     """The single `person` row with this primary key, or a failure counting what there is.
 
@@ -203,19 +252,37 @@ def test_the_session_claim_reader_reads_a_token_it_is_handed() -> None:
 
 
 def test_a_launch_lands_with_a_session_this_module_can_read(
-    launch_driver: Any, provisioning_contract: Any, launch_ground: Any
+    launch_driver: Any,
+    provisioning_contract: Any,
+    launch_ground: Any,
+    web_identity: Any,
+    committed_rows: Any,
 ) -> None:
     """The second control: the launch driver reaches a landing, and its session decodes.
 
     **Dies if the launch never lands** — a refused handshake, a platform nothing
-    registered, a door answering 4xx — in which case every identity assertion below
-    would be a statement about a flow that did not happen. E1-08's own claims are
-    what is checked, not E1-12's: those are already shipped, so this control is
-    green before the implementer starts and stays green after, which is what makes
-    a red here a fault in this module rather than in the ticket.
+    registered, a door answering 4xx or, since E1-13, the calm no-access page — in
+    which case every identity assertion below would be a statement about a flow
+    that did not happen. E1-08's own claims are what is checked, not E1-12's: those
+    are already shipped, so this control is about the machinery rather than about
+    either ticket, and a red here is a fault in this module.
+
+    **The three rows and the assignment are E1-13's arrival in this module.** A
+    launch by a subject Pulse holds no record of now lands on a page carrying no
+    session, so a control that asserted "a session decodes" would fail for a reason
+    that has nothing to do with the decoder.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.instructor_role_urn)
-    launch_ground(provisioning_contract.label_of(launch_driver.claims_of(offer)))
+    claims = launch_driver.claims_of(offer)
+    launch_ground(provisioning_contract.label_of(claims))
+
+    person_id = web_identity.person()
+    user_id = web_identity.user(
+        platform_id=platform_id_of(launch_driver.registration, web_identity),
+        subject=claims.get(SUBJECT_CLAIM),
+    )
+    web_identity.link_person_to_user(person_id=person_id, user_id=user_id)
+    so_a_launch_can_land(committed_rows, person_id)
 
     response, signed = launch_driver.launch(offer)
 
@@ -246,6 +313,7 @@ def test_the_two_hat_person_resolves_to_one_person_row_through_both_doors(
     provisioning_contract: Any,
     launch_ground: Any,
     web_identity: Any,
+    committed_rows: Any,
 ) -> None:
     """The done-when, verbatim: same stored identity, one row, by its primary key.
 
@@ -315,6 +383,14 @@ def test_the_two_hat_person_resolves_to_one_person_row_through_both_doors(
     web_identity.link_web_subject(
         issuer=provider_issuer, subject=published_subject(hers), person_id=person_id
     )
+    # Her two hats, so that E1-13's two doors have a view each to land her on: an
+    # instructor assignment that permits a launch and a Care assignment that
+    # permits a web login (ADR 0026). Which view each door chooses is not this
+    # module's subject and is asserted in
+    # `tests/integration/test_landing_resolves_from_assignments.py`; what is
+    # asserted here is that both sessions name one `person` row.
+    so_a_launch_can_land(committed_rows, person_id)
+    so_a_web_login_can_land(committed_rows, person_id)
 
     web_landing = web_door.login_as(hers)
     launch_landing, _ = launch_driver.launch(offers[0])
@@ -350,6 +426,7 @@ def test_a_second_person_entering_by_launch_resolves_to_their_own_person_row(
     provisioning_contract: Any,
     launch_ground: Any,
     web_identity: Any,
+    committed_rows: Any,
 ) -> None:
     """Criterion 2: the merge is a merge and not a constant (`docs/MISTAKES.md` entry 3).
 
@@ -390,6 +467,11 @@ def test_a_second_person_entering_by_launch_resolves_to_their_own_person_row(
         person_id = web_identity.person()
         user_id = web_identity.user(platform_id=platform_id, subject=subject)
         web_identity.link_person_to_user(person_id=person_id, user_id=user_id)
+        # One instructor assignment each, so both launches land with a session
+        # under E1-13. Both people get the same one, so the only thing that
+        # differs between them is which `person` row their subject reaches —
+        # which is the whole question this test asks.
+        so_a_launch_can_land(committed_rows, person_id)
         people[subject] = str(person_id)
 
     first_landing, _ = launch_driver.launch(first_offer)
@@ -427,6 +509,7 @@ def test_a_second_launch_by_one_subject_leaves_one_user_row_and_one_identity(
     provisioning_contract: Any,
     launch_ground: Any,
     web_identity: Any,
+    committed_rows: Any,
 ) -> None:
     """Criterion 4, the launch side: "no duplicate identities after repeated logins".
 
@@ -466,6 +549,9 @@ def test_a_second_launch_by_one_subject_leaves_one_user_row_and_one_identity(
     person_id = web_identity.person()
     user_id = web_identity.user(platform_id=platform_id, subject=subject)
     web_identity.link_person_to_user(person_id=person_id, user_id=user_id)
+    # Written once, before either launch, so that "the second launch changed
+    # nothing" is measured over a person both launches could land (E1-13).
+    so_a_launch_can_land(committed_rows, person_id)
 
     def users_on_the_platform() -> list[Any]:
         """Every `user` row belonging to the registration these launches are signed by.
@@ -524,6 +610,7 @@ def test_a_second_web_login_writes_no_linkage_row_and_carries_one_identity(
     published_person: Any,
     published_subject: Any,
     web_identity: Any,
+    committed_rows: Any,
 ) -> None:
     """Criterion 4, the web side: a login reads the linkage and never writes one.
 
@@ -547,6 +634,10 @@ def test_a_second_web_login_writes_no_linkage_row_and_carries_one_identity(
     web_identity.link_web_subject(
         issuer=provider_issuer, subject=published_subject(hers), person_id=person_id
     )
+    # Her Care hat, so E1-13's web door has a view to land her on. Written before
+    # the counts below are taken, so that "a login created no `person` row" is
+    # measured against a table this test has finished seeding.
+    so_a_web_login_can_land(committed_rows, person_id)
 
     before_linkages = [dict(row) for row in web_identity.linkages()]
     before_people = web_identity.keys_of(PERSON_TABLE)

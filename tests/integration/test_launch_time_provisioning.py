@@ -34,6 +34,28 @@ address to appear. That pairing is inside the test rather than next door on
 purpose: it is what makes the negative half evidence about the *role* rather than
 evidence about the feature (`docs/MISTAKES.md` entry 2 — prefer asserting the
 forbidden state — and entry 3 — a test that passes for an unrelated reason).
+
+**Every launch here is asserted with `LaunchDriver.accepted` rather than `landed`,
+and E1-13 is why** (`docs/MISTAKES.md` entry 22). That ticket resolves the landing
+from the launching person's own live assignments, with enrollment as the student
+fallback — so a launch by a subject Pulse holds nothing about is answered with the
+calm no-access page, which is neither a refusal nor a role route. What these tests
+have always asserted is E1-10's rule that "a provisioning refusal NEVER fails the
+launch or the person's landing", and both of the door's non-refusal answers
+satisfy it; `accepted` is that rule in words that stay true when the launching
+person's rows entitle them to no view.
+
+**Seeding those rows instead was tried and is unsound here**, which is worth
+recording so nobody re-attempts it. Every route to a landing writes a `section`,
+and the seeding helper invents a section code as `{letter}3WW` from a session-wide
+counter one letter wide — so across a full run it produces `R3WW`, the very code
+the mock's launch label carries, and `the_one(sections_coded(...))` then finds two
+sections and fails inside its own fixture. A flake in this module would be blamed
+on the writer for a week. Which *view* a launching person's rows produce is
+asserted where the rows are written in the open, in
+`tests/integration/test_landing_resolves_from_assignments.py`, and that a valid
+launch still reaches a role route at all is asserted in
+`tests/integration/test_lti_launch_door.py`.
 """
 
 from datetime import timedelta
@@ -129,7 +151,7 @@ def test_a_staff_launch_creates_the_course_its_context_label_names(
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "an instructor's launch against an unknown section")
+    launch_driver.accepted(response, "an instructor's launch against an unknown section")
     course = the_one(
         course_named(provisioned_rows, provisioning_contract, ground, label),
         f"course for prefix {label.prefix!r} numbered {label.number!r}",
@@ -184,7 +206,7 @@ def test_a_staff_launch_creates_the_section_with_the_calendar_its_terms_map_give
 
     response, _ = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "an instructor's launch against an unknown section")
+    launch_driver.accepted(response, "an instructor's launch against an unknown section")
     course = the_one(course_named(provisioned_rows, provisioning_contract, ground, label), "course")
     section = the_one(
         sections_coded(provisioned_rows, provisioning_contract, label),
@@ -262,7 +284,7 @@ def test_a_staff_launch_stamps_the_section_with_the_context_it_was_discovered_fr
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "an instructor's launch against an unknown section")
+    launch_driver.accepted(response, "an instructor's launch against an unknown section")
     registration = launch_driver.registration
     assert registration is not None, (
         "The launch driver carries no registration, so this test has nothing to compare the "
@@ -323,7 +345,7 @@ def test_a_staff_launch_stores_the_roster_service_address_from_its_own_claim(
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "an instructor's launch")
+    launch_driver.accepted(response, "an instructor's launch")
     advertised = provisioning_contract.memberships_url_in(signed.claims)
     section = the_one(
         sections_coded(provisioned_rows, provisioning_contract, label),
@@ -379,11 +401,11 @@ def test_a_second_identical_staff_launch_changes_no_row(
         }
 
     first, _ = launch_driver.launch(offer)
-    launch_driver.landed(first, "the first instructor launch")
+    launch_driver.accepted(first, "the first instructor launch")
     after_one = snapshot()
 
     second, _ = launch_driver.launch(offer)
-    launch_driver.landed(second, "a second identical instructor launch")
+    launch_driver.accepted(second, "a second identical instructor launch")
     after_two = snapshot()
 
     assert after_two == after_one, (
@@ -414,18 +436,20 @@ def test_a_launch_creates_the_launching_subjects_user_row_once(
     for value. A row rewritten on each launch is a `sub` this project has edited,
     which is exactly what the `lms_` marker says never happens.
 
-    **This test is about a launch that lands.** Whether a launch that verifies and
-    lands on no view — E1-07's Mentor mint, which E1-08's door refuses — also
-    leaves a `user` row is not asserted anywhere in this module: the ticket does
-    not settle it, and the two non-staff tests below are written so that neither
-    answer changes them.
+    **This test used to say it was about a launch that lands, and E1-13 made that
+    impossible to keep.** It has a second reason for `accepted` beyond the
+    module-wide one above: from that ticket a landing comes from an assignment or
+    an enrollment, and an enrollment hangs off the very `user` row this test exists
+    to watch being created. So even where seeding were otherwise sound, seeding it
+    here would be handing back the answer (`docs/MISTAKES.md` entry 30) — and a
+    *first* launch by anybody reaches the calm no-access page by construction.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.learner_role_urn)
     label = provisioning_contract.label_of(launch_driver.claims_of(offer))
     launch_ground(label)
 
     first, signed = launch_driver.launch(offer)
-    launch_driver.landed(first, "a student's launch")
+    launch_driver.accepted(first, "a first launch by a subject Pulse holds no rows for")
     subject = signed.claims.get("sub")
     assert subject, "The launch carries no `sub`, so there is no subject for a `user` row to be."
     created = the_one(
@@ -433,7 +457,7 @@ def test_a_launch_creates_the_launching_subjects_user_row_once(
     )
 
     second, _ = launch_driver.launch(offer)
-    launch_driver.landed(second, "the same person's second launch")
+    launch_driver.accepted(second, "the same person's second launch")
     again = the_one(
         users_for(provisioned_rows, subject),
         f"`user` row for {subject!r} after a second launch",
@@ -496,7 +520,7 @@ def assert_a_staff_launch_still_provisions(
     (`docs/MISTAKES.md` entry 3).
     """
     response, signed = driver.launch(driver.offer_for_role(names.instructor_role_urn))
-    driver.landed(response, "the instructor's launch that follows")
+    driver.accepted(response, "the instructor's launch that follows")
 
     assert course_named(rows, names, ground, label), (
         "The instructor's launch into the same environment created no course either, so the "
@@ -539,7 +563,7 @@ def test_a_student_launch_stores_no_roster_address_and_creates_no_course_or_sect
 
     response, signed = launch_driver.launch(student)
 
-    launch_driver.landed(response, "a student's launch against an unknown section")
+    launch_driver.accepted(response, "a student's launch against an unknown section")
     assert provisioning_contract.memberships_url_in(signed.claims), (
         "The student's own launch advertises no roster service address, so 'the address was not "
         "stored' is true of a launch that carried none and says nothing about the rule."
@@ -694,7 +718,7 @@ def test_a_context_with_a_label_and_no_title_provisions_the_fallback_title(
         offer, defect=provisioning_contract.titleless_context_with_label
     )
 
-    launch_driver.landed(response, "a launch whose context carries a label and no title")
+    launch_driver.accepted(response, "a launch whose context carries a label and no title")
     assert "title" not in provisioning_contract.context_of(signed.claims), (
         "The launch this test drove still carries a context `title`, so the fallback is never "
         "reached and this test would pass against a writer that has none."
@@ -742,7 +766,7 @@ def test_a_real_title_arriving_later_replaces_a_fallback_and_clears_the_flag(
     first, _ = launch_driver.launch(
         offer, defect=provisioning_contract.titleless_context_with_label
     )
-    launch_driver.landed(first, "a titleless launch")
+    launch_driver.accepted(first, "a titleless launch")
     fallback = the_one(
         course_named(provisioned_rows, provisioning_contract, ground, label), "course"
     )
@@ -753,7 +777,7 @@ def test_a_real_title_arriving_later_replaces_a_fallback_and_clears_the_flag(
     )
 
     second, signed = launch_driver.launch(offer)
-    launch_driver.landed(second, "a later launch carrying the platform's own title")
+    launch_driver.accepted(second, "a later launch carrying the platform's own title")
 
     corrected = the_one(
         course_named(provisioned_rows, provisioning_contract, ground, label), "course"
@@ -796,7 +820,7 @@ def test_a_titleless_launch_never_overwrites_a_title_the_platform_supplied(
     ground = launch_ground(label)
 
     first, signed = launch_driver.launch(offer)
-    launch_driver.landed(first, "a launch carrying the platform's own title")
+    launch_driver.accepted(first, "a launch carrying the platform's own title")
     real_title = provisioning_contract.title_of(signed.claims)
     stored = the_one(course_named(provisioned_rows, provisioning_contract, ground, label), "course")
     assert stored[provisioning_contract.course_title_column] == real_title, (
@@ -812,7 +836,7 @@ def test_a_titleless_launch_never_overwrites_a_title_the_platform_supplied(
     second, _ = launch_driver.launch(
         offer, defect=provisioning_contract.titleless_context_with_label
     )
-    launch_driver.landed(second, "a later launch whose context carries no title")
+    launch_driver.accepted(second, "a later launch whose context carries no title")
 
     after = the_one(course_named(provisioned_rows, provisioning_contract, ground, label), "course")
     assert after[provisioning_contract.course_title_column] == real_title, (

@@ -532,7 +532,25 @@ def everything_the_caller_received(response: Any, token: str) -> str:
 
 
 @pytest.fixture
-def provider(mock_idps: Any, door_contract: Any, link_published_people: Any) -> Any:
+def published_links() -> dict[str, Any]:
+    """Filled by `provider` below: each published subject, and the `person` it resolves to.
+
+    Added by E1-13's reconciliation. One test in this module drives a launch as
+    well as a login and has to hang a `user` row off the very `person` the linkage
+    names, and the mapping is what says which row that is. Empty until `provider`
+    has run, and empty for good while the linkage table does not exist — the same
+    tolerance `link_published_people` documents for the red phase.
+    """
+    return {}
+
+
+@pytest.fixture
+def provider(
+    mock_idps: Any,
+    door_contract: Any,
+    link_published_people: Any,
+    published_links: dict[str, Any],
+) -> Any:
     """The mock provider, registered to return to this tool's own callback.
 
     `MOCK_IDP_TOOL_REDIRECT_URI` is compared exactly — on the way in and again at
@@ -556,6 +574,23 @@ def provider(mock_idps: Any, door_contract: Any, link_published_people: Any) -> 
     unlinked case is not lost: it is E1-12's own subject, in
     `tests/integration/test_the_unlinked_web_login_lands_on_no_account.py`, where a
     subject is deliberately left without a row.
+
+    **E1-13 arrives here the same way, through the same fixture** — and this is
+    the second time a later ticket's rule has reached this module through it
+    (`docs/MISTAKES.md` entry 22). From that ticket the landing comes from the
+    assignment model, so a person with a linkage and no assignment lands on a calm
+    no-access page: the dean, the Care office, the administrator, the cookie
+    attributes, the login hints and the re-signed sessions would all answer 200
+    with that page instead of a session, in tests whose subject is none of it. So
+    `link_published_people` also writes the assignments the registration document
+    says each person holds — their `roles`, plus the `launch_only_roles` the
+    two-hat person carries on the other door (ADR 0058 makes both part of the
+    published contract). **What that costs**: a landing test in this module can no
+    longer be read as evidence that the assignment is what decided, because the
+    fixture is what put the assignment there. It is not asked to be — the rule is
+    asserted in the open in
+    `tests/integration/test_landing_resolves_from_assignments.py`, over rows each
+    test writes itself.
     """
     provider = mock_idps(
         {
@@ -564,7 +599,7 @@ def provider(mock_idps: Any, door_contract: Any, link_published_people: Any) -> 
             )
         }
     )
-    link_published_people(provider)
+    published_links.update(link_published_people(provider))
     return provider
 
 
@@ -1055,14 +1090,21 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
     """The claim produced a page, never a capability. E0-09 criterion 10, behaviourally.
 
     **Dies if the callback writes an assignment, or provisions a person, from the
-    claim.** This is the other half of the exception
-    `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` grants to
-    `backend/app/services/landing.py`. That exception rests on one factual claim —
-    the landing seam chooses a screen and writes nothing — and an exception that
-    rests on a sentence in a comment is an exception that stops being true without
-    anyone noticing. So the sentence is asserted here, against the whole flow, as
-    the Care person: authorization request, login form, code, server-side
-    exchange, the landing redirect, and not one row anywhere.
+    claim.** It was written as the behavioural half of the exception
+    `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` used to
+    grant `backend/app/services/landing.py`: that exception rested on one factual
+    claim — the landing seam chooses a screen and writes nothing — and an exception
+    resting on a sentence in a comment is one that stops being true without anybody
+    noticing.
+
+    **E1-13 deleted both the module and the exception, and this test is worth more
+    rather than less for it.** The landing no longer comes from a claim at all, so
+    what is asserted here is the plainer and stronger fact: a verified session
+    stating `CARE` reaches this door, is landed, and writes nothing — no
+    assignment, no person, no user. A claim is an authentication context and never
+    a grant, and the whole flow is driven as the Care person to say so:
+    authorization request, login form, code, server-side exchange, the landing
+    redirect, and not one row anywhere.
 
     The Care half is the one that must never move. E0-09: "No LTI claim, no OIDC
     claim, and no LMS role may ever produce a `CARE` assignment… a claim-to-Care
@@ -1080,6 +1122,15 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
     she lands with a session as she did before; what must not happen is a row
     appearing here, and that is now a rule of E1-12's as well as an artefact of
     E0's boundary.
+
+    **E1-13 did not move it either, and the count it is measured against changed.**
+    That ticket gives the Care person a live `CARE` assignment, seeded by the same
+    `provider` fixture ahead of the login, because a person with no assignment
+    lands on the calm no-access page. So the assignment count is non-zero before
+    the flow begins and must be **unchanged** after it — which is a stricter thing
+    to say than it was over an empty table, and is exactly what E0-09's criterion
+    10 is about: the row is provisioned by whoever administers Pulse, and the
+    claim's job stops at saying who signed in.
 
     Two guards keep this from passing on nothing having happened: the flow has to
     land on `/app/care` with a session, so a 4xx or a door that was never reached
@@ -1410,6 +1461,9 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     mock_platforms: Any,
     open_web_door: Any,
     register_platform: Any,
+    published_links: dict[str, Any],
+    published_subject: Any,
+    web_identity: Any,
 ) -> None:
     """E0-18: "the two-hat person exists on both doors and both doors open for her".
 
@@ -1447,6 +1501,15 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     session and CSRF cookies set. Neither half is a rendered page any more, and the
     fact this test exists for is untouched by that: one published identity opens
     both doors, and each door dispatches her on the assignment that opens it.
+
+    **Since E1-13, "the assignment that opens it" is literal.** Her two hats are
+    rows now: the `provider` fixture writes the `CARE` and `INSTRUCTOR` assignments
+    the registration document publishes for her, and this test adds the one thing
+    that fixture cannot know — the `user` row for her LMS subject at *this*
+    registration, and ADR 0024's link from her `person` to it, without which her
+    launch resolves nobody and is answered with the calm no-access page. That is
+    the same three-row shape `scripts/seed.py` writes for the mock world, and it is
+    what makes both halves below reach a session at all.
     """
     hers = person_holding(provider, "CARE", and_a_launch_assignment=True)
     lms_user_id = hers.get("lms_user_id")
@@ -1493,7 +1556,29 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     # setting: this suite's subject is which person a launch lands as, so the
     # value only has to be one nothing could reach by accident. `.invalid` is
     # RFC 2606.
-    register_platform(offers[0], jwks_url, "http://lti-platform.invalid/e0-18-configured-authorize")
+    registration = register_platform(
+        offers[0], jwks_url, "http://lti-platform.invalid/e0-18-configured-authorize"
+    )
+    # E1-13: her launch resolves `sub` → `user` → `person`, so the `user` row for
+    # her LMS subject at this registration, and ADR 0024's link to the `person` the
+    # linkage already names, are what let the launch door reach her instructor
+    # assignment at all. `published_links` is where the `provider` fixture recorded
+    # which `person` her IdP subject resolves to; hanging the `user` row off any
+    # other row would make her two doors two humans, which is the very thing
+    # `tests/integration/test_dual_door_identity_merge.py` exists to forbid.
+    her_person = published_links.get(published_subject(hers))
+    assert her_person is not None, (
+        f"No `person` was linked for the two-hat person's IdP subject "
+        f"{published_subject(hers)!r}; the fixture linked {sorted(published_links)}. Without it "
+        "this test cannot hang her launch-side `user` row off the identity her web login resolves "
+        "to, and the two halves below would be about two different people."
+    )
+    her_user = web_identity.user(
+        platform_id=registration.platform_row[web_identity.key_of("lti_platform")],
+        subject=lms_user_id,
+    )
+    web_identity.link_person_to_user(person_id=her_person, user_id=her_user)
+
     launch_tool = tool_doors(
         {door_contract.settings["public_base_url"]: door_contract.public_base_url},
         {urlsplit(jwks_url).hostname: platform},

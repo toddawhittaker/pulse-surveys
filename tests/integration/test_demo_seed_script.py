@@ -122,6 +122,35 @@ USERS = "user"
 # resolving.
 MOCK_WORLD_SUBJECTS = ("mock-lms-user-instructor", "mock-lms-user-dean")
 
+# What each mock-world persona holds in Pulse's own records, by the subject the
+# mock provider signs them in as. **A hand-written inventory, and E1-13 is why it
+# exists.** Until that ticket the landing came from the roles claim, so a persona
+# with a linkage and no assignment still opened their screen on a demo box; from
+# E1-13 the view comes from the assignment model, and a persona holding nothing
+# lands on the calm no-access page. So a demo stack where these six hold no
+# assignment is one where six of the eight personas can sign in and see nothing,
+# and E1-15's browser proof cannot be driven at all.
+#
+# The role each one holds is the role their slug names — `mock-idp/app/seed.py`
+# publishes it as their `roles` — and the scope is the grain SPEC §2.1's table
+# gives that role: VP of academics and administrator and Care at the institution,
+# assistant dean at a college, chair at a department, lead faculty at a course.
+#
+# **Two of the eight are deliberately absent from this inventory.**
+# `mock-idp-user-care-who-teaches` holds her two hats already — she is the person
+# E0-09's criterion 9 seeds and every ticket since has reused — and
+# `mock-idp-user-dean` reaches a leadership assignment through the launch-side
+# person E1-12 seeded for §7.3's leadership limb. Both predate this ticket, so
+# asserting them here would be this test claiming credit for somebody else's rows.
+MOCK_WORLD_PERSONA_ROLES = {
+    "mock-idp-user-vpaa": "VP_ACADEMICS",
+    "mock-idp-user-assistant-dean": "ASSISTANT_DEAN",
+    "mock-idp-user-chair": "CHAIR",
+    "mock-idp-user-lead-faculty": "LEAD_FACULTY",
+    "mock-idp-user-admin": "ADMIN",
+    "mock-idp-user-care": "CARE",
+}
+
 # The two-hat person's *other* subject, at the mock identity provider.
 # `mock-idp/app/seed.py` builds every subject as `mock-idp-user-<slug>` and gives
 # her the slug `care-who-teaches` — "Care, and teaching a section by the other
@@ -1255,6 +1284,96 @@ def test_the_seed_links_the_two_hat_persons_two_subjects_to_one_person(
         "seeded stack has her web login reaching one person and her launch reaching another, "
         "which is exactly the state E1-12 exists to close and which no other test here would "
         "report."
+    )
+
+
+def test_every_mock_world_persona_holds_the_assignment_their_role_names(
+    seeded_demo: Any,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+    supervision_graph: Any,
+) -> None:
+    """E1-13's demo-stack half: a persona who can sign in can also see something.
+
+    From E1-13 the landing view is resolved from the assignment model — the
+    person's live assignments filtered by the entered door's permission column
+    (ADR 0026), with enrollment as the student fallback (ADR 0028). A `person` with
+    a `web_login_subject` linkage and no assignment therefore signs in correctly
+    and is met with the calm no-access page. That is the right answer for somebody
+    an administrator has not finished provisioning, and it is the wrong state for
+    six of the eight personas the mock provider exists to demonstrate.
+
+    **Dies against the seed as it stands**, which writes these six "nothing but a
+    linkage" and says so in a comment above `MOCK_WORLD_PEOPLE` — a deferral that
+    named this ticket as the one that would close it.
+
+    **Dies if the role is wrong as well as if it is missing.** The role each
+    persona holds is asserted, not merely that they hold one: a demo where
+    `mock-idp-user-care` opens the leadership view is a worse demonstration than
+    one where she opens nothing, because §6.2's Care surface is the one screen this
+    product cannot afford to show the wrong person, and a screenshot of it is what
+    ends up in a slide deck.
+
+    **Its two controls are the linkage table and the assignment table.** An empty
+    `web_login_subject` makes every "no such persona" message below true for a
+    reason that has nothing to do with assignments, and an empty `role_assignment`
+    would make this test's failure unreadable — the seeded institution's own
+    eighteen people are what say the seed writes assignments at all.
+    """
+    seeded(seeded_demo)
+    graph = supervision_graph
+    linkage_person_column = one_foreign_key_column(
+        require_table(metadata_tables, LINKAGES), "person"
+    )
+
+    with reading(demo_database, metadata_tables) as rows:
+        linkages = rows_of(rows, LINKAGES)
+        assignments = rows_of(rows, ASSIGNMENTS)
+        held = {
+            role: {row[graph.person_column] for row in assignments_by_role(graph, rows, role)}
+            for role in sorted(set(MOCK_WORLD_PERSONA_ROLES.values()))
+        }
+
+    assert linkages, (
+        f"The seed wrote no `{LINKAGES}` rows at all, so none of these personas resolves to a "
+        "`person` and every complaint below would be about a missing linkage rather than about a "
+        "missing assignment. `test_the_seed_links_the_two_hat_persons_two_subjects_to_one_person` "
+        "owns that failure."
+    )
+    assert assignments, (
+        f"The seed wrote no `{ASSIGNMENTS}` rows at all. ADR 0065 gives the demo institution "
+        "eighteen people with assignments of their own, so an empty table is the seed not running "
+        "rather than these six personas being unprovisioned."
+    )
+
+    by_subject = {row.get(LINKAGE_SUBJECT_COLUMN): row for row in linkages}
+    complaints: list[str] = []
+    for subject, role in sorted(MOCK_WORLD_PERSONA_ROLES.items()):
+        linkage = by_subject.get(subject)
+        if linkage is None:
+            complaints.append(
+                f"{subject} has no `{LINKAGES}` row, so nothing resolves them to a `person` at all"
+            )
+            continue
+        person_id = linkage[linkage_person_column]
+        if person_id not in held[role]:
+            theirs = sorted(
+                enum_text(row[graph.role_column])
+                for row in assignments
+                if row[graph.person_column] == person_id
+            )
+            complaints.append(
+                f"{subject} resolves to `person` {person_id}, which holds "
+                f"{theirs or 'nothing at all'} and not {role}"
+            )
+
+    assert not complaints, (
+        "These mock-world personas cannot see anything on a seeded demo stack:\n"
+        + "\n".join(f"  - {complaint}" for complaint in complaints)
+        + "\n\nE1-13 resolves the landing from the assignment model, so a persona with a linkage "
+        "and no assignment signs in correctly and is met with the no-access page. `scripts/seed.py` "
+        "carries the comment that deferred these six to this ticket; the role each one holds is the "
+        "role their slug names, scoped to the node SPEC §2.1's table gives that role."
     )
 
 

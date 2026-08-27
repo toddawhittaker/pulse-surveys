@@ -22,6 +22,25 @@ record says which rule fired. Dropping the third is `docs/MISTAKES.md` entry 26
 exactly, a fallback path swallowing the defect that triggered it; dropping the
 first turns a data-quality problem into a person who cannot get in.
 
+**What "still lands" becomes since E1-13** (`docs/MISTAKES.md` entry 22). That
+ticket resolves the landing from the launching person's own live assignments, so a
+launch by a subject Pulse holds nothing about is answered with the calm no-access
+page — which is not a refusal, and is not a landing either. So the first of the
+three assertions is `LaunchDriver.accepted` rather than `landed` throughout this
+module: the door verified the token and did not refuse, which is exactly what
+E1-10's "a provisioning refusal NEVER fails the launch" asks, and which of the
+door's two answers the person got is not this module's subject.
+
+**It is `accepted` rather than seeded rows, and the reason is this file's own
+strictness.** The sibling module `test_launch_time_provisioning.py` repairs the
+same breakage by seeding the launching subject a landing. That is unavailable
+here: `assert_nothing_was_written` asserts that `course` and `section` are
+*entirely empty* — deliberately, because "a check filtered by the key the writer
+was supposed to use would miss a row written under a key it made up" — and every
+route to a landing writes into at least one of them, since an instructor
+assignment is scoped to a section and an enrollment needs one. Seeding would make
+criterion 5's own assertion unstatable.
+
 **The kind is asserted, not merely the presence of a row.** A defect is a defect:
 a writer that recorded `unknown_prefix` for every refusal would satisfy a test
 that only counted rows, and the admin surface E11 builds on this would then say
@@ -173,7 +192,7 @@ def test_a_launch_with_everything_seeded_records_no_defect(
 
     response, _ = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "an instructor's launch into a fully seeded environment")
+    launch_driver.accepted(response, "an instructor's launch into a fully seeded environment")
     assert provisioned_rows.courses(), (
         "The launch wrote no course, so this environment is not the working one the four defect "
         "tests below are each one row away from. "
@@ -217,7 +236,7 @@ def test_a_context_that_carries_no_label_is_refused_and_recorded(
 
     response, signed = launch_driver.launch(offer, defect=provisioning_contract.titleless_context)
 
-    launch_driver.landed(response, "a launch whose context carries neither label nor title")
+    launch_driver.accepted(response, "a launch whose context carries neither label nor title")
     context = provisioning_contract.context_of(signed.claims)
     assert "label" not in context, (
         f"The launch this test drove carries a context label ({context.get('label')!r}), so it is "
@@ -258,7 +277,7 @@ def test_a_prefix_the_org_does_not_hold_is_refused_and_recorded(
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "a launch naming a prefix the org does not hold")
+    launch_driver.accepted(response, "a launch naming a prefix the org does not hold")
     assert_nothing_was_written(
         provisioned_rows, f"A launch naming the unknown prefix {label.prefix!r}"
     )
@@ -297,7 +316,7 @@ def test_a_launch_on_a_day_no_terms_dates_contain_is_refused_and_recorded(
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "a launch on a day no term's dates contain")
+    launch_driver.accepted(response, "a launch on a day no term's dates contain")
     assert_nothing_was_written(
         provisioned_rows, "A launch on a day outside every term this deployment holds"
     )
@@ -336,7 +355,7 @@ def test_a_start_position_this_terms_map_does_not_hold_is_refused_and_recorded(
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "a launch whose code has no row in the term's map")
+    launch_driver.accepted(response, "a launch whose code has no row in the term's map")
     assert_nothing_was_written(
         provisioned_rows,
         f"A launch whose code starts at {label.start_letter!r}, which this term's map does not "
@@ -370,6 +389,13 @@ def test_a_defective_context_still_creates_the_launching_subjects_user_row(
     Without a `user` row the person exists nowhere in this system, so their next
     launch — which may be against a perfectly good context — starts from nothing,
     and §4's own key for every response they ever give is missing.
+
+    **This test has a second reason for `accepted` beyond the module-wide one.**
+    Even where seeding a landing were otherwise possible, it is not here: from
+    E1-13 a landing comes from an assignment or an enrollment, and an enrollment
+    hangs off the very `user` row this test watches being written — so seeding one
+    would be handing back the answer (`docs/MISTAKES.md` entry 30), and a first
+    launch by anybody reaches the calm no-access page by construction.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.instructor_role_urn)
     label = provisioning_contract.label_of(launch_driver.claims_of(offer))
@@ -377,7 +403,7 @@ def test_a_defective_context_still_creates_the_launching_subjects_user_row(
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "a launch whose context could not be read")
+    launch_driver.accepted(response, "a launch whose context could not be read")
     subject = signed.claims.get("sub")
     assert subject, "The launch carries no `sub`, so there is no subject for a `user` row to be."
     the_one(
@@ -660,7 +686,7 @@ def test_a_recorded_defect_names_nobody(
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "a launch whose context could not be read")
+    launch_driver.accepted(response, "a launch whose context could not be read")
     recorded = the_one(provisioned_rows.defects(), "recorded defect")
 
     personal = {

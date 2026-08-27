@@ -1011,6 +1011,12 @@ REGISTERED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e1-10-configure
 # ticket's own suite, and nothing E1-10 does may change it either way.
 LANDING_PREFIX = "/app/"
 
+# E1-13's calm page, by the testid E1-15's browser proof addresses it by. The
+# second of the two answers a *verified* launch can get, and the one a subject
+# Pulse holds no assignment and no live enrollment for is met with. Spelled here
+# as `tests/fixtures/landing.py` spells it; see `LaunchDriver.accepted`.
+NO_ACCESS_TESTID = "no-access"
+
 # `ENVIRONMENT`, spelled as `tests/unit/test_docs_exposure.py` and the launch-door
 # suite spell it. **Wherever an application is built, it is set through
 # `tool_doors`** rather than with a bare `setenv`, so a module that builds something
@@ -1122,6 +1128,16 @@ class LaunchDriver:
         E1-10's work order rules that "a provisioning refusal NEVER fails the
         launch or the person's landing". A test that only read the rows could not
         tell a launch that provisioned nothing from a launch the door refused.
+
+        **Since E1-13 this says more than it used to**, and its callers had to be
+        sorted into two groups. The landing comes from the launching person's own
+        live assignments now, so a launch by a subject Pulse holds nothing about is
+        answered with the calm no-access page rather than a role route. A module
+        that asserts *this* has to seed its subject a landing — the door suites do,
+        through `landing_ground` in `tests/fixtures/landing.py`. A module that only
+        ever needed "the launch was not refused" asserts `accepted` below instead,
+        and every provisioning suite is in that group: each of them asserts over
+        the very tables a landing would have to be built out of.
         """
         assert response.status_code in (302, 303, 307), (
             f"{what} answered {response.status_code} rather than the redirect E1-08's door issues "
@@ -1133,6 +1149,51 @@ class LaunchDriver:
             "lands a verified launch on a role-named route; E1-10 must not change that, whatever "
             "it did or did not write."
         )
+
+    @staticmethod
+    def accepted(response: Any, what: str) -> None:
+        """The door did not **refuse** this launch, whichever of its two answers it gave.
+
+        E1-10's rule is that "a provisioning refusal NEVER fails the launch", and
+        until E1-13 there was one shape that satisfied it: a redirect to a role
+        route. There are two now — that redirect, and the calm no-access page a
+        person whose rows entitle them to no view is met with — and both mean the
+        same thing here: the token verified, the writer ran, and nothing about the
+        context stopped the request.
+
+        **It is deliberately weaker than `landed`**, and the modules that use it
+        say why in their own docstrings. Three reasons recur. A test that asserts
+        `course`, `section` or `user` is *empty* cannot seed a landing, because
+        every route to one writes into at least one of those. A test that asserts
+        exactly one section exists cannot either. And a test whose subject is the
+        `user` row a *first* launch writes cannot seed the row it is about
+        (`docs/MISTAKES.md` entry 30) — a first-ever launch by anybody reaches the
+        calm page by construction, since the `user` row an enrollment would hang
+        off does not exist yet.
+
+        **What it gives up, stated plainly**: this would pass against a door that
+        had stopped landing anybody at all. That is not left uncovered — it is
+        covered where it belongs, by `tests/integration/test_lti_launch_door.py`,
+        `test_the_launch_views_name_nobody.py`, `test_dual_door_identity_merge.py`
+        and `test_landing_resolves_from_assignments.py`, all of which seed rows and
+        assert `landed` or a route by name.
+        """
+        assert response.status_code in (200, 302, 303, 307), (
+            f"{what} answered {response.status_code}. A 4xx is the door refusing the launch, and "
+            "E1-10's work order rules that a provisioning refusal never fails one. Body begins "
+            f"{response.text[:400]!r}."
+        )
+        if response.status_code == 200:
+            assert NO_ACCESS_TESTID in response.text, (
+                f"{what} answered 200 with a page carrying no `{NO_ACCESS_TESTID}` testid (body "
+                f"begins {response.text[:400]!r}). The only 200 either door answers a verified "
+                "entry with is E1-13's calm page; anything else is a shape nobody has decided on."
+            )
+            return
+        location = response.headers.get("location") or ""
+        assert location.startswith(
+            LANDING_PREFIX
+        ), f"{what} redirected to {location!r}, which does not begin `{LANDING_PREFIX}`."
 
 
 @pytest.fixture

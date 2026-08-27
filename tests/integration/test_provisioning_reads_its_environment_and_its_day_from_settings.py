@@ -25,6 +25,17 @@ the point of the first of them, and `docs/MISTAKES.md` entry 40's rule for all o
 them. The first asserts that `ENVIRONMENT` is *absent* from `os.environ` at the
 moment of the launch, because a test of a `.env`-only configuration that ran with
 the variable set would pass against exactly the code it exists to fail.
+
+**Both launches are asserted with `LaunchDriver.accepted` rather than `landed`,
+and E1-13 is why** (`docs/MISTAKES.md` entry 22). From that ticket the landing
+comes from the launching person's own live assignments, so a launch by a subject
+Pulse holds nothing about is answered with the calm no-access page rather than a
+role route — neither a refusal nor a landing. What both tests need is that the
+door did not refuse, so that whatever the writer did or did not store is
+attributable to configuration; which of the two answers the person got is not
+their subject. Seeding the launching subject a landing is not available here
+either: the second test asserts that **exactly one** section exists, and every
+route to a landing writes one.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -141,7 +152,7 @@ def test_a_launch_under_a_dotenv_only_development_configuration_stores_the_mocks
     launch_ground(label)
 
     response, _ = driver.launch(offer)
-    driver.landed(response, "A staff launch under a `.env`-only development configuration")
+    driver.accepted(response, "A staff launch under a `.env`-only development configuration")
 
     assert provisioned_rows.addresses() == [advertised], (
         f"The launch advertised the roster address {advertised!r} and the sections carry "
@@ -230,7 +241,7 @@ def test_a_launch_lands_in_the_term_the_institutions_calendar_names(
     )
 
     response, _ = driver.launch(offer)
-    driver.landed(response, "A staff launch on a day the two zones disagree about")
+    driver.accepted(response, "A staff launch on a day the two zones disagree about")
 
     sections = provisioned_rows.sections()
     assert len(sections) == 1, (

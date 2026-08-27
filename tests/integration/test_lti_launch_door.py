@@ -26,11 +26,33 @@ cannot be changed on the token — the platform signs with a key nothing here ho
 it is changed on the *registration*, which is the other half of every comparison
 the tool makes.
 
-**The landing role comes from the verified token.** E0-18: "the landing role comes
-from the verified token, not from the database", so the two happy paths below
-assert that a Learner's launch lands on the student view and an Instructor's on the
-instructor view, with the other four testids absent. Absent as well as present,
-because a page carrying every view is a page that is right about none of them.
+**The landing role came from the verified token, and since E1-13 it does not.**
+E0-18 wrote "the landing role comes from the verified token, not from the
+database", and that sentence is the one this ticket deletes: the landing is
+resolved from the person's own live assignments, filtered by ADR 0026's
+`permits_launch` column, with enrollment as the student fallback (ADR 0028). Two
+things follow for every test in this module.
+
+First, **a launch by a subject Pulse holds nothing about lands on the calm
+no-access page** — a `200` carrying `data-testid="no-access"`, no landing testid
+and no session — rather than on a role route. So the happy paths here take
+`landings_for_the_platforms_subjects`, which gives the platform's learner subject
+a live enrollment and its instructor subject an instructor assignment. That
+fixture is E1-13 arriving in a module whose subject is signatures, nonces, state
+and cookies (`docs/MISTAKES.md` entry 22); it decides nothing this module
+asserts, and the rule it stands in for — that the rows are what choose the view —
+is asserted in the open in
+`tests/integration/test_landing_resolves_from_assignments.py`.
+
+Second, **the "one door, one vocabulary" section below says something stronger
+than it used to.** It used to assert that a launch stating a web-door role in the
+web door's claim is *refused*, because the launch door reads one roles vocabulary.
+The claim now reaches no decision at all, so the honest assertion is that such a
+launch lands exactly where the same launch without that claim lands — on the calm
+page when the subject holds nothing, and on the student route when they are
+enrolled. A claim buys a person nothing they do not already hold, which is the
+fact E0-09's criterion 10 always wanted and could not have while a claim chose a
+screen.
 
 **Four things arrived in the third review round**, and they are the last three
 sections of this module. One door reads one roles vocabulary, which needs launches
@@ -58,6 +80,7 @@ and reading the LIS roles claim, rather than by naming a seeded user identifier.
 """
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -152,6 +175,20 @@ NON_ASCII_NONCE = "é"
 CERTAINLY_EXPIRED_SECONDS = 3600
 CERTAINLY_STILL_VALID_SECONDS = 30
 
+# How far back the seeded enrollment window starts. Comfortably longer than any
+# timezone offset, so that a window opened this many days before *UTC's* today
+# contains the institution's today under every `INSTITUTION_TIMEZONE` — which is
+# what lets this module state no timezone at all. The four tests whose subject
+# actually is the window's edge live in
+# `tests/integration/test_landing_resolves_from_assignments.py` and set the zone
+# themselves.
+ENROLLED_SINCE_DAYS = 30
+
+# E1-13's calm page, by the testid E1-15's browser proof addresses it by. Not one
+# of the five landing testids and not the refusal page: a launch the door verified
+# by a person whose rows entitle them to no view is a state rather than a fault.
+NO_ACCESS_TESTID = "no-access"
+
 
 @pytest.fixture
 def platform(mock_platforms: Any, door_contract: Any) -> Any:
@@ -229,6 +266,90 @@ def open_launch_door(
 def tool(open_launch_door: Any) -> Any:
     """The application, configured for this platform and able to reach it in process."""
     return open_launch_door()
+
+
+def give_the_platforms_subjects_a_landing(
+    platform: Any, registration: Any, landing_ground: Any, web_identity: Any
+) -> dict[str, Any]:
+    """Seed the rows behind the two fixtures below. See either of their docstrings.
+
+    A function rather than a fixture because two registrations are in play in this
+    module and never at once: the platform's own, and the one pointing at
+    `suite_key_set`. A `user` row belongs to a registration, so seeding against the
+    wrong one leaves the door resolving nobody — and the tests would report that as
+    the landing rule being wrong.
+    """
+    ground = landing_ground()
+    platform_id = registration.platform_row[web_identity.key_of("lti_platform")]
+    enrolled_since = datetime.now(UTC).date() - timedelta(days=ENROLLED_SINCE_DAYS)
+
+    seeded: dict[str, Any] = {}
+    for role_uri, give in (
+        (LEARNER_ROLE_URI, "student"),
+        (INSTRUCTOR_ROLE_URI, "instructor"),
+    ):
+        offer = offer_for_role(platform, role_uri)
+        subject = platform.mint(offer).claims.get("sub")
+        assert isinstance(subject, str) and subject, (
+            f"The launch this platform signs for {role_uri!r} carries no `sub`, so there is no "
+            "subject to seed rows for and no launch in this module could land."
+        )
+        if give == "student":
+            seeded[give] = ground.a_student(
+                platform_id=platform_id, subject=subject, on=enrolled_since
+            )
+        else:
+            seeded[give] = ground.an_instructor(platform_id=platform_id, subject=subject)
+    return seeded
+
+
+@pytest.fixture
+def landings_for_the_platforms_subjects(
+    platform: Any, registration: Any, landing_ground: Any, web_identity: Any
+) -> dict[str, Any]:
+    """Give the platform's two launchable subjects something E1-13's door can land them on.
+
+    The learner subject gets a `user` row and a live enrollment (ADR 0028: a
+    student holds no assignment, and enrollment is the whole of their access); the
+    instructor subject gets a `person`, a `user` row, ADR 0024's link and one live
+    `INSTRUCTOR` assignment. Both are the minimum a real deployment holds for
+    somebody who can use this tool, and both are seeded committed, because the door
+    reads on its own connection.
+
+    **It decides nothing this module asserts.** Every test here is about a
+    signature, an issuer, a nonce, a `state`, a cookie or a log line, and each one
+    needs a launch that *lands* before it can say anything about those — which
+    stopped being free when E1-13 made the landing come from rows
+    (`docs/MISTAKES.md` entry 22). Which view those rows produce is asserted in the
+    open, over rows written by the test that reads them, in
+    `tests/integration/test_landing_resolves_from_assignments.py`.
+
+    The subjects are read off the launches the platform signs rather than off its
+    seed, exactly as `offer_for_role` reads the roles: nothing in this module is a
+    copy of `mock-lms/app/seed.py`.
+    """
+    return give_the_platforms_subjects_a_landing(
+        platform, registration, landing_ground, web_identity
+    )
+
+
+@pytest.fixture
+def landings_for_the_re_signed_subjects(
+    platform: Any,
+    registration_naming_this_suites_key: Any,
+    landing_ground: Any,
+    web_identity: Any,
+) -> dict[str, Any]:
+    """The same rows, against the registration the re-signed section runs behind.
+
+    `registration_naming_this_suites_key` replaces `registration` rather than
+    joining it — two rows registering one issuer would leave the door choosing
+    between them — and a `user` row belongs to a registration, so the seeding has
+    to follow whichever one the test is running behind.
+    """
+    return give_the_platforms_subjects_a_landing(
+        platform, registration_naming_this_suites_key, landing_ground, web_identity
+    )
 
 
 @pytest.fixture
@@ -382,6 +503,40 @@ def views_in(response: Any, contract: Any) -> list[str]:
 # see ADR 0089 and the per-test "Updated by E1-08's reconciliation pass"
 # notes above. `views_in` stays: `refused()` still uses it to prove a refusal
 # rendered nobody's landing page.
+
+
+def the_no_access_page(response: Any, contract: Any, what: str) -> None:
+    """E1-13's calm answer: the launch verified, and this person's rows entitle them to no view.
+
+    Distinct from `refused` in every respect a test can see — the status, the
+    testid, and the fact that this is a page somebody is meant to read rather than
+    a refusal. Both halves are checked, because a door answering the calm page with
+    a 4xx would be right about the words and wrong about the event, and a door
+    answering 200 with the refusal's own body would be the reverse.
+
+    The launch is correct in every claim; what is missing is a row. That is the
+    difference between "we cannot accept this token" and "there is nothing here for
+    you yet", and the person in front of the screen is owed different words for
+    each.
+    """
+    assert response.status_code == 200, (
+        f"The tool answered {response.status_code} to {what}. E1-13 replaces the launch door's 'no "
+        "role this tool has a view for' refusal with a calm page: the token verified, so nothing "
+        f"went wrong and the answer is a 200. Body begins {response.text[:400]!r}."
+    )
+    assert NO_ACCESS_TESTID in response.text, (
+        f"The tool answered {what} with a 200 carrying no `{NO_ACCESS_TESTID}` testid (body begins "
+        f"{response.text[:400]!r}). That testid is E1-13's contract for this page and is what says "
+        "which of the door's non-landing answers the person actually got."
+    )
+    found = views_in(response, contract)
+    assert not found, (
+        f"The tool answered {what} with a page carrying {found}. A person whose rows entitle them "
+        "to no view lands on nobody's."
+    )
+    assert "session=" not in (
+        response.headers.get("location") or ""
+    ), f"The tool answered {what} with a `Location` carrying a session token."
 
 
 def refused(response: Any, contract: Any, what: str) -> None:
@@ -791,7 +946,11 @@ def test_a_launch_whose_token_expired_an_hour_ago_is_refused(
 
 
 def test_a_launch_minted_seconds_ago_is_still_accepted(
-    tool: Any, door_contract: Any, platform: Any, wind_the_clock_back: Any
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    wind_the_clock_back: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
 ) -> None:
     """The near miss for the test above: a token that is old and not yet expired.
 
@@ -811,6 +970,12 @@ def test_a_launch_minted_seconds_ago_is_still_accepted(
     retires that contract: acceptance is now a `302` to
     `/app/student#session=<token>` with the session cookie set, which is what
     `redirected_to_role` (defined in the `# E1-08` section below) checks.
+
+    **Updated again by E1-13**: the learner subject now needs a live enrollment
+    before any launch of hers lands at all, which
+    `landings_for_the_platforms_subjects` seeds. Nothing about what this test says
+    changes — the subject is still the expiry check — only what "accepted" costs to
+    set up.
     """
     offer = offer_for_role(platform, LEARNER_ROLE_URI)
     started = initiate(tool, door_contract, offer)
@@ -894,11 +1059,30 @@ def test_a_launch_whose_nonce_is_not_the_one_the_tool_sent_is_refused(
 
 
 # ---------------------------------------------------------------------------
-# One door, one vocabulary. SPEC §2 gives Care, leadership and admin the web door
-# *precisely so* the LMS cannot name those roles, and this is that rule at the
-# navigation layer — E0-09 criterion 10's shape, one layer up from the assignment
-# table. It is also the premise the Care sweep's exception argues from
-# (`tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS`).
+# What a roles claim buys. SPEC §2 gives Care, leadership and admin the web door
+# *precisely so* the LMS cannot name those roles, and this section used to hold
+# that rule at the navigation layer: a launch stating a web-door role in the web
+# door's claim was *refused*, because this door read one vocabulary and that was
+# not it.
+#
+# **E1-13 replaces those refusals with something stronger, and this whole section
+# is rewritten to it.** The landing comes from the person's own live assignments
+# now, so no roles claim of any kind reaches the decision — and the assertion
+# worth making is not that a smuggled claim is refused but that it changes
+# *nothing*: the same launch, with its LIS roles claim emptied, removed, replaced
+# with a role this door has no view for, or carrying a web-door role beside it,
+# lands exactly where the subject's rows already said it would. That is the fact
+# E0-09's criterion 10 always wanted — "the launch or login establishes who
+# someone is; this table establishes what they may do" — and it could not be
+# stated while a claim chose a screen.
+#
+# The last test in the section is the one that costs something: a launch stating
+# `CARE`, by a subject whose rows entitle them to nothing, is met with the calm
+# page and never with the Care view. It is `invariant`-marked, and it is the
+# behavioural half of what
+# `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` used to
+# argue in prose — that exception is gone in this same change, and the assertions
+# are what stand in its place.
 # ---------------------------------------------------------------------------
 
 
@@ -908,21 +1092,27 @@ def test_a_launch_re_signed_with_the_registered_key_is_still_accepted(
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
     """The control for every re-signed case below, and they are worth nothing without it.
 
     The claims are the platform's own, unchanged, signed again by the key set this
     tool's registration names. If this lands on the student view then the machinery
     — the key, the served JWK Set, the `kid`, the re-encoding — produces launches
-    this door accepts, and a refusal in the tests below can only be the one claim
-    they changed. If it does *not*, every one of them is a red about the harness
-    rather than about the door, and this is where that shows (`docs/MISTAKES.md`
-    entry 3).
+    this door accepts, and a different answer in the tests below can only be the
+    one claim they changed. If it does *not*, every one of them is a red about the
+    harness rather than about the door, and this is where that shows
+    (`docs/MISTAKES.md` entry 3).
 
     **Updated by E1-08's reconciliation pass.** Was `lands_on(response,
     door_contract, STUDENT_VIEW)` — the `200`+inline-HTML contract E1-08's
     session model (ADR 0089) retires. Acceptance is now the `302` to
     `/app/student#session=<token>` `redirected_to_role` checks.
+
+    **Updated again by E1-13**: the subject `re_signed_launch` drives — the
+    platform's learner — reaches the student route because of the live enrollment
+    `landings_for_the_re_signed_subjects` seeds for her, not because her token says
+    Learner. That is the point of every test below and it starts here.
     """
     response = re_signed_launch(
         tool_verifying_against_this_suites_key,
@@ -937,7 +1127,7 @@ def test_a_launch_re_signed_with_the_registered_key_is_still_accepted(
 
 
 @pytest.mark.parametrize("web_role", WEB_DOOR_ROLES)
-def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
+def test_a_launch_naming_a_web_door_role_and_no_lis_role_lands_where_the_rows_already_said(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
@@ -945,22 +1135,25 @@ def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
     claims_in_token: Any,
     web_vocabulary: tuple[str, frozenset[str]],
     web_role: str,
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
-    """**Dies if the launch door consults the web door's vocabulary.**
+    """**Dies if any roles claim, in any vocabulary, reaches the landing decision.**
 
     SPEC §2 gives Care, leadership and admin a second way in *precisely so* that
     the LMS cannot name those roles: the person who administers the platform writes
-    what an `id_token` says, and E0-09 criterion 10 is that no claim may produce a
-    Care capability. This is that rule one layer up — at the navigation layer,
-    where a launch door that read the web door's roles claim would let the same
-    administrator put themselves on the Care screen by adding a claim to a launch.
+    what an `id_token` says. Until E1-13 this door defended that by *refusing* such
+    a launch; from E1-13 the defence is that the claim is not read at all, and this
+    test is that stronger fact. The launch is otherwise entirely correct — signed
+    by the registered key set, right issuer, audience, deployment, nonce, state and
+    expiry — its LIS roles claim is emptied, and it states a web-door role in the
+    web door's own claim. The subject behind it holds one live enrollment and
+    nothing else, so she lands on the student route, exactly as she does with her
+    claims untouched in the control above.
 
-    The launch is otherwise entirely correct: signed by the registered key set,
-    the right issuer, audience, deployment, nonce, state and expiry. Its LIS roles
-    claim is empty and it states a web-door role in the web door's own claim. There
-    is no view this door may serve for it, so the only answer is a refusal — and
-    `refused` requires that no landing testid at all appears, which covers the Care
-    page and the other four together.
+    **Two mutations die here.** A door that read the web vocabulary lands her on
+    leadership, Care or admin, depending on the parameter. A door that still read
+    the *LIS* vocabulary finds it empty and lands her nowhere — the calm page — so
+    emptying the claim is as much of the question as smuggling the other one is.
 
     The claim name and the role spelling are read off the provider's published
     registration document rather than written here, so this cannot pass by
@@ -969,8 +1162,8 @@ def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
     claim, published = web_vocabulary
     assert web_role in published, (
         f"The mock provider publishes nobody holding {web_role!r} (it publishes "
-        f"{sorted(published)}), so this test is smuggling a role the web door never sees and a "
-        "refusal below would say nothing about which vocabulary the launch door reads."
+        f"{sorted(published)}), so this test is smuggling a role the web door never sees and its "
+        "result would say nothing about which vocabularies this door consults."
     )
 
     def adjust(claims: dict[str, Any]) -> dict[str, Any]:
@@ -987,29 +1180,29 @@ def test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused(
         adjust,
     )
 
-    refused(
-        response,
-        door_contract,
-        f"a launch whose LIS roles claim is empty and which states {web_role!r} in `{claim}`, the "
-        "claim SPEC §2 gives the web door",
-    )
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
-def test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_is_refused(
+def test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_lands_the_same_way(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
     web_vocabulary: tuple[str, frozenset[str]],
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
     """The absent case, which an empty list does not cover.
 
     `claims.get(ROLES_CLAIM, [])` and `claims[ROLES_CLAIM]` behave differently when
     the claim is missing rather than empty — the second raises, and a door that
-    catches broadly around it could fall through to a default. A different mutation
-    is a different case, which is the reason this module already has a launch with
-    no `state` beside the launch with the wrong one.
+    caught broadly around it could fall through to a default or to a 500. A
+    different mutation is a different case, which is the reason this module already
+    has a launch with no `state` beside the launch with the wrong one.
+
+    A door that reads no roles claim at all cannot notice the difference, which is
+    what makes this the cheapest possible statement of E1-13's rule: the token's
+    roles are absent and the landing is unchanged.
     """
     claim, published = web_vocabulary
     assert "CARE" in published, (
@@ -1031,38 +1224,33 @@ def test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_is_refused(
         adjust,
     )
 
-    refused(
-        response,
-        door_contract,
-        f"a launch carrying no LIS roles claim at all and stating 'CARE' in `{claim}`",
-    )
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
-def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_names(
+def test_a_launch_carrying_both_vocabularies_lands_where_the_subjects_rows_say(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
     web_vocabulary: tuple[str, frozenset[str]],
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
-    """The foreign vocabulary is **ignored**, not merely outranked.
+    """Neither vocabulary is consulted, and this is the case that says so both ways at once.
 
-    A launch stating the LIS Learner role and `CARE` in the web door's claim lands
-    on the student view. This is the boundary control on the two refusals above: a
-    door that refused every launch carrying an unfamiliar claim would satisfy them
-    while being wrong about what it does with one, and a door that read both
-    vocabularies and happened to prefer the LIS one would pass this and fail those.
-    Together the three say the launch door reads one claim and does not look at the
-    other.
+    The launch states the LIS **Instructor** role and `CARE` in the web door's
+    claim, and the subject behind it holds one live enrollment and no assignment of
+    any kind. Under E0-18's rule she lands on the instructor view; under a door
+    that read the web claim she lands on Care; under E1-13 she lands on the student
+    route, because that is what her rows say and nothing else is consulted.
 
-    It is expected to pass today, and its value is in what it stops the fix from
-    being: refusing anything that smells of the web vocabulary is not the fix.
+    **This is the boundary control on the two tests above**: a door that answered
+    the calm page to every launch carrying an unfamiliar claim would satisfy both
+    of them and be wrong about what it does with one, and a door that read the LIS
+    vocabulary and merely outranked the web one would pass those and fail this.
 
-    **Updated by E1-08's reconciliation pass.** Was `lands_on(response,
-    door_contract, STUDENT_VIEW)` — the `200`+inline-HTML contract E1-08's
-    session model (ADR 0089) retires. Acceptance is now the `302` to
-    `/app/student#session=<token>` `redirected_to_role` checks.
+    **Updated by E1-13 from `..._lands_on_the_view_its_lis_role_names`**, which is
+    the sentence this ticket makes false: the LIS role names no view any more.
     """
     claim, published = web_vocabulary
     assert "CARE" in published, (
@@ -1071,7 +1259,7 @@ def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_name
     )
 
     def adjust(claims: dict[str, Any]) -> dict[str, Any]:
-        claims[ROLES_CLAIM] = [LEARNER_ROLE_URI]
+        claims[ROLES_CLAIM] = [INSTRUCTOR_ROLE_URI]
         claims[claim] = ["CARE"]
         return claims
 
@@ -1087,26 +1275,29 @@ def test_a_launch_carrying_both_vocabularies_lands_on_the_view_its_lis_role_name
     redirected_to_role(response, door_contract, STUDENT_ROLE)
 
 
-def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_is_refused(
+def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_still_lands(
     tool_verifying_against_this_suites_key: Any,
     door_contract: Any,
     platform: Any,
     suite_key_set: Any,
     claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
 ) -> None:
-    """**Dies if the door defaults instead of refusing.**
+    """A role E0-18 had no view for, held by somebody whose rows entitle her to one.
 
-    E0-18 gives this door two dispatches and no third: "Learner → student empty
-    view, Instructor → instructor empty view". A launch whose LIS roles claim names
-    neither is one this system has no view for, and a door that fell through to a
-    default would put a mentor — a parent or an advisor, in the LIS vocabulary — on
-    whichever page came last in the `if`. The wrong default here is a person seeing
-    a screen nobody decided they should see, and it is the same fall-through the
-    web door's admin test exists to catch.
+    E0-18 gave this door two dispatches and no third — "Learner → student empty
+    view, Instructor → instructor empty view" — so a Mentor launch was a launch
+    with no view, and the risk was a door falling through to a default and putting
+    a parent or an advisor on whichever page came last in the `if`. E1-13 removes
+    the `if`: the claim is not a dispatch any more, so a Mentor claim over an
+    enrolled subject lands her on the student route with the rest of them.
 
-    Nothing else is changed: no web-door claim is added, so a 4xx can only be the
-    role. The Mentor URI is from the same LIS membership vocabulary the recognised
-    two come from, so this is not a malformed claim either.
+    **Dies if any residue of the old dispatch survives** — a door that still
+    special-cased an unrecognised LIS role would answer the calm page or a 4xx
+    here, for a person whose enrollment plainly entitles her to a view.
+
+    The Mentor URI is from the same LIS membership vocabulary the recognised two
+    come from, so this is not a malformed claim either.
     """
 
     def adjust(claims: dict[str, Any]) -> dict[str, Any]:
@@ -1122,11 +1313,67 @@ def test_a_launch_whose_only_lis_role_is_one_this_door_serves_no_view_for_is_ref
         adjust,
     )
 
-    refused(
+    redirected_to_role(response, door_contract, STUDENT_ROLE)
+
+
+@pytest.mark.invariant
+def test_a_launch_stating_care_by_a_subject_with_no_rows_is_met_with_the_calm_page(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    web_vocabulary: tuple[str, frozenset[str]],
+) -> None:
+    """The one in this section that costs something: a claim buys no view at all.
+
+    **No landing rows are seeded**, which is the whole difference from every test
+    above. The launch is correct in every claim, states `CARE` in the web door's
+    own roles claim, and belongs to a subject Pulse holds no assignment and no
+    enrollment for. The answer has to be the calm page — and, specifically, never
+    the Care view.
+
+    E0-09's criterion 10 is why this is `invariant`-marked: "No LTI claim, no OIDC
+    claim, and no LMS role may ever produce a `CARE` assignment… a claim-to-Care
+    mapping would let an LMS administrator grant themselves identity access,
+    walking past every guarantee in §4." Care is the only role that can re-identify
+    a student (§6.2), and the person who administers the platform decides what a
+    launch says.
+
+    **The denial is asserted rather than the absence of a name.** `the_no_access_page`
+    requires the whole positive shape — a 200, the `no-access` testid, no landing
+    of any kind and no session in the `Location` — so a launch that failed for some
+    unrelated reason fails this test instead of passing it.
+
+    **Its boundary pair is the control at the head of this section**: the same
+    machinery, the same key, the same re-signing, and a landing — so a green here
+    is not the re-signed harness having stopped working.
+    """
+    claim, published = web_vocabulary
+    assert "CARE" in published, (
+        f"The mock provider publishes nobody holding 'CARE' (it publishes {sorted(published)}), so "
+        "this test is smuggling a role no door in this system would ever act on and its silence "
+        "would say nothing."
+    )
+
+    def adjust(claims: dict[str, Any]) -> dict[str, Any]:
+        claims[ROLES_CLAIM] = []
+        claims[claim] = ["CARE"]
+        return claims
+
+    response = re_signed_launch(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        adjust,
+    )
+
+    the_no_access_page(
         response,
         door_contract,
-        f"a launch whose only LIS role is {MENTOR_ROLE_URI!r}, which E0-18 gives this door no view "
-        "for",
+        f"a launch stating 'CARE' in `{claim}` by a subject holding no assignment and no enrollment",
     )
 
 
@@ -1612,9 +1859,12 @@ def test_assert_no_claim_leaked_catches_a_value_planted_in_the_log(
 
 
 def test_a_valid_launch_redirects_with_a_session_to_the_role_named_route(
-    tool: Any, door_contract: Any, platform: Any
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
 ) -> None:
-    """A Learner's launch redirects to `/app/student#session=...`, `pulse_session` set.
+    """An enrolled subject's launch redirects to `/app/student#session=...`, `pulse_session` set.
 
     **Dies if the door still renders inline HTML** (the E0-18 contract this
     ticket retires), and dies if the redirect carries the session as a query
@@ -1635,9 +1885,18 @@ def test_a_valid_launch_redirects_with_a_session_to_the_role_named_route(
 
 
 def test_an_instructors_valid_launch_redirects_to_the_instructor_route(
-    tool: Any, door_contract: Any, platform: Any
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
 ) -> None:
-    """The pair to the test above — one role is not enough to show a dispatch."""
+    """The pair to the test above — one role is not enough to show a dispatch.
+
+    **Since E1-13 the dispatch is on the rows rather than on the claim**: this
+    subject holds a live `INSTRUCTOR` assignment and the one above holds a live
+    enrollment, so the pair still shows a door choosing between two answers — and
+    it now shows it choosing on the thing the ticket says decides.
+    """
     response = launched(
         tool, door_contract, platform, offer_for_role(platform, INSTRUCTOR_ROLE_URI)
     )
@@ -1683,6 +1942,7 @@ def test_a_replayed_nonce_is_refused_by_the_replay_guard_not_by_a_generic_nonce_
     door_contract: Any,
     platform: Any,
     caplog: pytest.LogCaptureFixture,
+    landings_for_the_platforms_subjects: dict[str, Any],
 ) -> None:
     """`reused_nonce`, E1-07's fifteenth defect, and criterion 3's within-process half.
 
@@ -1765,7 +2025,11 @@ def test_a_claimed_nonce_is_refused_after_the_store_is_reopened_as_a_fresh_sessi
 
 @pytest.mark.parametrize("environment", (DEVELOPMENT, PRODUCTION))
 def test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes(
-    open_launch_door: Any, door_contract: Any, platform: Any, environment: str
+    open_launch_door: Any,
+    door_contract: Any,
+    platform: Any,
+    environment: str,
+    landings_for_the_platforms_subjects: dict[str, Any],
 ) -> None:
     """`HttpOnly` on the session cookie and absent on the CSRF one; `SameSite=None`
     on both; `Secure` flips with the environment; `path=/` on both.
