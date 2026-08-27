@@ -165,6 +165,14 @@ RECORD_NOT_COMMITTED = "55000"
 # student's address had leaked into the result is true of any result at all when
 # that address is `None` (`docs/MISTAKES.md` entry 3). Cases 1 and 2 are each
 # somebody's subject on purpose now.
+#
+# **Since E1-11 the name travels the same way, and for a second reason.** That
+# ticket makes `identity_name` nullable (D7, ADR 0050: the roster sync stores an
+# address for a member it has no name for), so the helper no longer fills it
+# either — see `a_name` below. The first reason is the one above, arriving a
+# ticket later; the second is that a value this file chose is a better thing to
+# compare a reveal's answer against than one the fixture invented and nothing ever
+# named.
 
 
 def an_address() -> str:
@@ -176,6 +184,27 @@ def an_address() -> str:
     whether the column carries a uniqueness constraint.
     """
     return f"e0-26-{uuid4().hex[:12]}@example.invalid"
+
+
+def a_name() -> str:
+    """One name that belongs to exactly one seeded student.
+
+    **Stated here since E1-11 rather than left to the seeding helper.** Every
+    identity row this module seeded used to carry a name because
+    `user_identity.identity_name` was `NOT NULL` and `seed_row` fills what the
+    schema requires. E1-11's D7 makes that column nullable — the roster sync
+    records an address for a member it has no name for (ADR 0050), and its writer
+    holds no privilege on the name column at all — so the helper correctly leaves
+    it null and every test in this module failed inside its own seeding (dispute
+    E1-11-02; `docs/MISTAKES.md` entry 22, whose shape `seed_row`'s own docstring
+    names).
+
+    Unique per call for exactly the reason `an_address` above is: the leak half of
+    `test_the_reveal_returns_the_student_named_in_the_committed_record` asks
+    whether a *second* student's name came back, which is true of any result at all
+    when the two students share one.
+    """
+    return f"E0-26 Student {uuid4().hex[:12]}"
 
 
 RECORD_CALL = (
@@ -379,12 +408,14 @@ def revealable(committed_rows: Any) -> Revealable:
     test ends, which is what takes away the `audit_log` rows these tests deliberately
     commit on a connection nothing here tracks by key.
 
-    **This is case 1**: a student with a name *and* an address. The address is
-    passed as an override rather than left to the seeding helper, which fills only
-    what the schema requires and leaves this nullable column null — so without it,
-    every assertion here comparing a returned address against a seeded one would be
-    comparing `None` with `None`. Case 2, a student with a name and no address, is
-    `seed_a_student_with_no_email` and has a test of its own.
+    **This is case 1**: a student with a name *and* an address. Both are passed as
+    overrides rather than left to the seeding helper, which fills only what the
+    schema requires and leaves a nullable column null — so without them, every
+    assertion here comparing a returned value against a seeded one would be
+    comparing `None` with `None`. The address has been an override since E0-26; the
+    name joined it in E1-11, when D7 made `identity_name` nullable. Case 2, a
+    student with a name and no address, is `seed_a_student_with_no_address` and has
+    a test of its own.
 
     The Care staffer is E0-09's two-hat person — a `CARE` assignment and a teaching
     assignment on one person, which §2.1 permits and §6.2 spends a paragraph on — so
@@ -394,7 +425,9 @@ def revealable(committed_rows: Any) -> Revealable:
     graph = committed_rows.graph
     hats = graph.care_and_instructor_person()
     chain: dict[str, Any] = {}
-    identity = committed_rows.seed("user_identity", chain, identity_email=an_address())
+    identity = committed_rows.seed(
+        "user_identity", chain, identity_name=a_name(), identity_email=an_address()
+    )
     committed_rows.commit()
 
     user = chain.get("user")
@@ -474,7 +507,9 @@ def seed_a_student_with_no_address(committed_rows: Any) -> tuple[Any, str]:
     was before, when it was every seeded student's and nobody's subject.
     """
     chain: dict[str, Any] = {}
-    identity = committed_rows.seed("user_identity", chain, identity_email=None)
+    identity = committed_rows.seed(
+        "user_identity", chain, identity_name=a_name(), identity_email=None
+    )
     committed_rows.commit()
     assert identity[IDENTITY_COLUMNS[1]] is None, (
         f"This helper asked for a student with no address and the row came back carrying "
@@ -498,7 +533,9 @@ def seed_a_second_student(committed_rows: Any) -> tuple[Any, str, str]:
     set of strings — true whatever the reveal returned.
     """
     chain: dict[str, Any] = {}
-    identity = committed_rows.seed("user_identity", chain, identity_email=an_address())
+    identity = committed_rows.seed(
+        "user_identity", chain, identity_name=a_name(), identity_email=an_address()
+    )
     committed_rows.commit()
     return (
         chain["user"][user_key(committed_rows)],

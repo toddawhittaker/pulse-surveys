@@ -153,6 +153,16 @@ RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
 # the split.
 IDENTITY_TABLE = "user_identity"
 
+# The name `seed_identity` below writes onto the student it seeds. **This file's
+# choice, and stated rather than borrowed since E1-11**: the helper's non-vacuity
+# guard used to ask only that the seeded row carry some string, which it did
+# because `identity_name` was `NOT NULL`. E1-11's D7 makes that column nullable
+# (ADR 0050 — the roster exposes an address and no name), so the value is named
+# here and the reveal's answer is recognised by it. One constant rather than a
+# generator: each of the four tests using it seeds one student, and none compares
+# two.
+SEEDED_IDENTITY_NAME = "Robin Reveal-Me"
+
 # SPEC §8's log, which "is append-only and includes all re-identifications". Named
 # here because E0-26 item 1 made it a table this file provokes a refusal on: the
 # Care connection now commits the record the door writes, so what that connection
@@ -686,9 +696,20 @@ def seed_identity(committed_rows: Any) -> dict[str, Any]:
     this module with the argument-guessing machinery that needed it. The copy in
     `tests/integration/test_care_service_reveal.py` stays: the *service*'s
     `reveal_identity` keeps its own signature, which E0-26 does not change.
+
+    **The name is stated here since E1-11, and was borrowed before it.** The
+    non-vacuity guard below asks the seeded row to carry a recognisable value, and
+    got one only because `user_identity.identity_name` was `NOT NULL` and
+    `seed_row` fills what the schema requires. E1-11's D7 makes the column nullable
+    — the roster sync stores an address for a member it has no name for (ADR 0050),
+    and `record_roster_email`'s owner holds no privilege on the name column at all
+    — so the helper leaves it and four tests here failed inside their own seeding
+    (dispute E1-11-02, `docs/MISTAKES.md` entry 22). Passing the value makes this
+    helper state its own premise instead of resting on a constraint two tickets
+    away, and it is what the reveal's answer is now recognised by.
     """
     chain: dict[str, Any] = {}
-    identity = committed_rows.seed(IDENTITY_TABLE, chain)
+    identity = committed_rows.seed(IDENTITY_TABLE, chain, identity_name=SEEDED_IDENTITY_NAME)
     committed_rows.commit()
 
     user = chain.get("user")
@@ -703,11 +724,14 @@ def seed_identity(committed_rows: Any) -> dict[str, Any]:
         for key, value in identity.items()
         if isinstance(value, str) and value and not key.endswith("_id")
     }
-    assert values, (
-        f"The seeded `{IDENTITY_TABLE}` row carries no non-key string value: {dict(identity)}. "
-        "There is then nothing for a reveal to return that could be recognised, and the test "
-        "below would be asserting that a function returned something rather than that it returned "
-        "the identity."
+    assert SEEDED_IDENTITY_NAME in values, (
+        f"The seeded `{IDENTITY_TABLE}` row does not carry the name this helper asked it to "
+        f"({SEEDED_IDENTITY_NAME!r}): {dict(identity)}. There is then nothing for a reveal to "
+        "return that could be recognised, and the tests below would be asserting that a function "
+        "returned something rather than that it returned this student's identity.\n\n"
+        "Until E1-11 this asked only for *some* non-key string and got one from the `NOT NULL` "
+        "constraint on `identity_name`, which D7 legitimately removes; the value is stated in this "
+        "file now."
     )
     user_key = next(
         (key for key in user if key in {"id", "user_id"}),

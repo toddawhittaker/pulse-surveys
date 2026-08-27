@@ -139,14 +139,21 @@ def test_a_launch_trigger_is_debounced_by_a_call_inside_the_window_and_not_by_on
     **The mutation this kills**: a debounce written as "skip if the section has any
     `nrps_call` row at all", which passes the 299-second case and turns every
     section in the institution into one that syncs exactly once.
+
+    **Every case counts the recorder's calls into an integer before it acts**, and
+    the first one did not until dispute E1-11-01: `never_called = enqueues.calls`
+    binds the recorder's live list rather than a snapshot of it, so `record`
+    appends to the very thing the assertion compares against and `n == n + 1` is
+    unsatisfiable by any implementation. A `len()` is the whole repair, and it is
+    the form the two cases below already used.
     """
-    never_called = enqueues.calls
+    never_called = len(enqueues.calls)
     roster_sync.call(
         roster_sync.request_section_sync,
         session=committed_rows.session,
         section_id=synced_section.id,
     )
-    assert len(enqueues.calls) == len(never_called) + 1, (
+    assert len(enqueues.calls) == never_called + 1, (
         "A section with no `nrps_call` row at all was not enqueued. It has never been synced, so "
         "there is nothing for a debounce to be measured against — and an implementation that "
         "enqueues nothing satisfies the skipped case below while the launch trigger does nothing "

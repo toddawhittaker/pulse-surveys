@@ -34,12 +34,21 @@ Duplicating it would give two failures for one defect.
     writing through a reflected table would bypass the decorator and store the
     sentinel in plaintext, failing a correct implementation.
 
-**Three column names in this file are guesses and are marked as ones**, following
-the precedent `tests/conftest.py` sets and the correction E0-05 went through: the
-LMS user ID on `user`, and the two ends of the enrollment window. The ticket
-names the facts and not the columns. Each is a named constant with a candidate
-list or a fragment list, so a deliberate rename is a one-line change here, and
-the failure prints both sides. Everything else is reached without a name at all:
+**One column name in this file is a guess and is marked as one**, following the
+precedent `tests/conftest.py` sets and the correction E0-05 went through: the LMS
+user ID on `user`. E0-08 names the facts and not the columns, so it is a named
+constant with a candidate list, a deliberate rename is a one-line change here, and
+the failure prints both sides.
+
+**The two ends of the enrollment window were the other two, and are not guesses
+any more.** E0-08 left their meaning open and named the ticket that would settle
+it; E1-11 settled it (ADR 0095), so `ENROLLMENT_START_COLUMN` and
+`ENROLLMENT_END_COLUMN` name `started_on` and `ended_on` outright and the fragment
+lists that hedged the question have gone. The constants carry why, and it is not
+tidying: the same ticket adds a *second* dated pair that no constraint here ranges
+over, so inference now has two candidates and no way to choose (dispute E1-11-03).
+
+Everything else is reached without a name at all:
 the platform reference, the user and section links, and the person link are found
 by following foreign keys.
 
@@ -139,14 +148,30 @@ IDENTITY_NAME_FRAGMENTS = (
     "username",
 )
 
-# The enrollment window. **This file's choice**, and a fragment list rather than
-# a candidate list because the ticket says only "an enrollment window (start and
-# end)" — `started_on`/`ended_on`, `start_date`/`end_date` and
-# `enrolled_at`/`dropped_at` are all reasonable spellings of it and all match
-# here. The end fragments are matched first, so a column called
-# `enrollment_end_date` is read as the end rather than as the start.
-ENROLLMENT_END_FRAGMENTS = ("end", "drop", "until", "through", "removed")
-ENROLLMENT_START_FRAGMENTS = ("start", "begin", "enrol", "added", "from")
+# The enrollment window ADR 0023's constraints range over. **Named outright since
+# E1-11, and no longer this file's choice.**
+#
+# It used to be a pair of fragment lists — `("end", "drop", "until", …)` and
+# `("start", "begin", "enrol", …)` — because E0-08 said only "an enrollment window
+# (start and end)" and `Enrollment`'s own docstring left the meaning open, naming
+# the ticket that would settle it: "these two columns are most likely Pulse's
+# record of when a student was first and last seen in the roster… E1's roster sync
+# is what settles it."
+#
+# E1-11 settled it, and as predicted (ADR 0095, that ticket's D3): `started_on`
+# and `ended_on` are Pulse's own observed record, and the platform's window arrives
+# beside them as `lms_window_start` / `lms_window_end` — `lms_`-prefixed under
+# E0-05's rule, because the platform owns those values. The table then held two
+# dated pairs, discovery-by-fragment matched both, and the helper below could no
+# longer answer (dispute E1-11-03).
+#
+# With the question closed there is nothing left to hedge against, and naming the
+# pair is what keeps these five tests about their own subject: ADR 0023's exclusion
+# and check constraints range over *these two* columns and over neither of the
+# platform's, so a rule that chose its columns by shape could quietly start
+# asserting the constraint against the wrong pair.
+ENROLLMENT_START_COLUMN = "started_on"
+ENROLLMENT_END_COLUMN = "ended_on"
 
 # Fragments naming a stored secret on `lti_platform`, for criterion 7. Broader
 # than "client secret" on purpose: the criterion is about key material at rest,
@@ -648,42 +673,43 @@ def branch_from(chain: dict[str, Any], *keep: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# The enrollment window, found by type and by fragment.
+# The enrollment window ADR 0023 constrains, by name.
 # ---------------------------------------------------------------------------
 
 
 def enrollment_window_columns(enrollment: Table) -> tuple[str, str]:
-    """The `(start, end)` columns of the enrollment window.
+    """The `(start, end)` columns ADR 0023's constraints range over.
 
-    Found among the date and timestamp columns rather than by a fixed name,
-    because the ticket says only "an enrollment window (start and end)". Ends are
-    matched first, so `enrollment_end_date` is read as an end rather than as a
-    start.
+    Named rather than discovered since E1-11 closed the question E0-08 left open;
+    the constants at the top of this file carry the reasoning and the record.
 
-    A failure here is a broken test rather than a red one, and it says so: the
-    fragments are constants at the top of this file.
+    **What this refuses to do is pick the pair by shape.** `enrollment` now carries
+    four dated columns, and only two of them are the window the exclusion
+    constraint is written over — `lms_window_start` and `lms_window_end` are the
+    platform's own values, which no constraint here ranges over and which a sync
+    may leave absent entirely (SPEC §3.4, ADR 0048). A helper that went on
+    inferring would have two candidate pairs to choose between and no reason to
+    prefer either, and the five tests below would be asserting ADR 0023's rule
+    against whichever it happened to pick.
+
+    A failure here is a broken test rather than a red one, and it says so.
     """
-    dated = [
-        column.name
-        for column in enrollment.columns
-        if isinstance(stored_type(column), Date | DateTime)
-    ]
-    ends = [name for name in dated if any(f in name.lower() for f in ENROLLMENT_END_FRAGMENTS)]
-    starts = [
+    missing = [
         name
-        for name in dated
-        if name not in ends and any(f in name.lower() for f in ENROLLMENT_START_FRAGMENTS)
+        for name in (ENROLLMENT_START_COLUMN, ENROLLMENT_END_COLUMN)
+        if name not in enrollment.c
     ]
-    if len(starts) != 1 or len(ends) != 1:
+    if missing:
         pytest.fail(
-            "`enrollment` does not present one start column and one end column. Its date and "
-            f"timestamp columns are {dated}; this file read {starts} as starts and {ends} as "
-            "ends, using the fragment lists at the top of this file. E0-08 gives enrollment a "
-            "window with a start and an end because E3's participation formula is "
-            "enrollment-windowed. If the window is spelled some other way, change the fragments "
-            "here."
+            f"`enrollment` declares no {missing}; its columns are "
+            f"{[column.name for column in enrollment.columns]}. E0-08 gives enrollment a window "
+            "with a start and an end because E3's participation formula is enrollment-windowed, "
+            "and ADR 0095 settles the pair as `started_on`/`ended_on` — Pulse's record of when a "
+            "member was first and last seen by a sync, which is what ADR 0023's exclusion and "
+            "check constraints range over. If that pair is genuinely renamed, it is renamed in "
+            "the constants at the top of this file, in the pull request that renames it."
         )
-    return starts[0], ends[0]
+    return ENROLLMENT_START_COLUMN, ENROLLMENT_END_COLUMN
 
 
 def window_value(column: Any, offset_days: int) -> date | datetime:
