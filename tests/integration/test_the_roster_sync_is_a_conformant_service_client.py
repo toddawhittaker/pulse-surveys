@@ -592,18 +592,29 @@ def test_a_refused_token_is_recorded_against_the_roster_url_with_the_token_endpo
     `response_code` as its single meaning. Neither says the thing an operator has
     to act on: this deployment's credentials were refused, and the platform is up.
 
-    So the sync fetches its token eagerly and records what happened to it, against
-    the roster's own URL, carrying the token endpoint's status. That is the only
-    reason the eager fetch exists: `pylti1p3` gets a token per request by itself, so
-    dropping it is invisible to every conformance assertion in this module.
+    So a refused token has to reach the call log as a row against the roster's own
+    URL, carrying the status the token endpoint answered.
 
-    **The mutation this kills** — and it is the survivor a mutation battery found,
-    which is why this test was written after the fact: removing the eager
-    `ServiceConnector.get_access_token` before the walk, so the failure surfaces
-    from inside `get_members()` with no row written; and its quieter sibling,
-    keeping the fetch and discarding the status it came back with, so the row is
-    written with `response_code` NULL and reads as a call that never reached the
-    platform.
+    **The mutation this kills**: the answered status being discarded — the row
+    written with `response_code` NULL, which reads on §6.1's console as a call that
+    never reached the platform when it reached it and was refused. The `xmin` round
+    proved that this lives in the assertion rather than in the wording: the status
+    is compared, not merely required to be present.
+
+    **And one it does not kill, measured rather than reasoned about.** This
+    docstring used to claim the removal of the eager
+    `ServiceConnector.get_access_token` before the walk as a second killing
+    mutation. It was re-planted and **the test stayed green**, correctly: the page
+    walk's own `LtiServiceException` handler records the same status against the URL
+    it called, and for the *first* page that URL is the roster address — so the row
+    this test asserts arrives by either path and the property is over-determined.
+    The eager fetch remains the module's own design and its own reason (a failure
+    that is about credentials rather than about the roster), and **nothing here
+    asserts it**; that is the boundary of this search rather than a hole in the
+    behaviour (`docs/MISTAKES.md` entry 14). A test that could see it would have to
+    separate the two paths — a token refused partway through a paged walk, where
+    the URL the handler holds is a later page's and not the section's stored
+    address — and no ticket asks for that today.
 
     **The pair is inside the test.** The same section, the same roster, the same
     wire — with the token endpoint restored, the sync ingests. Without that half,
