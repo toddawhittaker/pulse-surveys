@@ -26,14 +26,25 @@ about the system: `mock-idp/app/seed.py::LMS_INSTRUCTOR_USER_ID` names the mock
 LMS's instructor user, and a unit test pins the two constants to each other so
 the cross-mock reference cannot go stale in silence.
 
-E1's dual-door identity merge is what closes this. Until it lands, a launch and
-a web login by the same person are two unrelated verified tokens.
+E1's dual-door identity merge is what closes this. Until it landed, a launch and
+a web login by the same person were two unrelated verified tokens.
 
 **Done when** one test drives the two-hat person through both doors and asserts
 that both resolve to the *same stored identity* — one row, by its primary key,
 not two rows that happen to agree on an email address — and the constant-pinning
 unit test E0-18 left behind is deleted in the same change, because the fact it
 stands in for is then asserted directly.
+
+**Closed by E1-12** (`docs/tickets/e1/E1-12-dual-door-identity-merge.md`). The
+stored identity is the `person` row and both doors resolve to it — a launch
+through `user.lms_user_id`, a web login through a new `web_login_subject` linkage
+— and the session carries it. The done-when's test is
+`tests/integration/test_dual_door_identity_merge.py::test_the_two_hat_person_resolves_to_one_person_row_through_both_doors`,
+and `tests/unit/test_the_mock_seeds_name_one_person.py` is gone. The decision is
+[ADR 0097](../../adr/0097-the-identity-a-verified-subject-resolves-to.md); the
+mechanism it resolves through is
+[ADR 0094](../../adr/0094-subjects-resolve-to-ids-through-definer-functions.md).
+The paragraphs above are kept as the record of what E0 shipped.
 
 ## The landing role is claims-derived scaffolding, and two of its rules are unexercised
 

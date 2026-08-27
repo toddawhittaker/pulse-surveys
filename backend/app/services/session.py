@@ -1,11 +1,13 @@
 """The session both entry doors issue and every later request reads — ticket E1-08.
 
 The launch door (`app.api.lti`) issues a session here once a launch verifies; the
-web door (E1-09) issues the same session type; E1-12 later gives a session its
-stored identity. It lives in `services/` rather than in `lti/` because both doors
-share it, and it is deliberately small: a signed statement of who arrived, at
-which door, in what role — no name, no email, no `lms_user_id`, only the opaque
-`sub` the launch already carried (SPEC §8, §10).
+web door (E1-09) issues the same session type; E1-12 gave a session its stored
+identity, which is `person_id` and `user_id` below. It lives in `services/` rather
+than in `lti/` because both doors share it, and it is deliberately small: a signed
+statement of who arrived, at which door, in what role, and which rows this system
+stores for them — no name, no email, no `lms_user_id`, only the opaque `sub` the
+launch already carried and two primary keys that name nothing on their own
+(SPEC §8, §10).
 
 **A single symmetric secret, HS256, algorithm passed explicitly both ways.** The
 tool issues this token and the tool verifies it, so a symmetric key is the right
