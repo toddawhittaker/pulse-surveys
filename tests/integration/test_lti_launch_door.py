@@ -1354,10 +1354,12 @@ def test_a_refusal_does_not_name_the_key_set_address_the_tool_could_not_reach(
 # session, and the session/CSRF cookies' attributes in both environment
 # modes.
 #
-# **The response shape changes under this ticket.** `landing_or_refusal` no
-# longer renders a 200 page of inline HTML: E1-08's module layout has it
+# **The response shape changes under this ticket.** The landing seam no
+# longer renders a 200 page of inline HTML. E1-08's module layout has it
 # "issue a session, set the session and CSRF cookies, and return
 # `fragment_redirect(role, token)`" — a 302 to `/app/<role>#session=<jwt>`.
+# The seam is `landing_with_session`; E1-09 renamed it and gave it a `door`
+# parameter when the web door joined it on the same shape.
 # The sections above this one test the door as E0-18 built it and are not
 # touched here; `docs/tickets/e1/E1-08-launch-door-pylti1p3.md`'s own module
 # layout retires that contract, and reconciling the tests above — several
@@ -1493,7 +1495,7 @@ def redirected_to_role(response: Any, contract: Any, role: str) -> str:
 
     assert response.status_code in (302, 303, 307), (
         f"A valid launch answered {response.status_code} rather than a redirect. Body begins "
-        f"{response.text[:300]!r}. E1-08: `landing_or_refusal` 'issues a session, sets the "
+        f"{response.text[:300]!r}. E1-08: `landing_with_session` 'issues a session, sets the "
         "session and CSRF cookies, and returns `fragment_redirect(role, token)`.'"
     )
     location = response.headers.get("location") or ""
