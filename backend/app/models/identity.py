@@ -313,6 +313,38 @@ class AssignmentRole(StrEnum):
     ADMIN = "ADMIN"
 
 
+# SPEC §2's reporting chain: the roles that supervise somebody. §7.3 calls them
+# "any leadership role" when it says which launches trigger a roster sync, and
+# §2 gives them all one shape of screen — a roll-up over whatever the holder
+# supervises.
+#
+# **Here rather than in a service, because two readers of different kinds need
+# it.** `app.services.landing` compares a *claim* against it to choose a landing
+# view, and that module retires in E1-13; `app.services.provisioning` compares a
+# launching person's own `role_assignment` rows against it to decide whether §7.3
+# authorizes the sync, and that one does not. A set that outlives one of its
+# readers belongs beside the enumeration it names, not inside either reader.
+#
+# Members rather than strings, so a role this schema does not have cannot be
+# written down here at all: a typo is an `AttributeError` at import. `StrEnum`
+# members compare equal to their own spelling, so a claim string and a role
+# column both match without anybody converting either.
+#
+# `CARE` and `ADMIN` are deliberately absent, and `INSTRUCTOR` with them. §2.1
+# puts Care outside the supervision graph entirely — it supervises nothing — and
+# an admin administers the console rather than a hierarchy. An instructor is
+# §7.3's *other* limb, authorized by the launch's own LIS role rather than by an
+# assignment, so putting it here would merge two rules that are checked
+# differently and against different sources.
+LEADERSHIP_ROLES: tuple[AssignmentRole, ...] = (
+    AssignmentRole.VP_ACADEMICS,
+    AssignmentRole.DEAN,
+    AssignmentRole.ASSISTANT_DEAN,
+    AssignmentRole.CHAIR,
+    AssignmentRole.LEAD_FACULTY,
+)
+
+
 # SPEC §2.1's "Scope attachment" column, as the one expression that holds it, and
 # the reason `role_assignment` carries five nullable scope references (ADR 0025).
 #

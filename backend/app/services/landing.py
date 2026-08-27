@@ -107,6 +107,8 @@ from enum import Enum, StrEnum, auto
 from html import escape
 from typing import Any
 
+from app.models.identity import LEADERSHIP_ROLES
+
 __all__ = ["Door", "LandingRole", "cancelled_page", "landing_role_for", "refusal_page"]
 
 # What a refused entry says. Deliberately one sentence and a reason, with no
@@ -140,10 +142,12 @@ MEMBERSHIP_VOCABULARY = "http://purl.imsglobal.org/vocab/lis/v2/membership#"
 INSTRUCTOR_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Instructor"
 LEARNER_ROLE_URI = f"{MEMBERSHIP_VOCABULARY}Learner"
 
-# SPEC §2's reporting chain, which is one view in E0 because it is one shape of
-# screen: a roll-up over whatever the holder supervises. The scope differs per
-# role and E9 is where that becomes visible; nothing here computes it.
-LEADERSHIP_ROLES = ("VP_ACADEMICS", "DEAN", "ASSISTANT_DEAN", "CHAIR", "LEAD_FACULTY")
+# SPEC §2's reporting chain is imported rather than spelled here. It used to be a
+# tuple of strings in this module, and E1-12 moved it to `app.models.identity`
+# beside the enumeration whose members it names: this module retires in E1-13 and
+# the set does not — `app.services.provisioning` reads it to decide whether a
+# launching person's own assignments authorize a roster sync (§7.3), which is a
+# question about a `role_assignment` row rather than about a claim.
 
 
 class Door(Enum):
