@@ -409,6 +409,35 @@ Every E1 pull request that defers something adds it here in the same PR.
    drives a launch with a `.env` in the working directory and `ENVIRONMENT`
    absent from the process, and asserts both halves: the address stored, and no
    `roster_address_refused` recorded.
+
+## From E1-11 — the roster sync service client
+
+1. **The fetched-address rules judge the host literal, not the address it
+   resolves to** (security fix round, residual MEDIUM after the HIGH was
+   closed). The SSRF fix routes every fetched roster URL — the stored address
+   and every `rel="next"` page — through `refuse_invalid_fetched_address`, which
+   refuses cleartext off this machine, the mock-platform host, and link-local
+   and loopback *literals*. That closes the cloud-metadata case outright
+   (`169.254.169.254` is http-only, refused by the cleartext rule and the
+   link-local literal both) and, with `requests`' default TLS verification and
+   the cleartext rule, the decimal/octal IP spellings (`https://2130706433/`)
+   too. The residual: a malicious or compromised registered platform sets
+   `rel="next"` to an internal service that holds a **valid public certificate
+   on an RFC1918 or split-horizon-DNS address** — it passes every rule, TLS
+   verifies, and the tool issues the GET with its NRPS `Authorization: Bearer`
+   token attached. Blind (the response is ingested as roster members, not
+   returned), and it needs a registered platform to act, which bounds the
+   actor. This is the same class as **E1-05 item 2** ("the address rules judge
+   spellings, not addresses") and is fixed with it, one level out: at the
+   fetched-URL surface rather than the registration-write surface.
+   **Done when** the fetched-address path resolves the host and refuses a
+   resolved address that is `not ip.is_global` (RFC1918, loopback, link-local,
+   carrier-grade NAT), exempting the operator's own stored roster host, and
+   connects to the pinned resolved address rather than re-resolving (so a
+   rebind between the check and the GET cannot swap it) — with test pairs on
+   both sides. Owed with E1-05 item 2, before a second fetched-address writer
+   or E11's console ships.
+
 ## From E1-12 — the dual-door identity merge
 
 1. **`mock-lms-user-dean` is a Pulse-side `user` row the mock LMS cannot sign a
