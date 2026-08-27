@@ -158,3 +158,15 @@ module fixed. An exact-set assertion is the kind whose silence looks like
 agreement.
 
 ---
+
+**Instance, 2026-08-26 (E1-10, dispute E1-10-01).** E1-10 added
+`course.title_is_fallback`, and E0-11's migration tests went red inside their
+own seeding: `seed_row` ends `.returning(*table.columns)` — every column
+`Base.metadata` declares — while the test seeds a database pinned eight
+revisions back, so no definition of the new column avoided it. The module's own
+docstring stated the premise that had expired ("seeding at `RANK_REVISION`
+keeps their columns the ones today's models declare"). The repair was on the
+other side of the test wall, exactly this entry's shape: the test author moved
+seeding to head with a walk back down, closing the class — any table a future
+revision touches — rather than the one column. Not counted as a catch; the
+entry describes what happened, it did not prevent it.

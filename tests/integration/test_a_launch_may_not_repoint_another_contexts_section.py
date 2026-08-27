@@ -159,10 +159,10 @@ def snapshot(rows: Any) -> dict[str, Any]:
     }
 
 
-def test_a_sections_binding_is_unique_in_the_database_and_not_only_in_the_writer(
+def test_the_section_model_declares_the_binding_as_a_unique_pair(
     metadata_tables: dict[str, Any], provisioning_contract: Any
 ) -> None:
-    """The binding is a constraint, so a second writer cannot undo what this one holds.
+    """The model says the binding is a unique pair — a declaration, not a database.
 
     The three tests below assert what `app.services.provisioning` does, and ADR
     0045's standing objection applies to all of them: "a caller can bypass it by
@@ -170,7 +170,8 @@ def test_a_sections_binding_is_unique_in_the_database_and_not_only_in_the_writer
     that a section has one context has to survive a second writer that never reads
     this module. A unique constraint is what makes it survive — the same shape SPEC
     §8 uses for the rest of this schema's identities, and the reason the ruling
-    says "unique together" rather than "looked up together".
+    says "unique together" rather than "looked up together". This test is where
+    that constraint is *stated*.
 
     **Both columns, and `NOT NULL` on each.** A nullable half is a section with no
     binding, which is a section resolvable by parsed label again — Postgres treats
@@ -178,9 +179,24 @@ def test_a_sections_binding_is_unique_in_the_database_and_not_only_in_the_writer
     nothing about the rows that matter. That is the quiet version of this finding
     coming back.
 
-    **The mutation this kills**: the columns added and stamped with no constraint
-    behind them, which every behavioural test in this file passes because the
-    writer is the only thing writing.
+    **What this does not prove, and it is the half a reader would assume it did.**
+    Every assertion below reads `Base.metadata` — the model's declaration — and
+    nothing here opens a connection. A migration that left the constraint out of
+    the database while the model went on declaring it passes this test, so this is
+    not the database-side proof and must not be cited as one.
+
+    **What reaches the migrated database is the drift gate**, and that is measured
+    rather than assumed: E1-10's verifier posed the missing-constraint mutation
+    both ways, and removing it from the migration turned
+    `tests/integration/test_alembic_baseline.py::test_check_reports_no_drift_after_upgrading_an_empty_database`
+    red immediately, with 40 failures behind it. `alembic check` compares the
+    declaration against the schema an upgrade actually built, so the two together
+    are the guarantee: this test says the model declares the pair, and that gate
+    says the database it built agrees.
+
+    **The mutation this kills**: the columns added and stamped with no unique
+    declaration behind them at all, which every behavioural test in this file
+    passes because the writer is the only thing writing.
     """
     section = metadata_tables.get("section")
     assert section is not None, (
@@ -223,11 +239,15 @@ def test_a_sections_binding_is_unique_in_the_database_and_not_only_in_the_writer
         if constraint.__class__.__name__ == "UniqueConstraint"
     ] + [{column.name for column in index.columns} for index in section.indexes if index.unique]
     assert binding in unique_sets, (
-        f"Nothing on `section` makes {sorted(binding)} unique — the unique sets it carries are "
-        f"{[sorted(one) for one in unique_sets]}. The tests below say the *writer* refuses a "
-        "second section for a bound context; this is what says the database does, which is what "
-        "ADR 0045's 'a caller can bypass it by not calling it' asks for and what E1-11's sync, "
-        "which writes sections and never reads `app.services.provisioning`, will be held to."
+        f"The `section` model declares no unique pair over {sorted(binding)} — the unique sets it "
+        f"carries are {[sorted(one) for one in unique_sets]}. The tests below say the *writer* "
+        "refuses a second section for a bound context; a declared constraint is what will hold "
+        "when something other than that writer writes a section, which is what ADR 0045's 'a "
+        "caller can bypass it by not calling it' asks for and what E1-11's sync — which writes "
+        "sections and never reads `app.services.provisioning` — will be held to.\n\n"
+        "This is the declaration and not the database: `alembic check`, through "
+        "`test_alembic_baseline.py::test_check_reports_no_drift_after_upgrading_an_empty_database`, "
+        "is what fails when the migration does not build what the model declares."
     )
 
 
