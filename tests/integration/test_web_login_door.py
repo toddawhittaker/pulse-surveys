@@ -1615,9 +1615,21 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
 
 
 # ---------------------------------------------------------------------------
-# One door, one vocabulary. This is the launch door's rule from the other side:
-# `test_lti_launch_door.py` asserts that door reads only the LIS roles claim, and
-# these three assert this one reads only `roles_claim` and never the LTI claim.
+# What a roles claim buys at this door, which since E1-13 is nothing.
+#
+# This section used to read "one door, one vocabulary": `test_lti_launch_door.py`
+# asserted that door reads only the LIS roles claim, and these three asserted this
+# one reads only `roles_claim` and never the LTI claim. **Both halves of that are
+# retired.** E1-13 resolves the landing from the person's live assignments,
+# filtered by ADR 0026's door column, so neither door consults a roles claim at
+# all — and the three tests below say the stronger thing: the Care officer reaches
+# `/app/care` with her own vocabulary present, with a foreign one smuggled in
+# beside it, and with her own removed entirely and only the foreign one left.
+# Her rows decide, three times over.
+#
+# The launch-door section this mirrors was rewritten in E1-13's red commit; the
+# last of the three here was missed and was rewritten under dispute E1-13-01,
+# which is the record of how one half of a stated pair moved without the other.
 # ---------------------------------------------------------------------------
 
 
@@ -1738,7 +1750,7 @@ def test_a_session_also_carrying_an_lti_roles_claim_lands_where_its_own_claim_na
     landed_with_session(response, door_contract, CARE_ROUTE)
 
 
-def test_a_session_stating_only_an_lti_roles_claim_is_refused(
+def test_a_session_stating_only_an_lti_roles_claim_lands_where_the_rows_already_said(
     open_web_door: Any,
     door_contract: Any,
     provider: Any,
@@ -1746,20 +1758,57 @@ def test_a_session_stating_only_an_lti_roles_claim_is_refused(
     claims_in_token: Any,
     suite_key_set: Any,
 ) -> None:
-    """**Dies if the web door consults the launch door's vocabulary.**
+    """**Dies if the web door consults either roles vocabulary.**
 
-    The session states the LIS Instructor role and nothing in this door's own roles
-    claim. SPEC §2 gives this door the roles the LMS may not name; a door that read
-    the LTI claim would take a role vocabulary an LMS administrator controls and
-    use it to choose a screen here — the mirror image of the rule
-    `test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused` asserts in
-    `tests/integration/test_lti_launch_door.py`.
+    The session states the LIS Instructor role and **nothing at all** in this
+    door's own roles claim, and the Care officer behind it lands on `/app/care`
+    anyway — because she holds a live `CARE` assignment, ADR 0026's
+    `permits_web_login` is true for it, and E1-13 gives no roles claim any say in
+    which view a person reaches. SPEC §2: "Entry doors are a property of the
+    assignment, not the person", and E1-13's scope is "session identity → that
+    person's live assignments filtered by the entered door's permission column →
+    landing view".
 
-    There is no view this door may serve for an instructor: E0-18 gives it
-    leadership, Care and admin, and the LIS roles belong to the launch door. So the
-    only answer is a refusal, and `refused` requires that no landing testid at all
-    appears — a door that fell through to a default fails here whichever view it
-    chose.
+    **Two mutations die here, in opposite directions.** A door that read the LTI
+    vocabulary lands her on the instructor view, or refuses because it serves no
+    instructor view at this door — either fails the landing assertion. A door that
+    read *this* door's own vocabulary finds nothing there at all, since the
+    adjustment removes it, and answers the calm no-access page or a refusal — which
+    fails the same assertion. Only a door that reads neither and asks her rows
+    lands her on Care.
+
+    **Rewritten by dispute E1-13-01, and the reason is worth having here.** It read
+    `test_a_session_stating_only_an_lti_roles_claim_is_refused` and required a 4xx,
+    which was the correct assertion while the landing came from a claim. Its own
+    docstring named its mirror —
+    `test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused` in
+    `tests/integration/test_lti_launch_door.py` — and E1-13's red commit rewrote
+    that half to `..._lands_where_the_rows_already_said` and missed this one. There
+    is no reading of this ticket under which the launch door stops consulting a
+    roles claim and the web door goes on doing it.
+
+    **The security property is stronger, not weaker.** The old test protected
+    "an LMS-controlled vocabulary must not choose a screen at this door" by
+    checking that such a token was refused; the door had to read the claim to
+    refuse on it. Now the claim is not read at all, which is the same movement work
+    order D10 records for the launch-door half. E0-09 criterion 10 is the rule
+    underneath — "The launch or login establishes who someone is; this table
+    establishes what they may do" — and a door that reads no vocabulary cannot be
+    talked into anything by one.
+
+    **The other direction of the pair is
+    `tests/integration/test_landing_resolves_from_assignments.py::test_a_web_login_by_a_linked_person_holding_no_assignment_lands_on_the_calm_page`**:
+    a linked person whose token states a role in *this door's own* vocabulary, and
+    who holds no assignment, is answered with the calm page. Together they kill a
+    door that reads the foreign vocabulary and a door that reads its own. Neither
+    alone does: this one is satisfied by a door that reads its own claim and
+    happens to agree with her rows, and that one by a door that reads the LTI claim
+    and finds none.
+
+    **The canary is kept and is doing more work than before.** The session the
+    provider issued has to have carried this door's own roles claim, or the
+    adjustment removed nothing and she would be landing on Care with her own
+    vocabulary still present — which is the sibling test above, not this one.
     """
     roles_claim = provider.roles_claim_name()
     seen: list[dict[str, Any]] = []
@@ -1778,14 +1827,10 @@ def test_a_session_stating_only_an_lti_roles_claim_is_refused(
 
     assert seen and seen[0].get(roles_claim), (
         f"The session the provider issued carries no `{roles_claim}`, so removing it changed "
-        "nothing and this test is not posing the question it names."
+        "nothing and this test is not posing the question it names — it would be the sibling "
+        "above, a session that still states its own vocabulary."
     )
-    refused(
-        response,
-        door_contract,
-        f"a session stating {INSTRUCTOR_ROLE_URI!r} in `{LTI_ROLES_CLAIM}` and nothing in "
-        f"`{roles_claim}`",
-    )
+    landed_with_session(response, door_contract, CARE_ROUTE)
 
 
 # ---------------------------------------------------------------------------
