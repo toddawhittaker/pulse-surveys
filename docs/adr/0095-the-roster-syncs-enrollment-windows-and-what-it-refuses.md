@@ -151,14 +151,11 @@ knowing before somebody writes the purge.
 
 **A refused token is recorded under the roster's URL carrying the token endpoint's
 status**, and both halves of that were decided rather than fallen into. A sync
-makes two calls to two endpoints and only one is the roster; when the token
-endpoint answers an error the roster is never asked at all, so the sync fetches its
-token eagerly for no reason other than to have something to write down —
-`pylti1p3` would otherwise get one lazily on the first page, and the failure would
-surface from inside the walk with no row at all, leaving the section
-indistinguishable from one SPEC §7.3 calls never-synced. The *URL* is the roster's
-because the row is that section's record of an attempted sync and §6.1's console
-reads it per section. The *status* is the token endpoint's because D9 gives a NULL
+makes two calls to two endpoints and only one of them is the roster; when the token
+endpoint answers an error the roster is never asked at all. The *URL* is the
+roster's because the row is that section's record of an attempted sync and §6.1's
+console reads it per section. The *status* is the token endpoint's because D9 gives
+a NULL
 `response_code` exactly one meaning — "the call never reached the platform" — and
 the two states an operator has to tell apart here are "this deployment's
 credentials were refused and the platform is up" and "nothing answered". Recording
@@ -168,13 +165,34 @@ row under the token endpoint's own address, and a `kind` column on `nrps_call`,
 each put an OAuth fact into a table whose whole subject is one section's roster
 history, and E11's console does not exist yet to be asked which it wants.
 
-None of it was assertable until a mutation battery removed the eager fetch and
-every conformance assertion stayed green — `pylti1p3` gets a token per request by
-itself, so nothing but the call log can see the difference.
+**The eager token fetch is redundant, and this paragraph used to claim otherwise.**
+It said the call row was the only thing that could ever detect the fetch's removal.
+Measured on 2026-08-27 by re-planting exactly that removal against the test written
+for it: **the mutation survives all fourteen tests of the conformance and debounce
+modules.** The property is over-determined. `_walked_roster`'s own page handler
+catches the same `LtiServiceException` and records the same status against the URL
+it called — and `ServiceConnector` caches an access token per scope set per
+connector with no expiry check, so exactly one grant is attempted per sync and it
+is attempted on the first page, whose URL *is* the section's stored address. Eager
+or lazy, the row is identical, and nothing in this repository can tell the two
+apart.
+
+So what the eager fetch buys is determinacy rather than behaviour: the recorded URL
+is the section's stored address because this module says so, rather than because
+the library's token cache happens to make the first page the only page a grant is
+ever attempted from. That becomes load-bearing only if the cache changes — a
+version honouring `expires_in`, or one connector reused across sections — and it is
+recorded here as the contingent thing it is. It is kept on that ground and on
+legibility, not because anything fails without it, and a later reader is entitled
+to delete it after re-running the measurement above.
+
+What *is* asserted is the pairing.
 `test_a_refused_token_is_recorded_against_the_roster_url_with_the_token_endpoints_status`
-is the assertion now. What the sync does with the refusal *beyond* recording it
-stays the writer's, which is ADR 0090's consequence about a sanctioned writer
-running on a job rather than on a request.
+pins the URL and the status, and it was red against an implementation that recorded
+the row and discarded the status — which is the defect it was written for. What the
+sync does with the refusal *beyond* recording it stays the writer's, which is ADR
+0090's consequence about a sanctioned writer running on a job rather than on a
+request.
 
 **`identity_name` being nullable is a widening the downgrade cannot undo
 silently.** E1-11's revision fills any row that has no name with a stated marker

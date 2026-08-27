@@ -437,20 +437,32 @@ def _walked_roster(
     recorded either way, with the response code that says which it was; a NULL
     response code means the call never reached the platform at all.
 
-    **The token is asked for before the first page, and what happened to it is
-    recorded**, rather than left to the library's lazy fetch on the first request.
-    A sync makes two calls to two endpoints and only one of them is the roster: when
-    the *token endpoint* answers an error the roster is never asked at all, so a
-    walk left to discover that on its first page writes no row and leaves the
-    section looking never-synced — SPEC §7.3's other state entirely.
-
-    So the refusal is written against the roster's own URL, because that is the
-    section's record of an attempted sync and §6.1's console reads it per section,
-    and it carries **the token endpoint's status**. A NULL there has exactly one
-    meaning under D9 — the call never reached the platform — and the two failures an
+    **A refused token is recorded against the roster's own URL, carrying the token
+    endpoint's status.** A sync makes two calls to two endpoints and only one of
+    them is the roster: when the *token endpoint* answers an error the roster is
+    never asked at all. The URL is still the roster's, because the row is this
+    section's record of an attempted sync and §6.1's console reads it per section.
+    The status is the token endpoint's, because a NULL there has exactly one meaning
+    under D9 — the call never reached the platform — and the two failures an
     operator has to tell apart are precisely "this deployment's credentials were
     refused, and the platform is up" and "nothing answered". Only the status
     separates them.
+
+    **The eager fetch below is redundant and is kept deliberately.** An earlier
+    version of this docstring claimed a walk left to discover the refusal on its
+    first page "writes no row"; that is false of the code underneath it. The page
+    handler further down catches the same `LtiServiceException` and records the same
+    status against the URL it called — and `ServiceConnector` caches a token per
+    scope set per connector with no expiry check, so exactly one grant is attempted
+    per sync and it is attempted on the first page, whose URL is this section's
+    stored address. Measured: removing the eager fetch leaves all fourteen tests of
+    the conformance and debounce modules green.
+
+    What it buys is that the recorded URL is the stored address because this
+    function says so, rather than because of where the library's cache happens to
+    put the only grant — which stops being true if that cache ever honours
+    `expires_in` or a connector is reused across sections. ADR 0095 records the
+    measurement and says a later reader may delete this after repeating it.
     """
     try:
         connector.get_access_token([MEMBERSHIP_SCOPE])
