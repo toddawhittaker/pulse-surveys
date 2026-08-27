@@ -262,8 +262,16 @@ class ProvisioningService:
 
 
 @pytest.fixture
-def provisioning() -> ProvisioningService:
-    """E1-10's writer, reached by discovery. See `ProvisioningService` above."""
+def provisioning(configured_env: dict[str, str]) -> ProvisioningService:
+    """E1-10's writer, reached by discovery. See `ProvisioningService` above.
+
+    Depends on `configured_env` so the documented variables are laid down before
+    `ProvisioningService.settings` builds a `Settings()`: E1-11 gave
+    `provision_from_launch` a `settings` parameter, so the `settings` role is now
+    reached where E1-10 never reached it, and a bare process environment — CI's,
+    with no `.env` — fails the whole configuration. `registered_platform`'s
+    `ENVIRONMENT` setenv rides on top of this (`docs/MISTAKES.md` entry 40).
+    """
     return ProvisioningService()
 
 
