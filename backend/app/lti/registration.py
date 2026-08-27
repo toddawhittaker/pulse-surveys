@@ -51,6 +51,7 @@ __all__ = [
     "MultipleRegistrationsError",
     "NoSigningKeyError",
     "OrmToolConf",
+    "ToolRegistration",
     "public_jwk",
     "published_key_set",
     "rfc7638_thumbprint",
@@ -103,6 +104,37 @@ class MultipleRegistrationsError(Exception):
     """
 
 
+class ToolRegistration(Registration):
+    """A `pylti1p3` registration whose `kid` is this module's own thumbprint.
+
+    `Registration.get_kid` derives one from the *public* key with jwcrypto, and
+    `ServiceConnector` reads it to put a `kid` in the header of every
+    `client_assertion` the tool signs. Measured on the locked versions, that
+    derivation agrees with `rfc7638_thumbprint` below — both are RFC 7638 §3.2 over
+    `e`, `kty` and `n` — and "measured to agree today" is exactly the state
+    `rfc7638_thumbprint`'s own docstring warns about: "Any stable string works
+    right up until the two are computed in different places."
+
+    So there is one derivation and this class is where the library reads it. The
+    alternative is `set_tool_public_key`, which would work and would leave the
+    identifier a platform selects a verification key by computed by a dependency
+    rather than by the module that publishes the key set.
+
+    Eight lines and one overridden method, deliberately: this is not a layer over
+    `pylti1p3` — the library has no `set_kid` and expects its own classes to be
+    subclassed, which is how `OrmToolConf` below reaches it too.
+    """
+
+    _kid: str | None = None
+
+    def set_kid(self, kid: str) -> "ToolRegistration":
+        self._kid = kid
+        return self
+
+    def get_kid(self) -> str | None:
+        return self._kid
+
+
 class OrmToolConf(ToolConfAbstract[Any]):
     """`pylti1p3`'s tool configuration, backed by `lti_platform`/`lti_deployment`.
 
@@ -118,11 +150,20 @@ class OrmToolConf(ToolConfAbstract[Any]):
     rather than choosing — the same guard `app.lti.launch.registered_platform`
     holds, kept here so a lookup through the library cannot lose it.
 
-    **The key set is left unset.** `Registration.get_key_set_url` carries the
-    `jwks_url`, but the launch door fetches the key set through the repo's httpx
-    client (`app.state.http`) the way `app.services.tokens` does, and hands it to
-    the launch — never letting `pylti1p3` open its own `requests` connection. So
-    this fills in everything but the keys.
+    **The platform's key set is left unfetched.** `Registration.get_key_set_url`
+    carries the `jwks_url`, but the launch door fetches the key set through the
+    repo's httpx client (`app.state.http`) the way `app.services.tokens` does, and
+    hands it to the launch — never letting `pylti1p3` open its own `requests`
+    connection for an inbound verification.
+
+    **The tool's own key is filled in, and E1-11 is why.** A registration is used
+    in both directions: inbound, to verify what a platform signed, and outbound, to
+    sign the `client_assertion` a token request authenticates with —
+    `pylti1p3.ServiceConnector` reads `get_tool_private_key()` and `get_kid()` off
+    exactly this object and asserts the first is not None. One construction path
+    for both is what keeps the `kid` this tool writes into an assertion header and
+    the `kid` it publishes at `/lti/jwks` the same function of the same modulus; two
+    would agree until somebody rotated one of them.
     """
 
     def __init__(self, session: Session) -> None:
@@ -134,7 +175,7 @@ class OrmToolConf(ToolConfAbstract[Any]):
         )
 
     def _registration(self, row: LtiPlatform) -> Registration:
-        registration = Registration()
+        registration = ToolRegistration()
         registration.set_issuer(row.issuer)
         registration.set_client_id(row.client_id)
         registration.set_key_set_url(row.jwks_url)
@@ -145,6 +186,16 @@ class OrmToolConf(ToolConfAbstract[Any]):
             registration.set_auth_login_url(row.authorization_endpoint)
         if row.auth_token_url is not None:
             registration.set_auth_token_url(row.auth_token_url)
+        # **Absent rather than refused**, deliberately. Every inbound launch is
+        # resolved through this method, and a deployment with no `tool_signing_key`
+        # row can still verify one — so raising here would take the door down over
+        # a key only the outbound client needs. The outbound caller
+        # (`app.services.roster_sync`) checks for it and raises `NoSigningKeyError`
+        # naming the table, which is a better message than the library's assert.
+        stored = self._session.scalars(select(ToolSigningKey)).one_or_none()
+        if stored is not None:
+            registration.set_tool_private_key(stored.private_key_pem)
+            registration.set_kid(public_jwk(stored.private_key_pem)["kid"])
         return registration
 
     def find_registration_by_issuer(self, iss: str, *args: Any, **kwargs: Any) -> Registration:
