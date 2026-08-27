@@ -59,6 +59,7 @@ holds `INSERT` on it and no `SELECT`, and E11 builds the surface that reads it.
 """
 
 import logging
+import os
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -72,7 +73,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.identity import User
-from app.models.lti import LaunchDefect, LaunchDefectKind, LtiPlatform
+from app.models.lti import (
+    ROSTER_SERVICE_ADDRESS_COLUMN,
+    LaunchDefect,
+    LaunchDefectKind,
+    LtiDeployment,
+    LtiPlatform,
+    RegistrationAddressError,
+    refuse_invalid_fetched_address,
+)
 from app.models.org import Course, Prefix, Section
 from app.models.term import Term
 from app.services.authz import LmsOwnedWriteRefused, WriteSanction, guard_write, sanction_for
@@ -100,6 +109,12 @@ NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
 # Where the roster service address sits inside that claim. The member name is the
 # NRPS specification's.
 MEMBERSHIPS_URL_MEMBER = "context_memberships_url"
+
+# The one configuration name this module reads, and it reads it directly rather
+# than through `Settings`: see `_environment` below for why, and for why an unset
+# value puts the address rules in force rather than switching them off. Spelled as
+# `scripts/seed.py` spells it — the other caller of the same rules.
+ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
 # The three members of a context claim this module reads. `id` is the only one LTI
 # 1.3 requires; `label` and `title` are both optional, and the whole of what this
@@ -159,6 +174,21 @@ class ContextLabel:
     code: str
 
 
+@dataclass(frozen=True)
+class ContextBinding:
+    """Which context, on which registration, a section was discovered from.
+
+    The identity a course copy cannot reproduce, and the pair `section` is unique
+    on. Carried as a value rather than as two arguments because the two are only
+    ever meaningful together: a context id without its deployment is unique
+    nowhere, and a deployment without a context id is every section of that
+    registration at once.
+    """
+
+    deployment_id: UUID
+    context_id: str
+
+
 def provision_from_launch(session: Session, claims: Mapping[str, Any]) -> None:
     """Write what this launch discovered, or record why it could not be read.
 
@@ -205,6 +235,35 @@ def _registered_platform(session: Session, claims: Mapping[str, Any]) -> LtiPlat
             "one, or provisioning was reached without one."
         )
     return platform
+
+
+def _registered_deployment(session: Session, claims: Mapping[str, Any]) -> LtiDeployment:
+    """The `lti_deployment` row this launch came from.
+
+    Half of a section's identity, and the half that makes the other half mean
+    anything: a context id is the platform's own opaque string, unique inside one
+    registration and meaningless across registrations.
+
+    Resolved rather than trusted: `verified_launch` has already refused a launch
+    naming a deployment nobody registered, so a launch reaching this point with no
+    row is the same class of condition as one with no platform — a registration
+    removed between the two reads, or provisioning reached without the door.
+    """
+    platform = _registered_platform(session, claims)
+    deployment_id = claims.get(DEPLOYMENT_ID_CLAIM)
+    deployment = session.scalars(
+        select(LtiDeployment).where(
+            LtiDeployment.lti_platform_id == platform.id,
+            LtiDeployment.deployment_id == deployment_id,
+        )
+    ).one_or_none()
+    if deployment is None:
+        raise UnregisteredLaunchError(
+            "This launch names a deployment no registration holds, which the door it came through "
+            "has already checked. A section is bound to the registration it was discovered "
+            "through, so there is nothing to bind one to."
+        )
+    return deployment
 
 
 def _record_the_launching_subject(
@@ -309,11 +368,25 @@ def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
     different outcome. `guard_write` is asked before each of the two writes, so a
     catalog that no longer grants `section` refuses after the course is written —
     and that is exactly the partial row this boundary exists to prevent. It is
-    rolled back and logged, and unlike the five defects it writes no record: it is
+    rolled back and logged, and unlike the defect kinds it writes no record: it is
     a fact about this project's own code rather than about the launch's context.
+
+    **The binding is resolved before the parsed identity, and the two have to
+    agree** (round 3, ADR 0091). A section belongs to the context it was
+    discovered from — `(lti_deployment_id, lms_context_id)` — and what its label
+    parses to is what it is *called*. A course copy reproduces the name and cannot
+    reproduce the identity, so the two lookups disagreeing is a collision:
+    somebody else's section wears this launch's name, or this launch's context has
+    been renamed onto a name nothing holds. Either way nothing is written, the
+    course title included, which is why the check sits above the savepoint rather
+    than inside it.
     """
     label = _parsed_label(claims)
-    if label is None:
+    context_id = _context(claims).get(CONTEXT_ID_MEMBER)
+    if label is None or not isinstance(context_id, str) or not context_id:
+        # A context claim carrying no `id` is unreadable in the same way one
+        # carrying no label is: LTI 1.3 requires the member, and without it there
+        # is no identity to bind a section to and nothing to resolve one by.
         _record_defect(session, claims, LaunchDefectKind.UNPARSEABLE_CONTEXT_LABEL)
         return
     if not _inside_the_bands(label.number):
@@ -330,11 +403,27 @@ def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
         _record_defect(session, claims, LaunchDefectKind.NO_TERM_FOR_LAUNCH_DATE)
         return
 
+    binding = ContextBinding(
+        deployment_id=_registered_deployment(session, claims).id, context_id=context_id
+    )
+    discovered = _course_row(session, prefix.id, label.number)
+    bound = _section_bound_to(session, binding)
+    named = (
+        None if discovered is None else _section_row(session, discovered.id, term.id, label.code)
+    )
+    if not _the_same_section(bound, named):
+        _record_defect(session, claims, LaunchDefectKind.CONTEXT_COLLISION)
+        return
+
+    address = _an_address_this_tool_may_call(session, claims)
+
     both_or_neither = session.begin_nested()
     try:
         course = _upsert_course(session, prefix.id, label, _platform_title(claims))
         if course is not None:
-            _upsert_section(session, course, term, label, _roster_address(claims))
+            _upsert_section(
+                session, course, term, label, binding=binding, address=address, section=bound
+            )
     except SectionCodeError as refusal:
         both_or_neither.rollback()
         logger.warning("%s: %s", LaunchDefectKind.SECTION_CODE_UNDERIVABLE.value, refusal)
@@ -409,6 +498,84 @@ def _platform_title(claims: Mapping[str, Any]) -> str | None:
     """The title the platform states for this context, if it states one."""
     title = _context(claims).get(CONTEXT_TITLE_MEMBER)
     return title if isinstance(title, str) and title else None
+
+
+def _the_same_section(bound: Section | None, named: Section | None) -> bool:
+    """Whether the section this context is bound to is the one its label names.
+
+    Both absent is agreement — this is a context nobody has launched, naming a
+    section nobody has written — and so is both present and the same row. Anything
+    else is the collision: a section some other context is bound to wearing this
+    launch's name, or this context bound to a section whose name has moved.
+    """
+    if bound is None or named is None:
+        return bound is None and named is None
+    return bound.id == named.id
+
+
+def _section_bound_to(session: Session, binding: ContextBinding) -> Section | None:
+    """The section discovered from one context on one registration, if there is one."""
+    return session.scalars(
+        select(Section).where(
+            Section.lti_deployment_id == binding.deployment_id,
+            Section.lms_context_id == binding.context_id,
+        )
+    ).one_or_none()
+
+
+def _an_address_this_tool_may_call(session: Session, claims: Mapping[str, Any]) -> str | None:
+    """The launch's roster address if this container may fetch it, and `None` if not.
+
+    Round 3's MEDIUM. E1-11 calls this address with the tool's own client
+    credentials, on a schedule, with nobody present, so it is judged by the same
+    four rules `jwks_url` and `auth_token_url` pass — through the one function that
+    holds them (`docs/MISTAKES.md` entry 13), not a second copy beside it.
+
+    **A refused address is not a refused section.** The address stays NULL, the
+    refusal is recorded, and the section is provisioned: SPEC §7.3 makes a section
+    with no roster a *state* — "the admin console shows it as never-synced …
+    rather than as empty" — and refusing the launch would take a real course out of
+    the product over a URL.
+
+    The refusal's own message says "registration", because that is the column set
+    the rules were written for and the message is not this module's to reword; the
+    log line beside it says which address was actually refused.
+    """
+    address = _roster_address(claims)
+    if address is None:
+        return None
+    try:
+        refuse_invalid_fetched_address(
+            _environment(), column=ROSTER_SERVICE_ADDRESS_COLUMN, address=address
+        )
+    except RegistrationAddressError as refusal:
+        logger.warning(
+            "%s: the roster service address this launch advertised is one this container will "
+            "not fetch. %s",
+            LaunchDefectKind.ROSTER_ADDRESS_REFUSED.value,
+            refusal,
+        )
+        _record_defect(session, claims, LaunchDefectKind.ROSTER_ADDRESS_REFUSED)
+        return None
+    return address
+
+
+def _environment() -> str:
+    """The `ENVIRONMENT` this process is running under, read per call.
+
+    Read here rather than taken as an argument, because the writer's signature is
+    the launch's own — a session and the claims — and read per call rather than at
+    import, so a process that is reconfigured is judged by what it is configured
+    as now.
+
+    **Absent reads as a deployment, not as development.** `is_a_deployment("")` is
+    true, so an unset variable puts the address rules *in force* rather than
+    switching them off. That is the same spelling `scripts/seed.py` uses, and the
+    direction matters: `Settings` makes `ENVIRONMENT` required, so a running
+    deployment always has one, and the failure this ordering prevents is a
+    misconfigured process quietly accepting an address it would otherwise refuse.
+    """
+    return os.environ.get(ENVIRONMENT_VARIABLE, "")
 
 
 def _roster_address(claims: Mapping[str, Any]) -> str | None:
@@ -497,32 +664,52 @@ def _fallback_title(label: ContextLabel) -> str:
 
 
 def _upsert_section(
-    session: Session, course: Course, term: Term, label: ContextLabel, address: str | None
+    session: Session,
+    course: Course,
+    term: Term,
+    label: ContextLabel,
+    *,
+    binding: ContextBinding,
+    address: str | None,
+    section: Section | None,
 ) -> None:
-    """Find or create the section this label's code names in this term, and store its address.
+    """Update the section this context is bound to, or create it with the binding stamped.
 
-    Keyed on `(course_id, term_id, lms_section_code)` — the same code runs again
-    next term, and a rule without the term would forbid that.
+    `section` is what `_ingest_the_context` resolved by the binding, and it has
+    already been checked against what the label names — so by the time this runs,
+    "found" means *this context's own section* rather than a row that happens to
+    share a name. That check is deliberately not repeated here: two places
+    deciding one identity is two places to disagree.
+
+    The insert still carries `(course_id, term_id, lms_section_code)` as before,
+    because that is what a section is *called* and it is still unique; what
+    changed in round 3 is that it is no longer what a section is looked up by.
 
     **The calendar comes from `apply_section_code` and from nothing here** (ADR
     0021). Its refusals travel out of this function as `SectionCodeError` and reach
     the caller, which writes the defect and leaves both rows unwritten.
 
-    **The address is stored on a staff launch and never cleared.** A staff launch
-    carrying no NRPS claim leaves whatever is there: a platform that stops
-    advertising a service has not moved the roster, and a section with no address
-    at all is §7.3's never-synced state rather than an error.
+    **The binding is stamped once, at insert, and never revised.** The application
+    role holds no `UPDATE` on either column, so a writer that tried would be
+    refused by Postgres as well as by this rule — a connection able to repoint
+    `lms_context_id` reaches round 3's finding through the database instead of
+    through this module.
 
-    A refusal is logged here and travels, exactly as `_upsert_course`'s does — and
-    it is the case that makes the shared savepoint load-bearing, because by this
-    point the course has been written and the two go together or not at all.
+    **The address is stored on a staff launch and never cleared.** A staff launch
+    carrying no NRPS claim, or one whose address this container will not fetch,
+    leaves whatever is there: a platform that stops advertising a service has not
+    moved the roster, and a section with no address at all is §7.3's never-synced
+    state rather than an error.
+
+    A guard refusal is logged here and travels, exactly as `_upsert_course`'s does
+    — and it is the case that makes the shared savepoint load-bearing, because by
+    this point the course has been written and the two go together or not at all.
     """
     try:
         guard_write(table="section", sanction=SANCTION)
     except LmsOwnedWriteRefused as refusal:
         _log_a_refused_write("section", refusal)
         raise
-    section = _section_row(session, course.id, term.id, label.code)
     if section is None:
         with _tolerating_a_row_that_is_already_there(session, "the section this launch names"):
             session.add(
@@ -533,6 +720,8 @@ def _upsert_section(
                         term_id=term.id,
                         lms_section_code=label.code,
                         lms_context_memberships_url=address,
+                        lti_deployment_id=binding.deployment_id,
+                        lms_context_id=binding.context_id,
                     ),
                 )
             )

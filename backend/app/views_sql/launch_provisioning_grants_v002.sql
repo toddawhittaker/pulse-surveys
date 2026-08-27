@@ -1,0 +1,50 @@
+-- What the application may read of `user` — ticket E1-10, round 3, ADR 0001,
+-- ADR 0045, SPEC §4, SPEC §8.
+--
+-- **This narrows `launch_provisioning_grants_v001.sql` and corrects its
+-- reasoning.** That file is left exactly as it was applied, per ADR 0041 — a
+-- revision that reads a `.sql` file at upgrade time means the file is what ran,
+-- so a database already at that revision is entitled to it unedited. The
+-- correction is here, in the file that changes the grant.
+--
+-- **What v001 granted, and the sentence that justified it.** It granted
+-- `SELECT, INSERT` on `public."user"`, on the reasoning that the reads were "the
+-- course, section and user rows an upsert has to find before it decides to
+-- insert". That was false of `user` and only of `user`: launch-time provisioning
+-- inserts a `user` row and reads the table never — the row is insert-if-absent,
+-- `UNIQUE (lti_platform_id, lms_user_id)` decides, and E0-11's rule that a
+-- service does not query an identity table forbids the lookup in any case.
+-- E1-10's round-3 security review found the grant and the false sentence
+-- together.
+--
+-- **What the writer actually needs is the key back.** An ORM insert returns the
+-- row's own primary key, and Postgres checks `SELECT` against each *returned*
+-- column — so the narrowest grant that lets the insert work is one column, and it
+-- is the column that identifies nobody.
+--
+-- **What table-wide `SELECT` was.** `user.lms_user_id` is the `sub` claim
+-- verbatim (ADR 0014, ADR 0045) and E1-01 keeps it out of every view precisely
+-- because it is the stable join key: a connection able to read that column can
+-- enumerate every subject that has ever launched this deployment and join a
+-- response back to the person who gave it — on `pulse_app`, the connection every
+-- screen in the product runs on. SPEC §8 puts the instructor and leadership read
+-- paths through views that "structurally cannot join to `user` identity columns";
+-- a table-wide read of this one is that join, available directly.
+--
+-- `INSERT` is untouched and stays exactly as v001 granted it, and no `UPDATE` or
+-- `DELETE` is granted here or there: the row is written once and never revised.
+--
+-- **The revoke comes first and is not a no-op.** A column grant and a table grant
+-- are separate ACL entries, so granting `SELECT (id)` beside a table-wide `SELECT`
+-- would leave the wider one in place and change nothing at all.
+--
+-- **The downgrade is in the revision**, not here: it restores v001's table-wide
+-- grant and drops the column grant, because that is the state a database one
+-- revision back is entitled to.
+-- `RUNTIME_BASE_TABLE_PRIVILEGES` and `RUNTIME_COLUMN_PRIVILEGES` in
+-- `tests/integration/test_identity_grants.py` are the hand-written record this
+-- narrowing is measured against, and E1-10 moves the `user` entry between them in
+-- the same change.
+
+REVOKE SELECT ON public."user" FROM pulse_app;
+GRANT SELECT (id) ON public."user" TO pulse_app;
