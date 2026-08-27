@@ -14,6 +14,16 @@ are filled by role, exactly as `SectionCodeService` in `fixtures/section_codes.p
 does for E0-07 and for the same reason: naming one here would make the implementer
 build to this fixture instead of to the ticket.
 
+**E1-11 adds a third role, `settings`, and fills it by default.** That ticket's
+decision D13 closes deferred E1-10 items 5 and 2 by handing the writer the
+configuration the door already holds — `provision_from_launch(session, claims,
+settings)` — and deleting `_environment()`'s `os.environ` read. Every existing
+call site here passes a session and claims and nothing else, so the role resolves
+to a `Settings` built at call time unless a test names its own; a fixture that had
+made the new parameter each caller's problem would have made this ticket's change
+red in E1-10's suite for a reason that is not E1-10's (`docs/MISTAKES.md` entry
+22).
+
 **`launch_ground` seeds what a launch needs to resolve against**, committed. The
 tool opens its own connection out of `DATABASE_URL` and sees nothing that has not
 been committed, so a prefix, a term and a start-letter map row seeded inside
@@ -79,6 +89,16 @@ PROVISIONING_MODULE = "app.services.provisioning"
 PROVISIONING_ROLES: dict[str, tuple[str, ...]] = {
     "session": ("session", "db"),
     "claims": ("claims", "launch", "payload", "token_claims", "id_token_claims"),
+    # E1-11's decision D13, closing deferred E1-10 items 5 and 2:
+    # `provision_from_launch(session, claims)` becomes
+    # `provision_from_launch(session, claims, settings)`, the door passes
+    # `request.app.state.settings`, and `_environment()` and its `os.environ` read
+    # are deleted. The role is filled by `ProvisioningService.settings` below
+    # unless a test supplies its own, so E1-10's existing call sites keep working
+    # unchanged — `docs/MISTAKES.md` entry 22 is what that avoids: a later
+    # ticket's legitimate change making an earlier ticket's tests unrunnable, with
+    # the repair on the far side of the test wall.
+    "settings": ("settings", "config", "configuration"),
 }
 
 
@@ -171,6 +191,24 @@ class ProvisioningService:
             "writer, and this list is the one line that changes."
         )
 
+    @property
+    def settings(self) -> Any:
+        """A `Settings` built from the environment **as of the call**, not of setup.
+
+        Lazy on purpose. `registered_platform` sets `ENVIRONMENT` with a bare
+        `setenv` after this fixture is constructed, and several tests set it
+        themselves inside their own bodies, so a `Settings` built when the fixture
+        was created would carry whatever the process happened to hold first — which
+        is the class of failure `docs/MISTAKES.md` entry 40 records, arriving
+        through the fixture that was supposed to close it.
+
+        A test that wants a *particular* configuration passes `settings=` to
+        `call` and this is never reached.
+        """
+        from app.config import Settings
+
+        return Settings()
+
     @staticmethod
     def role_of(parameter_name: str) -> str | None:
         """Which of `PROVISIONING_ROLES` a parameter called `parameter_name` wants."""
@@ -199,9 +237,12 @@ class ProvisioningService:
         ]
         positional: list[Any] = []
         keyword: dict[str, Any] = {}
+        offered = dict(available)
         for parameter in parameters:
             role = self.role_of(parameter.name)
-            if role is None or role not in available:
+            if role == "settings" and role not in offered:
+                offered[role] = self.settings
+            if role is None or role not in offered:
                 if parameter.default is not parameter.empty:
                     continue
                 pytest.fail(
@@ -214,9 +255,9 @@ class ProvisioningService:
                     "says what it is for."
                 )
             if parameter.kind is parameter.POSITIONAL_ONLY:
-                positional.append(available[role])
+                positional.append(offered[role])
             else:
-                keyword[parameter.name] = available[role]
+                keyword[parameter.name] = offered[role]
         return function(*positional, **keyword)
 
 
@@ -553,6 +594,27 @@ class LaunchGround:
         )
         return self.term_row
 
+    def seed_term_starting(self, start: date, weeks: int = TERM_WEEKS) -> Any:
+        """One term beginning on `start`, running `weeks`, with its end derived.
+
+        Added by E1-11 for deferred E1-10 item 2, whose whole question is which
+        *day* a launch happens on: a term seeded around "today" by the calendar
+        above spans eighteen weeks and therefore contains both candidate dates,
+        so it cannot tell the two apart. The end is derived from the length rather
+        than passed in, so a schema that relates the two agrees with itself.
+        """
+        table = require_table(self.tables, "term")
+        self.term_row = self.rows.seed(
+            "term",
+            self.chain,
+            **{
+                require_column(table, TERM_LENGTH_COLUMNS): weeks,
+                require_column(table, TERM_START_COLUMNS): start,
+                require_column(table, TERM_END_COLUMNS): start + timedelta(days=weeks * 7 - 1),
+            },
+        )
+        return self.term_row
+
     def seed_letter(self, letter: str) -> Any:
         table = require_table(self.tables, "start_letter_map")
         start_column = require_column(table, LETTER_START_COLUMNS)
@@ -604,11 +666,21 @@ def launch_ground(
         prefix: bool = True,
         term: str = "current",
         letter: bool = True,
+        term_starts_on: date | None = None,
     ) -> LaunchGround:
         ground = LaunchGround(committed_rows, metadata_tables)
         if prefix:
             ground.seed_prefix(label.prefix)
-        ground.seed_term(containing_today=term == "current")
+        if term_starts_on is not None:
+            # E1-11, deferred E1-10 item 2: a term whose edges the caller chose, so
+            # that exactly one of "today in UTC" and "today in the institution's
+            # zone" falls inside it. `term` is ignored here rather than combined —
+            # the two are different ways of answering the same question and a
+            # caller that passed both would get whichever this file happened to
+            # apply last.
+            ground.seed_term_starting(term_starts_on)
+        else:
+            ground.seed_term(containing_today=term == "current")
         if letter:
             ground.seed_letter(label.start_letter)
         else:

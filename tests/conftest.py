@@ -43,6 +43,10 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/provisioning.py` — E1-10: the launch-time writer, reached by
     discovery; the committed prefix, term and start-letter map a launch resolves
     against; and a launch's claims as a value for the cases nothing mints.
+  - `fixtures/roster_sync.py` — E1-11: the roster sync reached by discovery, the
+    `requests` seam its service calls travel over and are recorded on, a
+    membership container a test composes, and the registered platform and section
+    a sync starts from.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -65,4 +69,5 @@ pytest_plugins = (
     "fixtures.suite_keys",
     "fixtures.client_credentials",
     "fixtures.provisioning",
+    "fixtures.roster_sync",
 )
