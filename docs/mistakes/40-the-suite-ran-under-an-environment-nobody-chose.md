@@ -79,3 +79,17 @@ inferring it from the fixtures that should have set it. Here the inference
 ("nothing sets it, so it is unset in both") was wrong in both directions at
 once — and note that unset and empty behaved differently, so reproducing
 "absent" needed the spelling the loader would not override.
+
+**Instance, 2026-08-27 (E1-11, PR #107's first CI run).** The same shape, a
+new door in. E1-11 gave `provision_from_launch` a `settings` parameter, so
+`ProvisioningService.settings` built a full `Settings()` where E1-10's tests
+never reached one — and the `provisioning` fixture depended on nothing, so the
+documented variables were never laid down. Sixteen of E1-10's course-number
+tests went red in CI with `ConfigurationError: DATABASE_URL — not set` (and
+every other variable), while every local run stayed green off `.env`. The fix
+made the fixture depend on `configured_env`, like every other Settings-building
+fixture. The process lesson underneath it: **the local `make ci` gate sources
+`.env`, and CI's pytest gate has none, so a green `make ci` does not prove the
+pytest gate green.** Before pushing, run the pytest gate once with `.env` moved
+aside — that is the only local run that shares CI's configuration. Not counted
+as a catch: CI caught it, the gate did not.
