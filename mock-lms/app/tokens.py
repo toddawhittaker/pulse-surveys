@@ -32,6 +32,11 @@ key problem or a scope it was never granted:
     this token endpoint, expired, or claiming a lifetime past the bound below.
   - `invalid_scope` — a scope this platform does not advertise.
   - `unsupported_grant_type` — anything but `client_credentials`.
+  - `invalid_grant` — the assertion authenticates the client perfectly and the
+    *grant* it presents is one this endpoint will not honour: a `jti` already
+    spent, or an `exp` further ahead than this platform's own clock allows. The
+    distinction from `invalid_client` is one E1-11's client needs, because one of
+    them means "mint a fresh assertion" and the other means "your clock is wrong".
 
 **400 for all of them, including `invalid_client`.** RFC 6749 §5.2 makes 400 the
 status of a refused token request and carves out one exception: a client that
@@ -78,9 +83,10 @@ ADVERTISED_SCOPES: tuple[str, ...] = (OPENID_SCOPE, *AGS_SCOPES, MEMBERSHIP_SCOP
 # it. Advertised because it is what the endpoint actually accepts.
 TOKEN_ENDPOINT_AUTH_METHOD = "private_key_jwt"  # noqa: S105 - a method name, not a credential
 
-# RFC 6749 §5.2's error codes, the four this endpoint answers with.
+# RFC 6749 §5.2's error codes, the five this endpoint answers with.
 INVALID_REQUEST = "invalid_request"
 INVALID_CLIENT = "invalid_client"
+INVALID_GRANT = "invalid_grant"
 INVALID_SCOPE = "invalid_scope"
 UNSUPPORTED_GRANT_TYPE = "unsupported_grant_type"
 
@@ -92,6 +98,13 @@ UNSUPPORTED_GRANT_TYPE = "unsupported_grant_type"
 # has and leaves nothing worth stealing. The IMS security framework recommends
 # the same order of magnitude.
 ASSERTION_LIFETIME_BOUND_SECONDS = 300
+
+# How far past this platform's own clock an `exp` may sit, on top of the lifetime
+# bound above. **Thirty seconds, and the allowance is the point rather than the
+# number**: a tool whose clock is a little fast is an honest tool, and a clamp with
+# no allowance refuses it. ADR 0084's consequences already warn about the
+# direction ("a tool whose clock is more than five minutes fast is refused here").
+ASSERTION_SKEW_ALLOWANCE_SECONDS = 30
 
 # How long an issued access token lives. An hour is what LTI platforms issue in
 # practice and what `ServiceConnector` caches against.
@@ -298,6 +311,24 @@ def verified_assertion(
             f"The `client_assertion` expired at {int(expires_at)} and it is now {int(now)}.",
         )
 
+    # **The wall-clock clamp**, and it is a separate rule from the lifetime bound
+    # below rather than a restatement of it. `exp` and `iat` are *both* the
+    # signer's own statements, so a signer who dates both claims into the future
+    # mints an assertion that passes the expiry check above and measures a lifetime
+    # of zero — a credential with a five-minute stated life and an unbounded real
+    # one. ADR 0084 measured that hole; this is the platform comparing `exp`
+    # against its own clock instead of against the assertion's arithmetic.
+    ceiling = now + ASSERTION_LIFETIME_BOUND_SECONDS + ASSERTION_SKEW_ALLOWANCE_SECONDS
+    if expires_at > ceiling:
+        raise TokenRequestError(
+            INVALID_GRANT,
+            f"The `client_assertion` expires at {int(expires_at)}, which is further ahead than "
+            f"this platform's own clock allows: at most {ASSERTION_LIFETIME_BOUND_SECONDS} "
+            f"seconds of lifetime plus {ASSERTION_SKEW_ALLOWANCE_SECONDS} seconds of clock skew, "
+            f"so no later than {int(ceiling)}. An assertion whose `iat` and `exp` are both dated "
+            "forward states a short lifetime and is usable for as long as it says it is.",
+        )
+
     issued_at = claims.get("iat")
     started = (
         issued_at if isinstance(issued_at, int | float) and not isinstance(issued_at, bool) else now
@@ -311,7 +342,75 @@ def verified_assertion(
             "assertion with a long life is a credential that stays usable wherever it leaks; "
             "mint one per request instead.",
         )
+
+    # **The replay check comes last**, after the assertion has been proved to be
+    # this client's, addressed here, and inside both time bounds. A store that
+    # recorded every `jti` it was shown would let anybody fill it by posting
+    # unsigned junk, and would refuse the tool's own next request if a passing
+    # attacker guessed a value it was about to use.
+    identifier = claims.get("jti")
+    if not isinstance(identifier, str) or not identifier:
+        raise TokenRequestError(
+            INVALID_REQUEST,
+            f"The `client_assertion` states `jti` {identifier!r}. RFC 7523 §3 makes it REQUIRED "
+            "and it is what lets this platform refuse a replay; an assertion without one cannot "
+            "be told from a second presentation of itself.",
+        )
+    if not SEEN_ASSERTIONS.claim(identifier, now=now):
+        raise TokenRequestError(
+            INVALID_GRANT,
+            f"The `client_assertion` with `jti` {identifier!r} has already been granted a token. "
+            "RFC 7523 §3 makes that identifier one-use, and an endpoint that honoured a replay "
+            "would make a captured assertion worth a token to whoever holds it, for as long as "
+            "it lives. Mint a fresh assertion per request.",
+        )
     return claims
+
+
+class SeenAssertions:
+    """The `jti` values this platform has already granted a token for.
+
+    **An assertion is a bearer credential for as long as it lives**, so an endpoint
+    that cannot notice a replay is one where a captured assertion is worth a token
+    to whoever holds it, however often. ADR 0084's own security-review paragraph
+    records exactly that gap — "with `jti` untracked — [it] stays spendable until
+    its far-future `exp`" — and E1-11 closes it, because a client's conformance
+    claims otherwise rest on an endpoint that cannot tell a replay from a request.
+
+    **In process, deliberately.** A store that survived a restart would need a
+    database, and a mock with one behaves differently after a restart, which is the
+    thing this platform exists not to do. What it costs is stated rather than
+    hidden: restarting the platform forgets every `jti`, so a captured assertion is
+    spendable once more across a restart. On a development stack that is a
+    reasonable trade; a real platform keeps the store where its tokens are.
+
+    **Entries live at least as long as an assertion may**, which is what makes
+    forgetting safe: a `jti` older than the lifetime bound belongs to an assertion
+    this endpoint already refuses for being expired, so remembering it buys nothing.
+    Pruning happens on the way in rather than on a timer, because a mock with a
+    background task is a mock with a shutdown problem.
+    """
+
+    def __init__(self, lifetime: int = ASSERTION_LIFETIME_BOUND_SECONDS) -> None:
+        self._lifetime = lifetime
+        self._seen: dict[str, float] = {}
+
+    def claim(self, jti: str, *, now: float) -> bool:
+        """Record `jti` as spent, and answer whether it was fresh."""
+        self._seen = {seen: at for seen, at in self._seen.items() if at > now - self._lifetime}
+        if jti in self._seen:
+            return False
+        self._seen[jti] = now
+        return True
+
+
+# The one store, at module scope, because `granted_token` is called from a route
+# that holds no state of its own and a store threaded through four signatures would
+# be four places to forget it. Two platform instances in one process share it,
+# which is a difference from a real deployment and not one a `jti` can notice: RFC
+# 7523 makes the value unique per assertion, and every client that mints one uses a
+# UUID or equivalent.
+SEEN_ASSERTIONS = SeenAssertions()
 
 
 def issued_token(settings: PlatformSettings, key: IssuerKey, scopes: list[str]) -> AccessToken:
