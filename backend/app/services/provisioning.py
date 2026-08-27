@@ -68,11 +68,11 @@ from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID, uuid4
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.identity import User
+from app.models.identity import LEADERSHIP_ROLES, User
 from app.models.lti import (
     ROSTER_SERVICE_ADDRESS_COLUMN,
     LaunchDefect,
@@ -85,6 +85,7 @@ from app.models.lti import (
 from app.models.org import Course, Prefix, Section
 from app.models.term import Term
 from app.services.authz import LmsOwnedWriteRefused, WriteSanction, guard_write, sanction_for
+from app.services.identity import identity_behind_a_launch_subject
 from app.services.landing import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.services.section_codes import SectionCodeError, apply_section_code
 
@@ -152,6 +153,35 @@ THREE_DIGIT_CEILING = 799
 FOUR_DIGIT_FLOOR = 8000
 FOUR_DIGIT_CEILING = 9999
 
+# Whether one person holds any assignment in §7.3's leadership set (E1-12).
+#
+# Read from `public.assignment_scope`, the view E0-11 built over
+# `role_assignment` — never from the table, which `pulse_app` holds no grant on
+# and which `tests/unit/test_no_service_reads_an_identity_table_directly.py`
+# would flag this module for naming. The view carries the role and the person key
+# and no name at all.
+#
+# `EXISTS` rather than a count or a row: the question is a yes or no, and a
+# leadership person legitimately holds several assignments.
+#
+# The set is bound as a parameter and cast to the enum, the way
+# `app.services.authz` casts its own single-role predicate. Casting rather than
+# comparing as text is what makes a role name this schema does not have a
+# database error at the boundary instead of a silent no-match — though
+# `LEADERSHIP_ROLES` being enum members already makes that unwritable in Python.
+#
+# "Live" reads as "exists" today, because `role_assignment` carries no validity
+# dates: revoking an assignment is deleting the row. When E9 or E10 adds
+# end-dating this predicate gains it, alongside the four copies of the live-Care
+# predicate `app.services.safety` names together.
+_HOLDS_A_LEADERSHIP_ASSIGNMENT = text(
+    "SELECT EXISTS ("
+    " SELECT 1 FROM public.assignment_scope AS held"
+    " WHERE held.person_id = :person_id"
+    " AND held.role = ANY(CAST(:roles AS public.assignment_role[]))"
+    ")"
+)
+
 
 class UnregisteredLaunchError(LookupError):
     """The launch's issuer and audience resolve to no `lti_platform` row.
@@ -197,7 +227,14 @@ def provision_from_launch(session: Session, claims: Mapping[str, Any]) -> None:
     a mentor's — because the person is authenticated whatever their role and
     whatever their context turns out to be, and SPEC §4 keys every response they
     will ever give to that row. Only then is the context looked at, and only for a
-    staff launch.
+    launch §7.3 authorizes: an instructor's, by the claim, or a leadership
+    person's, by their own assignment.
+
+    **The ordering carries the leadership limb** (E1-12). That limb resolves the
+    launching subject to a `user` row, and the row it resolves is the one the line
+    above has just written — a leadership person's very first launch works
+    because the write precedes the read inside one transaction, rather than
+    provisioning nothing until their second visit.
 
     Nothing here commits: the caller owns the transaction, exactly as
     `app.lti.replay_guard.claim_nonce` leaves its claim to ride inside the
@@ -205,7 +242,7 @@ def provision_from_launch(session: Session, claims: Mapping[str, Any]) -> None:
     """
     platform = _registered_platform(session, claims)
     _record_the_launching_subject(session, platform, claims)
-    if _is_a_staff_launch(claims):
+    if _is_a_staff_launch(claims) or _launching_subject_holds_leadership(session, platform, claims):
         _ingest_the_context(session, claims)
 
 
@@ -337,15 +374,68 @@ def _is_a_staff_launch(claims: Mapping[str, Any]) -> bool:
     Under-inclusion costs nothing that lasts, because a real instructor's next
     launch discovers the section.
 
-    **The leadership limb of §7.3's rule is not here, and its absence fails safe.**
-    §7.3 triggers on "an instructor or any leadership role", and a leadership role
-    is a live `role_assignment` in Pulse's own graph rather than a claim on the
-    launch — reaching it needs the `sub` → `user` → `person` link that E1-12
-    builds. Until then a dean's launch discovers nothing, which is a launch that
-    provisions late rather than one that provisions for the wrong person. E1-12
-    carries the accept-side criterion (ADR 0090, ADR 0091).
+    **This is one of §7.3's two limbs and it is the claim-based one.** The other —
+    "any leadership role" — is a live `role_assignment` in Pulse's own graph rather
+    than anything the launch says, and it is `_launching_subject_holds_leadership`
+    below. E1-10 shipped this limb alone and left that one dormant, because
+    reaching an assignment needs the `sub` → `user` → `person` link E1-12 built;
+    E1-12 activated it (ADR 0090, ADR 0091, ADR 0097). The two are deliberately
+    separate functions because they are checked against different sources and one
+    of them can be wrong without the other.
     """
     return INSTRUCTOR_ROLE_URI in stated_roles(claims.get(LTI_ROLES_CLAIM))
+
+
+def _launching_subject_holds_leadership(
+    session: Session, platform: LtiPlatform, claims: Mapping[str, Any]
+) -> bool:
+    """Whether Pulse's own records say the launching person holds a leadership role.
+
+    §7.3's second limb, and the one that reads the database rather than the token:
+    "A launch by an instructor **or any leadership role** triggers a roster sync."
+    §2.1 makes a role a `role_assignment` row and never a claim, and E0-09's tenth
+    criterion is the reason — the administrator of a platform writes what its
+    launches say, so a limb read out of the roles claim would let them hand
+    themselves a section's whole roster of names and email addresses.
+
+    **So the question is asked of the assignment and answered from `sub`.** The
+    subject resolves to a `user` row at this registration and then to a `person`
+    (ADR 0094's point resolvers, through `app.services.identity`), and the person's
+    assignments are read from `public.assignment_scope` — the view E0-11 built,
+    which `pulse_app` may read and which names nobody.
+
+    **Three ways to answer no, and each is an ordinary state.** A launch with no
+    `sub` never reaches here from the door; a subject with no `person` is a student
+    or somebody nobody has put in the people graph (ADR 0028); and a person holding
+    only assignments outside `LEADERSHIP_ROLES` — a Care officer, an administrator
+    — holds a live grant that authorizes nothing about a roster. §2.1 puts Care
+    outside the supervision graph altogether, which is why the set is enumerated
+    positively rather than written as "any assignment at all".
+
+    **Asked only when the claim limb has already said no**, because `or`
+    short-circuits: an ordinary instructor launch costs no query, and the two hops
+    plus this read are paid on the launches the cheap test does not answer.
+
+    This is an authorization decision made outside `app.services.authz`, which is
+    deliberate and is recorded in ADR 0097: that module's chokepoint scopes a
+    *read* to an actor's purview, and this asks whether a launch may trigger a
+    write of this tool's own — a different question, on a path with no purview in
+    it and no data to scope.
+    """
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not subject:
+        return False
+    identity = identity_behind_a_launch_subject(session, platform_id=platform.id, subject=subject)
+    if identity.person_id is None:
+        return False
+    held: bool = session.execute(
+        _HOLDS_A_LEADERSHIP_ASSIGNMENT,
+        {
+            "person_id": identity.person_id,
+            "roles": [role.value for role in LEADERSHIP_ROLES],
+        },
+    ).scalar_one()
+    return held
 
 
 # ---------------------------------------------------------------------------
