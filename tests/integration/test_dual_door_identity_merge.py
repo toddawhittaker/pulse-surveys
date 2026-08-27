@@ -444,48 +444,71 @@ def test_a_second_launch_by_one_subject_leaves_one_user_row_and_one_identity(
     Its own control is the first launch: the `user` row and the `person_id` are both
     required before the second launch runs, so "unchanged" is a statement about a
     row that existed rather than about an empty table.
+
+    **The rows are counted per registration, not per subject, and the mutation
+    battery is why.** The first version filtered them to `lms_user_id == sub`, which
+    made a whole class of duplicate invisible: a door inserting a second row for the
+    same human under a near-miss key — `sub` with anything appended, a normalised
+    or re-cased `sub` — leaves the filtered list holding exactly the seeded row
+    before and after, and resolution still finds that row, so the same-person
+    assertion holds too. The mutation "reinsert a fresh `user` row on every launch"
+    survived the test whole. Every `user` row on the platform that signed these
+    launches is now the measurement, which is what the message below always claimed
+    to be saying: this registration has one human launching into it, so one row is
+    the whole of what may be there.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.instructor_role_urn)
     claims = launch_driver.claims_of(offer)
     subject = claims.get(SUBJECT_CLAIM)
     launch_ground(provisioning_contract.label_of(claims))
 
+    platform_id = platform_id_of(launch_driver.registration, web_identity)
     person_id = web_identity.person()
-    user_id = web_identity.user(
-        platform_id=platform_id_of(launch_driver.registration, web_identity), subject=subject
-    )
+    user_id = web_identity.user(platform_id=platform_id, subject=subject)
     web_identity.link_person_to_user(person_id=person_id, user_id=user_id)
 
-    def user_rows() -> list[Any]:
-        return [
-            row for row in web_identity.rows_of(USER_TABLE) if row.get("lms_user_id") == subject
-        ]
+    def users_on_the_platform() -> list[Any]:
+        """Every `user` row belonging to the registration these launches are signed by.
+
+        A subject means nothing outside the registration that issued it, so the
+        registration is the right grain to count a duplicate at — and it is the only
+        grain that can see one keyed to something *near* this launch's `sub` rather
+        than to it. Exactly one human launches into this registration in this test,
+        and the seeding above is the only thing that put a row there.
+        """
+        column = web_identity.platform_column()
+        return [row for row in web_identity.rows_of(USER_TABLE) if row.get(column) == platform_id]
 
     first, _ = launch_driver.launch(offer)
     first_person = resolved_person(
         claims_of_session(first, "the first launch"), "The first launch's session"
     )
-    after_one = user_rows()
+    after_one = users_on_the_platform()
     assert len(after_one) == 1, (
-        f"There are {len(after_one)} `{USER_TABLE}` rows for {subject!r} after one launch: "
-        f"{after_one}. One row was seeded for this subject and ADR 0091 has the launch tolerate "
-        "the row it finds; zero means the seeded row is not where the door looks, and two means "
-        "the door inserted beside it — which is the duplicate identity this criterion is about, "
-        "arriving on the *first* launch."
+        f"There are {len(after_one)} `{USER_TABLE}` rows on the registration this launch was "
+        f"signed by after one launch, and one human has launched into it: {after_one}. One row was "
+        f"seeded, for {subject!r}, and ADR 0091 has the launch tolerate the row it finds — so zero "
+        "means the seeded row is not where the door looks, and two means the door inserted beside "
+        "it. **Read the second row's `lms_user_id` before anything else**: equal to the seeded "
+        "one, the unique constraint is missing; *near* it — the `sub` with something appended, "
+        "trimmed or re-cased — the door is deriving its key rather than storing the claim "
+        "verbatim, which is a second identity for one human that a lookup by the exact `sub` "
+        "would never have found."
     )
 
     second, _ = launch_driver.launch(offer)
     second_person = resolved_person(
         claims_of_session(second, "the second launch"), "The second launch's session"
     )
-    after_two = user_rows()
+    after_two = users_on_the_platform()
 
     assert [dict(row) for row in after_two] == [dict(row) for row in after_one], (
-        f"The second launch changed the `{USER_TABLE}` rows for {subject!r}.\n"
+        f"The second launch changed the `{USER_TABLE}` rows on this registration.\n"
         f"  after the first: {[dict(row) for row in after_one]}\n"
         f"  after the second: {[dict(row) for row in after_two]}\n"
         "Criterion 4 asks for idempotence on row identity: same key, same values. A changed key "
-        "is a delete-and-reinsert; a second row is a second identity for one human."
+        "is a delete-and-reinsert, which orphans everything a later epic hangs off this row; a "
+        "second row is a second identity for one human, whatever key it carries."
     )
     assert second_person == first_person, (
         f"The same subject's two launches resolved to `{PERSON_TABLE}` {first_person!r} and then "
