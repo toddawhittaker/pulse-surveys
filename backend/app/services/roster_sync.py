@@ -437,15 +437,35 @@ def _walked_roster(
     recorded either way, with the response code that says which it was; a NULL
     response code means the call never reached the platform at all.
 
-    **The token is asked for before the first page**, rather than left to the
-    library's lazy fetch on the first request. A grant this platform refuses is a
-    fact about the *token endpoint*, and left to the walk it would be recorded
-    against the roster's URL carrying the token endpoint's status code — which reads
-    on SPEC §6.1's console as a roster service refusing a tool it never saw.
+    **The token is asked for before the first page, and what happened to it is
+    recorded**, rather than left to the library's lazy fetch on the first request.
+    A sync makes two calls to two endpoints and only one of them is the roster: when
+    the *token endpoint* answers an error the roster is never asked at all, so a
+    walk left to discover that on its first page writes no row and leaves the
+    section looking never-synced — SPEC §7.3's other state entirely.
+
+    So the refusal is written against the roster's own URL, because that is the
+    section's record of an attempted sync and §6.1's console reads it per section,
+    and it carries **the token endpoint's status**. A NULL there has exactly one
+    meaning under D9 — the call never reached the platform — and the two failures an
+    operator has to tell apart are precisely "this deployment's credentials were
+    refused, and the platform is up" and "nothing answered". Only the status
+    separates them.
     """
     try:
         connector.get_access_token([MEMBERSHIP_SCOPE])
-    except (LtiServiceException, requests.RequestException):
+    except LtiServiceException as refusal:
+        answered = _answered_status(refusal)
+        _record_call(session, section_id, address, answered, None)
+        logger.warning(
+            "the token endpoint answered %s for section %s, so no call was made to its roster at "
+            "%s: this deployment's credentials were refused rather than its roster service",
+            answered,
+            section_id,
+            address,
+        )
+        return None
+    except requests.RequestException:
         _record_call(session, section_id, address, None, None)
         logger.exception(
             "no access token could be obtained for section %s, so no call was made to its roster "
@@ -475,7 +495,7 @@ def _walked_roster(
         try:
             page, following = service.get_members_page(called)
         except LtiServiceException as refusal:
-            answered = getattr(getattr(refusal, "response", None), "status_code", None)
+            answered = _answered_status(refusal)
             _record_call(session, section_id, called, answered, None)
             logger.warning(
                 "the roster at %s answered %s, so section %s was not ingested",
@@ -493,6 +513,26 @@ def _walked_roster(
         _record_call(session, section_id, called, 200, len(page))
         members.extend(page)
     return members
+
+
+def _answered_status(refusal: LtiServiceException) -> int | None:
+    """The HTTP status behind one `LtiServiceException`, or `None` if it carries none.
+
+    Both places a service call can be refused read the status the same way, through
+    here rather than through a second copy of the same `getattr` chain
+    (`docs/MISTAKES.md` entry 13): the token endpoint's refusal and the roster's are
+    written into the same column of the same table, and D9 gives that column's NULL
+    exactly one meaning — the call never reached the platform. A second reading that
+    drifted would put one of the two failures under the other's meaning, which is
+    the whole distinction §6.1's console is read for.
+
+    Defensive rather than `refusal.response.status_code` because the attribute is
+    the library's: `LtiServiceException` sets `.response` today and a version that
+    stopped would otherwise turn a refusal this function is meant to describe into
+    an `AttributeError` inside the error path.
+    """
+    answered = getattr(getattr(refusal, "response", None), "status_code", None)
+    return answered if isinstance(answered, int) else None
 
 
 def _record_call(
