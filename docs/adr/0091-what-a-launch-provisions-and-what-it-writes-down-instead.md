@@ -81,6 +81,30 @@ and never a `sub`, a name, an email or a claims payload (§10). Log lines on thi
 path carry no more than the row. Course and section are written together or not at
 all; the `user` row lands either way, because the person is not what failed.
 
+**A section is resolved by the context it was discovered from, and the two
+identities have to agree** (round 3). `section` carries `lms_context_id` — the
+context claim's `id`, the platform's own value — and `lti_deployment_id`, the
+registration it was issued under, unique together **in the database**. A launch
+resolves by that pair first, and by the parsed identity `(course, term,
+lms_section_code)` second, and the two disagreeing is a `context_collision`:
+nothing is written, the course title included, because the check sits above the
+atomic boundary rather than inside it. Both directions of one question are that
+disagreement — a copied course wearing another context's name, and a renamed
+context whose old name is somewhere else — which is why one rule closes both.
+The unique constraint is in the schema rather than only in the writer, because
+ADR 0045's "a caller can bypass it by not calling it" applies to E1-11's sync,
+which writes sections and never reads `app.services.provisioning`.
+
+**The roster address is judged by the rules every address this container fetches
+passes** (round 3). It arrives as an NRPS claim and E1-11 calls it with the tool's
+own client credentials, on a schedule, with nobody present — so it goes through
+`app.models.lti.refuse_invalid_fetched_address`, the same four rules `jwks_url`
+and `auth_token_url` pass, reached through the one function that holds them rather
+than a copy beside it (`docs/MISTAKES.md` entry 13). A refused address leaves the
+column NULL, records `roster_address_refused`, and **still provisions the
+section**: §7.3 makes a section with no roster a state rather than a fault, and
+refusing the launch would take a real course out of the product over a URL.
+
 **A refusal from `guard_write` is caught, logged at error level, and given no
 record.** It cannot happen while the catalog and this writer agree, and the day
 they stop agreeing — a table added to a write site and not to the grant, or
@@ -152,6 +176,36 @@ context `id` against the section, so a platform that renames `BIOL-215-R3WW` to
 anything else presents a section this tool has never seen and discovers a second
 one. Nobody has asked for rename handling; storing `lms_context_id` is the obvious
 future repair and is deliberately unbuilt.
+
+> **Round 3, 2026-08-26 — this consequence was the safe half of a hole, and it is
+> closed.** The security review asked the *other* direction of the same question:
+> not one context under two names, but one name under two contexts. A Canvas
+> course copy keeps the section code, so a staff launch from the copy parsed to the
+> original section's identity exactly — and the writer resolved by that parse, so
+> it repointed the original's stored roster address at the copy's own endpoint and
+> overwrote its course's title. E1-11 fetches that address with the tool's own
+> credentials, so the original section's roster, names and email addresses
+> included, went to whoever held the copy. Copying a course needs no privilege at
+> all. The paragraph above stands as the record of what was known then, and the
+> rest of it — that storing the context id was the repair — turned out to be
+> right for both directions.
+
+**E1-11 picks its platform off the binding, not off the section's course.** The
+sync mints a client-credentials token for one registration, and
+`section.lti_deployment_id` is now what says which one a section's roster belongs
+to — the column exists precisely because a context identifier means nothing
+outside the registration that issued it. A sync that resolved the platform any
+other way would be able to present one institution's token to another
+institution's roster service, which is the finding this pair closes arriving one
+epic later. `docs/tickets/e1/deferred.md` carries it with a done-when.
+
+**A section stored before the binding carries a synthetic context id.** The
+migration binds it to the one registered deployment under a `pre-binding-section-`
+identifier, and refuses to guess where there is no unambiguous registration. Those
+rows are unreachable by any launch, which is right for rows no launch created —
+the demo seed's eighteen sections are the only ones that exist — but it does mean
+`lms_context_id` is not universally a value some platform issued, and a reader of
+that column has to know it.
 
 **Two rows already there are tolerated, not reported.** A returning person's
 `user` insert and a simultaneous first launch of one section both end in a unique

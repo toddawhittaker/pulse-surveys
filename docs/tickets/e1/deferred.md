@@ -241,3 +241,51 @@ Every E1 pull request that defers something adds it here in the same PR.
    asserts the door still refuses it, so the pin's removal turns a green launch
    red. Owed to the ticket that gives a mock platform a permissive-alg mint (a
    natural companion to E1-07's wrong-launch selectors).
+
+## From E1-10 — launch-time provisioning and the sanctioned writer
+
+1. **E1-11 must pick the platform to mint a token for off `section.lti_deployment_id`,
+   and nothing yet makes it.** E1-10's round-3 security review gave `section` a
+   binding — `(lti_deployment_id, lms_context_id)`, unique — because a section had
+   no identity a copied course could not reproduce, and a launch from a copy
+   repointed the original's stored roster address. The column that closed it is
+   also the answer to a question E1-11 has to ask on every sync: *whose* client
+   credentials does this section's roster get fetched with? A context identifier
+   means nothing outside the registration that issued it, and a section's course
+   and term say nothing about a registration at all — so a sync that resolved the
+   platform any other way (the only registration it can find, the first one, one
+   named in configuration) could present one institution's token to another
+   institution's roster service, which is the same failure the binding closes,
+   arriving an epic later. There is nothing structural stopping it: the sync will
+   hold the section row and can read whatever column it likes.
+   **Done when** E1-11's client resolves its registration from the section's own
+   `lti_deployment_id` and a test drives two registered platforms, each with a
+   section, and asserts each sync presents the assertion of its own platform —
+   a test that fails against a resolver that takes whichever registration it
+   finds first. Recorded in
+   [ADR 0091](../../adr/0091-what-a-launch-provisions-and-what-it-writes-down-instead.md)'s
+   consequences as well, because that is where a reader of the column will be.
+
+2. **The launch day is UTC's day, not the institution's.**
+   `app.services.provisioning` is handed a session and the launch's claims and no
+   settings, so the term a new section belongs to is chosen against
+   `datetime.now(UTC).date()`. A launch in the hours either side of a term
+   boundary can be read into the neighbouring calendar day and land in the
+   neighbouring term. E1-11's sync will want the same value and has the same
+   problem.
+   **Done when** the launch moment reaches the writer — the door has `Settings`
+   in hand and the institution timezone is on it — and a test drives a launch at
+   an hour that falls on different dates in UTC and in the institution's zone,
+   asserting the term the institution's calendar names.
+
+3. **Sections stored before the binding carry a synthetic context id.** The
+   round-3 migration binds them to the one registered deployment under a
+   `pre-binding-section-` identifier and refuses where there is no unambiguous
+   registration. Nothing a platform ever issues looks like that, so no launch can
+   reach one of those rows — which is right for rows no launch created, and the
+   demo seed's eighteen sections are all of them today. The residue is that
+   `lms_context_id` is not universally a value some platform issued.
+   **Done when** either no such row exists in any database anybody keeps (a
+   `make docker-build` and a re-seed is the whole of it for the demo stack), or a
+   later ticket decides that a section with no real context is a state worth
+   naming rather than a value worth inventing.
