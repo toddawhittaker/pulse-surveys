@@ -3,7 +3,7 @@
 Acceptance criteria 1, 2 and 4, plus the scope items they rest on: the `user` row
 for the launching subject, the roster service address SPEC §7.3 has a staff launch
 store, and the `lms_title` fallback with its correction rules. Criterion 5 and the
-five defect kinds are next door in
+defect kinds are next door in
 `tests/integration/test_launch_provisioning_defects.py`; criterion 3 is
 `tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py`, and
 the sanctioned-writer mechanism itself is
@@ -221,6 +221,81 @@ def test_a_staff_launch_creates_the_section_with_the_calendar_its_terms_map_give
         f"{expected_end!r}. E0-07's convention is the inclusive one, argued from §2.2's own seed "
         "map in `tests/integration/test_section_date_derivation.py`, which is where it changes if "
         "it ever does."
+    )
+
+
+def test_a_staff_launch_stamps_the_section_with_the_context_it_was_discovered_from(
+    launch_driver: Any,
+    provisioning_contract: Any,
+    launch_ground: Any,
+    provisioned_rows: Any,
+) -> None:
+    """The round-3 binding: a section records which context, on which deployment, made it.
+
+    The security review's HIGH turned on a section having no identity of its own.
+    It was resolved by what its label parsed to — prefix, number, section code —
+    and a course copy keeps the section code, so a launch from the copy resolved
+    the original and repointed its roster address. The fix gives `section` an
+    identity the platform owns: `lms_context_id`, the context claim's `id`, unique
+    within `lti_deployment_id`, the registration the launch resolved to.
+
+    This is the positive half. The refusals it makes possible are in
+    `tests/integration/test_a_launch_may_not_repoint_another_contexts_section.py`,
+    and every one of them is satisfied by a writer that provisions nothing — which
+    is what this test, and the two it sits beside, rule out.
+
+    **Both halves of the pair are asserted**, because either alone is a binding
+    that does not bind. A section stamped with the context and not the deployment
+    is unique across the world, so two institutions whose platforms hand out the
+    same context identifier share a section; a section stamped with the deployment
+    and not the context is every section of that deployment at once.
+
+    **Dies if either column is written from anywhere but the launch.** The context
+    id is compared against the claim the platform signed and the deployment
+    against the row this suite registered for it, with those two checked against
+    each other first — so a stamp that matched by both being wrong in the same way
+    is not read as a stamp that matched.
+    """
+    offer = launch_driver.offer_for_role(provisioning_contract.instructor_role_urn)
+    label = provisioning_contract.label_of(launch_driver.claims_of(offer))
+    launch_ground(label)
+
+    response, signed = launch_driver.launch(offer)
+
+    launch_driver.landed(response, "an instructor's launch against an unknown section")
+    registration = launch_driver.registration
+    assert registration is not None, (
+        "The launch driver carries no registration, so this test has nothing to compare the "
+        "section's deployment against. `launch_driver_in` in tests/fixtures/provisioning.py is "
+        "where the registered rows are kept."
+    )
+    claimed_deployment = signed.claims.get(provisioning_contract.deployment_id_claim)
+    assert claimed_deployment == registration.deployment_id, (
+        f"The launch claims deployment {claimed_deployment!r} and the row this suite registered "
+        f"carries {registration.deployment_id!r}. They have to be the same deployment, or the "
+        "comparison below is between two unrelated values and would be satisfied by a stamp taken "
+        "from anywhere at all."
+    )
+
+    section = the_one(
+        sections_coded(provisioned_rows, provisioning_contract, label),
+        f"section coded {label.code!r}",
+    )
+    context_id = provisioning_contract.context_id_of(signed.claims)
+    stamped = section[provisioning_contract.section_context_id_column]
+    assert stamped == context_id, (
+        f"The section's `{provisioning_contract.section_context_id_column}` is {stamped!r} and the "
+        f"launch's context claim carries id {context_id!r}. That value is the one thing about a "
+        "section that the platform owns and a course copy does not reproduce — a section stamped "
+        "with anything else is resolvable by a launch that has no business finding it."
+    )
+    deployment_link = provisioned_rows.link("section", "lti_deployment")
+    registered_key = registration.deployment_row[provisioned_rows.key("lti_deployment")]
+    assert section[deployment_link] == registered_key, (
+        f"The section's `{deployment_link}` is {section[deployment_link]!r} and the deployment "
+        f"this launch resolved to is {registered_key!r}. A context id is unique within a "
+        "deployment and not across the world, so without this half two institutions' platforms "
+        "handing out one identifier share a section."
     )
 
 

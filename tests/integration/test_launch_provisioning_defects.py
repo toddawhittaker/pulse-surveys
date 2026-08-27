@@ -1,9 +1,18 @@
 """What a launch is refused for, and what gets written down — ticket E1-10.
 
 Acceptance criterion 5 — "an out-of-band course number is refused and recorded;
-nothing is written" — generalised to the five defect kinds this ticket's design
+nothing is written" — generalised to the defect kinds this ticket's design
 enumerates, plus the record's own field set. Criteria 1, 2 and 4 are next door in
 `tests/integration/test_launch_time_provisioning.py`.
+
+**The set is seven, and five of them are here.** Round 3's security review added
+two, and each is asserted where its own subject is: `context_collision` in
+`tests/integration/test_a_launch_may_not_repoint_another_contexts_section.py`, and
+`roster_address_refused` in
+`tests/integration/test_a_roster_address_is_judged_by_the_registration_rules.py`.
+What stays here is everything that judges *what the label said* — and the two
+tests at the foot of this file, which pin the closed set and the record's fields
+for all seven.
 
 **Every one of these is a launch that still lands.** E1-10's work order: "A
 provisioning refusal NEVER fails the launch or the person's landing: the write is
@@ -517,6 +526,65 @@ def test_a_course_number_outside_spec_8s_bands_is_refused_and_recorded(
 # ---------------------------------------------------------------------------
 
 
+def test_the_defect_kinds_are_exactly_the_seven_this_ticket_enumerates(
+    metadata_tables: dict[str, Any], provisioning_contract: Any
+) -> None:
+    """The closed set, pinned as an equality rather than as a floor.
+
+    `test_the_kind_column_refuses_a_defect_kind_this_ticket_does_not_name` below
+    asks the database to accept each kind and to refuse one invented name, and
+    that pair cannot see an **eighth** kind that a later ticket adds: a
+    plausible-looking label sits in the type, is accepted, and nothing in this
+    suite reports it. E11 builds an administrator's surface on this column and has
+    to know what it may be shown, so the set is fixed here and widening it is a
+    visible diff in a test — the same shape `RUNTIME_BASE_TABLE_PRIVILEGES` uses
+    for the grants and `SANCTIONED_WRITERS_EXPECTED` for the writer catalog.
+
+    **Seven, since round 3.** Five kinds came from the ticket's own design; the
+    security review added `context_collision` — a launch naming a section another
+    context is bound to, which is the HIGH — and `roster_address_refused`, an
+    address the registration rules will not let this container fetch.
+
+    **Read off the column's own type**, which is where E1-10 settles the set:
+    "`kind` (closed string enum of exactly the five kinds above)", now seven. A
+    column that is not an enum fails here saying so rather than being read as an
+    empty set, because "no labels" and "a free-text column" are the same silence
+    and only one of them is a defect this test can describe.
+    """
+    from sqlalchemy.types import TypeDecorator
+
+    table = metadata_tables.get(provisioning_contract.defect_table)
+    assert table is not None, (
+        f"There is no `{provisioning_contract.defect_table}` table on `Base.metadata` (it holds "
+        f"{sorted(metadata_tables)}). E1-10's migration adds it."
+    )
+    column = table.columns.get("kind")
+    assert column is not None, (
+        f"`{provisioning_contract.defect_table}` has no `kind` column (it has "
+        f"{[c.name for c in table.columns]}). It is the field E11's surface groups by."
+    )
+    kind = column.type
+    while isinstance(kind, TypeDecorator):
+        kind = kind.impl_instance
+    labels = tuple(getattr(kind, "enums", ()) or ())
+    assert labels, (
+        f"`{provisioning_contract.defect_table}.kind` is typed {column.type!r}, which enumerates "
+        "nothing. E1-10 makes it a closed enum precisely so the administrator's surface E11 builds "
+        "can know what it may be shown; a free-text column has to render whatever string the next "
+        "writer invents, and this test cannot tell that apart from an enum with no members."
+    )
+    assert set(labels) == set(provisioning_contract.defect_kinds), (
+        f"`{provisioning_contract.defect_table}.kind` enumerates {sorted(labels)} and E1-10 "
+        f"enumerates {sorted(provisioning_contract.defect_kinds)}.\n\n"
+        "A kind in the column and not in the record is one an administrator can be shown with "
+        "nothing saying what it means; a kind in the record and not in the column is a defect the "
+        "writer cannot record at all, which is `docs/MISTAKES.md` entry 26 — the fallback path "
+        "losing the failure it exists to surface. If a later ticket genuinely adds one, "
+        "`DEFECT_KINDS` in tests/fixtures/provisioning.py is where it is recorded, in the pull "
+        "request that adds it."
+    )
+
+
 def test_the_defect_record_carries_exactly_the_fields_this_ticket_enumerates(
     metadata_tables: dict[str, Any], provisioning_contract: Any
 ) -> None:
@@ -627,18 +695,22 @@ def test_a_recorded_defect_names_nobody(
 def test_the_kind_column_refuses_a_defect_kind_this_ticket_does_not_name(
     seed_rows: Any, db_session: Any, provisioning_contract: Any
 ) -> None:
-    """The five kinds are a closed set, held by the database rather than by the writer.
+    """The kinds are a closed set, held by the database rather than by the writer.
 
     E1-10's design: `kind` is "a closed string enum of exactly the five kinds
-    above". Closed in the schema is what makes E11's surface able to enumerate
-    what it may be shown — a free-text column means the admin console has to cope
-    with whatever string a later ticket invents, and it will not.
+    above" — seven since round 3's review added `context_collision` and
+    `roster_address_refused`. Closed in the schema is what makes E11's surface able
+    to enumerate what it may be shown; a free-text column means the admin console
+    has to cope with whatever string a later ticket invents, and it will not.
 
     **Both directions in one test**, because a database that refused every insert
-    would satisfy the refusal alone and make the whole record unwritable. Each of
-    the five kinds is required to be accepted, and a sixth is required to be
-    refused, and the refusal is the database's — a check the writer makes in
-    Python is undone by the next writer.
+    would satisfy the refusal alone and make the whole record unwritable. Every
+    kind is required to be accepted, and one this ticket does not name is required
+    to be refused, and the refusal is the database's — a check the writer makes in
+    Python is undone by the next writer. Which kinds those are is
+    `test_the_defect_kinds_are_exactly_the_seven_this_ticket_enumerates` above:
+    this test would go on passing if an eighth were added, and that one is what
+    would not.
 
     The exception type is deliberately not named: a Postgres enum answers with a
     `DataError` and a `CHECK` constraint with an `IntegrityError`, and E1-10

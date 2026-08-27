@@ -2747,9 +2747,10 @@ MEMBER_OF_ROLES = """
 # The definer is not here: it is not a connection role, and
 # `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
 # pins its four grants as an equality already.
-#   - `pulse_app` **reads** `prefix`, `term`, `start_letter_map`, `course`,
-#     `section` and `user`, and **inserts** `course`, `section`, `user` and
-#     `launch_defect`. This is E1-10's launch-time provisioning, and it is the
+#   - `pulse_app` **reads** `prefix`, `term`, `start_letter_map`, `course` and
+#     `section`, and **inserts** `course`, `section`, `user` and `launch_defect`.
+#     On `user` it holds no table-wide `SELECT` at all — only `SELECT (id)`, in the
+#     column set below. This is E1-10's launch-time provisioning, and it is the
 #     first grant in this set that lets the application write a relation SPEC §2.1
 #     puts on the *LMS's* side — so it is the entry that most needs its sentence.
 #     **What it is for.** §2.1 gives courses and sections two arrival paths,
@@ -2759,8 +2760,20 @@ MEMBER_OF_ROLES = """
 #     bootstraps every later sync of it." The reads are the look-ups that launch
 #     has to make before it may write anything — the prefix the context label
 #     names, the term whose dates contain the day of the launch, that term's
-#     start-letter map row, and the course, section and user rows an upsert has to
-#     find before it decides to insert.
+#     start-letter map row, and the course and section rows an upsert has to find
+#     before it decides to insert.
+#     **`user` is not one of those look-ups, and this entry used to say it was.**
+#     The sentence above read "the course, section and user rows an upsert has to
+#     find", which was false: the writer inserts a `user` row and never reads the
+#     table, by design — `lms_user_id` is the `sub` claim verbatim and E1-01 keeps
+#     it out of every view, so a connection able to `SELECT` it can enumerate every
+#     launching subject this deployment has ever seen and join responses to people.
+#     The round-3 security review found the grant and the false justification
+#     together. What the writer actually needs is the primary key back from an
+#     insert, which Postgres checks `SELECT` against per returned column — so the
+#     grant is `SELECT (id)`, and `lms_user_id` is refused.
+#     `tests/integration/test_the_application_role_writes_only_the_granted_columns.py`
+#     provokes both halves.
 #     **This is the grant ADR 0045 deferred, arriving narrowed rather than
 #     widened.** That record wanted the opposite instrument — "refusing the
 #     *application role* `INSERT`/`UPDATE` on these tables would be structural
@@ -2816,7 +2829,6 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "course", "INSERT"),
         (APPLICATION_ROLE, "section", "SELECT"),
         (APPLICATION_ROLE, "section", "INSERT"),
-        (APPLICATION_ROLE, "user", "SELECT"),
         (APPLICATION_ROLE, "user", "INSERT"),
         (APPLICATION_ROLE, "launch_defect", "INSERT"),
     }
@@ -2848,16 +2860,27 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 #     stored title is (ADR 0091), written by the same statement.
 #   - `section(lms_context_memberships_url)` — SPEC §7.3's stored roster service
 #     address, updated when a later staff launch advertises a different one.
+#   - `user(id)` — **`SELECT`, not `UPDATE`**, and the round-3 security review's
+#     LOW. The writer inserts a `user` row and reads the table never; what it needs
+#     is the row's own key back, and Postgres checks `SELECT` per returned column
+#     on an `INSERT … RETURNING`. Table-wide `SELECT` would have been read access to
+#     `lms_user_id`, which is the `sub` claim verbatim (ADR 0045) and the stable
+#     join key E1-01 keeps out of every view — so a connection holding it can
+#     enumerate every subject that has ever launched and join a response to a
+#     person, on the connection every screen in the product runs on. The narrowest
+#     grant that does the job is one column, and it is the column that identifies
+#     nobody.
 #
 # What is *not* here is the assertion: no `UPDATE` on `course.lms_number`, on
-# `section.lms_section_code`, on any of ADR 0021's four calendar columns, or on
-# `user` in any form. A launch discovers those and never revises them, and the
-# database is what says so.
+# `section.lms_section_code`, on the binding columns E1-10 adds to `section`, on
+# any of ADR 0021's four calendar columns, or on `user` in any form. A launch
+# discovers those and never revises them, and the database is what says so.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
         (APPLICATION_ROLE, "course", "title_is_fallback", "UPDATE"),
         (APPLICATION_ROLE, "section", "lms_context_memberships_url", "UPDATE"),
+        (APPLICATION_ROLE, "user", "id", "SELECT"),
     }
 )
 
@@ -3280,10 +3303,12 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
     set is. **It was empty until E1-10**, because every grant this scheme wrote
     before then was table-level — ADR 0043's enumeration and E0-13's
     `SELECT, INSERT` on `classification` alike — and a runtime role named in any
-    column ACL was therefore a widening by definition. E1-10 spends three
-    column-scoped `UPDATE`s deliberately, in preference to the table-wide `UPDATE`
-    on `course` and `section` that would otherwise have been needed; the constant
-    carries the sentence for each. Without this half,
+    column ACL was therefore a widening by definition. E1-10 spends four
+    column-scoped grants deliberately — three `UPDATE`s, in preference to the
+    table-wide `UPDATE` on `course` and `section` that would otherwise have been
+    needed, and one `SELECT` on `user(id)`, in preference to the table-wide read of
+    `lms_user_id` the round-3 review found; the constant carries the sentence for
+    each. Without this half,
     `GRANT UPDATE (verdict) ON public.classification TO pulse_app` would leave the
     append-only property broken with this test green, which is the same shape as
     the identity finding one table over and would have been left open by fixing
@@ -3394,8 +3419,9 @@ def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_
         "**An entry naming a column** — `…public.classification.verdict` rather than "
         "`…public.classification` — is a grant `has_table_privilege` does not report at all, so "
         "it is read out of `pg_attribute.attacl` instead. The expected set at column level is "
-        "`RUNTIME_COLUMN_PRIVILEGES`, which held nothing until E1-10 and now holds exactly three "
-        "column-scoped `UPDATE`s, each with its sentence. Anything else at column grain is a "
+        "`RUNTIME_COLUMN_PRIVILEGES`, which held nothing until E1-10 and now holds three "
+        "column-scoped `UPDATE`s and one column-scoped `SELECT`, each with its sentence. Anything "
+        "else at column grain is a "
         "widening by definition, and on an append-only table it is the whole of how append-only "
         "stops being true.\n\n"
         "The second list means this scheme has lost a grant it needs: without `SELECT` on "

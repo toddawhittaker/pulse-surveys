@@ -34,7 +34,7 @@ platform title for one context — where the claims are still a real launch's, f
 a registered platform, with the one member under test rewritten.
 
 **`provisioning_contract` is the vocabulary both modules read a launch through**:
-claim names, column names, the five defect kinds, the mint selectors, and the
+claim names, column names, the seven defect kinds, the mint selectors, and the
 helpers that split a context label into the three parts E1-10 parses. Test modules
 reach it as a fixture rather than importing this file, because an import of a
 fixtures module by name depends on where pytest put `tests/` on `sys.path` and an
@@ -339,6 +339,62 @@ def with_course_number(claims: Mapping[str, Any], number: str) -> dict[str, Any]
     return relabelled(claims, LABEL_SEPARATOR.join((parsed.prefix, number, parsed.code)))
 
 
+def with_section_code(claims: Mapping[str, Any], code: str) -> dict[str, Any]:
+    """`claims` with the context label's last part replaced by `code`.
+
+    A platform that renames a context keeps the context's `id` and changes what it
+    is called, which is the case the round-3 ruling turns into a recorded
+    `context_collision` rather than a silent second section.
+    """
+    parsed = parse_context_label(context_of(claims).get("label"))
+    return relabelled(claims, LABEL_SEPARATOR.join((parsed.prefix, parsed.number, code)))
+
+
+def with_context_id(claims: Mapping[str, Any], context_id: str) -> dict[str, Any]:
+    """`claims` with the context claim's `id` replaced and its label left alone.
+
+    The one mutation the collision tests make, and the shape of the finding they
+    are about: a Canvas course copy carries the source course's section code in a
+    brand-new context. Everything a launch parses stays identical and the only
+    thing that differs is the identity the platform gave the context.
+    """
+    changed = dict(claims)
+    context = context_of(claims)
+    context["id"] = context_id
+    changed[CONTEXT_CLAIM] = context
+    return changed
+
+
+def with_context_title(claims: Mapping[str, Any], title: str) -> dict[str, Any]:
+    """`claims` with the context claim's `title` replaced.
+
+    Carried alongside a changed address in the collision tests, because the
+    finding is that a colliding launch rewrites *both* — the stored roster address
+    and the LMS's own course title — and a test that changed only one could not
+    say the other was left alone.
+    """
+    changed = dict(claims)
+    context = context_of(claims)
+    context["title"] = title
+    changed[CONTEXT_CLAIM] = context
+    return changed
+
+
+def with_memberships_url(claims: Mapping[str, Any], address: str) -> dict[str, Any]:
+    """`claims` with the NRPS claim's roster address replaced and nothing else touched.
+
+    The mutation the address tests make. The service claim is copied rather than
+    edited in place for the same reason `relabelled` copies the context claim: two
+    parametrised cases sharing one launch would otherwise see each other's URL.
+    """
+    changed = dict(claims)
+    service = claims.get(NRPS_CLAIM)
+    replaced = dict(service) if isinstance(service, dict) else {}
+    replaced[MEMBERSHIPS_URL_MEMBER] = address
+    changed[NRPS_CLAIM] = replaced
+    return changed
+
+
 # ---------------------------------------------------------------------------
 # The vocabulary a test names a launch by.
 # ---------------------------------------------------------------------------
@@ -519,7 +575,7 @@ def launch_ground(
 ) -> Callable[..., LaunchGround]:
     """Seed and commit the rows a launch resolves against, with each part optional.
 
-    Every option has a paired opposite, because each of E1-10's five defects is
+    Every option has a paired opposite, because three of E1-10's seven defects are
     the absence or the mismatch of one of these rows and none of them is worth
     asserting except beside the case where the same launch provisions correctly:
 
@@ -582,6 +638,14 @@ SECTION_CODE_COLUMN = "lms_section_code"
 TITLE_IS_FALLBACK_COLUMN = "title_is_fallback"
 SECTION_ADDRESS_COLUMN = "lms_context_memberships_url"
 
+# The binding the round-3 ruling adds to `section`: the platform's own identifier
+# for the context a section was discovered from, and the registration scope that
+# identifier is unique within. `lms_`-marked because the platform supplies it and
+# Pulse never edits it (ADR 0014); the deployment is a foreign key, which the
+# E0-35 rule-1 sweep accounts for as structural. Together they are what makes a
+# section resolvable by *who said so* rather than by what its label parses to.
+SECTION_CONTEXT_ID_COLUMN = "lms_context_id"
+
 # Spelled by the work order too: the append-only record E11 reads, and its five
 # fields beside the key.
 DEFECT_TABLE = "launch_defect"
@@ -593,12 +657,23 @@ OUT_OF_BAND_COURSE_NUMBER = "out_of_band_course_number"
 NO_TERM_FOR_LAUNCH_DATE = "no_term_for_launch_date"
 SECTION_CODE_UNDERIVABLE = "section_code_underivable"
 
+# The two the round-3 security review added. `context_collision` is the HIGH: a
+# launch whose parsed identity names a section some *other* context is bound to,
+# which before the fix repointed that section's stored roster address and rewrote
+# its course's title. `roster_address_refused` is the MEDIUM: an address the
+# registration-address rules refuse, which leaves the section provisioned and its
+# address NULL — SPEC §7.3's never-synced state, which is a state and not a fault.
+CONTEXT_COLLISION = "context_collision"
+ROSTER_ADDRESS_REFUSED = "roster_address_refused"
+
 DEFECT_KINDS = (
     UNPARSEABLE_CONTEXT_LABEL,
     UNKNOWN_PREFIX,
     OUT_OF_BAND_COURSE_NUMBER,
     NO_TERM_FOR_LAUNCH_DATE,
     SECTION_CODE_UNDERIVABLE,
+    CONTEXT_COLLISION,
+    ROSTER_ADDRESS_REFUSED,
 )
 
 
@@ -723,6 +798,7 @@ class ProvisioningContract:
     title_is_fallback_column = TITLE_IS_FALLBACK_COLUMN
     section_code_column = SECTION_CODE_COLUMN
     section_address_column = SECTION_ADDRESS_COLUMN
+    section_context_id_column = SECTION_CONTEXT_ID_COLUMN
 
     defect_table = DEFECT_TABLE
     defect_columns = DEFECT_COLUMNS
@@ -732,6 +808,8 @@ class ProvisioningContract:
     out_of_band_course_number = OUT_OF_BAND_COURSE_NUMBER
     no_term_for_launch_date = NO_TERM_FOR_LAUNCH_DATE
     section_code_underivable = SECTION_CODE_UNDERIVABLE
+    context_collision = CONTEXT_COLLISION
+    roster_address_refused = ROSTER_ADDRESS_REFUSED
 
     instructor_role_urn = INSTRUCTOR_ROLE_URN
     learner_role_urn = LEARNER_ROLE_URN
@@ -746,6 +824,10 @@ class ProvisioningContract:
     memberships_url_in = staticmethod(memberships_url_in)
     relabelled = staticmethod(relabelled)
     with_course_number = staticmethod(with_course_number)
+    with_section_code = staticmethod(with_section_code)
+    with_context_id = staticmethod(with_context_id)
+    with_context_title = staticmethod(with_context_title)
+    with_memberships_url = staticmethod(with_memberships_url)
 
     @staticmethod
     def label_of(claims: Mapping[str, Any]) -> ContextLabel:
@@ -847,6 +929,12 @@ REGISTERED_AUTHORIZATION_ENDPOINT = "http://lti-platform.invalid/e1-10-configure
 # ticket's own suite, and nothing E1-10 does may change it either way.
 LANDING_PREFIX = "/app/"
 
+# `ENVIRONMENT`, spelled as `tests/unit/test_docs_exposure.py` and the launch-door
+# suite spell it. Set through `tool_doors` rather than with a bare `setenv`, so a
+# module that builds something out of `Settings` at import is built under the value
+# the test chose (`docs/MISTAKES.md` entry 3).
+ENVIRONMENT_VARIABLE = "ENVIRONMENT"
+
 
 class LaunchDriver:
     """One tool, one registered mock platform, and whole launches through both.
@@ -864,10 +952,17 @@ class LaunchDriver:
     is what `mint_defect` in the launch-door suite does and for the same reason.
     """
 
-    def __init__(self, tool: Any, contract: Any, platform: Any) -> None:
+    def __init__(self, tool: Any, contract: Any, platform: Any, registration: Any = None) -> None:
         self.tool = tool
         self.contract = contract
         self.platform = platform
+        # The `lti_platform` and `lti_deployment` rows this platform's launches
+        # resolve to. Kept so a test can assert what a section was *bound* to
+        # rather than only what it was called: the round-3 ruling makes
+        # `(lti_deployment_id, lms_context_id)` the identity a section is looked
+        # up by, and the deployment half of that pair is a row nothing else here
+        # holds a handle on.
+        self.registration = registration
 
     def offers(self) -> list[Any]:
         return self.platform.require_offers()
@@ -984,24 +1079,58 @@ def provisioning_jwks_url(provisioning_platform: Any) -> str:
 
 
 @pytest.fixture
-def launch_driver(
+def launch_driver_in(
     tool_doors: Any,
     door_contract: Any,
     provisioning_platform: Any,
     provisioning_jwks_url: str,
     register_platform: Any,
-) -> LaunchDriver:
-    """This project's launch door, with one registered mock platform behind it."""
-    register_platform(
-        provisioning_platform.require_offers()[0],
-        provisioning_jwks_url,
-        REGISTERED_AUTHORIZATION_ENDPOINT,
-    )
-    tool = tool_doors(
-        {door_contract.settings["public_base_url"]: door_contract.public_base_url},
-        {urlsplit(provisioning_jwks_url).hostname: provisioning_platform},
-    )
-    return LaunchDriver(tool, door_contract, provisioning_platform)
+) -> Callable[..., LaunchDriver]:
+    """Build the launch door under a named `ENVIRONMENT`, registering the platform once.
+
+    A factory, because one of E1-10's rules only exists outside development: the
+    roster address a launch advertises is judged by
+    `app.models.lti.refuse_invalid_registration_addresses`, and every rule that
+    function applies is switched off under the development name so the demo stack
+    can seed the mock's own cleartext addresses
+    (`tests/unit/test_registration_address_constraints.py`). A test about a
+    refused address has to run somewhere a refusal happens, and setting the
+    variable through `tool_doors` is what makes it true both at import — for
+    anything built out of `Settings` — and at call time.
+
+    **The registration is written once however many tools are built.** Two rows
+    registering one issuer would leave the door choosing between them, and which
+    one it chose would decide the result of every test using it.
+    """
+    written: list[Any] = []
+
+    def build(environment: str | None = None) -> LaunchDriver:
+        if not written:
+            written.append(
+                register_platform(
+                    provisioning_platform.require_offers()[0],
+                    provisioning_jwks_url,
+                    REGISTERED_AUTHORIZATION_ENDPOINT,
+                )
+            )
+        values = {door_contract.settings["public_base_url"]: door_contract.public_base_url}
+        if environment is not None:
+            values[ENVIRONMENT_VARIABLE] = environment
+        tool = tool_doors(values, {urlsplit(provisioning_jwks_url).hostname: provisioning_platform})
+        return LaunchDriver(tool, door_contract, provisioning_platform, written[0])
+
+    return build
+
+
+@pytest.fixture
+def launch_driver(launch_driver_in: Callable[..., LaunchDriver]) -> LaunchDriver:
+    """This project's launch door, with one registered mock platform behind it.
+
+    Built with no `ENVIRONMENT` override, so it runs under whatever
+    `configured_env` laid down — the development name, which is what every test
+    about the ordinary path wants.
+    """
+    return launch_driver_in()
 
 
 @pytest.fixture
@@ -1022,12 +1151,12 @@ def registered_platform(
     `launch` is unavailable on what this returns, deliberately: a test that means
     to drive the whole route should ask for `launch_driver` and get the door.
     """
-    register_platform(
+    registration = register_platform(
         provisioning_platform.require_offers()[0],
         provisioning_jwks_url,
         REGISTERED_AUTHORIZATION_ENDPOINT,
     )
-    return LaunchDriver(None, None, provisioning_platform)
+    return LaunchDriver(None, None, provisioning_platform, registration)
 
 
 @pytest.fixture

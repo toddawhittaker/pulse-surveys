@@ -51,10 +51,14 @@ outright, and said why it could not have that: "the launch path and E1's roster
 sync are the same connection, so the grant would have to distinguish a sanctioned
 writer from an unsanctioned one, and no such separation exists in E0." One
 connection still serves both, so what arrived on 2026-08-26 is the narrowest grant
-launch-time provisioning needs — `SELECT` and `INSERT` on `course`, `section` and
-`user`, column-scoped `UPDATE` on three columns, no `DELETE` and no table-wide
-`UPDATE` anywhere — with everything outside it refused by the server for every
-caller on that connection, guard or no guard.
+launch-time provisioning needs — `SELECT` and `INSERT` on `course` and `section`,
+`INSERT` on `user` with `SELECT` on its key column alone, column-scoped `UPDATE`
+on three columns, no `DELETE` and no table-wide `UPDATE` anywhere — with
+everything outside it refused by the server for every caller on that connection,
+guard or no guard. The `user` half is at column grain because a table-wide read
+would have been read access to `lms_user_id`, the `sub` claim verbatim and the
+join key E1-01 keeps out of every view; E1-10's round-3 security review found it,
+and `test_identity_grants.py` carries the sentence.
 `tests/integration/test_the_application_role_writes_only_the_granted_columns.py`
 provokes both halves and `tests/integration/test_identity_grants.py` pins the set
 as an equality. It is a real instrument and it is narrower than a proof: inside

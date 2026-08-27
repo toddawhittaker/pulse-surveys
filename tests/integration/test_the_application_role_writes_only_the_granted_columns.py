@@ -230,6 +230,14 @@ def test_the_application_role_may_store_a_roster_address_and_may_not_touch_a_der
     constraint ties the three calendar columns to each other", so a value written
     here would be accepted by the schema — which is exactly what makes the refusal
     attributable to the grant rather than to a constraint.
+
+    **`lms_context_id` is the round-3 addition and the sharpest of the three.** It
+    is half of the binding that makes a section resolvable by which context
+    discovered it rather than by what its label parses to, and the whole of the
+    HIGH that review found. A connection able to rewrite it can re-point a section
+    at another context and reach the original finding through the database instead
+    of through the writer — so the grant withholds it, and the writer stamps it
+    once at insert.
     """
     section = {"id": key_of(seeded, "section")}
     permitted_by_the_server(
@@ -249,6 +257,12 @@ def test_the_application_role_may_store_a_roster_address_and_may_not_touch_a_der
         "UPDATE public.section SET lms_section_code = 'Z9FF' WHERE id = :id",
         section,
         "Updating `section.lms_section_code` as the application role",
+    )
+    refused_by_the_server(
+        application_session,
+        "UPDATE public.section SET lms_context_id = 'e1-10-another-context' WHERE id = :id",
+        section,
+        "Repointing `section.lms_context_id` as the application role",
     )
 
 
@@ -296,6 +310,50 @@ DELETES_THAT_MUST_BE_REFUSED = {
     "section": "DELETE FROM public.section",
     "user": 'DELETE FROM public."user"',
 }
+
+
+def test_the_application_role_may_read_a_users_key_and_may_not_read_the_subject_beside_it(
+    seeded: dict[str, Any], application_session: Any
+) -> None:
+    """The round-3 LOW: one column of `user` is readable and the one that names somebody is not.
+
+    The review found `GRANT SELECT, INSERT ON "user"` and the sentence that
+    justified it, and the sentence was false — the writer inserts a row and reads
+    the table never. What it does need is the row's own key back from an
+    `INSERT … RETURNING`, and Postgres checks `SELECT` against each *returned*
+    column, so the narrowest grant that does the job is `SELECT (id)`.
+
+    **What table-wide `SELECT` was.** `user.lms_user_id` is the `sub` claim
+    verbatim (ADR 0045) and E1-01 keeps it out of every view precisely because it
+    is the stable join key: a connection that can read the column can enumerate
+    every subject that has ever launched this deployment and join a response back
+    to the person who gave it — on `pulse_app`, the connection every screen in the
+    product runs on. SPEC §8 puts the instructor and leadership read paths through
+    views that "structurally cannot join to `user` identity columns"; a table-wide
+    read of this one is the join those views exist to make impossible, available
+    directly.
+
+    **Both halves, on one table, one `SELECT` list apart.** The refusal alone is
+    satisfied by a role holding nothing at all on `user`, which would break the
+    insert next door; the permission alone says nothing about what came with it.
+    Together they are a statement about column grain rather than about the table.
+
+    **The mutation this kills**: `GRANT SELECT ON "user"` in place of
+    `GRANT SELECT (id)`. `test_identity_grants.py`'s exact sets are the other
+    instrument — that one reads the catalog, this one asks the server.
+    """
+    permitted_by_the_server(
+        application_session,
+        'SELECT id FROM public."user" WHERE id = :id',
+        {"id": key_of(seeded, "user")},
+        "Reading `user.id` as the application role",
+    )
+    refused_by_the_server(
+        application_session,
+        'SELECT lms_user_id FROM public."user"',
+        {},
+        "Reading `user.lms_user_id` as the application role",
+    )
 
 
 @pytest.mark.parametrize(("relation", "statement"), sorted(DELETES_THAT_MUST_BE_REFUSED.items()))
