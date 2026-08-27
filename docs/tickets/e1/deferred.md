@@ -289,3 +289,46 @@ Every E1 pull request that defers something adds it here in the same PR.
    `make docker-build` and a re-seed is the whole of it for the demo stack), or a
    later ticket decides that a section with no real context is a state worth
    naming rather than a value worth inventing.
+
+4. **A squatted binding is never reconciled or aged out** (round-3 security
+   re-pass, MEDIUM). The binding makes `(course, term, lms_section_code)`
+   first-writer-wins: the first context to provision a name holds it, and every
+   later context whose label parses to that name is refused with a
+   `context_collision`. The direction is deliberate — the alternative is the
+   silent repointing round 3 closed — and the refusal is loud, so an
+   administrator reading E11's surface sees a specific context being refused
+   repeatedly with the identifiers to act on. What is missing is the acting.
+   Somebody who copies a course and launches it *before* the genuine context
+   takes the name, and the genuine instructor's launches are denied from then on,
+   unbounded in time, with no path that rebinds or retires the squatted row. It
+   needs an operator surface (E11's) and a rule about who may rebind, neither of
+   which belongs on a launch path, which is why E1-10 recorded it rather than
+   built it —
+   [ADR 0091](../../adr/0091-what-a-launch-provisions-and-what-it-writes-down-instead.md)'s
+   consequences carry the reasoning.
+   **Done when** an operator or a sync path can rebind or retire a squatted
+   section, proved by a test that provisions a section from one context, drives a
+   second context whose label parses to the same identity, and asserts that after
+   the repair the second context provisions and the first no longer holds the
+   name — a test that fails today whatever an administrator does, because there
+   is nothing to call.
+
+5. **`app.services.provisioning._environment()` reads `os.environ` while every
+   other reader of the same rules reads `Settings`** (round-3 security re-pass,
+   LOW). The address rules are gated on `ENVIRONMENT`, and the two registration
+   writers reach it through the configuration `Settings` validated;
+   `provision_from_launch` is handed a session and the launch's claims, so it
+   reads the variable itself. Two consequences, and only one of them costs
+   anything today. The dangerous direction — an unset variable switching the
+   rules *off* — is unreachable: `is_a_deployment("")` is true, so an absent value
+   puts them in force, which is why this is a LOW rather than a finding to fix in
+   the round. The direction that does cost something is the other one: a process
+   whose `ENVIRONMENT` lives only in a `.env` file that `Settings` loads and
+   `os.environ` does not see would judge a development stack by a deployment's
+   rules, and refuse the mock platform's own cleartext roster address on a
+   developer's machine.
+   **Done when** `provision_from_launch` takes the environment from `Settings` —
+   the launch door already holds one on `request.app.state.settings`, so the
+   thread is short — and a test drives a launch under a `.env`-only development
+   configuration and asserts the mock's address is stored. E1-11 touches this
+   module and is the natural place.

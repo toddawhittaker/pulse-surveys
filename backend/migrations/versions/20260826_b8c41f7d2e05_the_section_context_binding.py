@@ -39,6 +39,13 @@ which is the disposition `9a71c4be0d3f` already takes for rows a new rule cannot
 be applied to. A fabricated binding that a real launch could collide with would be
 worse than a refusal.
 
+**The refusal points at registering a platform and at nothing else**, which the
+round-3 security re-pass asked for: an earlier wording offered "or drop them" as
+the second way out, and the reader of that sentence is somebody whose upgrade is
+failing, under time pressure, taking anything the message sanctions. On the demo
+stack those rows are fiction; on any database that matters they are sections with
+responses hanging off them.
+
 Both the backfill and that refusal are one PL/pgSQL block rather than a read in
 Python, so `alembic upgrade --sql` emits a script that carries them; see the
 comment on `BIND_EXISTING_SECTIONS`.
@@ -108,10 +115,10 @@ BEGIN
         RAISE EXCEPTION
             'E1-10: % section(s) here predate the context binding and this database holds % '
             'registered deployment(s), so there is no unambiguous one to bind them to. Both '
-            'binding columns are NOT NULL. Either register the platform those sections came '
-            'from and run this again, or drop them (the demo seed re-runs with `make seed`). A '
-            'binding invented here would be one a real launch could collide with, which is the '
-            'failure this revision exists to prevent.', unbound, registrations;
+            'binding columns are NOT NULL. Register the platform those sections came from — '
+            'exactly one registration has to be resolvable — and run this again. A binding '
+            'invented here would be one a real launch could collide with, which is the failure '
+            'this revision exists to prevent.', unbound, registrations;
     END IF;
 
     SELECT id INTO only_registration FROM public.lti_deployment;

@@ -86,14 +86,27 @@ identities have to agree** (round 3). `section` carries `lms_context_id` — the
 context claim's `id`, the platform's own value — and `lti_deployment_id`, the
 registration it was issued under, unique together **in the database**. A launch
 resolves by that pair first, and by the parsed identity `(course, term,
-lms_section_code)` second, and the two disagreeing is a `context_collision`:
-nothing is written, the course title included, because the check sits above the
-atomic boundary rather than inside it. Both directions of one question are that
-disagreement — a copied course wearing another context's name, and a renamed
-context whose old name is somewhere else — which is why one rule closes both.
-The unique constraint is in the schema rather than only in the writer, because
-ADR 0045's "a caller can bypass it by not calling it" applies to E1-11's sync,
-which writes sections and never reads `app.services.provisioning`.
+lms_section_code)` second, and the two disagreeing is a `context_collision`.
+Both directions of one question are that disagreement — a copied course wearing
+another context's name, and a renamed context whose old name is somewhere else —
+which is why one rule closes both. The unique constraint is in the schema rather
+than only in the writer, because ADR 0045's "a caller can bypass it by not calling
+it" applies to E1-11's sync, which writes sections and never reads
+`app.services.provisioning`.
+
+**What a collision stops is that launch, and the scope of "nothing is written" is
+worth stating exactly** (the round-3 re-pass asked, and an earlier draft of this
+paragraph over-claimed). When the two identities disagree, nothing at all is
+written for that launch — the course's title included — because the check sits
+above the atomic boundary rather than inside it. It does **not** mean a course's
+title is protected from every other context that names it: a launch whose section
+identity agrees takes the ordinary path, and that path writes the title of the
+course its label names, which may be a course several contexts share. That is
+SPEC §2.1's model rather than a gap in this one — the LMS owns a course's title,
+`course` is keyed `(prefix_id, lms_number)` and is deliberately one row per course
+however many sections and contexts hang off it, so the last staff launch to name
+that course sets the name. **Accepted**: the alternative is per-context titles,
+which is a different schema and a different product.
 
 **The roster address is judged by the rules every address this container fetches
 passes** (round 3). It arrives as an NRPS claim and E1-11 calls it with the tool's
@@ -189,6 +202,36 @@ future repair and is deliberately unbuilt.
 > all. The paragraph above stands as the record of what was known then, and the
 > rest of it — that storing the context id was the repair — turned out to be
 > right for both directions.
+
+**The first context to claim a name owns it, and nothing ages that claim out.**
+The binding makes `(course, term, lms_section_code)` first-writer-wins: whichever
+context provisions first holds the name, and every later context whose label parses
+to it is refused. That is the direction this design chose on purpose — the
+alternative, and what the code did before round 3, is the last launch silently
+repointing the section — but it has a cost worth writing down. **A copy launched
+before the genuine context denies the genuine one.** Somebody who copies a course
+and launches it first takes the name, and the real instructor's launches are
+refused from then on, each leaving a `context_collision` row naming their context.
+That is loud rather than silent, which is the whole of why it is the safe
+direction: an administrator reading E11's surface sees a specific context being
+refused, repeatedly, with the identifiers to act on. What does not exist yet is the
+acting: nothing rebinds or retires a squatted section, so the denial is unbounded
+in time until an operator repairs it by hand. **The reconciliation question is
+deferred** — `docs/tickets/e1/deferred.md` carries it with a done-when — rather
+than answered here, because the repair needs an operator surface E11 owns and a
+rule about who may rebind, and neither belongs to a launch path.
+
+**A concurrent first launch is tolerated, so its collision is recorded one launch
+late.** Two contexts whose labels parse alike, launching for the first time at the
+same moment, both find no section and both insert one; the second violates the
+unique constraint and
+`_tolerating_a_row_that_is_already_there` rolls its savepoint back and carries on,
+because that helper cannot tell "the row I wanted is already there" from "somebody
+else's row is". So the loser writes no `context_collision` on that launch. Its
+*next* launch takes the ordinary path — the binding lookup finds nothing, the label
+lookup finds the winner's row, the identities disagree — and records the collision
+then. The window is one launch wide and closes by itself, and the state it leaves
+in the meantime is the correct one: the loser has provisioned nothing.
 
 **E1-11 picks its platform off the binding, not off the section's course.** The
 sync mints a client-credentials token for one registration, and
