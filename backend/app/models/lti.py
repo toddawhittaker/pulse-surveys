@@ -681,3 +681,75 @@ class LaunchDefect(UuidPrimaryKey, Base):
     created_at: Mapped[datetime] = mapped_column(
         AwareDateTime, nullable=False, server_default=text("now()")
     )
+
+
+class NrpsCall(UuidPrimaryKey, Base):
+    """One HTTP call the roster sync made to a section's NRPS service (E1-11, D9).
+
+    SPEC §6.1 puts "NRPS and AGS call logs with response codes" on the admin
+    console, and this is that log for the roster half. It is deliberately at the
+    grain of an **HTTP call** and not of a sync: a roster that comes back over four
+    pages is four rows, because an operator looking at a section whose sync is slow
+    or partly refused needs to see which request failed, and a row per sync cannot
+    say.
+
+    **Three jobs, and the grain is load-bearing in all of them.**
+
+      - §6.1's call log, above.
+      - **The never-synced discriminator.** SPEC §7.3 makes a section with no
+        stored roster address a state — "the admin console shows it as never-synced
+        … rather than as empty, because a section with no roster and a section with
+        no enrollments are different states and only one of them is a fault". A
+        section is never-synced when it has no address *and* no rows here;
+        synced-empty when it has rows here and no enrollments.
+      - **The debounce's memory.** §7.3 pulls NRPS "on schedule and on launch
+        (debounced)", and `app.services.roster_sync.request_section_sync` measures
+        that window against this section's most recent row.
+
+    **`response_code` is nullable and NULL has exactly one meaning: the call never
+    reached the platform.** A transport failure and a refusal are different facts
+    on a console — one is a network, one is a registration — so a 401 recorded as
+    NULL is a tool being refused every hour that reads as an unreachable host.
+    `members_seen` is nullable for the same reason: a call that failed counted
+    nobody, and a zero there would be a roster that came back empty.
+
+    **Not LMS-owned, so no `guard_write` and no sanction.** SPEC §2.1's ownership
+    list is courses, sections, section codes, enrollments and teaching instructors;
+    this is Pulse's own record of what Pulse did, in the way `launch_defect` is.
+
+    **Not a person table.** A section reference, a URL, an HTTP status, a count and
+    a timestamp — no subject, no name, no address — so `PERSON_TABLES` does not
+    change and no identity-separated view is owed. That is also the answer to
+    deferred E1-01 item 2's E1-11 half: this ticket adds no person table.
+
+    **Append-only by grant** (`roster_sync_grants_v001.sql`): `pulse_app` holds
+    `SELECT` and `INSERT` here and neither `UPDATE` nor `DELETE`. E13's retention
+    purge is what will trim it, on its own connection and with its own rule.
+    """
+
+    __tablename__ = "nrps_call"
+
+    # Which section's roster was being read. Indexed, because every one of the
+    # three jobs above is a query for one section's rows — the debounce most of
+    # all, which runs on a staff launch while somebody waits. RESTRICT, matching
+    # every other reference to `section` in this schema: losing a section should
+    # refuse rather than silently take its call history with it.
+    section_id: Mapped[UUID] = mapped_column(
+        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    # The address actually called, page parameter and all — not the section's
+    # stored address. A paged walk's second request is a URL the platform composed
+    # in a `Link` header, and recording the stored address for all four rows would
+    # lose which page failed.
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    # The HTTP status the platform answered with. NULL means no answer at all: see
+    # the class docstring.
+    response_code: Mapped[int | None] = mapped_column(nullable=True)
+    # How many members this page carried. NULL for a call that failed.
+    members_seen: Mapped[int | None] = mapped_column(nullable=True)
+    # When the call was made. Written by the sync rather than defaulted, because
+    # the debounce compares against it and the row is one of several written in a
+    # single transaction — a server default would give a paged walk one timestamp
+    # for every page, which is true of the transaction and not of the calls.
+    # `AwareDateTime` refuses a naive value at the bind boundary (ADR 0019).
+    called_at: Mapped[datetime] = mapped_column(AwareDateTime, nullable=False)
