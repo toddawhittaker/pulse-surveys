@@ -462,6 +462,29 @@ class ComposedRoster:
         return body, headers
 
 
+def _route_key(url: str) -> tuple[str, str]:
+    """`url` as the pair a configured answer is filed and looked up under.
+
+    **Host *and* path, since dispute E1-11-04.** A mock platform serves its token
+    endpoint at a fixed `/token` path (`mock-lms/app/config.py`), so two platforms
+    started under two issuers advertise it at the same path on different hosts.
+    Keyed by path alone, a sabotage installed for one platform's `/token`
+    answered the *other* platform's `/token` too — so F3's healthy section could
+    never obtain a token and "the following section still syncs" was unsatisfiable
+    against every implementation. The netloc carries the host and port, which is
+    what tells the two apart; the query is dropped, because the token endpoint
+    carries none and a paged roster's `?page=` goes through `rosters` rather than
+    here.
+
+    `rosters` is *not* keyed this way, and does not need to be: a roster's path
+    carries its `{context_id}` (`MEMBERSHIPS_PATH`), and `roster_platforms` gives
+    two platforms two different seeded contexts, so their roster paths already
+    differ. Only the fixed-path endpoints collide across hosts.
+    """
+    split = urlsplit(url)
+    return (split.netloc, split.path)
+
+
 class ServiceWire:
     """The `requests.Session` the sync's outbound calls travel over.
 
@@ -484,9 +507,9 @@ class ServiceWire:
         self.hosts = dict(hosts)
         self.calls: list[ServiceCall] = []
         self.rosters: dict[str, ComposedRoster] = {}
-        self.failures: dict[str, int] = {}
-        self.answers: dict[str, tuple[int, dict[str, Any]]] = {}
-        self.redirects: dict[str, str] = {}
+        self.failures: dict[tuple[str, str], int] = {}
+        self.answers: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+        self.redirects: dict[tuple[str, str], str] = {}
         self.refuse_unauthenticated = False
         self.strip_authorization = False
 
@@ -522,19 +545,20 @@ class ServiceWire:
         of those it is is a question about the tool's credentials rather than about
         the roster service, and the row is the only place the difference lives.
 
-        Keyed by path, like the composed rosters, because that is what the wire can
-        match on before it knows which application would have answered.
+        Keyed by host and path (`_route_key`), so a failure installed for one
+        platform's endpoint does not answer another platform's endpoint at the
+        same path — the leak dispute E1-11-04 records.
         """
-        self.failures[urlsplit(url).path] = status_code
+        self.failures[_route_key(url)] = status_code
 
     def recovering(self, url: str) -> None:
         """Stop failing `url`, so a test can pose its own control in the same run."""
-        self.failures.pop(urlsplit(url).path, None)
-        self.answers.pop(urlsplit(url).path, None)
-        self.redirects.pop(urlsplit(url).path, None)
+        self.failures.pop(_route_key(url), None)
+        self.answers.pop(_route_key(url), None)
+        self.redirects.pop(_route_key(url), None)
 
     def answering(self, url: str, payload: Mapping[str, Any], status_code: int = 200) -> None:
-        """Answer `payload` at `url`'s path, with a status this endpoint would use.
+        """Answer `payload` at `url`'s host and path, with a status this endpoint would use.
 
         For the security round's F3: a token endpoint that answers 200 with a body
         carrying no `access_token` is a *well-formed* HTTP success that makes
@@ -542,11 +566,15 @@ class ServiceWire:
         shape the finding is about — not an error the sync was written to expect,
         but an unexpected exception out of a library, from one platform, in the
         middle of a walk over every section in the institution.
+
+        Keyed by host and path (`_route_key`), and dispute E1-11-04 is why: two
+        platforms share the `/token` path, so a sabotage keyed by path alone
+        reached both and F3's healthy section could never sync.
         """
-        self.answers[urlsplit(url).path] = (status_code, dict(payload))
+        self.answers[_route_key(url)] = (status_code, dict(payload))
 
     def redirecting(self, url: str, to: str) -> None:
-        """Answer a 302 at `url`'s path, pointing at `to`.
+        """Answer a 302 at `url`'s host and path, pointing at `to`.
 
         F1's other half. A redirect is the same bypass as a hostile `Link` header
         and it arrives one step earlier: the address the walk judged is not the
@@ -554,7 +582,7 @@ class ServiceWire:
         nothing. `requests` follows redirects by default, which is what makes this
         the quiet version.
         """
-        self.redirects[urlsplit(url).path] = to
+        self.redirects[_route_key(url)] = to
 
     def stripping_the_authorization_header(self) -> None:
         """Deliver every service request with its `Authorization` header removed.
@@ -594,25 +622,28 @@ class ServiceWire:
         self.calls.append(ServiceCall(method, url, delivered, body))
 
         split = urlsplit(url)
+        route = _route_key(url)
         # A configured failure answers before anything else, including the
         # unauthenticated gate: a test that fails an endpoint is asking what the
         # sync does when that endpoint is down, and an answer from any other branch
-        # here would be about something else.
-        failing = self.failures.get(split.path)
+        # here would be about something else. Matched by host and path (dispute
+        # E1-11-04), so a sabotage installed for one platform's endpoint does not
+        # answer another platform's endpoint at the same path.
+        failing = self.failures.get(route)
         if failing is not None:
             return _Answer(
                 failing,
                 {"content-type": "application/json"},
                 json.dumps({"error": "server_error"}).encode("utf-8"),
             )
-        redirected = self.redirects.get(split.path)
+        redirected = self.redirects.get(route)
         if redirected is not None:
             return _Answer(
                 302,
                 {"location": redirected, "content-type": "application/json"},
                 b"{}",
             )
-        canned = self.answers.get(split.path)
+        canned = self.answers.get(route)
         if canned is not None:
             status, payload = canned
             return _Answer(
