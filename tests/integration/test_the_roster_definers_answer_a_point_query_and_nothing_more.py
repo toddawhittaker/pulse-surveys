@@ -230,11 +230,13 @@ class acting_as:  # noqa: N801 — a context manager used as a statement, not a 
 def refused(session: Any, statement: Any, parameters: dict[str, Any] | None = None) -> Any:
     """Run `statement` inside a savepoint; answer the error it provoked, or `None`.
 
-    Takes SQL as a string **or** an already-built Core statement, so the one test
-    that has to provoke a real `INSERT` — with real foreign keys, so that a refusal
-    is the privilege rather than a constraint — can hand over the insert it built
-    from the table's own metadata rather than assembling SQL text for columns this
-    suite discovers by following keys.
+    Takes SQL as a string (all callers pass one), and tolerates an already-built
+    Core statement for the branch. The one test that provokes a real `INSERT`
+    hands over **raw** `INSERT INTO … VALUES (…)` text with no `RETURNING`: a Core
+    `.insert()` would auto-append `RETURNING role_assignment.id`, and since
+    `pulse_app` holds no `SELECT` the 42501 that produced would be the `RETURNING`
+    clause rather than the `INSERT` privilege the test is about (the false control
+    the mutation battery found).
     """
     from sqlalchemy.exc import DatabaseError
 
@@ -669,7 +671,6 @@ def an_assignable_pair(committed_rows: Any) -> dict[str, Any]:
 )
 def test_the_application_role_may_not_insert_a_role_assignment_of_any_role(
     committed_rows: Any,
-    metadata_tables: dict[str, Any],
     an_assignable_pair: dict[str, Any],
     role: str,
 ) -> None:
@@ -691,42 +692,63 @@ def test_the_application_role_may_not_insert_a_role_assignment_of_any_role(
     hand the caller the choice of value, which is exactly what a grant cannot
     restrict.
 
+    **The insert is raw `text()` with no `RETURNING`, and that is the whole of the
+    correction the mutation battery forced.** The first version issued the insert
+    as a SQLAlchemy Core `table.insert().values(...)`, which auto-appends
+    `RETURNING role_assignment.id` to fetch the generated key — and `pulse_app`
+    holds no `SELECT` on the table, so the `42501` it observed was the `RETURNING`
+    clause being refused, *not* the `INSERT` privilege. That control was false: it
+    stayed green with the table-wide `INSERT` grant restored, because the grant
+    gives `INSERT` and not `SELECT`, so `RETURNING` is refused either way. Written
+    as a bare `INSERT INTO … VALUES (…)` with no `RETURNING`, the only privilege
+    the statement needs is `INSERT`, so a `42501` here is that privilege and
+    nothing else.
+
     **The mutation this kills**: `GRANT INSERT ON public.role_assignment TO
-    pulse_app` in `roster_sync_grants_v001.sql`, restored. Nothing else in this
-    suite would mention it — the inventory in `test_identity_grants.py` would go
-    red only because this fix removes the entry there in the same change.
+    pulse_app` in `roster_sync_grants_v001.sql`, restored. With the grant back this
+    bare insert *succeeds* — `failure` is `None` — and the first assertion fails
+    naming the role it wrote; the corrected test goes red exactly where the false
+    one stayed green. Nothing else in this suite would mention it — the inventory
+    in `test_identity_grants.py` loses the entry in the same change.
 
     **Asserted on the SQLSTATE, not on "it failed".** The row is valid: a real
     person, a real scope node at the grain SPEC §2.1 gives the role, and the role
-    column's own enumerated value. A constraint violation (23xxx) would mean this
-    test never reached the privilege check, and would pass just as green.
+    column's own enumerated value. Postgres checks the `INSERT` privilege at
+    executor startup, before it evaluates the row, so without the grant `42501`
+    fires whatever the values are; a constraint violation (23xxx) would mean the
+    privilege check was reached and *passed*, which is itself the mutation biting.
     """
     graph = an_assignable_pair["graph"]
-    table = metadata_tables["role_assignment"]
     scope = graph.scope_overrides(ROLE_GRAIN[role], an_assignable_pair[ROLE_GRAIN[role]])
     values = {
         graph.role_column: graph.role_value(role),
         graph.person_column: an_assignable_pair["person"],
         **scope,
     }
+    columns = ", ".join(f'"{name}"' for name in values)
+    binds = ", ".join(f":{name}" for name in values)
+    # S608: the column names come from `Base.metadata` through the graph fixture,
+    # never from a request; and there is no `RETURNING`, deliberately — see the
+    # docstring for the false control that clause produced.
+    statement = f"INSERT INTO public.role_assignment ({columns}) VALUES ({binds})"  # noqa: S608
 
     with acting_as(committed_rows.session, APPLICATION_ROLE):
-        failure = refused(committed_rows.session, table.insert().values(**values))
+        failure = refused(committed_rows.session, statement, values)
 
     assert failure is not None, (
-        f"`{APPLICATION_ROLE}` inserted a `{role}` `role_assignment` row directly. SPEC §2.1 "
-        "computes the whole oversight surface from these rows, and for `CARE` the row is what "
-        "E0-10's reveal definers check before they return a name — so a connection that may write "
-        "one may grant itself re-identification. The security round's F2 drops the table grant and "
-        "routes the one legitimate write through `record_teaching_instructor`, whose body chooses "
-        "the role."
+        f"`{APPLICATION_ROLE}` inserted a `{role}` `role_assignment` row directly — the bare "
+        "`INSERT` succeeded, so the table-wide grant is present. SPEC §2.1 computes the whole "
+        "oversight surface from these rows, and for `CARE` the row is what E0-10's reveal definers "
+        "check before they return a name — so a connection that may write one may grant itself "
+        "re-identification. F2 drops the table grant and routes the one legitimate write through "
+        "`record_teaching_instructor`, whose body chooses the role."
     )
     assert sqlstate(failure) == INSUFFICIENT_PRIVILEGE, (
         f"The insert failed with SQLSTATE {sqlstate(failure)} rather than "
-        f"{INSUFFICIENT_PRIVILEGE}: {failure}. This row is valid — a committed person, a scope "
-        f"node at the grain §2.1 gives `{role}`, and the role column's own value — so a "
-        "constraint failure means the privilege check was never reached and this test would be "
-        "green whatever the grant says."
+        f"{INSUFFICIENT_PRIVILEGE}: {failure}. The statement carries no `RETURNING`, so the only "
+        "privilege it needs is `INSERT`; a code other than 42501 means the privilege check passed "
+        "and the row was refused for something else — which is the table grant being present, the "
+        "very mutation this test exists to catch."
     )
 
 

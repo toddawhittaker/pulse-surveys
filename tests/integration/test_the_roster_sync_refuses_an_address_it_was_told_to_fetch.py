@@ -253,6 +253,36 @@ def test_a_next_page_the_platform_points_off_its_own_host_is_refused(
         "recorded as a refusal rather than as D9's transport NULL and leaves the sentinel to the "
         "implementer."
     )
+
+    # F1-4: the read-back channel is closed too. It is not enough that the tool
+    # declined to *fetch* the hostile URL — the URL the platform chose must not
+    # reach the `nrps_call.url` column either, because §6.1's console is read per
+    # section and a row carrying `169.254.169.254` puts an attacker's string on an
+    # operator's screen and detaches the record from the section's own address.
+    stored_address = str(platform_on_https.address)
+    assert not [row for row in recorded if row.get("url") == hostile], (
+        f"An `nrps_call` row carries the hostile URL {hostile!r} in its `url` column: "
+        f"{[dict(row) for row in recorded]}. The refusal must be recorded against the section's "
+        f"own stored address ({stored_address!r}), not against the address the platform chose in "
+        "its `Link` header — a row keyed to `following` hands the console a value an attacker "
+        "supplied and reads as a call to somewhere this tool never meant to go.\n\n"
+        "**The mutation this kills**: recording the refusal against `following` (the scraped "
+        "`rel=next` URL) instead of the section's stored address."
+    )
+    refusals = [row for row in recorded if row.get("response_code") != 200]
+    assert refusals, (
+        f"No `nrps_call` row records the refusal itself — the section's rows are "
+        f"{[dict(row) for row in recorded]}. The refused page is a call the tool decided not to "
+        "make, and it is a distinct row from the first page's 200."
+    )
+    assert all(row.get("url") == stored_address for row in refusals), (
+        f"A refusal row is keyed to something other than the section's stored address "
+        f"({stored_address!r}): {[dict(row) for row in refusals]}. SPEC §7.3 makes that stored "
+        "address the section's identity on the console, and D9's call log is read against it — a "
+        "refusal recorded under the platform-chosen URL is a refusal an operator cannot tie back "
+        "to the section it belongs to."
+    )
+
     assert roster_rows.enrollments_for(reachable), (
         "The first page's member was not ingested. The refusal is per URL: a walk that discards "
         "the whole container because its *second* page was hostile loses a class that synced "
