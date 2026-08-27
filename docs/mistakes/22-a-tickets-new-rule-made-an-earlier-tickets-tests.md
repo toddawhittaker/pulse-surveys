@@ -1,6 +1,6 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 6**
+**Caught: 7**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -170,3 +170,14 @@ other side of the test wall, exactly this entry's shape: the test author moved
 seeding to head with a walk back down, closing the class — any table a future
 revision touches — rather than the one column. Not counted as a catch; the
 entry describes what happened, it did not prevent it.
+
+**Instance, 2026-08-27 (E1-12, caught before it landed).** E1-12's rule that a
+verified web login whose subject has no `web_login_subject` linkage lands on
+the no-account page turns roughly fifty merged E1-09 web-door tests into calm
+no-account landings inside their own flow — a module the ticket does not
+otherwise edit, and one the implementer may not touch. The test author ran
+`grep -rn 'oidc_callback' tests/` before writing anything, found the class,
+and repaired it at the `provider` fixture in the same tests-first round, so
+the reds never existed. Counted as a catch: the entry's rule — go looking for
+the earlier ticket's tests your new rule breaks, from the side of the wall
+that can fix them — is what found it.
