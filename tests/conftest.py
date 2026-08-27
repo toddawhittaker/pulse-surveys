@@ -43,6 +43,10 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/provisioning.py` — E1-10: the launch-time writer, reached by
     discovery; the committed prefix, term and start-letter map a launch resolves
     against; and a launch's claims as a value for the cases nothing mints.
+  - `fixtures/roster_sync.py` — E1-11: the roster sync reached by discovery, the
+    `requests` seam its service calls travel over and are recorded on, a
+    membership container a test composes, and the registered platform and section
+    a sync starts from.
   - `fixtures/web_identity.py` — E1-12: the `person`, `user` and
     `web_login_subject` rows a door resolves a subject through, seeded committed,
     and the session claims a landing carries them back in.
@@ -68,5 +72,6 @@ pytest_plugins = (
     "fixtures.suite_keys",
     "fixtures.client_credentials",
     "fixtures.provisioning",
+    "fixtures.roster_sync",
     "fixtures.web_identity",
 )

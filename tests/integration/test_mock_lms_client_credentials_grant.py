@@ -79,6 +79,24 @@ INVALID_REQUEST = "invalid_request"
 INVALID_CLIENT = "invalid_client"
 INVALID_SCOPE = "invalid_scope"
 
+# RFC 6749 §5.2's fourth code, and the one E1-11 adds two refusals under.
+# **Settled by E1-11's work order (D12)** for both of the deferred E1-06 items it
+# closes: a replayed `jti`, and an `exp` beyond the platform's own clock plus the
+# stated allowance. `invalid_grant` rather than `invalid_client` because in each
+# case the assertion authenticates the client perfectly and the *grant* it
+# presents is one this endpoint will not honour — a distinction E1-11's client
+# needs, since one of them means "mint a fresh assertion" and the other means
+# "your clock is wrong".
+INVALID_GRANT = "invalid_grant"
+
+# The skew the platform allows beyond its own clock when it judges an `exp`.
+# **Settled at 30 seconds by E1-11's work order (D12)**: "`exp` further than now +
+# 300s + 30s skew → 400 `invalid_grant`; the 30s skew is the recorded allowance".
+# It is the allowance the wall-clock clamp needs in order not to refuse an honest
+# tool whose clock is a little fast, which ADR 0084's consequences already warn
+# about ("a tool whose clock is more than five minutes fast is refused here").
+ASSERTION_SKEW_ALLOWANCE_SECONDS = 30
+
 # How long a `client_assertion` may live, in seconds. **Settled at 300 by the
 # E1-06 dispatch brief**, which the ticket asks for in as many words: "an
 # assertion with no `exp` or one longer-lived than the short bound the mock
@@ -914,6 +932,233 @@ def test_an_assertion_living_past_the_bound_is_refused_and_one_at_the_bound_is_g
         f"An assertion living {ASSERTION_LIFETIME_BOUND_SECONDS + 1} seconds, one past the bound",
         f"An assertion living exactly {ASSERTION_LIFETIME_BOUND_SECONDS} seconds was granted a "
         "moment ago, so the bound is where this ticket put it,",
+    )
+
+
+# ---------------------------------------------------------------------------
+# The two refusals E1-11 closes, from `docs/tickets/e1/deferred.md` (E1-06 items
+# 1 and 2). Both are about what this endpoint remembers or refuses **beyond the
+# signature**, which is why ADR 0084's own measured-boundary paragraph puts them
+# in the same future change.
+# ---------------------------------------------------------------------------
+
+
+def test_an_assertion_presented_twice_is_refused_the_second_time(
+    platform: Any, token_url: str, client_id: str, tool_key_pair: Any, claims_for_an_assertion: Any
+) -> None:
+    """Deferred E1-06 item 1: the endpoint refuses a replayed `jti`.
+
+    "**Done when** the endpoint refuses a second request presenting an
+    already-seen `jti` within the lifetime bound, proven by a pair (fresh `jti`
+    granted, replayed `jti` refused) — at latest with E1-11, whose client's
+    conformance claims otherwise rest on an endpoint that cannot notice a replay."
+
+    A `client_assertion` is a bearer credential for the five minutes it lives, so
+    an endpoint that cannot notice a replay is one where a captured assertion is
+    worth a token to anybody holding it, however often — which is the property ADR
+    0084's lifetime bound was supposed to cap and, as its own security-review
+    paragraph records, does not: "with `jti` untracked — [it] stays spendable until
+    its far-future `exp`".
+
+    **The pair, and it is three requests rather than two.** The same assertion is
+    granted once and refused once, which is the finding; and a *fresh* assertion is
+    granted afterwards, which is what tells a `jti` store from an endpoint that
+    grants exactly one token and refuses everything after it. Without the third
+    request, a platform that shut its own door would pass.
+
+    **The near miss it must not fire on** is in that third request: it differs from
+    the first only in `jti` and `iat`, which is what `claims_for_an_assertion`
+    produces on every call — so the refusal in the middle is attributable to the
+    identifier and not to anything else about the request.
+
+    **What this deliberately does not assert** is the store's eviction: D12 keeps
+    entries "≥ the 300s assertion bound", and a test of that would have to wait out
+    the bound. What matters for conformance is that a replay inside the lifetime is
+    refused.
+    """
+    claims = claims_for_an_assertion(client_id, token_url)
+    assertion = tool_key_pair.sign(claims)
+
+    granted(
+        platform,
+        token_url,
+        token_request(assertion, NRPS_MEMBERSHIP_SCOPE),
+        "The first presentation of a freshly minted assertion",
+    )
+
+    refused(
+        platform,
+        token_url,
+        token_request(assertion, NRPS_MEMBERSHIP_SCOPE),
+        INVALID_GRANT,
+        f"The same assertion, `jti` {claims['jti']!r}, presented a second time",
+        "The very same assertion was granted a moment ago,",
+    )
+
+    granted(
+        platform,
+        token_url,
+        token_request(
+            tool_key_pair.sign(claims_for_an_assertion(client_id, token_url)), NRPS_MEMBERSHIP_SCOPE
+        ),
+        "A second, freshly minted assertion after the replay was refused",
+    )
+
+
+def test_a_jti_is_remembered_for_as_long_as_an_assertion_carrying_it_could_be_accepted(
+    platform: Any,
+    token_url: str,
+    client_id: str,
+    tool_key_pair: Any,
+    claims_for_an_assertion: Any,
+    wind_the_clock_back: Any,
+) -> None:
+    """The security round's F4: the prune horizon has to be the acceptance ceiling.
+
+    Two numbers in the same endpoint, one apart. A `jti` is forgotten after
+    `ASSERTION_LIFETIME_BOUND_SECONDS`; an assertion is accepted while
+    `exp <= now + lifetime + skew`. So an assertion whose `iat` sits inside the skew
+    allowance — an honest tool whose clock is a little fast, which is the case the
+    allowance exists for — is still live after its `jti` has been forgotten, and a
+    spent one replayed in that window is granted a **second** token off one
+    signature.
+
+    **How the window is reached without waiting five minutes.** The clock is wound
+    back for the first grant only, so the platform records the `jti` at `T` while
+    the assertion is dated `iat = T + skew`, `exp = T + lifetime + skew` — accepted,
+    because that is exactly the boundary the test below pins. Real time is then
+    `T + 310`: past the prune horizon as it stands, inside the one the fix gives it,
+    with the assertion still live for twenty seconds. Only the `jti` can refuse it.
+
+    **The mutation this kills**: the prune horizon left at
+    `ASSERTION_LIFETIME_BOUND_SECONDS`. Every other replay assertion in this module
+    presents its `jti` a second or two after recording it, so all of them stay
+    green — which is how this survived to the security review.
+
+    **What this pair cannot pose, said rather than hidden** (`docs/MISTAKES.md`
+    entry 14). The other half — "a `jti` past the horizon is forgotten" — is not
+    observable through this endpoint, and that is the *reason* the horizon is
+    `lifetime + skew` rather than something larger: past that point no assertion
+    carrying the `jti` can still be accepted, so a forgotten one and a remembered
+    one are both refused and both for the expiry. What is observable, and is
+    asserted, is that the store has not become a wall: a fresh `jti` after the
+    wound-back grant is still granted.
+    """
+    horizon = ASSERTION_LIFETIME_BOUND_SECONDS + ASSERTION_SKEW_ALLOWANCE_SECONDS
+    replayed_at = ASSERTION_LIFETIME_BOUND_SECONDS + 10
+    assert ASSERTION_LIFETIME_BOUND_SECONDS < replayed_at < horizon, (
+        f"This test replays a `jti` {replayed_at} seconds after it was recorded, and the window it "
+        f"means to land in is ({ASSERTION_LIFETIME_BOUND_SECONDS}, {horizon}) — past the prune "
+        "horizon as it stands and inside the one the fix gives it. Outside that window the "
+        "assertion is either still inside the old horizon, and refused for the `jti` whatever the "
+        "fix does, or expired, and refused for that instead."
+    )
+
+    with wind_the_clock_back(replayed_at):
+        aged = claims_for_an_assertion(
+            client_id,
+            token_url,
+            issued_at=time.time() + ASSERTION_SKEW_ALLOWANCE_SECONDS,
+            lifetime=ASSERTION_LIFETIME_BOUND_SECONDS,
+        )
+        assertion = tool_key_pair.sign(aged)
+        granted(
+            platform,
+            token_url,
+            token_request(assertion, NRPS_MEMBERSHIP_SCOPE),
+            f"An assertion dated {ASSERTION_SKEW_ALLOWANCE_SECONDS} seconds ahead of the "
+            "platform's clock, inside the stated skew allowance",
+        )
+
+    assert aged["exp"] > time.time(), (
+        f"The assertion this test replays expired at {aged['exp']} and it is now "
+        f"{int(time.time())}, so the endpoint would refuse it for its expiry and the refusal below "
+        "would say nothing about whether the `jti` was remembered."
+    )
+
+    refused(
+        platform,
+        token_url,
+        token_request(assertion, NRPS_MEMBERSHIP_SCOPE),
+        INVALID_GRANT,
+        f"The same assertion, `jti` {aged['jti']!r}, replayed {replayed_at} seconds after it was "
+        "first spent and still twenty seconds from expiry",
+        "The identical assertion was granted when it was first presented, and it is still live,",
+    )
+
+    granted(
+        platform,
+        token_url,
+        token_request(
+            tool_key_pair.sign(claims_for_an_assertion(client_id, token_url)),
+            NRPS_MEMBERSHIP_SCOPE,
+        ),
+        "A freshly minted assertion after the replayed one was refused",
+    )
+
+
+def test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_refused(
+    platform: Any, token_url: str, client_id: str, tool_key_pair: Any, claims_for_an_assertion: Any
+) -> None:
+    """Deferred E1-06 item 2: the wall-clock clamp, from both sides of its line.
+
+    "**Done when** the endpoint also refuses an assertion whose `exp` lies further
+    than the bound plus a stated skew allowance beyond the platform's clock, proven
+    by a pair on both sides of that line."
+
+    ADR 0084 measures the hole this closes: `exp - iat` are *both* the signer's own
+    statements, "so a signer who dates both claims in the future mints an assertion
+    that passes the expiry check and measures a lifetime of zero" — a credential
+    with a five-minute stated life and an unbounded real one. The clamp is the
+    platform comparing `exp` against its own clock rather than against the
+    assertion's arithmetic.
+
+    **Why both halves move `iat` forward too, which is the whole shape of the
+    test.** Decision 1's bound is still in force, so an assertion with `iat` now and
+    `exp` at now + 330 is refused for its 330-second *lifetime* and says nothing
+    about the clamp. Dating both claims forward keeps the stated lifetime at exactly
+    the permitted 300 and leaves `exp` as the only thing that moves — which is
+    precisely the forged-dating case, and which makes the accepted half a real
+    requirement rather than a formality: a tool whose clock is 30 seconds fast is an
+    honest tool, and the allowance exists so that this endpoint does not refuse it.
+
+    **One second either side of the line**, for the reason the lifetime bound's own
+    pair gives: a refusal at an hour and an acceptance at a minute is satisfied by a
+    clamp anywhere between them.
+    """
+    now = int(time.time())
+    bound = ASSERTION_LIFETIME_BOUND_SECONDS
+    allowance = ASSERTION_SKEW_ALLOWANCE_SECONDS
+
+    at_the_line = claims_for_an_assertion(client_id, token_url, issued_at=now + allowance)
+    assert at_the_line["exp"] - at_the_line["iat"] <= bound, (
+        "The claims this test means to sit at the wall-clock line already break the lifetime "
+        "bound, so it would be refused for its stated lifetime and this test would say nothing "
+        "about the clamp."
+    )
+    at_the_line["exp"] = now + bound + allowance
+    at_the_line["iat"] = at_the_line["exp"] - bound
+    granted(
+        platform,
+        token_url,
+        token_request(tool_key_pair.sign(at_the_line), NRPS_MEMBERSHIP_SCOPE),
+        f"An assertion expiring exactly {bound + allowance} seconds from now, with a stated "
+        f"lifetime of {bound}",
+    )
+
+    past_the_line = claims_for_an_assertion(client_id, token_url)
+    past_the_line["exp"] = now + bound + allowance + 1
+    past_the_line["iat"] = past_the_line["exp"] - bound
+    refused(
+        platform,
+        token_url,
+        token_request(tool_key_pair.sign(past_the_line), NRPS_MEMBERSHIP_SCOPE),
+        INVALID_GRANT,
+        f"An assertion expiring {bound + allowance + 1} seconds from now — one second past the "
+        "bound plus the stated skew — whose own arithmetic still claims a "
+        f"{bound}-second lifetime",
+        f"An assertion expiring {bound + allowance} seconds from now, dated the same way, was "
+        "granted a moment ago,",
     )
 
 

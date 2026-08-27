@@ -116,6 +116,15 @@ of an empty subject set;
 is the assertion that the subject set is no longer empty, and it is the one that
 turns every other sentence here into a claim about this codebase rather than about
 a parser.
+
+**E1-11 adds the second subject, and it is the one ADR 0045 was written about.**
+`app.services.roster_sync` writes `enrollment` and the `INSTRUCTOR`
+`role_assignment` row — the two relations of the four that no code in this project
+had ever written — under a catalog entry of its own, and
+`test_the_roster_sync_is_a_routed_write_site_and_its_unguarded_twin_is_not` below
+is its criterion 5. The rule, the sweep and the absence of an exclusion list are
+all unchanged; what changes is that both of ADR 0045's named sanctioned writers
+now exist, so this file's silence is finally about a tree with writers in it.
 """
 
 import ast
@@ -142,6 +151,14 @@ GUARDED_TABLE_FLOOR = ("course", "section", "enrollment", "user")
 # Pulse's to write — so it is carried separately from the tables throughout.
 ROLE_ASSIGNMENT_TABLE = "role_assignment"
 INSTRUCTOR_ROLE = "INSTRUCTOR"
+
+# The definer the teaching instructor's `role_assignment` write moved into — the
+# security round's F2 (ADR 0096). The sync no longer writes that row directly:
+# `pulse_app` holds no grant on `role_assignment`, and the row is written by
+# `public.record_teaching_instructor`, whose body chooses `INSTRUCTOR`. So the
+# module *names* this function (in the SQL it executes) rather than *writing* the
+# table, and that is the routed shape this file now checks for.
+RECORD_TEACHING_INSTRUCTOR = "record_teaching_instructor"
 
 # The chokepoint's name, which is what a module has to say to pass.
 GUARD = "guard_write"
@@ -890,4 +907,148 @@ def test_the_launch_writer_is_a_routed_write_site_this_sweep_can_actually_see(
         f"{path.relative_to(REPO_ROOT)} writes {sorted(seen)} and calls `{GUARD}` nowhere in the "
         "module. E1-10's whole mechanism is that a sanctioned writer satisfies this rule rather "
         "than being excused from it: it calls the guard and passes a sanction the catalog grants."
+    )
+
+
+def test_the_roster_sync_is_a_routed_write_site_and_its_unguarded_twin_is_not(
+    authz: Any, import_app_module: Any
+) -> None:
+    """E1-11 criterion 5, both directions, **run** against the real module.
+
+    "The E0-35 sweep passes with the sync as a sanctioned writer; a planted
+    unsanctioned write in the sync module still fails it."
+
+    `app.services.roster_sync` is the second real subject this sweep has ever had,
+    and it is the more interesting one: E1-10's writer touches `course`, `section`
+    and `user`, and this one touches `enrollment` and — through a definer — the
+    teaching instructor's `role_assignment` row, the two relations of ADR 0045's
+    four that nothing in this project had written before.
+
+    **The `role_assignment` write is no longer *in* this module, and that is the
+    security round's F2, not a regression** (ADR 0096, dispute E1-11-05). F2
+    dropped `pulse_app`'s table grant on `role_assignment` — a grant cannot bound a
+    column's value, and the table-wide `INSERT` let the application connection
+    write a `CARE` row — and moved the one legitimate write into
+    `public.record_teaching_instructor`, a `SECURITY DEFINER` whose body writes
+    `'INSTRUCTOR'`. So the module no longer contains a syntactic `role_assignment`
+    write for the static sweep to find, and that is the **stronger** control: the
+    database now refuses any direct application write, which is more than a
+    source-level sweep ever gave. What this test asserts instead is that the write
+    is *routed to the definer* — the module names `record_teaching_instructor`,
+    with the defence-in-depth `guard_write` still at the call site — rather than
+    merely gone. Where the grant went and what the definer's body may write are
+    pinned in `test_identity_grants.py` and
+    `test_the_roster_definers_answer_a_point_query_and_nothing_more.py`.
+
+    **The planted offender is this module with its guard calls taken out**, which
+    is the strongest form the sweep's own grain permits and is worth saying plainly.
+    "Names the guard" means the module calls `guard_write` *somewhere*, so a write
+    planted into a module that also routes one is cleared by design — that limit is
+    in this file's docstring and this test does not pretend otherwise. What the
+    twin proves is the thing that matters: the clearance above is earned by the
+    guard calls and not by a detector that cannot see these writes at all.
+
+    **The mutation this exists to survive**: the sync reaching its `enrollment` or
+    `user` writes through a helper in another module, which the docstring names as
+    the sweep's first limit and which would leave the live sweep green while this
+    test goes red — the `{enrollment, user} <= seen` assertion is what catches it,
+    and it is unchanged by F2.
+
+    **The rename is checked before it is believed** (`docs/MISTAKES.md` entry 3, and
+    the "check the mutation landed" habit): a substitution that matched nothing
+    would produce an identical twin, the twin would be cleared for the same reason
+    the original is, and this test would report a working sweep having tested
+    nothing.
+    """
+    path = APP_ROOT / "services" / "roster_sync.py"
+    assert path.is_file(), (
+        f"There is no {path.relative_to(REPO_ROOT)}. E1-11's work order (D1) puts every line of "
+        "the roster sync there — the `user` and `enrollment` writes 'each immediately preceded "
+        "by its `guard_write` call in the same module (the E0-35 static sweep reads per-module)', "
+        "and the teaching instructor's `role_assignment` write routed through "
+        "`public.record_teaching_instructor` since the security round's F2 (ADR 0096), with the "
+        "`guard_write` call kept at that site as defence in depth."
+    )
+
+    tables = guarded_tables(authz)
+    models = guarded_models(mapped_classes_by_table(import_app_module), tables)
+    source = path.read_text(encoding="utf-8")
+
+    seen = {site.relation for site in write_sites(source, path, tables, models)}
+    assert {"enrollment", "user"} <= seen, (
+        f"This file's detector reads {sorted(seen)} out of {path.relative_to(REPO_ROOT)}, and "
+        "E1-11 makes it the writer of `enrollment` and `user`. Either the writes are reached "
+        "through a helper in another module — the syntactic sweep's first stated limit — or the "
+        "detector cannot see the shape they are written in, in which case the live sweep is "
+        "passing for having read nothing."
+    )
+
+    # F2 (ADR 0096, dispute E1-11-05): the teaching instructor's `role_assignment`
+    # write moved into `public.record_teaching_instructor`, so the module contains
+    # no syntactic `role_assignment` write and `pulse_app` holds no grant on the
+    # table — the database refuses a direct write, which is stronger than the sweep.
+    # Three things replace "the sweep sees a `role_assignment` write": the sweep
+    # sees none, the write is *routed to the definer* rather than merely gone, and
+    # the defence-in-depth guard is still at that site.
+    tree = ast.parse(source)
+    assert ROLE_ASSIGNMENT_TABLE not in seen, (
+        f"The detector reads a `{ROLE_ASSIGNMENT_TABLE}` write out of "
+        f"{path.relative_to(REPO_ROOT)}. Since F2 the module writes no `role_assignment` row "
+        "directly — the write goes through `public.record_teaching_instructor`, and `pulse_app` "
+        "holds no grant on the table, so a direct write from the application connection is refused "
+        "by the database. A syntactic write left in the module is dead, refused code; if this is a "
+        "real new write, F2's grant was undone and `test_identity_grants.py` is where that is "
+        "diagnosed."
+    )
+    excluded = docstring_constants(tree)
+    routes_to_definer = any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and RECORD_TEACHING_INSTRUCTOR in node.value
+        and id(node) not in excluded
+        for node in ast.walk(tree)
+    )
+    assert routes_to_definer, (
+        f"{path.relative_to(REPO_ROOT)} does not name `{RECORD_TEACHING_INSTRUCTOR}` in any "
+        "non-docstring string — so the teaching instructor's row is not routed to the definer, it "
+        "is simply not written. E1-11 writes the teaching instructor's assignment (SPEC §2.1's "
+        "fifth owned item, and a purview grant): F2 moved that write into "
+        f"`public.{RECORD_TEACHING_INSTRUCTOR}`, whose body writes `{INSTRUCTOR_ROLE}` and whose "
+        "signature has nowhere to put another role. A module that named it only in a comment or a "
+        "docstring would pass a bare text search and route nothing, which is why this reads the "
+        "syntax tree and subtracts docstrings."
+    )
+    guarded_instructor_site = any(
+        isinstance(node, ast.Call)
+        and called_name(node) == GUARD
+        and names_the_instructor_role(node)
+        for node in ast.walk(tree)
+    )
+    assert guarded_instructor_site, (
+        f"{path.relative_to(REPO_ROOT)} makes no `{GUARD}` call naming `{INSTRUCTOR_ROLE}`. F2 "
+        "keeps the guard at the teaching-instructor site as defence in depth — 'the catalog entry "
+        "stays; a defence-in-depth layer, not the only one now' — so the sanctioned-writer check "
+        "runs before the definer is called even though the database is now the primary control. A "
+        "definer routed without the guard would drop that layer silently."
+    )
+
+    assert not unrouted_write_sites(source, path, tables, models), (
+        f"{path.relative_to(REPO_ROOT)} writes {sorted(seen)} and calls `{GUARD}` nowhere in the "
+        "module. ADR 0090's mechanism is that a sanctioned writer satisfies this rule rather than "
+        "being excused from it, and there is no exclusion list in this file on purpose."
+    )
+
+    unguarded = source.replace(f"{GUARD}(", "a_write_nobody_routed(")
+    assert unguarded != source, (
+        f"Replacing `{GUARD}(` in {path.relative_to(REPO_ROOT)} changed nothing, so the twin below "
+        f"is the original module and would be cleared for calling `{GUARD}` exactly as the "
+        "original does. Either the module calls the guard under another spelling — which "
+        "`names_the_guard` would also miss, and the clearance above is then meaningless — or this "
+        "substitution has gone stale."
+    )
+    assert unrouted_write_sites(unguarded, path, tables, models), (
+        "The sync module with every `guard_write` call renamed was still cleared by this file's "
+        "own verdict, so the clearance above is not earned by the guard calls: a copy of this "
+        "module that routed nothing would pass the live sweep too, and that sweep is the only "
+        "thing standing between an unsanctioned writer and LMS-owned data."
     )

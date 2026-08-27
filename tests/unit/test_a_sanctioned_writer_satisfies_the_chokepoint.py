@@ -29,8 +29,9 @@ has to come from somewhere the guarded structure cannot shrink, so it is written
 in this file — as an equality, in the shape
 `RUNTIME_BASE_TABLE_PRIVILEGES` in `tests/integration/test_identity_grants.py`
 uses — and widening it is a visible diff in a test rather than a line added to a
-module nobody re-reads. E1-11's roster sync adds its own entry, deliberately, and
-that pull request edits this constant and says why.
+module nobody re-reads. E1-11's roster sync added the second entry, deliberately, and
+that pull request edited this constant and said why — including the two tables
+E1-10 predicted for it and it did not take.
 
 **What this module does not assert.** Whether the writer *calls* the guard is next
 door, in `tests/unit/test_every_writer_of_an_lms_owned_relation_names_the_guard.py`
@@ -45,35 +46,61 @@ from typing import Any
 
 import pytest
 
-# E1-10's work order settles the catalog: "today exactly `{"launch_provisioning":
-# frozenset({"course", "section", "user"})}`. E1-11 adds its own entry later,
-# deliberately." Held here rather than read out of `authz` for the reason
-# `docs/MISTAKES.md` entry 19 gives: a constant compared against itself asserts
-# nothing, and a writer quietly added to the guard would take this file's
-# assertion with it.
+# E1-10's work order settled the catalog at one entry — "today exactly
+# `{"launch_provisioning": frozenset({"course", "section", "user"})}`. E1-11 adds
+# its own entry later, deliberately" — and **E1-11 is that ticket**, adding
+# `roster_sync` under its work order's decision D2 and ADR 0090's own consequence
+# ("E1-11 adds the `INSTRUCTOR` write it needs by adding an entry, deliberately, in
+# the pull request that needs it").
+#
+# The roster sync's three: `user`, because a member the deployment has never seen
+# needs a row before anything can be enrolled; `enrollment`, which is the whole
+# subject of SPEC §3.4's windows; and `role_assignment`, for the teaching
+# instructor's row, which is the first entry in this catalog that is not a table
+# at all but a row-grain rule — see `ROLE_ASSIGNMENT_TABLE` below.
+#
+# `course` and `section` are **not** in it, and the absence is the interesting
+# part: SPEC §7.3 makes launch-time ingestion the only thing that discovers a
+# section ("it has no way of its own to learn that a section exists"), so a sync
+# that could create one would be inventing a section from a roster it was only
+# able to fetch because a section already existed.
+#
+# Held here rather than read out of `authz` for the reason `docs/MISTAKES.md`
+# entry 19 gives: a constant compared against itself asserts nothing, and a writer
+# quietly added to the guard would take this file's assertion with it.
 SANCTIONED_WRITERS_EXPECTED: dict[str, frozenset[str]] = {
     "launch_provisioning": frozenset({"course", "section", "user"}),
+    "roster_sync": frozenset({"user", "enrollment", "role_assignment"}),
 }
 
 LAUNCH_PROVISIONING = "launch_provisioning"
+ROSTER_SYNC = "roster_sync"
 
-# The tables the launch writer is granted, and the guarded table it is not.
-# `enrollment` is the interesting one: it is in `LMS_OWNED_TABLES`, E1-11's roster
-# sync is the writer that will need it (SPEC §2.1 makes a launch prove one
-# person's presence, not a roster), and a sanction that reached it would hand this
-# ticket a table its own scope excludes.
+# The tables each writer is granted, and one guarded table each is not.
+# `enrollment` against the launch writer is the interesting pair: it is in
+# `LMS_OWNED_TABLES`, E1-11's roster sync is the writer that needs it (SPEC §2.1
+# makes a launch prove one person's presence, not a roster), and a sanction that
+# reached it from the launch path would hand one ticket another's grant.
 SANCTIONED_TABLES = ("course", "section", "user")
 UNSANCTIONED_GUARDED_TABLE = "enrollment"
+ROSTER_SYNC_TABLES = ("user", "enrollment")
+UNSANCTIONED_FOR_THE_SYNC = "section"
 
-# A writer nobody has put in the catalog. E1-11's name is used on purpose: it is
-# the writer that will legitimately be added later, so a `guard_write` that
-# accepted it today would be accepting the *next* ticket's grant a ticket early —
-# which is exactly the failure a catalog exists to make visible.
-UNCATALOGUED_WRITER = "roster_sync"
+# A writer nobody has put in the catalog. **E1-11's name used to be this
+# constant**, on the ground that it was "the writer that will legitimately be
+# added later"; E1-11 has now added it, so the name here moves to the next writer
+# this repository knows it will want and does not yet have. SPEC §3.4's grade
+# passback is E3's, it writes nothing LMS-owned today, and a `guard_write` that
+# accepted it would be accepting a later ticket's grant early — which is exactly
+# the failure a catalog exists to make visible.
+UNCATALOGUED_WRITER = "grade_passback"
 
 # SPEC §2.1's fifth owned item, and the one that is a purview grant rather than an
-# attribute. E1-10 grants nothing on it: the INSTRUCTOR assignment arrives from
-# NRPS in E1-11, and this ticket's own scope puts it out.
+# attribute. It is a *row* rather than a table — the teaching instructor is an
+# `INSTRUCTOR` assignment and every other role on that table is Pulse's to write —
+# so the catalog entry that names it is unlike the other four in the file, and
+# `test_every_table_the_catalog_grants_is_a_table_the_chokepoint_actually_guards`
+# below carries the consequence.
 ROLE_ASSIGNMENT_TABLE = "role_assignment"
 INSTRUCTOR_ROLE = "INSTRUCTOR"
 PULSE_WRITABLE_ROLE = "LEAD_FACULTY"
@@ -203,16 +230,22 @@ def test_the_catalog_of_sanctioned_writers_is_exactly_the_one_entry_this_ticket_
     `test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own`
     exists for on the grant axis, and it is here for the same reason.
 
-    **This will go red for a good reason**, and that is the cost being paid on
-    purpose: E1-11's roster sync is a sanctioned writer for `course`, `section`,
-    `enrollment` and the `INSTRUCTOR` `role_assignment` row, and the pull request
-    that adds it edits this constant and says so. A grant recorded in a test diff
-    is the deliverable; a grant that arrives unnoticed is what this refuses.
+    **It went red for a good reason once already, and that is the cost being paid
+    on purpose.** E1-10 wrote this constant with one entry and predicted the
+    second; E1-11 adds `roster_sync` — `user`, `enrollment` and the `INSTRUCTOR`
+    `role_assignment` row — and this constant moved in the pull request that made
+    the change, with the sentence each table rests on beside it. A grant recorded
+    in a test diff is the deliverable; a grant that arrives unnoticed is what this
+    refuses. (E1-10's own prediction named `course` and `section` for the sync as
+    well; they are deliberately not there — SPEC §7.3 gives a section only one way
+    to be discovered, and it is not the roster of a section that must already
+    exist for the roster to be fetchable.)
 
     **The mutation it exists to survive**: adding `"enrollment"` to
-    `launch_provisioning`'s set — a table this ticket's scope explicitly leaves to
-    E1-11 — and adding a second key to the mapping. Neither changes the behaviour
-    of any other test in this file, because every one of them names its table.
+    `launch_provisioning`'s set — a table E1-10's scope explicitly left to
+    E1-11 — and adding `"course"` or `"section"` to `roster_sync`'s. Neither
+    changes the behaviour of any other test in this file, because every one of them
+    names its table.
     """
     catalog = authz.SANCTIONED_WRITERS
     held = {writer: frozenset(tables) for writer, tables in dict(catalog).items()}
@@ -333,9 +366,15 @@ def test_a_write_with_no_sanction_is_still_refused_on_every_guarded_table(
     refused(authz, f"a write to `{table}` with no sanction at all", table=table)
 
 
-@pytest.mark.parametrize("table", SANCTIONED_TABLES)
+@pytest.mark.parametrize(
+    ("writer", "table"),
+    [
+        *((LAUNCH_PROVISIONING, table) for table in SANCTIONED_TABLES),
+        *((ROSTER_SYNC, table) for table in ROSTER_SYNC_TABLES),
+    ],
+)
 def test_a_sanctioned_writer_may_write_each_table_its_catalog_entry_names(
-    authz: Any, table: str
+    authz: Any, writer: str, table: str
 ) -> None:
     """The half that has to work, table by table — the pair to the test above.
 
@@ -343,17 +382,19 @@ def test_a_sanctioned_writer_may_write_each_table_its_catalog_entry_names(
     adds `course` and `section` to it, because launch-time ingestion is one of
     SPEC §2.1's two arrival paths for a course and a section and there is no other
     way for either to be discovered before a roster sync has an address to call.
+    ADR 0045 names E1's roster sync for the rest, and E1-11 spends `user` and
+    `enrollment` of them — that ticket's other arrival path, "hourly roster sync".
 
-    **Parametrised per table rather than asserted once**, so a mechanism that
-    happens to work for `user` and not for `section` names which one — and so a
-    grant that quietly stopped covering one of the three is a red naming it
+    **Parametrised per writer and table rather than asserted once**, so a mechanism
+    that happens to work for `user` and not for `enrollment` names which one — and
+    so a grant that quietly stopped covering one of the five is a red naming it
     instead of a single test with a longer message.
     """
     permitted(
         authz,
-        f"a write to `{table}` by the sanctioned launch writer",
+        f"a write to `{table}` by the sanctioned `{writer}` writer",
         table=table,
-        sanction=authz.sanction_for(LAUNCH_PROVISIONING),
+        sanction=authz.sanction_for(writer),
     )
 
 
@@ -465,18 +506,25 @@ def test_a_sanction_that_names_more_tables_than_the_catalog_grants_is_refused(
 # ---------------------------------------------------------------------------
 
 
-def test_the_teaching_instructor_row_is_refused_even_to_a_sanctioned_writer(authz: Any) -> None:
-    """SPEC §2.1's fifth owned item is not in this writer's grant, and a sanction is not a mood.
+def test_the_teaching_instructor_row_is_refused_to_a_writer_the_catalog_does_not_grant_it(
+    authz: Any,
+) -> None:
+    """SPEC §2.1's fifth owned item is not in the launch writer's grant, and a sanction is not a mood.
 
     An `INSTRUCTOR` `role_assignment` row is a purview grant — §2.1 computes
     purview from exactly these rows — so a write path able to create one can hand
     somebody oversight of a section, with the moderation view and the report that
-    hang off it. E1-10's scope puts INSTRUCTOR assignment writes in E1-11, and the
-    catalog entry pinned above names three tables and not this row.
+    hang off it. E1-10's scope put INSTRUCTOR assignment writes in E1-11, and the
+    launch writer's catalog entry names three tables and not this row. **E1-11
+    grants it to the roster sync and to nothing else**, which is why this test now
+    says "a writer the catalog does not grant it" rather than "even to a
+    sanctioned writer": the branch is no longer an unconditional refusal, so what
+    it refuses has to be stated in terms of the catalog.
 
     **The mutation it exists to survive**: a `guard_write` that returns early as
     soon as any sanction is present, before it reaches the role check. That leaves
-    every table-grained test in this file green.
+    every table-grained test in this file green, and it is a much easier mistake to
+    make now that one entry in the catalog legitimately passes this branch.
 
     **The control beside it** is a `LEAD_FACULTY` assignment written with the same
     sanction, which §6.3's People editor writes and which must still be permitted.
@@ -497,6 +545,121 @@ def test_the_teaching_instructor_row_is_refused_even_to_a_sanctioned_writer(auth
         f"a `{PULSE_WRITABLE_ROLE}` role assignment written with a sanction in hand",
         table=ROLE_ASSIGNMENT_TABLE,
         assignment_role=assignment_role(authz, PULSE_WRITABLE_ROLE),
+        sanction=sanction,
+    )
+
+
+def test_the_roster_sync_may_write_the_teaching_instructor_row_its_entry_names(
+    authz: Any,
+) -> None:
+    """Decision D2's permitting half: the branch learns a catalogued writer.
+
+    ADR 0090 recorded the gap and named the ticket that closes it: "The
+    teaching-instructor row is outside the mechanism … no catalogued writer is
+    granted `role_assignment`, so a sanction never reaches that branch. E1-11 adds
+    the `INSTRUCTOR` write it needs by adding an entry, deliberately, in the pull
+    request that needs it." This is that write.
+
+    **Why it has to be permitted rather than routed around.** SPEC §2.1 makes the
+    teaching instructor LMS-owned — the roster is where Pulse learns who teaches a
+    section — so the alternative to passing the guard is a writer that does not
+    call it, which is precisely the bypass ADR 0045 names and E0-35's sweep exists
+    to find.
+
+    **The mutation this kills**: a branch that goes on refusing unconditionally,
+    which leaves E1-11 unable to write the row at all and every refusal test in
+    this file green. It is the failure mode a denial-only suite cannot see, and it
+    is the one this project has shipped before (`docs/MISTAKES.md` entry 2's
+    mirror image: a wall where the ticket asks for a door).
+
+    **The near miss it must not fire on** is one call away and is asserted in the
+    test above: the same row, under the *launch* writer's sanction, still refused.
+    """
+    permitted(
+        authz,
+        "an `INSTRUCTOR` role assignment written under the roster sync's own sanction",
+        table=ROLE_ASSIGNMENT_TABLE,
+        assignment_role=assignment_role(authz, INSTRUCTOR_ROLE),
+        sanction=authz.sanction_for(ROSTER_SYNC),
+    )
+
+
+def test_the_instructor_branch_reads_the_catalog_rather_than_the_sanction_it_was_handed(
+    authz: Any,
+) -> None:
+    """Decision D2's mirror: `sanction.tables` is never read, on this branch either.
+
+    "Exactly mirroring the `LMS_OWNED_TABLES` branch: catalog is authority,
+    `sanction.tables` is never read."
+
+    `WriteSanction` has a public constructor, so a caller can hand the guard a
+    sanction naming the launch writer and a table set of its own choosing. On the
+    table-grained branch that forgery is refused and
+    `test_a_sanction_that_names_more_tables_than_the_catalog_grants_is_refused`
+    above is where; this is the same forgery aimed at the row-grained branch, which
+    is a separate piece of code and now the more valuable of the two — the row it
+    guards is a purview grant rather than a stale attribute.
+
+    **The mutation this kills**: an implementation that writes the new branch as
+    `if ROLE_ASSIGNMENT_TABLE in sanction.tables: return`. Every other test in this
+    file passes against it, including the permitting one directly above, because
+    `sanction_for("roster_sync")` carries exactly that table.
+
+    **The near miss it must not fire on** is inside this test: the *catalogued*
+    roster-sync sanction on the same row has to return, or this would be evidence
+    that hand-built sanctions are refused outright — a different rule, which
+    nothing asks for.
+    """
+    forged = authz.WriteSanction(
+        writer=LAUNCH_PROVISIONING, tables=frozenset({*SANCTIONED_TABLES, ROLE_ASSIGNMENT_TABLE})
+    )
+
+    refused(
+        authz,
+        "an `INSTRUCTOR` role assignment under a sanction that named `role_assignment` itself",
+        table=ROLE_ASSIGNMENT_TABLE,
+        assignment_role=assignment_role(authz, INSTRUCTOR_ROLE),
+        sanction=forged,
+    )
+    permitted(
+        authz,
+        "the same row under the sanction the catalog actually grants it to",
+        table=ROLE_ASSIGNMENT_TABLE,
+        assignment_role=assignment_role(authz, INSTRUCTOR_ROLE),
+        sanction=authz.sanction_for(ROSTER_SYNC),
+    )
+
+
+def test_the_roster_sync_is_refused_a_guarded_table_its_own_entry_does_not_name(
+    authz: Any,
+) -> None:
+    """The sync's grant is per table too, and `section` is the table it must not reach.
+
+    SPEC §7.3 gives a section exactly one way to be discovered — the staff launch
+    that stores its roster address, because the scheduled job "has no way of its
+    own to learn that a section exists". A sync able to write `section` could
+    create one from a roster, and the roster it would create it from is one it
+    could only fetch because the section already existed.
+
+    **The mutation this kills**: a catalog entry widened to the four tables ADR
+    0045 loosely names for "E1's roster sync", or a guard that answers "is this
+    writer sanctioned?" rather than "is this writer sanctioned for this table?".
+
+    The pair is inside the test, so the refusal is known to be about the table: the
+    same sanction, on `enrollment`, has to return.
+    """
+    sanction = authz.sanction_for(ROSTER_SYNC)
+
+    refused(
+        authz,
+        f"a write to `{UNSANCTIONED_FOR_THE_SYNC}` by the roster sync",
+        table=UNSANCTIONED_FOR_THE_SYNC,
+        sanction=sanction,
+    )
+    permitted(
+        authz,
+        "a write to `enrollment` by the same sanction",
+        table=UNSANCTIONED_GUARDED_TABLE,
         sanction=sanction,
     )
 
@@ -538,13 +701,25 @@ def test_every_table_the_catalog_grants_is_a_table_the_chokepoint_actually_guard
     Scoped to `LMS_OWNED_TABLES` rather than to `Base.metadata` because that is
     the question worth asking: a sanction is permission to pass *this* guard, and
     a name the guard never refuses is a permission for nothing.
+
+    **`role_assignment` is admitted beside that set, and only because the guard
+    refuses it at row grain.** SPEC §2.1's fifth owned item is the teaching
+    instructor, which is an `INSTRUCTOR` row on a table Pulse otherwise owns
+    outright — so it is deliberately not in `LMS_OWNED_TABLES` (every other role on
+    that table would then be refused, and §6.3's People editor writes them all) and
+    it is just as deliberately something a sanction can name, since E1-11 has to
+    pass that branch. Admitting it here without saying so would have made this test
+    blind to a typo in exactly the one entry whose blast radius is a purview grant;
+    what keeps it honest is that the guard is required to have a row-grain refusal
+    for it at all, which the two `INSTRUCTOR` tests above provoke in both
+    directions.
     """
-    guarded = frozenset(authz.LMS_OWNED_TABLES)
-    assert guarded, (
+    assert authz.LMS_OWNED_TABLES, (
         "`LMS_OWNED_TABLES` is empty, so the comparison below is true of a catalog naming "
         "anything at all. `test_the_refusal_set_names_the_tables_the_spec_puts_on_the_lms_side` "
         "is where an empty refusal set is diagnosed."
     )
+    guarded = frozenset(authz.LMS_OWNED_TABLES) | {ROLE_ASSIGNMENT_TABLE}
 
     granted = {
         (writer, table)

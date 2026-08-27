@@ -165,6 +165,16 @@ RUNTIME_ROLES = (APPLICATION_ROLE, CARE_ROLE)
 # the split.
 IDENTITY_TABLE = "user_identity"
 
+# The name `seed_identity` below writes onto the student it seeds. **This file's
+# choice, and stated rather than borrowed since E1-11**: the helper's non-vacuity
+# guard used to ask only that the seeded row carry some string, which it did
+# because `identity_name` was `NOT NULL`. E1-11's D7 makes that column nullable
+# (ADR 0050 — the roster exposes an address and no name), so the value is named
+# here and the reveal's answer is recognised by it. One constant rather than a
+# generator: each of the four tests using it seeds one student, and none compares
+# two.
+SEEDED_IDENTITY_NAME = "Robin Reveal-Me"
+
 # SPEC §8's log, which "is append-only and includes all re-identifications". Named
 # here because E0-26 item 1 made it a table this file provokes a refusal on: the
 # Care connection now commits the record the door writes, so what that connection
@@ -262,28 +272,59 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 
 # Every `SECURITY DEFINER` function `pulse_app` may call, by name, and why.
 #
+# **Four entries, from two tickets, and one inventory rather than two.** E1-12 and
+# E1-11 opened this door in the same epic and from opposite ends — the first so a
+# verified subject reaches its stored identity, the second so a roster member
+# reaches its `user` row — and each ticket's branch wrote the equality over its own
+# set. Two rival closed sets over one fact is not an inventory; the merge is the
+# union, and every entry keeps the sentence that admits it.
+#
 #   - `resolve_platform_user(lti_platform_id, lms_user_id) -> uuid` — E1-12's
 #     launch door holds a `sub` from a token it has verified and needs the `user`
 #     row it names. It returns a uuid or NULL and reads no identity column. The
 #     caller can resolve a subject it already holds and can never enumerate the
-#     subjects it does not, which is the property the revocation bought.
+#     subjects it does not, which is the property the revocation bought. **E1-11's
+#     roster sync spends the same function for the same reason**: it matches an
+#     NRPS member against `user.lms_user_id`, the column E1-10's round-3 review
+#     revoked from this role because "a connection able to read it can enumerate
+#     every subject that ever launched and join a response back to the person who
+#     gave it".
 #   - `resolve_person_for_user(user_id) -> uuid` — the second hop, ADR 0024's
 #     `person.user_id` link read in the direction a door needs it. NULL is a
 #     defined answer, not an error: ADR 0028 gives a student a `user` row and no
-#     person, and D1 makes "no person" a state the session carries.
+#     person, and E1-12's D1 makes "no person" a state the session carries.
+#     **E1-11's D5 spends it on the other side of that same NULL**: the sync writes
+#     the teaching instructor's `INSTRUCTOR` assignment only where the member's
+#     `user` row already resolves to a `person`, and `pulse_app` holds no privilege
+#     on `person` at all, which carries a name.
 #   - `resolve_web_person(idp_issuer, idp_subject) -> uuid` — the web door's half,
 #     over the linkage table `pulse_app` holds no grant on at all. A merge is never
 #     inferred from a mutable claim, so this is the only route from a verified
 #     `id_token` to an identity.
+#   - `record_roster_email(user_id, identity_email)` — E1-11's D7, and one of the
+#     two that **write**. ADR 0050 has the roster expose "an address and no name",
+#     and E0-10 gives this role "no grant of any kind" on `user_identity` — so an
+#     address reaches that table through one function, owned by a role holding two
+#     of its columns and never `identity_name`, rather than through a grant.
+#   - `record_teaching_instructor(person_id, section_id)` — the security round's F2,
+#     and the same argument arriving on a second table. E1-11 first spent a
+#     table-wide `INSERT` on `role_assignment` for the teaching instructor's row;
+#     `guard_write` refuses only an `INSTRUCTOR` row and that is a Python rule, so a
+#     **`CARE`** assignment — the row the reveal definers check for before they
+#     return a name — passed unconditionally. A grant cannot bound a column's value,
+#     so the write moved into a function whose body writes `'INSTRUCTOR'` and whose
+#     signature is two uuids with nowhere to put a role. The grant is gone.
 #
 # What is *not* here is the point of the list: the two halves of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# fourth entry appearing here is a new door into identity that some later ticket
+# sixth entry appearing here is a new door into identity that some later ticket
 # opened without arguing for it.
 SANCTIONED_APPLICATION_EXECUTE = (
     "resolve_platform_user",
     "resolve_person_for_user",
     "resolve_web_person",
+    "record_roster_email",
+    "record_teaching_instructor",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -459,15 +500,50 @@ RESOLVE_BOTH = text("SELECT to_regclass(:bare)::oid, to_regclass(:qualified)::oi
 # exists because a test cannot be written against an interface that does not exist.
 # So the guessing machinery is gone and the names are constants.
 #
-# **The rules in this file are still spelled without them.** No `SECURITY DEFINER`
-# function in `public` may be owned by a superuser; the definer's grants are
-# exactly what its job needs; `pulse_app` may execute nothing. Those sweep over
-# whatever is there, because E10 replaces this door and a rule carrying its name
-# would retire with it. What is named below is only how a *test calls* the door,
-# which is a different thing from what a rule is about.
+# **Most rules in this file are still spelled without them.** No `SECURITY
+# DEFINER` function in `public` may be owned by a superuser, and the definer's
+# grants are exactly what its job needs: both sweep over whatever is there, because
+# E10 replaces this door and a rule carrying its name would retire with it.
+#
+# **One rule stopped being spellable as emptiness, and E1-12 and E1-11 are why.**
+# "`pulse_app` may execute nothing" needed no name at all while the answer was
+# zero; the answer is now five functions that return no identity (ADR 0094, E1-11's
+# D7, and the security round's F2), so the rule is an equality over
+# `SANCTIONED_APPLICATION_EXECUTE` at
+# the head of this file. The **door** it may not open is still spelled without a
+# name — `test_the_application_role_may_not_execute_the_reveal_function` discovers
+# it as whatever `pulse_care` may execute — so when E10 replaces the door that
+# refusal follows it rather than retiring with these two constants.
 RECORD_FUNCTION = "record_identity_reveal"
 REVEAL_FUNCTION = "reveal_student_identity"
 CARE_DOOR_HALVES = 2
+
+# The `EXECUTE` inventory for the application role is
+# `SANCTIONED_APPLICATION_EXECUTE` at the head of this file, and it is one list.
+# E1-11's branch carried a second constant over the same fact — a closed set of the
+# three functions *that* ticket granted — and the merge folded its entries and its
+# sentences into that one rather than leaving two equalities to disagree.
+#
+# The owners those five functions run as: NOLOGIN roles that exist for nothing
+# else, so that "the definer's privileges" is a list you can read in one file
+# against one body (ADR 0043's pattern, ADR 0094 and E1-11's D7).
+# `pulse_resolve_definer` owns the three point resolvers, `pulse_roster_definer`
+# the email write, and `pulse_instructor_definer` the teaching-instructor write the
+# security round's F2 moved off a table grant. They are named here because the
+# grantee sweep below asks *who* is named in an ACL anywhere in `public` and would
+# otherwise report the grants they hold on `user`, `person`, `web_login_subject`,
+# `user_identity` and `role_assignment` as roles no ticket sanctioned. What each
+# may reach is pinned separately —
+# `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+# below for the first, and
+# `tests/integration/test_the_roster_definers_answer_a_point_query_and_nothing_more.py`
+# for the other two — and what is asserted here is only that they are expected to
+# exist.
+IDENTITY_DEFINER_ROLES = (
+    RESOLVE_DEFINER_ROLE,
+    "pulse_roster_definer",
+    "pulse_instructor_definer",
+)
 
 # How the two halves are called. The record's third argument is a null case id:
 # there is no case model until E10, and E0-10 shipped its reveal the same way.
@@ -731,9 +807,20 @@ def seed_identity(committed_rows: Any) -> dict[str, Any]:
     this module with the argument-guessing machinery that needed it. The copy in
     `tests/integration/test_care_service_reveal.py` stays: the *service*'s
     `reveal_identity` keeps its own signature, which E0-26 does not change.
+
+    **The name is stated here since E1-11, and was borrowed before it.** The
+    non-vacuity guard below asks the seeded row to carry a recognisable value, and
+    got one only because `user_identity.identity_name` was `NOT NULL` and
+    `seed_row` fills what the schema requires. E1-11's D7 makes the column nullable
+    — the roster sync stores an address for a member it has no name for (ADR 0050),
+    and `record_roster_email`'s owner holds no privilege on the name column at all
+    — so the helper leaves it and four tests here failed inside their own seeding
+    (dispute E1-11-02, `docs/MISTAKES.md` entry 22). Passing the value makes this
+    helper state its own premise instead of resting on a constraint two tickets
+    away, and it is what the reveal's answer is now recognised by.
     """
     chain: dict[str, Any] = {}
-    identity = committed_rows.seed(IDENTITY_TABLE, chain)
+    identity = committed_rows.seed(IDENTITY_TABLE, chain, identity_name=SEEDED_IDENTITY_NAME)
     committed_rows.commit()
 
     user = chain.get("user")
@@ -748,11 +835,14 @@ def seed_identity(committed_rows: Any) -> dict[str, Any]:
         for key, value in identity.items()
         if isinstance(value, str) and value and not key.endswith("_id")
     }
-    assert values, (
-        f"The seeded `{IDENTITY_TABLE}` row carries no non-key string value: {dict(identity)}. "
-        "There is then nothing for a reveal to return that could be recognised, and the test "
-        "below would be asserting that a function returned something rather than that it returned "
-        "the identity."
+    assert SEEDED_IDENTITY_NAME in values, (
+        f"The seeded `{IDENTITY_TABLE}` row does not carry the name this helper asked it to "
+        f"({SEEDED_IDENTITY_NAME!r}): {dict(identity)}. There is then nothing for a reveal to "
+        "return that could be recognised, and the tests below would be asserting that a function "
+        "returned something rather than that it returned this student's identity.\n\n"
+        "Until E1-11 this asked only for *some* non-key string and got one from the `NOT NULL` "
+        "constraint on `identity_name`, which D7 legitimately removes; the value is stated in this "
+        "file now."
     )
     user_key = next(
         (key for key in user if key in {"id", "user_id"}),
@@ -1052,20 +1142,43 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     that to be true. Revoking it is a line somebody has to write, and nothing
     else in this suite would notice its absence (`docs/MISTAKES.md` entry 2).
 
-    **The mutation it exists to survive**: dropping
-    `REVOKE ALL ON FUNCTION … FROM PUBLIC` from the migration, which leaves every
-    other test in this file green.
+    **This was "`pulse_app` may execute nothing" until E1-12 and E1-11, and the
+    narrowing is what those tickets had to argue for rather than a relaxation.**
+    `pulse_app` now holds `EXECUTE` on the three point-resolution functions ADR
+    0094 ships — a verified subject reaching its stored identity is E1-12's whole
+    subject, and E1-11's roster sync matches a member to its `user` row through the
+    same two — and on `record_roster_email`, which writes an address into a table
+    this role holds no grant on at all (E1-11's D7, ADR 0050). Each answers a point
+    question and returns no identity, so a rule phrased as emptiness would be red
+    against the correct schema.
 
-    **E1-12 narrowed this from "may execute nothing" to "may not execute the
-    door", and the narrowing is the whole of what that ticket had to argue for.**
-    `pulse_app` now holds `EXECUTE` on three point-resolution functions (ADR 0094)
-    that answer with a uuid and read no identity column, so a rule phrased as
-    emptiness would be red against the correct schema. The door is identified here
-    the way every other rule in this file identifies it — as whatever `pulse_care`
-    may execute, never by name, because E10 replaces it — and the *inventory* half,
-    that the three resolvers are the only other thing `pulse_app` may call, is
-    `test_the_application_role_may_execute_only_the_point_resolvers` next door. Two
-    tests because they are two facts: this one is a door, that one is an inventory.
+    **What this test asserts is the door, and it identifies the door by discovery.**
+    Whatever `pulse_care` may execute is what `pulse_app` may not — never by name,
+    because E10 replaces the Care door and a rule spelled with its name would
+    retire with it. That is E0-10's sentence, and the reason `pulse_app` reaching
+    either half is a §4.1 breach rather than an untidy grant:
+    `reveal_student_identity` returns a name, and `record_identity_reveal` writes
+    the audit row that makes the name accountable.
+
+    **The inventory half is next door**, in
+    `test_the_application_role_may_execute_only_the_point_resolvers`: that the four
+    sanctioned functions are the only other thing this role may call. Two tests
+    because they are two facts — this one is a door, that one is a closed set — and
+    a merge that folded them into one would have lost whichever fact it phrased
+    second.
+
+    **What the four permitted functions can reach is pinned elsewhere, as
+    equalities over their owners' grants**:
+    `test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+    below, and
+    `tests/integration/test_the_roster_definers_answer_a_point_query_and_nothing_more.py`.
+    That is where "what could this door possibly reach" is answered, and it is a
+    question about the owner rather than about the body.
+
+    **The mutation it exists to survive**: dropping
+    `REVOKE ALL ON FUNCTION … FROM PUBLIC` from any of the migrations, which puts
+    every definer function in this schema — the Care door included — in this
+    role's reach and leaves every other test in this file green.
     """
     functions = security_definer_functions(db_session, APPLICATION_ROLE)
     assert functions, (
@@ -1095,10 +1208,10 @@ def an_inventoried_execute(row: Any) -> bool:
     Two entries, and the asymmetry between them is the design. `pulse_care` holds
     the Care door and the door is discovered rather than named, because E10
     replaces it and a rule spelled with its name would retire with it. `pulse_app`
-    holds ADR 0094's point resolvers and those *are* named, because the argument
-    that admits them is an argument about each function's body — a uuid out, no
-    identity column read — and it does not generalise to the next function somebody
-    wants to grant.
+    holds ADR 0094's point resolvers and E1-11's one writer, and those *are* named,
+    because the argument that admits each is an argument about that function's body
+    — a uuid out and no identity column read, or an address in and never a name —
+    and neither generalises to the next function somebody wants to grant.
     """
     if row["grantee"] == CARE_ROLE:
         return True
@@ -1121,17 +1234,34 @@ def routine_name(routine: str) -> str:
 
 @pytest.mark.invariant
 def test_the_application_role_may_execute_only_the_point_resolvers(db_session: Any) -> None:
-    """E1-12: the inventory of doors this connection may open, as an equality.
+    """E1-12 and E1-11: the inventory of doors this connection may open, as an equality.
 
     `EXECUTE` on a `SECURITY DEFINER` function is a privilege held in a different
     currency — the caller spends the *owner's* grants — and it is the currency this
-    file's own sweep missed once already, in the worst possible place. Until E1-12
-    the rule was that `pulse_app` held none of it. ADR 0094 opens exactly three,
-    each answering one point question with a uuid, and this is the assertion that
-    they are the only three.
+    file's own sweep missed once already, in the worst possible place. Until this
+    epic the rule was that `pulse_app` held none of it. ADR 0094 opens three point
+    resolvers, each answering one question with a uuid; E1-11's D7 opens one writer
+    that takes an address and never a name; and the security round's F2 opens a
+    second writer that takes a person and a section and writes the one role its own
+    body names. This is the assertion that those five are the only five.
 
-    **Why an equality rather than a ceiling.** A fourth function granted to
-    `pulse_app` is a fourth door into whatever its owner can read, and nothing else
+    **Two of the five write, and that is not a widening of this rule but the
+    instrument it now has to carry.** A grant bounds a table and its columns and
+    cannot bound a column's *value*: there is no `GRANT INSERT (role =
+    'INSTRUCTOR')`. So where a writer must be restricted to one value — an address
+    and never a name, an `INSTRUCTOR` and never a `CARE` — the restriction lives in
+    a function body and the caller holds `EXECUTE` rather than the grant. Each such
+    door is a door, and each is here by name.
+
+    **One equality over both tickets' grants, not one per ticket.** E1-12 and E1-11
+    opened this door from opposite ends in the same epic and each branch pinned its
+    own set; two closed sets over one fact is not an inventory, because each is
+    satisfied by the other's grants being present. The merged list is
+    `SANCTIONED_APPLICATION_EXECUTE` at the head of this file, where every entry
+    carries the sentence that admits it.
+
+    **Why an equality rather than a ceiling.** A sixth function granted to
+    `pulse_app` is a sixth door into whatever its owner can read, and nothing else
     in this build would mention it: `alembic check` reads no `pg_proc` entry in
     either direction, the grantee sweep below asks *who* holds something rather
     than *how many things*, and the refusal above is scoped to the Care door. A
@@ -1145,10 +1275,10 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     satisfying it after the grants were dropped and the doors stopped working.
 
     **The mutation it exists to survive**: `GRANT EXECUTE ON FUNCTION public.<a
-    fourth definer function> TO pulse_app`, and its quieter sibling, a migration
+    sixth definer function> TO pulse_app`, and its quieter sibling, a migration
     that omits `REVOKE ALL … FROM PUBLIC` on a new definer function — `PUBLIC`
     includes `pulse_app`, so both arrive here.
-    **The near miss it tolerates**: a fourth `SECURITY DEFINER` function that
+    **The near miss it tolerates**: a sixth `SECURITY DEFINER` function that
     `pulse_app` may not execute. That is somebody else's door and
     `test_no_role_outside_this_scheme_is_granted_anything_in_public` is where its
     grantee is judged.
@@ -1163,11 +1293,12 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
     missing = [name for name in SANCTIONED_APPLICATION_EXECUTE if name not in executable]
     assert not missing, (
         f"`{APPLICATION_ROLE}` may execute {executable}, and {missing} are missing from it. Those "
-        "are ADR 0094's point-resolution functions, and without them a verified subject reaches no "
-        "stored identity on either door — E1-12's whole subject — while every refusal in this file "
-        "stays green. It also means this sweep has not been seen finding an `EXECUTE` on a role "
-        "that certainly holds one, so the equality below would be satisfied by an instrument that "
-        "reports nothing for anybody."
+        "are ADR 0094's point-resolution functions and E1-11's `record_roster_email`: without the "
+        "first a verified subject reaches no stored identity on either door — E1-12's whole "
+        "subject — and without the last the roster sync can store no address at all, while every "
+        "refusal in this file stays green. It also means this sweep has not been seen finding an "
+        "`EXECUTE` on a role that certainly holds one, so the equality below would be satisfied by "
+        "an instrument that reports nothing for anybody."
     )
 
     beyond = [name for name in executable if name not in SANCTIONED_APPLICATION_EXECUTE]
@@ -1176,7 +1307,7 @@ def test_the_application_role_may_execute_only_the_point_resolvers(db_session: A
         f"{list(SANCTIONED_APPLICATION_EXECUTE)} and each entry carries the sentence that admits "
         "it, beside the constant at the top of this file. A `SECURITY DEFINER` function runs as "
         "its owner, so `EXECUTE` on one is a privilege on everything that owner can read — held by "
-        "the connection every screen in the product runs on. If a fourth is genuinely needed, add "
+        "the connection every screen in the product runs on. If a fifth is genuinely needed, add "
         "it there with its sentence and say in the pull request what the caller can now reach that "
         "it could not before."
     )
@@ -1320,11 +1451,16 @@ def test_neither_runtime_role_holds_any_privilege_on_user_identity(db_session: A
     added there reaches both without anybody remembering this test exists.
 
     **The execute mechanism is filtered out here and nowhere else**, and that is
-    the asymmetry rather than an exemption. `pulse_care` holds `EXECUTE` on the
-    reveal *by design* — §4 and §6.2 require that door to be open — so a rule that
-    reported it would fail against the correct schema. It is asserted separately
-    and in both directions instead: `test_the_application_role_may_not_execute_the_
-    reveal_function` says `pulse_app` may call nothing, and
+    the asymmetry rather than an exemption. Both runtime roles hold `EXECUTE` on a
+    definer function *by design* — `pulse_care` on the Care door, because §4 and
+    §6.2 require that door to be open, and since E1-12 and E1-11 `pulse_app` on
+    five functions that return no identity (ADR 0094, E1-11's D7 and the security
+    round's F2) — so a rule
+    that reported either would fail against the correct schema. It is asserted
+    separately instead, and on each side by an equality beside a refusal:
+    `test_the_application_role_may_execute_only_the_point_resolvers` says which
+    five `pulse_app` may call, `test_the_application_role_may_not_execute_the_
+    reveal_function` says it may not open the Care door, and
     `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door` says
     `pulse_care` may call exactly those two. Asked about a role a runtime role can
     *become*, the same mechanism is dangerous and is not filtered.
@@ -2777,6 +2913,14 @@ def test_the_downgrade_completes_when_a_role_it_revokes_from_is_absent(
 # member nobody sanctioned — which is a precondition for the doors being the only
 # doors rather than an instance of §4.1 itself.
 #
+# **E1-12 and E1-11 add a marked test on the inventory side of that line, and it
+# is deliberate rather than a drift.** `test_the_application_role_may_execute_only_
+# the_point_resolvers` is an equality over the five functions `pulse_app` may call,
+# which by the rule above would be unmarked — but from the moment that set stopped
+# being empty, "the doors are the only doors" is the assertion that the set has not
+# grown, and there is no separate route-test that would notice a fifth door. The
+# mark follows the guarantee rather than the shape.
+#
 # **E0-26 item 1 added two marks by that same line, and they are doors.**
 # `test_the_care_door_refuses_an_actor_with_no_live_care_assignment` guards the
 # route through the door itself — the acting person's `CARE` assignment is the only
@@ -3116,6 +3260,57 @@ MEMBER_OF_ROLES = """
 #     issuer, a deployment, a context id and a timestamp, and never a subject, a
 #     name or an email.
 #     Decided and spent in E1-10.
+#   - `pulse_app` **reads and inserts** `enrollment` and `nrps_call`, and
+#     **inserts** `role_assignment`. This is E1-11's roster sync, and it is the
+#     second grant in this set that lets the application write a relation SPEC §2.1
+#     puts on the LMS's side — the two relations of ADR 0045's four that nothing in
+#     this project had written before.
+#     **What each one is for.** §2.1's other arrival path is the "hourly roster
+#     sync", and §3.4 reads what it writes: "Late adds: denominator starts at the
+#     student's first enrolled week (from NRPS enrollment data)." The `SELECT` on
+#     `enrollment` is the lookup that decides insert-or-update — a member already
+#     enrolled must not be enrolled twice, and ADR 0023's exclusion constraint would
+#     refuse the second row rather than answer the question. `nrps_call` is E1-11's
+#     own record (its work order, D9): one row per NRPS HTTP call, which is §6.1's
+#     "NRPS and AGS call logs with response codes", the discriminator between a
+#     never-synced section and a synced-empty one, and the memory the launch
+#     trigger's debounce is measured against — so the sync both writes it and reads
+#     it back.
+#     **`role_assignment` is not in this set, and the security round's F2 is why.**
+#     E1-11 first granted `pulse_app` a table-wide `INSERT` on it, for the teaching
+#     instructor's row — §2.1's fifth owned item, and a *purview grant*: the whole
+#     oversight surface is computed from these rows. The review measured what that
+#     bought: `guard_write` refuses only an `INSTRUCTOR` row and that is a Python
+#     rule, so a **`CARE`** assignment — the row E0-10's reveal definers check for
+#     before they return a name — passed unconditionally, on the connection every
+#     screen in the product runs on. A grant cannot bound a column's *value*; there
+#     is no `GRANT INSERT (role = 'INSTRUCTOR')`. So the grant is gone and the one
+#     legitimate write goes through `public.record_teaching_instructor`, whose body
+#     chooses the role and whose signature has nowhere to put another one — the
+#     same instrument, and the same argument, as the email write one entry down.
+#     The sync still asks `public.assignment_scope` (E0-11's view, already granted)
+#     whether it has already written one, so no read on the table is spent either.
+#     `pulse_care` holds `SELECT` on this table for the reveal's own assignment
+#     check, one entry above, and that entry is now the only `role_assignment`
+#     privilege in this inventory.
+#     **No `DELETE`, no `UPDATE` on `nrps_call`, and no table-wide `UPDATE` on
+#     `enrollment`.** The verbs withheld are the assertion,
+#     as they are on `classification` and on E1-10's group. A drop is a *closed
+#     window* rather than a deleted row (ADR 0023, and E1-11's D3: "the open/closed
+#     window rows ARE the recorded transition"), so a connection able to delete an
+#     enrollment could erase the record a participation figure is computed from; a
+#     connection able to delete a `role_assignment` could revoke a dean's purview;
+#     and `nrps_call` is an append-only log, which is only true if the grant says
+#     so. `enrollment`'s `UPDATE` is granted at column grain, below.
+#     **What these tables carry, for §4.1.** `enrollment` holds two foreign keys and
+#     four dates and no identity of any kind; `role_assignment` holds a person
+#     reference, a role and a scope, which is the graph §2.1 computes purview from
+#     and which `pulse_care` already reads; `nrps_call` holds a section reference, a
+#     URL, an HTTP status, a count and a timestamp — no subject, no name, no email.
+#     E1-11's own review question ("does this ticket add a person table?", deferred
+#     E1-01 item 2) is answered no on exactly this ground: `nrps_call` references
+#     `section` and nothing else.
+#     Decided and spent in E1-11.
 RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
     {
         (CARE_ROLE, "role_assignment", "SELECT"),
@@ -3138,6 +3333,10 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "section", "INSERT"),
         (APPLICATION_ROLE, "user", "INSERT"),
         (APPLICATION_ROLE, "launch_defect", "INSERT"),
+        (APPLICATION_ROLE, "enrollment", "SELECT"),
+        (APPLICATION_ROLE, "enrollment", "INSERT"),
+        (APPLICATION_ROLE, "nrps_call", "SELECT"),
+        (APPLICATION_ROLE, "nrps_call", "INSERT"),
     }
 )
 
@@ -3182,12 +3381,37 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # `section.lms_section_code`, on the binding columns E1-10 adds to `section`, on
 # any of ADR 0021's four calendar columns, or on `user` in any form. A launch
 # discovers those and never revises them, and the database is what says so.
+#
+# **E1-11 spends three more, all on `enrollment`, and for the same reason E1-10
+# spent its three**: the alternative is `UPDATE` on `enrollment` table-wide, which
+# is strictly more than the sync needs and which would hand the application
+# connection the ability to rewrite `started_on`, `user_id` and `section_id`.
+#
+#   - `enrollment(ended_on)` — a drop closes the window. SPEC §3.4: "Drops: scores
+#     stop updating", which the tool can only act on once the row says when the
+#     student left.
+#   - `enrollment(lms_window_start)` / `enrollment(lms_window_end)` — the ADR 0048
+#     extension's values, which a platform may revise between syncs (a drop dated
+#     after the fact, a start corrected). `lms_`-prefixed because the platform owns
+#     them (E0-05's rule), and updatable for the same reason `course.lms_title` is:
+#     following the platform is the rule rather than an edit.
+#
+# **`started_on`, `user_id` and `section_id` are deliberately absent**, and that is
+# the load-bearing half of this group. They are first-seen facts — which member,
+# which section, and the day Pulse first saw them, which §3.4's fallback for an
+# undated late add is computed from — so a connection that could rewrite them could
+# re-date a student's whole term, and a re-add is a second row rather than an edit
+# to the first (ADR 0023, E1-11's D3). No `UPDATE` anywhere on `nrps_call` or
+# `role_assignment` either: an append-only log and a purview grant.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
         (APPLICATION_ROLE, "course", "title_is_fallback", "UPDATE"),
         (APPLICATION_ROLE, "section", "lms_context_memberships_url", "UPDATE"),
         (APPLICATION_ROLE, "user", "id", "SELECT"),
+        (APPLICATION_ROLE, "enrollment", "ended_on", "UPDATE"),
+        (APPLICATION_ROLE, "enrollment", "lms_window_start", "UPDATE"),
+        (APPLICATION_ROLE, "enrollment", "lms_window_end", "UPDATE"),
     }
 )
 
@@ -3432,15 +3656,24 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     the one function whose job is to return a name.
 
     **The allowed grantees on a definer function are `pulse_care`, and — since
-    E1-12 — `pulse_app` on the three functions ADR 0094 names.** E0-10's own
-    sentence still governs the door that returns identity: `pulse_care` "gets
-    `EXECUTE` on a **single** `SECURITY DEFINER` function". What E1-12 adds is a
-    different kind of function — a point lookup answering with a uuid, owned by a
-    role that reads five columns and no identity among them — and it is admitted
-    here **by name**, out of `SANCTIONED_APPLICATION_EXECUTE` at the top of this
-    file, rather than by widening the rule to "the application role may execute
-    definer functions". A fourth grant to `pulse_app` therefore still appears
-    below, which is the whole point of writing the inventory down.
+    E1-12, E1-11 and that ticket's security round — `pulse_app` on the five
+    functions `SANCTIONED_APPLICATION_EXECUTE` names.** E0-10's own sentence still governs
+    the door that returns identity: `pulse_care` "gets `EXECUTE` on a **single**
+    `SECURITY DEFINER` function". What this epic adds is a different kind of
+    function — three point lookups answering with a uuid, owned by a role that
+    reads five columns and no identity among them; one writer that takes an address
+    and can never write a name; and one that takes a person and a section and
+    writes the single role its body names — and each is admitted here **by name**,
+    out of that constant at the top of this file, rather than by widening the rule
+    to "the application role may execute definer functions". A sixth grant to
+    `pulse_app` therefore still appears below, which is the whole point of writing
+    the inventory down.
+
+    Which five they are is *not* this test's question. This sweep owns the grantee
+    axis — who is named in an ACL anywhere — and the count and contents are
+    `test_the_application_role_may_execute_only_the_point_resolvers`'s, one
+    equality in one place. E0-10's count for `pulse_care` is likewise
+    `test_pulse_care_may_execute_exactly_the_two_halves_of_the_care_door`'s.
 
     **`PUBLIC` is in both sweeps and is the sharpest case, and it means different
     things on the two.** On a relation Postgres grants nothing to `PUBLIC` by
@@ -3483,7 +3716,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     on the third read view.
     """
     definer = the_reveal_definer(db_session)
-    expected = {APPLICATION_ROLE, CARE_ROLE, definer, RESOLVE_DEFINER_ROLE}
+    expected = {APPLICATION_ROLE, CARE_ROLE, definer, *IDENTITY_DEFINER_ROLES}
     granted = db_session.execute(text(RELATION_GRANTEES)).mappings().all()
     on_columns = db_session.execute(text(COLUMN_GRANTEES)).mappings().all()
     executable = db_session.execute(text(SECURITY_DEFINER_GRANTEES)).mappings().all()
@@ -3524,14 +3757,17 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     unexpected = sorted(beyond_on_relations + beyond_on_columns + beyond_on_functions)
     assert not unexpected, (
         f"{unexpected}. On a relation, the roles this scheme names are {sorted(expected)} — the "
-        "two connection roles of ADR 0001, the reveal function's own owner from ADR 0043 and "
-        "ADR 0094's resolve definer — plus whoever owns it, which is the migration identity ADR "
-        f"0009 sanctions. On a `SECURITY DEFINER` function it is `{CARE_ROLE}`, the owner, and "
+        "two connection roles of ADR 0001, the reveal function's own owner from ADR 0043, and the "
+        f"three definer owners this epic adds ({', '.join(IDENTITY_DEFINER_ROLES)} — ADR 0094, "
+        "E1-11's D7 and that ticket's security round) — plus whoever owns the relation, which is "
+        "the migration identity ADR 0009 "
+        f"sanctions. On a `SECURITY DEFINER` function it is `{CARE_ROLE}`, the owner, and "
         f"`{APPLICATION_ROLE}` on the functions `SANCTIONED_APPLICATION_EXECUTE` names, and "
         "nothing else: E0-10 gives the Care role `EXECUTE` on the door and E0-26 item 1 made that "
-        f"door two halves, and `{APPLICATION_ROLE}` is refused both by name in an "
-        "`invariant`-marked test above. Anything else holds a privilege that no ticket in this "
-        "epic granted and that nothing in this repository will ever revoke.\n\n"
+        f"door two halves, and `{APPLICATION_ROLE}` is refused that door in an `invariant`-marked "
+        "test above, with the five functions it *may* call pinned as an equality beside it. "
+        "Anything else holds a privilege that no ticket in this epic granted and that nothing in "
+        "this repository will ever revoke.\n\n"
         "`PUBLIC` appearing here is the worst case and reads like the mildest, and it reads "
         "differently on the two kinds. On a relation it is always deliberate, because Postgres "
         "grants no table privilege to `PUBLIC` by default. On a function it is what a migration "

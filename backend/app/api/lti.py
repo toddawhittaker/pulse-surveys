@@ -56,6 +56,7 @@ from app.lti.launch import (
 from app.lti.registration import JWKS_PATH, NoSigningKeyError, published_key_set
 from app.services.landing import Door
 from app.services.provisioning import provision_from_launch
+from app.services.roster_sync import request_section_sync
 
 # What a caller is told when this deployment holds no signing key. Short on
 # purpose: the route is public in every environment, and the operator's copy of
@@ -164,6 +165,16 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     point functions and binds the result into the session, and the `user` row it
     reads is the one provisioning has just written — so the ordering here is a
     dependency now rather than only a preference about failure isolation.
+
+    **And then the roster sync is asked for, after that commit** (E1-11, SPEC §7.3:
+    NRPS is "pulled on schedule and on launch (debounced)"). Which section — or
+    none — is provisioning's answer rather than this router's to work out, and
+    whether anything is enqueued at all is `request_section_sync`'s: it skips a
+    section that was called in the last five minutes, so a class of thirty opening
+    the tool at the top of the hour asks the platform for one roster rather than
+    thirty. It runs after the commit because the worker that picks the job up reads
+    its own connection and would otherwise find a section this request has not
+    written yet.
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
@@ -177,8 +188,10 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
         return answer
 
     await run_in_threadpool(session.commit)
-    await run_in_threadpool(provision_from_launch, session, claims)
+    section_id = await run_in_threadpool(provision_from_launch, session, claims, settings)
     await run_in_threadpool(session.commit)
+    if section_id is not None:
+        await run_in_threadpool(request_section_sync, session, section_id)
     return await landing_with_session(
         claims,
         door=Door.LAUNCH,

@@ -55,7 +55,7 @@ re-identification path and its audit log are E10. The LTI registration tables
 `user` points at are `app.models.lti`.
 """
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from uuid import UUID
 
@@ -74,7 +74,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, UuidPrimaryKey
+from app.models.base import AwareDateTime, Base, UuidPrimaryKey
 
 
 class User(UuidPrimaryKey, Base):
@@ -128,17 +128,30 @@ class UserIdentity(UuidPrimaryKey, Base):
     and a `RESTRICT` here would make every such deletion a two-step that a future
     code path can perform half of.
 
-    **`identity_email` is nullable.** NRPS exposes an email address only where
-    the platform is configured to release it (SPEC §7.3, "email addresses where
-    exposed"), so a roster sync must be able to record a name without one. A name
-    is required: an identity row with neither is a row with no reason to exist.
+    **Both columns are nullable, and E1-11 is why the name is.** NRPS exposes an
+    email address only where the platform is configured to release it (SPEC §7.3,
+    "email addresses where exposed"), so a roster sync must be able to record a
+    name without one — which is what `identity_email` being nullable was always
+    for. The mirror turned out to be the live case: ADR 0050 measured that this
+    project's mock roster exposes "an address and no name", so E1-11's sync has an
+    address to store for a user it has no name for at all. A NOT NULL name would
+    leave it two bad options — invent one, or store no address — and inventing
+    identity from a roster is the thing this table exists not to do.
+
+    **A row with neither is therefore writable, and nothing here refuses it.** That
+    is a state no writer in this project produces: `record_roster_email`
+    (`roster_email_v001.sql`) creates a row only where the platform exposed an
+    address, and clears an address without creating one. A `CHECK` requiring one of
+    the two is deliberately not added — it would refuse the ordinary intermediate
+    state of a two-step edit in §6.3's People editor, which nobody has built yet, in
+    exchange for a rule no writer needs. ADR 0095 records the choice.
     """
 
     __tablename__ = "user_identity"
     __table_args__ = (UniqueConstraint("user_id"),)
 
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
-    identity_name: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     identity_email: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -316,14 +329,31 @@ class Enrollment(UuidPrimaryKey, Base):
     the section's end date in advance — stores a prediction as a fact and has to
     be corrected on every drop.
 
-    **Neither date carries an `lms_` prefix, and that is a judgment.** Enrollments
-    are LMS-owned in SPEC §2.1, but NRPS 2.0 reports a membership *status* rather
-    than enrollment dates, so these two columns are most likely Pulse's record of
-    when a student was first and last seen in the roster — derived by Pulse from
-    LMS data, which is the `course.level` case ADR 0014 leaves unprefixed. E1's
-    roster sync is what settles it; if a platform turns out to supply the dates,
-    renaming them is a migration and a visible schema event, which is what ADR
-    0014 says an ownership change should be.
+    **Neither date carries an `lms_` prefix, and E1-11 settled that they never
+    will.** E0-08 left this open — "these two columns are most likely Pulse's
+    record of when a student was first and last seen in the roster … E1's roster
+    sync is what settles it" — and the sync's answer is that the prediction was
+    right and that the platform's own dates are a *second* pair rather than the
+    same one. `started_on` and `ended_on` stay Pulse's record of first and last
+    sighting, unprefixed; the platform's window arrives beside them in
+    `lms_window_start` and `lms_window_end`.
+
+    **The two pairs are separate because SPEC §3.4 reads them differently.** "Late
+    adds: denominator starts at the student's first enrolled week (from NRPS
+    enrollment data). Where the platform supplies no enrollment dates — most supply
+    none — a student counts as enrolled from the section's start date." Those are
+    two rules, and E3 can only choose between them if "the platform supplied none"
+    is a state the row can be in — which is why the new pair is nullable and why
+    nothing may synthesize a value into it. A single pair carrying whichever
+    happened to be known would make a windowless member indistinguishable from a
+    dated one for the rest of the term.
+
+    **Which is also why there is no status column.** NRPS reports `Active`,
+    `Inactive` and `Deleted`, and it is tempting to store the last one seen; the
+    open and closed windows *are* the recorded transition, and a status column
+    beside them is a second answer to "was this student enrolled in week N" with no
+    rule for choosing between the two. ADR 0095 records that and the rest of E1-11's
+    window semantics.
     """
 
     __tablename__ = "enrollment"
@@ -363,6 +393,22 @@ class Enrollment(UuidPrimaryKey, Base):
     )
     started_on: Mapped[date] = mapped_column(Date, nullable=False)
     ended_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # The platform's own enrollment window, verbatim, where it supplies one (ADR
+    # 0048's namespaced NRPS extension; E1-11). `lms_`-prefixed under E0-05's rule
+    # because these are the platform's values and Pulse never edits them — it
+    # follows them, the way it follows `course.lms_title`.
+    #
+    # **Nullable, and NULL means the platform supplied none.** That is the whole
+    # value of the pair: see the class docstring, and never write a value here that
+    # the extension did not carry. `AwareDateTime` refuses a naive datetime at the
+    # bind boundary (ADR 0019), which is what makes "an RFC 3339 timestamp with its
+    # offset, end to end" a property of the column rather than of the sync.
+    #
+    # A `timestamptz` beside two `date`s, because these are the two kinds of fact
+    # they are: a platform dates an enrollment to an instant, and Pulse's own
+    # record of a sighting is the day a sync ran.
+    lms_window_start: Mapped[datetime | None] = mapped_column(AwareDateTime, nullable=True)
+    lms_window_end: Mapped[datetime | None] = mapped_column(AwareDateTime, nullable=True)
 
 
 class AssignmentRole(StrEnum):

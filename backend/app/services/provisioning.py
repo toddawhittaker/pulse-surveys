@@ -13,6 +13,18 @@ everything here is reading a token this tool has already checked the signature,
 issuer, audience, deployment, nonce and clock of. Nothing here validates a launch;
 this module decides what a valid launch *means* for the org.
 
+**It is handed the configuration the door already holds**, rather than reading the
+process for itself, and E1-11 is the ticket that changed that (its D13, closing
+deferred E1-10 items 5 and 2). Two rules here depend on configuration: which
+addresses this container may fetch, which is switched off in development, and which
+day a launch happened on, which decides its term. Both were read from somewhere
+`Settings` could not see — `os.environ`, and `datetime.now(UTC)` — and both were
+wrong in the same way: a process whose `ENVIRONMENT` lives only in a `.env` file
+judged a development stack by a deployment's rules, and a launch in the hours
+either side of a term boundary landed in the neighbouring term. `Settings` is the
+one place either question is answered now, and `app.api.lti.launch` passes the
+instance it already has on `request.app.state.settings`.
+
 **A refusal here never fails the launch.** Every way a context can be unreadable
 ends in a `launch_defect` row and a return, and the person lands exactly as they
 would have. That is not leniency: the record is the visibility (`docs/MISTAKES.md`
@@ -51,27 +63,32 @@ module calls it and never assigns any of the four. A start position the term's m
 has no row for, or dates that would leave the term, is that service's refusal
 arriving here as a defect.
 
-**What is deliberately not done.** No roster sync is dispatched and no enrollment
-or teaching-instructor row is written — a launch proves one person's presence, not
-a roster, and E1-11 owns the sync, its debounce and its writes. No `person` row is
-created (E1-12, ADR 0024). Nothing reads `launch_defect` back: the application role
-holds `INSERT` on it and no `SELECT`, and E11 builds the surface that reads it.
+**What is deliberately not done.** No roster sync is dispatched from here and no
+enrollment or teaching-instructor row is written — a launch proves one person's
+presence, not a roster, and E1-11 owns the sync, its debounce and its writes. What
+this module does for that ticket is *answer which section*: `provision_from_launch`
+returns the id of the section a roster can now be fetched for, and the door hands
+that to `app.services.roster_sync.request_section_sync`, which decides whether to
+enqueue anything at all. No `person` row is created (E1-12, ADR 0024). Nothing
+reads `launch_defect` back: the application role holds `INSERT` on it and no
+`SELECT`, and E11 builds the surface that reads it.
 """
 
 import logging
-import os
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Final
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.models.identity import User
 from app.models.lti import (
     ROSTER_SERVICE_ADDRESS_COLUMN,
@@ -116,12 +133,6 @@ NRPS_CLAIM = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
 # Where the roster service address sits inside that claim. The member name is the
 # NRPS specification's.
 MEMBERSHIPS_URL_MEMBER = "context_memberships_url"
-
-# The one configuration name this module reads, and it reads it directly rather
-# than through `Settings`: see `_environment` below for why, and for why an unset
-# value puts the address rules in force rather than switching them off. Spelled as
-# `scripts/seed.py` spells it — the other caller of the same rules.
-ENVIRONMENT_VARIABLE = "ENVIRONMENT"
 
 # The three members of a context claim this module reads. `id` is the only one LTI
 # 1.3 requires; `label` and `title` are both optional, and the whole of what this
@@ -196,7 +207,9 @@ class ContextBinding:
     context_id: str
 
 
-def provision_from_launch(session: Session, claims: Mapping[str, Any]) -> None:
+def provision_from_launch(
+    session: Session, claims: Mapping[str, Any], settings: Settings
+) -> UUID | None:
     """Write what this launch discovered, or record why it could not be read.
 
     The order is the rule and not an implementation detail. The `user` row is
@@ -213,6 +226,16 @@ def provision_from_launch(session: Session, claims: Mapping[str, Any]) -> None:
     because the write precedes the read inside one transaction, rather than
     provisioning nothing until their second visit.
 
+    **What it answers is the section a roster can now be fetched for**, or `None`.
+    SPEC §7.3 pulls NRPS "on schedule and on launch (debounced)", and the launch
+    half needs a section id — so this hands one back rather than making the door
+    resolve a context claim to a row for itself, which would put domain logic in a
+    router §13 keeps thin. It is `None` for every launch that did not both discover
+    a section and store an address for it: a student's launch, a staff launch whose
+    context could not be read, and a staff launch whose platform advertised no
+    roster address or an address this container may not fetch. Each of those is a
+    section with no roster to pull rather than a sync to skip.
+
     Nothing here commits: the caller owns the transaction, exactly as
     `app.lti.replay_guard.claim_nonce` leaves its claim to ride inside the
     launch's own session. `app.api.lti.launch` commits once this returns.
@@ -220,7 +243,8 @@ def provision_from_launch(session: Session, claims: Mapping[str, Any]) -> None:
     platform = _registered_platform(session, claims)
     _record_the_launching_subject(session, platform, claims)
     if _is_a_staff_launch(claims) or _launching_subject_holds_leadership(session, platform, claims):
-        _ingest_the_context(session, claims)
+        return _ingest_the_context(session, claims, settings)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -417,8 +441,14 @@ def _launching_subject_holds_leadership(
 # ---------------------------------------------------------------------------
 
 
-def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
+def _ingest_the_context(
+    session: Session, claims: Mapping[str, Any], settings: Settings
+) -> UUID | None:
     """Upsert the course and section this launch's context names, or record a defect.
+
+    Answers the section this launch's roster can be fetched for, and `None` where
+    there is none to fetch — see `provision_from_launch` for what the answer is
+    spent on and for every way it comes back `None`.
 
     Every look-up happens before any write, so that four of the five defects are
     decided while nothing has been written at all. The fifth —
@@ -452,20 +482,20 @@ def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
         # carrying no label is: LTI 1.3 requires the member, and without it there
         # is no identity to bind a section to and nothing to resolve one by.
         _record_defect(session, claims, LaunchDefectKind.UNPARSEABLE_CONTEXT_LABEL)
-        return
+        return None
     if not _inside_the_bands(label.number):
         _record_defect(session, claims, LaunchDefectKind.OUT_OF_BAND_COURSE_NUMBER)
-        return
+        return None
 
     prefix = session.scalars(select(Prefix).where(Prefix.code == label.prefix)).one_or_none()
     if prefix is None:
         _record_defect(session, claims, LaunchDefectKind.UNKNOWN_PREFIX)
-        return
+        return None
 
-    term = _term_containing_today(session)
+    term = _term_containing_the_launch_day(session, settings)
     if term is None:
         _record_defect(session, claims, LaunchDefectKind.NO_TERM_FOR_LAUNCH_DATE)
-        return
+        return None
 
     binding = ContextBinding(
         deployment_id=_registered_deployment(session, claims).id, context_id=context_id
@@ -477,9 +507,9 @@ def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
     )
     if not _the_same_section(bound, named):
         _record_defect(session, claims, LaunchDefectKind.CONTEXT_COLLISION)
-        return
+        return None
 
-    address = _an_address_this_tool_may_call(session, claims)
+    address = _an_address_this_tool_may_call(session, claims, settings)
 
     both_or_neither = session.begin_nested()
     try:
@@ -492,14 +522,28 @@ def _ingest_the_context(session: Session, claims: Mapping[str, Any]) -> None:
         both_or_neither.rollback()
         logger.warning("%s: %s", LaunchDefectKind.SECTION_CODE_UNDERIVABLE.value, refusal)
         _record_defect(session, claims, LaunchDefectKind.SECTION_CODE_UNDERIVABLE)
-        return
+        return None
     except LmsOwnedWriteRefused:
         # Already logged, by the write site that knows which table it asked about.
         # What is left to do is the undoing, and this is the only frame that holds
         # the savepoint to undo it with.
         both_or_neither.rollback()
-        return
+        return None
     both_or_neither.commit()
+
+    if address is None:
+        # A section with no stored address is SPEC §7.3's never-synced state and
+        # there is nothing to trigger: "it has no way of its own to learn that a
+        # section exists" cuts both ways, and a sync enqueued with no URL to call
+        # would write a failed call record that makes never-synced look like a
+        # platform refusing the tool.
+        return None
+    # Re-read rather than threaded back out of the savepoint above, because the
+    # section this launch resolves to is `_section_bound_to`'s answer whether the
+    # row was written a moment ago or three terms back, and one lookup on a staff
+    # launch is cheaper than a second way of being told which row it is.
+    stored = _section_bound_to(session, binding)
+    return None if stored is None else stored.id
 
 
 def _parsed_label(claims: Mapping[str, Any]) -> ContextLabel | None:
@@ -529,7 +573,7 @@ def _inside_the_bands(number: str) -> bool:
     return False
 
 
-def _term_containing_today(session: Session) -> Term | None:
+def _term_containing_the_launch_day(session: Session, settings: Settings) -> Term | None:
     """The term whose dates contain the day of this launch, or `None`.
 
     Todd's ruling, 2026-08-26: "a new section belongs to the one term whose dates
@@ -538,13 +582,19 @@ def _term_containing_today(session: Session) -> Term | None:
     situations with the same answer here, and taking whatever term exists would put
     every section of the year into it.
 
-    **The day is UTC's**, because this function is handed no institution timezone
-    (ADR 0091 records the limit): a launch in the hours either side of a term
-    boundary can be read into the neighbouring day. The most recently started
-    containing term wins if an administrator has configured two that overlap, which
-    is a tie this schema permits and nothing else decides.
+    **The day is the institution's**, which is E1-11 closing deferred E1-10 item 2.
+    This read UTC's day while the writer was handed no configuration, and ADR 0091
+    recorded the limit: "a launch in the hours either side of a term boundary can be
+    read into the neighbouring calendar day and land in the neighbouring term." SPEC
+    §3.1 makes every moment in this product a moment in the institution timezone and
+    §8 makes that a deployment-level setting, so a section's term is a fact about the
+    institution's calendar rather than about the server's clock.
+
+    The most recently started containing term wins if an administrator has
+    configured two that overlap, which is a tie this schema permits and nothing else
+    decides.
     """
-    today = datetime.now(UTC).date()
+    today = datetime.now(ZoneInfo(settings.institution_timezone)).date()
     return session.scalars(
         select(Term)
         .where(Term.start_date <= today, Term.end_date >= today)
@@ -587,7 +637,9 @@ def _section_bound_to(session: Session, binding: ContextBinding) -> Section | No
     ).one_or_none()
 
 
-def _an_address_this_tool_may_call(session: Session, claims: Mapping[str, Any]) -> str | None:
+def _an_address_this_tool_may_call(
+    session: Session, claims: Mapping[str, Any], settings: Settings
+) -> str | None:
     """The launch's roster address if this container may fetch it, and `None` if not.
 
     Round 3's MEDIUM. E1-11 calls this address with the tool's own client
@@ -610,7 +662,7 @@ def _an_address_this_tool_may_call(session: Session, claims: Mapping[str, Any]) 
         return None
     try:
         refuse_invalid_fetched_address(
-            _environment(), column=ROSTER_SERVICE_ADDRESS_COLUMN, address=address
+            settings.environment, column=ROSTER_SERVICE_ADDRESS_COLUMN, address=address
         )
     except RegistrationAddressError as refusal:
         logger.warning(
@@ -622,24 +674,6 @@ def _an_address_this_tool_may_call(session: Session, claims: Mapping[str, Any]) 
         _record_defect(session, claims, LaunchDefectKind.ROSTER_ADDRESS_REFUSED)
         return None
     return address
-
-
-def _environment() -> str:
-    """The `ENVIRONMENT` this process is running under, read per call.
-
-    Read here rather than taken as an argument, because the writer's signature is
-    the launch's own — a session and the claims — and read per call rather than at
-    import, so a process that is reconfigured is judged by what it is configured
-    as now.
-
-    **Absent reads as a deployment, not as development.** `is_a_deployment("")` is
-    true, so an unset variable puts the address rules *in force* rather than
-    switching them off. That is the same spelling `scripts/seed.py` uses, and the
-    direction matters: `Settings` makes `ENVIRONMENT` required, so a running
-    deployment always has one, and the failure this ordering prevents is a
-    misconfigured process quietly accepting an address it would otherwise refuse.
-    """
-    return os.environ.get(ENVIRONMENT_VARIABLE, "")
 
 
 def _roster_address(claims: Mapping[str, Any]) -> str | None:

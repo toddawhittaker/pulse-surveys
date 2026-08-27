@@ -1,5 +1,40 @@
 # 0091 — What a launch provisions, and what it writes down instead
 
+> **Amended 2026-08-27 by E1-11.** Three sentences below were true when this was
+> written and are not now. Everything else stands, and nothing here is reopened.
+>
+> - **"The day of the launch" is the institution's day, not UTC's.** The
+>   consequence paragraph saying otherwise, and the rejected alternative "A
+>   `settings` parameter for the institution timezone", record the state E1-10
+>   shipped. E1-11's D13 took that alternative — `provision_from_launch(session,
+>   claims, settings)`, with the door passing `request.app.state.settings` — so the
+>   term a new section lands in is read off `settings.institution_timezone` (SPEC
+>   §3.1, §8). The rejected-alternative paragraph stays in place as the record of
+>   what deferring it cost, which is what deferred E1-10 item 2 was.
+> - **`_environment()` is gone with it.** It read `os.environ` for the rule
+>   deciding which roster addresses this container may fetch, and `Settings` reads
+>   `.env` where `os.environ` does not — so a development stack configured only by
+>   a `.env` file was judged by a deployment's rules and the mock's own cleartext
+>   address was refused. `settings.environment` is the one answer now (deferred
+>   E1-10 item 5).
+> - **E1-11's sync does not write sections.** The paragraph on the unique
+>   constraint says it "writes sections and never reads
+>   `app.services.provisioning`". The second half stands and is still why the
+>   constraint belongs in the schema; the first half does not — E1-11's catalog
+>   entry grants `user`, `enrollment` and the `INSTRUCTOR` `role_assignment` row
+>   and deliberately not `section`, because SPEC §7.3 gives a section exactly one
+>   way to be discovered (ADR 0090's own amendment, and ADR 0095).
+>
+> One thing this record predicted and E1-11 confirms: "E1-11 picks its platform off
+> the binding, not off the section's course." The sync resolves its registration
+> through `section.lti_deployment_id` and through nothing else, which is deferred
+> E1-10 item 1's done-when.
+>
+> E1-11 also spends what this record left open at the door: `provision_from_launch`
+> now answers with the id of the section a roster can be fetched for, or `None`, so
+> that the launch handler can hand it to the debounced sync trigger without
+> resolving a context claim to a row itself.
+
 ## Context
 
 SPEC §2.1 gives courses and sections two arrival paths, "hourly roster sync +

@@ -123,6 +123,7 @@ __all__ = [
     "resolve_scope",
     "sanction_for",
     "scoped_reader",
+    "teaching_instructor_assigned",
     "transitive_purview",
 ]
 
@@ -397,6 +398,23 @@ _HOLDS_A_LEADERSHIP_ASSIGNMENT = text(
     " SELECT 1 FROM public.assignment_scope AS held"
     " WHERE held.person_id = :person_id"
     " AND held.role = ANY(CAST(:roles AS public.assignment_role[]))"
+    ")"
+)
+
+# Whether one person already holds the teaching-instructor grant over one section.
+# **A grant question rather than a purview question**, and it is here rather than
+# in the caller because `public.assignment_scope` is this module's view to read:
+# E0-41 fails any module under `backend/app/` outside this one that runs SQL
+# naming it, on the ground that a second reader is a second place the scoping rule
+# can be got wrong. The caller is `app.services.roster_sync`, which holds `INSERT`
+# on `role_assignment` and deliberately no `SELECT` — so this is also the only way
+# it can ask.
+_HOLDS_THE_TEACHING_INSTRUCTOR_GRANT = text(
+    "SELECT EXISTS ("
+    " SELECT 1 FROM public.assignment_scope AS granted"
+    " WHERE granted.person_id = :person_id"
+    " AND granted.role = CAST(:role AS public.assignment_role)"
+    " AND granted.section_id = :section_id"
     ")"
 )
 
@@ -754,6 +772,40 @@ def holds_leadership(session: Session, *, person_id: UUID) -> bool:
     return bool(answer)
 
 
+def teaching_instructor_assigned(session: Session, *, person_id: UUID, section_id: UUID) -> bool:
+    """Does this person already hold the `INSTRUCTOR` grant over this section?
+
+    Asked by E1-11's roster sync before it writes one, so that an hourly run does
+    not add a second identical grant every hour. SPEC §2.1 puts no uniqueness rule
+    on `role_assignment` — two chairs of one department is a shape no ticket rules
+    out — so nothing in the database refuses the duplicate, and the writer has to
+    ask.
+
+    **It lives here because the view does.** E0-41's rule is that
+    `public.assignment_scope` is read through this module and nowhere else, and
+    `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` enforces it.
+    The sync also holds `INSERT` on `role_assignment` and no `SELECT` — E1-11's D8
+    withholds it deliberately — so this view is not merely the tidy way for it to
+    ask, it is the only way.
+
+    **Not an authorization decision**, and the difference matters for how it fails.
+    `guard_write` is what decides whether the sync may write the row at all; this
+    only says whether the row is already there. A false *yes* leaves a real
+    instructor without the section's report, and a false *no* writes a duplicate
+    grant to somebody who already had it — neither widens anybody's purview, which
+    is why this is a plain predicate and not a `ScopedReader` method.
+    """
+    answer = session.execute(
+        _HOLDS_THE_TEACHING_INSTRUCTOR_GRANT,
+        {
+            "person_id": person_id,
+            "role": LMS_OWNED_ASSIGNMENT_ROLE.value,
+            "section_id": section_id,
+        },
+    ).scalar_one()
+    return bool(answer)
+
+
 def resolve_scope(
     session: Session,
     *,
@@ -967,7 +1019,7 @@ class WriteSanction:
 # mapping, so a caller cannot authorize itself by constructing the sanction it
 # wants.
 #
-# **One entry today, and adding a second is the conversation.** `launch_provisioning`
+# **Two entries, and adding a third is the conversation.** `launch_provisioning`
 # is `app.services.provisioning`, E1-10's launch-time ingestion: SPEC §2.1 gives
 # courses and sections two arrival paths, "hourly roster sync + launch-time
 # ingestion", and §7.3 makes the first staff launch of a section the only thing
@@ -975,9 +1027,22 @@ class WriteSanction:
 # launch path that creates a `user` row" as a sanctioned writer when it put `user`
 # in the guarded set.
 #
-# **`enrollment` is deliberately absent**, and so is the `INSTRUCTOR`
-# `role_assignment` row: a launch proves one person's presence, not a roster, and
-# E1-11's sync adds its own entry here in the pull request that needs it.
+# **`enrollment` is deliberately absent from the launch writer**, and so is the
+# `INSTRUCTOR` `role_assignment` row: a launch proves one person's presence, not a
+# roster.
+#
+# `roster_sync` is `app.services.roster_sync`, E1-11's hourly NRPS pull — §2.1's
+# other arrival path. It takes three: `user`, because a member this deployment has
+# never seen needs a row before anything can be enrolled; `enrollment`, which is
+# what §3.4's participation windows are computed from; and `role_assignment`, for
+# the teaching instructor's row, which is the first entry in this catalog that is a
+# row-grain rule rather than a table (see `guard_write` below).
+#
+# **`course` and `section` are deliberately not in the sync's entry**, and the
+# absence is the load-bearing part: SPEC §7.3 gives a section exactly one way to be
+# discovered — the staff launch that stores its roster address — so a sync able to
+# write `section` would be inventing a section from a roster it could only fetch
+# because that section already existed.
 #
 # **The inventory is pinned in a test, not here** (`docs/MISTAKES.md` entry 35).
 # `tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py` compares this
@@ -985,6 +1050,7 @@ class WriteSanction:
 # here is a visible diff in a test file this module cannot shrink.
 SANCTIONED_WRITERS: Final[Mapping[str, frozenset[str]]] = {
     "launch_provisioning": frozenset({"course", "section", "user"}),
+    "roster_sync": frozenset({"user", "enrollment", "role_assignment"}),
 }
 
 
@@ -1040,9 +1106,16 @@ def guard_write(
     which is the behaviour every caller in this project that is not a catalogued
     writer gets and the property ADR 0090 was designed around. With one, the
     *catalog* decides: `sanction_for` is how a writer obtains it, and a sanction
-    the catalog does not back refuses exactly as none would. The teaching-instructor
-    row below is outside the mechanism entirely — no sanction reaches it, because
-    no catalogued writer is granted `role_assignment`.
+    the catalog does not back refuses exactly as none would.
+
+    **The teaching-instructor row below reads the catalog the same way**, and E1-11
+    is why. That branch was an unconditional refusal while no catalogued writer was
+    granted `role_assignment`; SPEC §2.1 makes the teaching instructor LMS-owned and
+    the roster is where Pulse learns who teaches a section, so the sync has to be
+    able to pass it — and the alternative to passing the guard is a writer that does
+    not call it, which is exactly the bypass ADR 0045 names. It mirrors the branch
+    above exactly: the catalog is the authority, `sanction.tables` is never read,
+    and any role but `INSTRUCTOR` on this table is Pulse's own to write.
     """
     if table in LMS_OWNED_TABLES and not _catalog_grants(sanction, table):
         sanctioned = "" if sanction is None else f" `{sanction.writer}` is not sanctioned for it."
@@ -1053,13 +1126,18 @@ def guard_write(
             f"{sanctioned}"
         )
 
-    if table == ROLE_ASSIGNMENT_TABLE and assignment_role is LMS_OWNED_ASSIGNMENT_ROLE:
+    if (
+        table == ROLE_ASSIGNMENT_TABLE
+        and assignment_role is LMS_OWNED_ASSIGNMENT_ROLE
+        and not _catalog_grants(sanction, ROLE_ASSIGNMENT_TABLE)
+    ):
+        sanctioned = "" if sanction is None else f" `{sanction.writer}` is not sanctioned for it."
         raise LmsOwnedWriteRefused(
             f"a {LMS_OWNED_ASSIGNMENT_ROLE.value} row on public.{ROLE_ASSIGNMENT_TABLE} is SPEC "
             "2.1's teaching-instructor link, which the LMS owns. It is not a stale attribute but "
             "a purview grant — 2.1 computes purview from exactly these rows — so writing one "
             "grants somebody oversight of a section. Every other role on this table is Pulse's "
-            "own, built top-down in the admin console."
+            f"own, built top-down in the admin console.{sanctioned}"
         )
 
 

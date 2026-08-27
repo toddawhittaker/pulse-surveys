@@ -181,3 +181,13 @@ and repaired it at the `provider` fixture in the same tests-first round, so
 the reds never existed. Counted as a catch: the entry's rule — go looking for
 the earlier ticket's tests your new rule breaks, from the side of the wall
 that can fix them — is what found it.
+**Instance, 2026-08-27 (E1-11, dispute E1-11-02).** D7 made
+`user_identity.identity_name` nullable, and seventeen merged Care-door tests —
+eleven of them invariant-marked — errored inside their own seeding:
+`seed_row`'s documented rule leaves a nullable column to the database, and the
+helpers' non-vacuity guard had been leaning on the NOT NULL constraint to fill
+a value they never named. Found by the implementer's full-suite run, repaired
+on the test side after a ruling: each helper now states the identity it seeds.
+Not counted as a catch; the entry describes what happened, it did not prevent
+it — the pre-write sweep that caught E1-12's instance looked for route
+consumers, not schema-constraint dependents.

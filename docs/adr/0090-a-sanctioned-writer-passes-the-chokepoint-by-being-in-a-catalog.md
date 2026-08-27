@@ -1,5 +1,32 @@
 # 0090 — A sanctioned writer passes the chokepoint by being in a catalog
 
+> **Amended 2026-08-27 by E1-11.** The decision below says "The teaching-instructor
+> row is outside the mechanism… no catalogued writer is granted `role_assignment`,
+> so a sanction never reaches that branch. E1-11 adds the `INSTRUCTOR` write it
+> needs by adding an entry, deliberately, in the pull request that needs it." That
+> is what E1-11 did, and this paragraph records the shape of it, so the sentence
+> above reads as history rather than as the current rule.
+>
+> `SANCTIONED_WRITERS` gains `"roster_sync": {"user", "enrollment",
+> "role_assignment"}`, and `guard_write`'s `role_assignment`/`INSTRUCTOR` branch —
+> an unconditional refusal until now — learns the same test the `LMS_OWNED_TABLES`
+> branch already applies: the catalog decides, `sanction.tables` is never read, and
+> a hand-built sanction naming `role_assignment` is refused exactly as no sanction
+> would be. Any role but `INSTRUCTOR` on that table is still Pulse's own to write
+> and reaches no branch at all.
+>
+> Nothing else here is reopened. The mechanism is unchanged, and the reason the
+> branch could not simply be routed around is the reason this record gives for the
+> whole design: SPEC §2.1 makes the teaching instructor LMS-owned, so the
+> alternative to passing the guard is a writer that does not call it — which is the
+> bypass [ADR 0045](0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md)
+> names and E0-35's sweep exists to find. `course` and `section` are deliberately
+> **not** in the sync's entry: SPEC §7.3 gives a section exactly one way to be
+> discovered, and a sync able to write one would be inventing a section from a
+> roster it could only fetch because that section already existed. Two entries is
+> still a catalog small enough that the pinning test is the record, which is what
+> the last consequence below asks.
+
 ## Context
 
 [ADR 0045](0045-the-chokepoint-refuses-an-lms-owned-write-at-table-grain-plus-one-row.md)
