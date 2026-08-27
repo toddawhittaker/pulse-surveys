@@ -46,7 +46,12 @@ leadership limb is stated and **dormant**: resolving a launch subject to a live
 `role_assignment` needs the `sub` → `user` → `person` link only E1-12 builds, so
 until then a dean's launch discovers nothing. That fails safe — a launch that
 provisions late, rather than one that provisions for the wrong person — and E1-12
-carries the accept-side criterion.
+carries the accept-side criterion. **That limb is live as of E1-12**: the
+launching subject resolves to a person and `public.assignment_scope` is asked
+whether they hold a leadership role, with the claim test above running first and
+short-circuiting, so an ordinary instructor launch costs no query. See
+[ADR 0097](0097-the-identity-a-verified-subject-resolves-to.md); nothing else in
+this record changes.
 
 **The term is the one whose dates contain the day of the launch** (Todd's
 ruling). Not the only term, not the most recent: an empty `term` table and a table

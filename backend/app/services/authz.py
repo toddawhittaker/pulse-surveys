@@ -93,7 +93,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import TextClause
 
 from app.config import Settings
-from app.models.identity import AssignmentRole
+from app.models.identity import LEADERSHIP_ROLES, AssignmentRole
 from app.views_sql.queries import (
     SectionEnrollmentCount,
     SectionRosterRow,
@@ -117,6 +117,7 @@ __all__ = [
     "WriteSanction",
     "guard_write",
     "holds_care",
+    "holds_leadership",
     "own_grant",
     "raw_comments_permitted",
     "resolve_scope",
@@ -376,6 +377,26 @@ _HOLDS_A_LIVE_CARE_ASSIGNMENT = text(
     " SELECT 1 FROM public.assignment_scope AS acting"
     " WHERE acting.person_id = :person_id"
     " AND acting.role = CAST(:care AS public.assignment_role)"
+    ")"
+)
+
+# Whether this person holds a live assignment in SPEC §2's reporting chain
+# (E1-12). The same shape as the predicate above and here for the same reason it
+# is: `public.assignment_scope` is read through this module and nowhere else, and
+# `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` is what holds
+# that. §7.3 authorizes a roster sync on "an instructor **or any leadership
+# role**", and the leadership half is a `role_assignment` row rather than anything
+# a launch says — `app.services.provisioning` asks it through `holds_leadership`
+# below.
+#
+# The set is bound and cast, so a role name this schema does not have is a
+# database error rather than a silent no-match. It carries "live" in the same
+# sense the Care predicate does, and gains end-dating with it.
+_HOLDS_A_LEADERSHIP_ASSIGNMENT = text(
+    "SELECT EXISTS ("
+    " SELECT 1 FROM public.assignment_scope AS held"
+    " WHERE held.person_id = :person_id"
+    " AND held.role = ANY(CAST(:roles AS public.assignment_role[]))"
     ")"
 )
 
@@ -691,6 +712,44 @@ def holds_care(session: Session, *, person_id: UUID) -> bool:
     answer = session.execute(
         _HOLDS_A_LIVE_CARE_ASSIGNMENT,
         {"person_id": person_id, "care": AssignmentRole.CARE.value},
+    ).scalar_one()
+    return bool(answer)
+
+
+def holds_leadership(session: Session, *, person_id: UUID) -> bool:
+    """Does this person hold a live assignment in SPEC §2's reporting chain? (E1-12)
+
+    SPEC §7.3 authorizes a roster sync on a launch "by an instructor **or any
+    leadership role**", and §2.1 makes a role a `role_assignment` row rather than
+    anything a launch says — the administrator of a platform writes what its
+    launches claim, and a limb read out of the roles claim would let them hand
+    themselves a section's whole roster of names and email addresses.
+    `app.services.provisioning` asks this once a launch's subject has resolved to
+    a person, and only when the claim-based half has already said no.
+
+    **Here rather than at the caller**, and that placement is the rule rather than
+    a preference: `public.assignment_scope` is unfiltered — nothing in the
+    database narrows it — so every read of it goes through this module, where
+    §2.1's scope rules are written. `tests/unit/test_the_org_views_are_read_only_
+    through_the_grant.py` is the invariant that holds it, and it names this file
+    as where a new predicate belongs.
+
+    **It is a predicate about a role and not a purview**, which is why it sits
+    beside `holds_care` rather than inside `resolve_scope`. It answers whether a
+    launch may trigger a write of the tool's own; it scopes no read and returns no
+    node. `LEADERSHIP_ROLES` is the enumerated set, and `CARE`, `ADMIN` and
+    `INSTRUCTOR` are outside it deliberately — the first two hold no rank in the
+    supervision chain (§2.1), and an instructor is §7.3's other limb, authorized
+    by the launch's own LIS role against a different source.
+
+    Both directions cost something and they are not symmetric. A false *no* is a
+    dean's section discovered late, which is what E1-10 shipped on purpose. A
+    false *yes* points a scheduled sync at a roster §7.3 does not authorize, and
+    that roster is names and email addresses.
+    """
+    answer = session.execute(
+        _HOLDS_A_LEADERSHIP_ASSIGNMENT,
+        {"person_id": person_id, "roles": [role.value for role in LEADERSHIP_ROLES]},
     ).scalar_one()
     return bool(answer)
 

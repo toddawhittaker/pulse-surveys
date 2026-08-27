@@ -43,6 +43,9 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/provisioning.py` — E1-10: the launch-time writer, reached by
     discovery; the committed prefix, term and start-letter map a launch resolves
     against; and a launch's claims as a value for the cases nothing mints.
+  - `fixtures/web_identity.py` — E1-12: the `person`, `user` and
+    `web_login_subject` rows a door resolves a subject through, seeded committed,
+    and the session claims a landing carries them back in.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -65,4 +68,5 @@ pytest_plugins = (
     "fixtures.suite_keys",
     "fixtures.client_credentials",
     "fixtures.provisioning",
+    "fixtures.web_identity",
 )

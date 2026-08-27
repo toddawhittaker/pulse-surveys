@@ -185,6 +185,93 @@ class Person(UuidPrimaryKey, Base):
     category: Mapped[str] = mapped_column(String(50), nullable=False)
 
 
+# The identity marker on `web_login_subject`, in ADR 0022's third shape: a comment
+# on the whole table, which marks every column of it. Spelled here rather than in
+# the revision that writes it, and imported by that revision, so the model and the
+# database cannot come to say two different things (`docs/MISTAKES.md` entry 13).
+#
+# It has to contain the word "identity" — that is the token
+# `tests/integration/test_identity_column_marker.py` reads, and the sweep in that
+# file is what E0-10's views and the §4.1 invariant pass are both computed from.
+WEB_LOGIN_SUBJECT_COMMENT = (
+    "Which person one identity provider's subject is (E1-12, ADR 0097). Every column here is "
+    "identity-bearing: `idp_subject` is a stable per-person key at the provider, the web door's "
+    "counterpart to `user.lms_user_id`, and it matches no name fragment the marker sweep knows."
+)
+
+
+class WebLoginSubject(UuidPrimaryKey, Base):
+    """Which person one identity provider's subject is — the web door's whole answer.
+
+    SPEC §2 gives every role but instructor and student a second way in, and an
+    `id_token` identifies its holder by one pair and one pair only: the issuer that
+    signed it and the `sub` it carries. This table maps that pair to a `person`,
+    and E1-12's bounding constraint is that nothing else may: **a merge is never
+    inferred from a mutable claim.** An email address is the merge nobody writes on
+    purpose and everybody reaches for when a linkage is missing — two people share
+    one after a rename, a departmental mailbox sits on two records, an address is
+    reassigned to a new hire — and ADR 0024 already rejected that shape for the
+    person-to-user link, because "the failure is a purview computed for the wrong
+    person — invisible, because it produces a plausible answer".
+
+    **A subject with no row here is a person this system has no record of**, which
+    is a defined state and not an error: the provider asserts that somebody
+    authenticated, never that Pulse has a record of them, and §2 puts every role in
+    Pulse's own records. The web door answers such a login with a calm page and
+    writes nothing. Rows arrive from the demo seed or from an administrator, never
+    from a door — `pulse_app` holds no grant of any kind on this table, and the
+    door reads it through `public.resolve_web_person` (ADR 0094).
+
+    **A separate table rather than two columns on `person`**, and ADR 0097 records
+    why: a person may hold no web account at all, the pair is what has to be unique
+    rather than either half, and a nullable pair on `person` makes "no account" and
+    "half a row" the same shape.
+
+    **What the database refuses.**
+
+      - *One subject naming two people* — `UNIQUE (idp_issuer, idp_subject)`. Which
+        person a login resolves to would otherwise depend on which row is read
+        first, and that is a purview handed to whoever the plan chose.
+      - *One person holding two web accounts* — `UNIQUE (person_id)`, mirroring
+        ADR 0024's one-user rule so that the two doors are symmetric. It is the
+        conservative half of the design rather than a fact about people: a
+        deployment federating a second provider needs it dropped, which is one
+        migration and no data change, and ADR 0097 says so.
+
+    **The table comment carries the identity marker** (ADR 0022's third shape).
+    `idp_subject` matches no fragment the name-based sweep in
+    `tests/integration/test_identity_column_marker.py` knows, and never will — it
+    is an opaque string a provider chose — so a name-based reader is silent about
+    it whether it is marked or not. It is the web door's exact counterpart to
+    `user.lms_user_id`: a stable per-person key that resolves to a directory entry
+    at the provider in one step. The comment is on the table because every column
+    here is of that one kind.
+    """
+
+    __tablename__ = "web_login_subject"
+    __table_args__ = (
+        UniqueConstraint("idp_issuer", "idp_subject"),
+        UniqueConstraint("person_id"),
+        {"comment": WEB_LOGIN_SUBJECT_COMMENT},
+    )
+
+    # The issuer as OIDC Discovery 1.0 §4.3 compares it — an origin, no trailing
+    # slash — and the `sub` verbatim. Two columns rather than one composite string,
+    # because a delimiter inside either half would make one pair two.
+    idp_issuer: Mapped[str] = mapped_column(Text, nullable=False)
+    idp_subject: Mapped[str] = mapped_column(Text, nullable=False)
+    # RESTRICT, like every other reference into the people graph: removing a person
+    # who can still sign in is a deliberate edit, and a cascade here would delete
+    # the record of who somebody is as a side effect of tidying the graph.
+    #
+    # Not indexed on its own: it is the whole of `uq_web_login_subject_person_id`,
+    # which already serves a lookup by person. Same reasoning as
+    # `person.user_id`'s unique constraint.
+    person_id: Mapped[UUID] = mapped_column(
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=False
+    )
+
+
 class Enrollment(UuidPrimaryKey, Base):
     """One window during which a user was enrolled in a section.
 
@@ -311,6 +398,38 @@ class AssignmentRole(StrEnum):
     VP_ACADEMICS = "VP_ACADEMICS"
     CARE = "CARE"
     ADMIN = "ADMIN"
+
+
+# SPEC §2's reporting chain: the roles that supervise somebody. §7.3 calls them
+# "any leadership role" when it says which launches trigger a roster sync, and
+# §2 gives them all one shape of screen — a roll-up over whatever the holder
+# supervises.
+#
+# **Here rather than in a service, because two readers of different kinds need
+# it.** `app.services.landing` compares a *claim* against it to choose a landing
+# view, and that module retires in E1-13; `app.services.provisioning` compares a
+# launching person's own `role_assignment` rows against it to decide whether §7.3
+# authorizes the sync, and that one does not. A set that outlives one of its
+# readers belongs beside the enumeration it names, not inside either reader.
+#
+# Members rather than strings, so a role this schema does not have cannot be
+# written down here at all: a typo is an `AttributeError` at import. `StrEnum`
+# members compare equal to their own spelling, so a claim string and a role
+# column both match without anybody converting either.
+#
+# `CARE` and `ADMIN` are deliberately absent, and `INSTRUCTOR` with them. §2.1
+# puts Care outside the supervision graph entirely — it supervises nothing — and
+# an admin administers the console rather than a hierarchy. An instructor is
+# §7.3's *other* limb, authorized by the launch's own LIS role rather than by an
+# assignment, so putting it here would merge two rules that are checked
+# differently and against different sources.
+LEADERSHIP_ROLES: tuple[AssignmentRole, ...] = (
+    AssignmentRole.VP_ACADEMICS,
+    AssignmentRole.DEAN,
+    AssignmentRole.ASSISTANT_DEAN,
+    AssignmentRole.CHAIR,
+    AssignmentRole.LEAD_FACULTY,
+)
 
 
 # SPEC §2.1's "Scope attachment" column, as the one expression that holds it, and

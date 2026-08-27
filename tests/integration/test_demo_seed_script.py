@@ -102,6 +102,40 @@ PLATFORMS = "lti_platform"
 DEPLOYMENTS = "lti_deployment"
 USERS = "user"
 
+# Every subject the seed makes launchable at the mock's registration, and the
+# sentence that admits each. **A hand-written inventory, and the whole of what an
+# unauthenticated launch from that platform can reach** — see
+# `test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own` below for what
+# it costs and why E1-12 moved it off empty.
+#
+#   - `mock-lms-user-instructor` — the two-hat person's launch-side identity, and
+#     the value `mock-idp/app/seed.py::LMS_INSTRUCTOR_USER_ID` publishes as hers.
+#     E1-12's first criterion is that her launch and her web login reach one
+#     `person` row, which needs a `user` row on the platform that signs her launch.
+#   - `mock-lms-user-dean` — the leadership person §7.3's leadership limb is driven
+#     by: a launch whose roles claim carries no Instructor URN, by somebody Pulse's
+#     own records say is a dean, has to store the roster address. Nothing else in
+#     the seeded world holds a leadership assignment *and* a launchable subject.
+#
+# Both are values `scripts/seed.py` writes; a rename on either side is a named
+# failure below rather than a demo where one of the two doors silently stops
+# resolving.
+MOCK_WORLD_SUBJECTS = ("mock-lms-user-instructor", "mock-lms-user-dean")
+
+# The two-hat person's *other* subject, at the mock identity provider.
+# `mock-idp/app/seed.py` builds every subject as `mock-idp-user-<slug>` and gives
+# her the slug `care-who-teaches` — "Care, and teaching a section by the other
+# door" — so this is that value spelled out. It is the web-door half of the pair
+# E1-12's first criterion is about, and a rename on either side is a named failure
+# in the linkage test below rather than a demo where her two doors quietly reach
+# two people.
+MOCK_IDP_TWO_HAT_SUBJECT = "mock-idp-user-care-who-teaches"
+
+# E1-12's linkage table, and the three columns the seed writes into it.
+LINKAGES = "web_login_subject"
+LINKAGE_SUBJECT_COLUMN = "idp_subject"
+LINKAGE_ISSUER_COLUMN = "idp_issuer"
+
 # E1-05's two columns on `lti_platform`, spelled by that ticket. The first is the
 # browser-facing endpoint a launch is redirected to; the second is the token
 # endpoint the tool fetches server-side, which this ticket deliberately leaves
@@ -1020,8 +1054,9 @@ def test_the_seed_registers_the_mock_platform_so_a_launch_from_it_can_be_trusted
         f"The mock is the only `{PLATFORMS}` row the seed wrote, so it has replaced the fictional "
         "registration rather than joined it. ADR 0065 keeps that one: the demo institution's "
         "eighteen people belong to a platform at an RFC 2606 `.invalid` address that resolves "
-        "nowhere, and nobody launches as them. The mock registration carries no `user` rows at "
-        "all — provisioning the person a launch resolves to is E1's (SPEC §14.3)."
+        "nowhere, and nobody launches as them. The mock registration carries `user` rows only for "
+        "the two subjects E1-12 makes launchable, which "
+        "`test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own` pins as an inventory."
     )
 
     for_the_mock = [row for row in deployments if row.get("lti_platform_id") in mock_ids]
@@ -1034,40 +1069,52 @@ def test_the_seed_registers_the_mock_platform_so_a_launch_from_it_can_be_trusted
     )
 
 
-def test_no_seeded_user_belongs_to_the_mock_platform(
+def test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own(
     seeded_demo: Any,
     demo_database: Any,
     metadata_tables: dict[str, Any],
     base_compose: dict[str, Any],
     mock_lms_service: str,
 ) -> None:
-    """The mock's registration carries no people, which is what stops it being a login oracle.
+    """What a launch from the platform that authenticates nobody can reach, as an inventory.
 
-    **This is the property that makes registering the mock survivable, and until
-    the E0-31 security review it was stated in five files and asserted in none.**
+    **This test used to say "no seeded user belongs to the mock platform", and
+    E1-12 changed it deliberately** — which is what its own previous message asked
+    of whoever changed it. The property and the reason it existed are unchanged and
+    are worth restating, because what follows is a narrowing rather than a removal.
+
     `mock-lms` authenticates nobody: it signs a launch as whatever subject the
-    caller picks (ADR 0038). Registering it makes `http://mock-lms:8000` a trusted
-    issuer. The single thing standing between that and a working login as a real
-    demo person is that **no `user` row points at the mock's platform row**, so a
-    launch from it can never reach a `person`, and therefore never reaches
-    `authz.resolve_scope`.
+    caller picks (ADR 0038), and registering it makes `http://mock-lms:8000` a
+    trusted issuer. So every `user` row on that registration is a subject anyone who
+    can reach the container on a development box can launch as, and every `person`
+    such a row links to is a purview they then hold. E0-31 made that reachable set
+    empty and said so.
 
-    **The concrete failure it stops.** E0-18 is the next ticket, it needs its
-    Playwright launch to land somewhere, and the cheapest way to get there is one
-    `User` upsert with `lti_platform_id` set to the mock's id and a `person` link
-    beside it. Add those two rows and anyone who can reach the container on a
-    development box holds a seeded person's purview — with every other test in
-    this repository still green. That is `docs/MISTAKES.md` entry 2's exact shape,
-    and the sibling property in the same pull request, the environment guard, got
-    a reaching test and a named mutation while this one got prose.
+    **E1-12 makes it two, by name.** The dual-door identity merge has to be
+    demonstrable on the running stack and in E1-15's browser proof: the two-hat
+    person has to reach one identity through both doors, and §7.3's leadership limb
+    has to be drivable, which needs a launchable subject linked to a person holding
+    a live leadership assignment. Both are new persons belonging to the mock world —
+    ADR 0024 allows one user per person and the demo institution's eighteen are
+    already linked to their own fictional platform, so these could not have been
+    reused even if that were wanted.
 
-    Whoever wants to make the demo institution launchable is not blocked by this
-    test — they are asked to change it deliberately, and to say in the pull
-    request what a launch from a platform that authenticates nobody now reaches.
+    **What that costs, stated rather than implied**, because a narrowed guard that
+    does not say what it gave up is a guard nobody can audit. On a development box —
+    the only environment where the seed runs at all (ADR 0063) and the only one
+    where the mock is registered — anyone who can reach the mock container can now
+    launch as those two subjects and hold what they hold, including a dean's
+    purview over the seeded institution. The data behind it is fictional and the
+    container is a development one; ADR 0097 records the trade and the pull request
+    says it again. The rule that keeps it bounded is this test: the reachable set is
+    **exactly** the two subjects below, and a third one added by a later ticket is a
+    red here rather than a quiet widening.
 
-    **The control is the fictional platform's own users.** A demo with no `user`
-    rows at all would satisfy "none belongs to the mock" while asserting nothing,
-    so the eighteen that belong to ADR 0065's registration are counted first.
+    **Two controls, and neither is ceremony.** The fictional platform's own users
+    have to be there, or "only these two belong to the mock" is being asserted over
+    an empty or wholly-mock table; and each inventoried subject has to be *found*,
+    or the equality is satisfied by a seed that stopped writing them and a stack
+    where neither door can be demonstrated at all.
     """
     seeded(seeded_demo)
     addresses = mock_platform_addresses(base_compose, mock_lms_service)
@@ -1096,21 +1143,118 @@ def test_no_seeded_user_belongs_to_the_mock_platform(
 
     on_other_platforms = [row for row in users if row.get("lti_platform_id") not in mock_ids]
     assert on_other_platforms, (
-        f"The seed wrote no `{USERS}` rows outside the mock's registration, so 'none belongs to "
-        "the mock' is being asserted over an empty or wholly-mock table. ADR 0065 gives the demo "
+        f"The seed wrote no `{USERS}` rows outside the mock's registration, so 'only the mock "
+        "world's own two belong to the mock' is being asserted over an empty or wholly-mock "
+        "table. ADR 0065 gives the demo "
         "institution's eighteen people a fictional platform of their own; if they are gone, this "
         "assertion is measuring their absence rather than the mock's emptiness."
     )
 
-    on_the_mock = [row.get("id") for row in users if row.get("lti_platform_id") in mock_ids]
-    assert not on_the_mock, (
-        f"{len(on_the_mock)} seeded `{USERS}` row(s) belong to the mock platform's registration: "
-        f"{sorted(str(user_id) for user_id in on_the_mock)}. The mock signs a launch as any "
+    on_the_mock = [row for row in users if row.get("lti_platform_id") in mock_ids]
+    subjects = sorted(str(row.get("lms_user_id")) for row in on_the_mock)
+    missing = [subject for subject in MOCK_WORLD_SUBJECTS if subject not in subjects]
+    assert not missing, (
+        f"The seed wrote no `{USERS}` row on the mock's registration for {missing}; it wrote "
+        f"{subjects}. Each is a subject E1-12 needs launchable: the two-hat person, whose "
+        "launch has to reach the same identity her web login does, and the leadership person "
+        "whose launch drives §7.3's leadership limb. Without them the merge cannot be "
+        "demonstrated on the running stack or in E1-15's browser proof — and the equality below "
+        "would be satisfied by a seed that had stopped writing them entirely."
+    )
+    beyond = [subject for subject in subjects if subject not in MOCK_WORLD_SUBJECTS]
+    assert not beyond, (
+        f"{beyond} are seeded as `{USERS}` rows on the mock platform's registration and are not in "
+        f"this test's inventory {list(MOCK_WORLD_SUBJECTS)}. The mock signs a launch as any "
         f"subject for whoever can reach the container, so a `{USERS}` row on that platform is a "
-        "path from 'can reach the container' to a real person's purview — and on a development "
-        "box that container is published on the host. If this is deliberate, say in the pull "
-        "request what a launch from a platform that authenticates nobody now reaches, and change "
-        "this test rather than removing it."
+        "path from 'can reach the container' to whatever that row's person holds — and on a "
+        "development box that container is published on the host. E1-12 opened that path for two "
+        "named subjects and argued for both in ADR 0097; a third is a widening nobody has argued "
+        "for. If it is deliberate, add it to the inventory above with the sentence that admits it "
+        "and say in the pull request what a launch as that subject now reaches."
+    )
+
+
+def test_the_seed_links_the_two_hat_persons_two_subjects_to_one_person(
+    seeded_demo: Any,
+    demo_database: Any,
+    metadata_tables: dict[str, Any],
+) -> None:
+    """E1-12's first criterion, at the seed: one row reachable from both of her subjects.
+
+    The integration suite drives both doors and asserts the sessions agree
+    (`tests/integration/test_dual_door_identity_merge.py`); this asserts the rows
+    that make the same thing true of the **running stack**, which is what a
+    developer sees on a demo box and what E1-15's browser proof walks. The two are
+    not substitutes: that one seeds its own rows and never runs `scripts/seed.py`,
+    and this one runs the script and never opens a door.
+
+    The walk is the one the doors make, in the two directions ADR 0024 and E1-12
+    settle: her IdP `(issuer, subject)` reaches a `person` through
+    `web_login_subject`, and that same `person` reaches a `user` through
+    `person.user_id` whose `lms_user_id` is the subject the mock platform signs her
+    launches as.
+
+    **Dies if the seed writes two people** — one per door — which is the state E0
+    shipped and the state the whole ticket is about; the failure names both rows.
+    **Dies if it writes the linkage and leaves the person unlinked to a user**, in
+    which case her web login resolves and her launch does not, and only the browser
+    proof would notice.
+
+    **Its control is the table itself**: an empty `web_login_subject` makes every
+    "no such row" message below true for a reason that has nothing to do with her.
+    """
+    seeded(seeded_demo)
+    require_table(metadata_tables, LINKAGES)
+    person_table = require_table(metadata_tables, "person")
+    person_key = single_primary_key(person_table)
+    person_user_column = one_foreign_key_column(person_table, USERS)
+    user_key = single_primary_key(require_table(metadata_tables, USERS))
+    linkage_person_column = one_foreign_key_column(
+        require_table(metadata_tables, LINKAGES), "person"
+    )
+
+    with reading(demo_database, metadata_tables) as rows:
+        linkages = rows_of(rows, LINKAGES)
+        people = rows_of(rows, "person")
+        users = rows_of(rows, USERS)
+
+    assert linkages, (
+        f"The seed wrote no `{LINKAGES}` rows at all. E1-12 gives the web door its identities that "
+        "way — the linkage is provisioned, never inferred from a claim — so on this seeded stack "
+        "every persona's web login lands on the no-account page, and each assertion below is a "
+        "statement about an empty table."
+    )
+    hers = [row for row in linkages if row.get(LINKAGE_SUBJECT_COLUMN) == MOCK_IDP_TWO_HAT_SUBJECT]
+    assert len(hers) == 1, (
+        f"{len(hers)} `{LINKAGES}` rows name the subject {MOCK_IDP_TWO_HAT_SUBJECT!r}; the seed "
+        f"writes one. It wrote {sorted(str(row.get(LINKAGE_SUBJECT_COLUMN)) for row in linkages)}. "
+        "Zero means her web login reaches no identity on a demo box — the one persona the whole "
+        "merge is demonstrated with — and more than one means the pair "
+        f"`({LINKAGE_ISSUER_COLUMN}, {LINKAGE_SUBJECT_COLUMN})` is not unique, so which person she "
+        "is depends on which row is read first."
+    )
+
+    person_id = hers[0][linkage_person_column]
+    matching = [row for row in people if row[person_key] == person_id]
+    assert (
+        len(matching) == 1
+    ), f"Her linkage names `person` {person_id!r} and {len(matching)} rows carry that key."
+    linked_user = matching[0].get(person_user_column)
+    assert linked_user is not None, (
+        f"The `person` her IdP subject resolves to carries no `{person_user_column}`, so her "
+        "launch resolves to nobody while her web login resolves to her. ADR 0024 puts the link on "
+        "`person`, and E1-12's criterion is that both doors reach *this* row — one row, by its "
+        "primary key."
+    )
+    her_user = [row for row in users if row[user_key] == linked_user]
+    assert len(her_user) == 1, f"Her person links to `user` {linked_user!r}, which no row carries."
+    assert her_user[0].get("lms_user_id") == MOCK_WORLD_SUBJECTS[0], (
+        f"Her person links to the `{USERS}` row for {her_user[0].get('lms_user_id')!r}, and the "
+        f"mock platform signs her launches as {MOCK_WORLD_SUBJECTS[0]!r} — the value "
+        "`mock-idp/app/seed.py` publishes as her `lms_user_id`. With those two disagreeing the "
+        "seeded stack has her web login reaching one person and her launch reaching another, "
+        "which is exactly the state E1-12 exists to close and which no other test here would "
+        "report."
     )
 
 

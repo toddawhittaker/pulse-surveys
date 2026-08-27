@@ -23,6 +23,18 @@ that outlives the flow, or a purview — `transitive_purview` raises by design (
 person — an instructor trying to sign in here — is E0-16's own test and is not
 re-proved.
 
+**E1-12 changes what a successful login requires, and this module meets it in one
+place.** From that ticket on the door resolves `(issuer, subject)` to a stored
+`person` through the `web_login_subject` linkage, and a subject with no row there
+lands on a calm no-account page instead of a session. Every login below would
+therefore stop landing, in tests about cookies, hints, claims and error redirects
+that have nothing to do with identity — `docs/MISTAKES.md` entry 22 exactly. So
+the `provider` fixture provisions a linkage for every person the provider
+publishes, one person each, and nothing else in this module changes. What a login
+*resolves to* is not asserted here at all: that is E1-12's own subject, in
+`test_dual_door_identity_merge.py` and
+`test_the_unlinked_web_login_lands_on_no_account.py`.
+
 **Four things arrived in the third review round**, and they are the last two
 sections of this module. This door reads one roles claim and ignores the LTI one,
 which needs sessions carrying claims no seeded person produces — so those are
@@ -247,10 +259,18 @@ APPLICATION_LOGGER_ROOT = "app"
 ASSIGNMENT_TABLE = "role_assignment"
 
 # The two tables a door would write if it provisioned the person it just
-# authenticated. E0-18's boundary section gives provisioning to E1 ("E0 does not
-# build… any `user` row for a mock subject"), so today the honest count is
-# unchanged; when E1 builds it, this half of the assertion moves in E1's own pull
-# request, deliberately and with the reason written down.
+# authenticated. E0-18's boundary section gave provisioning to E1 ("E0 does not
+# build… any `user` row for a mock subject"), and this assertion was written to
+# move deliberately when E1 built it.
+#
+# **E1-12 built it and the count is still unchanged**, which is that ticket's
+# decision rather than an accident: the web door *resolves* an identity and never
+# creates one. The linkage is pre-provisioned — by the seed, or by an administrator
+# — `pulse_app` holds no grant of any kind on the table it lives in, and a subject
+# with no linkage gets a calm page rather than an account. So this stays as it was
+# written, and what E1-12 adds beside it is the same assertion made about the
+# subject nobody provisioned, in
+# `tests/integration/test_the_unlinked_web_login_lands_on_no_account.py`.
 PROVISIONING_TABLES = ("user", "person")
 
 # A table the migration itself fills, used as the control on the counter below.
@@ -512,21 +532,40 @@ def everything_the_caller_received(response: Any, token: str) -> str:
 
 
 @pytest.fixture
-def provider(mock_idps: Any, door_contract: Any) -> Any:
+def provider(mock_idps: Any, door_contract: Any, link_published_people: Any) -> Any:
     """The mock provider, registered to return to this tool's own callback.
 
     `MOCK_IDP_TOOL_REDIRECT_URI` is compared exactly — on the way in and again at
     the token endpoint — so this is what makes "the tool builds its redirect URI
     from `PUBLIC_BASE_URL`" a property the provider itself enforces rather than one
     only a test believes.
+
+    **Every published person is given a Pulse identity to resolve to, and that is
+    E1-12 arriving in this module** (`docs/MISTAKES.md` entry 22). From that ticket
+    on, a verified `id_token` is not enough to land: the door resolves
+    `(issuer, subject)` through the `web_login_subject` linkage, and a subject with
+    no row there gets a calm "no account" page and no session. Without this line
+    every successful login below — the dean, the Care office, the administrator, the
+    cookie attributes, the login hints, the re-signed sessions — would answer 200
+    with that page, in tests whose subject is none of it, and the repair would be on
+    the other side of the test wall from whoever met the red.
+
+    So the linkage is provisioned for everybody the provider publishes, which is
+    what a deployment whose people all have accounts looks like, and it is one
+    person per subject so that nothing here can prove a merge by accident. The
+    unlinked case is not lost: it is E1-12's own subject, in
+    `tests/integration/test_the_unlinked_web_login_lands_on_no_account.py`, where a
+    subject is deliberately left without a row.
     """
-    return mock_idps(
+    provider = mock_idps(
         {
             MOCK_IDP_TOOL_REDIRECT_URI_VARIABLE: (
                 f"{door_contract.public_base_url}{door_contract.oidc_callback}"
             )
         }
     )
+    link_published_people(provider)
+    return provider
 
 
 @pytest.fixture
@@ -1032,11 +1071,15 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
     nothing else, so as long as the claim reaches no row in that table, a forged
     or administrator-granted `CARE` claim buys an empty page.
 
-    The provisioning half moves once, deliberately: E0-18's boundary gives E1 the
-    `user` row and the dual-door identity merge, and when E1 builds them this
-    assertion changes in E1's own pull request with the reason written down. What
-    it must not do is start passing quietly because a door began provisioning
-    early.
+    The provisioning half was written to move once, deliberately: E0-18's boundary
+    gives E1 the `user` row and the dual-door identity merge. **E1-12 landed both
+    and this assertion did not move**, because that ticket's answer is that the web
+    door resolves an identity and never creates one — the linkage is provisioned
+    ahead of a login and `pulse_app` holds no grant on the table carrying it. The
+    Care person now has a linkage row, seeded by the `provider` fixture above, so
+    she lands with a session as she did before; what must not happen is a row
+    appearing here, and that is now a rule of E1-12's as well as an artefact of
+    E0's boundary.
 
     Two guards keep this from passing on nothing having happened: the flow has to
     land on `/app/care` with a session, so a 4xx or a door that was never reached
@@ -1377,13 +1420,21 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     her teaching assignment does not open this door; her launch states the LIS
     Instructor role, because it does.
 
-    **The database-level assertion that these are one person is E1's, not this
-    ticket's**, and E0-18 says so: it needs the dual-door identity merge E1's
-    breakdown owns, and E0 writes no `user` row for a mock subject. What ties the
-    two halves below to one human is `mock-idp/app/seed.py::LMS_INSTRUCTOR_USER_ID`,
-    the cross-mock reference published as `lms_user_id` — pinned to the platform's
-    own constant by `tests/unit/test_the_mock_seeds_name_one_person.py`, and used
-    here to choose which launch to drive.
+    **The database-level assertion that these are one person is E1-12's, not this
+    ticket's**, and E0-18 said so: it needs the dual-door identity merge, and E0
+    writes no `user` row for a mock subject. It has since landed —
+    `tests/integration/test_dual_door_identity_merge.py` drives the same person
+    through both doors and asserts both sessions name one `person` row by its
+    primary key — and this test keeps the half that is E0-18's: that each door
+    dispatches her on the assignment that opens it.
+
+    What ties the two halves below to one human is
+    `mock-idp/app/seed.py::LMS_INSTRUCTOR_USER_ID`, the cross-mock reference
+    published as `lms_user_id`, used here to choose which launch to drive. It used
+    to be pinned to the platform's own constant by a unit test of E0-18's;
+    E1-12 deleted that module, because the fact it stood in for is asserted
+    directly now — against what the two mocks *serve* rather than against what they
+    spell — in the merge test named above.
 
     Both doors in one test on purpose. Split in two, each half is satisfied by a
     seed the other person is missing from, and the fact worth asserting — that one
