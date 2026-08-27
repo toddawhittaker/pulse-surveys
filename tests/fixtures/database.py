@@ -217,10 +217,11 @@ def whole_environment_restored() -> Iterator[None]:
     **`backend/migrations/env.py` is a documented third reader of `.env`** — its
     own module docstring says so, "This file is the third reader of `.env`, after
     `Settings` and the Compose files" — and it calls `load_dotenv` on the
-    repository root's `.env` at import. `migrated_database` below runs Alembic
-    **in process**, so that import loads a developer's whole `.env` into
-    `os.environ`, and without this it stays there for the rest of the pytest
-    session: `ENVIRONMENT=development` among everything else in the file.
+    repository root's `.env` at import, with `override=False`. `migrated_database`
+    below runs Alembic **in process**, so that import puts every name in a
+    developer's `.env` that the process does not already hold into `os.environ`,
+    and without this they stay there for the rest of the pytest session —
+    `ENVIRONMENT=development` among them.
 
     A session that inherits a developer's `.env` that way passes locally and fails
     in CI, which has no `.env` file at all. That is not hypothetical: it is what

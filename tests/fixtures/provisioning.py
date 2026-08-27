@@ -1194,7 +1194,7 @@ def registered_platform(
         f"`app.config.DEVELOPMENT_ENVIRONMENT` is {DEVELOPMENT_ENVIRONMENT!r}, so the name pinned "
         "below is not a development environment and every test using this fixture would run under "
         "a deployment without saying so. `tests/unit/test_registration_address_constraints.py` "
-        "reads the same constant and makes the same check."
+        "reads the same constant; its non-emptiness is proved there, by a control of its own."
     )
     monkeypatch.setenv(ENVIRONMENT_VARIABLE, DEVELOPMENT_ENVIRONMENT)
 
