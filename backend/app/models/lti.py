@@ -713,6 +713,17 @@ class NrpsCall(UuidPrimaryKey, Base):
     `members_seen` is nullable for the same reason: a call that failed counted
     nobody, and a zero there would be a roster that came back empty.
 
+    **`url` is always the roster's; `response_code` is sometimes the token
+    endpoint's.** A sync makes two calls to two endpoints, and when the token
+    endpoint refuses, the roster is never asked at all — so there is one row, under
+    the address the section's roster lives at, carrying the status the *token*
+    endpoint answered. That pairing is deliberate: the row is the section's record
+    of an attempted sync and §6.1's console reads it per section, so a row carrying
+    an OAuth address would be a row about the platform's credential surface in the
+    middle of one section's roster history. What the status is doing there is
+    telling an operator that this deployment's credentials were refused while the
+    platform is up — which is exactly what a NULL would hide. ADR 0095 records it.
+
     **Not LMS-owned, so no `guard_write` and no sanction.** SPEC §2.1's ownership
     list is courses, sections, section codes, enrollments and teaching instructors;
     this is Pulse's own record of what Pulse did, in the way `launch_defect` is.
