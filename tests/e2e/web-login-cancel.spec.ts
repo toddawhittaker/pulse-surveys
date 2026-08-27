@@ -72,7 +72,27 @@ function sessionsDelivered(page: Page): string[] {
   return delivered;
 }
 
-function storedSession(page: Page): Promise<string | null> {
+// Read the SPA's session key, at a point where the answer is settled.
+//
+// **The wait is part of the instrument, not a courtesy.** The SPA captures the
+// token out of the fragment and then strips it from the address bar (E1-08,
+// frontend/src/lib/session.ts), in that order — so a URL with no `session=` in it
+// is the observable proof that the capture effect has run. Without that edge this
+// read races the bundle: under the full suite with six workers the SPA parses and
+// executes late, and a read taken first returns null on a login that succeeded.
+// That is how this file failed once under load and passed three times alone.
+//
+// `expect(page).not.toHaveURL` retries until the condition holds or the spec's
+// timeout expires, so this is a wait on a signal rather than on a clock. It leaves
+// both assertions below saying exactly what they said: the successful login has a
+// session here, and the cancelled one does not.
+//
+// The cancelled login satisfies the edge trivially — no fragment was ever
+// delivered, which the `Location` collector is what proves — and it uses the same
+// helper anyway, so both reads happen at one defined point rather than at
+// whichever moment each test happened to reach.
+async function storedSession(page: Page): Promise<string | null> {
+  await expect(page).not.toHaveURL(/session=/);
   return page.evaluate((key) => window.sessionStorage.getItem(key), SESSION_STORAGE_KEY);
 }
 

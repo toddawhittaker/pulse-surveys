@@ -133,15 +133,33 @@ for (const item of CASES) {
 
     expect(new URL(page.url()).pathname).toBe(`/app/${item.route}`);
 
-    const stored = await page.evaluate((key) => window.sessionStorage.getItem(key), SESSION_STORAGE_KEY);
-    expect(stored, 'the session token should be in sessionStorage, lifted from the fragment').not.toBeNull();
-    expect(stored).toContain('.');
-
-    expect(
-      page.url(),
+    // The stripped fragment first, and the read second — the order is the fix for
+    // a race, not a preference. The SPA captures the token and then strips it
+    // (E1-08, frontend/src/lib/session.ts), so a URL with no `session=` in it is
+    // the observable proof that the capture effect has run; `toHaveURL` retries
+    // until it does. Read before that edge, under a loaded machine where the
+    // bundle executes late, and sessionStorage is legitimately still empty on a
+    // login that succeeded — which is how tests/e2e/web-login-cancel.spec.ts
+    // failed once under six workers and passed alone (docs/MISTAKES.md entry 13:
+    // the same hazard, worked around in one of the two places facing it).
+    //
+    // The assertion is unchanged: the fragment must be gone from the address bar,
+    // and the token must never have been in the query string.
+    await expect(
+      page,
       'the fragment should have been stripped from the address bar once captured, and the token ' +
         'should never have been in the query string',
-    ).not.toContain('session=');
+    ).not.toHaveURL(/session=/);
+
+    const stored = await page.evaluate(
+      (key) => window.sessionStorage.getItem(key),
+      SESSION_STORAGE_KEY,
+    );
+    expect(
+      stored,
+      'the session token should be in sessionStorage, lifted from the fragment',
+    ).not.toBeNull();
+    expect(stored).toContain('.');
 
     // Exactly one of the five, so a door that landed every login on one route —
     // or on the wrong one — fails here rather than passing on the testid it was
