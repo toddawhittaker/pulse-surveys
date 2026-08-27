@@ -384,20 +384,31 @@ class SeenAssertions:
     spendable once more across a restart. On a development stack that is a
     reasonable trade; a real platform keeps the store where its tokens are.
 
-    **Entries live at least as long as an assertion may**, which is what makes
-    forgetting safe: a `jti` older than the lifetime bound belongs to an assertion
-    this endpoint already refuses for being expired, so remembering it buys nothing.
-    Pruning happens on the way in rather than on a timer, because a mock with a
-    background task is a mock with a shutdown problem.
+    **Entries live at least as long as an assertion carrying one could still be
+    accepted**, which is what makes forgetting safe — and it is the *acceptance
+    ceiling*, not the lifetime bound alone. `verified_assertion` accepts an `exp` up
+    to `now + lifetime + skew`, so an assertion whose `iat` sits inside the skew
+    allowance (an honest tool whose clock is a little fast) is still live for the
+    skew window past `now + lifetime`. A horizon of the lifetime alone forgets its
+    `jti` while it is still spendable, and a replay in that window is granted a
+    second token off one signature — the security round's F4. So the horizon is
+    `lifetime + skew`: past that point no assertion carrying the `jti` can be
+    accepted at all, so a forgotten one and a remembered one are both refused, both
+    for the expiry. Pruning happens on the way in rather than on a timer, because a
+    mock with a background task is a mock with a shutdown problem.
     """
 
-    def __init__(self, lifetime: int = ASSERTION_LIFETIME_BOUND_SECONDS) -> None:
-        self._lifetime = lifetime
+    def __init__(
+        self, horizon: int = ASSERTION_LIFETIME_BOUND_SECONDS + ASSERTION_SKEW_ALLOWANCE_SECONDS
+    ) -> None:
+        # The acceptance ceiling — lifetime plus skew — and not the lifetime alone;
+        # see the class docstring for why forgetting at the lifetime is F4's hole.
+        self._horizon = horizon
         self._seen: dict[str, float] = {}
 
     def claim(self, jti: str, *, now: float) -> bool:
         """Record `jti` as spent, and answer whether it was fresh."""
-        self._seen = {seen: at for seen, at in self._seen.items() if at > now - self._lifetime}
+        self._seen = {seen: at for seen, at in self._seen.items() if at > now - self._horizon}
         if jti in self._seen:
             return False
         self._seen[jti] = now

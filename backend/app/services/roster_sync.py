@@ -65,7 +65,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
-from uuid import UUID, uuid4
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import requests
@@ -78,8 +78,15 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.lti.registration import NoSigningKeyError, OrmToolConf
-from app.models.identity import AssignmentRole, Enrollment, RoleAssignment, User
-from app.models.lti import LtiDeployment, LtiPlatform, NrpsCall
+from app.models.identity import AssignmentRole, Enrollment, User
+from app.models.lti import (
+    ROSTER_SERVICE_ADDRESS_COLUMN,
+    LtiDeployment,
+    LtiPlatform,
+    NrpsCall,
+    RegistrationAddressError,
+    refuse_invalid_fetched_address,
+)
 from app.models.org import Section
 from app.services.authz import (
     LmsOwnedWriteRefused,
@@ -167,6 +174,18 @@ _RECORD_ROSTER_EMAIL = text(
     "SELECT public.record_roster_email(CAST(:user_id AS uuid), CAST(:email AS text))"
 )
 
+# F2's writer, and the reason this module holds no `INSERT` on `role_assignment`
+# directly any more. A grant can bound a table and its columns; it cannot bound a
+# column's *value*, so a table-wide `INSERT` let the application connection write a
+# `CARE` row — the row E0-10's reveal definers check for — as readily as the
+# `INSTRUCTOR` one `guard_write` was the only thing refusing. The definer's body
+# writes `'INSTRUCTOR'` and its signature has nowhere to put another role, exactly
+# as `record_roster_email` bounds the write to an address and never a name. ADR 0096
+# records it.
+_RECORD_TEACHING_INSTRUCTOR = text(
+    "SELECT public.record_teaching_instructor(CAST(:person_id AS uuid), CAST(:section_id AS uuid))"
+)
+
 
 class RosterSyncError(RuntimeError):
     """This section's roster could not be reached at all, and no call was made.
@@ -228,9 +247,17 @@ def sync_section(
 
     `http` is the transport every outbound call travels over — see the module
     docstring for why it is a parameter. `settings` supplies the institution
-    timezone the sync's own dates are stamped in (SPEC §3.1); both default to
-    values built here, so a caller that has neither passes neither.
+    timezone the sync's own dates are stamped in (SPEC §3.1) and the environment the
+    fetched-address rules are judged under (F1); both default to values built here,
+    so a caller that has neither passes neither.
+
+    **The environment reaches the address rules from `Settings`, never from
+    `os.environ`.** That is the read deferred E1-10 item 5 removed from the writer
+    next door, and F1 asks for the same discipline here: a URL the walk is about to
+    fetch is judged by the same rules the stored address was, and those rules take
+    the environment name.
     """
+    settings = Settings() if settings is None else settings
     section = session.get(Section, section_id)
     if section is None:
         raise RosterSyncError(
@@ -247,11 +274,35 @@ def sync_section(
         return
 
     platform = _platform_for(session, section)
-    connector = ServiceConnector(_registration_for(session, platform), requests_session=http)
-    members = _walked_roster(session, section_id, address, connector)
-    if members is None:
+    connector = ServiceConnector(
+        _registration_for(session, platform), requests_session=_no_redirects(http)
+    )
+    walked = _walked_roster(session, section_id, address, connector, settings.environment)
+    if walked is None:
         return
-    _ingest(session, section, platform.id, members, _today(settings))
+    members, complete = walked
+    _ingest(session, section, platform.id, members, _today(settings), complete=complete)
+
+
+def _no_redirects(http: requests.Session | None) -> requests.Session:
+    """The transport the sync fetches over, with redirect-following turned off (F1).
+
+    A redirect is the same bypass as a hostile `Link` header arriving one step
+    earlier: the address `refuse_invalid_fetched_address` judged is not the address
+    the request ends at, so a client that follows a 30x has validated nothing. This
+    tool follows none.
+
+    `requests` has no session-level `allow_redirects`, and `pylti1p3`'s
+    `ServiceConnector` calls `get`/`post` without the per-request flag — so the one
+    lever that reaches its internal calls is `max_redirects`, and `0` makes any 30x
+    raise `TooManyRedirects` (a `RequestException`, recorded as a refused call)
+    rather than being followed. It is set on the session the caller handed in when
+    there is one, so a test driving a redirect over its own wire is covered too, and
+    on a fresh session in production where `http` is `None`.
+    """
+    session = requests.Session() if http is None else http
+    session.max_redirects = 0
+    return session
 
 
 def sync_all_rosters(
@@ -270,9 +321,18 @@ def sync_all_rosters(
     platform's credentials to every section in the institution, which is deferred
     E1-10 item 1's failure arriving one level up from where that item found it.
 
-    A section that fails does not stop the walk. The alternative is one
-    unreachable platform silencing every other institution's sync for the hour,
-    and the failure is already recorded per section in `nrps_call`.
+    **One section's failure — of any kind — does not end the hour** (F3). The catch
+    is broad on purpose: the sync raises the errors it was written to raise, and what
+    silences a walk is the one it was not — a token body carrying no `access_token`
+    makes `pylti1p3` raise `KeyError`, a roster answering a bare list makes it raise
+    `AttributeError`, and either from one platform escaping a narrower `except` ends
+    the hour for every section after it, with nothing on §6.1's console for the ones
+    never reached. So each section runs inside a savepoint: its own partial work is
+    rolled back on a failure and the sections before it are not, the failure is
+    recorded against the section it belongs to as a call this tool could not
+    complete, and the walk moves on. A broad `except` here is defended by that
+    boundary — it cannot swallow a bug into a green run, because a failed section
+    still leaves a red mark an operator reads.
     """
     addressed = list(
         session.scalars(select(Section.id).where(Section.lms_context_memberships_url.is_not(None)))
@@ -281,10 +341,35 @@ def sync_all_rosters(
         "the scheduled roster walk found %d section(s) with a stored address", len(addressed)
     )
     for section_id in addressed:
+        savepoint = session.begin_nested()
         try:
             sync_section(session, section_id, http=http, settings=settings)
-        except (RosterSyncError, NoSigningKeyError):
+            savepoint.commit()
+        except Exception:
+            savepoint.rollback()
             logger.exception("the scheduled roster walk could not sync section %s", section_id)
+            _record_section_failure(session, section_id)
+
+
+def _record_section_failure(session: Session, section_id: UUID) -> None:
+    """Leave a call row for a section whose scheduled sync failed unexpectedly (F3).
+
+    Against the section's own stored address, `response_code` NULL: §6.1's console
+    then shows a section whose platform answered something this tool could not read,
+    rather than a section that was never attempted — which is what a walk that
+    continued but recorded nothing would leave. Written *after* the section's own
+    savepoint was rolled back, so a failure that left the session mid-statement
+    cannot take this row with it; and itself guarded, because the one thing this
+    must not do is turn one section's failure back into the whole walk's.
+    """
+    try:
+        section = session.get(Section, section_id)
+        address = section.lms_context_memberships_url if section is not None else None
+        _record_call(session, section_id, address or "", None, None)
+    except Exception:
+        logger.exception(
+            "section %s failed and its failure could not be recorded either", section_id
+        )
 
 
 def request_section_sync(session: Session, section_id: UUID) -> bool:
@@ -417,9 +502,20 @@ def _registration_for(session: Session, platform: LtiPlatform) -> Any:
 
 
 def _walked_roster(
-    session: Session, section_id: UUID, address: str, connector: ServiceConnector
-) -> list[Mapping[str, Any]] | None:
+    session: Session,
+    section_id: UUID,
+    address: str,
+    connector: ServiceConnector,
+    environment: str,
+) -> tuple[list[Mapping[str, Any]], bool] | None:
     """Every member of the container at `address`, following `rel="next"` to the end.
+
+    Answers `(members, complete)` — the members read, and whether the walk reached a
+    page that advertised no next relation — or `None` when there is no usable roster
+    at all. `complete` is what `_ingest` reads to decide whether it may close the
+    enrollment of a member the container did not carry: a member missing from a
+    *complete* walk has left, and a member missing from a *truncated* one is on a
+    page this tool never fetched.
 
     **One `nrps_call` row per HTTP call**, which is D9's grain and is load-bearing
     three times over: it is SPEC §6.1's "NRPS and AGS call logs with response
@@ -427,13 +523,23 @@ def _walked_roster(
     A row per *sync* would leave an operator unable to tell a roster that took four
     requests from one that took one.
 
-    **Anything but a complete container answers `None` rather than what it got**,
-    and the difference is a section's whole enrollment. `_ingest` closes the
-    enrollment of every member the container did not carry, so a roster ingested
-    short closes everybody on the pages that were never read — and an empty list is
-    the extreme of that, which is what a platform answering 401 for an hour would
-    otherwise do to a class. So a refusal, a transport failure, a `Link` header that
-    loops and a walk past `MAX_PAGES_WALKED` all answer the same way. The call is
+    **Every URL the walk is about to fetch is judged first (F1).** The stored first
+    page and every `rel="next"` the platform names pass
+    `refuse_invalid_fetched_address` before the GET — link-local by rule 4, loopback
+    by the roster column's own rule, cleartext-off-this-machine by rule 1 — because
+    the walk adopts an address the *platform* chose at run time, and a compromised
+    one points it at the cloud metadata service or a loopback listener with the
+    tool's Bearer token attached. A URL that fails is a refusal recorded **against
+    the section's stored address, not the hostile one** (a hostile URL written into
+    the log a console reads back is a second channel), `response_code` NULL, the
+    refused URL in the log line only. The walk stops there and keeps what earlier,
+    validly-fetched pages already read — so a class that synced correctly up to a
+    hostile second page is not thrown away. ADR 0096 records it.
+
+    **A token or transport failure answers `None`**, and the difference from a
+    validation refusal is a section's whole enrollment. Those leave no usable prefix:
+    the token endpoint refused everything, or a page this tool *did* choose to fetch
+    could not be reached — so `_ingest` never runs and nothing is closed. The call is
     recorded either way, with the response code that says which it was; a NULL
     response code means the call never reached the platform at all.
 
@@ -502,6 +608,24 @@ def _walked_roster(
                 len(walked),
             )
             return None
+        try:
+            refuse_invalid_fetched_address(
+                environment, column=ROSTER_SERVICE_ADDRESS_COLUMN, address=following
+            )
+        except RegistrationAddressError as refusal:
+            # Against the section's stored address, never the hostile one: a URL the
+            # platform chose, written into a record a console reads back, is a second
+            # channel the review named. The refused URL is in the log line only.
+            _record_call(session, section_id, address, None, None)
+            logger.warning(
+                "section %s was told to fetch a roster page at %s, which this container refuses: "
+                "%s. The walk stopped and kept the %d member(s) already read.",
+                section_id,
+                following,
+                refusal,
+                len(members),
+            )
+            return members, False
         walked.add(following)
         called = following
         try:
@@ -524,7 +648,7 @@ def _walked_roster(
             return None
         _record_call(session, section_id, called, 200, len(page))
         members.extend(page)
-    return members
+    return members, True
 
 
 def _answered_status(refusal: LtiServiceException) -> int | None:
@@ -689,6 +813,8 @@ def _ingest(
     platform_id: UUID,
     roster: Sequence[Mapping[str, Any]],
     today: date,
+    *,
+    complete: bool,
 ) -> None:
     """Write one container's members into `user`, `enrollment` and `user_identity`.
 
@@ -697,6 +823,13 @@ def _ingest(
     then the enrollments this section holds for people the container did **not**
     carry are closed. Doing the last of those first would close a member's window
     and reopen it in the same transaction.
+
+    **The close-the-vanished pass runs only when the walk was complete** (F1). A
+    member absent from a container this tool read to its last page has left, and
+    ending their enrollment is right; a member absent from a walk that stopped on a
+    refused page is on a page this tool never fetched, and closing them would end a
+    student's enrollment because a *later* page was hostile. So a truncated walk
+    writes what it read and closes nobody.
     """
     read = [_read_member(member) for member in roster]
     members = [member for member in read if member is not None]
@@ -719,6 +852,8 @@ def _ingest(
         if member.teaches:
             _record_the_teaching_instructor(session, section, user_id)
 
+    if not complete:
+        return
     present = set(resolved.values())
     for user_id, row in open_rows.items():
         if user_id not in present:
@@ -923,11 +1058,19 @@ def _record_the_teaching_instructor(session: Session, section: Section, user_id:
     out of E1 — they are E9's admin surface — and an edge invented here would be a
     supervision claim no human made.
 
-    **The idempotence check goes through `public.assignment_scope`**, which is
-    `app.services.authz`'s to read (E0-41), rather than through the table: this
-    connection holds `INSERT` on `role_assignment` and no `SELECT`, deliberately.
-    The key is generated here for the same reason — Postgres checks the columns an
-    `INSERT … RETURNING` returns against the writer's privileges.
+    **The row is written through `public.record_teaching_instructor`, not by this
+    connection directly** (F2, ADR 0096). This module holds no `INSERT` on
+    `role_assignment` any more: a table-wide grant let the application connection
+    write a `CARE` row as readily as an `INSTRUCTOR` one, and a grant cannot bound a
+    column's value. The definer's body writes `'INSTRUCTOR'` and takes no argument
+    for the role, so the value is the database's and not this caller's, and the
+    definer is idempotent on its own — it inserts only where no such assignment
+    exists.
+
+    **Two idempotence checks and a guard, all kept as defence in depth.** The
+    `assignment_scope` read below is E0-11's view (E0-41 keeps it `authz`'s to read),
+    the definer re-checks inside its own transaction, and `guard_write` still guards
+    the call site — the catalog entry stays, an ADR 0090 layer, not the only one.
     """
     person_id = session.execute(_RESOLVE_PERSON_FOR_USER, {"user_id": user_id}).scalar_one()
     if person_id is None:
@@ -951,12 +1094,4 @@ def _record_the_teaching_instructor(session: Session, section: Section, user_id:
             "the chokepoint refused the roster sync the teaching instructor's assignment"
         )
         return
-    session.execute(
-        insert(RoleAssignment.__table__).values(  # type: ignore[arg-type]
-            id=uuid4(),
-            person_id=person_id,
-            role=AssignmentRole.INSTRUCTOR,
-            section_id=section.id,
-            reports_to=None,
-        )
-    )
+    session.execute(_RECORD_TEACHING_INSTRUCTOR, {"person_id": person_id, "section_id": section.id})

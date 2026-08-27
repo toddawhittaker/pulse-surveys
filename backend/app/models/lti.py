@@ -128,6 +128,22 @@ ROSTER_SERVICE_ADDRESS_COLUMN = "lms_context_memberships_url"
 # Rules 3 and 4 below are the whole of that distinction.
 FETCHED_COLUMNS = (JWKS_URL_COLUMN, AUTH_TOKEN_URL_COLUMN, ROSTER_SERVICE_ADDRESS_COLUMN)
 
+# The columns loopback is refused on, and E1-11's security round widened it. Rule 3
+# began as `authorization_endpoint` alone — the one address a *browser* resolves, so
+# loopback there is the launching person's own computer. The roster service address
+# joins it, and only it, because of who chooses the value. `jwks_url` and
+# `auth_token_url` are written by the registration writer under an operator's own
+# hand, and a platform component running as a loopback sidecar in the same pod is an
+# ordinary deployment ADR 0077 protects by name — which is why loopback is *accepted*
+# on those two (`tests/unit/test_registration_address_constraints.py::test_a_loopback_
+# fetched_address_is_accepted_outside_development`). The roster address's *pagination
+# next URL* is a different thing entirely: it is chosen by the platform at fetch time,
+# an untrusted source, so a loopback there is a service on this container that the
+# operator never pointed the tool at — the textbook server-side request forgery. ADR
+# 0096 records why the two fetched columns split here where rule 4 (link-local) keeps
+# them together.
+LOOPBACK_REFUSED_COLUMNS = (AUTHORIZATION_ENDPOINT_COLUMN, ROSTER_SERVICE_ADDRESS_COLUMN)
+
 
 class RegistrationAddressError(Exception):
     """A registration states an address this environment will not accept.
@@ -207,9 +223,13 @@ def refuse_invalid_registration_addresses(
          a cleartext sidecar addressed by loopback stays deployable.
       2. **The mock platform's host is refused** on all three columns.
       3. **Loopback is refused on `authorization_endpoint`**, as a class, and on
-         no other column. That string is resolved on the *reader's* machine, so
-         loopback there is the launching person's own computer; the two fetched
-         columns are resolved here, where a sidecar is an ordinary deployment.
+         neither registration column this function judges. That string is resolved
+         on the *reader's* machine, so loopback there is the launching person's own
+         computer; `jwks_url` and `auth_token_url` are resolved here, where a
+         sidecar the operator registers is an ordinary deployment. (The roster
+         service address is not a registration column and is judged by
+         `refuse_invalid_fetched_address`, where loopback *is* refused because its
+         pagination URL is the platform's to choose — E1-11's round, ADR 0096.)
       4. **Link-local is refused on the two fetched columns.** They are the only
          addresses a stored row makes this container fetch, the cloud metadata
          service lives at `169.254.169.254`, and no legitimate LMS does.
@@ -252,8 +272,15 @@ def refuse_invalid_fetched_address(environment: str, *, column: str, address: st
 
     `column` is the name a refusal quotes, and it decides which rules apply —
     which is why `ROSTER_SERVICE_ADDRESS_COLUMN` is in `FETCHED_COLUMNS` above.
-    Rule 3 does not reach it: loopback is refused only on the one column a
-    *browser* resolves, and nothing sends a browser to a roster service.
+
+    **Loopback is refused on this column, which E1-11's security round decided and
+    which is not true of the two registration columns beside it** (see
+    `LOOPBACK_REFUSED_COLUMNS`). A roster URL points a server-side fetch, and the
+    *pagination* address it follows is chosen by the platform at fetch time — so a
+    loopback there reaches a service on this container that nobody registered, which
+    is the server-side request forgery the review found. `jwks_url` and
+    `auth_token_url` keep accepting loopback because an operator registers a sidecar
+    through them on purpose; ADR 0096 records the split.
     """
     if not is_a_deployment(environment) or address is None:
         return
@@ -293,13 +320,23 @@ def _refuse_an_unacceptable_address(column: str, value: str) -> None:
             "ENVIRONMENT=development."
         )
 
-    if column == AUTHORIZATION_ENDPOINT_COLUMN and is_a_loopback_host(host):
+    if column in LOOPBACK_REFUSED_COLUMNS and is_a_loopback_host(host):
+        if column == AUTHORIZATION_ENDPOINT_COLUMN:
+            raise RegistrationAddressError(
+                f"The registration's `{column}` names this machine — localhost or a loopback "
+                "address. A browser, not this container, is what resolves it, so loopback there "
+                "is the launching person's own computer, and whatever listens on that port "
+                "receives an authorization request arriving from a Pulse URL. Register the "
+                "platform's own browser-facing address, or run with ENVIRONMENT=development."
+            )
         raise RegistrationAddressError(
             f"The registration's `{column}` names this machine — localhost or a loopback "
-            "address. A browser, not this container, is what resolves it, so loopback there is "
-            "the launching person's own computer, and whatever listens on that port receives "
-            "an authorization request arriving from a Pulse URL. Register the platform's own "
-            "browser-facing address, or run with ENVIRONMENT=development."
+            "address. This container fetches that address with the tool's own credentials, and "
+            "a roster URL the platform chose that points at loopback reaches whatever this "
+            "container runs beside — the server-side request forgery E1-11's review found in the "
+            "pagination path. A sidecar the operator registers is reached through the two "
+            "registration columns instead. Register the platform's own address, or run with "
+            "ENVIRONMENT=development."
         )
 
     if column in FETCHED_COLUMNS and _is_a_link_local_host(host):
