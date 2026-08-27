@@ -170,3 +170,14 @@ other side of the test wall, exactly this entry's shape: the test author moved
 seeding to head with a walk back down, closing the class — any table a future
 revision touches — rather than the one column. Not counted as a catch; the
 entry describes what happened, it did not prevent it.
+
+**Instance, 2026-08-27 (E1-11, dispute E1-11-02).** D7 made
+`user_identity.identity_name` nullable, and seventeen merged Care-door tests —
+eleven of them invariant-marked — errored inside their own seeding:
+`seed_row`'s documented rule leaves a nullable column to the database, and the
+helpers' non-vacuity guard had been leaning on the NOT NULL constraint to fill
+a value they never named. Found by the implementer's full-suite run, repaired
+on the test side after a ruling: each helper now states the identity it seeds.
+Not counted as a catch; the entry describes what happened, it did not prevent
+it — the pre-write sweep that caught E1-12's instance looked for route
+consumers, not schema-constraint dependents.
