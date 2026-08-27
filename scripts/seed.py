@@ -1141,8 +1141,25 @@ def seed_calendar(session: Session, institution_id: UUID) -> Term:
     return term
 
 
+def demo_context_id(section: DemoSection) -> str:
+    """The context identifier a demo section is bound to.
+
+    **Fiction, and shaped so it can never be mistaken for a real one.** E1-10
+    round 3 binds every section to the context it was discovered from, and a demo
+    section was discovered from nothing — these eighteen are invented, and the
+    in-repo mock platform's own three contexts are different courses entirely. A
+    launch resolves a section by the context id its platform signed, so a
+    synthetic value under this prefix is a section no launch can ever reach,
+    which is exactly right for a row no launch created.
+    """
+    return f"pulse-demo-context-{section.handle.lower().replace(' ', '-')}"
+
+
 def seed_sections(
-    session: Session, term: Term, nodes: dict[tuple[str, str], UUID]
+    session: Session,
+    term: Term,
+    nodes: dict[tuple[str, str], UUID],
+    deployment: LtiDeployment,
 ) -> dict[tuple[str, str], UUID]:
     """One section per entry in `SECTIONS`, with its calendar derived from its code.
 
@@ -1152,6 +1169,13 @@ def seed_sections(
     with its code is not a state this script can produce — and a code the term's
     map cannot resolve stops the seed by name rather than storing a section nobody
     can load.
+
+    **Each section is bound to the demo platform's deployment** (E1-10 round 3),
+    under a synthetic context id — see `demo_context_id`. The demo institution's
+    people belong to that fictional platform, so its sections belonging to it is
+    the same fiction told consistently; binding them to the *mock* platform would
+    say these eighteen sections came from the mock LMS, which is not true of any
+    of them.
     """
     for section in SECTIONS:
         course_id = nodes["course", section.course]
@@ -1163,7 +1187,13 @@ def seed_sections(
             )
         ).one_or_none()
         if row is None:
-            row = Section(course_id=course_id, term_id=term.id, lms_section_code=section.code)
+            row = Section(
+                course_id=course_id,
+                term_id=term.id,
+                lms_section_code=section.code,
+                lti_deployment_id=deployment.id,
+                lms_context_id=demo_context_id(section),
+            )
             apply_section_code(session, row)
             session.add(row)
         else:
@@ -1235,6 +1265,60 @@ def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> Lt
     return platform
 
 
+@dataclass(frozen=True)
+class DemoRegistration:
+    """The fictional platform the demo institution belongs to, and its deployment.
+
+    Both halves, because two writers need different ones: the people key to the
+    platform, and the sections bind to the deployment (E1-10 round 3).
+    """
+
+    platform: LtiPlatform
+    deployment: LtiDeployment
+
+
+def seed_demo_platform(session: Session, configuration: Mapping[str, str]) -> DemoRegistration:
+    """Register the fictional platform the demo institution belongs to.
+
+    **Its own function since E1-10 round 3**, and the reason is ordering rather
+    than tidiness: a section is now bound to the deployment it was discovered
+    through, so the demo sections need this registration before `seed_sections`
+    runs, and it used to be written half-way down `seed_people`, which runs after.
+    Nothing about what it writes has changed.
+
+    **It is the second writer of an `lti_platform` row in this file**, so it goes
+    through E1-05's address chokepoint exactly as `seed_mock_platform` does — a
+    chokepoint one writer can walk past is not one. Its address is https at an RFC
+    2606 reserved domain and would pass in any environment; the call is what makes
+    that a fact the code states rather than one a reader has to check.
+    """
+    refuse_invalid_registration_addresses(
+        configuration.get(ENVIRONMENT_VARIABLE, ""),
+        # No endpoints: nobody launches from this platform. It exists so the demo
+        # people have a `user.lti_platform_id` to key to, and a browser is never
+        # sent anywhere on its behalf, so stating an address it does not serve
+        # would be the untrue record `MOCK_PLATFORM_AUTH_TOKEN_URL` explains.
+        authorization_endpoint=None,
+        jwks_url=DEMO_PLATFORM_JWKS_URL,
+        auth_token_url=None,
+    )
+    platform = upsert(
+        session,
+        LtiPlatform,
+        {"issuer": DEMO_PLATFORM_ISSUER, "client_id": DEMO_PLATFORM_CLIENT_ID},
+        jwks_url=DEMO_PLATFORM_JWKS_URL,
+        jwks_fetched_at=None,
+        authorization_endpoint=None,
+        auth_token_url=None,
+    )
+    deployment = upsert(
+        session,
+        LtiDeployment,
+        {"lti_platform_id": platform.id, "deployment_id": DEMO_PLATFORM_DEPLOYMENT_ID},
+    )
+    return DemoRegistration(platform=platform, deployment=deployment)
+
+
 def seed_people(session: Session, configuration: Mapping[str, str]) -> dict[str, Person]:
     """Every demo person, with the `user` and `user_identity` rows behind them.
 
@@ -1258,31 +1342,7 @@ def seed_people(session: Session, configuration: Mapping[str, str]) -> dict[str,
     demo institution where somebody cannot log in is a demo institution somebody
     will file a bug about.
     """
-    refuse_invalid_registration_addresses(
-        configuration.get(ENVIRONMENT_VARIABLE, ""),
-        # No endpoints: nobody launches from this platform. It exists so the demo
-        # people have a `user.lti_platform_id` to key to, and a browser is never
-        # sent anywhere on its behalf, so stating an address it does not serve
-        # would be the untrue record `MOCK_PLATFORM_AUTH_TOKEN_URL` explains.
-        authorization_endpoint=None,
-        jwks_url=DEMO_PLATFORM_JWKS_URL,
-        auth_token_url=None,
-    )
-    platform = upsert(
-        session,
-        LtiPlatform,
-        {"issuer": DEMO_PLATFORM_ISSUER, "client_id": DEMO_PLATFORM_CLIENT_ID},
-        jwks_url=DEMO_PLATFORM_JWKS_URL,
-        jwks_fetched_at=None,
-        authorization_endpoint=None,
-        auth_token_url=None,
-    )
-    upsert(
-        session,
-        LtiDeployment,
-        {"lti_platform_id": platform.id, "deployment_id": DEMO_PLATFORM_DEPLOYMENT_ID},
-    )
-
+    platform = seed_demo_platform(session, configuration).platform
     people: dict[str, Person] = {}
     for demo in PEOPLE:
         user = upsert(
@@ -1438,9 +1498,10 @@ def seed(session: Session, configuration: Mapping[str, str]) -> None:
     check_calendar_fits()
     seed_mock_platform(session, configuration)
     seed_tool_signing_key(session, configuration)
+    demo = seed_demo_platform(session, configuration)
     nodes = seed_containment(session)
     term = seed_calendar(session, nodes["institution", INSTITUTION_NAME])
-    seed_sections(session, term, nodes)
+    seed_sections(session, term, nodes, demo.deployment)
     people = seed_people(session, configuration)
     seed_assignments(session, people, nodes)
     seed_lead_faculty_mappings(session, people, nodes)

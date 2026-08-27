@@ -360,7 +360,26 @@ class Section(UuidPrimaryKey, Base):
     """
 
     __tablename__ = "section"
-    __table_args__ = (UniqueConstraint("course_id", "term_id", "lms_section_code"),)
+    __table_args__ = (
+        UniqueConstraint("course_id", "term_id", "lms_section_code"),
+        # **A section's identity is the context it was discovered from** (E1-10,
+        # round 3). The constraint above says what a section is *called* inside a
+        # course and a term, and a course copy reproduces all three: Canvas keeps
+        # the section code, and copying a course needs no privilege at all. So a
+        # staff launch from the copy resolved the *original* section and
+        # repointed its stored roster address at the copy's own endpoint — and
+        # E1-11 fetches that address with the tool's own credentials, so the
+        # original section's roster, names and email addresses included, was
+        # delivered to whoever held the copy.
+        #
+        # This pair is what a copy cannot reproduce: the platform's own
+        # identifier for the context, scoped to the registration it was issued
+        # under. Unique **in the database** and not only in the writer, because
+        # ADR 0045's standing objection applies to any writer — "a caller can
+        # bypass it by not calling it" — and E1-11's roster sync writes sections
+        # too, without reading `app.services.provisioning`.
+        UniqueConstraint("lti_deployment_id", "lms_context_id"),
+    )
 
     # Reaching sections by course has to be indexed: `section` is the leaf table
     # and it grows by a row per section per term, so a sequential scan here is
@@ -434,4 +453,34 @@ class Section(UuidPrimaryKey, Base):
     # or a platform that publishes none, has no address to hold and a sync has
     # nothing to call. A fabricated default would be an address pointing nowhere
     # that reads as configuration.
+    #
+    # **What may be stored here is judged first** (E1-10 round 3). It is the third
+    # address in this system that this container fetches, so it goes through
+    # `app.models.lti.refuse_invalid_fetched_address` — the same four rules
+    # `jwks_url` and `auth_token_url` pass — before it reaches this column. An
+    # address those rules refuse leaves this NULL and is recorded as a defect.
     lms_context_memberships_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # **The binding: which context, on which registration, this section is.** See
+    # the unique constraint above for what it is for and what it cost to learn.
+    #
+    # `lms_context_id` is the context claim's `id` — the platform's own value
+    # verbatim, so it carries the `lms_` marker (ADR 0014) and Pulse never edits
+    # it. `lti_deployment_id` is the registration the launch resolved to, because
+    # a context identifier is unique within a deployment and means nothing across
+    # them: two institutions' platforms handing out one identifier would otherwise
+    # share a section.
+    #
+    # Both `NOT NULL`, and that is load-bearing rather than tidy: Postgres treats
+    # two NULLs as distinct, so a nullable half would leave the unique constraint
+    # constraining nothing about the rows that carry no binding — and a section
+    # with no binding is one resolvable by its parsed label again, which is the
+    # finding this pair closes.
+    #
+    # RESTRICT rather than CASCADE, as every other key in this module: removing a
+    # deployment must not silently delete the sections discovered through it, and
+    # with them every response keyed to those sections.
+    lti_deployment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lti_deployment.id", ondelete="RESTRICT"), nullable=False
+    )
+    lms_context_id: Mapped[str] = mapped_column(Text, nullable=False)
