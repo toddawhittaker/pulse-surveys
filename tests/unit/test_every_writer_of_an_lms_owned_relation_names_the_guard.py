@@ -52,15 +52,18 @@ correct module is very likely to *say* "this never inserts into `course`" in a
 docstring, and a text search would turn that sentence into a failure and teach the
 next person to delete the comment. Docstrings are subtracted by name below.
 
-**The controls come first, and they have to find things.** Over today's tree this
-sweep's subject set is empty — E0 ships no write path at all, which E0-35 records
-as correct — so the sweep walks every module, finds no writer, and passes. A guard
-whose only evidence is that it reported nothing on a tree containing nothing has
-told you nothing (`docs/MISTAKES.md` entry 35). So each write shape is proven
-detectable against a sample carried in this file, the near-miss beside it is proven
-to be allowed, and the ORM half is required to resolve every guarded table to a
-mapped class it can actually recognise. What this file asserts today is that the
-detector can see a write; what it asserts from E1 is that every writer routes.
+**The controls come first, and they have to find things.** From E0-35 until E1-10
+this sweep's subject set was empty — E0 shipped no write path at all, which E0-35
+records as correct — so the sweep walked every module, found no writer, and
+passed. A guard whose only evidence is that it reported nothing on a tree
+containing nothing has told you nothing (`docs/MISTAKES.md` entry 35). So each
+write shape is proven detectable against a sample carried in this file, the
+near-miss beside it is proven to be allowed, and the ORM half is required to
+resolve every guarded table to a mapped class it can actually recognise. Those
+controls are what the file asserts about the *detector*; from E1-10 it also
+asserts something about the codebase, because `app.services.provisioning` is a
+real writer of three of these relations and the live assertion below finally has a
+subject.
 
 **What it cannot see, so that nothing here is cited as more than it is**
 (ADR 0062 states the same three limits for the mock-idp gate, and they are the
@@ -87,14 +90,32 @@ same three):
     to hold. Under-flagging is the direction consistent with the guard, and it is
     a hole.
 
-**One thing this rule does not answer, and E1 will have to.** ADR 0045 names the
-launch path that creates a `user` row, and E1's roster sync that writes the other
-three, as *sanctioned* writers. Nothing records how a sanctioned writer satisfies
-"calls `guard_write`", given that `guard_write(table="course")` refuses. This sweep
-asserts E0-35's criterion as written — the module names the guard — and a
-sanctioned writer that cannot honestly do that is a question for the ADR rather
-than a line to add to an exclusion list here. There is no exclusion list, on
-purpose.
+**How a *sanctioned* writer satisfies this rule, answered by E1-10.** ADR 0045
+names the launch path that creates a `user` row, and E1's roster sync that writes
+the other three, as *sanctioned* writers, and until 2026-08-26 nothing recorded
+what that meant operationally: `guard_write(table="course")` refused
+unconditionally, so a sanctioned writer could not honestly call it and this rule
+was satisfiable only because nothing under `backend/app/` called the guard at all.
+E1-10 arrives with the first real writer and settles it, and the answer changes
+nothing about what this file asserts:
+
+  **A sanctioned writer still calls `guard_write`.** It calls it with a
+  `sanction` the catalog grants — `authz.SANCTIONED_WRITERS` maps a writer's name
+  to the tables it may write, `sanction_for` resolves one, and `guard_write`
+  consults the catalog rather than the sanction it was handed. So "the module
+  names the guard" is exactly as true of the launch writer as of anything else,
+  the rule below is unchanged, and **there is still no exclusion list, on
+  purpose.** What a sanction is and what it refuses is asserted in
+  `tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py`, including
+  that a write with no sanction is refused exactly as it is today.
+
+That is also what makes this file's live assertion stop being vacuous. It swept a
+tree with no writer in it from E0-35 until E1-10, so its silence was the silence
+of an empty subject set;
+`test_the_launch_writer_is_a_routed_write_site_this_sweep_can_actually_see` below
+is the assertion that the subject set is no longer empty, and it is the one that
+turns every other sentence here into a claim about this codebase rather than about
+a parser.
 """
 
 import ast
@@ -339,6 +360,25 @@ def names_the_guard(source: str) -> bool:
     return any(isinstance(node, ast.Call) and called_name(node) == GUARD for node in ast.walk(tree))
 
 
+def unrouted_write_sites(
+    source: str,
+    path: Path,
+    tables: tuple[str, ...],
+    models: dict[str, tuple[str, ...]],
+) -> list[WriteSite]:
+    """The guarded writes in `source` that nothing in the same module routes.
+
+    The verdict, as one function, so that the planted-offender control below and
+    the live sweep at the foot of this file reach it by the same route. When the
+    two were spelled separately — a control that reasoned about the parts and a
+    sweep that combined them — a detector could pass the control and answer
+    differently over the application, which is `docs/MISTAKES.md` entry 9's shape:
+    a guard cited for a case it was never run against.
+    """
+    sites = write_sites(source, path, tables, models)
+    return [] if names_the_guard(source) else sites
+
+
 def swept_modules(root: Path) -> list[Path]:
     """Every Python source file under `root`, in a stable order."""
     return sorted(
@@ -475,16 +515,46 @@ UNGUARDED_MODULE = (
     "def create_course(session, payload):\n" "    session.add(Course(lms_number=payload.number))\n"
 )
 
+# E1-10's shape: the same write, guarded with the sanction the catalog grants. It
+# is a third sample rather than an edit to `GUARDED_MODULE`, because the two say
+# different things and both have to hold — the second-argument call is what a
+# real writer under ADR 0090 looks like, and a `names_the_guard` written as a
+# match on the exact source text `guard_write(table=` would pass the sample above
+# and fail this one while every module in the application routed correctly.
+SANCTIONED_MODULE = (
+    "def provision_course(session, claims):\n"
+    '    guard_write(table="course", sanction=sanction_for("launch_provisioning"))\n'
+    "    session.add(Course(lms_number=claims.number))\n"
+)
+
+# The planted offender E1-10's criterion 3 requires this sweep to be *run* against
+# rather than reasoned about (`docs/MISTAKES.md` entry 9). It is a module that
+# writes two guarded relations through the ORM and names no guard at all — the
+# shape a second, unsanctioned writer takes when somebody adds one beside the
+# launch writer — and it is judged by `verdict_on` below, the same function the
+# live sweep uses, so a detector that stopped seeing this would stop seeing the
+# real thing too.
+PLANTED_UNSANCTIONED_WRITER = (
+    "def store_the_roster(session, roster):\n"
+    "    session.add(Section(lms_section_code=roster.code))\n"
+    '    session.execute(text("INSERT INTO enrollment (section_id) VALUES (:id)"))\n'
+)
+
 
 def test_the_write_sweep_finds_every_shape_it_claims_to_and_allows_their_near_misses() -> None:
     """The control, run before this file's silence over `backend/app/` counts as evidence.
 
-    E0-35 records that nothing calls `guard_write` today and that this is correct:
-    E0 ships no write path. So the sweep below walks the application, finds no
-    writer, iterates over nothing and passes — and would pass just as quietly on
-    the day E1's roster sync lands unrouted, if the shape it uses is one this file
-    cannot see. `docs/MISTAKES.md` entry 35's rule is the one that applies: require
-    the guard to find each mechanism on a subject that certainly has it.
+    E0-35 recorded that nothing called `guard_write` and that this was correct: E0
+    shipped no write path. So the sweep below walked the application, found no
+    writer, iterated over nothing and passed — and would have passed just as
+    quietly on the day a real writer landed unrouted, if the shape it used were one
+    this file cannot see. `docs/MISTAKES.md` entry 35's rule is the one that
+    applies: require the guard to find each mechanism on a subject that certainly
+    has it.
+
+    E1-10's `app.services.provisioning` is the first such subject in the tree, and
+    it does not retire this control: it exercises three of these ten shapes at
+    most, and the point of the sample set is the seven it does not.
 
     The allow half costs as much as the catch half. `RoleAssignment(role=…)` with
     a leadership role is one token away from the instructor case and has to pass,
@@ -533,6 +603,60 @@ def test_the_verdict_passes_a_routed_write_and_fails_an_unrouted_one() -> None:
     assert not names_the_guard(UNGUARDED_MODULE), (
         f"This file read a call to `{GUARD}` in a module that makes none, so every module would "
         "pass the sweep below whatever it writes."
+    )
+
+
+def test_the_verdict_flags_a_planted_unsanctioned_writer_and_clears_a_sanctioned_one() -> None:
+    """E1-10 criterion 3, both directions, **run** rather than reasoned about.
+
+    "The E0-35 sweep still fails a planted unsanctioned writer, and the new
+    sanctioned path passes it — both directions run, per MISTAKES entry 9." The
+    two subjects are one line apart in what they mean and are nothing alike in
+    what they contain: one writes `section` and `enrollment` and names no guard,
+    the other writes `course` and names the guard with the sanction ADR 0090's
+    catalog grants.
+
+    **Why the sanctioned sample is not the same as `GUARDED_MODULE` above.** That
+    one calls `guard_write(table="course")` with no second argument, which is the
+    only shape that existed before this ticket. If `names_the_guard` were ever
+    narrowed from "a call to `guard_write`" to a match on that exact text — the
+    obvious way to make it stricter — the old sample would pass, this one would
+    fail, and every correctly sanctioned writer in the application would be
+    reported as an offender. The failure mode of a sweep that is red against
+    correct code is that somebody deletes the sweep.
+
+    The planted sample's non-emptiness is asserted before its verdict is, because
+    "no unrouted write" is what this function answers for a module it cannot read
+    at all.
+    """
+    planted = write_sites(
+        PLANTED_UNSANCTIONED_WRITER, CONTROL_MODULE, CONTROL_TABLES, CONTROL_MODELS
+    )
+    assert {site.relation for site in planted} == {"section", "enrollment"}, (
+        f"The sweep read {sorted({site.relation for site in planted})} out of the planted "
+        "unsanctioned writer, which writes `section` through the ORM and `enrollment` as SQL. A "
+        "control that cannot see the planted offender says nothing about the live sweep below, "
+        "which is the only thing standing between a second writer and LMS-owned data."
+    )
+    assert unrouted_write_sites(
+        PLANTED_UNSANCTIONED_WRITER, CONTROL_MODULE, CONTROL_TABLES, CONTROL_MODELS
+    ), (
+        "The planted unsanctioned writer was cleared by this file's own verdict. It writes two "
+        "relations SPEC §2.1 makes LMS-owned and calls `guard_write` nowhere, so if this passes "
+        "then the sweep at the foot of this module would pass a module exactly like it."
+    )
+
+    sanctioned = write_sites(SANCTIONED_MODULE, CONTROL_MODULE, CONTROL_TABLES, CONTROL_MODELS)
+    assert sanctioned, (
+        "The sweep found no write in the sanctioned control module, so it is not the subject this "
+        "test needs — it would be cleared for having nothing to judge rather than for routing."
+    )
+    assert not unrouted_write_sites(
+        SANCTIONED_MODULE, CONTROL_MODULE, CONTROL_TABLES, CONTROL_MODELS
+    ), (
+        f"The sanctioned control module writes `course` and calls `{GUARD}` with the sanction "
+        "ADR 0090's catalog grants, and this file reported it as an offender. That is the sweep "
+        "going red against the one shape E1-10 makes correct."
     )
 
 
@@ -640,16 +764,17 @@ def test_no_module_under_the_application_writes_a_guarded_relation_without_namin
     ADR 0045: "a caller can bypass it by not calling it… E0 ships no HTTP write
     path at all, so today the set of callers is empty and the guard is scaffolding
     with tests on it. E1 is the first ticket that has to route a real write through
-    it." E1's roster sync writes `course`, `section`, `enrollment` and the
-    `INSTRUCTOR` `role_assignment` row — every relation the guard names, all four
-    in one module — so this is the assertion that is empty today and load-bearing
-    on the day that module lands.
+    it." E1-10 is that ticket: `app.services.provisioning` writes `course`,
+    `section` and `user` at launch time, so this assertion has a subject for the
+    first time and the test below it is what says so.
 
     The module count assertion first is not ceremony, and it is not the whole
     guard either: this test asserts a set is empty, and an empty set is what a
     sweep pointed at a renamed directory produces as readily as one pointed at
     correct code. The controls above are what make the emptiness mean something,
-    because today the tree genuinely holds no writer.
+    and `test_the_launch_writer_is_a_routed_write_site_this_sweep_can_actually_see`
+    is what stops the emptiness being the emptiness of a tree with no writer in
+    it.
     """
     modules = swept_modules(APP_ROOT)
     assert modules, (
@@ -664,14 +789,13 @@ def test_no_module_under_the_application_writes_a_guarded_relation_without_namin
     for path in modules:
         source = path.read_text(encoding="utf-8")
         try:
-            sites = write_sites(source, path, tables, models)
-            routed = names_the_guard(source)
+            sites = unrouted_write_sites(source, path, tables, models)
         except SyntaxError as failure:  # pragma: no cover - a broken source tree
             pytest.fail(
                 f"{path.relative_to(REPO_ROOT)} does not parse ({failure}), so this sweep cannot "
                 "read it and would report success having skipped it."
             )
-        if sites and not routed:
+        if sites:
             offenders[str(path.relative_to(REPO_ROOT))] = [
                 f"line {site.line}: {site.relation} — {site.shape}: {site.source}" for site in sites
             ]
@@ -700,9 +824,70 @@ def test_no_module_under_the_application_writes_a_guarded_relation_without_namin
             "",
             f"Route the write through `{GUARD}`. If this module is a *sanctioned* writer — ADR "
             "0045 names the launch path that creates a `user` row, and E1's roster sync for the "
-            "other three — then note that no record yet says how a sanctioned writer satisfies "
-            f"this rule, since `{GUARD}(table='course')` refuses. That is a question for the ADR "
-            "and a deliberate change to this rule, not an exclusion added here; there is no "
-            "exclusion list in this file on purpose.",
+            "other three — then it calls the guard like everything else and passes a `sanction` "
+            "the catalog grants: `sanction_for(<writer>)` resolves one out of "
+            "`authz.SANCTIONED_WRITERS`, and E1-10's ADR 0090 records the mechanism. A writer "
+            "the catalog does not name is a grant nobody has made, and the honest answers are to "
+            "add it there — in a pull request that says why, since "
+            "`tests/unit/test_a_sanctioned_writer_satisfies_the_chokepoint.py` pins that catalog "
+            "as an equality — or not to write the relation. There is no exclusion list in this "
+            "file on purpose.",
         ]
+    )
+
+
+def test_the_launch_writer_is_a_routed_write_site_this_sweep_can_actually_see(
+    authz: Any, import_app_module: Any
+) -> None:
+    """The sweep above stops being vacuous here, and only here.
+
+    From E0-35 until E1-10 the sweep walked `backend/app/`, found no writer of any
+    guarded relation, iterated over nothing and reported success — which is
+    exactly what it would report on the day a real writer landed in a shape the
+    detector cannot see. E0-35 recorded that as its own limit and `docs/MISTAKES.md`
+    entry 35 is the rule: require the guard to *find* the thing on a subject that
+    certainly has it.
+
+    `app.services.provisioning` is that subject. E1-10 has it write `course`,
+    `section` and `user` — three of the four tables in the floor — through the ORM,
+    with `guard_write` called before each write in the same module.
+
+    **Two assertions, and they are opposite.** The writes must be *visible* to
+    this file's detector, or the sweep's silence about the application is the
+    silence of a parser that reads nothing. And the module must be *cleared*, or
+    the mechanism E1-10 designed does not satisfy the rule E0-35 wrote and one of
+    the two is wrong.
+
+    **The mutation this exists to survive**: `provisioning.py` writing its rows
+    through a helper in another module, which is the first limit E0-35's docstring
+    names — the sweep is syntactic and its grain is the module, so a write reached
+    through a helper elsewhere is invisible to it. That mutation leaves the sweep
+    above green and turns this red, which is the whole reason this test names a
+    module rather than counting offenders.
+    """
+    path = APP_ROOT / "services" / "provisioning.py"
+    assert path.is_file(), (
+        f"There is no {path.relative_to(REPO_ROOT)}. E1-10 puts launch-time provisioning there — "
+        "the first code in this project that writes an LMS-owned relation at all — and until it "
+        "exists the sweep above walks a tree with no writer in it and its success means nothing "
+        "(`docs/MISTAKES.md` entry 35)."
+    )
+
+    tables = guarded_tables(authz)
+    models = guarded_models(mapped_classes_by_table(import_app_module), tables)
+    source = path.read_text(encoding="utf-8")
+
+    seen = {site.relation for site in write_sites(source, path, tables, models)}
+    assert seen, (
+        f"This file's detector reads no guarded write out of {path.relative_to(REPO_ROOT)}, which "
+        "E1-10 makes the writer of `course`, `section` and `user`. Either the writes are reached "
+        "through a helper in another module — the syntactic sweep's first stated limit, and a "
+        "hole this rule then has no way to close — or the detector has gone blind, in which case "
+        "the sweep above is passing for having read nothing."
+    )
+
+    assert not unrouted_write_sites(source, path, tables, models), (
+        f"{path.relative_to(REPO_ROOT)} writes {sorted(seen)} and calls `{GUARD}` nowhere in the "
+        "module. E1-10's whole mechanism is that a sanctioned writer satisfies this rule rather "
+        "than being excused from it: it calls the guard and passes a sanction the catalog grants."
     )

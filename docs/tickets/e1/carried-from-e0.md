@@ -197,6 +197,14 @@ nothing today, and E1's roster sync is the first code that writes `course`,
 relation the guard names, in one module. E0-35 names E1 as its deadline for
 exactly that reason, and it records what its static sweep cannot see.
 
+**Half of this landed 2026-08-26 in E1-10.** `app.services.provisioning` is the
+first caller of `guard_write` and writes three of those four relations, so the
+guard is called by something now and ADR 0090 records how a sanctioned writer
+passes it. The sync is still the first writer of `enrollment` and of the
+`INSTRUCTOR` `role_assignment` row, and it follows that mechanism rather than
+designing one — if it finds the mechanism wrong, that is a dispute and an
+amendment to ADR 0090, not a second mechanism beside it.
+
 ## The §4.1 view sweep is blind to an aliased identity column and to join keys
 
 **Found 2026-08-21 by the reviewer self-test, not by a live defect.** The

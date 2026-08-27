@@ -100,7 +100,7 @@ WRONG_DEFECTS: tuple[str, ...] = (
     EXP_PAST,
 )
 
-# -- The three near-miss and edge fixtures: valid launches, not wrong ones ---
+# -- The four near-miss and edge fixtures: valid launches, not wrong ones ---
 #
 # Same selector, same vocabulary, because E1-10 and E1-08 ask for these the
 # same way they ask for a wrong one. What each mints is syntactically and
@@ -111,10 +111,19 @@ ONLY_TEACHING_ASSISTANT_ROLE = "only_teaching_assistant_role"
 ONLY_MENTOR_ROLE = "only_mentor_role"
 TITLELESS_CONTEXT = "titleless_context"
 
+# **The titleless case is two mints, because it has two outcomes.** A context
+# carrying `id` alone identifies no course — there is no prefix and no number in
+# it to resolve — so E1-10 refuses that launch and records the refusal. A context
+# that kept its `label` and lost only its `title` identifies a course perfectly
+# well, and it is the one that proves E1-10's "PREFIX NUMBER" fallback title. One
+# defect per mint is this module's own rule, and it is what keeps the two apart.
+TITLELESS_CONTEXT_WITH_LABEL = "titleless_context_with_label"
+
 NEAR_MISS_FIXTURES: tuple[str, ...] = (
     ONLY_TEACHING_ASSISTANT_ROLE,
     ONLY_MENTOR_ROLE,
     TITLELESS_CONTEXT,
+    TITLELESS_CONTEXT_WITH_LABEL,
 )
 
 # Every name the selector answers to, wrong and near-miss together — the set
@@ -273,10 +282,18 @@ class WrongLaunchMinter:
             id_token = self._signed({**claims, ROLES_CLAIM: [TEACHING_ASSISTANT_SUB_ROLE_URN]})
         elif name == ONLY_MENTOR_ROLE:
             id_token = self._signed({**claims, ROLES_CLAIM: [MENTOR_ROLE_URN]})
-        else:  # name == TITLELESS_CONTEXT — the only selector left, per the guard above
+        elif name == TITLELESS_CONTEXT:
             context_claim = dict(claims[CONTEXT_CLAIM])
             del context_claim["title"]
             del context_claim["label"]
+            id_token = self._signed({**claims, CONTEXT_CLAIM: context_claim})
+        else:  # name == TITLELESS_CONTEXT_WITH_LABEL — the only selector left
+            # The `label` stays, and it is the whole difference from the mint
+            # above: a tool can still read a prefix and a course number out of
+            # this launch, so it is the fixture E1-10's fallback title is proved
+            # against rather than a launch that identifies nothing.
+            context_claim = dict(claims[CONTEXT_CLAIM])
+            del context_claim["title"]
             id_token = self._signed({**claims, CONTEXT_CLAIM: context_claim})
 
         return MintedResponse(id_token=id_token, state=state)

@@ -33,15 +33,36 @@ downgrade below cannot touch the session database every other integration test
 reads — and there is no leftover state from an earlier run for the plant to be
 confused by (`docs/MISTAKES.md` entry 12).
 
-**Why the rows are seeded at the new revision and the edge written at the old
-one.** The two assignments go in while the rank rule is installed, which keeps
-their columns the ones today's models declare; only the edge itself is written
-after the downgrade, because the edge is the one thing the old version accepts
-and the new one does not. The same `UPDATE` is attempted **before** the downgrade
-and required to be refused, so the plant is known to depend on the older schema
-rather than on nothing (`docs/MISTAKES.md` entry 9), and it is read back on a
-fresh connection afterwards, so a plant that silently did not land cannot make
-the refusal below arrive for some other reason (`docs/MISTAKES.md` entry 3).
+**Why the rows are seeded at head and only the edge is written at the old
+revision.** The two assignments go in while the database is at **head**, because
+that is the only schema `seed_row` can write to: it builds its insert from
+`Base.metadata` and its `RETURNING` clause names every column that metadata
+declares, so a database standing before any revision that added one is a database
+it cannot seed. Head here is not a subject and is not a step — it is the name of
+the schema today's models describe, which is what the seeding needs and the only
+thing it is used for. Everything this file *asserts* is still pinned to a named
+revision, for the reason the paragraph above gives.
+
+The database is then walked back down: to `RANK_REVISION`, where the write that
+the plant depends on being illegal is attempted and required to be refused
+(`docs/MISTAKES.md` entry 9 — so the plant is known to depend on the older schema
+rather than on nothing), and then to `SUPERVISION_REVISION`, where the edge itself
+is written, because the edge is the one thing the old version accepts and the new
+one does not. It is read back on a fresh connection afterwards, so a plant that
+silently did not land cannot make the refusal below arrive for some other reason
+(`docs/MISTAKES.md` entry 3).
+
+**This paragraph used to say the opposite, and the correction is the point.** It
+read that the rows go in "while the rank rule is installed, which keeps their
+columns the ones today's models declare". That was true when E0-11 was head and
+stopped being true the first time a later revision added a column to a table this
+seeds — E1-10's `course.title_is_fallback`, eight revisions on, which turned both
+tests here red inside their own fixture without either ticket being about the
+other (`docs/disputes/E1-10-01.md`, `docs/MISTAKES.md` entry 22). The shape that
+replaces it is not a fix for that column: seeding happens at head whatever the
+models declare, so a revision that adds a column, or ten, cannot reach this file
+again. E1-11's roster sync and E1-12's identity link were both already due to add
+some.
 """
 
 from collections.abc import Iterator
@@ -63,6 +84,16 @@ RANK_REVISION = "9a71c4be0d3f"
 # row this test invented a way to write.
 SUPERVISION_REVISION = "014ccb3d0fe5"
 
+# Where the seeding happens, and **it is not a subject**. Every assertion in this
+# file is about one of the two named revisions above; this name appears only in
+# the two `upgrade` calls that put the database into the shape `Base.metadata`
+# describes, so that `seed_row` can write to it at all. `docs/disputes/E0-11-02.md`
+# forbids `head` and a relative step as the *subject* of an assertion, because a
+# position moves when a revision lands on top of it — and nothing here asserts
+# anything about whatever revision happens to be at head. What it needs is the
+# schema today's models declare, and that is what this word means.
+MODEL_SCHEMA = "head"
+
 
 def written(graph: Any, action: Any, what: str) -> Any:
     """Perform a write that has to succeed, and fail naming it when it does not.
@@ -83,6 +114,41 @@ def written(graph: Any, action: Any, what: str) -> Any:
         "it in this test can mean anything (`docs/MISTAKES.md` entry 3)."
     )
     return holder.get("row")
+
+
+def survived_the_downgrade(graph: Any, seeded: list[Any], revision: str) -> None:
+    """Every seeded assignment is still stored after the walk back down.
+
+    A control on this file's own machinery rather than an assertion about the
+    migration, and it exists because the machinery grew a step. The rows are
+    written at `MODEL_SCHEMA` and everything after that runs against an older
+    schema, so a downgrade that removed them — a data migration, a cascade off a
+    dropped constraint — would leave every assertion below true of a database with
+    nothing in it, which is `docs/MISTAKES.md` entry 3's shape and is exactly what
+    the read-backs further down already guard against for the *edge*.
+
+    A red here is a broken test, not a broken migration: it means the rows this
+    file needs cannot survive the route it takes to the revision under test, and
+    the route is what changes.
+    """
+    from sqlalchemy import select
+
+    table = graph.assignments
+    key = graph.assignment_key
+    wanted = [row[key] for row in seeded]
+    found = set(
+        graph.session.execute(select(table.c[key]).where(table.c[key].in_(wanted))).scalars()
+    )
+    missing = [str(one) for one in wanted if one not in found]
+    assert not missing, (
+        f"After downgrading to {revision}, the assignments {missing} are no longer stored. They "
+        f"were seeded at `{MODEL_SCHEMA}` — the only schema `seed_row` can write to, per "
+        "`tests/fixtures/supervision.py` — and every step after this one is about a database that "
+        "holds them. A downgrade between there and here removes rows rather than only schema, so "
+        "this file's route to the revision under test has to change: seed at the oldest revision "
+        "whose schema `Base.metadata` still fits, or write the rows through Core statements this "
+        "module builds itself."
+    )
 
 
 def require_revision(config: Any, revision: str, ticket: str, what: str) -> str:
@@ -252,19 +318,27 @@ def test_upgrading_over_a_stored_edge_that_does_not_climb_refuses_and_names_the_
     have come from the data.
 
     **The control is `test_upgrading_over_a_graph_whose_edges_all_climb_completes`**,
-    which runs the identical two migration steps over a database seeded with a
-    legal edge and requires them to complete. Without it, this test passes against
-    a migration that refuses every upgrade unconditionally, which is the mutation
-    it exists to survive.
+    which runs the identical migration step — E0-09's revision up into E0-11's —
+    over a database seeded with a legal edge, and requires it to complete. Without
+    it, this test passes against a migration that refuses every upgrade
+    unconditionally, which is the mutation it exists to survive.
+
+    The two assignments are seeded while the database is at `MODEL_SCHEMA` and the
+    database is then walked back down through `RANK_REVISION` to
+    `SUPERVISION_REVISION`; the stop at `RANK_REVISION` is where the write the
+    plant depends on being illegal is required to be refused. That is machinery
+    rather than subject, and the module docstring says why it has to be that way
+    round.
     """
     config = alembic_config_pointed_at(empty_database)
     rank, supervision = revisions(config)
 
-    failure = attempt_upgrade(config, rank)
+    failure = attempt_upgrade(config, MODEL_SCHEMA)
     assert failure is None, (
-        f"`alembic upgrade {rank}` did not complete against an empty database: {failure!r}. That "
-        "is the state every other test in the suite runs against, so this is a defect in the "
-        "revision itself rather than anything this test planted — nothing has been written yet."
+        f"`alembic upgrade {MODEL_SCHEMA}` did not complete against an empty database: "
+        f"{failure!r}. That is the state every other test in the suite runs against, so this is a "
+        "defect in a revision rather than anything this test planted — nothing has been written "
+        f"yet. Revision {rank}, the subject of this file, is one of the ones it passes through."
     )
 
     with graph_on(empty_database, supervision_graph_on) as graph:
@@ -273,6 +347,11 @@ def test_upgrading_over_a_stored_edge_that_does_not_climb_refuses_and_names_the_
         child = written(
             graph, lambda: graph.node("LEAD_FACULTY"), "A second lead-faculty assignment"
         )
+
+    downgrade_to(config, rank, MODEL_SCHEMA)
+
+    with graph_on(empty_database, supervision_graph_on) as graph:
+        survived_the_downgrade(graph, [parent, child], rank)
         refused_now = graph.refusal(lambda: graph.repoint(child, parent[key]))
         assert refused_now is not None, (
             f"At revision {rank}, one lead-faculty assignment was pointed at another and the edge "
@@ -340,12 +419,17 @@ def test_upgrading_over_a_graph_whose_edges_all_climb_completes(
 ) -> None:
     """The control, and the half a validating migration is easiest to get wrong.
 
-    The same two steps as the test above — up to E0-11's revision, back to
-    E0-09's, and up again — over a database whose one stored edge is
-    `LEAD_FACULTY → CHAIR`, the third link of SPEC §2.1's canonical chain. It has
-    to complete. Without this, the test above passes against a migration that
-    refuses every upgrade, and the rule "raises rather than completing" would be
-    satisfied by a revision no deployment can apply at all.
+    The same migration step as the test above — down to E0-09's revision and up
+    into E0-11's — over a database whose one stored edge is `LEAD_FACULTY → CHAIR`,
+    the third link of SPEC §2.1's canonical chain. It has to complete. Without
+    this, the test above passes against a migration that refuses every upgrade, and
+    the rule "raises rather than completing" would be satisfied by a revision no
+    deployment can apply at all.
+
+    The seeding, here as above, happens while the database is at `MODEL_SCHEMA`
+    and only then is it walked back down. That is machinery rather than subject and
+    the module docstring says why; this test stops at no intermediate revision on
+    the way, because it has no write to prove illegal there.
 
     **Three assertions, because "it completed" has two degenerate readings.** The
     upgrade does not raise; the revision is stamped, so a run that quietly did
@@ -355,17 +439,19 @@ def test_upgrading_over_a_graph_whose_edges_all_climb_completes(
     purviews of everything transitively reporting to an assignment, so a dropped
     edge is a branch that stops existing with nothing to report it.
 
-    The edge is asserted stored *before* the second upgrade for the same reason
-    the plant is asserted in the test above: over a database with no edges in it,
-    "the upgrade completed" says nothing about a migration that examines edges.
+    The edge is asserted stored *before* the upgrade under test, for the same
+    reason the plant is asserted in the test above: over a database with no edges
+    in it, "the upgrade completed" says nothing about a migration that examines
+    edges.
     """
     config = alembic_config_pointed_at(empty_database)
     rank, supervision = revisions(config)
 
-    failure = attempt_upgrade(config, rank)
+    failure = attempt_upgrade(config, MODEL_SCHEMA)
     assert failure is None, (
-        f"`alembic upgrade {rank}` did not complete against an empty database: {failure!r}. "
-        "Nothing has been seeded at this point, so this is the revision failing on its own."
+        f"`alembic upgrade {MODEL_SCHEMA}` did not complete against an empty database: "
+        f"{failure!r}. Nothing has been seeded at this point, so this is a revision failing on its "
+        f"own, and {rank} — the subject of this file — is one of the ones it passes through."
     )
 
     with graph_on(empty_database, supervision_graph_on) as graph:
@@ -377,9 +463,10 @@ def test_upgrading_over_a_graph_whose_edges_all_climb_completes(
             "A lead-faculty assignment reporting to that chair",
         )
 
-    downgrade_to(config, supervision, rank)
+    downgrade_to(config, supervision, MODEL_SCHEMA)
 
     with graph_on(empty_database, supervision_graph_on) as graph:
+        survived_the_downgrade(graph, [chair, lead], supervision)
         stored = graph.parent_of(lead[key])
     assert stored == chair[key], (
         f"Before the upgrade under test, the lead reports to {stored} rather than to the chair "

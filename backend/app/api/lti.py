@@ -55,6 +55,7 @@ from app.lti.launch import (
 )
 from app.lti.registration import JWKS_PATH, NoSigningKeyError, published_key_set
 from app.services.landing import Door
+from app.services.provisioning import provision_from_launch
 
 # What a caller is told when this deployment holds no signing key. Short on
 # purpose: the route is public in every environment, and the operator's copy of
@@ -143,6 +144,20 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     launch single-use survive to the next request. On a refusal it persists the
     consumed in-flight `state` (`verified_launch` deleted it, burn-after-use), so a
     correct `state` replayed after a refusal finds nothing and is refused too.
+
+    **What a verified launch discovers is written before the landing is resolved**
+    (E1-10, ADR 0091). `provision_from_launch` writes the launching subject's
+    `user` row on every verified launch and, for a staff launch, the course and
+    section its context names — and it runs here rather than after the landing
+    because a launch this door has nothing to *show* is still a launch that
+    authenticated somebody: a teaching assistant is refused a view and is no less
+    a person E1-12 has to be able to link. It never refuses a launch of its own
+    accord; an unreadable context is written down and the person lands anyway.
+
+    **Its work gets a commit of its own, after the launch's.** The two are
+    independent: the nonce claim and the consumed handshake are what make this
+    launch single-use, and they must not be hostage to what provisioning found in
+    the context.
     """
     settings = request.app.state.settings
     form = form_body(await request.body())
@@ -155,6 +170,8 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
         await run_in_threadpool(session.commit)
         return answer
 
+    await run_in_threadpool(session.commit)
+    await run_in_threadpool(provision_from_launch, session, claims)
     await run_in_threadpool(session.commit)
     return landing_with_session(
         claims,

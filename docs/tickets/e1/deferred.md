@@ -241,3 +241,101 @@ Every E1 pull request that defers something adds it here in the same PR.
    asserts the door still refuses it, so the pin's removal turns a green launch
    red. Owed to the ticket that gives a mock platform a permissive-alg mint (a
    natural companion to E1-07's wrong-launch selectors).
+
+## From E1-10 — launch-time provisioning and the sanctioned writer
+
+1. **E1-11 must pick the platform to mint a token for off `section.lti_deployment_id`,
+   and nothing yet makes it.** E1-10's round-3 security review gave `section` a
+   binding — `(lti_deployment_id, lms_context_id)`, unique — because a section had
+   no identity a copied course could not reproduce, and a launch from a copy
+   repointed the original's stored roster address. The column that closed it is
+   also the answer to a question E1-11 has to ask on every sync: *whose* client
+   credentials does this section's roster get fetched with? A context identifier
+   means nothing outside the registration that issued it, and a section's course
+   and term say nothing about a registration at all — so a sync that resolved the
+   platform any other way (the only registration it can find, the first one, one
+   named in configuration) could present one institution's token to another
+   institution's roster service, which is the same failure the binding closes,
+   arriving an epic later. There is nothing structural stopping it: the sync will
+   hold the section row and can read whatever column it likes.
+   **Done when** E1-11's client resolves its registration from the section's own
+   `lti_deployment_id` and a test drives two registered platforms, each with a
+   section, and asserts each sync presents the assertion of its own platform —
+   a test that fails against a resolver that takes whichever registration it
+   finds first. Recorded in
+   [ADR 0091](../../adr/0091-what-a-launch-provisions-and-what-it-writes-down-instead.md)'s
+   consequences as well, because that is where a reader of the column will be.
+
+2. **The launch day is UTC's day, not the institution's.**
+   `app.services.provisioning` is handed a session and the launch's claims and no
+   settings, so the term a new section belongs to is chosen against
+   `datetime.now(UTC).date()`. A launch in the hours either side of a term
+   boundary can be read into the neighbouring calendar day and land in the
+   neighbouring term. E1-11's sync will want the same value and has the same
+   problem.
+   **Done when** the launch moment reaches the writer — the door has `Settings`
+   in hand and the institution timezone is on it — and a test drives a launch at
+   an hour that falls on different dates in UTC and in the institution's zone,
+   asserting the term the institution's calendar names.
+
+3. **Sections stored before the binding carry a synthetic context id.** The
+   round-3 migration binds them to the one registered deployment under a
+   `pre-binding-section-` identifier and refuses where there is no unambiguous
+   registration. Nothing a platform ever issues looks like that, so no launch can
+   reach one of those rows — which is right for rows no launch created, and the
+   demo seed's eighteen sections are all of them today. The residue is that
+   `lms_context_id` is not universally a value some platform issued.
+   **Done when** either no such row exists in any database anybody keeps (a
+   `make docker-build` and a re-seed is the whole of it for the demo stack), or a
+   later ticket decides that a section with no real context is a state worth
+   naming rather than a value worth inventing.
+
+4. **A squatted binding is never reconciled or aged out** (round-3 security
+   re-pass, MEDIUM). The binding makes `(course, term, lms_section_code)`
+   first-writer-wins: the first context to provision a name holds it, and every
+   later context whose label parses to that name is refused with a
+   `context_collision`. The direction is deliberate — the alternative is the
+   silent repointing round 3 closed — and the refusal is loud, so an
+   administrator reading E11's surface sees a specific context being refused
+   repeatedly with the identifiers to act on. What is missing is the acting.
+   Somebody who copies a course and launches it *before* the genuine context
+   takes the name, and the genuine instructor's launches are denied from then on,
+   unbounded in time, with no path that rebinds or retires the squatted row. It
+   needs an operator surface (E11's) and a rule about who may rebind, neither of
+   which belongs on a launch path, which is why E1-10 recorded it rather than
+   built it —
+   [ADR 0091](../../adr/0091-what-a-launch-provisions-and-what-it-writes-down-instead.md)'s
+   consequences carry the reasoning.
+   **Done when** an operator or a sync path can rebind or retire a squatted
+   section, proved by a test that provisions a section from one context, drives a
+   second context whose label parses to the same identity, and asserts that after
+   the repair the second context provisions and the first no longer holds the
+   name — a test that fails today whatever an administrator does, because there
+   is nothing to call.
+
+5. **`app.services.provisioning._environment()` reads `os.environ` while every
+   other reader of the same rules reads `Settings`** (round-3 security re-pass,
+   LOW). The address rules are gated on `ENVIRONMENT`, and the two registration
+   writers reach it through the configuration `Settings` validated;
+   `provision_from_launch` is handed a session and the launch's claims, so it
+   reads the variable itself. Two consequences, and only one of them costs
+   anything today. The dangerous direction — an unset variable switching the
+   rules *off* — is unreachable: `is_a_deployment("")` is true, so an absent value
+   puts them in force, which is why this is a LOW rather than a finding to fix in
+   the round. The direction that does cost something is the other one: a process
+   whose `ENVIRONMENT` lives only in a `.env` file that `Settings` loads and
+   `os.environ` does not see would judge a development stack by a deployment's
+   rules, and refuse the mock platform's own cleartext roster address on a
+   developer's machine.
+   That cost materialized before this PR merged, in CI rather than on a
+   developer's machine: CI's pytest process has no `.env` and set no
+   `ENVIRONMENT`, so the ten in-band course-number tests recorded
+   `roster_address_refused` while every local run stayed green off a dotenv
+   leak. The test-side fix (the tests now state their environment, and the
+   leak is closed) is `docs/MISTAKES.md` entry 40; this done-when is unchanged
+   and remains the code-side half.
+   **Done when** `provision_from_launch` takes the environment from `Settings` —
+   the launch door already holds one on `request.app.state.settings`, so the
+   thread is short — and a test drives a launch under a `.env`-only development
+   configuration and asserts the mock's address is stored. E1-11 touches this
+   module and is the natural place.
