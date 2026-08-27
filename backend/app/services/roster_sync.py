@@ -73,6 +73,7 @@ from pylti1p3.exception import LtiServiceException
 from pylti1p3.names_roles import NamesRolesProvisioningService
 from pylti1p3.service_connector import ServiceConnector
 from sqlalchemy import insert, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -100,10 +101,23 @@ SANCTION: Final[WriteSanction] = sanction_for("roster_sync")
 
 # The scope NRPS 2.0 names for reading a context's membership. A specification
 # constant: the token endpoint grants for the exact string the service claim
-# carries, and one granted for anything else is a token the service refuses.
+# carries, and one granted for anything else is a token the service refuses. It is
+# the same string `NamesRolesProvisioningService` asks for on every page, so a token
+# obtained under it here is the one the walk spends — `ServiceConnector` caches per
+# scope set, which is what keeps a paged sync to one grant.
 MEMBERSHIP_SCOPE: Final[str] = (
     "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
 )
+
+# How many pages of one container this tool will follow before it gives up. **A
+# bound on somebody else's header**, not a page budget: the `Link` relation a walk
+# follows is composed by the platform, so a header that advertises a next page for
+# ever is a worker that never finishes and an `nrps_call` table that never stops
+# growing. A thousand is far past any real section — platforms page rosters at
+# fifty or more, so a section would need tens of thousands of members to reach it —
+# and a walk that hits it is reported as a refusal rather than truncated, for the
+# reason `_walked_roster` gives.
+MAX_PAGES_WALKED: Final[int] = 1000
 
 # How long a launch trigger is debounced by a call this section has already made.
 # **Five minutes** (E1-11's D9, recorded in ADR 0095): SPEC §7.3 debounces the
@@ -413,16 +427,50 @@ def _walked_roster(
     A row per *sync* would leave an operator unable to tell a roster that took four
     requests from one that took one.
 
-    **A refusal returns `None` rather than an empty roster**, and the difference is
-    a section's whole enrollment. An empty list would be ingested as "every member
-    has left", which is what a platform answering 401 for an hour would do to a
-    class. The call is recorded either way, with the response code that says which
-    it was; a NULL response code means the call never reached the platform at all.
+    **Anything but a complete container answers `None` rather than what it got**,
+    and the difference is a section's whole enrollment. `_ingest` closes the
+    enrollment of every member the container did not carry, so a roster ingested
+    short closes everybody on the pages that were never read — and an empty list is
+    the extreme of that, which is what a platform answering 401 for an hour would
+    otherwise do to a class. So a refusal, a transport failure, a `Link` header that
+    loops and a walk past `MAX_PAGES_WALKED` all answer the same way. The call is
+    recorded either way, with the response code that says which it was; a NULL
+    response code means the call never reached the platform at all.
+
+    **The token is asked for before the first page**, rather than left to the
+    library's lazy fetch on the first request. A grant this platform refuses is a
+    fact about the *token endpoint*, and left to the walk it would be recorded
+    against the roster's URL carrying the token endpoint's status code — which reads
+    on SPEC §6.1's console as a roster service refusing a tool it never saw.
     """
+    try:
+        connector.get_access_token([MEMBERSHIP_SCOPE])
+    except (LtiServiceException, requests.RequestException):
+        _record_call(session, section_id, address, None, None)
+        logger.exception(
+            "no access token could be obtained for section %s, so no call was made to its roster "
+            "at %s",
+            section_id,
+            address,
+        )
+        return None
+
     service = NamesRolesProvisioningService(connector, {"context_memberships_url": address})
     members: list[Mapping[str, Any]] = []
+    walked: set[str] = set()
     following: str | None = address
     while following is not None:
+        if following in walked or len(walked) >= MAX_PAGES_WALKED:
+            logger.error(
+                "the roster walk for section %s reached %s after %d page(s) and stopped: a `Link` "
+                "header that returns to a page it already served, or one that never says stop, is "
+                "a container this tool cannot read to the end",
+                section_id,
+                following,
+                len(walked),
+            )
+            return None
+        walked.add(following)
         called = following
         try:
             page, following = service.get_members_page(called)
@@ -659,10 +707,12 @@ def _resolve_member(session: Session, platform_id: UUID, member: _Member) -> UUI
         session.add(User(lti_platform_id=platform_id, lms_user_id=member.subject))
         session.flush()
         savepoint.commit()
-    except Exception:
+    except IntegrityError:
         # A row another process wrote between the resolution above and this insert.
         # `UNIQUE (lti_platform_id, lms_user_id)` is what says so, and resolving
-        # again is the answer rather than a retry loop.
+        # again is the answer rather than a retry loop. Narrow on purpose: anything
+        # else that fails this insert is a defect to see, and the savepoint is what
+        # lets it out of here without a half-written transaction behind it.
         savepoint.rollback()
     return _resolved_user(session, platform_id, member.subject)
 
