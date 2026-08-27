@@ -66,6 +66,17 @@ treating a skip, an xfail or an empty collection in that pass as a failure. Do
 not count them from this paragraph — `pytest -m invariant --collect-only` is the
 only currency that sees both marking forms (`docs/MISTAKES.md` entry 35).
 
+**E1-12 adds the first table this convention has had to reach on its own**, at the
+foot of the file. `web_login_subject` maps an IdP `(issuer, subject)` pair to a
+`person`, and neither of its two text columns is named anything the identity
+vocabulary knows — `idp_subject` matches no fragment in `IDENTITY_NAME_FRAGMENTS`
+and was never going to. So the sweep above is silent about it whether it is marked
+or not, and the criterion that it "stays green with the new columns marked" is a
+criterion nothing here would have measured. The three tests at the foot are that
+measurement: the table is reached by the fixed-point walk, its per-person key
+carries the marker, and the closed list of columns a view may read from a person
+table is still the same three structural keys.
+
 **E1-01 adds a rule phrased over the *table* rather than over the marker**, and it
 is here for the same reason everything else in this file is: the vocabulary is
 defined here, so widening it widens every reader at once. The marker says what a
@@ -1965,4 +1976,151 @@ def test_a_view_that_reads_only_join_keys_of_a_person_table_is_not_flagged(
         f"{list(PERSON_TABLES)}, so nothing here should have looked at it at all; the Pulse-"
         "internal `user_id` is the design, and it is what makes a de-identified response "
         "addressable."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1-12 — the web door's linkage table joins this file's subject matter.
+# ---------------------------------------------------------------------------
+
+# The table E1-12 adds and the column that identifies a person in it. `idp_subject`
+# is the `sub` of a verified `id_token`: a stable per-person key at the identity
+# provider, and the web door's exact counterpart to `user.lms_user_id`, which the
+# carried entry measured as "a stable per-person key… flagged by nothing". The pair
+# `(idp_issuer, idp_subject)` is unique and `person_id` is what it resolves to.
+LINKAGE_TABLE = "web_login_subject"
+LINKAGE_SUBJECT_COLUMN = "idp_subject"
+
+# The whole of `JOIN_KEY_COLUMNS`, written out again as a literal. **The point is
+# the duplication**: the pin below compares the constant against these three names,
+# so widening the allow-list to admit a column of the new table — `person_id` is a
+# foreign key and would pass the structural-key rule in
+# `test_identity_separated_views.py` — cannot be done quietly. Changing the list is
+# a change to this test in the same pull request, with the reason in it, which is
+# what "moves deliberately" means for a hand-written inventory
+# (`docs/MISTAKES.md` entry 35).
+THE_THREE_STRUCTURAL_KEYS = ("id", "user_id", "lti_platform_id")
+
+
+def test_the_web_login_linkage_table_is_swept_as_a_table_that_holds_a_person(
+    migrated_engine: Any,
+) -> None:
+    """E1-12 criterion 5: the new table is inside this file's subject matter, not beside it.
+
+    `web_login_subject` says which human an IdP subject is. That is the same class
+    of fact `person` holds, and the fixed-point walk is what is supposed to notice —
+    the table carries a foreign key to `person`, so `people_tables` reaches it
+    without anybody adding a name to `PERSON_TABLES`.
+
+    **Dies if the linkage is stored somewhere the walk cannot reach**: a column on
+    `lti_platform`, a table keyed to `user_identity` by something other than a
+    foreign key, a document column. Any of those leaves every rule in this module
+    and every §4.1 sweep built on it computing over a set that does not include the
+    place a person's IdP subject is stored — and the sweep would report success,
+    because it looks at what it can reach.
+
+    **Its control is the walk's own known members.** An empty or one-table walk
+    satisfies nothing here, and a missing `person` table would make the reach a
+    fact about nothing (`docs/MISTAKES.md` entry 3).
+    """
+    reached = people_tables(migrated_engine)
+    missing = [name for name in PERSON_TABLES if name not in reached]
+    assert not missing, (
+        f"The walk did not even reach {missing}, the tables it starts from — it reached "
+        f"{sorted(reached)}. Whatever it says about a new table is a fact about a broken "
+        "reflection rather than about the schema."
+    )
+    assert LINKAGE_TABLE in reached, (
+        f"`{LINKAGE_TABLE}` is not among the tables this file treats as holding a person: "
+        f"{sorted(reached)}. E1-12 stores the mapping from an IdP `(issuer, subject)` pair to a "
+        "`person` row there, which is the web door's whole answer to who somebody is. The walk "
+        "collects anything with a foreign-key path to `person`, so a table it does not reach is "
+        "either not linked to `person` by a key — in which case the linkage is expressed as "
+        "something this schema cannot enforce — or not there at all."
+    )
+
+
+def test_the_web_login_linkage_tables_subject_key_carries_the_identity_marker(
+    migrated_engine: Any,
+) -> None:
+    """E1-12 criterion 5: the marker is on the column the vocabulary cannot recognise.
+
+    ADR 0022's convention is what every §4.1 reader is computed from, and the sweep
+    at the top of this file finds a column by its *name*. `idp_subject` contains no
+    fragment in `IDENTITY_NAME_FRAGMENTS` and never will: it is an opaque string a
+    provider chose. So nothing above this line goes red if the marker is missing,
+    and this is the assertion that does.
+
+    **What the marker says, and why this column earns it.** It is the `sub` of a
+    verified `id_token` — the web door's counterpart to `user.lms_user_id`, which
+    `docs/tickets/e1/carried-from-e0.md` measured as the disclosure no identity rule
+    in this repository sees: "a stable per-person key… a view returning it beside a
+    comment lets an instructor resolve a named student in the LMS in one step, with
+    every §4.1 guard green". The same is true at the provider, where the subject
+    resolves to a directory entry.
+
+    **Any of the three shapes counts**, as everywhere else in this file: a column
+    comment, a name prefix, or a comment on the whole table, which is the shape D2
+    chose because this table's columns are all of one kind. Pinning the mechanism
+    here would make the implementer build to this file rather than to the ticket.
+
+    **Dies if the table lands unmarked**, which is the state that costs something:
+    the marker is what E0-10's views, this file's rules and the CI invariant pass
+    are all computed from, so a column outside it is a column all three believe is
+    safe to expose.
+    """
+    marked_columns = database_marked_columns(migrated_engine)
+    assert marked_columns, (
+        "Nothing in the migrated database carries the identity marker in any shape this file "
+        "reads, so this test would be about the absence of a convention rather than about one "
+        "table. The sweep at the top of this module is where that is diagnosed."
+    )
+    inspector = inspect(migrated_engine)
+    present: set[str] = set()
+    if LINKAGE_TABLE in inspector.get_table_names():
+        present = {column["name"] for column in inspector.get_columns(LINKAGE_TABLE)}
+    assert LINKAGE_SUBJECT_COLUMN in present, (
+        f"`public.{LINKAGE_TABLE}` does not exist, or has no `{LINKAGE_SUBJECT_COLUMN}` column — "
+        f"it has {sorted(present)}. E1-12 stores the provider's subject there, and this test "
+        "cannot ask whether a column is marked before the column exists."
+    )
+    assert (LINKAGE_TABLE, LINKAGE_SUBJECT_COLUMN) in marked_columns, (
+        f"`{LINKAGE_TABLE}.{LINKAGE_SUBJECT_COLUMN}` carries no identity marker in any shape this "
+        f"file reads: no column comment containing {MARKER_TOKEN!r}, no comment on the table "
+        f"containing it, no name beginning with one of {list(MARKER_PREFIXES)}. It is a stable "
+        "per-person key at the identity provider and it matches no name fragment, so it is exactly "
+        "the column ADR 0022's convention exists for and exactly the one the name-based sweep in "
+        "this file cannot find on its own."
+    )
+
+
+def test_the_join_key_allow_list_is_still_the_three_structural_keys() -> None:
+    """E1-12 criterion 5: E1-01's closed list stays closed, and a widening is deliberate.
+
+    E1-01 replaced a list of forbidden names with an allow-list of keys, and the
+    value of an allow-list is that it is short and that nothing can be added to it
+    by accident. E1-12 is the first ticket to add a table the list governs, and the
+    cheapest way to make a new view of it pass would be to add one of its columns
+    here — `person_id` is a foreign key, so it would satisfy
+    `test_every_join_key_the_bound_column_mechanism_allows_is_a_structural_key`
+    in `test_identity_separated_views.py` and change nothing else in this suite.
+
+    So the list is pinned against a literal written out beside it. This is not a
+    test of the implementation and cannot be made to fail by one: it is the
+    tripwire that makes moving a hand-written inventory a deliberate act, in the
+    same pull request, with a sentence saying what a view may now read
+    (`docs/MISTAKES.md` entry 35).
+
+    **A legitimate addition changes this test**, and that is the intended cost. What
+    it must not be changed for: a view of `web_login_subject`. No view reads that
+    table today and the web door reaches it through a definer function instead —
+    the whole reason the closed list did not have to move for this ticket.
+    """
+    assert tuple(JOIN_KEY_COLUMNS) == THE_THREE_STRUCTURAL_KEYS, (
+        f"`JOIN_KEY_COLUMNS` is {list(JOIN_KEY_COLUMNS)}; this pin expects "
+        f"{list(THE_THREE_STRUCTURAL_KEYS)}. Each of the three names a *row* and none of them "
+        "names a person, which is the property that makes the list safe to be short. If a fourth "
+        "is genuinely needed, change this test in the same pull request and say what a view may "
+        "now read out of `user`, `user_identity`, `person` — and, since E1-12, out of the web "
+        "door's linkage table."
     )

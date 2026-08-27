@@ -30,6 +30,18 @@ superuser, and the owner's grants are exactly the four its job needs. Neither
 names the role or the function, because E10 replaces the door and a rule
 spelled with its name would retire with it.
 
+**Since E1-12 there is a fifth role and a second kind of definer function**, and
+the two are not the same kind of thing. `pulse_resolve_definer` (ADR 0094) owns
+three point-resolution functions that turn a subject the caller already holds into
+a row id: a uuid out, five column reads behind them, no identity column among
+those and no `user_identity` read at all. `pulse_app` may execute those three and
+may execute the Care door's halves *not at all*, which is now two assertions rather
+than one — a door (`test_the_application_role_may_not_execute_the_reveal_function`)
+and an inventory (`test_the_application_role_may_execute_only_the_point_resolvers`).
+The second definer's grants are pinned exactly, like the first's, and for a
+sharper reason: the connection that may call its functions is the one every screen
+in the product runs on.
+
 **Denial, never absence.** Every confidentiality assertion here is that the
 server *refused* a statement, with the SQLSTATE that says why. "The name was not
 in the result" is satisfied by a query that returned nothing for an unrelated
@@ -218,6 +230,88 @@ REVEAL_DEFINER_PRIVILEGES = frozenset(
         ("role_assignment", "SELECT"),
         ("audit_log", "INSERT"),
         ("audit_log", "SELECT"),
+    }
+)
+
+# ---------------------------------------------------------------------------
+# E1-12 — the second definer, and the first `EXECUTE` the application role holds.
+# ---------------------------------------------------------------------------
+#
+# Until this ticket the answer to "what may `pulse_app` execute" was **nothing**,
+# and that was the whole of the rule. E1-12 needs a launch subject and a web
+# subject resolved to row ids on the application connection, and the column that
+# answers the launch half — `user.lms_user_id` — is the one E1-10's round-3 review
+# revoked from `pulse_app` precisely because a connection able to read it can
+# enumerate every subject that ever launched. A view cannot help: a view can only
+# be filtered on a column it exposes. So resolution goes through the third
+# mechanism this file already recognises, `EXECUTE` on a `SECURITY DEFINER`
+# function, and the inventory below is what keeps that door the size it was
+# argued for (ADR 0094).
+#
+# **These are hand-written inventories and they move deliberately**
+# (`docs/MISTAKES.md` entry 35). Each entry carries the sentence that admits it,
+# from the ADR and the ticket rather than from the SQL it is policing, so the next
+# person to add one has to be able to say what makes it legitimate.
+
+# The role that owns the point-resolution functions. Named here where the reveal's
+# owner is deliberately not: that one is discovered from the catalog because E10
+# replaces the function it owns, while this one is spelled by ADR 0094 as part of
+# the decision — "a NOLOGIN role that exists for nothing else, so 'the definer's
+# privileges' is a list you can read in this file against these bodies".
+RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
+
+# Every `SECURITY DEFINER` function `pulse_app` may call, by name, and why.
+#
+#   - `resolve_platform_user(lti_platform_id, lms_user_id) -> uuid` — E1-12's
+#     launch door holds a `sub` from a token it has verified and needs the `user`
+#     row it names. It returns a uuid or NULL and reads no identity column. The
+#     caller can resolve a subject it already holds and can never enumerate the
+#     subjects it does not, which is the property the revocation bought.
+#   - `resolve_person_for_user(user_id) -> uuid` — the second hop, ADR 0024's
+#     `person.user_id` link read in the direction a door needs it. NULL is a
+#     defined answer, not an error: ADR 0028 gives a student a `user` row and no
+#     person, and D1 makes "no person" a state the session carries.
+#   - `resolve_web_person(idp_issuer, idp_subject) -> uuid` — the web door's half,
+#     over the linkage table `pulse_app` holds no grant on at all. A merge is never
+#     inferred from a mutable claim, so this is the only route from a verified
+#     `id_token` to an identity.
+#
+# What is *not* here is the point of the list: the two halves of the Care door.
+# `pulse_app` is refused those by name in an `invariant`-marked test below, and a
+# fourth entry appearing here is a new door into identity that some later ticket
+# opened without arguing for it.
+SANCTIONED_APPLICATION_EXECUTE = (
+    "resolve_platform_user",
+    "resolve_person_for_user",
+    "resolve_web_person",
+)
+
+# What the resolve definer may reach at table grain, and the whole of it.
+# `web_login_subject` is E1-12's own table and this grant is the only read of it
+# anywhere: the rows are written by the seed and by an administrator, and every
+# reader goes through `resolve_web_person`.
+RESOLVE_DEFINER_PRIVILEGES = frozenset({("web_login_subject", "SELECT")})
+
+# And at column grain, which is where the interesting half is. ADR 0094: the owner
+# "holds SELECT on exactly five columns and no identity-bearing column among them:
+# ids, the platform reference, and the subject key being matched. It never reads
+# `user_identity`, and neither function can return anything but a uuid."
+#
+#   - `user.id`, `user.lti_platform_id`, `user.lms_user_id` — the three
+#     `resolve_platform_user` needs to match a subject at a registration and answer
+#     with a row id.
+#   - `person.id`, `person.user_id` — ADR 0024's link, read in one direction.
+#
+# A sixth entry — `person.identity_name`, say — would be a name reachable through a
+# function `pulse_app` may call, which is ADR 0001's scheme undone in one line and
+# is invisible to every other gate in this build.
+RESOLVE_DEFINER_COLUMN_PRIVILEGES = frozenset(
+    {
+        ("user", "id", "SELECT"),
+        ("user", "lti_platform_id", "SELECT"),
+        ("user", "lms_user_id", "SELECT"),
+        ("person", "id", "SELECT"),
+        ("person", "user_id", "SELECT"),
     }
 )
 
@@ -961,6 +1055,17 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
     **The mutation it exists to survive**: dropping
     `REVOKE ALL ON FUNCTION … FROM PUBLIC` from the migration, which leaves every
     other test in this file green.
+
+    **E1-12 narrowed this from "may execute nothing" to "may not execute the
+    door", and the narrowing is the whole of what that ticket had to argue for.**
+    `pulse_app` now holds `EXECUTE` on three point-resolution functions (ADR 0094)
+    that answer with a uuid and read no identity column, so a rule phrased as
+    emptiness would be red against the correct schema. The door is identified here
+    the way every other rule in this file identifies it — as whatever `pulse_care`
+    may execute, never by name, because E10 replaces it — and the *inventory* half,
+    that the three resolvers are the only other thing `pulse_app` may call, is
+    `test_the_application_role_may_execute_only_the_point_resolvers` next door. Two
+    tests because they are two facts: this one is a door, that one is an inventory.
     """
     functions = security_definer_functions(db_session, APPLICATION_ROLE)
     assert functions, (
@@ -970,13 +1075,215 @@ def test_the_application_role_may_not_execute_the_reveal_function(db_session: An
         "its absence."
     )
 
-    reachable = [row["signature"] for row in functions if row["executable"]]
+    door = {row["signature"] for row in the_care_door(db_session)}
+    reachable = [
+        row["signature"] for row in functions if row["executable"] and row["signature"] in door
+    ]
     assert not reachable, (
-        f"`{APPLICATION_ROLE}` may execute {reachable}. A `SECURITY DEFINER` function runs with "
-        "its owner's privileges, so one that reads `user_identity` hands identity to whoever may "
-        "call it — and Postgres grants `EXECUTE` to `PUBLIC` by default, which means this is the "
-        "state a migration reaches by *not* saying anything. E0-10 gives the `EXECUTE` to "
-        "`pulse_care` alone."
+        f"`{APPLICATION_ROLE}` may execute {reachable}, which is the door `{CARE_ROLE}` opens to "
+        "identity. A `SECURITY DEFINER` function runs with its owner's privileges, so one that "
+        "reads `user_identity` hands identity to whoever may call it — and Postgres grants "
+        "`EXECUTE` to `PUBLIC` by default, which means this is the state a migration reaches by "
+        "*not* saying anything. E0-10 gives that `EXECUTE` to `pulse_care` alone, and every screen "
+        "in the product runs on this connection."
+    )
+
+
+def an_inventoried_execute(row: Any) -> bool:
+    """Is this `EXECUTE` grant one a ticket argued for, by grantee *and* by function?
+
+    Two entries, and the asymmetry between them is the design. `pulse_care` holds
+    the Care door and the door is discovered rather than named, because E10
+    replaces it and a rule spelled with its name would retire with it. `pulse_app`
+    holds ADR 0094's point resolvers and those *are* named, because the argument
+    that admits them is an argument about each function's body — a uuid out, no
+    identity column read — and it does not generalise to the next function somebody
+    wants to grant.
+    """
+    if row["grantee"] == CARE_ROLE:
+        return True
+    return (
+        row["grantee"] == APPLICATION_ROLE
+        and routine_name(row["routine"]) in SANCTIONED_APPLICATION_EXECUTE
+    )
+
+
+def routine_name(routine: str) -> str:
+    """The bare function name out of a `regprocedure` rendering.
+
+    `oid::regprocedure::text` prints `resolve_web_person(text,text)`, and prints a
+    schema qualification where the schema is not on the search path. Both are
+    stripped, so an inventory can be written as names — which is what the ADR that
+    admits each entry writes.
+    """
+    return routine.split("(", 1)[0].strip().rsplit(".", 1)[-1].strip('"')
+
+
+@pytest.mark.invariant
+def test_the_application_role_may_execute_only_the_point_resolvers(db_session: Any) -> None:
+    """E1-12: the inventory of doors this connection may open, as an equality.
+
+    `EXECUTE` on a `SECURITY DEFINER` function is a privilege held in a different
+    currency — the caller spends the *owner's* grants — and it is the currency this
+    file's own sweep missed once already, in the worst possible place. Until E1-12
+    the rule was that `pulse_app` held none of it. ADR 0094 opens exactly three,
+    each answering one point question with a uuid, and this is the assertion that
+    they are the only three.
+
+    **Why an equality rather than a ceiling.** A fourth function granted to
+    `pulse_app` is a fourth door into whatever its owner can read, and nothing else
+    in this build would mention it: `alembic check` reads no `pg_proc` entry in
+    either direction, the grantee sweep below asks *who* holds something rather
+    than *how many things*, and the refusal above is scoped to the Care door. A
+    convenience wrapper that returned "the person and their name" would satisfy
+    every other test in this file.
+
+    **Each sanctioned name must be *found*, not merely permitted**
+    (`docs/MISTAKES.md` entry 35). A sweep that reported nothing for `pulse_app` —
+    the wrong catalog, a filter that matches no function, a role that does not
+    exist — satisfies "nothing beyond the inventory" perfectly, and would go on
+    satisfying it after the grants were dropped and the doors stopped working.
+
+    **The mutation it exists to survive**: `GRANT EXECUTE ON FUNCTION public.<a
+    fourth definer function> TO pulse_app`, and its quieter sibling, a migration
+    that omits `REVOKE ALL … FROM PUBLIC` on a new definer function — `PUBLIC`
+    includes `pulse_app`, so both arrive here.
+    **The near miss it tolerates**: a fourth `SECURITY DEFINER` function that
+    `pulse_app` may not execute. That is somebody else's door and
+    `test_no_role_outside_this_scheme_is_granted_anything_in_public` is where its
+    grantee is judged.
+    """
+    functions = security_definer_functions(db_session, APPLICATION_ROLE)
+    assert functions, (
+        "This project defines no `SECURITY DEFINER` function in `public` at all, so this "
+        "inventory is being compared against a sweep that looked at nothing."
+    )
+
+    executable = sorted({row["name"] for row in functions if row["executable"]})
+    missing = [name for name in SANCTIONED_APPLICATION_EXECUTE if name not in executable]
+    assert not missing, (
+        f"`{APPLICATION_ROLE}` may execute {executable}, and {missing} are missing from it. Those "
+        "are ADR 0094's point-resolution functions, and without them a verified subject reaches no "
+        "stored identity on either door — E1-12's whole subject — while every refusal in this file "
+        "stays green. It also means this sweep has not been seen finding an `EXECUTE` on a role "
+        "that certainly holds one, so the equality below would be satisfied by an instrument that "
+        "reports nothing for anybody."
+    )
+
+    beyond = [name for name in executable if name not in SANCTIONED_APPLICATION_EXECUTE]
+    assert not beyond, (
+        f"`{APPLICATION_ROLE}` may execute {beyond}, which no ticket sanctioned. The inventory is "
+        f"{list(SANCTIONED_APPLICATION_EXECUTE)} and each entry carries the sentence that admits "
+        "it, beside the constant at the top of this file. A `SECURITY DEFINER` function runs as "
+        "its owner, so `EXECUTE` on one is a privilege on everything that owner can read — held by "
+        "the connection every screen in the product runs on. If a fourth is genuinely needed, add "
+        "it there with its sentence and say in the pull request what the caller can now reach that "
+        "it could not before."
+    )
+
+
+def test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers(
+    db_session: Any,
+) -> None:
+    """E1-12: the second definer is small, and its size is the whole of what the door opens.
+
+    The same rule `test_the_reveal_functions_owner_holds_exactly_the_privileges_its_job_needs`
+    holds over the Care door's owner, applied to the owner ADR 0094 introduces —
+    and it matters more here, because `pulse_app` may call this one and `pulse_app`
+    is the connection every request in the product runs on. What that connection
+    can reach through these functions is exactly the set of grants this role holds.
+
+    **Both grains, because the interesting half is at column grain.** Five of the
+    six entries are `GRANT SELECT (…)` on `user` and `person`, which
+    `has_table_privilege` does not report at all — the mechanism `COLUMN_GRANTEES`
+    above was added for, and the one ADR 0001 rejects by name for `pulse_app`
+    precisely because somebody always reaches for it. A whole-table `SELECT` on
+    `person` granted here instead of five columns would look identical from the
+    outside and would put `person.identity_name` behind a function `pulse_app` may
+    call.
+
+    **Exactly, not at least**, in both directions: the second list means the doors
+    cannot answer and some other test is about to fail for a reason that reads as
+    unrelated.
+
+    **What it cannot see** (`docs/MISTAKES.md` entry 14): a change *within* those
+    six. The functions could come to return a different shape over the same columns,
+    or to match on something else, and nothing here moves. The grant is the outer
+    bound on the blast radius rather than a description of the body;
+    `tests/unit/test_no_service_reads_an_identity_table_directly.py` and the SQL
+    file's own review are what read the bodies.
+    """
+    require_role(db_session, RESOLVE_DEFINER_ROLE)
+    relations = [row[0] for row in db_session.execute(text(PUBLIC_RELATIONS))]
+    assert relations, (
+        "There is no table or view in `public`, so this sweep has nothing to ask about and the "
+        "comparison below would be between an empty set and six expected members."
+    )
+
+    held_tables = {
+        (relation, privilege)
+        for relation in relations
+        for privilege in TABLE_PRIVILEGES
+        if db_session.execute(
+            text(HAS_TABLE_PRIVILEGE),
+            {
+                "role": RESOLVE_DEFINER_ROLE,
+                "relation": f"public.{relation}",
+                "privilege": privilege,
+            },
+        ).scalar_one()
+    }
+    held_columns: set[tuple[str, str, str]] = set()
+    for relation in relations:
+        for column, _ in public_table_columns(db_session, relation):
+            for privilege in COLUMN_PRIVILEGES:
+                on_column = db_session.execute(
+                    text(HAS_COLUMN_PRIVILEGE),
+                    {
+                        "role": RESOLVE_DEFINER_ROLE,
+                        "relation": f"public.{relation}",
+                        "column": column,
+                        "privilege": privilege,
+                    },
+                ).scalar_one()
+                if on_column and (relation, privilege) not in held_tables:
+                    held_columns.add((relation, column, privilege))
+
+    unexpected = sorted(
+        [
+            f"{relation}:{privilege}"
+            for relation, privilege in held_tables - RESOLVE_DEFINER_PRIVILEGES
+        ]
+        + [
+            f"{relation}.{column}:{privilege}"
+            for relation, column, privilege in held_columns - RESOLVE_DEFINER_COLUMN_PRIVILEGES
+        ]
+    )
+    missing = sorted(
+        [
+            f"{relation}:{privilege}"
+            for relation, privilege in RESOLVE_DEFINER_PRIVILEGES - held_tables
+        ]
+        + [
+            f"{relation}.{column}:{privilege}"
+            for relation, column, privilege in RESOLVE_DEFINER_COLUMN_PRIVILEGES - held_columns
+        ]
+    )
+    assert not unexpected and not missing, (
+        f"`{RESOLVE_DEFINER_ROLE}` owns the point-resolution functions `{APPLICATION_ROLE}` may "
+        f"call, so what it holds is what those functions can reach. Beyond what its job needs: "
+        f"{unexpected}. Missing from what its job needs: {missing}.\n\n"
+        "The first list is the one to read first, and a whole-table entry on `user` or `person` "
+        "where a column entry was expected is the quietest way for it to be wrong: it reads as "
+        "tidier SQL and it puts every column of those tables — `person.identity_name` among them — "
+        "behind a function the application connection may call. ADR 0094 fixes the set at five "
+        "columns and one table, and says of them: 'no identity-bearing column among them: ids, the "
+        "platform reference, and the subject key being matched'.\n\n"
+        "The second list means resolution cannot answer: without the column reads a subject "
+        "resolves to nothing on either door, and without `web_login_subject:SELECT` the web door "
+        "lands every person on the no-account page.\n\n"
+        "If the owner has come to *own* a relation rather than to be granted on it, that shows up "
+        "here as every privilege on that relation at once."
     )
 
 
@@ -3122,10 +3429,18 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     public.<the reveal> TO pulse_reporting` also writes nothing to any `relacl`,
     and the role is not `pulse_app`, so neither this sweep as first written nor the
     `invariant`-marked refusal above would mention it — while the grantee may call
-    the one function whose job is to return a name. The allowed grantee on a
-    definer function is `pulse_care` and nothing else, which is E0-10's own
-    sentence: `pulse_care` "gets `EXECUTE` on a **single** `SECURITY DEFINER`
-    function".
+    the one function whose job is to return a name.
+
+    **The allowed grantees on a definer function are `pulse_care`, and — since
+    E1-12 — `pulse_app` on the three functions ADR 0094 names.** E0-10's own
+    sentence still governs the door that returns identity: `pulse_care` "gets
+    `EXECUTE` on a **single** `SECURITY DEFINER` function". What E1-12 adds is a
+    different kind of function — a point lookup answering with a uuid, owned by a
+    role that reads five columns and no identity among them — and it is admitted
+    here **by name**, out of `SANCTIONED_APPLICATION_EXECUTE` at the top of this
+    file, rather than by widening the rule to "the application role may execute
+    definer functions". A fourth grant to `pulse_app` therefore still appears
+    below, which is the whole point of writing the inventory down.
 
     **`PUBLIC` is in both sweeps and is the sharpest case, and it means different
     things on the two.** On a relation Postgres grants nothing to `PUBLIC` by
@@ -3168,7 +3483,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     on the third read view.
     """
     definer = the_reveal_definer(db_session)
-    expected = {APPLICATION_ROLE, CARE_ROLE, definer}
+    expected = {APPLICATION_ROLE, CARE_ROLE, definer, RESOLVE_DEFINER_ROLE}
     granted = db_session.execute(text(RELATION_GRANTEES)).mappings().all()
     on_columns = db_session.execute(text(COLUMN_GRANTEES)).mappings().all()
     executable = db_session.execute(text(SECURITY_DEFINER_GRANTEES)).mappings().all()
@@ -3204,16 +3519,17 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     beyond_on_functions = [
         f"{row['grantee']} holds {row['privilege']} on {row['routine']}"
         for row in executable
-        if row["grantee"] != CARE_ROLE and row["grantee"] != row["owner"]
+        if row["grantee"] != row["owner"] and not an_inventoried_execute(row)
     ]
     unexpected = sorted(beyond_on_relations + beyond_on_columns + beyond_on_functions)
     assert not unexpected, (
         f"{unexpected}. On a relation, the roles this scheme names are {sorted(expected)} — the "
-        "two connection roles of ADR 0001 and the reveal function's own owner from ADR 0043 — plus "
-        "whoever owns it, which is the migration identity ADR 0009 sanctions. On a `SECURITY "
-        f"DEFINER` function it is `{CARE_ROLE}` and the owner, and nothing else: E0-10 gives the "
-        "Care role `EXECUTE` on the door and E0-26 item 1 made that door two halves, and "
-        "`pulse_app` is refused both by name in an "
+        "two connection roles of ADR 0001, the reveal function's own owner from ADR 0043 and "
+        "ADR 0094's resolve definer — plus whoever owns it, which is the migration identity ADR "
+        f"0009 sanctions. On a `SECURITY DEFINER` function it is `{CARE_ROLE}`, the owner, and "
+        f"`{APPLICATION_ROLE}` on the functions `SANCTIONED_APPLICATION_EXECUTE` names, and "
+        "nothing else: E0-10 gives the Care role `EXECUTE` on the door and E0-26 item 1 made that "
+        f"door two halves, and `{APPLICATION_ROLE}` is refused both by name in an "
         "`invariant`-marked test above. Anything else holds a privilege that no ticket in this "
         "epic granted and that nothing in this repository will ever revoke.\n\n"
         "`PUBLIC` appearing here is the worst case and reads like the mildest, and it reads "
