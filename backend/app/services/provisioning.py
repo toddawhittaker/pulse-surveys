@@ -101,7 +101,14 @@ from app.models.lti import (
 )
 from app.models.org import Course, Prefix, Section
 from app.models.term import Term
-from app.services.authz import LmsOwnedWriteRefused, WriteSanction, guard_write, sanction_for
+from app.services.authz import (
+    LmsOwnedWriteRefused,
+    WriteSanction,
+    guard_write,
+    holds_leadership,
+    sanction_for,
+)
+from app.services.identity import identity_behind_a_launch_subject
 from app.services.landing import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.services.section_codes import SectionCodeError, apply_section_code
 
@@ -210,7 +217,14 @@ def provision_from_launch(
     a mentor's — because the person is authenticated whatever their role and
     whatever their context turns out to be, and SPEC §4 keys every response they
     will ever give to that row. Only then is the context looked at, and only for a
-    staff launch.
+    launch §7.3 authorizes: an instructor's, by the claim, or a leadership
+    person's, by their own assignment.
+
+    **The ordering carries the leadership limb** (E1-12). That limb resolves the
+    launching subject to a `user` row, and the row it resolves is the one the line
+    above has just written — a leadership person's very first launch works
+    because the write precedes the read inside one transaction, rather than
+    provisioning nothing until their second visit.
 
     **What it answers is the section a roster can now be fetched for**, or `None`.
     SPEC §7.3 pulls NRPS "on schedule and on launch (debounced)", and the launch
@@ -228,7 +242,7 @@ def provision_from_launch(
     """
     platform = _registered_platform(session, claims)
     _record_the_launching_subject(session, platform, claims)
-    if _is_a_staff_launch(claims):
+    if _is_a_staff_launch(claims) or _launching_subject_holds_leadership(session, platform, claims):
         return _ingest_the_context(session, claims, settings)
     return None
 
@@ -361,15 +375,65 @@ def _is_a_staff_launch(claims: Mapping[str, Any]) -> bool:
     Under-inclusion costs nothing that lasts, because a real instructor's next
     launch discovers the section.
 
-    **The leadership limb of §7.3's rule is not here, and its absence fails safe.**
-    §7.3 triggers on "an instructor or any leadership role", and a leadership role
-    is a live `role_assignment` in Pulse's own graph rather than a claim on the
-    launch — reaching it needs the `sub` → `user` → `person` link that E1-12
-    builds. Until then a dean's launch discovers nothing, which is a launch that
-    provisions late rather than one that provisions for the wrong person. E1-12
-    carries the accept-side criterion (ADR 0090, ADR 0091).
+    **This is one of §7.3's two limbs and it is the claim-based one.** The other —
+    "any leadership role" — is a live `role_assignment` in Pulse's own graph rather
+    than anything the launch says, and it is `_launching_subject_holds_leadership`
+    below. E1-10 shipped this limb alone and left that one dormant, because
+    reaching an assignment needs the `sub` → `user` → `person` link E1-12 built;
+    E1-12 activated it (ADR 0090, ADR 0091, ADR 0097). The two are deliberately
+    separate functions because they are checked against different sources and one
+    of them can be wrong without the other.
     """
     return INSTRUCTOR_ROLE_URI in stated_roles(claims.get(LTI_ROLES_CLAIM))
+
+
+def _launching_subject_holds_leadership(
+    session: Session, platform: LtiPlatform, claims: Mapping[str, Any]
+) -> bool:
+    """Whether Pulse's own records say the launching person holds a leadership role.
+
+    §7.3's second limb, and the one that reads the database rather than the token:
+    "A launch by an instructor **or any leadership role** triggers a roster sync."
+    §2.1 makes a role a `role_assignment` row and never a claim, and E0-09's tenth
+    criterion is the reason — the administrator of a platform writes what its
+    launches say, so a limb read out of the roles claim would let them hand
+    themselves a section's whole roster of names and email addresses.
+
+    **So the question is asked of the assignment and answered from `sub`.** The
+    subject resolves to a `user` row at this registration and then to a `person`
+    (ADR 0094's point resolvers, through `app.services.identity`), and the roles
+    that person holds are asked of `app.services.authz.holds_leadership`.
+
+    **The role question goes through the chokepoint and is not asked here**, which
+    is a rule rather than a preference and it is the one thing this function got
+    wrong first. `public.assignment_scope` is unfiltered — nothing in the database
+    narrows it — so the only narrowing anywhere is inside `app.services.authz`,
+    where §2.1's scope rules are written, and
+    `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` is the §4.1
+    invariant that holds every read of that view to that module. A `SELECT` written
+    here applied whichever of §2.1's rules its author remembered; the invariant
+    caught it and its message names where the predicate belongs.
+
+    **Three ways to answer no, and each is an ordinary state.** A launch with no
+    `sub` never reaches here from the door; a subject with no `person` is a student
+    or somebody nobody has put in the people graph (ADR 0028); and a person holding
+    only assignments outside `LEADERSHIP_ROLES` — a Care officer, an administrator
+    — holds a live grant that authorizes nothing about a roster. §2.1 puts Care
+    outside the supervision graph altogether, which is why that set is enumerated
+    positively rather than written as "any assignment at all".
+
+    **Asked only when the claim limb has already said no**, because `or`
+    short-circuits: an ordinary instructor launch costs no query, and the two hops
+    plus the chokepoint's read are paid on the launches the cheap test does not
+    answer.
+    """
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not subject:
+        return False
+    identity = identity_behind_a_launch_subject(session, platform_id=platform.id, subject=subject)
+    if identity.person_id is None:
+        return False
+    return holds_leadership(session, person_id=identity.person_id)
 
 
 # ---------------------------------------------------------------------------

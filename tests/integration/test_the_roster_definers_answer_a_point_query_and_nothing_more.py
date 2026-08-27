@@ -90,18 +90,15 @@ ROSTER_DEFINER_PRIVILEGES = frozenset(
     }
 )
 
-# And the resolver's, from ADR 0094's own sentence: "a NOLOGIN role holding SELECT
-# on exactly five columns (`user.id`, `user.lti_platform_id`, `user.lms_user_id`,
-# `person.id`, `person.user_id`) and nothing else".
-RESOLVE_DEFINER_PRIVILEGES = frozenset(
-    {
-        ("user", "id", "SELECT"),
-        ("user", "lti_platform_id", "SELECT"),
-        ("user", "lms_user_id", "SELECT"),
-        ("person", "id", "SELECT"),
-        ("person", "user_id", "SELECT"),
-    }
-)
+# **The resolver's own set is not written here**, and its absence is deliberate
+# rather than an omission. This file carried a copy of ADR 0094's five columns
+# until E1-12 merged first; that ticket's
+# `test_identity_grants.py::test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+# pins the same owner at both grains — the five columns *and* the table-level
+# `SELECT` on `web_login_subject` its web door needs — and is authoritative. A
+# second copy here would be a hand-written inventory of one fact in two places,
+# which is the thing every inventory in this suite exists to avoid: the two would
+# disagree the first time either ticket's owner gained a grant.
 
 # Every privilege a column can carry, so "exactly" above is checked against all of
 # them rather than against `SELECT` alone: `INSERT` and `UPDATE` on a name column
@@ -505,21 +502,31 @@ def test_the_care_role_may_not_execute_either_of_the_roster_definers(committed_r
 @pytest.mark.parametrize(
     ("role", "expected"),
     [
-        pytest.param(RESOLVE_DEFINER, RESOLVE_DEFINER_PRIVILEGES, id="resolve-definer"),
         pytest.param(ROSTER_DEFINER, ROSTER_DEFINER_PRIVILEGES, id="roster-definer"),
     ],
 )
 def test_each_definer_holds_exactly_the_column_privileges_its_job_needs(
     db_session: Any, role: str, expected: frozenset[tuple[str, str, str]]
 ) -> None:
-    """ADR 0043's pattern, applied to the two owners this ticket adds.
+    """ADR 0043's pattern, applied to the owner this ticket adds.
 
     A `SECURITY DEFINER` function spends its **owner's** privileges, so the owner's
     grant list is the real blast radius of the door — not the function body, which
-    a later revision can change without anybody re-reading the grants. Both owners
-    exist for nothing else, which is what makes an equality possible at all:
+    a later revision can change without anybody re-reading the grants. The owner
+    exists for nothing else, which is what makes an equality possible at all:
     "'the definer's privileges' is a list you can read in this file against these
     bodies".
+
+    **`pulse_resolve_definer` is pinned elsewhere and deliberately not here.** This
+    test covered it too until E1-12 merged first;
+    `test_identity_grants.py::test_the_resolve_definers_privileges_are_exactly_the_point_lookups_it_answers`
+    is that owner's equality and is authoritative after the merge, because it pins
+    **both grains** — five column grants *and* the table-level `SELECT` on
+    `web_login_subject` that E1-12's web door resolver needs. This sweep reads
+    column privileges only and does not subtract the ones held table-wide, so it
+    would report every column of that table as a widening and be red against the
+    correct schema. Two equalities over one owner is one too many; the one that can
+    see the whole grant keeps the job.
 
     **An equality rather than a ceiling**, for the reason
     `REVEAL_DEFINER_PRIVILEGES` next door is one. A `>=` is satisfied by an owner

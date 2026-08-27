@@ -35,6 +35,20 @@ Every E1 pull request that defers something adds it here in the same PR.
    reads it until E1-06 signs with it — so `PERSON_TABLES` is unchanged.
    Recorded in [ADR 0082](../../adr/0082-the-tools-signing-key-lives-in-the-database.md)
    and beside the model.
+   *E1-12 was not one of the two tickets named, and it is the one that added a
+   person table.* `web_login_subject` maps an identity provider's
+   `(issuer, subject)` pair to a `person`, and the closed list still did not have
+   to move: the table carries a foreign key to `person`, so the fixed-point walk
+   in `test_identity_column_marker.py` reaches it with no name added to
+   `PERSON_TABLES`, which two new tests at the foot of that module assert
+   directly. The item's hazard is therefore untouched and stands as written. What
+   E1-12 did meet is a second half of the same hazard that the item does not
+   state: a table the walk reaches whose columns the **name-based** sweep can
+   recognise none of. `idp_subject` matches no fragment in
+   `IDENTITY_NAME_FRAGMENTS` and never will, so nothing in the repository would
+   have gone red had that table shipped unmarked; the marker is a comment on the
+   whole table (ADR 0022's third shape) and a test written for it is the only
+   thing holding it.
    *E1-11 asked it and the answer is no.* It adds one table, `nrps_call`,
    holding a section reference, the URL called, an HTTP status, a count of
    members seen and a timestamp. It carries no subject, no name and no
@@ -42,8 +56,10 @@ Every E1 pull request that defers something adds it here in the same PR.
    person by any path — so `PERSON_TABLES` is unchanged. Recorded beside the
    model in `backend/app/models/lti.py`, and in the sentence
    `RUNTIME_BASE_TABLE_PRIVILEGES` carries for the table. Both tickets have
-   now asked; what stays open is the other half of this item's own done-when,
-   a structural source for the list.
+   now asked.
+   **Done when**, for what stays open: a structural source for the list
+   exists, and — E1-12's second half — the sweep reports a table it reached
+   whose column names it recognises none of, rather than passing over it.
 
 3. **The two E0-34 planted-file tests have a not-load-bearing message
    check.** Pytest assertion rewriting satisfies the check without the
@@ -393,3 +409,52 @@ Every E1 pull request that defers something adds it here in the same PR.
    drives a launch with a `.env` in the working directory and `ENVIRONMENT`
    absent from the process, and asserts both halves: the address stored, and no
    `roster_address_refused` recorded.
+## From E1-12 — the dual-door identity merge
+
+1. **`mock-lms-user-dean` is a Pulse-side `user` row the mock LMS cannot sign a
+   launch for.** E1-12's seed writes that row so SPEC §7.3's leadership limb is
+   demonstrable on the running stack, and
+   `test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own` pins it as
+   half of the mock world's inventory. But `mock-lms/app/launch.py::resolve_launch`
+   refuses a `login_hint` naming no user its own seed holds, and that seed holds a
+   learner and an instructor — measured, not assumed. So today the dean's launch
+   can be driven from the integration suite, which signs its own launches, and not
+   from the mock's launch page. Adding the person to `mock-lms/app/seed.py` is a
+   change to that service's own inventories, and the tests that hold them were not
+   part of this ticket's red phase.
+   **Done when** `mock-lms` seeds a person whose `user_id` is
+   `mock-lms-user-dean`, enrolled in at least one context with a roles claim
+   carrying no Instructor URN, and a test drives that launch through the tool and
+   asserts the section's `lms_context_memberships_url` was stored — the browser
+   half of `test_a_leadership_persons_launch_stores_the_roster_address_with_no_instructor_urn`.
+   E1-15 owns the browser proof and is the natural place.
+
+2. **A web-login linkage can only be provisioned by the demo seed or by hand.**
+   `web_login_subject` is read by the door through
+   `public.resolve_web_person` and written by nobody: `pulse_app` holds no grant
+   of any kind on the table, which is what makes "a web login writes nothing" a
+   property of the database. That is the decision
+   ([ADR 0097](../../adr/0097-the-identity-a-verified-subject-resolves-to.md)) and
+   the ticket puts an admin surface out of scope, so this is not a defect. What it
+   costs is worth carrying: a person who joins between demo seeds cannot sign in
+   through the web door until somebody connects as the migration identity and
+   writes the row, and the psql statement in the ADR is the whole of the
+   documented path.
+   **Done when** E9's People editor or E11's console can create and remove a
+   linkage under the same rule the seed follows — never inferred from a claim —
+   with the write behind whatever authorization that surface uses, proved by a
+   test that provisions a linkage through it and signs the person in.
+
+3. **The two-hat person's seeded instructor assignment is scoped to a demo
+   section, not to the section her launches provision.** `mock-lms` launches her
+   into `BIOL-215-R3WW`, which does not exist as a row until somebody launches, so
+   the seed cannot scope a grant to it; her `INSTRUCTOR` assignment is scoped to
+   `BIOL 101 X1FF` instead. Nothing today reads it — the landing view comes from
+   the claim until E1-13 — so the cost is entirely in front of us: once roles come
+   from the assignment model, her launch into BIOL 215 resolves to a person whose
+   only instructor grant is over a different section, and what she is shown will
+   be decided by whatever E1-13 does with that mismatch.
+   **Done when** E1-13 has decided what a launch into a section the launching
+   person holds no assignment over is shown, and either the seed's scope follows
+   that decision or the assignment is dropped as scaffolding, with a test naming
+   which.

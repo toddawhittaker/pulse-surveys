@@ -89,6 +89,19 @@ registration carries no `user` rows at all. The two do different jobs: one gives
 the demo institution an identity split to develop against, the other lets a
 launch reach the code.
 
+**Amended in part by
+[ADR 0097](0097-the-identity-a-verified-subject-resolves-to.md) (E1-12).** The
+fourth bullet above, and the sentence about the mock registration carrying no
+`user` rows, were true until that ticket. E1-12 makes the reachable set on that
+registration **exactly two named subjects** — the two-hat person and a dean —
+because the dual-door identity merge and SPEC §7.3's leadership limb have to be
+demonstrable on the running stack and in E1-15's browser proof. The property
+argued for here is narrowed rather than removed: the test named above still
+exists, now as an equality against a written-down inventory rather than against
+the empty set, so a third subject is a red. ADR 0097 states what a launch as
+either of them reaches on a development box, and why the guard above is what
+bounds it.
+
 ## Alternatives rejected
 
 **Keep ADR 0065 and let E0-18 create the row itself.** The row exists either

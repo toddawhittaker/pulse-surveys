@@ -160,6 +160,12 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     launch single-use, and they must not be hostage to what provisioning found in
     the context.
 
+    **That commit is also what makes the identity resolvable** (E1-12).
+    `landing_with_session` resolves `sub` → `user` → `person` through ADR 0094's
+    point functions and binds the result into the session, and the `user` row it
+    reads is the one provisioning has just written — so the ordering here is a
+    dependency now rather than only a preference about failure isolation.
+
     **And then the roster sync is asked for, after that commit** (E1-11, SPEC §7.3:
     NRPS is "pulled on schedule and on launch (debounced)"). Which section — or
     none — is provisioning's answer rather than this router's to work out, and
@@ -186,9 +192,10 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
     await run_in_threadpool(session.commit)
     if section_id is not None:
         await run_in_threadpool(request_section_sync, session, section_id)
-    return landing_with_session(
+    return await landing_with_session(
         claims,
         door=Door.LAUNCH,
+        db=session,
         settings=settings,
         secret=request.app.state.session_secret,
         no_role_reason=(

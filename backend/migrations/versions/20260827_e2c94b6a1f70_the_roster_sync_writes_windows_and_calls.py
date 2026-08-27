@@ -53,7 +53,7 @@ from app.views_sql import read_sql
 
 # revision identifiers, used by Alembic.
 revision: str = "e2c94b6a1f70"
-down_revision: str | Sequence[str] | None = "b8c41f7d2e05"
+down_revision: str | Sequence[str] | None = "e2b8f4a17c63"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

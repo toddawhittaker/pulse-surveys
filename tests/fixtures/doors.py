@@ -7,10 +7,19 @@ with the door settings a test chooses, and hands back a `TestClient` whose
 seam is the ticket's design rather than a fixture's convenience — every
 server-side fetch a door makes (a platform's JWKS, the provider's token endpoint)
 goes through one client, so a test can route it and nothing else has to be
-intercepted. `seed_constant` sits beside it and exists for one assertion: the two
-mock seeds name one human, and the constant that says so can only be read by
-importing a module out of each mock, which the two packages both being called
-`app` makes a one-at-a-time affair.
+intercepted. `seed_constant` sits beside it and reads a module-level value out of
+one mock's `app.seed`, which the two packages both being called `app` makes a
+one-at-a-time affair.
+
+**`seed_constant` has no caller as of E1-12, and it is kept deliberately.** It was
+built for one assertion — that the two mock seeds name one human — and that fact is
+asserted directly now, against what the two mocks *serve*, in
+`tests/integration/test_dual_door_identity_merge.py`; the unit module that compared
+the two constants was deleted in the same change, which is that ticket's own
+"done when". What keeps this fixture here is the resolution it demonstrates:
+`tests/fixtures/lti_services.py` and dispute E1-05-02 both cite it as the reference
+for reading a value out of a mock package and letting the meta-path resolution
+close before the caller touches anything.
 """
 
 import base64

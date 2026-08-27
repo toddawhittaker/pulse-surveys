@@ -1,11 +1,13 @@
 """The session both entry doors issue and every later request reads — ticket E1-08.
 
 The launch door (`app.api.lti`) issues a session here once a launch verifies; the
-web door (E1-09) issues the same session type; E1-12 later gives a session its
-stored identity. It lives in `services/` rather than in `lti/` because both doors
-share it, and it is deliberately small: a signed statement of who arrived, at
-which door, in what role — no name, no email, no `lms_user_id`, only the opaque
-`sub` the launch already carried (SPEC §8, §10).
+web door (E1-09) issues the same session type; E1-12 gave a session its stored
+identity, which is `person_id` and `user_id` below. It lives in `services/` rather
+than in `lti/` because both doors share it, and it is deliberately small: a signed
+statement of who arrived, at which door, in what role, and which rows this system
+stores for them — no name, no email, no `lms_user_id`, only the opaque `sub` the
+launch already carried and two primary keys that name nothing on their own
+(SPEC §8, §10).
 
 **A single symmetric secret, HS256, algorithm passed explicitly both ways.** The
 tool issues this token and the tool verifies it, so a symmetric key is the right
@@ -110,6 +112,21 @@ class SessionClaims:
     fields a token must carry to be a session, and no more: a name, an email or
     an `lms_user_id` here would be a credential the browser holds copies of §8
     keeps in one place.
+
+    **`person_id` and `user_id` are E1-12's, and they are keys rather than
+    identity.** `person_id` is the `person` row both doors resolve to — the stored
+    identity, by its primary key — and `user_id` is the `user` row a launch's
+    subject reaches. Neither names anybody: a name lives on `person` and
+    `user_identity`, which `pulse_app` reaches through no path this session opens,
+    and what a holder of this token gains is the ability to say *which* row they
+    are, which they already proved at the door. E1-13 reads assignments through
+    `person_id`.
+
+    **Both are `None`-able, and the two absences mean different things.**
+    `person_id` is absent for a launch by somebody nobody has put in the people
+    graph — a student, per ADR 0028 — which is an ordinary state the session
+    carries rather than an error. `user_id` is absent at the web door, which
+    resolves a person and no LMS subject at all.
     """
 
     door: Door
@@ -119,6 +136,8 @@ class SessionClaims:
     jti: str
     iat: int
     exp: int
+    person_id: str | None = None
+    user_id: str | None = None
 
 
 def issue_session(
@@ -128,6 +147,8 @@ def issue_session(
     sub: str,
     iss: str | None,
     secret: bytes,
+    person_id: str | None = None,
+    user_id: str | None = None,
     now: int | None = None,
 ) -> str:
     """One signed session token, expiring `SESSION_LIFETIME_SECONDS` after `now`.
@@ -141,6 +162,15 @@ def issue_session(
     `door` and `role` are stored by their enum *names* so the token is stable
     against a change in `Door`'s `auto()` numbering; `verified_session` reads them
     back the same way and answers `None` for a name neither enum knows.
+
+    **`person_id` and `user_id` default to `None` rather than being required**,
+    and that is about the callers rather than about convenience: the resolution
+    that fills them belongs to `app.api.deps`, which is the one place both doors
+    reach this function from, and every other caller — the unit suite, a future
+    tool that mints a session for something with no stored identity — states what
+    it has and nothing else. Both claims are always written, `null` included, so
+    the claim set of a session is the same set whichever door issued it and
+    "resolved to nobody" is visible rather than inferred from an absence.
     """
     issued_at = int(time.time()) if now is None else now
     payload = {
@@ -148,6 +178,8 @@ def issue_session(
         "role": role.name,
         "sub": sub,
         "iss": iss,
+        "person_id": person_id,
+        "user_id": user_id,
         "jti": uuid4().hex,
         "iat": issued_at,
         "exp": issued_at + SESSION_LIFETIME_SECONDS,
@@ -189,6 +221,12 @@ def verified_session(token: str | None, secret: bytes) -> SessionClaims | None:
             jti=str(payload["jti"]),
             iat=int(payload["iat"]),
             exp=int(payload["exp"]),
+            # `.get` rather than `[...]`, unlike every claim above: a session
+            # minted before E1-12 carries neither, and a browser holding one for
+            # the rest of its hour should read as "no stored identity" rather than
+            # as a token this tool did not issue.
+            person_id=None if payload.get("person_id") is None else str(payload["person_id"]),
+            user_id=None if payload.get("user_id") is None else str(payload["user_id"]),
         )
     except (KeyError, ValueError, TypeError):
         return None

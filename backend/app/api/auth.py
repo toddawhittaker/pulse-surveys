@@ -55,9 +55,10 @@ import secrets
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 from app.api.deps import (
@@ -72,6 +73,7 @@ from app.api.deps import (
     with_query,
 )
 from app.config import Settings
+from app.db import get_session
 from app.services.landing import Door
 from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
@@ -361,12 +363,21 @@ def begin_web_login(request: Request) -> Response:
 
 
 @router.get(CALLBACK_PATH, summary="Finish a web login and issue a session")
-async def finish_web_login(request: Request) -> Response:
+async def finish_web_login(request: Request, session: Session = Depends(get_session)) -> Response:
     """Redeem the code, verify the session, and hand it over — or answer the refusal.
 
     `async def` for the reason `app.api.lti` gives at length: the exchange and
     the key-set fetch are synchronous, and `run_in_threadpool` is what keeps them
     off the event loop.
+
+    **The database session is E1-12's**, and it is the first this door has needed.
+    A verified `id_token` identifies its holder by `(issuer, sub)` and nothing
+    else, and which person that pair is comes out of the `web_login_subject`
+    linkage — read by `landing_with_session` through ADR 0094's definer function.
+    Nothing on this path writes: the linkage is provisioned by the seed or by an
+    administrator, `pulse_app` holds no grant of any kind on the table, and a
+    subject with no row gets the calm no-account page rather than an account.
+    Nothing here commits, because there is nothing to commit.
 
     **`error` is read first, and a redirect carrying one goes no further.** RFC
     6749 §4.1.2.1 says a provider sends `error` *or* `code`, never both, so a
@@ -406,9 +417,10 @@ async def finish_web_login(request: Request) -> Response:
         clear_carried(answer, OIDC_LOGIN_COOKIE)
         return answer
 
-    landed = landing_with_session(
+    landed = await landing_with_session(
         claims,
         door=Door.WEB,
+        db=session,
         settings=settings,
         secret=request.app.state.session_secret,
         no_role_reason=(
