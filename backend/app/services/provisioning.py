@@ -68,11 +68,11 @@ from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID, uuid4
 
-from sqlalchemy import insert, select, text
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.identity import LEADERSHIP_ROLES, User
+from app.models.identity import User
 from app.models.lti import (
     ROSTER_SERVICE_ADDRESS_COLUMN,
     LaunchDefect,
@@ -84,7 +84,13 @@ from app.models.lti import (
 )
 from app.models.org import Course, Prefix, Section
 from app.models.term import Term
-from app.services.authz import LmsOwnedWriteRefused, WriteSanction, guard_write, sanction_for
+from app.services.authz import (
+    LmsOwnedWriteRefused,
+    WriteSanction,
+    guard_write,
+    holds_leadership,
+    sanction_for,
+)
 from app.services.identity import identity_behind_a_launch_subject
 from app.services.landing import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.services.section_codes import SectionCodeError, apply_section_code
@@ -152,35 +158,6 @@ FOUR_DIGIT_NUMBER = re.compile(r"^[0-9]{4}$")
 THREE_DIGIT_CEILING = 799
 FOUR_DIGIT_FLOOR = 8000
 FOUR_DIGIT_CEILING = 9999
-
-# Whether one person holds any assignment in §7.3's leadership set (E1-12).
-#
-# Read from `public.assignment_scope`, the view E0-11 built over
-# `role_assignment` — never from the table, which `pulse_app` holds no grant on
-# and which `tests/unit/test_no_service_reads_an_identity_table_directly.py`
-# would flag this module for naming. The view carries the role and the person key
-# and no name at all.
-#
-# `EXISTS` rather than a count or a row: the question is a yes or no, and a
-# leadership person legitimately holds several assignments.
-#
-# The set is bound as a parameter and cast to the enum, the way
-# `app.services.authz` casts its own single-role predicate. Casting rather than
-# comparing as text is what makes a role name this schema does not have a
-# database error at the boundary instead of a silent no-match — though
-# `LEADERSHIP_ROLES` being enum members already makes that unwritable in Python.
-#
-# "Live" reads as "exists" today, because `role_assignment` carries no validity
-# dates: revoking an assignment is deleting the row. When E9 or E10 adds
-# end-dating this predicate gains it, alongside the four copies of the live-Care
-# predicate `app.services.safety` names together.
-_HOLDS_A_LEADERSHIP_ASSIGNMENT = text(
-    "SELECT EXISTS ("
-    " SELECT 1 FROM public.assignment_scope AS held"
-    " WHERE held.person_id = :person_id"
-    " AND held.role = ANY(CAST(:roles AS public.assignment_role[]))"
-    ")"
-)
 
 
 class UnregisteredLaunchError(LookupError):
@@ -400,27 +377,31 @@ def _launching_subject_holds_leadership(
 
     **So the question is asked of the assignment and answered from `sub`.** The
     subject resolves to a `user` row at this registration and then to a `person`
-    (ADR 0094's point resolvers, through `app.services.identity`), and the person's
-    assignments are read from `public.assignment_scope` — the view E0-11 built,
-    which `pulse_app` may read and which names nobody.
+    (ADR 0094's point resolvers, through `app.services.identity`), and the roles
+    that person holds are asked of `app.services.authz.holds_leadership`.
+
+    **The role question goes through the chokepoint and is not asked here**, which
+    is a rule rather than a preference and it is the one thing this function got
+    wrong first. `public.assignment_scope` is unfiltered — nothing in the database
+    narrows it — so the only narrowing anywhere is inside `app.services.authz`,
+    where §2.1's scope rules are written, and
+    `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` is the §4.1
+    invariant that holds every read of that view to that module. A `SELECT` written
+    here applied whichever of §2.1's rules its author remembered; the invariant
+    caught it and its message names where the predicate belongs.
 
     **Three ways to answer no, and each is an ordinary state.** A launch with no
     `sub` never reaches here from the door; a subject with no `person` is a student
     or somebody nobody has put in the people graph (ADR 0028); and a person holding
     only assignments outside `LEADERSHIP_ROLES` — a Care officer, an administrator
     — holds a live grant that authorizes nothing about a roster. §2.1 puts Care
-    outside the supervision graph altogether, which is why the set is enumerated
+    outside the supervision graph altogether, which is why that set is enumerated
     positively rather than written as "any assignment at all".
 
     **Asked only when the claim limb has already said no**, because `or`
     short-circuits: an ordinary instructor launch costs no query, and the two hops
-    plus this read are paid on the launches the cheap test does not answer.
-
-    This is an authorization decision made outside `app.services.authz`, which is
-    deliberate and is recorded in ADR 0097: that module's chokepoint scopes a
-    *read* to an actor's purview, and this asks whether a launch may trigger a
-    write of this tool's own — a different question, on a path with no purview in
-    it and no data to scope.
+    plus the chokepoint's read are paid on the launches the cheap test does not
+    answer.
     """
     subject = claims.get("sub")
     if not isinstance(subject, str) or not subject:
@@ -428,14 +409,7 @@ def _launching_subject_holds_leadership(
     identity = identity_behind_a_launch_subject(session, platform_id=platform.id, subject=subject)
     if identity.person_id is None:
         return False
-    held: bool = session.execute(
-        _HOLDS_A_LEADERSHIP_ASSIGNMENT,
-        {
-            "person_id": identity.person_id,
-            "roles": [role.value for role in LEADERSHIP_ROLES],
-        },
-    ).scalar_one()
-    return held
+    return holds_leadership(session, person_id=identity.person_id)
 
 
 # ---------------------------------------------------------------------------

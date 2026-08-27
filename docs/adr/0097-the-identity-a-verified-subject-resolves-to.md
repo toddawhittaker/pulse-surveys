@@ -83,13 +83,21 @@ the assignment model — which cannot ask anything at all without a person.
 **§7.3's leadership limb activates here.** E1-10 shipped the instructor limb from
 the launch's LIS claim and left the other dormant (ADR 0091), because reaching
 "any leadership role" means reaching a `role_assignment` row. It now resolves the
-launching subject to a person and asks `public.assignment_scope` whether that
-person holds a role in `LEADERSHIP_ROLES`. The claim test runs first and
-short-circuits, so an ordinary instructor launch costs no query. This is an
-authorization decision made outside `app/services/authz.py`, deliberately: that
-chokepoint scopes a *read* to an actor's purview, and this asks whether a launch
-may trigger a write of the tool's own — a different question, on a path with no
-purview in it and no data to scope.
+launching subject to a person and asks whether that person holds a role in
+`LEADERSHIP_ROLES`. The claim test runs first and short-circuits, so an ordinary
+instructor launch costs no query.
+
+**The role question is asked through the authorization chokepoint**, as
+`holds_leadership` in `app/services/authz.py` beside `holds_care`, and not with a
+query in the launch path. That was got wrong first and a §4.1 invariant caught
+it: `public.assignment_scope` is unfiltered, nothing in the database narrows it,
+and the only narrowing anywhere is inside that module — so
+`tests/unit/test_the_org_views_are_read_only_through_the_grant.py` holds every
+read of that view to it, and its message names that file as where a new predicate
+belongs. The argument for putting it in the launch path was that this asks
+whether a launch may *trigger a write* rather than scoping a read, which is a
+real distinction and is not the one the invariant is about: what the invariant
+protects is the view, not the shape of the question.
 
 **What a launch from the platform that authenticates nobody now reaches.** The
 seed registers `mock-lms` as a trusted issuer on a development box (ADR 0068),
@@ -158,10 +166,16 @@ unique column of its own, and six of the eight have no `user` row to key on.
   half-written row indistinguishable from no account, and puts an
   identity-provider subject on the table `pulse_app` must hold no grant on —
   which would have made the linkage unreadable by any mechanism at all.
-- **Putting the leadership check in `app/services/authz.py`.** That module is the
-  purview chokepoint, and its shape is "scope this read to this actor". A launch
-  trigger has no read to scope; adding a second kind of question there would make
-  the chokepoint two things.
+- **Querying `public.assignment_scope` from the launch path.** Tried, and refused
+  by the §4.1 invariant named above. The view is unfiltered and the only
+  narrowing in the system is inside `authz.py`, so a `SELECT` written anywhere
+  else applies whichever of §2.1's rules its author remembered. The predicate
+  went where the invariant's own message says a new one belongs.
+- **A fourth `SECURITY DEFINER` function for the same question.** It would have
+  kept the launch path self-contained and it widens the closed set of three
+  functions `pulse_app` may execute (ADR 0094), which is an inventory
+  `test_identity_grants.py` pins as an equality. A door opened to route around a
+  guard is the guard's cost paid twice.
 - **Keeping the reachable set on the mock registration empty.** It is the safest
   answer and it makes the ticket's own criterion undemonstrable outside the test
   suite: the merge would be proved in integration and unprovable in the browser,
