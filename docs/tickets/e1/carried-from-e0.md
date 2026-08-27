@@ -82,6 +82,33 @@ she gets. Deleting `landing.py`'s entry from
 change is the signal that this is finished: that exception exists only because
 the mapping names the Care role while reading a claim.
 
+**Closed by E1-13** (`docs/tickets/e1/E1-13-role-resolution-from-assignments.md`).
+`backend/app/services/landing.py` is deleted. The landing is resolved in
+`app/services/authz.py` from the session's own live assignments, filtered in SQL
+by ADR 0026's `permits_launch` / `permits_web_login`, with enrollment as the
+student fallback at the launch door alone (ADR 0028); `assignment_scope_v002.sql`
+is what publishes those two columns to the chokepoint. The decision, the ordering
+and every alternative rejected are
+[ADR 0098](../../adr/0098-the-landing-comes-from-the-assignment-model.md).
+
+A precedence did survive, so both pairs above are now held. The launch pair — the
+teaching assistant, instructor beating learner — is
+`tests/integration/test_landing_resolves_from_assignments.py::test_the_teaching_assistant_lands_on_instructor_rather_than_on_her_own_student_view`,
+restated as assignments beating enrollment. The web pair is posed twice, at both
+ends of the ordering, because a test at one end says nothing about the other:
+`::test_a_person_holding_dean_and_care_lands_on_the_leadership_view_at_the_web_door`
+and `::test_a_person_holding_care_and_admin_lands_on_the_care_view_at_the_web_door`.
+`tests/unit/test_chosen_landing.py` pins the same ordering over every ordered
+pair in both input orders, so no single transposition survives.
+
+`EXCEPTIONS` is empty — the signal this entry names — and the rule it stood for
+is stronger than it was: "Care is unreachable from a launch" no longer rests on
+an exception list or on a door refusing a smuggled claim, but on the generated
+column, exercised over a real live `CARE` assignment held by the very person
+launching, in
+`::test_a_care_only_persons_launch_is_answered_with_the_calm_page_and_never_the_care_view`.
+The paragraphs above are kept as the record of what E0 shipped.
+
 ## `LTI_PLATFORM_AUTHORIZATION_ENDPOINT` is process-wide and platforms are not
 
 The security review of E0-18 named this. Platforms resolve per issuer:
@@ -362,7 +389,11 @@ surface, in plain words, no shield or lock iconography — are both rules about
 *shipped copy*, and nothing in the suite reads a shipped surface against either.
 The only string in the tree either rule touches is
 `backend/app/services/landing.py`'s "Nothing needs attention.", which happens to
-comply. Every screen those items govern arrives in E2 and E4, and each will be
+comply. (**Where that string lives moved twice after this was written**: E1-08
+took the five landing pages out of that module, and E1-13 deleted the module, so
+the sentence is `frontend/src/lib/landings.ts`'s now. Nothing else about this
+entry changes — one complying string in the tree either way.) Every screen those
+items govern arrives in E2 and E4, and each will be
 reviewed by a person who has read §4.1 — which is exactly the enforcement model
 §4.1's own preamble says is not enough.
 
