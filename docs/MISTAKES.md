@@ -345,3 +345,18 @@ mutates, not an enumerated one: the names that need undoing are exactly the ones
 the fixture was never told. And when a suite is green locally and red in CI,
 probe what each process actually holds at the failing call; do not infer it from
 the fixtures that should have set it.
+
+## 41. A request path inherited a background job's dependency, at that dependency's default retry policy
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/41-a-request-path-inherited-a-background-dependency.md)
+
+**Rule.** A request path may not be able to fail because a background dependency
+was unavailable, and it may not wait to find out. When a handler enqueues work,
+publish with retries off, keep the result backend out of it for a task whose
+answer nobody reads, and catch broadly — the request has already done its own job
+by then, and the scheduled run covers the gap. A client library's defaults are
+written for the context that library is usually called from, and a worker's
+defaults on a request path turn a dependency that is *down* into a request that is
+*hanging*. And the corollary: a change that adds a call to a shared entry point is
+not verified by the suites of the ticket that made it — run the whole suite, and
+read its timing as well as its result.

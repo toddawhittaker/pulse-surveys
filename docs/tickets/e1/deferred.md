@@ -34,7 +34,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    subject, no name and no address, nothing joins it to a person, and nothing
    reads it until E1-06 signs with it — so `PERSON_TABLES` is unchanged.
    Recorded in [ADR 0082](../../adr/0082-the-tools-signing-key-lives-in-the-database.md)
-   and beside the model. E1-11 still owes its half.
+   and beside the model.
+   *E1-11 asked it and the answer is no.* It adds one table, `nrps_call`,
+   holding a section reference, the URL called, an HTTP status, a count of
+   members seen and a timestamp. It carries no subject, no name and no
+   address, and its only foreign key is to `section` — nothing joins it to a
+   person by any path — so `PERSON_TABLES` is unchanged. Recorded beside the
+   model in `backend/app/models/lti.py`, and in the sentence
+   `RUNTIME_BASE_TABLE_PRIVILEGES` carries for the table. Both tickets have
+   now asked; what stays open is the other half of this item's own done-when,
+   a structural source for the list.
 
 3. **The two E0-34 planted-file tests have a not-load-bearing message
    check.** Pytest assertion rewriting satisfies the check without the
@@ -166,6 +175,17 @@ Every E1 pull request that defers something adds it here in the same PR.
    `jti` granted, replayed `jti` refused) — at latest with E1-11, whose
    client's conformance claims otherwise rest on an endpoint that cannot
    notice a replay.
+   **Fixed by E1-11.** `mock-lms/app/tokens.py` keeps a `SeenAssertions`
+   store, pruned on the way in and holding an entry at least as long as the
+   lifetime bound; a replayed `jti` inside that life is refused `400
+   invalid_grant`. The check runs last, after the assertion has been proved to
+   be this client's and to be inside both time bounds, so nothing can fill the
+   store by posting junk. The pair is in
+   `test_mock_lms_client_credentials_grant.py::test_an_assertion_presented_twice_is_refused_the_second_time`,
+   and it is three requests rather than two: granted, replayed and refused,
+   then a *fresh* assertion granted — which is what tells a `jti` store from an
+   endpoint that grants exactly once. What the store deliberately does not
+   survive is a restart, which is stated where it lives.
 
 2. **The lifetime bound trusts the signer's own dates** (security review,
    LOW). `exp - iat` are both the assertion's claims, so a signer who dates
@@ -178,6 +198,13 @@ Every E1 pull request that defers something adds it here in the same PR.
    further than the bound plus a stated skew allowance beyond the platform's
    clock, proven by a pair on both sides of that line — in the same change as
    item 1, E1-11 at latest.
+   **Fixed by E1-11**, in the same change. The stated allowance is thirty
+   seconds (`ASSERTION_SKEW_ALLOWANCE_SECONDS` in `mock-lms/app/tokens.py`), so
+   an `exp` beyond now + 300 + 30 on the platform's own clock is refused `400
+   invalid_grant` however the assertion's own arithmetic reads.
+   `test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_refused`
+   is the pair, one second either side of that line, with both halves stating a
+   300-second lifetime so the clamp is the only thing being measured.
 
 3. **The unpadded-spelling pin covers one key set of three.** The battery's
    survivor taught that decode-based assertions forgive how a JWK integer is
@@ -265,6 +292,17 @@ Every E1 pull request that defers something adds it here in the same PR.
    finds first. Recorded in
    [ADR 0091](../../adr/0091-what-a-launch-provisions-and-what-it-writes-down-instead.md)'s
    consequences as well, because that is where a reader of the column will be.
+   **Fixed by E1-11.** `app.services.roster_sync._registration_for` resolves
+   `section.lti_deployment_id → lti_deployment → lti_platform` and reads
+   nothing else, and the `ServiceConnector` is built inside the per-section
+   sync so that the scheduled walk cannot hoist one out of its loop.
+   `test_the_roster_sync_is_a_conformant_service_client.py::test_each_section_is_synced_with_the_credentials_of_its_own_registered_platform`
+   is the two-platform test, and it catches the failure in both places at once:
+   the second platform's token endpoint sees no grant at all, and the token on
+   the wire verifies against the wrong key set.
+   `test_the_scheduled_walk_syncs_a_section_under_each_registered_platform`
+   asks the same question of the hourly job, which the per-section test cannot
+   see because it already calls the sync once per section.
 
 2. **The launch day is UTC's day, not the institution's.**
    `app.services.provisioning` is handed a session and the launch's claims and no
@@ -277,6 +315,14 @@ Every E1 pull request that defers something adds it here in the same PR.
    in hand and the institution timezone is on it — and a test drives a launch at
    an hour that falls on different dates in UTC and in the institution's zone,
    asserting the term the institution's calendar names.
+   **Fixed by E1-11**, riding item 5's signature change.
+   `_term_containing_the_launch_day(session, settings)` reads
+   `datetime.now(ZoneInfo(settings.institution_timezone)).date()`, and
+   `test_provisioning_reads_its_environment_and_its_day_from_settings.py::test_a_launch_lands_in_the_term_the_institutions_calendar_names`
+   drives it, picking a zone at run time from two that bracket the clock so the
+   question can be posed at any hour. E1-11's sync stamps its own `started_on`
+   from the same setting rather than writing the same defect into a second
+   module ([ADR 0095](../../adr/0095-the-roster-syncs-enrollment-windows-and-what-it-refuses.md)).
 
 3. **Sections stored before the binding carry a synthetic context id.** The
    round-3 migration binds them to the one registered deployment under a
@@ -339,3 +385,11 @@ Every E1 pull request that defers something adds it here in the same PR.
    thread is short — and a test drives a launch under a `.env`-only development
    configuration and asserts the mock's address is stored. E1-11 touches this
    module and is the natural place.
+   **Fixed by E1-11.** `provision_from_launch(session, claims, settings)` is
+   the signature now, `app.api.lti.launch` passes
+   `request.app.state.settings`, and `_environment()` and its `os.environ` read
+   are deleted — `settings.environment` is the one answer.
+   `test_provisioning_reads_its_environment_and_its_day_from_settings.py::test_a_launch_under_a_dotenv_only_development_configuration_stores_the_mocks_address`
+   drives a launch with a `.env` in the working directory and `ENVIRONMENT`
+   absent from the process, and asserts both halves: the address stored, and no
+   `roster_address_refused` recorded.
