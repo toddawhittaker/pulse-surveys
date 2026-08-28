@@ -202,6 +202,18 @@ IDENTITY_NAME_FRAGMENTS = (
 
 # The tables that hold a person by construction. Anything with a foreign key to
 # one of them is swept too — see `people_tables`.
+#
+# **A structural source for these three roots was attempted on 2026-08-28 and
+# does not exist**, which is why the list is still written out. The grant-derived
+# candidate — the tables `pulse_app` holds no `SELECT` on — over-reports five-fold,
+# because the application role reads through views rather than through tables and
+# most of what it cannot select holds no person at all; and a marker- or
+# model-derived source is circular for the reason dispute E0-10-01 settled, since
+# the marker is the thing these roots are used to check. The compensating control
+# is `unclassified_reached_tables` at the foot of this file, which names a table
+# the walk reached and recognised nothing on; the residual blind spot it does not
+# cover is a person table with no foreign-key path into the graph at all. The full
+# record is `docs/tickets/e1/deferred.md`, E1-01 item 2.
 PERSON_TABLES = ("user", "user_identity", "person")
 
 # The columns a view may read from one of those tables, and the whole of the list.

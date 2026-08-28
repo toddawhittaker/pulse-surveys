@@ -24,6 +24,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    against the recorded column set, disambiguating via `pg_get_viewdef`),
    proved by the join-form planted control.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2, the first epic to add a view after the guard.
+   **Fixed by E1's cleanup Batch A** (`e1/sweep-closures`), inside E1 after
+   all. `decompiled_whole_row_reads` in `test_identity_column_marker.py`
+   reads `pg_get_viewdef` for every view holding a column-grain edge to a
+   guarded table and reports a whole-row token of that table's aliases; its
+   result is unioned into both whole-row consumers, so the join-hidden form
+   travels the chain like a catalog edge. Proven by the hidden-case plant
+   (a view naming `u.id` *and* taking `to_jsonb(u)`, which drops the
+   `refobjsubid = 0` row), by alias near-misses, and by a battery mutation
+   that hid a whole-row read behind a join in a live `views_sql/` file and
+   watched the check fail.
 
 2. **`PERSON_TABLES` is a hand-written closed list.** Nothing guards that a
    future person table joins it. E1-05 and E1-11 are the tickets that could
@@ -63,6 +73,24 @@ Every E1 pull request that defers something adds it here in the same PR.
    whose column names it recognises none of, rather than passing over it.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; the per-table question is every epic's review, the structural
    source and the unrecognized-table report are E13's at the latest.
+   **The report half is fixed by E1's cleanup Batch A**
+   (`e1/sweep-closures`): `unclassified_reached_tables` fails naming any
+   table the walk reaches that no fragment, no marker shape and no
+   `REACHED_TABLES_THAT_CARRY_NOTHING` entry classifies, and the entry list
+   is closed in both directions so it cannot rot. The five measured entries
+   are `user`, `audit_log`, `enrollment`, `lead_faculty_mapping` and
+   `role_assignment`, each with its reason beside it.
+   **The structural-source half was attempted by Batch A and failed
+   honestly; it stays carried to E13.** Measured 2026-08-28: the
+   grant-derived candidate (tables `pulse_app` holds no SELECT on) returns
+   fifteen tables — the three roots plus twelve view-mediated ordinary
+   tables — and no refinement distinguishes them without a hand-written
+   judgment; marker-derived and model-derived sources are circular, the
+   shape dispute E0-10-01 already rejected. The report above is the
+   compensating control. The residual blind spot, stated so E13 inherits
+   it precisely: a new person table with no foreign-key path into the
+   existing person graph is reached by nothing and reported by nothing —
+   only the per-epic review question covers it.
 
 3. **The two E0-34 planted-file tests have a not-load-bearing message
    check.** Pytest assertion rewriting satisfies the check without the
