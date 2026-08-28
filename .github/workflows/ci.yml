@@ -652,6 +652,13 @@ jobs:
           python scripts/ci/check_invariants.py reports/invariants.xml
           python scripts/ci/check_invariant_assertions.py tests
 
+      # `-n 4` is pytest-xdist: four worker processes over the same collection.
+      # This pass is the pipeline's wall clock, and it is the only pass that
+      # runs under xdist — the invariant pass above stays serial on purpose
+      # (docs/adr/0104-the-unit-and-integration-pass-runs-under-xdist.md, which
+      # also records what the four workers cost: each is a full pytest session,
+      # so each provisions its own testcontainers Postgres and runs alembic
+      # once). `make test` runs the same flag.
       - name: Unit + integration with coverage
         if: needs.changed.outputs.inert != 'true'
         env:
@@ -659,7 +666,7 @@ jobs:
           # is what it talks to.
           TESTCONTAINERS_RYUK_DISABLED: 'false'
         run: |
-          pytest tests/unit tests/integration \
+          pytest tests/unit tests/integration -n 4 \
             --cov=backend/app --cov-report=term-missing --cov-report=xml \
             --junitxml=reports/pytest.xml
 
