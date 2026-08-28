@@ -1845,10 +1845,18 @@ def person_table_columns_bound(body: str, vocabulary: IdentityVocabulary) -> tup
         CTE leaves the same row at both grains: Postgres drops the
         `refobjsubid = 0` whole-row row as soon as the view also names any column
         of that table, so the join form of a whole-row read records only the
-        column it joined on. What catches that spelling is
-        `identity_rows_read_whole` above — which is text, and which was attacked
-        and held — so for whole-row reads the two sides trade places and the file
-        sweep is the one carrying the guarantee.
+        column it joined on. `identity_rows_read_whole` above catches that
+        spelling — it is text, and it was attacked and held.
+
+        **The two sides no longer trade places there, and this paragraph used to
+        say they did.** Batch A closed E1-01's first deferred item: the catalog
+        half reads `pg_get_viewdef` as well as `pg_depend`, so
+        `decompiled_whole_row_reads` in `test_identity_column_marker.py` reports
+        the join-hidden whole-row form the dependency row does not survive. Each
+        side now answers for the same shape in its own currency — this module for
+        the spellings a human writes in a `views_sql/` file, that one for what
+        Postgres decompiled a stored view back to — and neither is the guarantee
+        on its own.
 
         A file no revision has executed is still the case that falls between the
         two at column grain, and it is the one this mechanism cannot answer for.

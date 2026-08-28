@@ -149,6 +149,7 @@ from app.models.identity import (
     WebLoginSubject,
 )
 from app.models.lti import (
+    ENVIRONMENT_SESSION_KEY,
     LtiDeployment,
     LtiPlatform,
     ToolSigningKey,
@@ -1084,6 +1085,29 @@ def check_environment_is_development(configuration: Mapping[str, str]) -> None:
     )
 
 
+def state_the_environment(session: Session, configuration: Mapping[str, str]) -> None:
+    """Tell the session which environment this seed run writes under (ADR 0101).
+
+    The registration-address rules are a `before_insert`/`before_update` event on
+    `LtiPlatform` now, and an event has no configuration in hand: it reads
+    `Session.info["environment"]`, and a session that states nothing is judged as
+    a deployment — which would refuse the mock platform's own cleartext addresses
+    on a Compose service name, and stop `make seed`.
+
+    **Called by the two registration writers rather than only where the session is
+    built**, and for the same reason those two call the address rules again after
+    `main` has already checked the environment: `main` is not the only way in. A
+    caller that builds its own session and calls `seed_mock_platform` — the demo
+    seed's own suite does exactly that — otherwise writes through a session that
+    states nothing, and the write it makes is a development one.
+
+    **It does not overwrite a stated environment.** A caller that has already said
+    where it is keeps saying it, and the write is judged under that name; this
+    fills in the silence, it does not argue with an answer.
+    """
+    session.info.setdefault(ENVIRONMENT_SESSION_KEY, configuration.get(ENVIRONMENT_VARIABLE, ""))
+
+
 # ---------------------------------------------------------------------------
 # Writing a row once.
 # ---------------------------------------------------------------------------
@@ -1415,6 +1439,7 @@ def seed_mock_platform(session: Session, configuration: Mapping[str, str]) -> Lt
     from the next `make seed` rather than from a hand-written `UPDATE`.
     """
     check_environment_is_development(configuration)
+    state_the_environment(session, configuration)
     refuse_invalid_registration_addresses(
         configuration.get(ENVIRONMENT_VARIABLE, ""),
         authorization_endpoint=MOCK_PLATFORM_AUTHORIZATION_ENDPOINT,
@@ -1466,6 +1491,7 @@ def seed_demo_platform(session: Session, configuration: Mapping[str, str]) -> De
     2606 reserved domain and would pass in any environment; the call is what makes
     that a fact the code states rather than one a reader has to check.
     """
+    state_the_environment(session, configuration)
     refuse_invalid_registration_addresses(
         configuration.get(ENVIRONMENT_VARIABLE, ""),
         # No endpoints: nobody launches from this platform. It exists so the demo
@@ -1820,7 +1846,16 @@ def main(environ: Mapping[str, str] | None = None, dotenv_path: Path | None = No
 
     engine = create_engine(url)
     try:
-        with Session(bind=engine) as session:
+        # The session states the environment it writes under (ADR 0101): the
+        # registration-address rules are a mapper event on `LtiPlatform` now, and
+        # a session that states nothing is judged as a deployment — which would
+        # refuse the mock platform's own cleartext addresses on a Compose service
+        # name, and stop `make seed`. This script has already refused to run
+        # anywhere but development by the time it reaches here (ADR 0063), so the
+        # name is a constant rather than a reading of the configuration.
+        with Session(
+            bind=engine, info={ENVIRONMENT_SESSION_KEY: DEVELOPMENT_ENVIRONMENT}
+        ) as session:
             try:
                 seed(session, configuration)
             except SeedError as refused:

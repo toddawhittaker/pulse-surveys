@@ -535,12 +535,32 @@ def db_session(migrated_engine: Any) -> Iterator[Any]:
 
     Postgres puts DDL inside the transaction too, so a table created in a test
     is gone with the rest of it.
+
+    **The session states the environment it writes under.** Batch C makes the
+    registration-address rules a `before_insert`/`before_update` mapper event on
+    `LtiPlatform`, and that event reads `Session.info["environment"]` — a session
+    that states nothing is judged as a deployment, deliberately, so that a writer
+    nobody thought about fails closed. This suite's sessions are development
+    stacks: they seed the mock platform's own cleartext addresses on a Compose
+    service name, which every rule refuses anywhere else. `app.db`'s
+    `SessionLocal` carries the same stamp from `Settings`, and `scripts/seed.py`
+    carries it too, so the three legitimate writers all say what they are.
+
+    A test that wants its write judged by a deployment's rules sets
+    `session.info["environment"]` itself, in the test, which is where a test that
+    depends on the environment states it (`docs/MISTAKES.md` entry 40).
     """
     from sqlalchemy.orm import Session
 
+    from app.config import DEVELOPMENT_ENVIRONMENT
+
     connection = migrated_engine.connect()
     transaction = connection.begin()
-    session = Session(bind=connection, join_transaction_mode="create_savepoint")
+    session = Session(
+        bind=connection,
+        join_transaction_mode="create_savepoint",
+        info={"environment": DEVELOPMENT_ENVIRONMENT},
+    )
     try:
         yield session
     finally:

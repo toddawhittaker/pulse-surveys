@@ -68,7 +68,7 @@ import json
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from types import ModuleType
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 from uuid import uuid4
 
 import pytest
@@ -109,6 +109,15 @@ SYNC_ROLES: dict[str, tuple[str, ...]] = {
     # `deployment_settings` below sets that too, so either shape is driven by the
     # same fixture (`docs/MISTAKES.md` entry 40: the test states what it runs under).
     "settings": ("settings", "config", "configuration"),
+    # Batch C's rule 5: the fetched-address rules resolve the host and judge every
+    # address the resolver returns, and the sync connects to the address that was
+    # judged. `resolve` is the seam that keeps a name lookup out of this suite —
+    # **no test in this repository may perform real DNS**, and every hostname a
+    # sync is driven with here (`roster-platform.invalid`, and the mock's own
+    # Compose name) resolves nowhere on a developer's machine and answers
+    # differently in CI. The parameter is spelled by the batch's settled design:
+    # `sync_section(session, section_id, http=None, settings=None, resolve=None)`.
+    "resolve": ("resolve", "resolver", "resolve_host", "resolve_addresses"),
 }
 
 
@@ -380,6 +389,20 @@ class ServiceCall:
         return self.headers.get("authorization")
 
     @property
+    def host_header(self) -> str | None:
+        """The `Host` header this request carried, or `None` if it set none.
+
+        `requests` does not put one in `request.headers` for an ordinary call —
+        urllib3 derives it from the URL at the socket — so a value here means
+        something deliberately set one. Batch C's `PinnedResolutionAdapter` is the
+        only thing in this system that does: it rewrites the URL's host to the
+        address that was judged and states the original hostname here, so the
+        certificate is verified against the name and the packet goes to the
+        address. A test reads this to tell a pinned request from an unpinned one.
+        """
+        return self.headers.get("host")
+
+    @property
     def bearer_token(self) -> str | None:
         """The token this request presented, or `None` if it presented none."""
         value = self.authorization or ""
@@ -484,6 +507,30 @@ def _route_key(url: str) -> tuple[str, str]:
     """
     split = urlsplit(url)
     return (split.netloc, split.path)
+
+
+def _authority(url: str, headers: Mapping[str, str]) -> tuple[str, str]:
+    """The `(netloc, hostname)` a server would answer this request as.
+
+    **The `Host` header wins over the URL, which is what a server does**, and it
+    is what lets this in-process wire represent a *pinned* connection at all.
+    Batch C's `PinnedResolutionAdapter` sends the roster's second page to the
+    address the first resolution returned and states the platform's hostname in
+    `Host`; on the network that request reaches the same server, and here it has
+    to reach the same mounted application. Without this, a pinned request would
+    arrive at an unmounted IP literal and `deliver` would raise — a green pin
+    would be indistinguishable from a sync that never walked.
+
+    A request that sets no `Host` header — every request in this suite before the
+    pin exists, because `requests` leaves the header to urllib3 — answers exactly
+    as it did before: the URL is the authority.
+    """
+    split = urlsplit(url)
+    stated = next((value for name, value in headers.items() if name.lower() == "host"), None)
+    if not stated or not stated.strip():
+        return split.netloc, (split.hostname or "")
+    netloc = stated.strip()
+    return netloc, (urlsplit(f"//{netloc}").hostname or "")
 
 
 class ServiceWire:
@@ -626,7 +673,19 @@ class ServiceWire:
         self.calls.append(ServiceCall(method, url, delivered, body))
 
         split = urlsplit(url)
-        route = _route_key(url)
+        # The authority is the `Host` header where one was set and the URL's own
+        # netloc otherwise (`_authority`), so a pinned request — sent to a
+        # resolved address under the platform's hostname — is routed, keyed and
+        # served exactly as the unpinned one it stands for.
+        authority, authority_host = _authority(url, delivered)
+        route = (authority, split.path)
+        # The request as the server sees it: the authority in place of whatever
+        # address the client dialled. Everything answered below is composed from
+        # this rather than from `url`, and the `rel="next"` header is why — a
+        # platform builds its pagination links out of its own name, so a wire that
+        # built them out of a pinned address would hand the sync a URL no platform
+        # would ever send and make the second hop a test of this fixture.
+        forwarded = urlunsplit((split.scheme, authority, split.path, split.query, split.fragment))
         # A configured failure answers before anything else, including the
         # unauthenticated gate: a test that fails an endpoint is asking what the
         # sync does when that endpoint is down, and an answer from any other branch
@@ -672,19 +731,21 @@ class ServiceWire:
                 json.dumps({"error": "invalid_token"}).encode("utf-8"),
             )
         if roster is not None:
-            document, page_headers = roster.document(url)
+            document, page_headers = roster.document(forwarded)
             return _Answer(200, page_headers, json.dumps(document).encode("utf-8"))
 
-        driver = self.hosts.get(split.hostname or "")
+        driver = self.hosts.get(authority_host)
         if driver is None:
             raise RuntimeError(
                 f"The roster sync made a request to `{url}`, and no application is mounted at host "
-                f"{split.hostname!r} (mounted: {sorted(self.hosts)}). Either the sync resolved its "
-                "platform from somewhere other than the section's own `lti_deployment_id` — which "
-                "is the failure deferred E1-10 item 1 is about — or this test has to mount the "
-                "platform that serves it."
+                f"{authority_host!r} (mounted: {sorted(self.hosts)}). That host is the request's "
+                f"`Host` header where it set one (authority {authority!r}) and the URL's own "
+                "otherwise. Either the sync resolved its platform from somewhere other than the "
+                "section's own `lti_deployment_id` — which is the failure deferred E1-10 item 1 is "
+                "about — or it connected to an address it pinned without stating the hostname it "
+                "pinned it for, or this test has to mount the platform that serves it."
             )
-        answered = driver.client.request(method, url, content=body, headers=delivered)
+        answered = driver.client.request(method, forwarded, content=body, headers=delivered)
         return _Answer(answered.status_code, dict(answered.headers), answered.content)
 
 
@@ -1408,6 +1469,142 @@ def deployment_settings(monkeypatch: pytest.MonkeyPatch, configured_env: dict[st
 
 
 @pytest.fixture
+def development_settings(monkeypatch: pytest.MonkeyPatch, configured_env: dict[str, str]) -> Any:
+    """A `Settings` whose environment is the development one, with the process agreeing.
+
+    The counterpart to `deployment_settings`, and it exists for one question Batch
+    C adds: in development the fetched-address rules run **only** for a host that
+    differs from the section's own stored one, so the case where they do *not* run
+    — the operator's own roster address — has to be posed under the development
+    name or it is not that case at all.
+
+    Both halves are set for the reason `deployment_settings` gives: the settings
+    object is what a sync that takes one is handed, and the process variable is
+    what a sync that builds its own reads (`docs/MISTAKES.md` entry 40).
+    """
+    from app.config import DEVELOPMENT_ENVIRONMENT, Settings
+
+    monkeypatch.setenv("ENVIRONMENT", DEVELOPMENT_ENVIRONMENT)
+    return Settings()
+
+
+# ---------------------------------------------------------------------------
+# Resolution, stubbed. **No test in this repository performs real DNS.**
+# ---------------------------------------------------------------------------
+
+# Two addresses that are `is_global` and one that is not, written out here so that
+# every module reasoning about Batch C's rule 5 uses the same three. `93.184.216.34`
+# and `8.8.8.8` are globally routable; `10.0.0.7` is RFC 1918. **The obvious
+# documentation ranges are not usable for the accepted side**: `203.0.113.0/24`
+# (TEST-NET-3) and `192.0.2.0/24` (TEST-NET-1) are reserved, so `is_global` is
+# false for them and a test using one as "an ordinary public address" would assert
+# the opposite of what it says.
+A_GLOBAL_ADDRESS = "93.184.216.34"
+ANOTHER_GLOBAL_ADDRESS = "8.8.8.8"
+A_PRIVATE_ADDRESS = "10.0.0.7"
+
+# A second and third platform hostname, for the walk that hops off the section's
+# own host. `.invalid` is RFC 2606's reserved suffix: it resolves nowhere, which is
+# the point — every lookup in these tests is answered by the stub below.
+A_SECOND_PLATFORM_HOST = "second.roster-platform.invalid"
+AN_INTERNAL_HOST = "internal.roster-platform.invalid"
+
+
+class UnexpectedHostLookupError(AssertionError):
+    """A resolver was asked about a host the test never described.
+
+    **Deliberately not `socket.gaierror`.** An unresolvable host is a *refusal* in
+    Batch C's design, so a stub that answered an unanticipated lookup that way
+    would turn "this test forgot to describe a host" into "the code correctly
+    refused something", which is `docs/MISTAKES.md` entry 3 with the evidence
+    destroyed. An `AssertionError` is not what the rules catch, so it arrives as
+    the failure it is.
+    """
+
+
+def _resolution_key(host: str) -> str:
+    """A hostname as a resolver would key it: unbracketed, one trailing dot off, folded.
+
+    The same three normalisations ADR 0077's `url_host` makes, and made here for
+    the same reason (`docs/MISTAKES.md` entry 13): a stub that answered
+    `mock-lms` and not `MOCK-LMS.` would report a case-folding defect in the code
+    under test as a resolution failure.
+    """
+    return host.strip().strip("[]").rstrip(".").lower()
+
+
+class StubResolver:
+    """The `resolve` a test injects, and the record of what was asked of it.
+
+    Three behaviours, and each is a case Batch C's rule 5 has to answer:
+
+      - a host the test described answers the addresses it described, in order;
+      - a host the test described as **unresolvable** raises what it was given —
+        a `socket.gaierror` — or answers the empty tuple, which are the two
+        shapes the design says refuse;
+      - an **IP literal** nobody described answers itself, which is what
+        `socket.getaddrinfo` does with one. This is deliberate and load-bearing:
+        whether the implementation short-circuits a literal or resolves it like
+        anything else is a decision the work order leaves open, and a stub that
+        refused to answer a literal would settle it here.
+
+    `asked` is the whole point of the fixture for two of the tests in this batch:
+    "the resolver was never called" is the only way to assert that a development
+    stack does not pay a DNS lookup per roster page, and a stub that could not say
+    so would leave that criterion untestable.
+    """
+
+    def __init__(self, answers: Mapping[str, Any] | None = None) -> None:
+        self.answers: dict[str, Any] = {
+            _resolution_key(host): value for host, value in (answers or {}).items()
+        }
+        self.asked: list[str] = []
+
+    def answering(self, host: str, addresses: Any) -> "StubResolver":
+        """Describe one host, and hand back this resolver so calls can be chained."""
+        self.answers[_resolution_key(host)] = addresses
+        return self
+
+    def __call__(self, host: str) -> Sequence[str]:
+        self.asked.append(host)
+        key = _resolution_key(host)
+        if key in self.answers:
+            described = self.answers[key]
+            if isinstance(described, BaseException):
+                raise described
+            if callable(described):
+                return tuple(described())
+            return tuple(described)
+        try:
+            from ipaddress import ip_address
+
+            ip_address(key)
+        except ValueError:
+            raise UnexpectedHostLookupError(
+                f"A resolver stub was asked to resolve {host!r}, which this test never described "
+                f"(it described {sorted(self.answers)}). That is one of two things and neither is "
+                "the code being wrong: the test is driving a hostname it forgot to answer for, or "
+                "the subject is resolving something it was not expected to resolve. Nothing here "
+                "may reach real DNS — every hostname in this suite resolves differently on a "
+                "developer's machine and in CI."
+            ) from None
+        return (key,)
+
+
+@pytest.fixture
+def resolving() -> Callable[..., StubResolver]:
+    """Build a `StubResolver` from `host -> addresses`. See `StubResolver` above."""
+
+    def build(answers: Mapping[str, Any] | None = None, **more: Any) -> StubResolver:
+        resolver = StubResolver(answers)
+        for host, addresses in more.items():
+            resolver.answering(host, addresses)
+        return resolver
+
+    return build
+
+
+@pytest.fixture
 def a_subject() -> Callable[[str], str]:
     """A subject key nothing else in this run uses.
 
@@ -1466,6 +1663,13 @@ def roster_contract() -> Any:
         cloud_metadata_host = CLOUD_METADATA_HOST
         loopback_host = LOOPBACK_HOST
         private_range_host = PRIVATE_RANGE_HOST
+
+        a_global_address = A_GLOBAL_ADDRESS
+        another_global_address = ANOTHER_GLOBAL_ADDRESS
+        a_private_address = A_PRIVATE_ADDRESS
+        a_second_platform_host = A_SECOND_PLATFORM_HOST
+        an_internal_host = AN_INTERNAL_HOST
+        unexpected_host_lookup = UnexpectedHostLookupError
 
         member = staticmethod(roster_member)
         window = staticmethod(enrollment_window)

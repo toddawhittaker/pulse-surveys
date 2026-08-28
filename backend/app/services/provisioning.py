@@ -646,8 +646,16 @@ def _an_address_this_tool_may_call(
 
     Round 3's MEDIUM. E1-11 calls this address with the tool's own client
     credentials, on a schedule, with nobody present, so it is judged by the same
-    four rules `jwks_url` and `auth_token_url` pass — through the one function that
-    holds them (`docs/MISTAKES.md` entry 13), not a second copy beside it.
+    rules `jwks_url` and `auth_token_url` pass — through the one function that
+    holds them (`docs/MISTAKES.md` entry 13), not a second copy beside it. There
+    are five of those rules since ADR 0101, and the fifth resolves the host and
+    judges every address it answers with.
+
+    **This caller names no exempt host and passes no resolver**, which is a
+    decision rather than an omission (ADR 0101). In development the blanket
+    admission is unchanged, so a launch on the demo stack costs no name lookup; in
+    a deployment the host is resolved with the machine's own resolver, one lookup
+    on a staff launch that discovers a section.
 
     **A refused address is not a refused section.** The address stays NULL, the
     refusal is recorded, and the section is provisioned: SPEC §7.3 makes a section

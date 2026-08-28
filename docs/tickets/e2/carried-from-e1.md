@@ -15,26 +15,34 @@ boundary and a later epic's breakdown reads this file's successors.
 
 ## The §4.1 catalog sweep misses the whole-row join form
 
-The catalog half of the view sweep cannot see `to_jsonb(u)` once a view also
-names a column of the same table (Postgres drops the whole-row dependency
-row). The file-text half covers every spelling a reviewer could write today;
-the union is total only because every live view ships through `views_sql/`.
-Source: `docs/tickets/e1/deferred.md`, E1-01 item 1.
-**Owner:** E2, the first epic to add a view after the guard.
-**Done when:** the deferred entry's — the catalog half flags a whole-row
-read in the presence of a join, proved by the planted control.
+**Fixed inside E1 after all**, by the cleanup Batch A PR
+(`e1/sweep-closures`): the catalog half now reads `pg_get_viewdef` as well
+as `pg_depend` and flags the join-hidden whole-row form, proved by the
+planted hidden-case control and a live-view battery mutation. The deferred
+entry (`docs/tickets/e1/deferred.md`, E1-01 item 1) carries the detail;
+nothing is owed to E2.
 
 ## `PERSON_TABLES` has no structural source, and the name-sweep passes over tables it cannot read
 
-Two halves of E1-01 item 2 stay open: nothing generates the closed list of
-person tables, and a table whose column names match no identity fragment is
-passed over silently rather than reported (`web_login_subject` shipped
-holdable only by a hand-written test). Source: `docs/tickets/e1/deferred.md`,
+One half of E1-01 item 2 was fixed inside E1 by the cleanup Batch A PR
+(`e1/sweep-closures`): the sweep now reports a reached table it can
+classify by nothing, with each carries-nothing exemption pinned to the
+exact column set its reason was written against, so an added column
+expires the entry. The report classifies per table, not per column: a
+first unrecognizable column on a table that already carries a recognized
+one is still the per-epic review's question, as the function's docstring
+states.
+The other half — a structural source for the `PERSON_TABLES` roots — was
+attempted there and failed honestly (the grant-derived set over-reports
+five-fold; marker- and model-derived sources are circular), so it stays
+carried with the attempt recorded in the deferred entry. Residual blind
+spot: a person table with no foreign-key path into the graph is invisible
+to both the walk and the report. Source: `docs/tickets/e1/deferred.md`,
 E1-01 item 2.
 **Owner:** every epic's review asks the question for tables it adds
-(standing); the structural source and the unrecognized-table report are owed
-to E13 at the latest.
-**Done when:** the deferred entry's.
+(standing); the structural source is E13's at the latest (ruled
+2026-08-28), with the reached-table report as its compensating control.
+**Done when:** the deferred entry's, for the half still open.
 
 ## A non-development deployment has no way to supply the tool's signing key
 
@@ -45,25 +53,38 @@ rotation needs. Source: `docs/tickets/e1/deferred.md`, E1-05 item 1.
 **Owner:** E3, the first epic to register a real platform.
 **Done when:** the deferred entry's.
 
-## The address rules judge spellings, not resolved addresses
+## The address rules judge spellings, not resolved addresses — fixed inside E1
 
-One defect recorded at two surfaces, fixed together: the registration-write
-rules accept `127.1`-style literals and resolver-backed names (E1-05 item
-2), and the fetched-URL path trusts the host literal, so a registered
-platform's `rel="next"` can point a tokened GET at an internal service
-holding a valid certificate on a private address (E1-11 item 1, residual
-MEDIUM). Source: both entries in `docs/tickets/e1/deferred.md`.
-**Owner:** E11 at the latest, before its console becomes a second writer of
-either surface.
-**Done when:** the E1-11 entry's — resolve, judge the resolved address, pin
-the connection, pairs both sides.
+One defect recorded at two surfaces (E1-05 item 2 and E1-11 item 1, the
+residual MEDIUM), and E1's cleanup batch closed both rather than handing
+them on: the address rules resolve the host and refuse every returned
+address that is not globally routable, and the roster walk connects to the
+address it judged. E2 inherits nothing to do here. Two things to know
+instead: **private ranges are refused now**, which reverses ADR 0081 and is
+recorded in
+[ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md);
+and the sync's token request and the launch's key-set fetch are judged when
+the registration is written and never at fetch time, so neither is pinned —
+residue that record states. Source: both entries in `docs/tickets/e1/deferred.md`, each
+carrying what landed and where.
 
-## Nothing makes a future `lti_platform` writer call the address rules
+## Nothing makes a future `lti_platform` writer call the address rules — fixed inside E1
 
-The write-time chokepoint is a call convention, not a mapper event or a
-sweep. Source: `docs/tickets/e1/deferred.md`, E1-05 item 3.
-**Owner:** the change that adds a second writer; E11 at the latest.
-**Done when:** the deferred entry's.
+Also closed by E1's cleanup batch (E1-05 item 3): `before_insert` and
+`before_update` events on `LtiPlatform` judge every ORM write, reading the
+environment from `Session.info["environment"]` and judging a session that
+states none as a deployment. Two things a later epic — E11's registration
+console above all — has to know about what is left. **A writer that states
+no environment on its session is refused in a deployment's terms**, so a new
+one says where it is where the session is built. And **the events do not see
+every write the ORM can make**: `session.add`, an edit to a persistent row
+and `session.merge` are judged, while `Session.bulk_save_objects`, an
+ORM-enabled `session.execute(update(LtiPlatform).values(...))`, a Core
+`insert()` and raw SQL are not — measured on SQLAlchemy 2.0.52, and the
+bulk-`UPDATE` shape is a natural way to write a console's save. `pulse_app`
+holds `SELECT` on the table and nothing else, so a bypassing write on the
+application connection is refused by the database. Recorded residue in ADR
+0081 and ADR 0101. Source: `docs/tickets/e1/deferred.md`, E1-05 item 3.
 
 ## The TypeScript 7 pair waits on typescript-eslint
 
@@ -163,24 +184,29 @@ client, the way NRPS's landed with E1-11's.
 No epic in §14.3 names logout; E1's sessions are short-lived JWTs that
 expire rather than end. Raised at the E1 breakdown (PR #89) and still
 unowned at E1 exit, which is the condition E1-09 set for carrying it here.
-**Owner:** unscheduled — Todd's call; the epic that first needs a session
-to end before it expires.
-**Done when:** an epic's breakdown schedules it, or a record says expiry is
-the product's answer and why.
+**Owner:** E9 (ruled 2026-08-28) — beside the role switcher and the admin
+surfaces, whose web-door roles are the people who need a session to end
+before its hour expires; E9 lands before the Care queue (E10) ships.
+**Done when:** E9's breakdown schedules it and it is built there.
 
 ## Local-account fallback for web login
 
 SPEC §7.1 names it as a pilot fallback; nothing in E1..E13 schedules it.
-Raised at the breakdown (PR #89), unanswered.
-**Owner:** unscheduled — Todd's call.
-**Done when:** scheduled or explicitly dropped from §7.1.
+Raised at the breakdown (PR #89).
+**Owner:** E13 (ruled 2026-08-28) — it is release-readiness insurance
+against the pilot IdP falling through, and E13 is where that risk is either
+real or expired.
+**Done when:** E13 either schedules and builds it, or deletes the §7.1
+sentence because the risk expired.
 
 ## Deep Linking
 
-§7.3 promises it, E0-14 deferred it out of the mock, no epic names it.
-Raised at the breakdown (PR #89), unanswered.
-**Owner:** unscheduled — Todd's call.
-**Done when:** an epic's breakdown schedules it, or §7.3 stops promising it.
+E0-14 deferred it out of the mock and no epic names it. Ruled 2026-08-28:
+post-v1, and §7.3 now says so rather than promising it — unless a real
+platform demands the flow before then, in which case it is E3's.
+**Owner:** post-v1 (§14.4); E3 only if a real platform forces it earlier.
+**Done when:** done — §7.3 was edited with the ruling (E1's cleanup Batch C
+PR); nothing further is owed unless a platform demands the flow.
 
 ## The mock's scope check is only provably a membership check while no advertised scope is a superstring
 

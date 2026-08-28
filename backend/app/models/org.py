@@ -456,9 +456,12 @@ class Section(UuidPrimaryKey, Base):
     #
     # **What may be stored here is judged first** (E1-10 round 3). It is the third
     # address in this system that this container fetches, so it goes through
-    # `app.models.lti.refuse_invalid_fetched_address` — the same four rules
-    # `jwks_url` and `auth_token_url` pass — before it reaches this column. An
-    # address those rules refuse leaves this NULL and is recorded as a defect.
+    # `app.models.lti.refuse_invalid_fetched_address` — the same rules `jwks_url`
+    # and `auth_token_url` pass, five of them since ADR 0101, the fifth resolving
+    # the host and judging every address it answers with — before it reaches this
+    # column. An address those rules refuse leaves this NULL and is recorded as a
+    # defect. The roster sync judges every page it walks the same way, and
+    # connects to the address that was judged.
     lms_context_memberships_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # **The binding: which context, on which registration, this section is.** See
