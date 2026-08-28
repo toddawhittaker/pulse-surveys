@@ -322,6 +322,28 @@ jobs:
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
 
+      # mypy's incremental cache, which is what makes the three runs below cost
+      # seconds instead of minutes on a warm runner. All three write to the same
+      # `.mypy_cache/` at the repository root, so one entry covers them.
+      #
+      # The key is the runner OS, the pinned mypy version, and the hash of the
+      # dev lockfile: a cache written by a different mypy, or over a different
+      # set of installed type stubs, describes types this run does not have. The
+      # restore-keys prefix lets a lockfile bump start from the previous
+      # closure's cache rather than from nothing — mypy revalidates what it
+      # restores, so a stale entry costs time, never correctness. The same
+      # revalidation is why three packages all called `app` sharing one cache
+      # directory is safe: an entry records the source path it came from, and
+      # one written for another `app` is rejected and recomputed. What all three
+      # genuinely share is the third-party stub cache, which is the bulk of it.
+      - name: Cache mypy's incremental results
+        uses: actions/cache@v6
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ env.MYPY_VERSION }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ env.MYPY_VERSION }}-
+
       # mypy runs over backend/, with the strict profile pinned to
       # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
       # the authorization chokepoint and the AI output contract; they carry the
