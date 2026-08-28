@@ -113,6 +113,7 @@ from app.config import (
     LINE_ITEM_PATH,
     LINE_ITEMS_PATH,
     MEMBERSHIPS_PATH,
+    MOCK_DEFECTS_PATH,
     MOCK_POSTED_SCORES_PATH,
     REGISTRATION_PATH,
     RESULT_PATH,
@@ -150,7 +151,7 @@ from app.tokens import (
     authorised_token,
     granted_token,
 )
-from app.wrong_launches import DEFECT_QUERY_PARAM, WrongLaunchMinter
+from app.wrong_launches import ALL_SELECTORS, DEFECT_QUERY_PARAM, WrongLaunchMinter
 
 SERVICE_NAME = "mock-lms"
 
@@ -879,6 +880,25 @@ def _register_mock_inspection(app: FastAPI, grades: GradeBook) -> None:
                 ]
             }
         )
+
+    @app.get(MOCK_DEFECTS_PATH, summary="Mock only: every defect selector this platform answers to")
+    def served_defects() -> JSONResponse:
+        """The defect selectors, straight from `ALL_SELECTORS`.
+
+        E1-07's deferred item 1. `app.wrong_launches` cannot be imported outside
+        `mock-lms/` (ADR 0039's `app`-package collision), so every consumer of a
+        selector name holds a copied literal and ADR 0088's own consequences say
+        nothing makes those copies move together. This serves the tuple itself —
+        not a written-out list — so a consumer can check its copy against the one
+        source, and a rename in `ALL_SELECTORS` fails that check at the name
+        rather than as a dispatcher's 400 inside whichever case selected the
+        stale spelling.
+
+        Outside the AGS namespace under `/mock/`, like `posted_scores` above: a
+        tool that learned this route would have learned something no real
+        platform serves.
+        """
+        return JSONResponse({"selectors": list(ALL_SELECTORS)})
 
 
 def create_app() -> FastAPI:

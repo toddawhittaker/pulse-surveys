@@ -132,6 +132,15 @@ RESULT_PATH = f"{RESULTS_PATH}/{{user_id:path}}"
 # something no real platform serves.
 MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 
+# The served defect vocabulary (E1-07 deferred item 1). `app.wrong_launches`
+# cannot be imported by any consumer outside `mock-lms/` — both mocks declare a
+# package called `app`, the collision ADR 0039 records — so every consumer of a
+# selector name held a copied literal and ADR 0088's consequences record that
+# nothing makes the copies move together. This route serves `ALL_SELECTORS` so
+# they have one source to check against, and it lives under `/mock/` for
+# `MOCK_POSTED_SCORES_PATH`'s reason: no real platform serves it.
+MOCK_DEFECTS_PATH = "/mock/defects"
+
 
 class ConfigurationError(RuntimeError):
     """A configured value is missing or empty. Raised at application build time."""
