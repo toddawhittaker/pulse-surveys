@@ -319,9 +319,11 @@ def test_a_next_page_the_platform_points_off_its_own_host_is_refused(
         f"A call row records a 200 against {hostile!r}: {[dict(row) for row in recorded]}. That "
         "page was never fetched, so nothing answered it — a 200 here means either the refusal was "
         "recorded as a success or the address was fetched after all.\n\n"
-        "*Which* code a refusal carries is deliberately not asserted: the fix settles that it is "
-        "recorded as a refusal rather than as D9's transport NULL and leaves the sentinel to the "
-        "implementer."
+        "*Which* code a refusal carries is left loose here and is not open anywhere: ADR 0096 "
+        "settles it as NULL, and "
+        "`test_a_development_stack_refuses_a_hop_off_its_own_host_that_resolves_privately` pins "
+        "that — this row asserts only that it is not a 200, so a change to the sentinel goes red "
+        "in one place rather than two."
     )
 
     # F1-4: the read-back channel is closed too. It is not enough that the tool
