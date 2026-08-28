@@ -119,6 +119,20 @@ Every E1 pull request that defers something adds it here in the same PR.
    both sides — before E11's console becomes a second writer.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-11 item 1 below into one entry; owner E11 at the
    latest.
+   **Fixed by the E1 cleanup Batch C pull request**, the first of the two
+   halves the done-when offered. Both helpers in `backend/app/models/lti.py`
+   resolve the URL's host and judge every address that comes back: an address
+   that is not globally routable is refused, except loopback on a column
+   outside `LOOPBACK_REFUSED_COLUMNS`, and a host that cannot be resolved —
+   by a raise or by an empty answer — is refused outright. All four residue
+   spellings are closed by the addresses they reach rather than by a list of
+   literals, which is also why the second half of the done-when was not taken:
+   a denylist says nothing about `metadata.google.internal`. The resolver is a
+   parameter so no test reaches a name server, and rule 5 runs after rules 1
+   to 4 so a refused spelling is never looked up.
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md)
+   records it and supersedes ADR 0081 in part: private ranges are refused now,
+   which reverses that record's decision and pays the cost it named.
 
 3. **The write-time chokepoint is a call convention** (security review,
    LOW). Nothing — mapper event, sweep, or grant — makes a future writer of
@@ -129,6 +143,19 @@ Every E1 pull request that defers something adds it here in the same PR.
    event on `LtiPlatform`) or a sweep asserts every write site calls it —
    in the same change that adds the second writer, E11 at the latest.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E11 at the latest.
+   **Fixed by the E1 cleanup Batch C pull request**, by the first of the two
+   the done-when names. `before_insert` and `before_update` events on
+   `LtiPlatform` in `backend/app/models/lti.py` call
+   `refuse_invalid_registration_addresses`, so a writer that never heard of it
+   is judged at the flush, on the first write and on every edit after. The
+   environment comes from `Session.info["environment"]`, stated by
+   `app.db.SessionLocal` from the settings it builds its engine from and by the
+   demo seed's two registration writers from the configuration they are handed;
+   a session that states none is judged as a deployment, which is the
+   fail-closed direction and is what a writer nobody has thought about yet
+   meets. Raw SQL and a Core `insert()` fire no mapper event and are still
+   unjudged: recorded residue, in ADR 0081 and again in
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md).
 
 ## From E1-03 — TypeScript 7 with typescript-eslint, one change
 
@@ -465,6 +492,22 @@ Every E1 pull request that defers something adds it here in the same PR.
    both sides. Owed with E1-05 item 2, before a second fetched-address writer
    or E11's console ships.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-05 item 2; owner E11 at the latest.
+   **Fixed by the E1 cleanup Batch C pull request**, to the done-when's own
+   words. `refuse_invalid_fetched_address` resolves the host and refuses a
+   resolved address that is not `ip.is_global` — RFC 1918, carrier-grade NAT,
+   link-local and loopback — keeping ADR 0096's split, which leaves loopback
+   admitted on `jwks_url` and `auth_token_url` and refused on the roster
+   column. In development the section's own stored roster host is exempt and is
+   not resolved at all, while a `rel="next"` hop to any other host is judged in
+   full. And the walk connects to what it judged: `sync_section` in
+   `backend/app/services/roster_sync.py` pins each host to the first address it
+   resolved to, never re-pins it, and `PinnedResolutionAdapter` sends the GET to
+   that address under the platform's own hostname with TLS verified against the
+   name — so a rebind between the check and the request swaps nothing.
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md)
+   records it, including what is left: the sync's token request and the launch's
+   key-set fetch are judged when the registration is written and never at fetch
+   time, so neither is pinned.
 
 ## From E1-12 — the dual-door identity merge
 
