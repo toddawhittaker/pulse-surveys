@@ -21,8 +21,21 @@
 // required present *before* the two are compared, and the file says which
 // mutation each half kills.
 //
+// **And one value compared with itself is the same emptiness wearing a
+// different shape**, which a security review found here and which is worth
+// stating at the top rather than only at the line that fixes it. Both tokens are
+// read from one `sessionStorage` key. If the launch delivers no session, the web
+// login's token is still sitting in that key, `sessionToken` returns it a second
+// time — its wait is satisfied instantly by a URL that never carried a fragment
+// — and the clause passes having compared the Care token with the Care token.
+// The key is therefore cleared between the doors, and the two tokens are
+// required to differ.
+//
 // Falsification — the changes that must turn this red:
 //
+//   - a launch door that delivers no session at all: the launch token is null
+//     and the presence assertion fails. This is the one that used to pass, and
+//     the reason for the clear and the inequality;
 //   - a launch door that mints its session with `person_id` unset: the second
 //     presence assertion fails, naming the door;
 //   - a door that resolves her launch to a second `person` row rather than to
@@ -36,7 +49,13 @@
 
 import { test, expect } from '@playwright/test';
 
-import { launchAs, sessionPayload, sessionToken, signInAs } from './support/doors';
+import {
+  SESSION_STORAGE_KEY,
+  launchAs,
+  sessionPayload,
+  sessionToken,
+  signInAs,
+} from './support/doors';
 
 // Her two subjects, one per door. `scripts/seed.py::MOCK_WORLD_PEOPLE` links
 // both to one person — the web-side subject through the mock provider's seed,
@@ -81,8 +100,26 @@ test('both doors resolve the two-hat person to one stored identity', async ({ pa
   // -- The launch door, her teaching hat. -----------------------------------
   //
   // The same browser, so the two entries are the two entries one person makes.
-  // sessionStorage is per origin and the launch overwrites the key, which is why
-  // the web token is read above rather than at the end.
+  //
+  // **The key is cleared first, and that is a repair rather than tidiness.** This
+  // comment used to say "the launch overwrites the key", which stated as an
+  // assumption the very thing under proof: `sessionToken` waits only for a URL
+  // with no `session=` in it, and a URL that never carried a fragment satisfies
+  // that instantly, while the SPA's capture returns early without clearing when
+  // there is no fragment to capture. So a launch that delivered **no** session
+  // would leave her Care token sitting in the key, and this clause would compare
+  // the web token with itself and pass — the emptiest possible green, on exactly
+  // the failure it exists to catch. The battery's `person_id=None` mutation did
+  // not expose it because that mutation still delivered a fragment.
+  //
+  // Two guards, deliberately: the key is emptied here, and the two tokens are
+  // required to differ below. Either alone would close it; together, a future
+  // change that removes one leaves the other. Clearing the key is the same idiom
+  // `exit-refused-launches.spec.ts` uses between its legitimate launch and its
+  // replay, and for the same reason — anything found afterwards was delivered
+  // afterwards.
+  await page.evaluate((key) => window.sessionStorage.removeItem(key), SESSION_STORAGE_KEY);
+
   await launchAs(page, LAUNCH_SUBJECT);
   await expect(page.getByTestId(INSTRUCTOR_VIEW)).toBeVisible();
 
@@ -92,6 +129,19 @@ test('both doors resolve the two-hat person to one stored identity', async ({ pa
     'a completed launch leaves its session token in sessionStorage, captured from the fragment ' +
       '(E1-08); with none, the comparison below is about one value and an absence',
   ).not.toBeNull();
+  // The second of the two guards on aliasing. A token identical to the web
+  // door's is not a launch that agreed with the web login — it is the web
+  // login's own token, read twice, which is what the cleared key above is meant
+  // to make impossible and what this makes impossible to miss if it ever is not.
+  expect(
+    launchToken,
+    'the launch door left the *same* token the web login did. That is not two doors agreeing on ' +
+      'one person: it is one token read twice, because the launch delivered no session of its ' +
+      'own and the previous one was still in sessionStorage. Every assertion below would then be ' +
+      'comparing the web token with itself and passing on the exact failure this clause exists ' +
+      'to catch.',
+  ).not.toEqual(webToken);
+
   const launchPerson = sessionPayload(launchToken as string)[PERSON_CLAIM];
   expect(
     launchPerson,
