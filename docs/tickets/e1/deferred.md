@@ -23,6 +23,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    in the presence of a join (compare the relation edge in `pg_depend`
    against the recorded column set, disambiguating via `pg_get_viewdef`),
    proved by the join-form planted control.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2, the first epic to add a view after the guard.
 
 2. **`PERSON_TABLES` is a hand-written closed list.** Nothing guards that a
    future person table joins it. E1-05 and E1-11 are the tickets that could
@@ -60,18 +61,25 @@ Every E1 pull request that defers something adds it here in the same PR.
    **Done when**, for what stays open: a structural source for the list
    exists, and — E1-12's second half — the sweep reports a table it reached
    whose column names it recognises none of, rather than passing over it.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; the per-table question is every epic's review, the structural
+   source and the unrecognized-table report are E13's at the latest.
 
 3. **The two E0-34 planted-file tests have a not-load-bearing message
    check.** Pytest assertion rewriting satisfies the check without the
    message being real; E1-01 made the same one-line fix to its own control
    and left these two.
    **Done when** both tests get that one-line fix.
+   **Fixed by E1-15.** Both guards hoist their truth value
+   (`clean = not offenders`), the idiom `agrees` in `test_identity_grants.py`
+   measured, so the authored message is the whole of the text.
 
 4. **`test_every_read_view_is_created_from_a_sql_file_under_views_sql` is
    not `invariant`-marked.** The text/catalog complementarity in item 1
    rests on it, but it runs only in the ordinary suite, not the isolated
    §4.1 pass.
    **Done when** it carries the marker and the isolated pass collects it.
+   **Fixed by E1-15.** The marker is on and the isolated pass collects 112
+   where it collected 111; the body already asserted, so nothing moved.
 
 ## From E1-05 — registration owns its endpoints and its keys
 
@@ -98,6 +106,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    since the one-row rule forbids the two-key overlap a real rotation needs.
    **Owner:** the epic that first registers a real platform and therefore first
    needs a production signer.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; that epic is E3.
 
 2. **The address rules judge spellings, not addresses** (security review,
    LOW). Rules 3 and 4 of ADR 0081 accept `127.1`, bare-decimal and
@@ -108,6 +117,8 @@ Every E1 pull request that defers something adds it here in the same PR.
    **Done when** the two helpers resolve the host and judge every returned
    address, or refuse integer/dotted-hex host literals, with test pairs on
    both sides — before E11's console becomes a second writer.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-11 item 1 below into one entry; owner E11 at the
+   latest.
 
 3. **The write-time chokepoint is a call convention** (security review,
    LOW). Nothing — mapper event, sweep, or grant — makes a future writer of
@@ -117,6 +128,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    **Done when** the call is structural (a `before_insert`/`before_update`
    event on `LtiPlatform`) or a sweep asserts every write site calls it —
    in the same change that adds the second writer, E11 at the latest.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E11 at the latest.
 
 ## From E1-03 — TypeScript 7 with typescript-eslint, one change
 
@@ -135,6 +147,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    entry 3's "done when", unchanged.
    **Owner:** whichever epic is running when that range widens; it is no longer
    E1's to wait for.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, owner unchanged.
 
 ## From E1-04 — frontend scaffold and the five empty landing views
 
@@ -160,6 +173,8 @@ Every E1 pull request that defers something adds it here in the same PR.
    deciding. Whichever way it goes, `design/tokens.css` stays the place the
    families are named.
 
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2.
+
 2. **The application sends no security response headers.** No route sets
    `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, or
    a framing policy; `backend/app/main.py` carries no header middleware at
@@ -178,6 +193,8 @@ Every E1 pull request that defers something adds it here in the same PR.
    and a `frame-ancestors` directive naming who may frame the app — with a
    test pinning each header. Scheduled before E2 puts real survey content in
    the SPA.
+
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2.
 
 ## From E1-06 — the mock learns the client-credentials grant
 
@@ -241,6 +258,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    `base64url`) before being trusted. The mock IdP's copy is untouched by
    E1-07 and stays open, owed to whichever ticket next touches `mock-idp/app/
    signing.py`'s encoder.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, owner unchanged.
 
 ## From E1-07 — the mock mints deliberately wrong launches
 
@@ -262,6 +280,9 @@ Every E1 pull request that defers something adds it here in the same PR.
    than a copied literal — proven by a test that the served list and
    `ALL_SELECTORS` agree. Natural to build alongside E1-08, whose Playwright
    spec is the consumer this would most directly help.
+   *E1-15's `exit-refused-launches.spec.ts` became that consumer, holding the
+   two selector literals as its recorded cost.* **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner: the next ticket
+   that adds a selector or a consumer.
 
 ## From E1-08 — the launch door on pylti1p3
 
@@ -284,6 +305,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    asserts the door still refuses it, so the pin's removal turns a green launch
    red. Owed to the ticket that gives a mock platform a permissive-alg mint (a
    natural companion to E1-07's wrong-launch selectors).
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E13 at the latest.
 
 ## From E1-10 — launch-time provisioning and the sanctioned writer
 
@@ -351,6 +373,10 @@ Every E1 pull request that defers something adds it here in the same PR.
    `make docker-build` and a re-seed is the whole of it for the demo stack), or a
    later ticket decides that a section with no real context is a state worth
    naming rather than a value worth inventing.
+   **Closed by E1-15.** Measured 2026-08-28 on the development stack, the only
+   database anybody keeps: `select count(*) from section where lms_context_id
+   like 'pre-binding-section-%'` answers 0 — re-seeds since E1-10 cleared the
+   bound rows, so no such row exists anywhere.
 
 4. **A squatted binding is never reconciled or aged out** (round-3 security
    re-pass, MEDIUM). The binding makes `(course, term, lms_section_code)`
@@ -374,6 +400,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    the repair the second context provisions and the first no longer holds the
    name — a test that fails today whatever an administrator does, because there
    is nothing to call.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E11.
 
 5. **`app.services.provisioning._environment()` reads `os.environ` while every
    other reader of the same rules reads `Settings`** (round-3 security re-pass,
@@ -437,6 +464,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    rebind between the check and the GET cannot swap it) — with test pairs on
    both sides. Owed with E1-05 item 2, before a second fetched-address writer
    or E11's console ships.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-05 item 2; owner E11 at the latest.
 
 ## From E1-12 — the dual-door identity merge
 
@@ -457,6 +485,12 @@ Every E1 pull request that defers something adds it here in the same PR.
    asserts the section's `lms_context_memberships_url` was stored — the browser
    half of `test_a_leadership_persons_launch_stores_the_roster_address_with_no_instructor_urn`.
    E1-15 owns the browser proof and is the natural place.
+   **Fixed by E1-15.** `mock-lms/app/seed.py` seeds the dean, enrolled in
+   `MATH-140-E1FF` only with a roles claim carrying no Instructor URN, and the
+   launch page pairs each person with only their own sections in the served
+   form. The browser half is `tests/e2e/exit-dean-both-doors.spec.ts`: the
+   launch lands the leadership view and the stored roster address is witnessed
+   through the dev console's sections table.
 
 2. **A web-login linkage can only be provisioned by the demo seed or by hand.**
    `web_login_subject` is read by the door through
@@ -473,6 +507,7 @@ Every E1 pull request that defers something adds it here in the same PR.
    linkage under the same rule the seed follows — never inferred from a claim —
    with the write behind whatever authorization that surface uses, proved by a
    test that provisions a linkage through it and signs the person in.
+   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E9's People editor or E11's console, whichever ships first.
 
 3. **The two-hat person's seeded instructor assignment is scoped to a demo
    section, not to the section her launches provision.** `mock-lms` launches her
@@ -487,6 +522,13 @@ Every E1 pull request that defers something adds it here in the same PR.
    person holds no assignment over is shown, and either the seed's scope follows
    that decision or the assignment is dropped as scaffolding, with a test naming
    which.
+   **Closed by E1-13, recorded by E1-15.** ADR 0098 resolves the landing from
+   door-filtered assignments with no scope condition, so her launch into a
+   section she holds no assignment over lands the instructor view her role
+   names;
+   `test_the_care_who_teaches_reaches_instructor_by_launch_and_care_by_web_login`
+   and `tests/e2e/two-hat.spec.ts` name the consequence, and the seed's
+   BIOL 101 scope is consistent with a decision that never reads the scope.
 
 ## From E1-11's fix round — the mock enforces a token on NRPS
 
@@ -503,13 +545,13 @@ Every E1 pull request that defers something adds it here in the same PR.
    Grade passback**. Enforcing now would turn every E0-15 line-item, score and
    result test red for a reason none of them is about (`docs/MISTAKES.md` entry
    22) and would assert nothing about a client.
-   **Owner: E3**, which builds the first AGS client. (Several places still read
-   "grade passback is E2" — this ticket's work order and four test docstrings.
-   §14.3 is the authority and it says E3; the test-side prose is noted in the
-   pull request for the test author.)
+   **Owner: E3**, which builds the first AGS client. (Several places read "grade
+   passback is E2" when this was written; §14.3 is the authority and says E3,
+   and the test-side prose was corrected in the same pull request.)
    **Done when** the AGS routes require a token this platform issued carrying
    the AGS scope the call needs, refusing in the same RFC 6750 vocabulary the
    roster uses, landing in the same change as the client that presents one —
    and the AGS-only guard in the suite's mock-platform driver
    (`refuse_an_unspecified_ags_token_flow`) is retired with it, that guard's
    whole premise being that no such client exists.
+

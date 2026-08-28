@@ -25,7 +25,7 @@ platform supplying them supplies a vendor extension and most supply nothing. A
 seed where every member has one lets E1 write `member[EXTENSION]["start"]` and
 pass every test here. So exactly one seeded member — a student in
 `NURS-8100-Q2FF`, a section away from the add-and-drop assertions, `Active`, and
-not one of the two users the launch page signs launches for — is served with the
+none of the users the launch page signs launches for — is served with the
 extension key **absent**. Three tests hold that shape: the count, the absence of
 the key itself rather than a null value, and the placement. The rule E0-15
 states is not withdrawn; a single case is added beside it.
@@ -744,11 +744,19 @@ def test_the_windowless_member_is_an_active_student_away_from_the_add_and_drop_s
     windowless member the *dropped* one folds two edge cases into one person, so
     a tool that mishandles either is only ever seen failing once, and it puts a
     member with a `status` of `Inactive` and no window in front of E3 — a state
-    the ticket does not ask for. Making it one of the two users the launch page
+    the ticket does not ask for. Making it one of the users the launch page
     signs launches for puts it in front of every other suite in this repository:
     E0-14's launch tests, the roster walk's lower bound and E3's future passback
     fixtures all reach for those users by name, and none of them is about a
     member with no enrollment window.
+
+    **How many those users are is not this test's business, and used to be
+    written here as "two".** E1-15 adds a third — the leadership subject E1-12
+    deferral 1 owes, so that §7.3's leadership limb can be driven from a browser
+    — and a count written into prose beside an assertion that reads
+    `context.subjects` is a record going stale the moment the seed grows
+    (`docs/MISTAKES.md` entry 1). The assertion below has always read the set;
+    only the sentences did not.
 
     The section is named by the tokens it publishes rather than by a string, for
     the reason `WINDOWLESS_SECTION_TOKENS` gives. If the seed has renamed the
@@ -775,7 +783,7 @@ def test_the_windowless_member_is_an_active_student_away_from_the_add_and_drop_s
     assert str(member.get(MEMBER_ID)) not in context.subjects, (
         f"The member with no enrollment window is {member.get(MEMBER_ID)}, which is one of the "
         f"users the launch page signs launches for in {context.context_id} ({sorted(context.subjects)}"
-        "). Those two users are reached by name from E0-14's launch suite, from the roster walk's "
+        "). Those users are reached by name from E0-14's launch suite, from the roster walk's "
         "lower bound and from every AGS fixture that posts a score, none of which is about a "
         "member with no enrollment window."
     )

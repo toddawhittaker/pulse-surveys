@@ -59,8 +59,11 @@ and Redis are on their usual ports. All of them bind to `127.0.0.1` only.
 The developer test console is at <http://localhost:8000/dev>. It lists the mock
 IdP's web-login people as one-click "sign in as" links and links to the mock LMS
 launcher, so both of Pulse's entry doors (SPEC §2) can be walked without typing
-URLs. Like `/docs`, it is served **only** when `ENVIRONMENT` is `development` and
-404s everywhere else.
+URLs. Below those it reports every section a launch has discovered: the calendar
+its section code derives to (SPEC §2.2), how many people the roster sync enrolled,
+and whether a roster address is stored to sync from — sections only, and never
+anybody's identity. Like `/docs`, it is served **only** when `ENVIRONMENT` is
+`development` and 404s everywhere else.
 
 `docker compose up` merges [`docker-compose.override.yml`](docker-compose.override.yml)
 over the base file automatically, and that override is what publishes those
@@ -168,15 +171,15 @@ character count produced are never confused for one another.
 Pulse is launched from a learning management system over LTI 1.3, and nobody has
 a spare Canvas. So the stack brings its own platform to launch from: `mock-lms`,
 a small FastAPI application in [`mock-lms/`](mock-lms/) that does the platform
-half of a launch — it signs the `id_token` that Pulse will one day validate
-(SPEC §9.2). It is development and test only. Nothing in Pulse trusts it unless a
-row in `lti_platform` says so.
+half of a launch — it signs the `id_token` Pulse validates (SPEC §9.2). It is
+development and test only. Nothing in Pulse trusts it unless a row in
+`lti_platform` says so.
 
 `make up` starts it with everything else. Open <http://localhost:8080>, choose a
 seeded user and a placement, and press **Launch**: the page posts a
 third-party-initiated login request at the tool, exactly as a real platform
-would. Until E1 builds the tool's side of the launch, that post lands on a 404 —
-which is the honest state of a platform whose tool does not exist yet.
+would, and E1's launch door validates it and lands you on the view your role in
+Pulse gives you.
 
 To register it with Pulse, take the values from
 <http://localhost:8080/registration>. The keys are the column names they go into,
@@ -203,7 +206,7 @@ full demo institution is E0-17's and lives in Pulse's own database.
 | Section | Course | Modality | Roster |
 |---|---|---|---|
 | `BIOL-215-R3WW` | Cell Biology | online, 12 weeks | 12 members — three pages |
-| `MATH-140-E1FF` | College Algebra | face-to-face, 6 weeks | 7 members — two pages |
+| `MATH-140-E1FF` | College Algebra | face-to-face, 6 weeks | 8 members — two pages |
 | `NURS-8100-Q2FF` | Doctoral Practice Inquiry | face-to-face, 12 weeks | 5 members — one page |
 
 Course numbers are picked against SPEC §8's bands rather than from the prototype
@@ -211,13 +214,19 @@ screens in `design/`, every one of which is invalid under them. The section code
 are §2.2's `{startLetter}{ordinal}{modality}`, and they use more than one start
 letter and both modalities so that E0-07's parser has real input.
 
-**Who to launch as.** The launch page offers the two people enrolled in every
-section, so any combination of its two selectors is a launch that works:
+**Who to launch as.** The launch page offers three people, each paired with the
+sections they are actually enrolled in, so every combination it offers is a
+launch that works:
 
-| Launch as | Role | What they are for |
-|---|---|---|
-| `mock-lms-user-instructor` | Instructor | every instructor surface |
-| `mock-lms-user-learner` | Learner | every student surface |
+| Launch as | Role | Sections | What they are for |
+|---|---|---|---|
+| `mock-lms-user-instructor` | Instructor | all three | every instructor surface |
+| `mock-lms-user-learner` | Learner | all three | every student surface |
+| `mock-lms-user-dean` | no Instructor role | `MATH-140-E1FF` | SPEC §7.3's leadership limb, which is authorized by the launching person's own role in Pulse and never by a claim |
+
+The dean is in one section rather than all three because `NURS-8100-Q2FF`'s five
+members are exactly one page, and that boundary is what a paging test is written
+against. He is a launchable person and not a roster fixture.
 
 Everybody else is a student who takes one section, and they exist so that a
 roster pages and so that E3 has its edge cases. Three of them are not ordinary.

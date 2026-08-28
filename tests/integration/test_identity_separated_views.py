@@ -649,6 +649,7 @@ def test_alembic_upgrade_head_creates_the_identity_separated_read_views(
     )
 
 
+@pytest.mark.invariant
 def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     migrated_engine: Any,
 ) -> None:
@@ -667,6 +668,21 @@ def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     The search is by name and the canary is the word `select`: a directory of
     view SQL certainly contains it, so a search that has gone blind against these
     files says so here rather than passing (`docs/MISTAKES.md` entry 3).
+
+    **`invariant`-marked, as E1-01's deferral item 4 asks.** Every §4.1 rule this
+    module asserts over the `views_sql/` *files* — the schema-qualification sweep
+    and the identity-column sweep both — is total only because every live view
+    ships through one of those files, and this test is the whole of what says so.
+    It ran in the ordinary suite alone, so the isolated §4.1 pass never collected
+    the one test holding the text half's completeness: a view inlined into a
+    revision would have taken both file sweeps out of reach while that pass went
+    on reporting a clean run over the tests that were left. E1-01 item 1's
+    text/catalog complementarity is the argument that needs it.
+
+    The marker adds a second reader rather than a second rule: the body already
+    asserts directly, which is what `scripts/ci/check_invariant_assertions.py`
+    requires of a marked test under E0-36 §3, so nothing here was restructured to
+    carry it.
     """
     with migrated_engine.connect() as connection:
         views = read_views(connection)
@@ -1051,7 +1067,20 @@ def test_every_relation_a_view_sql_file_names_is_schema_qualified(migrated_engin
         if found:
             offenders[path.name] = found
 
-    assert not offenders, (
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not offenders`, pytest's assertion rewriting
+    # appends the repr of the dict to the exception, so the offending file name
+    # appears in `str(failure.value)` whatever this message says — and
+    # `test_the_schema_qualification_failure_does_not_hide_the_identity_failure`,
+    # whose whole job is to establish that this message names the file, would
+    # pass against a message that had stopped naming anything. With a plain bool
+    # there is nothing for the rewriter to expand: the explanation is
+    # `assert False`, and the names below are the only names in the failure.
+    # The same fix, in the same shape, as `agrees` in
+    # `tests/integration/test_identity_grants.py`, where the mutation battery
+    # measured it (E1-01, deferral item 3).
+    clean = not offenders
+    assert clean, (
         f"These view files name a relation without a schema: {offenders}. Postgres searches the "
         "temporary schema first for relation names — being unlisted in `search_path` is what puts "
         "it first, not what skips it — so an unqualified name is a table the *reader* can choose. "
@@ -2690,7 +2719,21 @@ def test_no_view_created_under_views_sql_names_an_identity_column(
                 for finding in findings
             )
 
-    assert not offenders, (
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not offenders`, pytest's assertion rewriting
+    # appends the repr of the dict to the exception, so the identity column
+    # appears in `str(failure.value)` whatever this message says — and both
+    # planted-file demonstrations at the foot of this module
+    # (`test_a_view_sql_file_reading_a_marked_identity_column_fails_the_guard`
+    # and `test_the_schema_qualification_failure_does_not_hide_the_identity_
+    # failure`) exist to establish that this message names it. With a plain bool
+    # there is nothing for the rewriter to expand: the explanation is
+    # `assert False`, and the findings printed below are the only place the
+    # column is named. The same fix, in the same shape, as `agrees` in
+    # `tests/integration/test_identity_grants.py`, where the mutation battery
+    # measured it (E1-01, deferral item 3).
+    clean = not offenders
+    assert clean, (
         f"These files under {VIEWS_SQL_DIR} create a view that reads an identity column: "
         f"{offenders}.\n\n"
         "SPEC §8 requires the instructor and leadership read paths to go through views that "

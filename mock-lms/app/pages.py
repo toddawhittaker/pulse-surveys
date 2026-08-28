@@ -25,7 +25,7 @@ has not been audited against WCAG 2.2 AA and this file does not pretend it has.
 from html import escape
 
 from app.config import PlatformSettings
-from app.seed import SeededPlatform
+from app.seed import MockUser, SeededPlatform
 
 LAUNCH_PAGE_TITLE = "Mock LMS — LTI 1.3 launch"
 
@@ -41,6 +41,55 @@ LAUNCH_PAGE_TITLE = "Mock LMS — LTI 1.3 launch"
 USER_CONTROL_TESTID = "mock-lms-login-hint"
 PLACEMENT_CONTROL_TESTID = "mock-lms-message-hint"
 SUBMIT_CONTROL_TESTID = "mock-lms-launch"
+
+# The attribute each launch form carries the subject it launches under, and the
+# id of the selector that chooses between them. Both are read by `CHOOSER_SCRIPT`
+# and by nothing else.
+LAUNCH_FORM_SUBJECT_ATTRIBUTE = "data-launch-as"
+USER_CONTROL_ID = "login_hint"
+
+# The chooser, which shows one launch form at a time and moves the two testids
+# onto the form it shows.
+#
+# **Why there is a form per user at all.** Since E1-15 the platform seeds a dean
+# who is enrolled in one section (`app.seed.DEAN`), so a page offering every user
+# against every placement would publish combinations `resolve_launch` refuses —
+# a dead option, and a `400` at the end of it reads from a browser as a broken
+# platform. One form per user is how the pairing is stated in the *served*
+# document rather than only in the browser: a test that reads this page's forms
+# sees each person against their own sections. `tests/integration/
+# test_mock_lms_launch.py::test_every_launch_the_page_offers_is_one_this_platform_signs`
+# is the assertion, and it reads the HTML rather than driving a browser.
+#
+# **Why the testids move.** Playwright addresses one `data-testid` per control
+# and refuses a selector matching several, so the placement selector and the
+# submit button carry theirs only on the form currently on screen. The server
+# renders the first user's form that way, so the page is already correct before
+# this script runs and there is no window in which a spec could see two.
+CHOOSER_SCRIPT = f"""
+      (function () {{
+        var chooser = document.getElementById({USER_CONTROL_ID!r});
+        var forms = document.querySelectorAll('form[{LAUNCH_FORM_SUBJECT_ATTRIBUTE}]');
+        function show() {{
+          for (var i = 0; i < forms.length; i++) {{
+            var form = forms[i];
+            var chosen = form.getAttribute({LAUNCH_FORM_SUBJECT_ATTRIBUTE!r}) === chooser.value;
+            form.hidden = !chosen;
+            var placement = form.querySelector('select[name="lti_message_hint"]');
+            var submit = form.querySelector('button[type="submit"]');
+            if (chosen) {{
+              placement.setAttribute('data-testid', {PLACEMENT_CONTROL_TESTID!r});
+              submit.setAttribute('data-testid', {SUBMIT_CONTROL_TESTID!r});
+            }} else {{
+              placement.removeAttribute('data-testid');
+              submit.removeAttribute('data-testid');
+            }}
+          }}
+        }}
+        chooser.addEventListener('change', show);
+        show();
+      }})();
+"""
 
 # Static CSS, no interpolation. This is code, not a value a caller supplied, so
 # it never goes through `escape` and it never sits next to a value that does —
@@ -177,8 +226,14 @@ def option(value: str, label: str) -> str:
     return f'<option value="{escape(value, quote=True)}">{escape(label)}</option>'
 
 
-def launch_page(settings: PlatformSettings, platform: SeededPlatform) -> str:
-    """The page a browser clicks through, and the page a test reads the form off.
+def launch_form(
+    settings: PlatformSettings,
+    platform: SeededPlatform,
+    user: MockUser,
+    *,
+    chosen: bool,
+) -> str:
+    """One person's launch form: their subject, and the placements they can launch from.
 
     The form **is** the OIDC third-party-initiated login request: `iss`,
     `login_hint` and `target_link_uri` are what make it one, and `client_id` and
@@ -187,25 +242,69 @@ def launch_page(settings: PlatformSettings, platform: SeededPlatform) -> str:
     does; a `GET` would put the whole initiation request in a query string and
     still look like a working launch from a browser.
 
-    The registration block sits **outside** the form on purpose. Anything inside
-    it is a field that gets submitted, and a value that is documentation should
-    not become a parameter because it was convenient to put it there.
+    `login_hint` is a hidden field rather than a selector because the person is
+    what this form *is*: one form per user is how the page states, in the served
+    HTML, that a placement belongs to a user. See `CHOOSER_SCRIPT`.
 
-    The user selector offers `launch_users()` rather than every seeded person,
-    and E0-15 is what made the two differ: its roster holds students who take one
-    section. The page's two selectors are chosen independently, so an option that
-    is only a launch in some sections is an option that produces a `400` — which
-    reads, from a browser, as a broken platform rather than as a dead choice.
+    `chosen` renders the one form on screen — the two testids and no `hidden`
+    attribute. The script moves both when the chooser changes; the server picks
+    the first user so that a page that has not run a script is already in a
+    consistent state.
     """
-    users = "\n          ".join(
-        option(user.user_id, user.label) for user in platform.launch_users()
-    )
-    placements = "\n          ".join(
+    placements = "\n            ".join(
         option(
             placement.resource_link_id,
             f"{placement.context.label} — {placement.title}",
         )
-        for placement in platform.placements
+        for placement in platform.placements_for(user)
+    )
+    # Unique per form, because an `id` is unique in a document and a `<label for>`
+    # pointing at a repeated one labels whichever the browser finds first.
+    control_id = escape(f"lti_message_hint-{user.user_id}", quote=True)
+    placement_testid = (
+        f' data-testid="{escape(PLACEMENT_CONTROL_TESTID, quote=True)}"' if chosen else ""
+    )
+    submit_testid = f' data-testid="{escape(SUBMIT_CONTROL_TESTID, quote=True)}"' if chosen else ""
+    return f"""<form method="post" action="{escape(settings.tool_login_url, quote=True)}"
+            {LAUNCH_FORM_SUBJECT_ATTRIBUTE}="{escape(user.user_id, quote=True)}"{
+        "" if chosen else " hidden"
+    }>
+        {hidden("iss", settings.issuer)}
+        {hidden("client_id", settings.client_id)}
+        {hidden("lti_deployment_id", settings.deployment_id)}
+        {hidden("target_link_uri", settings.tool_launch_url)}
+        {hidden("login_hint", user.user_id)}
+
+        <p>
+          <label for="{control_id}">Placement</label>
+          <select id="{control_id}" name="lti_message_hint"{placement_testid}>
+            {placements}
+          </select>
+        </p>
+        <p><button type="submit"{submit_testid}>Launch</button></p>
+      </form>"""
+
+
+def launch_page(settings: PlatformSettings, platform: SeededPlatform) -> str:
+    """The page a browser clicks through, and the page a test reads the forms off.
+
+    **One form per launchable user, and a selector that chooses between them.**
+    The selector sits outside every form: it picks which form is on screen, and
+    it is not a field any of them submits. Each form carries its own person as a
+    hidden `login_hint` and offers that person's own placements, so every
+    combination the page publishes is one `resolve_launch` will sign — which is
+    the rule this page has always had, restated for a seed in which not everybody
+    is enrolled everywhere (`app.seed.DEAN`, E1-15).
+
+    The registration block sits **outside** the forms on purpose. Anything inside
+    one is a field that gets submitted, and a value that is documentation should
+    not become a parameter because it was convenient to put it there.
+    """
+    launchable = platform.launch_users()
+    users = "\n            ".join(option(user.user_id, user.label) for user in launchable)
+    forms = "\n      ".join(
+        launch_form(settings, platform, user, chosen=index == 0)
+        for index, user in enumerate(launchable)
     )
     registration = "\n      ".join(
         f"<dt>{escape(term)}</dt><dd><code>{escape(value)}</code></dd>"
@@ -228,29 +327,22 @@ def launch_page(settings: PlatformSettings, platform: SeededPlatform) -> str:
         posts a third-party-initiated login request to the tool.
       </p>
 
-      <form method="post" action="{escape(settings.tool_login_url, quote=True)}">
-        {hidden("iss", settings.issuer)}
-        {hidden("client_id", settings.client_id)}
-        {hidden("lti_deployment_id", settings.deployment_id)}
-        {hidden("target_link_uri", settings.tool_launch_url)}
-
-        <p>
-          <label for="login_hint">Launch as</label>
-          <select id="login_hint" name="login_hint"
-                  data-testid="{escape(USER_CONTROL_TESTID, quote=True)}">
+      <p>
+        <label for="{escape(USER_CONTROL_ID, quote=True)}">Launch as</label>
+        <select id="{escape(USER_CONTROL_ID, quote=True)}"
+                data-testid="{escape(USER_CONTROL_TESTID, quote=True)}">
             {users}
-          </select>
-        </p>
+        </select>
+      </p>
+      <noscript>
         <p>
-          <label for="lti_message_hint">Placement</label>
-          <select id="lti_message_hint" name="lti_message_hint"
-                  data-testid="{escape(PLACEMENT_CONTROL_TESTID, quote=True)}">
-            {placements}
-          </select>
+          Choosing a different person needs scripting. Without it this page offers
+          the first person's launches only.
         </p>
-        <p><button type="submit"
-                   data-testid="{escape(SUBMIT_CONTROL_TESTID, quote=True)}">Launch</button></p>
-      </form>
+      </noscript>
+
+      {forms}
+      <script>{CHOOSER_SCRIPT}</script>
 
       <h2>Registration</h2>
       <p>
