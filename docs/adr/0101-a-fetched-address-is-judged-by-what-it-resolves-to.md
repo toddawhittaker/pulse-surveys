@@ -130,6 +130,37 @@ in ADR 0081 stands, and it carries a pointer to this record.
 `authorization_endpoint` is refused — the browser-facing column is resolved here
 too, once, at the write. Nothing was asserted about it either way before.
 
+**Three IPv6 forms that embed an IPv4 are unwrapped, not one.** The first cut
+unwrapped only the IPv4-mapped `::ffff:0:0/96`, the form `.ipv4_mapped` reports,
+and judged the wrapper for the other two — but `ipaddress` reports every embedded
+form `is_global` true, so `64:ff9b::a9fe:a9fe` (the NAT64 well-known prefix, RFC
+6052) and `::a9fe:a9fe` (the deprecated IPv4-compatible form, RFC 4291) both read
+as globally routable while a DNS64/NAT64 egress translates the packet to
+`169.254.169.254`. E1 Batch C's security review found it. All three forms are now
+unwrapped to the embedded IPv4 and that address is judged, at both entries into
+the shared judgment. It is an unwrap, not a blanket reject: a NAT64-wrapped
+*global* IPv4 (`64:ff9b::8.8.8.8`) is the legitimate DNS64 synthesis for a v4-only
+global platform on an IPv6-only network and stays accepted, which a reject-all fix
+would break while every refusal test stayed green. The IPv4-compatible range
+`::/96` contains the specials `::` (unspecified) and `::1` (IPv6 loopback), which
+are not an embedded IPv4 and are excluded from the unwrap — unwrapping `::1` to
+`0.0.0.1` would lose the loopback this record's own ADR 0096 split turns on — so
+the IPv6 loopback handling is left intact, while an embedded `127.0.0.1`
+(`::7f00:1`) is a genuine IPv4-compatible address and is unwrapped and refused on
+the browser-facing column.
+
+**One residual limit remains, and it is inherent.** A *custom* NAT64 prefix — a
+network-specific prefix (RFC 6052 §3.1) rather than the well-known
+`64:ff9b::/96` — is indistinguishable from an ordinary global IPv6 address without
+the egress's own NAT64 configuration, which the application does not hold and has
+no way to learn. So on an IPv6-only network configured with a network-specific
+prefix, a name resolving to `<custom-prefix>::a9fe:a9fe` is judged as the global
+IPv6 address it is spelled as and accepted. This is a limit of resolve-and-judge
+itself, not a gap in the rule: the only place the mapping from that prefix to an
+embedded IPv4 is known is the NAT64 gateway. Closing it would mean handing the
+application the egress's NAT64 configuration, which is a deployment coupling this
+batch does not take on.
+
 **The token POST and the key-set fetch keep registration-time judgment only.**
 The sync's token request travels over the same session the pinned adapter is
 mounted on, but its host is never judged at fetch time and so never pinned: it

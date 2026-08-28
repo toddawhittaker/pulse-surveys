@@ -144,3 +144,39 @@ afterwards.
 
 No code change was owed by this round; the tests were always about a case the
 implementation already handled and nothing asserted.
+
+## Attempt 6 — the fix round: two more embedded-IPv4 forms (2026-08-28)
+
+A follow-up security finding: `_is_an_acceptable_resolved_address` unwrapped only
+the IPv4-mapped form (`::ffff:0:0/96`, via `.ipv4_mapped`) before the `is_global`
+test, so `64:ff9b::a9fe:a9fe` (NAT64 well-known, RFC 6052) and `::a9fe:a9fe`
+(IPv4-compatible, RFC 4291) were judged at the wrapper — which `ipaddress` reports
+`is_global` true — and accepted while reaching `169.254.169.254`.
+
+Fix: a `_embedded_ipv4` helper returns the IPv4 an IPv6 address carries in its low
+32 bits for all three forms, and the judgment unwraps through it. Both entries
+(registration write and fetched address) share
+`_is_an_acceptable_resolved_address`, so one change fixes both.
+
+The boundary that took the care: the IPv4-compatible `::/96` contains `::`
+(unspecified) and `::1` (loopback). Unwrapping `::1` to `0.0.0.1` would lose the
+loopback identity ADR 0096's sidecar split turns on, so both are excluded by
+`is_loopback`/`is_unspecified` guards — while `::7f00:1` (`::127.0.0.1`) is a
+genuine embedded address and IS unwrapped to 127.0.0.1 (refused on the
+browser-facing column). Not a blanket reject: `64:ff9b::8.8.8.8` unwraps to a
+global v4 and stays accepted, which the boundary-acceptance test guards.
+
+Verified with `ipaddress` first (all vectors classify as the tests claim), then:
+
+- new tests + control (`-k "embedded or sit_where_this_module"`): 23 passed.
+- the full unit address-rules module: 222 passed (199 before + 23 new), exit 0.
+- the integration roster-sync refusal module: 24 passed (23 before + the nat64
+  metadata hop), exit 0, 22s.
+- `ruff format --check`, `ruff check`, `mypy`, `mypy mock-lms/app`, `mypy
+  mock-idp/app`: all clean.
+
+No `::1`/loopback or ADR 0096 case reddened — the exclusion held. No dispute.
+Records: ADR 0101 consequences (two more forms + the custom-NAT64-prefix residual)
+and the E1-11 deferred entry's Batch C paragraph.
+
+Worked: yes.

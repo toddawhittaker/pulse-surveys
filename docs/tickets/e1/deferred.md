@@ -520,6 +520,20 @@ Every E1 pull request that defers something adds it here in the same PR.
    records it, including what is left: the sync's token request and the launch's
    key-set fetch are judged when the registration is written and never at fetch
    time, so neither is pinned.
+   **Its fix round then judged the IPv4 embedded by two more IPv6 forms.** The
+   first cut unwrapped only the IPv4-mapped `::ffff:0:0/96`; the NAT64 well-known
+   `64:ff9b::/96` (RFC 6052) and the deprecated IPv4-compatible `::/96` (RFC 4291)
+   also embed an IPv4 that a DNS64/NAT64 egress translates the packet to, and both
+   read `is_global` true at the wrapper, so `64:ff9b::a9fe:a9fe` reached
+   `169.254.169.254`. All three forms are unwrapped now, `::` and `::1` excepted so
+   the IPv6 loopback split is left intact; a NAT64-wrapped *global* IPv4 stays
+   accepted, because that is the legitimate DNS64 synthesis for a v4-only platform.
+   **One residual is inherent:** a *custom* (network-specific) NAT64 prefix is
+   indistinguishable from an ordinary global IPv6 address without the egress's NAT64
+   configuration, which the application does not hold, so a name resolving to
+   `<custom-prefix>::a9fe:a9fe` is accepted as the global IPv6 it is spelled as —
+   the limit of resolve-and-judge on an IPv6-only NAT64 network, recorded in ADR
+   0101 rather than closed.
 
 ## From E1-12 — the dual-door identity merge
 
