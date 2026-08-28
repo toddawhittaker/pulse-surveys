@@ -259,6 +259,13 @@ Every E1 pull request that defers something adds it here in the same PR.
    E1-07 and stays open, owed to whichever ticket next touches `mock-idp/app/
    signing.py`'s encoder.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, owner unchanged.
+   **Closed by E1 cleanup Batch B (item 4).** The third encoder now has the
+   same test as the other two —
+   `test_mock_idp_authorization_code_flow.py::test_the_published_keys_numbers_
+   are_spelled_as_unpadded_base64url` — proven against the same mutation
+   (`.rstrip(b"=")` dropped from `mock-idp/app/signing.py`'s `base64url`) by the
+   battery. The encoder was already correct, so no code changed; the pin now
+   covers all three served key sets and the carried entry is resolved.
 
 ## From E1-07 — the mock mints deliberately wrong launches
 
@@ -283,6 +290,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    *E1-15's `exit-refused-launches.spec.ts` became that consumer, holding the
    two selector literals as its recorded cost.* **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner: the next ticket
    that adds a selector or a consumer.
+   **Closed by E1 cleanup Batch B (item 3).** The mock serves its own list from
+   a `GET /mock/defects` route (`MOCK_DEFECTS_PATH` in `mock-lms/app/config.py`),
+   returning `{"selectors": list(ALL_SELECTORS)}` — the tuple itself, not a
+   written-out copy. `test_mock_lms_wrong_launches.py::test_the_served_defect_
+   vocabulary_is_the_platforms_own_all_selectors` pins the served list to
+   `ALL_SELECTORS` in both directions, and each copied-literal consumer now
+   checks itself against the served source (that suite's own copy, and this
+   module's in `test_lti_launch_door.py`). The Playwright spec's two literals
+   stay its own until E2 points the browser at the route; the served source they
+   are owed is now in place.
 
 ## From E1-08 — the launch door on pylti1p3
 

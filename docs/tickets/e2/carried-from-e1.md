@@ -96,6 +96,9 @@ the mock IdP's encoder is the third copy and nothing asserts its spelling.
 Source: `docs/tickets/e1/deferred.md`, E1-06 item 3.
 **Owner:** whichever ticket next touches `mock-idp/app/signing.py`.
 **Done when:** the deferred entry's.
+**Closed by E1 cleanup Batch B (item 4):** the third encoder now has the
+spelling test, proven against the `.rstrip(b"=")` mutation by the battery;
+the encoder was already correct, so no code changed. Nothing for E2 to do.
 
 ## The wrong-launch selector vocabulary has no served source
 
@@ -107,6 +110,11 @@ consumer is `tests/e2e/exit-refused-launches.spec.ts`.
 **Owner:** the next ticket that adds a selector or a consumer.
 **Done when:** the deferred entry's — one served source, proven to agree
 with `ALL_SELECTORS`.
+**Closed by E1 cleanup Batch B (item 3):** the mock serves `ALL_SELECTORS`
+from `GET /mock/defects`, and both integration copies (the wrong-launches
+suite's and the launch-door module's) now check themselves against it. The
+`exit-refused-launches.spec.ts` literals stay the spec's own until E2 points
+the browser at the route; the served source they were owed is in place.
 
 ## The launch door's algorithm pin has no end-to-end forgery proof
 
