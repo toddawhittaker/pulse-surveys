@@ -7,7 +7,7 @@ MEDIUM. Both are construction decisions a reasonable engineer would make
 differently, and SPEC settles neither, so this record exists. It sits beside
 [ADR 0095](0095-the-roster-syncs-enrollment-windows-and-what-it-refuses.md) (the
 sync's window semantics) and extends
-[ADR 0081](0081-what-a-legitimate-registration-address-is.md) (the fetched-address
+[ADR 0081](0081-a-registrations-addresses-are-refused-at-one-write-time-chokepoint.md) (the fetched-address
 rules) and [ADR 0090](0090-a-sanctioned-writer-passes-the-chokepoint-by-being-in-a-catalog.md)
 (the sanctioned-writer chokepoint).
 

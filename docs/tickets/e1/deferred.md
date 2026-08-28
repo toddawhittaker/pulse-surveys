@@ -487,3 +487,25 @@ Every E1 pull request that defers something adds it here in the same PR.
    person holds no assignment over is shown, and either the seed's scope follows
    that decision or the assignment is dropped as scaffolding, with a test naming
    which.
+
+## From E1-11's fix round — the mock enforces a token on NRPS
+
+1. **The mock platform's AGS routes still answer without a token.** E1-06 left
+   both Advantage services open on one argument — a service refusing before a
+   conformant client exists would be refusing this repository's own tests — and
+   named E1-11's client as the event that ends it. E1-11 shipped the client for
+   the roster, so this fix round closed the NRPS half: the memberships route
+   requires a token this platform issued for NRPS 2.0's membership scope
+   ([ADR 0099](../../adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md)).
+   The AGS half is not a defect and not an oversight; the same argument still
+   holds there, because grade passback is E2 (SPEC §3.4) and no AGS client
+   exists to prove conformance against. Enforcing now would turn every E0-15
+   line-item, score and result test red for a reason none of them is about
+   (`docs/MISTAKES.md` entry 22) and would assert nothing about a client.
+   **Owner: E2**, with its first AGS client.
+   **Done when** the AGS routes require a token this platform issued carrying
+   the AGS scope the call needs, refusing in the same RFC 6750 vocabulary the
+   roster uses, landing in the same change as the client that presents one —
+   and the AGS-only guard in the suite's mock-platform driver
+   (`refuse_an_unspecified_ags_token_flow`) is retired with it, that guard's
+   whole premise being that no such client exists.

@@ -225,6 +225,16 @@ entry's own "done when" asks for the grant rather than for the refusal.
 `docs/adr/0084` records what the token endpoint decides and `docs/adr/0085` what
 the tool's key set does.
 
+**Half of that closed on 2026-08-27, in E1-11's fix round.** The paragraph above
+is true of AGS alone now. E1-11 built the conformant client — the event E1-06's
+ruling named — so the mock's NRPS memberships route requires a token it issued
+for the membership scope, in RFC 6750's vocabulary; SPEC §14.3's E1 exit line
+asks for exactly that ("an authenticated service call, not an unauthenticated
+GET"), and it cannot be witnessed against a platform that answers either way.
+AGS keeps the open state, because no grade-passback client exists before E2
+(SPEC §3.4), and **E2 owns closing it** — carried with a "done when" in
+[`deferred.md`](deferred.md). `docs/adr/0099` records the split.
+
 **Also read E0-35 before writing the roster sync** — a pointer rather than a
 copy, because that ticket owns the question and restating it here would give it
 two homes.
