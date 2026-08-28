@@ -303,14 +303,24 @@ def _refuse_an_unacceptable_resolution(
 
     unresolvable = RegistrationAddressError(
         f"The registration's `{column}` names a host this container cannot resolve to any "
-        "address. An address that cannot be resolved cannot be judged, and a name that resolves "
+        "address — either nothing answers for it, or it is not a name a resolver will encode at "
+        "all. An address that cannot be resolved cannot be judged, and a name that resolves "
         "nowhere now resolves wherever its owner chooses at the moment this container fetches it. "
         "Register a platform address this container can resolve, or run with "
         "ENVIRONMENT=development."
     )
+    # **Two exception families, because a resolver fails in two ways.** A host
+    # nothing answers for raises `socket.gaierror`, an `OSError`. A host the
+    # resolver will not *encode* — a label over 63 octets, an empty label —
+    # raises `UnicodeError` from the IDNA codec, before any query is composed;
+    # that is a `ValueError` and no `OSError` at all. Catching one of the two
+    # left the other escaping these rules entirely: past the walk, which catches
+    # only the refusal type, into the per-section handler that rolls the
+    # transaction back — so no refusal row was written and the pages already
+    # validly read went with it. E1 Batch C's security review found it.
     try:
         resolved = tuple(resolve(host))
-    except OSError:
+    except (OSError, UnicodeError):
         raise unresolvable from None
     if not resolved:
         raise unresolvable
