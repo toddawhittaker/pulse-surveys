@@ -50,9 +50,12 @@
   --shadow-card: 0 1px 2px rgba(30, 57, 50, .06);
 }
 
-/* Focus ring — marigold, everywhere, always visible */
+/* Focus ring — everywhere, always visible. Deep marigold, not the accent:
+   the accent measures 2.1:1 against chalk and 2.2:1 against paper, under
+   SC 1.4.11's 3:1 floor for a focus indicator; the deep variant measures
+   4.6:1 and 5.0:1. */
 :focus-visible {
-  outline: 2px solid var(--marigold);
+  outline: 2px solid var(--marigold-deep);
   outline-offset: 2px;
 }
 
