@@ -65,7 +65,7 @@ still stands sends a reader looking for a replacement that does not exist.
 | [0001](0001-identity-separation-by-database-role.md) | Identity separation enforced by database role and grant | Accepted — one consequence amended by [0009](0009-a-superuser-identity-is-sanctioned-for-migrations-and-bootstrap.md) and again by [0040](0040-pulse-migrate-is-the-bootstrap-identity-under-another-name.md), which also resolves `pulse_migrate`; [0043](0043-the-reveal-function-has-an-owner-of-its-own.md) adds the definer role it does not name |
 | [0002](0002-ci-gates-ship-tolerant.md) | CI gates ship tolerant and name the ticket that enforces them | Accepted, recorded retroactively |
 | [0003](0003-deferred-authz-seams-fail-closed.md) | Deferred authorization seams fail closed by raising | Accepted |
-| [0004](0004-agent-roster-mechanism.md) | Agent roster mechanism: hooks, computed gating, session-scoped warmth | Accepted |
+| [0004](0004-agent-roster-mechanism.md) | Agent roster mechanism: hooks, computed gating, session-scoped warmth | Accepted — roster split amended 2026-08-28: four per-PR reviewers moved to the epic boundary, fifteen agents and the mechanism unchanged |
 | [0005](0005-dependency-locking.md) | Python dependencies are locked with pip-compile, hashes and all | Accepted |
 | [0006](0006-settings-lifetime.md) | Settings are built inside `create_app()` and hung on `app.state` | Accepted |
 | [0007](0007-container-images-pinned-by-tag-and-digest.md) | Container images are pinned by tag and by digest | Accepted |
