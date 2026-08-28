@@ -55,28 +55,39 @@
 // ruling; asserting on it here would be the one way this file passes while a
 // session is being handed out.
 //
-// **A note for whoever runs the weakened-guard battery (acceptance criterion 2).**
-// Neither refusal below is guaranteed to isolate the single guard the battery's
-// table names, and pretending otherwise would be `docs/MISTAKES.md` entry 9
-// wearing a green tick:
+// **Which guard refuses, and a correction to what this comment used to claim.**
+// It said the second delivery of a replay was probably refused for a *consumed
+// handshake*, on the strength of
+// `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal`. That
+// test is about a state delivered once and **refused**; a launch that succeeded
+// does not consume its state (`backend/app/lti/launch.py:325-327`), so the
+// second delivery here reaches the nonce ledger and it is the replay guard that
+// answers. The old note had the mechanism backwards and would have sent the
+// battery at the wrong mutation.
 //
-//   - the *replay* case delivers the identical signed artifact a second time.
-//     The tool's launch handshake is single-use server side — that is what
-//     `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal`
-//     proves — so the second delivery may be refused for a consumed handshake
-//     before any nonce-replay check is reached. Disabling the nonce-replay
-//     refusal *alone* may therefore leave this green. The mutation that makes it
-//     red is the replay refusal as a whole: a door that will accept a handshake
-//     it has already consumed.
-//   - the *tamper* case returns a `state` that is the real one with a suffix
-//     appended. If the door looks a handshake up **by** that value, a tampered
-//     state is refused as "no such handshake" and disabling a separate
-//     comparison changes nothing. The mutation that makes it red is a door that
-//     accepts a `state` it did not issue.
+// What the security review found in its place is sharper, and it was a gap in
+// these tests rather than in the door: they asserted that a refusal page
+// appeared and not whose guard produced it. A re-sent launch carrying the same
+// nonce is caught by the ledger whether or not the mint handed back identical
+// bytes — so deleting `wrong_launches.py`'s `reused_nonce` branch entirely left
+// the replay case green, still refused, proving nothing about the mint it is
+// named for.
 //
-// Both are findings about the mutations, not about the clause: what this file
-// asserts is the criterion — the launch is refused, and no session exists
-// afterwards.
+// **Closed by asserting each guard's own reason**, which the refusal page prints
+// (`backend/app/api/deps.py:381-385`) and which is the seam that tells them
+// apart. Each case now requires its own guard's sentence present *and* the other
+// guard's sentence absent — the second half is what would catch a page that
+// printed every reason it knows, which would leave the first half true and
+// meaningless. `REPLAY_REASON` and `TAMPERED_STATE_REASON` below carry the
+// sentences and the note on how they were copied.
+//
+// The coupling to that prose is deliberate and was weighed: these are fixed
+// error sentences rather than §4.1-governed copy, so a reword breaks this
+// loudly, which is the right direction for a guard somebody has edited. A
+// machine-readable reason marker on the page would be the more durable seam and
+// is recorded in the pull request as a candidate for whichever ticket next
+// touches the refusal page; adding one here would have been fresh implementation
+// at the end of a fix round.
 //
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
@@ -107,6 +118,31 @@ const TAMPERED_STATE = 'tampered_state';
 const REFUSAL_VIEW = 'pulse-entry-refused';
 const REFUSAL_HEADING = 'This did not open';
 const REFUSAL_STATUS = 400;
+
+// The reason each guard prints, which is what says *whose* refusal this was.
+// The refusal page renders the guard's own sentence through `escape(reason)`
+// into its empty-state slot (`backend/app/api/deps.py:381-385`); neither
+// sentence contains a character `html.escape` rewrites, so what a browser shows
+// is the source text, backticks and all.
+//
+// **Copied as whole source lines, which is the rule and not a formality**
+// (`docs/MISTAKES.md` entry 3: build the sample by copying whole lines, the line
+// the sentence starts on included — a sentence retyped from where you think it
+// begins is the thing the sample exists to disprove). The replay reason is one
+// sentence pair built from two adjacent literals in
+// `backend/app/lti/replay_guard.py:76-79`, and the split below is written to
+// mirror that source split — the first part ends with `and ` exactly as the
+// source line does, so the join this assertion depends on is visible in this
+// file rather than assumed. The state reason is a single line,
+// `backend/app/lti/launch.py:387`.
+//
+// A reword in either place breaks this loudly, which is the intended coupling:
+// these are fixed error prose rather than §4.1-governed copy, and a guard whose
+// message changed is a guard somebody edited.
+const REPLAY_REASON =
+  'This launch has already been delivered once. A launch nonce is single-use, and ' +
+  'presenting the same signed launch a second time is refused.';
+const TAMPERED_STATE_REASON = 'The launch returns a `state` this tool did not issue.';
 
 test('an undefected launch lands on the instructor view and hands over a session', async ({
   page,
@@ -173,10 +209,12 @@ test('a replayed launch is refused and delivers no second session', async ({ pag
   // pass while proving nothing.
   expect(
     rewritten,
-    `no authorization address was rewritten to select \`${REUSED_NONCE}\`, so nothing below is a ` +
-      'replay: the route handler never fired, and the "refusal" would be an ordinary launch ' +
-      'failing for an unrelated reason. This is the guard that caught the first version of the ' +
-      'helper, which armed a route on the authorization endpoint — a hop the browser reaches by ' +
+    `no authorization address was rewritten to select \`${REUSED_NONCE}\`, so the route handler ` +
+      'never fired and the second delivery below is not the mint this case is named for. It ' +
+      'would still be a re-sent launch carrying the same nonce, and the door would still refuse ' +
+      'it as a replay — so this guard alone cannot tell the two apart, and the reason assertion ' +
+      'below is what does. This is also the guard that caught the first version of the helper, ' +
+      'which armed a route on the authorization endpoint — a hop the browser reaches by ' +
       'following a redirect, and one Playwright does not route.',
   ).not.toHaveLength(0);
   await expect(
@@ -211,6 +249,28 @@ test('a replayed launch is refused and delivers no second session', async ({ pag
       'refused; a door that accepted this one accepted a launch artifact it had already spent.',
   ).toBeVisible();
   await expect(page.getByText(REFUSAL_HEADING)).toBeVisible();
+
+  // **Whose guard refused, which is the assertion this case was missing.** A
+  // re-sent launch carrying the same nonce is caught by the nonce ledger whether
+  // or not the mint handed back identical bytes, so "a refusal page appeared"
+  // stays true with `wrong_launches.py`'s `reused_nonce` branch deleted
+  // altogether — refused, green, and proving nothing about the mint this case is
+  // named for. The reason the page prints is what tells the guards apart.
+  await expect(
+    page.getByText(REPLAY_REASON),
+    "the refusal page does not carry the replay guard's own reason. Something refused this " +
+      'launch and it was not the nonce ledger — read the page before changing anything, because ' +
+      'a refusal from a different guard here means the replay never reached the one this case is ' +
+      'about.',
+  ).toBeVisible();
+  await expect(
+    page.getByText(TAMPERED_STATE_REASON),
+    "the refusal page carries the *state* guard's reason on a replayed launch whose `state` was " +
+      'never altered. Either the door is refusing for the wrong reason, or the page prints every ' +
+      "guard's sentence rather than the one that fired — and in that case neither this assertion " +
+      'nor the tamper case can tell one guard from another.',
+  ).toHaveCount(0);
+
   expect(
     statuses,
     'the replayed delivery was not answered with a client error; the statuses the tool answered ' +
@@ -257,6 +317,27 @@ test('a state-tampered launch is refused and no session is ever delivered', asyn
       'has no cross-site request forgery defence on its launch endpoint at all.',
   ).toBeVisible();
   await expect(page.getByText(REFUSAL_HEADING)).toBeVisible();
+
+  // Whose guard refused, the other half of the pair. The `state` this mint
+  // returns is the tool's own with a suffix, so a door that looked its handshake
+  // up by that value would refuse with "no such handshake" — a refusal, and the
+  // wrong one. This is what distinguishes the guard that compared a `state` from
+  // one that merely failed to find it.
+  await expect(
+    page.getByText(TAMPERED_STATE_REASON),
+    "the refusal page does not carry the state guard's own reason. The launch was refused by " +
+      'something else — read the page: a refusal for a missing handshake, or for a signature, is ' +
+      'not the same fact as a tool refusing a `state` it did not issue, and only the second is ' +
+      'what SPEC §14.3 (E1) asks this case to prove.',
+  ).toBeVisible();
+  await expect(
+    page.getByText(REPLAY_REASON),
+    "the refusal page carries the replay guard's reason on a launch that was delivered once. " +
+      'Either this launch was refused as a replay — in which case the tamper was never reached — ' +
+      "or the page prints every guard's sentence, which would make both of this file's reason " +
+      'assertions unable to tell one guard from another.',
+  ).toHaveCount(0);
+
   expect(
     statuses,
     'the tampered delivery was not answered with a client error; the statuses the tool answered ' +
