@@ -24,16 +24,23 @@ of the database and required non-empty, the sections table is required present,
 and only then is it searched. Every string searched for is one this tool
 demonstrably holds about a member of a section on that page.
 
-**What "a leak" means here is two sets, and the second is the live one.** The
-subjects and addresses the sync stored are unreachable by this page today —
-`pulse_app` is granted no `SELECT` on `user` or `user_identity` — so they are
-defence in depth against a future grant. The member keys on `public.section_roster`
-*are* reachable, because that view is granted deliberately, and they are what a
-console-only mutation can actually render. The first version of this module
-searched for the unreachable half alone and a battery mutation that rendered
-each section's `user_id` walked through it: a `user_id` is a UUID, so it matched
-neither the string-valued planted set nor the two literal shapes. Both halves
-are searched now, and the reachable one carries the canary.
+**What "a leak" means here is three sets, and two of them are the live ones.**
+The subjects and addresses the sync stored on `user` and `user_identity` are
+unreachable by this page today — `pulse_app` is granted no `SELECT` on either —
+so they are defence in depth against a future grant. What *is* reachable is the
+member keys on `public.section_roster`, because that view is granted
+deliberately, and the roster address on the `section` row itself. Those two are
+what a console-only mutation can actually render, and each carries its own
+canary.
+
+Both were added after the fact, one round apart, and the pattern is the lesson:
+the first version searched the unreachable half alone; a battery mutation
+rendering each section's `user_id` walked through it, because a `user_id` is a
+UUID and matched neither the string-valued set nor the literal shapes; and a
+security review then found the roster address sitting in the same blind spot,
+one value over. The rule that would have caught both at once is to start from
+what the page's own connection is granted, and only then ask what of it is
+forbidden here — rather than from the values that felt like identity.
 
 **Placed beside `test_dev_console.py` rather than inside it.** That module builds
 its application with the mock identity provider mounted and no platform, no
@@ -111,6 +118,20 @@ SHORTEST_TELLING_VALUE = 8
 # render, and it is what the battery proved this sweep was blind to.
 ROSTER_VIEW = "section_roster"
 ROSTER_MEMBER_KEY = "user_id"
+
+# The table the console reads a section off, and what marks a stored service
+# address on one of its rows. The roster address —
+# `section.lms_context_memberships_url` — is the second value E1-15's contract
+# forbids this table outright: it is where a launch said this section's roster
+# lives, it carries the platform's own context identifier, and it is the target
+# a bearer token is spent against. ADR 0100 is the record.
+#
+# Found by the `://` rather than by column name, so the sweep does not hold a
+# copy of the schema's spelling and picks up any *other* address a later column
+# might store. The section this test synced carries one by construction, which is
+# what makes the canary below exact rather than hopeful.
+SECTION_TABLE = "section"
+SERVICE_ADDRESS_MARK = "://"
 
 # HTML elements that never carry an end tag, so the row reader's depth counter
 # does not go looking for one.
@@ -223,6 +244,30 @@ def stored_identity_strings(roster_rows: Any) -> set[str]:
     for row in list(roster_rows.users()) + list(roster_rows.identities()):
         for value in dict(row).values():
             if isinstance(value, str) and len(value) >= SHORTEST_TELLING_VALUE:
+                found.add(value)
+    return found
+
+
+def stored_roster_addresses(roster_rows: Any) -> set[str]:
+    """Every service address stored on a `section` row.
+
+    **The second survivor of the same shape as the first**, and the review that
+    found it called it that: the sweep already searched for what the console
+    cannot reach and for member keys, and left out the one *other* forbidden
+    value its connection can read. This module's own docstring listed "prints the
+    stored roster address" among the mutations it kills, and that sentence was
+    false — a record asserting something nothing enforced (`docs/MISTAKES.md`
+    entry 1 meeting entry 2).
+
+    Read off the rows rather than taken from the fixture object, because what
+    matters is that the value is reachable *in the database* the console queries.
+    The fixture's own copy is used in the test as the canary that this read found
+    the right thing.
+    """
+    found: set[str] = set()
+    for row in roster_rows.all_of(SECTION_TABLE):
+        for value in dict(row).values():
+            if isinstance(value, str) and SERVICE_ADDRESS_MARK in value:
                 found.add(value)
     return found
 
@@ -407,11 +452,21 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
 
     **The mutations this kills.** A sections table that renders the roster
     alongside the count, which is the single most useful thing to add to a
-    developer console and the reason this rule needed writing down. A table that
-    prints the stored roster address, which carries the platform's own context
-    identifier and is a service credential's target. A column added later that
-    holds "who last synced this" and turns out to be a member. And — the one it
-    missed the first time — a cell holding each member's `user_id`.
+    developer console and the reason this rule needed writing down. A column
+    added later that holds "who last synced this" and turns out to be a member.
+    And two this file listed before it could kill: a cell holding each member's
+    `user_id`, and a cell printing the stored roster address, which carries the
+    platform's own context identifier and is a service credential's target.
+
+    **Both of those were claims before they were assertions**, found one round
+    apart and by different readers — the battery for the first, the security
+    review for the second, which named it the identical survivor pattern one
+    value over. The docstring you are reading listed each among the mutations
+    this test kills while the planted set contained neither. That is
+    `docs/MISTAKES.md` entry 2 arriving through entry 1: a record that described
+    a guarantee, and a reader — me — who wrote the description from the contract
+    rather than from what the set actually held. Both are in the set now, each
+    with its own canary below.
 
     **The mutation that survived, and what it changed here.** The Loop B battery
     rendered `section_roster.user_id` into a cell and this test passed. Two
@@ -439,12 +494,13 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
     is a calendar, a count and a yes/no, and nothing on it is a person.
 
     **What makes it non-vacuous, in order.** The sync runs first, so the section
-    on the page has real members behind it; the strings the tool stored about
-    those members and the member keys the console's connection can reach are both
-    read out of the database and each required non-empty, so the page is searched
-    for values it demonstrably could have printed; and the sections table is
-    required present before it is searched, so an absent table fails saying so
-    rather than passing because there was nothing to find.
+    on the page has real members behind it; each of the three sets is read out of
+    the database and carries its own guard — the stored strings must be
+    non-empty, this section's member keys must be non-empty, and this section's
+    roster address must be among the addresses found on the `section` rows — so
+    the page is searched for values it demonstrably could have printed; and the
+    sections table is required present before it is searched, so an absent table
+    fails saying so rather than passing because there was nothing to find.
     """
     roster_sync.call(
         roster_sync.sync_one_section,
@@ -473,10 +529,20 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
         "reach this section rather than that the console is clean."
     )
 
-    # The live half and the defence-in-depth half, searched as one set. The member
-    # keys clear `SHORTEST_TELLING_VALUE` on their own — a UUID is 36 characters,
-    # 32 without hyphens — so no exemption is needed for them.
-    planted = stored | reachable
+    addresses = stored_roster_addresses(roster_rows)
+    assert synced_section.address in addresses, (
+        f"The roster address this test's section was seeded with ({synced_section.address!r}) is "
+        f"not among the addresses readable off the `{SECTION_TABLE}` rows ({sorted(addresses)}). "
+        "That address is the second value E1-15's contract forbids this table, and the whole of "
+        "what makes searching for it meaningful is that the console's own connection can read it "
+        "from the database — so an empty or wrong answer here means this half of the sweep is "
+        "looking for something that is not there to be leaked."
+    )
+
+    # Three sets, searched as one. The member keys and the addresses clear
+    # `SHORTEST_TELLING_VALUE` on their own — a UUID is 36 characters, 32 without
+    # hyphens, and a URL is longer than either — so no exemption is needed.
+    planted = stored | reachable | addresses
 
     answered = dev_console.get(DEV_CONSOLE_PATH)
     assert answered.status_code == 200, (
@@ -499,6 +565,9 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
     assert not leaked, (
         f"The console's sections table carries {len(leaked)} value(s) that name a member of a "
         f"section: {leaked[:5]}. The first sits in {around(region, leaked[0])!r}.\n\n"
+        "If it is a service address, that is the roster address a launch stored on the section: "
+        "it carries the platform's own context identifier and is where a bearer token gets spent, "
+        "and the table reports whether one is stored as a yes or a no and never the value.\n\n"
         f"If it is a `{ROSTER_MEMBER_KEY}` from `public.{ROSTER_VIEW}`, read this before "
         "reaching for the grant: that view hands the key to instructor-scoped code by design and "
         "is sanctioned by name in `tests/integration/test_identity_grants.py`, so the repair is "
