@@ -251,6 +251,65 @@ def clear_carried(response: Response, name: str) -> None:
 REFUSAL_TESTID = "pulse-entry-refused"
 REFUSAL_HEADING = "This did not open"
 
+# The sentence each guard's refusal page carries, keyed by the guard's own class
+# name — the machine vocabulary ADR 0103 put in `data-reason`, and the only
+# thing `refusal_page` takes.
+#
+# **The page derives its copy rather than being handed it, and that is the
+# security property** (E1 boundary fix, M7). This page is answered to anybody
+# who can post a form at a door: no session, no authentication, nothing but a
+# request. A page with a text parameter is a page half-written by whoever
+# provoked it, and the string nearest to hand at every call site is the
+# exception that refused — whose `str()` carries whatever a library was told by
+# the caller. So the callers pass a name from a closed vocabulary, this mapping
+# turns it into a constant, and a name nothing maps gets `DEFAULT_REFUSAL_COPY`.
+# There is nowhere for a caller's words to go.
+#
+# **Keyed by class name and not by class**, so `app.api.deps` imports neither
+# door's exceptions: the launch guards live in `app.lti.launch` and the web
+# door's in `app.api.auth`, and this module is below both. A guard renamed on
+# one side and not here falls to the default — calm, and correct, and visible
+# as the wrong copy rather than as a 500 from inside a refusal.
+#
+# `NonceReplayedError`'s two sentences are `app.lti.replay_guard`'s own words,
+# copied whole: `tests/e2e/exit-refused-launches.spec.ts` keeps one prose
+# assertion as its copy canary and matches that string.
+REFUSAL_COPY: Mapping[str, str] = {
+    "SignatureRefused": (
+        "This launch could not be verified. Its signature, the algorithm it names, or the key it "
+        "was signed with did not hold."
+    ),
+    "AudienceRefused": "This launch was issued for a different tool than this one.",
+    "IssuerRefused": "No registration here exists for the platform that began this launch.",
+    "NonceRefused": "This launch carries no `nonce`, or one this tool did not send.",
+    "NonceReplayedError": (
+        "This launch has already been delivered once. A launch nonce is single-use, and "
+        "presenting the same signed launch a second time is refused."
+    ),
+    "DeploymentRefused": "This launch names a deployment this tool was never installed into.",
+    "MessageTypeRefused": "This launch is a message type this tool does not serve.",
+    "VersionRefused": "This launch states an LTI version this tool does not speak.",
+    "StateRefused": "This launch returns a `state` this tool did not issue, or none at all.",
+    "ClockSkewRefused": "This launch was minted too far in the future, or expired too long ago.",
+    "AnonymousLaunchRefused": (
+        "This launch names nobody. Pulse Surveys shows each person their own work, so a launch "
+        "carrying no subject is one it cannot open."
+    ),
+    "SessionRefusedError": (
+        "That sign-in could not be verified, and nobody has been signed in. Start again from "
+        "where you opened Pulse Surveys."
+    ),
+}
+
+# What a guard this mapping does not know is answered with. A constant, and
+# every word of it true of any refusal: it reports nothing about what was handed
+# in, which is what keeps a guard name nobody mapped from becoming a caller's
+# string in the body by way of an f-string that meant to be helpful.
+DEFAULT_REFUSAL_COPY = (
+    "This tool could not account for what it was handed, and nobody has been signed in. Start "
+    "again from where you opened Pulse Surveys."
+)
+
 # What a cancelled web login says (E1-09). Calm and non-blaming, per
 # `docs/DESIGN_BRIEF.md`'s tone: the person declined to sign in, or the provider
 # declined for them, and neither is a fault to report back. It says what is true —
@@ -364,21 +423,19 @@ PAGE = """<!doctype html>
 """
 
 
-def _reason_attribute(guard: str | None) -> str:
-    """The ` data-reason="<guard>"` attribute for a refusal, or `""` when none is named.
+def _reason_attribute(guard: str) -> str:
+    """The ` data-reason="<guard>"` attribute a refusal container carries.
 
-    Rendered onto the refusal container beside `data-testid` so a browser-side
-    refusal spec can name which guard fired without reading the prose (E1 cleanup
-    Batch B item 2; ADR 0103). **When `guard` is `None` the attribute is omitted
-    entirely** — never `data-reason=""` — because the door suites assert the page
-    carries *exactly one* marker, which an empty attribute would defeat.
+    Rendered beside `data-testid` so a browser-side refusal spec can name which
+    guard fired without reading the prose (E1 cleanup Batch B item 2; ADR 0103).
+    Every refusal names a guard now, so there is no attribute-less case: the door
+    suites assert the page carries *exactly one* marker, and both an omitted
+    attribute and an empty one defeat that.
     """
-    if guard is None:
-        return ""
     return f' data-reason="{escape(guard, quote=True)}"'
 
 
-def refusal_page(reason: str, *, guard: str | None = None) -> str:
+def refusal_page(guard: str) -> str:
     """The page a refused launch or a refused web login gets, in the same layout.
 
     **It carries no landing testid**, and that is a property both door suites
@@ -386,22 +443,25 @@ def refusal_page(reason: str, *, guard: str | None = None) -> str:
     admitted the caller and merely said so in the status line. The testid slot is
     filled with a name of its own so the markup stays one template.
 
-    `reason` is written by `app.lti.launch` or by `app.api.auth` and is never
-    assembled from the request. It is escaped anyway: everything interpolated is
-    a constant today, and the escaping is written for the day somebody puts a
-    section title or a person's name in one of these slots — so it is already
-    where it has to be rather than something a reviewer has to notice is missing.
+    **`guard` is the only thing it takes, and the body copy is derived from it
+    rather than handed in** (E1 boundary fix, M7). It is the refusing guard's own
+    class name, from the closed vocabulary `REFUSAL_COPY` above is keyed by; the
+    sentence a person reads comes out of that mapping, or out of
+    `DEFAULT_REFUSAL_COPY` for a name nothing maps. This page is answered to
+    anybody who can post a form at a door, so a parameter it could print is a
+    parameter an attacker fills — and the value nearest to hand at a call site
+    is the exception that refused, which carries whatever a library was told.
+    There is now nowhere in this signature to put such a string.
 
-    `guard` is the refusing guard's own class name — the machine vocabulary the
-    refusal exceptions already define — and reaches the page as a `data-reason`
-    attribute (ADR 0103). It is escaped for the same day `reason` is, though a
-    guard name is a Python class name today.
+    The name still reaches the `data-reason` attribute (ADR 0103), escaped:
+    everything interpolated is a constant or a Python class name today, and the
+    escaping is written for the day it is neither.
     """
     return PAGE.format(
         testid=escape(REFUSAL_TESTID, quote=True),
         reason_attr=_reason_attribute(guard),
         heading=escape(REFUSAL_HEADING),
-        empty_state=escape(reason),
+        empty_state=escape(REFUSAL_COPY.get(guard, DEFAULT_REFUSAL_COPY)),
     )
 
 
@@ -476,13 +536,15 @@ def no_access_page() -> str:
     )
 
 
-def refused(reason: str, *, guard: str | None = None) -> HTMLResponse:
-    """A 4xx page carrying the reason and no landing view.
+def refused(guard: str) -> HTMLResponse:
+    """A 4xx page naming the guard that refused, and no landing view.
 
-    `guard` is the refusing guard's class name; when given it reaches the page as
-    a `data-reason` marker (ADR 0103), and when omitted the page carries none.
+    `guard` is the refusing guard's class name. It reaches the page as the
+    `data-reason` marker (ADR 0103) and, through `REFUSAL_COPY`, chooses the
+    sentence the page carries — which is the whole of what a caller can affect
+    here (E1 boundary fix, M7).
     """
-    return HTMLResponse(refusal_page(reason, guard=guard), status_code=REFUSED)
+    return HTMLResponse(refusal_page(guard), status_code=REFUSED)
 
 
 def no_access() -> HTMLResponse:

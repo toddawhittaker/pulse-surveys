@@ -302,17 +302,22 @@ def cancelled_or_refused(error: str, state: str, carried: dict[str, Any] | None)
     a code from outside the closed set. `warning` rather than `info` because this
     application configures no logging at all, so an `info` line is one no operator
     would ever see.
+
+    **The refusal names `SessionRefusedError`**, this door's one published guard
+    name (ADR 0103), even though no exception is raised on this path: the refusal
+    page derives its copy and its `data-reason` marker from that name and nothing
+    else (E1 boundary fix, M7), so a branch that named none would answer with a
+    page carrying no marker — which is what the door suites' exactly-one-marker
+    check is for, and what a browser-side spec reads. This *is* a session
+    refused: the tool was handed a callback it cannot account for and issued
+    nobody a session, which is the whole of what the name says.
     """
     logger.warning("A web login came back refused by the provider: %s", loggable_error_code(error))
 
     expected = str((carried or {}).get("state") or "")
     if state and expected and same_opaque_value(state, expected):
         return cancelled()
-    return refused(
-        "That sign-in came back refused by the identity provider, and this tool cannot tell which "
-        "sign-in it belongs to. Nobody has been signed in. Start again from where you opened Pulse "
-        "Surveys."
-    )
+    return refused(SessionRefusedError.__name__)
 
 
 @router.get(LOGIN_PATH, summary="Start a web login against the identity provider")
@@ -416,7 +421,7 @@ async def finish_web_login(request: Request, session: Session = Depends(get_sess
             carried,
         )
     except SessionRefusedError as refusal:
-        answer = refused(str(refusal), guard=type(refusal).__name__)
+        answer = refused(type(refusal).__name__)
         clear_carried(answer, OIDC_LOGIN_COOKIE)
         return answer
 
