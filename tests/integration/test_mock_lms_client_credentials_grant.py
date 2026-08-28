@@ -37,13 +37,27 @@ its own scope section — "E1-11's client is only conformant if nonconformance i
 distinguishable" — and a platform answering one code for all six is a platform
 whose client cannot tell a clock problem from a key problem.
 
-**The services do not begin requiring a token here**, which is E1-06's ruling and
-not an omission. Enforcement pairs with E1-11's client, so there is no test below
-that an unauthenticated roster read is refused, and `MockPlatform.
-refuse_an_unspecified_token_flow` still reports a 401 from NRPS or AGS as a gap.
-What the conformance test asserts is the whole sequence completing — token
-requested with a tool-signed assertion, token attached, container returned — which
-is the carried entry's own definition of done.
+**The services did not begin requiring a token here**, which was E1-06's ruling and
+not an omission: enforcement paired with E1-11's client. **That pairing has since
+landed for NRPS.** The roster route now refuses a read that carries no token, one
+the endpoint never issued, or one without the membership scope, and those refusals
+are asserted in `test_mock_lms_nrps_requires_a_token.py` rather than here — this
+module's subject is the endpoint that grants the token, not the service that checks
+it. `MockPlatform.refuse_an_unspecified_ags_token_flow`, which used to report a 401
+from either service as a gap, is narrowed to **AGS**, where the original argument
+still holds: no grade-passback client exists before E2 (SPEC §3.4).
+
+What the conformance test at the foot of this module asserts is unchanged and is
+the whole sequence completing — token requested with a tool-signed assertion, token
+attached, container returned — which is the carried entry's own definition of done.
+
+**Why this module still builds its own token request by hand.** Every other suite
+that needs a credential now goes through one helper,
+`tests/fixtures/client_credentials.py::access_token_granted_to`, reached as
+`MockPlatform.service_token` (`docs/MISTAKES.md` entry 13). This module is the one
+that does not, deliberately: the *shape* of the form and the code each malformed one
+is refused with are its subject, so a conformance test driven through that helper
+would be checking the helper against itself (`docs/MISTAKES.md` entry 19).
 
 **How the platform is told what the tool's key is.** Through one seam, described
 in `tests/fixtures/client_credentials.py`, which pins an interface the ticket
@@ -1186,12 +1200,14 @@ def test_a_roster_is_read_with_a_token_obtained_the_way_a_service_connector_obta
     advertises an endpoint it does not serve answers HTML. Each of those is a
     separate test above, and this is the one that says they compose.
 
-    **What it deliberately cannot say.** E1-06 rules that NRPS does not yet
-    require a token, so a roster that answered the same way with no header at all
-    would satisfy the last step. That is stated rather than hidden: the substance
-    here is the grant, and the roster read is what proves the granted token is
-    presentable — a token a service refuses is not one E1-11 can use, and
-    enforcement arrives with that ticket.
+    **What it could not say when it was written, and what now says it.** Under
+    E1-06's ruling NRPS did not require a token, so a roster that answered the same
+    way with no header at all would have satisfied the last step; the substance
+    here was the grant, and the roster read only proved the granted token was
+    presentable. E1-11's fix round closed that half: a tokenless read is refused,
+    asserted in `test_mock_lms_nrps_requires_a_token.py`. This test is unchanged and
+    still asserts what it always did — that the four parts compose into a sequence
+    a conformant client can complete.
     """
     contexts = platform.seeded_contexts()
     assert contexts, (

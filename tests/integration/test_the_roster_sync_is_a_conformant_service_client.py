@@ -7,15 +7,18 @@ assertion, attached to every service call, the way `pylti1p3`'s `ServiceConnecto
 performs it" — and this module is that sequence asserted from the client's side of
 the wire.
 
-**Why the evidence is what the client *sent* rather than what it got back.** E1-06
-ruled that the mock's Advantage services do not begin requiring a token — "a roster
-read with no `Authorization` header still answers" (ADR 0084's consequences) — and
-E1-11's boundary keeps the mock that way. So a 200 from the membership service says
-nothing at all about whether a token was attached, and a test written on it would
-pass against exactly the client this ticket exists to replace. Every assertion below
-reads `service_wire`, which records each request as it left the client, and the
-forbidden-state half turns the harness's own gate on: a wire that refuses an
-unauthenticated read, so that a client with any such path left in it fails.
+**Why the evidence is what the client *sent* rather than what it got back.** These
+assertions were written while E1-06's ruling stood — the mock's Advantage services
+did not require a token, "a roster read with no `Authorization` header still
+answers" (ADR 0084's consequences) — so a 200 from the membership service said
+nothing about whether a token had been attached. **E1-11's fix round changed that
+for NRPS**, and the evidence here stays where it is anyway, because a status code
+is still the weaker instrument: it says a token arrived, not that every path in the
+client sends one. Every assertion below reads `service_wire`, which records each
+request as it left the client, and the forbidden-state half turns the harness's own
+gate on: a wire that refuses an unauthenticated read, so that a client with any such
+path left in it fails. The mock's own refusal is asserted next door, in
+`test_mock_lms_nrps_requires_a_token.py`.
 
 **The controls come first and they must be green.** The wire, the composed roster
 and the two-platform arrangement are new machinery, and machinery whose only
@@ -167,10 +170,12 @@ def test_the_wire_refuses_a_service_read_that_carries_no_bearer_token(
 ) -> None:
     """The gate AC1's forbidden state is asserted with, proven able to fire.
 
-    `refusing_unauthenticated_reads` is a harness gate rather than the platform's,
-    because E1-06 ruled the mock's services do not require a token. A gate nobody
-    has watched refuse anything is a comment (`docs/MISTAKES.md` entry 9), and the
-    test that rests on it —
+    `refusing_unauthenticated_reads` is a harness gate rather than the platform's.
+    It was built when E1-06's ruling stood and the mock required no token; E1-11's
+    fix round made the mock refuse too, and the gate stays because this suite
+    asserts over the wire the client's requests are recorded on rather than over
+    the mock's status codes. A gate nobody has watched refuse anything is a comment
+    (`docs/MISTAKES.md` entry 9), and the test that rests on it —
     `test_the_sync_has_no_unauthenticated_path_to_the_roster` — would then be green
     against a client that attaches nothing.
 
@@ -193,9 +198,9 @@ def test_the_wire_refuses_a_service_read_that_carries_no_bearer_token(
     refused = session.get(str(synced_section.address))
     assert refused.status_code == 401, (
         f"The wire answered {refused.status_code} for a read carrying no `Authorization` header "
-        "while its unauthenticated gate was on. That gate is the only thing in this suite that "
-        "refuses an unauthenticated roster read — the mock deliberately does not — so with it "
-        "inert, AC1's forbidden state cannot be asserted at all."
+        "while its unauthenticated gate was on. That gate is what AC1's forbidden state is "
+        "asserted through — it refuses on the wire, where a second path in the client is visible "
+        "rather than inferred — so with it inert, that state cannot be asserted at all."
     )
 
 

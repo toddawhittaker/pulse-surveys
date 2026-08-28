@@ -16,10 +16,18 @@ right failure: `pylti1p3` (SPEC §7.1) would never find it.
 **What is deliberately not here.** Tool-side roster sync — enrollment
 provisioning, the hourly schedule, debouncing on launch — is E1's, and E0-15's
 out-of-scope list says so. There is no test below of what Pulse does with a
-roster. Nor is there a test of the access-token flow: real Advantage services
-sit behind an OAuth 2.0 client-credentials grant, E0-15 mentions none and E0-14
-built none, so this suite calls the services unauthenticated and a 401 is
-reported as a gap in the ticket rather than as a defect in the mock.
+roster.
+
+**Nor is there a test of the access-token flow, and that sentence changed
+meaning.** It used to mean there was none to test: E0-15 mentioned no grant and
+E0-14 built none, so this suite called the services unauthenticated and a 401 was
+reported as a gap in the ticket. E1-06 built the grant and E1-11's fix round made
+this route require it, so every roster read below now carries a token the mock's
+own endpoint issued — attached by `MockPlatform.roster_get`, which is why no test
+here mentions one. What the route must **refuse** is a subject of its own and
+lives in `test_mock_lms_nrps_requires_a_token.py`; a 401 reaching this module is
+still a diagnosis rather than an assertion, because every test here is about what
+a roster carries.
 
 **No §4.1 invariant lives here.** The mock is a platform, not a Pulse read path;
 the confidentiality invariants attach to what Pulse shows a human. What the

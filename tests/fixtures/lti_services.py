@@ -15,6 +15,16 @@ claims a launch carries, which is how a tool reaches them and which means no URL
 is hardcoded here either. `link_relations_in` and `instant_of` sit beside
 `signed_launch` and exist so that a test module can exercise the paging-header
 parser and the timestamp comparison without importing this file by name.
+
+**Since E1-11's fix round the roster is behind a token, and this driver holds it.**
+The mock's NRPS route requires an access token its own endpoint issued carrying the
+membership scope, so every roster read here goes through `roster_get`, which asks
+`service_token` for one — one place rather than one per module
+(`docs/MISTAKES.md` entry 13). **AGS deliberately stays unauthenticated** until a
+grade-passback client exists in E2 (SPEC §3.4), which is why
+`refuse_an_unspecified_ags_token_flow` is still here and is still called by every
+AGS path. What the platform must refuse, and with which status and code, is
+`tests/integration/test_mock_lms_nrps_requires_a_token.py` and not this file.
 """
 
 import importlib
@@ -31,6 +41,11 @@ from uuid import uuid4
 import pytest
 
 from fixtures.app_imports import import_mock_lms_application, mock_package_resolved
+from fixtures.client_credentials import (
+    ToolKeyPair,
+    ToolKeySetServer,
+    access_token_granted_to,
+)
 from fixtures.lti_platform import (
     AUTHORIZATION_REQUEST_CONSTANTS,
     MOCK_LMS_DIR,
@@ -108,6 +123,14 @@ MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 # posted to it. Specification constants, not preferences.
 AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
 AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+
+# The scope a token has to carry before this platform will serve a roster, spelled
+# as NRPS 2.0 spells it and as the platform's own discovery document advertises it.
+# A specification constant, the same string `test_mock_lms_client_credentials_
+# grant.py` transcribes: a tool asks its token endpoint for the exact string the
+# service claim names, so a scope of this suite's own devising is one no token can
+# be requested for.
+NRPS_MEMBERSHIP_SCOPE = "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
 
 # How many pages of one paged container are walked before the walk is called
 # broken. **This suite's choice**, and a bound rather than a rule: E0-15 keeps
@@ -263,7 +286,10 @@ class MockPlatform:
     """
 
     def __init__(
-        self, values: Mapping[str, str] | None = None, tool_key_set: Any | None = None
+        self,
+        values: Mapping[str, str] | None = None,
+        tool_key_set: Any | None = None,
+        tool_key_pair: Any | None = None,
     ) -> None:
         from fastapi.testclient import TestClient
 
@@ -282,10 +308,28 @@ class MockPlatform:
         # deliberately leaves to the implementer. Installed **after** the lifespan
         # has run, for the reason `tool_doors` gives: it then holds this test's
         # client whether the mock builds one in its factory or at startup.
-        if tool_key_set is not None:
-            self.application.state.http = tool_key_set.client
+        #
+        # **Served by default, and E1-11's NRPS enforcement is what changed that.**
+        # A roster read now needs a token, a token needs an assertion the platform
+        # can verify, and verifying it needs the tool's key set — so a driver that
+        # served one only when a caller asked would leave every roster suite unable
+        # to read a roster at all. A caller with its own arrangement passes both
+        # arguments and this default stands aside: the grant suite, which records
+        # what was fetched, and the roster-sync fixture, which points the platform
+        # at the real tool's own JWKS route.
+        if tool_key_pair is None:
+            tool_key_pair = ToolKeyPair("e1-06-tool")
+        self.tool_key_pair = tool_key_pair
+        self._own_key_set = tool_key_set is None
+        self.tool_key_set = (
+            ToolKeySetServer(self.tool_key_pair.key_set()) if self._own_key_set else tool_key_set
+        )
+        self.application.state.http = self.tool_key_set.client
+        self._service_tokens: dict[str, str] = {}
 
     def close(self) -> None:
+        if self._own_key_set:
+            self.tool_key_set.close()
         self.client.__exit__(None, None, None)
 
     # -- what the application serves ----------------------------------------
@@ -527,36 +571,124 @@ class MockPlatform:
         return local_target(url)
 
     @staticmethod
-    def refuse_an_unspecified_token_flow(response: Any, url: str) -> None:
-        """Turn a 401 or a 403 into a named gap rather than a puzzling red.
+    def refuse_an_unspecified_ags_token_flow(response: Any, url: str) -> None:
+        """Turn a 401 or a 403 from **AGS** into a named gap rather than a puzzling red.
 
         Real LTI Advantage services sit behind an OAuth 2.0 client-credentials
         grant against the platform's token endpoint. E0-15 does not mention one
-        and E0-14 built none, so this suite drives the services unauthenticated.
+        and E0-14 built none, so this suite drove both services unauthenticated.
 
-        **E1-06 builds the token endpoint and deliberately does not make NRPS or
-        AGS require a token**, which is a ruling of that ticket rather than an
-        omission: enforcement pairs with E1-11's client, and a mock that started
-        refusing unauthenticated reads would turn every E0-15 test red for a
-        reason none of them is about (`docs/MISTAKES.md` entry 22). So this stays
-        exactly as it was, and a 401 here is still a gap to be settled in a
-        ticket rather than guessed at in this file.
+        **Narrowed to AGS, because for NRPS the premise has ended.** This guard
+        existed to say "no conformant client exists yet, so a refusal is a gap in
+        a ticket rather than a defect" — E1-06's own argument, that a service
+        refusing before a conformant client exists would refuse this repository's
+        own tests. E1-11 built that client for the roster, so the mock's NRPS
+        route now requires a token and this suite presents one: see
+        `service_token` below, and `test_mock_lms_nrps_requires_a_token.py` for
+        the refusals it is required to answer with.
+
+        AGS keeps the guard, and keeps it for the unchanged reason: grade
+        passback is E2 (SPEC §3.4), no AGS client exists, and a platform that
+        started refusing there would turn every E0-15 line-item and score test red
+        for a reason none of them is about (`docs/MISTAKES.md` entry 22).
         """
         if response.status_code in (401, 403):
             pytest.fail(
                 f"The platform answered {response.status_code} for `{url}`, so it requires an "
-                "access token for its Advantage services. E0-15 specifies no grant, E0-14 built "
-                "none, and E1-06 builds the token endpoint while ruling that these services do "
-                "not yet require a token — enforcement arrives with E1-11's client. So this suite "
-                "calls NRPS and AGS unauthenticated; what a tool should present is a question for "
-                "that ticket rather than something to guess at in tests/fixtures/lti_services.py."
+                "access token for an Advantage service this suite calls unauthenticated. NRPS "
+                "requires one and this driver presents it; **AGS deliberately does not** — no "
+                "grade-passback client exists before E2 (SPEC §3.4), so a service refusing there "
+                "would be refusing this repository's own tests. If AGS is meant to start requiring "
+                "a token, that is a ticket rather than something to guess at in "
+                "tests/fixtures/lti_services.py."
             )
 
-    def service_get(self, url: str, accept: str | None = None) -> Any:
-        """GET one Advantage URL the platform advertised."""
-        response = self.client.get(self.local(url), headers={"accept": accept} if accept else None)
-        self.refuse_an_unspecified_token_flow(response, url)
+    # -- access tokens, obtained the one way (E1-11's enforcement) -------------
+
+    def service_token_grant(self, scope: str) -> dict[str, Any]:
+        """One access token for `scope`, and the whole response the platform granted.
+
+        The grant sequence lives in `tests/fixtures/client_credentials.py` and is
+        reached from here by every suite that needs a credential, so there is one
+        of it rather than one per module (`docs/MISTAKES.md` entry 13). What this
+        adds is the two values that are properties of *this* platform: the token
+        endpoint it advertises, read out of its discovery document rather than
+        from a path anybody knows, and the client id its own launch form
+        publishes.
+
+        The full response rather than the string, because a caller reasoning about
+        expiry needs `expires_in` — and reading the platform's own answer is how a
+        test avoids holding the lifetime in a second copy of it
+        (`docs/MISTAKES.md` entry 19).
+        """
+        document = self.discovery() or {}
+        token_url = document.get("token_endpoint")
+        if not isinstance(token_url, str) or not token_url:
+            pytest.fail(
+                "The platform's discovery document advertises no `token_endpoint` (it carries "
+                f"{sorted(document)}), so there is nowhere to ask for the access token its own "
+                "roster service now requires. E1-06 adds it, and "
+                "`test_mock_lms_client_credentials_grant.py` is where its absence is diagnosed."
+            )
+        offer = self.require_offers()[0]
+        client_id = offer.parameters.get("client_id")
+        if not isinstance(client_id, str) or not client_id:
+            pytest.fail(
+                "The launch form publishes no `client_id` (it publishes "
+                f"{sorted(offer.parameters)}), so there is nothing to put in a `client_assertion`'s "
+                "`iss` and `sub` and no token can be requested at all."
+            )
+        return access_token_granted_to(
+            lambda url, body: self.client.post(self.local(url), data=body),
+            token_url=token_url,
+            client_id=client_id,
+            key_pair=self.tool_key_pair,
+            scope=scope,
+        )
+
+    def service_token(self, scope: str) -> str:
+        """One freshly granted access token for `scope`, as a string."""
+        return str(self.service_token_grant(scope)["access_token"])
+
+    def nrps_token(self) -> str:
+        """This platform's roster token, granted once and reused for the run of a test.
+
+        Cached per platform instance so that walking a five-page roster is five
+        reads rather than five grants: an assertion is single-use at this endpoint
+        (RFC 7523 §3's `jti`), so a fresh grant per page would be five signatures
+        to prove nothing about paging. A test that needs a *particular* token —
+        stale, wrong-scoped, forged — builds it itself rather than asking here.
+        """
+        if NRPS_MEMBERSHIP_SCOPE not in self._service_tokens:
+            self._service_tokens[NRPS_MEMBERSHIP_SCOPE] = self.service_token(NRPS_MEMBERSHIP_SCOPE)
+        return self._service_tokens[NRPS_MEMBERSHIP_SCOPE]
+
+    def service_get(self, url: str, accept: str | None = None, *, token: str | None = None) -> Any:
+        """GET one Advantage URL the platform advertised.
+
+        `token`, when given, is presented as the `Bearer` credential RFC 6750 §2.1
+        describes — and its presence is also what says this call is one the
+        platform is entitled to refuse. A call that presents nothing is an AGS
+        call, where a refusal is still a gap rather than a defect.
+        """
+        headers: dict[str, str] = {}
+        if accept:
+            headers["accept"] = accept
+        if token is not None:
+            headers["authorization"] = f"Bearer {token}"
+        response = self.client.get(self.local(url), headers=headers or None)
+        if token is None:
+            self.refuse_an_unspecified_ags_token_flow(response, url)
         return response
+
+    def roster_get(self, url: str, accept: str | None = NRPS_MEDIA_TYPE) -> Any:
+        """GET one NRPS URL with this platform's own roster token attached.
+
+        The one door every roster read in this suite goes through, so that
+        "present a token" is a fact about the driver rather than something each
+        module remembers to do (`docs/MISTAKES.md` entry 13).
+        """
+        return self.service_get(url, accept=accept, token=self.nrps_token())
 
     def service_post(
         self,
@@ -575,7 +707,7 @@ class MockPlatform:
         if accept:
             headers["accept"] = accept
         response = self.client.post(self.local(url), content=json.dumps(payload), headers=headers)
-        self.refuse_an_unspecified_token_flow(response, url)
+        self.refuse_an_unspecified_ags_token_flow(response, url)
         return response
 
     def service_claim(self, launch: SignedLaunch, claim: str, member: str, purpose: str) -> str:
@@ -630,8 +762,12 @@ class MockPlatform:
         return [scope for scope in scopes if isinstance(scope, str)]
 
     def membership_page(self, url: str) -> MembershipPage:
-        """Fetch one page of a membership container and read its paging header."""
-        response = self.service_get(url, accept=NRPS_MEDIA_TYPE)
+        """Fetch one page of a membership container and read its paging header.
+
+        Through `roster_get`, so the token E1-11's enforcement requires is
+        attached here rather than in each of the six modules that read a roster.
+        """
+        response = self.roster_get(url)
         assert response.status_code == 200, (
             f"The membership service answered {response.status_code} for `{url}` rather than 200. "
             "E0-15's first criterion is a roster whose members carry role and enrollment status, "
@@ -667,7 +803,9 @@ class MockPlatform:
             next_url=urljoin(url, following) if following else None,
         )
 
-    def link_walk(self, url: str, accept: str, subject: str) -> list[tuple[str, Any]]:
+    def link_walk(
+        self, url: str, accept: str, subject: str, *, token: str | None = None
+    ) -> list[tuple[str, Any]]:
         """Fetch `url` and every page its `Link` header advertises, in order.
 
         One walk for both paged containers E0-15 serves — the roster and the
@@ -693,7 +831,7 @@ class MockPlatform:
                     "it. A client following this header never finishes."
                 )
             visited.add(following)
-            response = self.service_get(following, accept=accept)
+            response = self.service_get(following, accept=accept, token=token)
             assert response.status_code == 200, (
                 f"Page {len(walked) + 1} of the {subject} at `{following}` answered "
                 f"{response.status_code} rather than 200, so the `Link` header that pointed here "
@@ -716,7 +854,9 @@ class MockPlatform:
         """Walk a roster from its first page to its last. Exactly what a sync does."""
         return [
             self.membership_page_of(page_url, response)
-            for page_url, response in self.link_walk(url, NRPS_MEDIA_TYPE, "roster")
+            for page_url, response in self.link_walk(
+                url, NRPS_MEDIA_TYPE, "roster", token=self.nrps_token()
+            )
         ]
 
     def seeded_contexts(self) -> list[SeededContext]:
@@ -1143,9 +1283,11 @@ def mock_platforms() -> Iterator[Callable[..., MockPlatform]]:
     started: list[MockPlatform] = []
 
     def start(
-        values: Mapping[str, str] | None = None, tool_key_set: Any | None = None
+        values: Mapping[str, str] | None = None,
+        tool_key_set: Any | None = None,
+        tool_key_pair: Any | None = None,
     ) -> MockPlatform:
-        platform = MockPlatform(values, tool_key_set)
+        platform = MockPlatform(values, tool_key_set, tool_key_pair)
         started.append(platform)
         return platform
 

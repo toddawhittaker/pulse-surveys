@@ -24,7 +24,9 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/app_imports.py` — importing a package called `app` when three of
     them answer to that name. Every `sys.meta_path` manipulation is there.
   - `fixtures/lti_services.py` — E0-14's `mock_platform` and the LTI Advantage
-    services E0-15 reaches through a launch's own claims.
+    services E0-15 reaches through a launch's own claims; since E1-11's fix round
+    it also holds the access token the mock's NRPS route requires, which is why
+    every roster read in the suite goes through `roster_get`.
   - `fixtures/supervision.py` — E0-09's assignment graph and the row-seeding
     helper, with the two counters that keep seeded values unique.
   - `fixtures/authz_data.py` — E0-10's committed rows and Care environment,
