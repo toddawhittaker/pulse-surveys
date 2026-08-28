@@ -129,10 +129,12 @@ from app.launch import (
 from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, MEMBERSHIP_SCOPE, membership_page
 from app.pages import authorization_response_page, launch_page, registration_values
 from app.paging import (
+    FIRST_PAGE,
     PAGE_PARAMETER,
     PageOutOfRangeError,
     link_header,
     page_count,
+    page_number,
     page_size,
     window,
 )
@@ -554,7 +556,7 @@ def _register_nrps(
     def memberships(
         request: Request,
         context_id: str,
-        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        page: Annotated[str | None, Query(alias=PAGE_PARAMETER)] = None,
         role: Annotated[str | None, Query()] = None,
         limit: Annotated[str | None, Query()] = None,
         rlid: Annotated[str | None, Query()] = None,
@@ -564,9 +566,18 @@ def _register_nrps(
         **The credential is checked before anything else about the request**, and
         the order is the decision rather than an accident: a caller with no token
         learns that it needs one, and learns nothing about which contexts this
-        platform seeds or which query parameters it implements. Answering the
-        `role` refusal or the context 404 first would make an unauthenticated
-        request a way to enumerate both.
+        platform seeds, which query parameters it implements, or where its cursor
+        starts. Answering the `role` refusal or the context 404 first would make
+        an unauthenticated request a way to enumerate the first two.
+
+        **That is why `page` is typed here as a string with no bound.** It
+        carried `ge=1`, which FastAPI enforces before the handler is entered at
+        all, so `?page=0` answered 422 to a caller who had presented nothing —
+        the one exception to the sentence above, and a claim with an exception is
+        one nobody can rely on. The bound and the default now live in
+        `app.paging::page_number`, read below, behind the credential; the same
+        move covers `?page=abc`, which the framework would also have answered
+        before the token was looked at.
 
         Every rule about the token is in `app.tokens`; this turns a refusal into
         the status and the RFC 6750 §3 challenge it carries. The challenge is a
@@ -600,6 +611,16 @@ def _register_nrps(
         `page` keeps working. It is the cursor the roster walk moves by, and a
         container that refused every query parameter would turn every seeded
         roster into its first page.
+
+        **A `page` that is not a page number is refused with the same 400**, and
+        the code is E0-28 item 2's rather than a new decision: 400 says this
+        platform read the request and will not serve it, which is the sentence a
+        tool's author acts on, while a 422 reports that a value could not be
+        parsed — a different fact, and one this handler is no longer in a
+        position to state. It is also deliberately not the 404 that a page
+        *past* the end answers with: page nine of a three-page roster is a client
+        following a header into nowhere, and page zero is a cursor no collection
+        could ever have.
         """
         try:
             authorised_token(request.headers.get("authorization"), MEMBERSHIP_SCOPE, settings, key)
@@ -627,9 +648,22 @@ def _register_nrps(
                     f"`{PAGE_PARAMETER}` is the one parameter this container implements."
                 ),
             )
+        requested = page_number(page)
+        if requested is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"`{PAGE_PARAMETER}={page}` is not a page of this membership container. "
+                    f"`{PAGE_PARAMETER}` is a whole number from {FIRST_PAGE} upwards — the cursor "
+                    "the roster walk moves by, and the one query parameter this container "
+                    "implements. A page past the end of the roster is a different answer, and "
+                    "this is not that."
+                ),
+            )
+
         context = require_context(platform, context_id)
         try:
-            served = membership_page(platform, settings, context, page)
+            served = membership_page(platform, settings, context, requested)
         except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         return JSONResponse(

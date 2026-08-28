@@ -36,7 +36,46 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 # is people debugging a sync.
 PAGE_PARAMETER = "page"
 
+# The page a request that names none is asking for, and the lowest one any
+# collection has. One rather than zero because `page_url` and the `Link`
+# relations are 1-based, and a cursor whose first value is not the one a client
+# reads back out of `first` is two cursors.
+FIRST_PAGE = 1
+
 T = TypeVar("T")
+
+
+def page_number(requested: str | None) -> int | None:
+    """The page a request asks for, or `None` where it asked for something that is not one.
+
+    **Read here rather than declared as a bound on a route parameter**, which is
+    where this rule used to live. A constraint in a route signature is enforced
+    by the framework *before the handler runs at all*, so a service that checks a
+    credential first cannot have one: `?page=0` was answered `422`, naming the
+    parameter and the bound it broke, to a caller who had presented nothing. The
+    leak is small — that this container pages, what its cursor is called, where
+    it starts — and the ordering claim it broke is not, because a claim with one
+    exception is a claim nobody can rely on. `app.main::memberships` states the
+    ordering and `docs/adr/0099` records it.
+
+    The string is taken as it arrived and judged whole. Nothing is stripped or
+    coerced: `int` accepts leading whitespace, a sign, and the underscores a
+    Python literal may carry, so `int(" 1_0")` is 10 and a request asking for
+    page `1_0` would be served page ten of a collection it never named. A value
+    that is not a run of ASCII digits is not a page number, and repairing one
+    before judging it is `docs/MISTAKES.md` entry 29.
+
+    Absent is `FIRST_PAGE`, because a client that names no cursor is asking for
+    the start; that is the same default the route parameter carried, moved here
+    with the bound so both halves of "what page is this" are answered in one
+    place (entry 13).
+    """
+    if requested is None:
+        return FIRST_PAGE
+    if not requested.isascii() or not requested.isdigit():
+        return None
+    number = int(requested)
+    return number if number >= FIRST_PAGE else None
 
 
 class PageOutOfRangeError(LookupError):
