@@ -235,6 +235,48 @@ def _resolved_addresses(host: str) -> tuple[str, ...]:
     return tuple(found)
 
 
+# The two other /96 ranges that carry an IPv4 in their low 32 bits, beside the
+# IPv4-mapped `::ffff:0:0/96` that `IPv6Address.ipv4_mapped` already reports. On a
+# DNS64/NAT64 egress (SPEC §10, the IPv6-only network) the gateway translates a GET
+# to either of these to the embedded IPv4, so a rule that judged the wrapper reads a
+# different answer from the one the packet gets: `64:ff9b::a9fe:a9fe` reaches
+# `169.254.169.254`. The IPv4-compatible form is deprecated (RFC 4291) but still
+# routed, and it contains the specials `::` and `::1`, which are NOT an embedded
+# IPv4 and are excluded below.
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+_IPV4_COMPATIBLE_PREFIX = ipaddress.ip_network("::/96")
+
+
+def _embedded_ipv4(resolved: ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
+    """The IPv4 an IPv6 address carries in its low 32 bits, or `None` if it carries none.
+
+    Three IPv6 forms embed an IPv4 that a NAT64/DNS64 egress translates a packet
+    to, and each has to be judged as the address the packet reaches rather than as
+    the wrapper — `ipaddress` reports every one of them `is_global` true while the
+    embedded address is internal:
+
+      - the **IPv4-mapped** `::ffff:0:0/96`, which `.ipv4_mapped` already reports;
+      - the **NAT64 well-known** `64:ff9b::/96` (RFC 6052);
+      - the deprecated **IPv4-compatible** `::/96` (RFC 4291).
+
+    The IPv4-compatible range contains `::` (unspecified) and `::1` (IPv6 loopback),
+    which are not an embedded IPv4 and must keep their own identity — unwrapping
+    `::1` to `0.0.0.1` would lose the loopback the module's split (ADR 0096) turns
+    on. They are excluded, so the IPv6 loopback and unspecified handling below is
+    left intact; an embedded `127.0.0.1` (`::7f00:1`) is a genuine IPv4-compatible
+    address and is unwrapped.
+    """
+    if resolved.ipv4_mapped is not None:
+        return resolved.ipv4_mapped
+    if resolved in _NAT64_WELL_KNOWN_PREFIX or (
+        resolved in _IPV4_COMPATIBLE_PREFIX
+        and not resolved.is_loopback
+        and not resolved.is_unspecified
+    ):
+        return ipaddress.IPv4Address(int(resolved) & 0xFFFFFFFF)
+    return None
+
+
 def _is_an_acceptable_resolved_address(column: str, address: str) -> bool:
     """Whether one address a host resolved to is one this column may reach.
 
@@ -246,10 +288,12 @@ def _is_an_acceptable_resolved_address(column: str, address: str) -> bool:
     loopback address in the same pod is doing it on purpose, and rule 5 adds a
     resolution dimension to that split rather than reopening it.
 
-    The IPv4-mapped form is unwrapped first, by the shape and for the reason
+    An **embedded IPv4** is unwrapped first, by the shape and for the reason
     `_is_a_link_local_host` above and `app.config.is_a_loopback_host` both use:
-    `::ffff:10.0.0.7` is `10.0.0.7` reached over an IPv6 socket, and a rule that
-    asked the wrapper reads a different answer from the one the packet gets.
+    `::ffff:10.0.0.7`, `64:ff9b::a9fe:a9fe` and `::a9fe:a9fe` are internal IPv4
+    addresses reached over an IPv6 socket on a NAT64 egress, and a rule that asked
+    the wrapper reads a different answer from the one the packet gets. The three
+    forms and the `::`/`::1` boundary live in `_embedded_ipv4`.
 
     An answer that does not parse as an address at all is refused, for the same
     reason an unresolvable host is: what cannot be judged is not something to
@@ -259,8 +303,10 @@ def _is_an_acceptable_resolved_address(column: str, address: str) -> bool:
         resolved = ipaddress.ip_address(address)
     except ValueError:
         return False
-    if isinstance(resolved, ipaddress.IPv6Address) and resolved.ipv4_mapped is not None:
-        resolved = resolved.ipv4_mapped
+    if isinstance(resolved, ipaddress.IPv6Address):
+        embedded = _embedded_ipv4(resolved)
+        if embedded is not None:
+            resolved = embedded
     if resolved.is_global:
         return True
     return resolved.is_loopback and column not in LOOPBACK_REFUSED_COLUMNS
