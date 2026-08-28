@@ -62,6 +62,24 @@ path and query — off every cross-origin request while still sending the origin
 Inside an LMS iframe that URL identifies a section and a person's place in it, so
 `unsafe-url` and the browser's own no-header default are both rejected.
 
+**The emitter admits only syntactically valid origins and drops a malformed
+one.** `launcher_origins` builds each source as `scheme://host[:port]` from a
+stored `authorization_endpoint`, and `urlsplit` strips neither a space nor a `;`
+nor a `,` nor a `*` from the host. The registration chokepoint (ADR 0081) does
+not reject those characters on `authorization_endpoint` either — it is
+browser-facing, not resolve-judged — so a stored `https://lms.edu *` would emit
+`frame-ancestors 'self' https://lms.edu *`, whose bare trailing `*` lets any
+origin frame the app, and a stored `https://lms.edu;script-src *` would graft a
+second CSP directive onto the header. So `launcher_origins` matches each
+candidate origin against a compiled pattern — `http`/`https`, a hostname or IPv4
+or bracketed IPv6 host, an optional numeric port, and no whitespace, `;`, `,`,
+`*`, quote or other CSP-breaking character — and drops any origin that does not
+match. This is fail-closed for that platform: a malformed endpoint contributes no
+framing source (and no developer-console link), so its iframe simply is not
+permitted rather than every origin's being permitted. The fix sits in
+`launcher_origins` itself, at the root of the derivation, so both consumers
+benefit and the header is robust however the column was written.
+
 **The CSP needs no `'unsafe-inline'` anywhere.** A real `npm run build` (Vite 8)
 emits the entry document with an external module script
 (`/app/assets/index-*.js`) and an external stylesheet (`/app/assets/index-*.css`)
@@ -104,3 +122,11 @@ nothing to bless, and the same-origin stylesheet is covered by `default-src
   only what the header contains; `tests/e2e/cookieless-launch.spec.ts` is the
   proof that a real LMS iframe loads under the enforced policy, and it is the
   check for any runtime inline style the built stylesheet does not cover.
+- **The source-side validation is owed to E11.** The emitter now drops a
+  malformed origin, so the header is robust whatever the column holds — but the
+  registration chokepoint still stores an `authorization_endpoint` carrying a
+  space, a `;`, a `,` or a `*` verbatim, because it judges the address for SSRF,
+  not for CSP syntax. E11 takes the endpoint from an untrusted party through
+  dynamic registration, so it owes a write-time rejection of a CSP-breaking
+  `authorization_endpoint` at the chokepoint. Recorded in
+  `docs/tickets/e1/deferred.md` and `docs/tickets/e2/carried-from-e1.md`.

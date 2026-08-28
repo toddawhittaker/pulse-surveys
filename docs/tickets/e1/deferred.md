@@ -227,6 +227,19 @@ Every E1 pull request that defers something adds it here in the same PR.
    test pinning each header. Scheduled before E2 puts real survey content in
    the SPA.
 
+   **Residue owed to E11 (source-side origin validation).** The framing
+   emitter now drops a malformed origin — `launcher_origins` validates each
+   `authorization_endpoint`-derived origin and skips one carrying a space, a
+   `;`, a `,` or a `*`, so a stored malformed value cannot inject a bare `*`
+   wildcard or graft a second CSP directive (ADR 0102). But the registration
+   chokepoint (ADR 0081) still stores such an `authorization_endpoint`
+   verbatim: it judges the address for SSRF, not for CSP syntax. E11 takes the
+   endpoint from an untrusted party through dynamic registration, so it owes a
+   write-time rejection of a CSP-breaking `authorization_endpoint` at the
+   chokepoint. **Done when** the registration path refuses (or normalises) an
+   `authorization_endpoint` whose host carries whitespace, `;`, `,`, `*`, or a
+   quote, with a test pinning the refusal; owner E11.
+
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2.
 
 ## From E1-06 — the mock learns the client-credentials grant

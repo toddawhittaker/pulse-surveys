@@ -52,6 +52,37 @@ ruff and mypy clean.
 - `1ec9ff2` behavior: the security-headers middleware in `create_app()`
 - (docs) ADR 0102 + README row + this attempt file
 
+## Fix-round — malformed `authorization_endpoint` injects into `frame-ancestors`
+
+The finding: `launcher_origins` built each origin as `f"{scheme}://{netloc}"`
+from a stored `authorization_endpoint`. `urlsplit` strips neither a space nor a
+`;` from the host, and the SSRF chokepoint (ADR 0081) does not reject those
+characters on `authorization_endpoint` (browser-facing, not resolve-judged). So a
+stored `https://lms.edu *` emitted `frame-ancestors 'self' https://lms.edu *` —
+the bare `*` lets any origin frame the app; a `;`-bearing value appended a whole
+CSP directive.
+
+Fix, in `launcher_origins` itself (the root of the derivation, so both the CSP
+header and the dev-console links benefit): a module-level compiled regex
+`_VALID_ORIGIN` — `^https?://(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(?::[0-9]+)?$` —
+anchored end to end. Each candidate origin is matched and skipped if it does not
+match. A hostname/IPv4 or bracketed IPv6 host with an optional numeric port is
+admitted; anything with whitespace, `;`, `,`, `*`, a quote or other
+CSP-breaking character is dropped. Fail-safe: a malformed endpoint contributes no
+framing source at all rather than corrupting the header.
+
+Chose `launcher_origins` over the middleware: it is the root of the bug, MISTAKES
+13 forbids a second copy, and a malformed endpoint has no valid console link
+either. Did NOT use `.hostname` — `urlsplit("https://lms.edu *").hostname` keeps
+the space; the characters must be validated explicitly.
+
+Result: `test_the_security_response_headers.py` 16 passed (all three target tests
+green, including `..._admits_a_valid_ipv6_origin_with_a_port` which must stay
+green — the regex admits `[` `]` `:`); `test_dev_console.py` 5 passed. ruff
+format/check clean, mypy clean. Records: ADR 0102 gained an emitter-validation
+paragraph and an E11-owed residual consequence; the residue is recorded in
+`deferred.md` (E1-04 item 2) and `e2/carried-from-e1.md`.
+
 ## For the orchestrator
 - The e2e/Docker gate serialises through you. `tests/e2e/cookieless-launch.spec.ts`
   is the canary that must run before the PR — it proves the LMS iframe actually
