@@ -115,6 +115,12 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
+    # The unit and integration pass runs under `-n 4` in CI and in `make test`
+    # (docs/adr/0104-the-unit-and-integration-pass-runs-under-xdist.md). Each
+    # worker is a full pytest session, so each provisions its own testcontainers
+    # Postgres and runs alembic once; that overhead is accepted in exchange for
+    # the wall clock. The §4.1 invariant pass stays serial.
+    "pytest-xdist==3.8.0",
     "testcontainers==4.15.0",
     "hypothesis==6.165.5",
     # Test-only. `tests/unit/test_compose_stack.py` asserts properties of the
