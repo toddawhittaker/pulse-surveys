@@ -326,10 +326,11 @@ def test_the_sync_reads_the_roster_with_a_token_it_requested_with_a_tool_signed_
     Four things have to be true at once and each is a separate mutation:
 
       - a **client-credentials grant** was posted to the token endpoint the
-        section's own registration carries, asking for the NRPS scope. A client
-        that skipped the grant and read the roster reaches a 200 from this mock,
-        which is why this is asserted from the request record rather than from the
-        answer.
+        section's own registration carries, asking for the NRPS scope. Asserted
+        from the request record rather than from the answer, and still asserted
+        that way now that the mock refuses an unauthenticated read: a status code
+        says a token arrived on *this* call, while the record says the client has
+        one path and it is this one.
       - its `client_assertion` **verifies against the tool's published key set**.
         Signed with any other key it is refused by every real platform, and by this
         one — ADR 0084 decision 4. A decode is not enough: a decoded assertion
@@ -372,8 +373,8 @@ def test_the_sync_reads_the_roster_with_a_token_it_requested_with_a_tool_signed_
     assert roster_contract.membership_scope in " ".join(body.get("scope", [])).split(), (
         f"The grant asked for scope {body.get('scope')!r} and not "
         f"{roster_contract.membership_scope!r}. A token is granted for the exact scope string the "
-        "NRPS claim names, and one granted for anything else is a token the service will refuse "
-        "the moment E1-06's deferred enforcement lands."
+        "NRPS claim names, and one granted for anything else is a token this service refuses — "
+        "403 `insufficient_scope`, since E1-11's fix round landed the enforcement E1-06 deferred."
     )
 
     assertion = (body.get("client_assertion") or [""])[0]
@@ -398,7 +399,9 @@ def test_the_sync_reads_the_roster_with_a_token_it_requested_with_a_tool_signed_
         assert token, (
             f"A roster read carried `Authorization` {call.authorization!r}. The exit clause this "
             "ticket exists for is that the roster read is 'an authenticated service call, not an "
-            "unauthenticated GET', and this mock answers either."
+            "unauthenticated GET'. The mock refuses the second now, so this would also have failed "
+            "at the platform — but it is asserted here, on what the client sent, because that is "
+            "what says the client has no second path rather than that this one call was refused."
         )
         assert token.count(".") == 2 and synced_section.platform.verifies(token) is not None, (
             "The token the sync presented on the roster read is not one this platform issued: it "

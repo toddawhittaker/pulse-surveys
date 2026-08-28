@@ -19,11 +19,17 @@ issued without the membership scope → **403**, `insufficient_scope`. A token i
 with it → the container, exactly as before.
 
 **And the credential is judged before anything else about the request**, which the
-handler states as a decision and which two pairs below assert: an unauthenticated
-read carrying a query parameter this container refuses is answered 401 rather than
-the 400 an authenticated one gets, and one naming a context nothing seeds is
-answered 401 rather than 404. A stranger learns neither which parameters this
-endpoint understands nor which sections exist.
+handler states as a decision and ADR 0099 records, and which three pairs below
+assert. An unauthenticated read carrying a query parameter this container refuses
+is answered 401 rather than the 400 an authenticated one gets; one naming a context
+nothing seeds is answered 401 rather than 404; and one carrying `page` below its
+own bound is answered 401 rather than the framework's 422. A stranger learns
+neither which parameters this endpoint understands, nor which sections exist, nor
+where its cursor starts.
+
+The third of those is the one a route signature makes easy to get wrong — a bound
+declared there is enforced before the handler runs at all — and it is why the
+first two are not enough on their own.
 
 **Where the status codes and the two error strings come from.** RFC 6750 — it is
 the only document that defines `invalid_token` and `insufficient_scope`, §3.1
@@ -121,6 +127,15 @@ PARAMETER_REFUSAL_STATUS = 400
 # cannot quietly become one of them.
 A_CONTEXT_NOBODY_SEEDED = "a-context-nobody-seeded"
 CONTEXT_NOT_FOUND_STATUS = 404
+
+# The cursor this container *does* implement — E0-28 item 2's accepted half, and
+# the parameter the roster walk moves by — with a value below its stated bound.
+# Transcribed from `test_mock_lms_paging_and_service_urls.py`, which owns the
+# question of what `page` does when it is inside the bound; what is needed here is
+# only that a value outside it is refused, so that an unauthenticated caller
+# getting a 401 instead says something about the order the handler works in.
+BOUNDED_QUERY_PARAMETER = "page"
+A_PAGE_BELOW_THE_BOUND = 0
 
 
 # ---------------------------------------------------------------------------
@@ -618,8 +633,11 @@ def test_a_roster_read_whose_credential_is_not_a_bearer_token_is_refused(
 # ---------------------------------------------------------------------------
 # The credential is checked **before anything else about the request**, so an
 # unauthenticated caller learns nothing about what this endpoint would have
-# served. Each pair asserts the ordering rather than the 401: a handler that
-# answered 401 to everything would satisfy the refused half of both.
+# served. Three pairs, and each asserts the ordering rather than the 401: a
+# handler that answered 401 to everything would satisfy the refused half of all
+# three. Two reach the handler's own checks; the third reaches a bound in the
+# route signature, which the framework enforces before the handler runs — the
+# case the first two structurally cannot see.
 # ---------------------------------------------------------------------------
 
 
@@ -778,6 +796,94 @@ def test_an_unauthenticated_read_is_refused_before_the_context_is_looked_up(
             "The identical read presenting a granted token was answered "
             f"{CONTEXT_NOT_FOUND_STATUS} a moment ago, so the lookup is there and the credential "
             "was judged before it,"
+        ),
+    )
+
+
+def test_an_unauthenticated_read_is_refused_before_the_page_bound_is_checked(
+    mock_platform: Any,
+) -> None:
+    """The same ordering, at the one parameter this container validates.
+
+    The two pairs above reach the handler's own checks. This one reaches a check
+    that was in front of them: `page` is declared with a bound, and a bound in a
+    route signature is enforced by the framework **before the handler runs at
+    all** — so `?page=0` was answered 422, naming the parameter and the bound it
+    violated, to a caller who had presented no credential. Neither pair above can
+    see it, because `role` is an unvalidated string and nothing fires.
+
+    That is a smaller leak than the two above and the same kind: it tells a
+    stranger that this container pages, what the cursor is called, and where it
+    starts. The route's own docstring and ADR 0099 both say the credential is
+    checked before anything else about the request, and this was the sentence's
+    one exception.
+
+    **The mutation this kills: the page bound restored to the signature**, where
+    the framework answers before the credential. It is a one-line move back, it
+    reads as tidier than the in-handler check that replaces it, and every other
+    test in this module stays green.
+
+    **The authenticated half asserts that a refusal happens, not which code it
+    carries**, and the reason is that this round does not settle that. E0-28 item 2
+    refuses `role`, `limit` and `rlid` with 400 and gives the reason — "a 422 from
+    a model that could not parse it is a different fact" — so 400 is the natural
+    landing place for an in-handler bound too, but that is
+    `test_mock_lms_paging_and_service_urls.py`'s question and pinning it here would
+    be this test deciding it. What is required is what the ordering claim needs: a
+    refusal that is *there*, and that names the parameter, so the 401 beside it
+    means "reached earlier" rather than "answered to everything".
+
+    401 and 403 are excluded from that loose status, and the exclusion is the
+    whole reason it can be loose: a handler whose token check had failed would
+    answer 401 here too, and a pair of 401s says nothing about ordering at all.
+    """
+    beyond = mock_platform.with_query(
+        roster_url(mock_platform), {BOUNDED_QUERY_PARAMETER: A_PAGE_BELOW_THE_BOUND}
+    )
+
+    authorised = read_roster(
+        mock_platform,
+        beyond,
+        f"{BEARER_SCHEME} {mock_platform.service_token(NRPS_MEMBERSHIP_SCOPE)}",
+    )
+    assert authorised.status_code not in (UNAUTHORIZED, FORBIDDEN), (
+        f"A read carrying a granted token and `{BOUNDED_QUERY_PARAMETER}="
+        f"{A_PAGE_BELOW_THE_BOUND}` answered {authorised.status_code}, which is a refusal of the "
+        "credential rather than of the parameter — so the 401 below would be the same answer this "
+        "read got and would say nothing about which check came first. The token is what failed "
+        "here, and `test_the_token_helper_obtains_a_credential_the_platform_itself_granted` "
+        f"diagnoses it. Body begins {authorised.text[:300]!r}."
+    )
+    assert 400 <= authorised.status_code < 500, (
+        f"A read carrying a granted token and `{BOUNDED_QUERY_PARAMETER}="
+        f"{A_PAGE_BELOW_THE_BOUND}` answered {authorised.status_code} rather than refusing it, so "
+        "there is no bound for the credential check to come before and this test cannot show the "
+        "ordering. A cursor accepted below its own bound is a separate defect and "
+        "`test_mock_lms_paging_and_service_urls.py` is where it belongs. Body begins "
+        f"{authorised.text[:300]!r}."
+    )
+    assert BOUNDED_QUERY_PARAMETER in authorised.text.lower(), (
+        f"The refusal of `{BOUNDED_QUERY_PARAMETER}={A_PAGE_BELOW_THE_BOUND}` does not name "
+        f"`{BOUNDED_QUERY_PARAMETER}` — the body is {authorised.text[:300]!r}. E0-28 item 2 asks a "
+        "parameter refusal to say which parameter it objects to, and a refusal that names none is "
+        "one this test cannot attribute to the bound rather than to something else about the "
+        "request."
+    )
+
+    refused(
+        mock_platform,
+        beyond,
+        None,
+        status=UNAUTHORIZED,
+        code=None,
+        subject=(
+            "A roster read carrying no credential and "
+            f"`{BOUNDED_QUERY_PARAMETER}={A_PAGE_BELOW_THE_BOUND}`, below the cursor's own bound"
+        ),
+        control=(
+            "The identical read presenting a granted token was answered "
+            f"{authorised.status_code} a moment ago, naming the parameter, so the bound is "
+            "enforced and this refusal was reached before it,"
         ),
     )
 
