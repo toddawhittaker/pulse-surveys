@@ -154,6 +154,13 @@ LOOPBACK_REFUSED_COLUMNS = (AUTHORIZATION_ENDPOINT_COLUMN, ROSTER_SERVICE_ADDRES
 # answers with are the same either way.
 RESOLUTION_PORT = 443
 
+# The key a session states its environment under, for the mapper events at the
+# foot of this module. Written down once and imported by the writers that stamp
+# it (`app.db`, `scripts/seed.py`): a writer stamping a different spelling would
+# be judged as a deployment and refused with nothing to say why
+# (`docs/MISTAKES.md` entry 13).
+ENVIRONMENT_SESSION_KEY = "environment"
+
 # What a write is judged under when nobody said where it was made — the mapper
 # events at the foot of this module read `Session.info["environment"]`, and a
 # session that carries none gets this. It is a deployment by `is_a_deployment`,
@@ -655,7 +662,7 @@ def _judge_a_registrations_addresses(
     it is stated rather than papered over.
     """
     session = object_session(target)
-    stated = session.info.get("environment") if session is not None else None
+    stated = session.info.get(ENVIRONMENT_SESSION_KEY) if session is not None else None
     refuse_invalid_registration_addresses(
         stated if isinstance(stated, str) else UNSTATED_ENVIRONMENT,
         authorization_endpoint=target.authorization_endpoint,

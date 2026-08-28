@@ -371,19 +371,34 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
         self.pins = pins
         self._pinned_transports: dict[str, requests.adapters.HTTPAdapter] = {}
 
-    def send(self, request: Any, **kwargs: Any) -> Any:
+    def send(
+        self,
+        request: requests.PreparedRequest,
+        stream: bool = False,
+        timeout: float | tuple[float | None, float | None] | None = None,
+        verify: bool | str = True,
+        cert: str | tuple[str, str] | None = None,
+        proxies: dict[str, str] | None = None,
+    ) -> requests.Response:
         split = urlsplit(str(request.url))
         hostname = (split.hostname or "").lower()
         address = self.pins.get(hostname)
-        if address is None:
-            return self.inner.send(request, **kwargs)
-
-        authority = split.netloc.split("@")[-1]
-        request.url = urlunsplit(
-            (split.scheme, _netloc_at(address, split.port), split.path, split.query, split.fragment)
+        sending = self.inner if address is None else self._transport_for(split.scheme, hostname)
+        if address is not None:
+            authority = split.netloc.split("@")[-1]
+            request.url = urlunsplit(
+                (
+                    split.scheme,
+                    _netloc_at(address, split.port),
+                    split.path,
+                    split.query,
+                    split.fragment,
+                )
+            )
+            request.headers["Host"] = authority
+        return sending.send(
+            request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies
         )
-        request.headers["Host"] = authority
-        return self._transport_for(split.scheme, hostname).send(request, **kwargs)
 
     def _transport_for(self, scheme: str, hostname: str) -> requests.adapters.BaseAdapter:
         """The transport a pinned request travels over — see the class docstring."""

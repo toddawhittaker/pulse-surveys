@@ -55,3 +55,34 @@ Decisions worth their own line, because a later reader will ask:
 Worked: `tests/unit/test_registration_address_constraints.py` **199 passed**,
 and the three integration modules **29 passed**, both exit 0, first run after the
 code was written. `ruff format --check`, `ruff check` clean on the four files.
+
+## Attempt 3 — the whole suite, and the one regression it found
+
+`pytest tests/unit tests/integration`: **1 failed, 1965 passed** in 12:00. The
+failure is the reason the whole suite is run rather than the ticket's own
+(`docs/MISTAKES.md` entry 41's corollary):
+`test_demo_seed_script.py::test_the_seed_refuses_to_register_the_mock_outside_a_development_environment`.
+
+Its *control* — the half that proves the refusal above it means something —
+calls `seed_mock_platform` under a development configuration through a session
+that `demo_session` in that module builds itself, and that session states no
+environment. The flush chokepoint judged it as a deployment, exactly as designed,
+and refused the mock's own loopback `authorization_endpoint`. `docs/MISTAKES.md`
+entry 22's shape: a new rule making an earlier ticket's test unrunnable. Not
+bumped — the entry did not stop this, the suite caught it.
+
+The repair is not behind the test wall, which is why no dispute was written. The
+seed's two registration writers already read the environment out of the
+`configuration` mapping they are handed, and already call the address rules with
+it; they now also state it on the session, through `state_the_environment`, with
+`setdefault` so a caller that has already said where it is keeps saying it. That
+is the same argument those writers already make for calling the address rules
+again after `main` has checked: `main` is not the only way in.
+
+The session-info key became a constant in `app.models.lti`
+(`ENVIRONMENT_SESSION_KEY`), imported by `app.db` and `scripts/seed.py`, because
+three spellings of one string with nothing comparing them is entry 13.
+
+Worked: the seed module plus the four batch modules, **283 passed**, exit 0.
+`mypy` clean after the adapter's `send` was given `BaseAdapter`'s own signature —
+`(self, request, **kwargs)` is an incompatible override and mypy said so.

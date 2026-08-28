@@ -75,6 +75,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings, is_development
 from app.models import Base
+from app.models.lti import ENVIRONMENT_SESSION_KEY
 
 __all__ = [
     "Base",
@@ -213,7 +214,7 @@ engine = create_engine(
 # a deployment, deliberately. The value comes from the same settings object this
 # file already built its engine from, so the process cannot say one thing to the
 # database and another to the rules.
-SessionLocal = sessionmaker(bind=engine, info={"environment": _settings.environment})
+SessionLocal = sessionmaker(bind=engine, info={ENVIRONMENT_SESSION_KEY: _settings.environment})
 
 
 def get_session() -> Iterator[Session]:
