@@ -1820,7 +1820,14 @@ def main(environ: Mapping[str, str] | None = None, dotenv_path: Path | None = No
 
     engine = create_engine(url)
     try:
-        with Session(bind=engine) as session:
+        # The session states the environment it writes under (ADR 0101): the
+        # registration-address rules are a mapper event on `LtiPlatform` now, and
+        # a session that states nothing is judged as a deployment — which would
+        # refuse the mock platform's own cleartext addresses on a Compose service
+        # name, and stop `make seed`. This script has already refused to run
+        # anywhere but development by the time it reaches here (ADR 0063), so the
+        # name is a constant rather than a reading of the configuration.
+        with Session(bind=engine, info={"environment": DEVELOPMENT_ENVIRONMENT}) as session:
             try:
                 seed(session, configuration)
             except SeedError as refused:

@@ -205,7 +205,15 @@ engine = create_engine(
 # The factory, not a session. A session is per unit of work: sharing one across
 # requests shares an open transaction, so one request's uncommitted rows become
 # visible to another and one request's rollback discards another's work.
-SessionLocal = sessionmaker(bind=engine)
+#
+# **Every session it makes states the environment it writes under** (ADR 0101).
+# The registration-address rules are a `before_insert`/`before_update` event on
+# `app.models.lti.LtiPlatform` now, and an event has no `Settings` in hand, so it
+# reads `Session.info["environment"]`; a session that states nothing is judged as
+# a deployment, deliberately. The value comes from the same settings object this
+# file already built its engine from, so the process cannot say one thing to the
+# database and another to the rules.
+SessionLocal = sessionmaker(bind=engine, info={"environment": _settings.environment})
 
 
 def get_session() -> Iterator[Session]:
