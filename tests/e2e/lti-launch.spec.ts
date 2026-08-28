@@ -129,6 +129,22 @@ const INSTRUCTOR_VIEW = 'pulse-landing-instructor';
 const SYNC_TIMEOUT_MS = 30_000;
 const SYNC_RETRY_MS = 3_000;
 
+// How long one attempt gives the landed page to paint before reading it. The
+// launch answers with a redirect and the SPA renders the view after hydrating,
+// so a read taken the instant `launchAs` resolves is a read taken before there
+// is anything to see — which is the race that failed this case once already:
+// the timeout snapshot showed "Your weekly check-in" on screen while the
+// predicate had measured zero, because every attempt counted and immediately
+// navigated away.
+//
+// Two seconds is far above hydration and short against `SYNC_RETRY_MS`, so a
+// genuine not-yet-enrolled attempt still costs about the same as it did and the
+// window stays a wall-clock thirty seconds. The calm page never grows this
+// testid, so an attempt that really did reach no-access waits the full two
+// seconds, returns nothing found, and retries — which is the behaviour this
+// case needs while the worker is still working.
+const RENDER_WAIT_MS = 2_000;
+
 test('a Learner launch lands on the student view once the roster sync has enrolled them', async ({
   page,
 }) => {
@@ -170,14 +186,30 @@ test('a Learner launch lands on the student view once the roster sync has enroll
 
   // Re-launching is legal: each attempt runs the whole login handshake and gets
   // a fresh `state` and `nonce`, so a repeat is a new launch rather than a
-  // replay. Polling the *launch* rather than a rendered page is what this needs —
-  // the answer is decided server-side at launch time, so a page that already
-  // rendered the calm page would never become a student view on its own.
+  // replay. The *launch* is what is polled, and it has to be: the answer is
+  // decided server-side at launch time, so a page that already rendered the calm
+  // page would never become a student view on its own however long it were
+  // watched.
+  //
+  // The bounded `waitFor` inside the attempt is not a second poll — it lets the
+  // answer this attempt already produced finish painting before it is read.
+  // Without it the read is instantaneous, lands between the redirect and the
+  // SPA's hydration, and reports nothing found for an attempt that had in fact
+  // succeeded; the retry then navigates away and repeats the identical race, so
+  // the poll can never observe the render it causes. That is what this case
+  // failed on once, with the student view on screen in the timeout snapshot.
   await expect
     .poll(
       async () => {
         await launchAs(page, LEARNER_SUBJECT, placement);
-        return page.getByTestId(STUDENT_VIEW).count();
+        try {
+          await page
+            .getByTestId(STUDENT_VIEW)
+            .waitFor({ state: 'visible', timeout: RENDER_WAIT_MS });
+          return 1;
+        } catch {
+          return 0;
+        }
       },
       {
         message:
