@@ -51,7 +51,7 @@ itself.
 **The environment** (`docs/MISTAKES.md` entry 40): both doors are built by
 `tool_doors` over `configured_env`, so `ENVIRONMENT` is the development name and
 the container's `DATABASE_URL` is laid down before `app.main` is imported. The
-four tests whose subject is *which day it is* set `INSTITUTION_TIMEZONE`
+five tests whose subject is *which day it is* set `INSTITUTION_TIMEZONE`
 themselves, before the door is built, because the application reads it into
 `Settings` at import and a value set afterwards would reach nothing.
 """
@@ -99,7 +99,7 @@ ADMIN_ROUTE = "admin"
 
 # How far back a window that is certainly live starts, and how far ahead a term
 # that certainly contains today runs. Wide enough that no timezone offset can move
-# a test whose subject is not the day; the four tests whose subject *is* the day
+# a test whose subject is not the day; the five tests whose subject *is* the day
 # use exact edges instead.
 COMFORTABLY_LIVE_DAYS = 30
 
@@ -1041,6 +1041,61 @@ def test_an_enrollment_that_ended_yesterday_does_not_land_a_student(
     )
 
 
+def test_an_enrollment_whose_first_day_is_today_lands_a_student(
+    monkeypatch: pytest.MonkeyPatch,
+    launch_driver_in: Any,
+    provisioning_contract: Any,
+    launch_ground: Any,
+    web_identity: Any,
+    enrol: Any,
+    committed_rows: Any,
+) -> None:
+    """The start edge's inclusive side: the day they added is an enrolled day.
+
+    The mirror of `test_an_enrollment_whose_last_day_is_today_still_lands_a_student`
+    at the other end of the window. Work order D3 makes the predicate
+    `started_on <= :today AND (ended_on IS NULL OR ended_on >= :today)` — inclusive
+    at both ends, ADR 0020's `'[]'` convention — so a person whose enrollment begins
+    today is enrolled today, and §3.1 shows them this week's survey rather than
+    making them wait until tomorrow.
+
+    **The mutation this kills**: `started_on < :today`. One character, and it takes
+    the first day of every section away from everybody who was added on it — which
+    on a Monday-start section is the whole first week's cohort, and which no other
+    test in this module sees. Its pair,
+    `test_an_enrollment_that_starts_tomorrow_does_not_land_a_student` below, seeds
+    one day later and must **not** land; between them the edge is pinned from both
+    sides.
+
+    **Added after the mutation battery found the gap.** The three boundary tests
+    that were here seeded start-side windows thirty days wide, so `<=` → `<` was
+    reachable only incidentally, through the timezone test's one-day window — a
+    test whose subject is which *calendar* the day is read in, not which side of
+    the edge is inclusive. Two rules were resting on one assertion, and the one
+    that would have reported this failure was about something else
+    (`docs/MISTAKES.md` entry 3, frozen).
+    """
+    zone = A_STATED_TIMEZONE
+    today = today_in(zone)
+
+    response, _ = drive_a_student_launch_over(
+        monkeypatch,
+        launch_driver_in,
+        provisioning_contract,
+        launch_ground,
+        web_identity,
+        enrol,
+        committed_rows,
+        zone=zone,
+        started_on=today,
+        ended_on=None,
+    )
+
+    landed_on(
+        response, STUDENT_ROUTE, f"a launch by somebody whose enrollment begins today ({today})"
+    )
+
+
 def test_an_enrollment_that_starts_tomorrow_does_not_land_a_student(
     monkeypatch: pytest.MonkeyPatch,
     launch_driver_in: Any,
@@ -1052,7 +1107,7 @@ def test_an_enrollment_that_starts_tomorrow_does_not_land_a_student(
     landing_contract: Any,
     door_contract: Any,
 ) -> None:
-    """The other edge of the same window, which the two tests above cannot see.
+    """The other edge of the same window, which the two ended-on tests cannot see.
 
     A window has two ends and a resolver that checked only one is right about half
     the boundary. `started_on > today` is a person enrolled in a section that has
@@ -1060,7 +1115,12 @@ def test_an_enrollment_that_starts_tomorrow_does_not_land_a_student(
     open survey per section they are *in*.
 
     **The mutation this kills**: dropping the `started_on <= :today` clause, which
-    leaves every future enrollment live and passes both tests above.
+    leaves every future enrollment live and passes both ended-on tests above.
+
+    **Its pair is the test immediately above**, seeded one day earlier, which must
+    land. Neither is worth much alone: this one is equally satisfied by a resolver
+    that has stopped landing students at all, and that one by a resolver that
+    ignores `started_on` entirely.
     """
     zone = A_STATED_TIMEZONE
     today = today_in(zone)
@@ -1106,8 +1166,15 @@ def test_the_enrollment_boundary_is_measured_in_the_institutions_day_and_not_in_
 
     **The mutation this kills**: `datetime.now(UTC).date()`, `date.today()`, or
     `CURRENT_DATE` in the enrollment predicate — three spellings of the same
-    defect, none of which any of the three boundary tests above can see, because
-    they seed windows thirty days wide on one side.
+    defect, none of which any of the four boundary tests above can see, because
+    each of those seeds a window thirty days wide on one side.
+
+    **What it must not be relied on for.** Its window is one day wide, so it also
+    happens to sit on both edges at once and would incidentally catch `<=` → `<`
+    or `>=` → `>`. The mutation battery found the suite resting on that: the start
+    edge had no inclusive-side test of its own and this one was covering for it.
+    Each edge is now pinned by a test whose subject *is* that edge, and this one is
+    left to say the one thing only it can — whose calendar the day is read in.
 
     **The zone is chosen at run time from two that bracket the clock**, so this
     poses its question at every hour rather than only in the few where a

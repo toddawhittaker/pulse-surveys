@@ -82,6 +82,19 @@ STUDENT_LANDING = "STUDENT"
 # `resolve_landing`.
 CHOSEN_LANDING_PARAMETERS = {"roles", "enrolled_today", "door"}
 
+# The pages whose own docstrings claim they take nothing, by the names the work
+# orders settle: E1-13's `no_access` (D5, "takes no argument (same security
+# property as `cancelled_page`), names nobody, repeats nothing from any token"),
+# E1-09's `cancelled_page` and E1-12's `no_account_page`. All three are reached by
+# somebody who authenticated correctly, and none of them has anything a caller
+# could legitimately need to say.
+#
+# **`refusal_page` is deliberately absent.** It takes a `reason` — it is the 4xx a
+# door answers when it cannot accept a token, and naming which check refused is
+# its job — so a blanket rule over every page in the module would be wrong about
+# it. What is swept here is the set that claims the property, not the module.
+PAGES_BUILT_ONLY_FROM_CONSTANTS = ("no_access", "cancelled_page", "no_account_page")
+
 # A value no `AssignmentRole` is, used for the fail-closed pair. The work order:
 # "A ninth `AssignmentRole` member absent from this mapping contributes **no**
 # landing (skipped, fail closed) — same shape as `_OWN_GRANT_ROOT` and ADR 0026's
@@ -660,8 +673,9 @@ def test_the_lis_vocabulary_is_reachable_from_the_launch_module(landing_contract
 # ---------------------------------------------------------------------------
 
 
-def test_the_no_access_page_takes_no_argument(
-    landing_contract: Any, configured_env: dict[str, str]
+@pytest.mark.parametrize("page_name", PAGES_BUILT_ONLY_FROM_CONSTANTS)
+def test_a_page_built_only_from_constants_takes_no_parameter_at_all(
+    landing_contract: Any, configured_env: dict[str, str], page_name: str
 ) -> None:
     """D5's security property, as a signature: the page cannot repeat anything it was handed.
 
@@ -672,9 +686,32 @@ def test_the_no_access_page_takes_no_argument(
     key_set_address_the_tool_could_not_reach` and E1-09's error-branch tests are
     the record of what an echoing page costs.
 
-    **Dies if the page grows a `reason` parameter** — which is precisely the shape
-    it replaces: `landing_with_session` loses its `no_role_reason`, and a page that
-    took one back would be that parameter under another name.
+    **Dies if any of these three pages grows a parameter of any kind** — required,
+    defaulted, keyword-only, `*args` or `**kwargs`. That is the whole rule and it
+    is now the whole assertion.
+
+    **The mutation battery killed an earlier version of this test, and the reason
+    is worth keeping.** It read "Dies if the page grows a `reason` parameter" and
+    then filtered the signature to parameters with no default, so
+    `def no_access(reason: str = "")` — a defaulted, caller-chosen echo string,
+    which is *precisely* the surface this rule exists to forbid — survived 26 of
+    26 runs. A default does not make a parameter safe; it makes it optional, and
+    every caller that wants to pass something still can. That gap between what a
+    docstring claimed and what its assertion reached is `docs/MISTAKES.md` entry 3
+    (frozen), and the fix is the one that entry asks for: make the claim and the
+    reach identical. `parameters` is compared empty, with nothing filtered out of
+    it at all.
+
+    **Three pages, not one, and `refusal_page` is deliberately not among them.**
+    That page takes a `reason` — it is the 4xx a door answers when it cannot
+    accept a token, and it says which check refused — so a blanket rule over every
+    page in the module would be wrong about it. What these three share is a
+    docstring that claims to take nothing: E1-13's `no_access`, E1-09's
+    `cancelled_page` and E1-12's `no_account_page` are all reached by people who
+    authenticated correctly, and none of them has anything a caller could
+    legitimately need to say. A page named here whose spelling has moved is a
+    one-line change to `PAGES_BUILT_ONLY_FROM_CONSTANTS` above; parametrized so
+    that a rename reds exactly one case and the other two go on asserting.
 
     `configured_env` is depended on and not used: `app.api.deps` is an application
     module and anything it imports may build a `Settings` (`docs/MISTAKES.md`
@@ -688,26 +725,32 @@ def test_the_no_access_page_takes_no_argument(
             "pages there — the module whose docstring already describes them."
         )
 
-    page = getattr(module, landing_contract.no_access_function, None)
+    page = getattr(module, page_name, None)
     assert callable(page), (
-        f"`{landing_contract.deps_module}` exposes no callable "
-        f"`{landing_contract.no_access_function}`; it exposes "
-        f"{sorted(n for n in vars(module) if not n.startswith('_'))}. E1-13 replaces both doors' "
-        "'no role this tool has a view for' refusals with one calm page, and this is it."
+        f"`{landing_contract.deps_module}` exposes no callable `{page_name}`; it exposes "
+        f"{sorted(n for n in vars(module) if not n.startswith('_'))}. E1-13 gathers the door pages "
+        "into that module and adds the calm no-access page to them."
     )
 
-    required = [
-        parameter.name
+    takes = [
+        f"{parameter.name}={parameter.default!r}"
+        if parameter.default is not parameter.empty
+        else parameter.name
         for parameter in inspect.signature(page).parameters.values()
-        if parameter.default is parameter.empty
-        and parameter.kind not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
     ]
 
-    assert not required, (
-        f"`{landing_contract.no_access_function}` requires {required}. The page is built from "
-        "constants and takes nothing, which is what makes it impossible for it to repeat a claim, "
-        "a role name or anything else a caller chose — the same property `cancelled_page` has, and "
-        "for the same reason."
+    assert not takes, (
+        f"`{page_name}` takes {takes}. This page is built from constants and takes nothing, which "
+        "is the whole of what makes it impossible for it to repeat a claim, a role name, an error "
+        "description or anything else a caller chose.\n\n"
+        '**A default does not make a parameter safe.** `def no_access(reason: str = "")` reads '
+        "as harmless and is the exact surface this rule forbids: every caller that wants to pass "
+        "something still can, and the page that renders it is one an unauthenticated stranger can "
+        "provoke. E1-13 takes `no_role_reason` *off* `landing_with_session` for this reason, and a "
+        "parameter here would be that one back under another name.\n\n"
+        f"`refusal_page` legitimately takes a `reason` and is deliberately not in "
+        f"{list(PAGES_BUILT_ONLY_FROM_CONSTANTS)}. If this page has genuinely joined it, that is a "
+        "decision to make in the pull request rather than a name to add here quietly."
     )
 
 
