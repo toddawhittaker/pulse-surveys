@@ -61,10 +61,11 @@ afterwards.
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -76,7 +77,7 @@ from sqlalchemy import insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.config import Settings
+from app.config import Settings, url_host
 from app.lti.launch import INSTRUCTOR_ROLE_URI, stated_roles
 from app.lti.registration import NoSigningKeyError, OrmToolConf
 from app.models.identity import AssignmentRole, Enrollment, User
@@ -232,6 +233,7 @@ def sync_section(
     section_id: UUID,
     http: requests.Session | None = None,
     settings: Settings | None = None,
+    resolve: Callable[[str], Sequence[str]] | None = None,
 ) -> None:
     """Pull one section's roster and write what it says. The whole of the sync.
 
@@ -256,6 +258,19 @@ def sync_section(
     next door, and F1 asks for the same discipline here: a URL the walk is about to
     fetch is judged by the same rules the stored address was, and those rules take
     the environment name.
+
+    `resolve` is the resolution seam rule 5 needs (ADR 0101), handed on to the
+    address rules and defaulted by them to a real name lookup. It is a parameter
+    for the reason `http` is: no test in this repository may reach a name server,
+    because a hostname resolves differently on a developer's machine and in CI —
+    and a rule measured against a resolver is measuring the machine.
+
+    **The connection goes to the address that was judged.** Each host the walk
+    judges is pinned to the first address it resolved to, and
+    `PinnedResolutionAdapter` below sends the GET there under the platform's own
+    hostname. Judging a name and then letting the transport resolve it again is a
+    check of one thing and a request to another — the same shape as a redirect,
+    one layer down.
     """
     settings = Settings() if settings is None else settings
     section = session.get(Section, section_id)
@@ -273,11 +288,23 @@ def sync_section(
         )
         return
 
+    # One pin table per sync, shared by reference with the adapter that reads it:
+    # the walk fills it in as it judges each host, and the next request out of the
+    # transport is already pinned.
+    pins: dict[str, str] = {}
+    transport = _pinned(_no_redirects(http), pins)
     platform = _platform_for(session, section)
-    connector = ServiceConnector(
-        _registration_for(session, platform), requests_session=_no_redirects(http)
+    connector = ServiceConnector(_registration_for(session, platform), requests_session=transport)
+    walked = _walked_roster(
+        session,
+        section_id,
+        address,
+        connector,
+        settings.environment,
+        resolve=resolve,
+        exempt_host=url_host(address),
+        pins=pins,
     )
-    walked = _walked_roster(session, section_id, address, connector, settings.environment)
     if walked is None:
         return
     members, complete = walked
@@ -303,6 +330,108 @@ def _no_redirects(http: requests.Session | None) -> requests.Session:
     session = requests.Session() if http is None else http
     session.max_redirects = 0
     return session
+
+
+class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
+    """Send a request for a judged host to the address that was judged (ADR 0101).
+
+    Rule 5 resolves a fetched URL's host and refuses every returned address that
+    is not one this container may reach. Between that answer and the GET the name
+    can be resolved again — by the transport, milliseconds later — and answer
+    something else: the platform's own DNS serves a public address while the walk
+    is judging and a private one while the page is being fetched, and every rule
+    has been satisfied about an address the packet never went to. That is the
+    redirect bypass one layer down, and this adapter is what closes it.
+
+    **What it does to a pinned request**, and nothing else: the URL's host becomes
+    the pinned address, and the `Host` header states the original hostname (with
+    its explicit port, where the URL carried one) so the platform serves the right
+    virtual host. **A host with no pin passes through untouched** — the token
+    endpoint, a development stack's own exempt roster host, and the in-process
+    transport a test hands in are all unpinned, and an adapter that rewrote a host
+    it holds no pin for would send a request to an address nothing judged.
+
+    **TLS is verified against the name, not the address.** A request addressed to
+    an IP literal would otherwise have its certificate checked against the
+    address, which no LMS's certificate names — a pin that dropped the name would
+    turn every real deployment's sync into a TLS failure. urllib3 takes the name
+    as `server_hostname` (SNI) and `assert_hostname` on the connection pool, and
+    `requests` passes pool keywords through `HTTPAdapter.init_poolmanager`, so one
+    pinned transport is built per hostname and kept. An inner adapter that is not
+    a `requests` HTTP adapter opens no socket and has no TLS to arrange — that is
+    the suite's in-process wire — and is delegated to as it is.
+
+    It resolves nothing itself. The pins are the walk's, filled in by the address
+    rules' own answer, so there is exactly one resolution per host per sync and
+    the adapter cannot disagree with what was judged.
+    """
+
+    def __init__(self, inner: requests.adapters.BaseAdapter, pins: Mapping[str, str]) -> None:
+        self.inner = inner
+        self.pins = pins
+        self._pinned_transports: dict[str, requests.adapters.HTTPAdapter] = {}
+
+    def send(self, request: Any, **kwargs: Any) -> Any:
+        split = urlsplit(str(request.url))
+        hostname = (split.hostname or "").lower()
+        address = self.pins.get(hostname)
+        if address is None:
+            return self.inner.send(request, **kwargs)
+
+        authority = split.netloc.split("@")[-1]
+        request.url = urlunsplit(
+            (split.scheme, _netloc_at(address, split.port), split.path, split.query, split.fragment)
+        )
+        request.headers["Host"] = authority
+        return self._transport_for(split.scheme, hostname).send(request, **kwargs)
+
+    def _transport_for(self, scheme: str, hostname: str) -> requests.adapters.BaseAdapter:
+        """The transport a pinned request travels over — see the class docstring."""
+        if scheme != "https" or not isinstance(self.inner, requests.adapters.HTTPAdapter):
+            return self.inner
+        held = self._pinned_transports.get(hostname)
+        if held is None:
+            held = requests.adapters.HTTPAdapter()
+            held.init_poolmanager(
+                requests.adapters.DEFAULT_POOLSIZE,
+                requests.adapters.DEFAULT_POOLSIZE,
+                server_hostname=hostname,
+                assert_hostname=hostname,
+            )
+            self._pinned_transports[hostname] = held
+        return held
+
+    def close(self) -> None:
+        for held in self._pinned_transports.values():
+            held.close()
+        self.inner.close()
+
+
+def _netloc_at(address: str, port: int | None) -> str:
+    """One resolved address as a URL authority, bracketed where IPv6 needs it."""
+    host = f"[{address}]" if ":" in address else address
+    return host if port is None else f"{host}:{port}"
+
+
+def _pinned(http: requests.Session, pins: Mapping[str, str]) -> requests.Session:
+    """Mount `PinnedResolutionAdapter` over whatever this session already answers with.
+
+    Both schemes, because a walk that judged an `http` page must reach the address
+    it judged too. The adapter it wraps is the one the session holds, which in a
+    test is the in-process wire and in production is `requests`' own — so a caller
+    that handed in a transport keeps it.
+
+    A session already carrying one of these is re-wrapped around its *inner*
+    adapter rather than around the whole thing: `sync_all_rosters` hands the same
+    session to every section in the institution, and a wrapper per section would
+    be a chain hundreds deep by the end of an hourly run, each link holding a pin
+    table belonging to a section already synced.
+    """
+    for scheme in ("https://", "http://"):
+        held = http.get_adapter(scheme)
+        inner = held.inner if isinstance(held, PinnedResolutionAdapter) else held
+        http.mount(scheme, PinnedResolutionAdapter(inner, pins))
+    return http
 
 
 def sync_all_rosters(
@@ -507,6 +636,10 @@ def _walked_roster(
     address: str,
     connector: ServiceConnector,
     environment: str,
+    *,
+    resolve: Callable[[str], Sequence[str]] | None,
+    exempt_host: str | None,
+    pins: dict[str, str],
 ) -> tuple[list[Mapping[str, Any]], bool] | None:
     """Every member of the container at `address`, following `rel="next"` to the end.
 
@@ -535,6 +668,20 @@ def _walked_roster(
     refused URL in the log line only. The walk stops there and keeps what earlier,
     validly-fetched pages already read — so a class that synced correctly up to a
     hostile second page is not thrown away. ADR 0096 records it.
+
+    **The judgment resolves the host, and its answer is what the connection is
+    made to** (ADR 0101). Rule 5 refuses a page whose host resolves to an address
+    this container may not reach — the residual finding E1-11 recorded, an
+    internal service holding a valid certificate on a private address, which every
+    rule that reads a spelling passes. The first address a host resolves to is
+    written into `pins`, and `PinnedResolutionAdapter` sends the GET there under
+    the platform's own hostname; a host already pinned is judged again on a later
+    page and never re-pinned, so a name that starts answering a private address
+    stops the walk while a name that merely answers a different public address
+    cannot move the connection. In development the section's own stored host is
+    exempt and is not resolved at all — `exempt_host` is that address's host —
+    because it is the operator's own and the hourly walk would otherwise pay a
+    lookup per page of every section.
 
     **A token or transport failure answers `None`**, and the difference from a
     validation refusal is a section's whole enrollment. Those leave no usable prefix:
@@ -609,8 +756,12 @@ def _walked_roster(
             )
             return None
         try:
-            refuse_invalid_fetched_address(
-                environment, column=ROSTER_SERVICE_ADDRESS_COLUMN, address=following
+            resolved = refuse_invalid_fetched_address(
+                environment,
+                column=ROSTER_SERVICE_ADDRESS_COLUMN,
+                address=following,
+                resolve=resolve,
+                development_exempt_host=exempt_host,
             )
         except RegistrationAddressError as refusal:
             # Against the section's stored address, never the hostile one: a URL the
@@ -626,6 +777,14 @@ def _walked_roster(
                 len(members),
             )
             return members, False
+        # The first resolution of a host is the one the connection is made to, and
+        # a later one never moves it. A page judged again mid-walk is judged again
+        # — a name that has started answering a private address stops the walk —
+        # but the address the transport dials was fixed the first time this host
+        # passed, which is the whole of the pin.
+        judged_host = url_host(following)
+        if resolved and judged_host is not None and judged_host not in pins:
+            pins[judged_host] = resolved[0]
         walked.add(following)
         called = following
         try:
