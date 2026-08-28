@@ -114,3 +114,33 @@ Verified, on the tree at the records commit:
   mock-lms/app`, `mypy mock-idp/app`: all exit 0.
 - No migration: a mapper event is not DDL, and no column, constraint or index
   moved.
+
+## Attempt 5 — the battery's survivor, and the tree it was left in
+
+The verifier's mutation battery ran against the four behaviour commits and one
+mutation survived: `development_exempt_host=exempt_host` at the walk's per-URL
+judgment, mutated to `None`. Every test stayed green, because the wire tests that
+drive a hostile hop run under `deployment_settings`, where that argument is
+ignored — and the one development test asserted only that something was *not*
+resolved, which is even more true when nothing is judged at all. The test author
+closed the pair in `ec0292e` with two tests on the development side: a hop that
+resolves privately is refused **and the resolver is proved to have been asked
+about the hostile host**, which is the fingerprint of rule 5 running; and a hop
+that resolves publicly is walked, so the refusal cannot be satisfied by a stack
+that refuses every second host.
+
+**The battery left the mutation in the working tree.** `roster_sync.py` still
+carried `development_exempt_host=None`, uncommitted, over the top of the correct
+committed code — the hazard the memory note about mutating a shared checkout
+describes. Restored with `git restore` (the correct version is committed at
+`abb845e`, so nothing of mine was at risk in that restore), and verified: the
+module is **14 passed**, exit 0, with no code change needed.
+
+Then the kill was measured rather than assumed (`docs/MISTAKES.md` entries 9 and
+16): the mutation re-applied by hand, the module run again — **2 failed, 12
+passed**, and the two failures are exactly the two new tests — and the file
+restored again. `git status` clean on `backend/`, `scripts/` and `docs/`
+afterwards.
+
+No code change was owed by this round; the tests were always about a case the
+implementation already handled and nothing asserted.
