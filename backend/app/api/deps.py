@@ -351,7 +351,7 @@ PAGE = """<!doctype html>
 </style>
 </head>
 <body>
-<main data-testid="{testid}">
+<main data-testid="{testid}"{reason_attr}>
 <h1>{heading}</h1>
 <svg class="pulse" width="120" height="8" viewBox="0 0 120 8" aria-hidden="true"
      fill="none" stroke="var(--mist)" stroke-width="2.5" stroke-linecap="round">
@@ -364,7 +364,21 @@ PAGE = """<!doctype html>
 """
 
 
-def refusal_page(reason: str) -> str:
+def _reason_attribute(guard: str | None) -> str:
+    """The ` data-reason="<guard>"` attribute for a refusal, or `""` when none is named.
+
+    Rendered onto the refusal container beside `data-testid` so a browser-side
+    refusal spec can name which guard fired without reading the prose (E1 cleanup
+    Batch B item 2; ADR 0103). **When `guard` is `None` the attribute is omitted
+    entirely** — never `data-reason=""` — because the door suites assert the page
+    carries *exactly one* marker, which an empty attribute would defeat.
+    """
+    if guard is None:
+        return ""
+    return f' data-reason="{escape(guard, quote=True)}"'
+
+
+def refusal_page(reason: str, *, guard: str | None = None) -> str:
     """The page a refused launch or a refused web login gets, in the same layout.
 
     **It carries no landing testid**, and that is a property both door suites
@@ -377,9 +391,15 @@ def refusal_page(reason: str) -> str:
     a constant today, and the escaping is written for the day somebody puts a
     section title or a person's name in one of these slots — so it is already
     where it has to be rather than something a reviewer has to notice is missing.
+
+    `guard` is the refusing guard's own class name — the machine vocabulary the
+    refusal exceptions already define — and reaches the page as a `data-reason`
+    attribute (ADR 0103). It is escaped for the same day `reason` is, though a
+    guard name is a Python class name today.
     """
     return PAGE.format(
         testid=escape(REFUSAL_TESTID, quote=True),
+        reason_attr=_reason_attribute(guard),
         heading=escape(REFUSAL_HEADING),
         empty_state=escape(reason),
     )
@@ -401,6 +421,7 @@ def cancelled_page() -> str:
     """
     return PAGE.format(
         testid=escape(CANCELLED_TESTID, quote=True),
+        reason_attr="",
         heading=escape(CANCELLED_HEADING),
         empty_state=escape(CANCELLED_MESSAGE),
     )
@@ -427,6 +448,7 @@ def no_account_page() -> str:
     """
     return PAGE.format(
         testid=escape(NO_ACCOUNT_TESTID, quote=True),
+        reason_attr="",
         heading=escape(NO_ACCOUNT_HEADING),
         empty_state=escape(NO_ACCOUNT_MESSAGE),
     )
@@ -448,14 +470,19 @@ def no_access_page() -> str:
     """
     return PAGE.format(
         testid=escape(NO_ACCESS_TESTID, quote=True),
+        reason_attr="",
         heading=escape(NO_ACCESS_HEADING),
         empty_state=escape(NO_ACCESS_MESSAGE),
     )
 
 
-def refused(reason: str) -> HTMLResponse:
-    """A 4xx page carrying the reason and no landing view."""
-    return HTMLResponse(refusal_page(reason), status_code=REFUSED)
+def refused(reason: str, *, guard: str | None = None) -> HTMLResponse:
+    """A 4xx page carrying the reason and no landing view.
+
+    `guard` is the refusing guard's class name; when given it reaches the page as
+    a `data-reason` marker (ADR 0103), and when omitted the page carries none.
+    """
+    return HTMLResponse(refusal_page(reason, guard=guard), status_code=REFUSED)
 
 
 def no_access() -> HTMLResponse:
