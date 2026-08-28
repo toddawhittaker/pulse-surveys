@@ -38,8 +38,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
+from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
@@ -47,6 +50,8 @@ from starlette.types import Scope
 from app import __version__
 from app.api import auth, dev, health, lti
 from app.config import Settings, is_development
+from app.db import SessionLocal
+from app.lti.registration import launcher_origins
 
 # What the tool waits for any single outbound request. A per-request timeout
 # beats it where a caller sets one; this is the floor, and it exists so that a
@@ -85,6 +90,75 @@ FRONTEND_DIST_VARIABLE = "FRONTEND_DIST"
 SPA_MOUNT = "/app"
 SPA_ENTRY_DOCUMENT = "index.html"
 DEFAULT_FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+# The security response headers the factory attaches to every response (E1-04
+# item 2, ADR 0102). Why each one, and why a middleware rather than a dependency,
+# is in `security_headers` below.
+CONTENT_TYPE_OPTIONS = "nosniff"
+REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+# The Content-Security-Policy carried before the framing directive. `default-src
+# 'self'` is the floor every other directive narrows from; `script-src 'self'`
+# refuses inline script, which is the half a careless CSP silently drops. The
+# built bundle loads an external module script and an external stylesheet and
+# injects neither inline — so no `'unsafe-inline'` is needed anywhere, and the
+# same-origin stylesheet is covered by `default-src 'self'` with no `style-src`
+# of its own. ADR 0102 records the `npm run build` that checked this.
+BASE_CSP_DIRECTIVES = ("default-src 'self'", "script-src 'self'")
+
+# The `frame-ancestors` source that admits the app's own framed documents. The
+# registered platforms' origins are added to it per request; `'self'` is the one
+# constant, because the app frames its own SPA.
+SELF_FRAME_ANCESTOR = "'self'"
+
+# The header a browser reads to decide whether a response may be framed lives
+# inside the CSP, and only a document can be framed — so `frame-ancestors` is
+# added only to `text/html` responses, keeping the per-request registration read
+# off `/healthz` and every JSON body (ADR 0102).
+FRAMED_CONTENT_TYPE = "text/html"
+
+
+def content_security_policy(frame_ancestors: list[str] | None) -> str:
+    """The CSP header value, with `frame-ancestors` appended when one is given.
+
+    `frame_ancestors` is `None` for the responses a browser never frames — the
+    JSON the API answers, and the plain 404 no route produced — so those carry the
+    base policy and cost no database read. A document passes the list, already
+    including `'self'`, and it becomes the navigation directive naming who may
+    frame the app.
+    """
+    directives = list(BASE_CSP_DIRECTIVES)
+    if frame_ancestors is not None:
+        directives.append(" ".join(["frame-ancestors", *frame_ancestors]))
+    return "; ".join(directives)
+
+
+def framing_ancestors() -> list[str]:
+    """`'self'` plus the origin of every registered platform's authorization endpoint.
+
+    Read from `lti_platform` on every call through the platform-config module's
+    `launcher_origins`, the same derivation the developer console links from — so
+    the framing policy is a property of the registration table and tracks a
+    platform registered after the process started, rather than a set frozen at
+    startup (ADR 0102). The middleware runs outside the request-scoped session a
+    route is handed, so it opens its own short read-only one.
+
+    **Serving a document does not depend on a reachable database.** The single-page
+    application is a static shell that then calls the API; making the shell itself
+    fail to load when the registration table cannot be read would be worse
+    availability than the outage already is, and the mount is served without a
+    database in `create_app()`'s own unit tests. So a read that cannot reach the
+    table degrades to `'self'` alone — the app's own frame, and **never wider**: it
+    is fail-closed, the LMS iframe simply does not load until the database is back.
+    An empty table is a normal read and answers `'self'` the same way; only an
+    error is caught here, and the integration suite asserts the real set against a
+    real database, so a *wrong* read is caught loudly rather than degraded.
+    """
+    try:
+        with SessionLocal() as session:
+            return [SELF_FRAME_ANCESTOR, *launcher_origins(session)]
+    except SQLAlchemyError:
+        return [SELF_FRAME_ANCESTOR]
 
 
 class SinglePageApp(StaticFiles):
@@ -240,5 +314,33 @@ def create_app() -> FastAPI:
     dist = frontend_dist()
     if dist.is_dir():
         app.mount(SPA_MOUNT, SinglePageApp(directory=dist, html=True), name="spa")
+
+    # The security response headers, added last so the middleware wraps the whole
+    # application — the API routers, the SPA mount and the refusal a route never
+    # saw alike. A header set added by a router dependency would reach the API and
+    # neither the static mount nor a 404 Starlette produced; only a middleware
+    # over the whole app carries the set onto every response (E1-04 item 2).
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Attach the static header set to every response, and framing to documents.
+
+        The static headers — `X-Content-Type-Options`, `Referrer-Policy`, and the
+        base CSP — cost no database read and go on everything. `frame-ancestors`
+        is the CSP's navigation directive and only a document can be framed, so it
+        is added only to the `text/html` responses a browser actually holds in a
+        frame; that is what keeps the per-request registration read off `/healthz`
+        and every JSON body (ADR 0102). The read is synchronous SQLAlchemy, so it
+        runs in a worker thread rather than on the event loop.
+        """
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = CONTENT_TYPE_OPTIONS
+        response.headers["Referrer-Policy"] = REFERRER_POLICY
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith(FRAMED_CONTENT_TYPE):
+            ancestors: list[str] | None = await run_in_threadpool(framing_ancestors)
+        else:
+            ancestors = None
+        response.headers["Content-Security-Policy"] = content_security_policy(ancestors)
+        return response
 
     return app
