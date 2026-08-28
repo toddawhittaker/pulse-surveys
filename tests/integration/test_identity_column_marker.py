@@ -116,10 +116,26 @@ E0-10 both already put it here. The consequence to keep in view: no implementati
 change can move these two assertions, so **a mutation of this module is the only
 way to check them**, and both were mutated in that dispute before being believed.
 
+**Batch A closes the two things E1-01 deferred, and both are at the foot of the
+file.** The first is a hole in the catalog half rather than a new rule: Postgres
+drops the `refobjsubid = 0` whole-row dependency as soon as the same view also
+names a column of that table, so a whole-row read written as a join —
+`SELECT u.id, to_jsonb(u) FROM enrollment e JOIN "user" u ON u.id = e.user_id` —
+was recorded at column grain only and neither whole-row rule here could see it.
+`decompiled_whole_row_reads` asks the same question of `pg_get_viewdef` and feeds
+the answer into both, so the two guards now report the join form and the plain
+one alike. The second is a *report* rather than a guard: the sweeps above are all
+phrased over names and markers, so a table the walk reaches whose columns none of
+them recognises is passed over in silence, which is how `web_login_subject` would
+have shipped unmarked. `unclassified_reached_tables` names such a table, and
+`REACHED_TABLES_THAT_CARRY_NOTHING` is where the five that carry nothing today are
+recorded with the reason a reviewer needs when one of them next changes.
+
 What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
 rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
 """
 
+import re
 from importlib import import_module
 from typing import Any
 
@@ -307,6 +323,15 @@ VIEW_COLUMN_DEPENDENCIES = """
 # them too, and both halves were repaired in one round because one finding
 # defeated both.
 #
+# **This row is conditional, and Batch A is what that cost.** Postgres records the
+# whole-row dependency only while the view names *no* column of the same table:
+# add one — a join condition is enough — and the `refobjsubid = 0` row is dropped
+# and the read is recorded at column grain, where it looks like an ordinary key
+# read. So this query is silent on `SELECT u.id, to_jsonb(u) FROM enrollment e
+# JOIN public."user" u ON u.id = e.user_id`, which carries every column `user`
+# has. `VIEW_DEFINITIONS` below is the second reading that closes it, and both
+# whole-row rules take the union of the two.
+#
 # Column names are deliberately absent from this query: at this grain there are
 # none to report, and the assertion names the columns the *table* carries, which
 # is what a whole-row reference reads.
@@ -325,6 +350,56 @@ VIEW_TABLE_DEPENDENCIES = """
       AND c.oid <> v.oid
     ORDER BY 1, 2
 """
+
+# The stored definition of every view, as Postgres decompiles it back out of the
+# rewrite rule. **This is not the author's text and must not be read as if it
+# were**: the parser has already resolved the names, expanded a `SELECT *` into
+# its columns, dropped the schema qualification the search path makes redundant,
+# and normalised the whitespace. That is exactly what makes it usable here — the
+# four-mechanism grammar in `test_identity_separated_views.py` exists because a
+# human can spell a whole-row read four ways, and this text has one spelling.
+#
+# `pg_get_viewdef(oid, true)` is the pretty-printed form, which puts each clause
+# of the `FROM` on its own line; nothing below depends on the layout, only on the
+# tokens.
+VIEW_DEFINITIONS = """
+    SELECT c.relname AS view_name, pg_get_viewdef(c.oid, true) AS definition
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('v', 'm')
+    ORDER BY 1
+"""
+
+# Words that may follow a relation name where an alias would otherwise stand, so
+# that `FROM public."user" WHERE …` does not bind an alias called `where` and then
+# go looking for `where.*`. Deliberately a stop list rather than a full grammar:
+# the text being read is decompiled, so the shapes are Postgres's own and few.
+CLAUSE_KEYWORDS = (
+    "on",
+    "using",
+    "where",
+    "group",
+    "order",
+    "having",
+    "limit",
+    "offset",
+    "join",
+    "inner",
+    "left",
+    "right",
+    "full",
+    "cross",
+    "natural",
+    "lateral",
+    "union",
+    "intersect",
+    "except",
+    "window",
+    "fetch",
+    "for",
+    "returning",
+)
 
 # The objects the whole-row self-test plants and rolls back. Named for the ticket
 # so that one surviving a fixture change is traceable to it.
@@ -856,6 +931,98 @@ def public_views(connection: Any) -> list[str]:
     )
 
 
+def view_definitions(connection: Any) -> dict[str, str]:
+    """Every view in `public`, and the definition Postgres decompiles it back to."""
+    return {
+        view: definition or "" for view, definition in connection.execute(text(VIEW_DEFINITIONS))
+    }
+
+
+def relation_tokens_bound_to(definition: str, table: str) -> set[str]:
+    """Every token a decompiled definition can refer to `table`'s rows by.
+
+    The table's own name, and every alias a `FROM` or a `JOIN` binds to it.
+    Postgres emits an alias wherever the query had one and refers to the relation
+    by name where it had none, so those two together are the whole vocabulary a
+    reference to that table's row can be written in — in *this* text. That is a
+    much smaller claim than the one `relation_bindings` in
+    `test_identity_separated_views.py` has to make, and the reason the two are
+    not one function: that one reads what a human wrote, where a schema
+    qualification may or may not be present, a keyword may be cased any way, and
+    the same relation may be named twice; this one reads what Postgres wrote.
+
+    **What it does not see, stated rather than left to be found**
+    (`docs/MISTAKES.md` entry 14): a relation bound by an old-style comma join
+    (`FROM enrollment e, "user" u`), which this deliberately does not read, and a
+    relation bound by a `WITH` clause. The table's own name is a token whatever
+    happens, so the unaliased spellings stay covered; what is missed is the alias.
+    Both shapes are over-reported by `identity_rows_read_whole` in
+    `test_identity_separated_views.py`, which reads the `views_sql/` file every
+    live view must ship through, so neither is an open path.
+
+    **And it is blind to scope, which over-reports rather than under-reports.** A
+    subquery may bind the same short alias to a different relation, and every
+    token here is searched for across the whole definition — so a view binding `u`
+    to `"user"` at the top level and `u` to something else inside a subquery that
+    takes a whole row is reported. That direction costs a human reading two lines
+    of a view definition; the other direction would cost the guard.
+    """
+    stop = "|".join(CLAUSE_KEYWORDS)
+    pattern = re.compile(
+        rf'(?:\bFROM\b|\bJOIN\b)\s+(?:"?\w+"?\s*\.\s*)?"?{re.escape(table)}"?(?!\w)'
+        rf'(?:\s+(?:AS\s+)?(?!(?:{stop})\b)"?(\w+)"?)?',
+        re.IGNORECASE,
+    )
+    return {table} | {found.group(1) for found in pattern.finditer(definition) if found.group(1)}
+
+
+def decompiled_whole_row_reads(connection: Any, tables: set[str]) -> set[tuple[str, str]]:
+    """Every `(view, table)` whose stored definition reads `table`'s row whole.
+
+    **The reading that closes the catalog's conditional blind spot**, which is
+    E1-01's first deferred item. `VIEW_TABLE_DEPENDENCIES` records a whole-row
+    reference at `refobjsubid = 0` only while the view names no column of the same
+    table; a join condition is a named column, so
+    `SELECT u.id, to_jsonb(u) FROM enrollment e JOIN public."user" u ON u.id =
+    e.user_id` is recorded as an ordinary read of `user.id` and the row it also
+    carries is recorded nowhere. Every column `user` has travels through that
+    view, `lms_user_id` among them.
+
+    **It matches `alias.*` and nothing else, and that narrowness is the decision.**
+    Postgres decompiles *every* whole-row form to that one spelling: `to_jsonb(u)`
+    comes back as `to_jsonb(u.*)`, a bare `SELECT u` as `u.*`, `TABLE public."user"`
+    as a `SELECT` over the expanded columns. The four-mechanism grammar in
+    `test_identity_separated_views.py` exists because a human writes whichever of
+    the four they like; this text is the parser's, so one pattern answers for all
+    of them. If a future Postgres decompiles a whole-row reference some other way,
+    the planted controls at the foot of this module go red rather than the guard
+    going quietly blind — which is why they plant the read and require it found,
+    rather than asserting an absence over the live schema alone.
+
+    **The token boundary is load-bearing in both directions**, and each is planted:
+    an alias `u` must not match `us.*` written by a second relation, and an alias
+    `r` must not match `ur.*`. Without the first the guard fires on correct SQL —
+    the direction that gets a guard weakened — and without the second it fires on
+    a whole-row read of a table nobody is guarding, which is the same thing one
+    step along.
+
+    **Its known false positive**, stated rather than discovered: a whole-row test
+    that projects nothing, `WHERE u.* IS NOT NULL`, is reported. It reads the row,
+    it is not a spelling anything in this repository writes, and a red on it is a
+    human look at a view that tests a person's row for existence — which is worth
+    having.
+    """
+    found: set[tuple[str, str]] = set()
+    for view, definition in view_definitions(connection).items():
+        for table in tables:
+            for token in relation_tokens_bound_to(definition, table):
+                whole = re.compile(rf'(?<![\w"])"?{re.escape(token)}"?\s*\.\s*\*', re.IGNORECASE)
+                if whole.search(definition):
+                    found.add((view, table))
+                    break
+    return found
+
+
 def column_grained_identity_reads(connection: Any) -> list[str]:
     """Every `view: table.column` where a view reads a column the marker names.
 
@@ -885,12 +1052,24 @@ def whole_row_identity_reads(connection: Any) -> list[str]:
     The table is required to carry a marked column, not to *be* an identity table
     by name: the marker is the enumeration this module exists to maintain, and a
     table that carries one is a table whose whole row carries one.
+
+    **Two readings since Batch A, and the second is here because the first is
+    conditional.** Postgres drops the `refobjsubid = 0` row as soon as the view
+    also names any column of the same table, so the join form of a whole-row read
+    is recorded at column grain only and the catalog query is silent on it.
+    `decompiled_whole_row_reads` asks the same question of `pg_get_viewdef`, and
+    what this reports is the union: a pair the catalog records and a pair only the
+    definition shows are one finding here, because they are one exposure.
     """
     tables = {table for table, _ in database_marked_columns(connection)}
-    return sorted(
-        f"{view}: {table}"
+    recorded = {
+        (view, table)
         for view, table in connection.execute(text(VIEW_TABLE_DEPENDENCIES))
         if table in tables
+    }
+    return sorted(
+        f"{view}: {table}"
+        for view, table in recorded | decompiled_whole_row_reads(connection, tables)
     )
 
 
@@ -927,10 +1106,13 @@ def test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names(
 
     **The mutation it exists to survive**: any of the four spellings — `to_jsonb`,
     `row_to_json`, a bare row reference, `TABLE public.user_identity` — added to a
-    view in the migrated database. **The near miss it tolerates**: a view reading a
-    named column of a marked table, which is the test above's subject and records
-    no dependency at this grain; and a view reading the whole row of a table that
-    carries no marked column, which is most of the schema.
+    view in the migrated database, and since Batch A any of them written as a join
+    that also names a column of the same table, which Postgres records at column
+    grain only. **The near miss it tolerates**: a view reading a named column of a
+    marked table, which is the test above's subject and produces neither a
+    whole-row dependency nor an `alias.*` in the decompiled definition; and a view
+    reading the whole row of a table that carries no marked column, which is most
+    of the schema.
     """
     with migrated_engine.connect() as connection:
         views = public_views(connection)
@@ -950,9 +1132,10 @@ def test_no_view_reads_a_whole_row_of_a_table_the_identity_marker_names(
 
     # **There is deliberately no "the query returned something" guard here**, and
     # that is the difference between this test and its column-grained sibling. On
-    # a healthy schema this query returns *nothing at all*: a view that reads named
-    # columns records column dependencies and no whole-table one, so an empty
-    # result is the correct state rather than a sweep that has gone blind.
+    # a healthy schema both readings return *nothing at all*: a view that reads
+    # named columns records column dependencies and no whole-table one, and its
+    # decompiled definition carries no `alias.*`, so an empty result is the correct
+    # state rather than a sweep that has gone blind.
     # Requiring a row would have been a red on the day this landed, for a reason
     # having nothing to do with any view.
     #
@@ -1290,12 +1473,27 @@ def person_table_rows_read_whole(connection: Any) -> dict[str, set[str]]:
     no column to name — that is what makes it invisible — and naming the table
     with a star is what tells a reader which of the two shapes they are looking
     at without them having to open the view.
+
+    **It reads the catalog and the decompiled definition, which is Batch A's half
+    of the same story.** The `refobjsubid = 0` row exists only while the view
+    names no column of that table, so the join form — every column of `user`
+    carried beside the key it joined on — was recorded at column grain and
+    reported by nothing. `decompiled_whole_row_reads` is the second reading and
+    the union is what this returns, so both spellings arrive here as `user.*` and
+    travel down the chain fold together. The scope does not move with it: this
+    still asks about the marked tables and the person tables, so a whole-row read
+    of `enrollment` stays silent whichever reading finds it, and the pair that
+    proves that is planted below.
     """
     tables = {table for table, _ in database_marked_columns(connection)} | set(PERSON_TABLES)
+    recorded = {
+        (view, table)
+        for view, table in connection.execute(text(VIEW_TABLE_DEPENDENCIES))
+        if table in tables
+    }
     found: dict[str, set[str]] = {}
-    for view, table in connection.execute(text(VIEW_TABLE_DEPENDENCIES)):
-        if table in tables:
-            found.setdefault(view, set()).add(f"{table}.*")
+    for view, table in recorded | decompiled_whole_row_reads(connection, tables):
+        found.setdefault(view, set()).add(f"{table}.*")
     return found
 
 
@@ -1415,6 +1613,15 @@ def test_no_view_reads_a_column_of_a_person_table_outside_the_join_keys(
     here rather than asserted separately, because a reader wants one answer to
     "what does this view reach" and the two grains are two spellings of one
     question.
+
+    **And since Batch A that second grain is read twice**, because the catalog's
+    answer to it is conditional: the `refobjsubid = 0` row survives only while the
+    view names no column of the same table, so the identical read written as a
+    join is recorded as an ordinary key read and nothing else.
+    `decompiled_whole_row_reads` reads `pg_get_viewdef` for the one spelling
+    Postgres decompiles every whole-row form to, and `person_table_rows_read_whole`
+    returns the union — so the join form arrives here as `user.*` exactly as the
+    plain form does, and travels the same chain.
 
     **And why it reaches through a chain.** `VIEW_COLUMN_DEPENDENCIES` is one hop:
     a view built on another view records its dependency against the intermediate
@@ -1774,23 +1981,28 @@ def test_a_whole_row_read_of_a_person_table_is_flagged_and_travels_down_the_chai
 
     **What this control proves is narrower than "the catalog covers whole-row
     reads", and the boundary is measured.** Postgres drops the `refobjsubid = 0`
-    row as soon as the same view also names a column of that table, so the catalog
-    half fires only on a view that touches **no** column of the person table —
-    which the planted probe here does not, and which is why it is planted that
-    way. Its join form,
+    row as soon as the same view also names a column of that table, so the
+    *catalog* half fires only on a view that touches **no** column of the person
+    table — which the planted probe here does not, and which is why it is planted
+    that way. Its join form,
     `SELECT to_jsonb(u) … FROM public.enrollment e JOIN public."user" u ON u.id =
-    e.user_id`, records only `(1, id)` and is reported by this rule not at all.
+    e.user_id`, records only `(1, id)`, and this control says nothing about it.
 
-    That spelling is text-side territory: `identity_rows_read_whole` in
-    `test_identity_separated_views.py` catches every form of it — a security
+    **Batch A is what covers that spelling on this side**, and it is a separate
+    control rather than a widening of this one:
+    `test_a_whole_row_read_hidden_by_a_join_is_flagged_though_the_catalog_records_
+    a_column` at the foot of the file plants the join form, asserts that the
+    catalog query is still silent on it, and requires
+    `decompiled_whole_row_reads` — which reads `pg_get_viewdef` — to report it
+    into this same rule. The two controls answer for one grain each of the same
+    question, which is why neither was folded into the other.
+
+    The text side is unchanged and still independent: `identity_rows_read_whole`
+    in `test_identity_separated_views.py` catches every form of it — a security
     re-pass tried to defeat it and did not — and every live view reaches the
     database through a `views_sql/` file, which
     `test_every_read_view_is_created_from_a_sql_file_under_views_sql` is what
-    enforces. So no live path is open. What is open is the same statement in a
-    file no revision has executed *and* the text sweep somehow missing it, which
-    is two failures rather than one; the residual is recorded as a deferred MEDIUM
-    in the pull request rather than left for a reader to infer from a control that
-    looks wider than it is.
+    enforces.
 
     **The mutation it exists to survive**: reverting `person_table_rows_read_whole`
     to the marked-table scope `whole_row_identity_reads` uses, or dropping the
@@ -2123,4 +2335,890 @@ def test_the_join_key_allow_list_is_still_the_three_structural_keys() -> None:
         "is genuinely needed, change this test in the same pull request and say what a view may "
         "now read out of `user`, `user_identity`, `person` — and, since E1-12, out of the web "
         "door's linkage table."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch A — the two things E1-01 deferred (`docs/tickets/e1/deferred.md`, items 1
+# and 2), closed here for the reason everything else in this file is here: the
+# vocabulary and both whole-row readings are defined above, so the rule that
+# widens them belongs beside them (`docs/MISTAKES.md` entry 13).
+#
+# The two are different kinds of thing, and reading them as one would be a
+# mistake:
+#
+#   - **item 1 is a hole in a guard.** The catalog's whole-row dependency row is
+#     conditional on the view naming no column of the same table, so the join form
+#     of a whole-row read was recorded at column grain, where it looks like an
+#     ordinary key read. `decompiled_whole_row_reads` above is the second reading
+#     and both whole-row rules take the union of the two; the controls below plant
+#     the hidden form against each of those two rules in turn, then the two near
+#     misses, then the token boundary the reading rests on.
+#   - **item 2 is not a guard but a report.** Every sweep above is phrased over a
+#     name or a marker, so a table the walk reaches whose columns none of them
+#     recognises is passed over in silence — which is exactly how
+#     `web_login_subject` would have shipped unmarked, and E1-12's entry in
+#     `deferred.md` says so in as many words. `unclassified_reached_tables` names
+#     such a table instead, and `REACHED_TABLES_THAT_CARRY_NOTHING` is where the
+#     ones that genuinely carry nothing are recorded, each with the reason a
+#     reviewer needs when that table next changes.
+# ---------------------------------------------------------------------------
+
+# The views item 1's controls plant, named for the batch so that one surviving a
+# fixture change is traceable to the test that made it.
+PLANTED_JOIN_HIDDEN_VIEW = "e1_batch_a_planted_join_hidden_view"
+PLANTED_JOIN_HIDDEN_MARKED_VIEW = "e1_batch_a_planted_join_hidden_marked_view"
+PLANTED_JOIN_NAMED_COLUMN_VIEW = "e1_batch_a_planted_join_named_column_view"
+PLANTED_JOIN_OTHER_WHOLE_VIEW = "e1_batch_a_planted_join_other_whole_view"
+PLANTED_ALIAS_BOUNDARY_VIEW = "e1_batch_a_planted_alias_boundary_view"
+
+# A real table this rule does not guard, joined to a person table so that the near
+# misses below are the shapes they claim to be. `course` is Pulse's own org
+# structure (SPEC §2.1), it is in neither `PERSON_TABLES` nor the marked set, and
+# each test that uses it asserts that before believing an absence — a near miss
+# planted on a table the rule turns out to guard proves the opposite of what it
+# claims.
+UNGUARDED_JOIN_TABLE = "course"
+
+# The four aliases the boundary control binds, and the whole point of them is the
+# two overlaps: `us` starts with `u` and `ur` ends with `r`, while `u` and `r` are
+# the two bound to the guarded table. Written out rather than generated, because a
+# control whose subject is derived from the thing it guards cannot notice that
+# thing changing — the note on `PLANTED_ALLOWED_KEYS` above carries what that cost
+# the last time.
+GUARDED_PREFIX_ALIAS = "u"
+OTHER_ALIAS_STARTING_WITH_IT = "us"
+GUARDED_SUFFIX_ALIAS = "r"
+OTHER_ALIAS_ENDING_WITH_IT = "ur"
+
+# The tables item 2's control plants, and the column name it plants on both.
+# `external_ref` is not this file's invention: ADR 0022's Consequences name it as
+# one of the identity columns the fragment set "still cannot see", beside `sis`,
+# `banner`, `initials` and `dob`. So the plant is the record's own example, and the
+# control asserts that the fragment rule really is silent about it rather than
+# assuming so.
+PLANTED_UNRECOGNISED_TABLE = "e1_batch_a_planted_unrecognised_table"
+PLANTED_UNRECOGNISED_MARKED_TABLE = "e1_batch_a_planted_unrecognised_marked_table"
+PLANTED_UNRECOGNISED_COLUMN = "external_ref"
+
+# Every table the fixed-point walk reaches that carries nothing any rule in this
+# file can recognise, with the reason it carries nothing. **This is a record, not
+# an exemption**: a table listed here is still swept by everything above, and all
+# the entry says is that the sweeps are correctly silent about it rather than
+# blind to it.
+#
+# Both directions are asserted, because a one-directional inventory rots in
+# silence (the closed-set lesson: a closed-set guard is defeated one level out).
+# `test_every_table_the_person_walk_reaches_is_recognised_or_recorded_as_carrying_
+# nothing` requires every reached table to be recognised or listed here;
+# `test_every_table_recorded_as_carrying_nothing_is_still_reached_and_still_
+# unrecognised` requires every name here to be a table the walk still reaches and
+# still recognises nothing on. So a dropped table and a table that later gained a
+# marker are both a named red rather than a line nobody re-reads.
+#
+# The reasons are one line each and they are what a reviewer reads when the table
+# next changes: a table that grows a column holding a person belongs in the marker
+# convention, not in a longer sentence here.
+REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, str] = {
+    "user": (
+        "ADR 0001 puts the LMS key and the platform reference here and identity on "
+        "`user_identity`, so nothing on the row names a person; the columns are held by "
+        "`JOIN_KEY_COLUMNS` and the table by the grants."
+    ),
+    "audit_log": (
+        "References to people and no identity payload: an actor, a subject, a case, an action "
+        "token and a timestamp."
+    ),
+    "enrollment": (
+        "A section membership: the two keys it joins on and the dates the enrollment window is "
+        "derived from, and nothing about the person in it."
+    ),
+    "lead_faculty_mapping": "Two foreign keys, a person and a course, and no other column.",
+    "role_assignment": (
+        "A role token, the scope keys the role is held over, and two booleans about which doors "
+        "it opens; the person is a foreign key."
+    ),
+}
+
+
+def table_marker_carried_by(engine: Any, table_name: str) -> bool:
+    """Does `table_name` carry ADR 0022's third shape — the marker on the whole table?
+
+    Answered through `marked` rather than by reading the comment here, which is
+    `docs/MISTAKES.md` entry 13 rather than fastidiousness: that function refuses
+    a table comment on `user` — ADR 0001 puts the key and the platform reference
+    there precisely so they are *not* identity — and a second implementation of
+    the third shape would be the copy that does not carry that refusal. The empty
+    column name is what isolates the shape: no prefix can match it and no column
+    comment is passed, so the table comment is the only thing that can answer yes.
+
+    **It is redundant today, on every table, and that is stated rather than left
+    to be discovered** (`docs/MISTAKES.md` entry 14): `marked` applies a table
+    comment to each of the table's columns, so a table carrying the third shape is
+    already in `database_marked_columns` and no mutation of this function alone
+    changes any answer below. It is written out because that redundancy is a
+    property of how the marked-column set happens to project a table-level marker
+    and not of the rule being asked — a `database_marked_columns` that ever
+    reported the table rather than its columns would silently take the third shape
+    out of the classification, and this is the line that would not move with it.
+    """
+    comment = (inspect(engine).get_table_comment(table_name) or {}).get("text")
+    return marked(table_name, "", None, comment)
+
+
+def unclassified_reached_tables(engine: Any) -> set[str]:
+    """Every table the person walk reaches that no rule here recognises anything on.
+
+    E1-12's half of E1-01's second deferred item, in the words `deferred.md` gives
+    it: "the sweep reports a table it reached whose column names it recognises none
+    of, rather than passing over it". `web_login_subject` is the table that made
+    the case. It carries a foreign key to `person`, so the fixed-point walk reaches
+    it; its per-person key is called `idp_subject`, which matches no fragment in
+    `IDENTITY_NAME_FRAGMENTS` and never will; so nothing in this repository would
+    have gone red had it shipped unmarked, and the only thing holding it is a test
+    somebody thought to write.
+
+    A table is recognised when the fragment rule or any marker shape has something
+    to say about it — `identity_bearing_columns` and `database_marked_columns`
+    called live, never a copy of either (`docs/MISTAKES.md` entry 19), and
+    `table_marker_carried_by` for the shape that is a comment on the table.
+    Recognised does **not** mean safe: an unmarked column whose name matches a
+    fragment is recognised here and is reported by the tripwire at the top of this
+    file, which is the correct division — this asks whether the sweeps can see the
+    table at all.
+
+    What is left over is either a table that genuinely carries nothing about a
+    person, in which case its name and the reason belong in
+    `REACHED_TABLES_THAT_CARRY_NOTHING`, or a table like `web_login_subject`
+    arriving unmarked, in which case the marker is missing and this is what says
+    so. The two cannot be told apart mechanically — `external_ref` and a student
+    number are the same object to Postgres, which is ADR 0022's own sentence — so
+    the answer is a human's and the report is what asks for it.
+    """
+    recognised = {table for table, _ in identity_bearing_columns(engine)} | {
+        table for table, _ in database_marked_columns(engine)
+    }
+    return {
+        name
+        for name in people_tables(engine)
+        if name not in recognised
+        and not table_marker_carried_by(engine, name)
+        and name not in REACHED_TABLES_THAT_CARRY_NOTHING
+    }
+
+
+@pytest.mark.invariant
+def test_a_whole_row_read_hidden_by_a_join_is_flagged_though_the_catalog_records_a_column(
+    db_session: Any,
+) -> None:
+    """E1-01 deferred item 1: the whole-row spelling the catalog's own row does not survive.
+
+    Postgres records a reference to a row as a value at `refobjsubid = 0`, and
+    drops that row the moment the same view also names any column of the same
+    table. A join condition names one. So
+
+        SELECT u.id, to_jsonb(u) AS platform_ref
+        FROM public.enrollment e
+        JOIN public."user" u ON u.id = e.user_id
+
+    is recorded as a read of `user.id` and of nothing else, while carrying every
+    column `user` has — `lms_user_id` among them, which resolves a named student
+    at the platform in one step. `VIEW_TABLE_DEPENDENCIES` returns no row for it,
+    so both whole-row rules in this module were silent; the marker-based one would
+    have been silent regardless, because `user` carries no marked column by
+    construction.
+
+    **The asymmetry is the whole deferred item, so it is asserted rather than
+    described.** The catalog query must still be silent on this view *and* the new
+    reading must report it, and it is the pair that says the second reading adds
+    something. If the silence assertion ever fails, Postgres has begun keeping the
+    whole-row row beside the column one: this item is moot and
+    `decompiled_whole_row_reads` is redundant rather than wrong, which is worth
+    knowing before anybody deletes either of the two.
+
+    **The plant names a column of `"user"` deliberately.** `to_jsonb(u)` alone is
+    E0-34's probe and is already caught — the control above it plants exactly
+    that, and its docstring records the boundary this test moves. The named column
+    is what makes Postgres drop the whole-row row, so a plant without one would be
+    green against the guard as it stood before this change and would prove nothing.
+
+    **The mutation it exists to survive**: deleting `decompiled_whole_row_reads`
+    from `person_table_rows_read_whole`, or narrowing its pattern to the bare
+    relation name so that an aliased join escapes it.
+    **The near misses it tolerates**, each planted in a test of its own below: the
+    same join reading only named columns of `"user"`, and a whole-row read of a
+    table this rule does not guard sitting beside a person table in one view.
+
+    Everything is planted inside `db_session`'s transaction and rolled back with
+    it, so `public` is unchanged at the end and the assertions run in the same
+    transaction as the plant (`docs/MISTAKES.md` entry 20).
+    """
+    session = db_session
+    assert ENROLLMENT_TABLE in inspect(session.connection()).get_table_names(), (
+        f"There is no `{ENROLLMENT_TABLE}` table to join through, so the join form this test is "
+        "about cannot be planted at all."
+    )
+
+    hidden = f'CREATE VIEW public.{PLANTED_JOIN_HIDDEN_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id, to_jsonb({GUARDED_PREFIX_ALIAS}) AS {PLANTED_WHOLE_ROW_ALIAS} FROM public.{ENROLLMENT_TABLE} e JOIN public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS} ON {GUARDED_PREFIX_ALIAS}.id = e.{ENROLLMENT_KEY_COLUMN}'  # noqa: S608
+    session.execute(text(hidden))
+
+    connection = session.connection()
+    whole = f"{USER_TABLE}.*"
+
+    at_column_grain = [tuple(row) for row in connection.execute(text(VIEW_COLUMN_DEPENDENCIES))]
+    assert (PLANTED_JOIN_HIDDEN_VIEW, USER_TABLE, "id") in at_column_grain, (
+        f"Postgres records no dependency of `{PLANTED_JOIN_HIDDEN_VIEW}` on `{USER_TABLE}.id`, so "
+        "the planted view either was not created or is not the shape this test believes it is — "
+        "and the named column is the whole mechanism here, because it is what makes the catalog "
+        "drop the whole-row row. Every assertion below would be about a view nothing is looking at."
+    )
+
+    at_table_grain = [tuple(row) for row in connection.execute(text(VIEW_TABLE_DEPENDENCIES))]
+    assert (PLANTED_JOIN_HIDDEN_VIEW, USER_TABLE) not in at_table_grain, (
+        f"The catalog records a whole-row dependency of `{PLANTED_JOIN_HIDDEN_VIEW}` on "
+        f"`{USER_TABLE}` after all: it reported {sorted(at_table_grain)}. That is *good* news and "
+        "it retires this deferred item — Postgres has begun keeping the `refobjsubid = 0` row "
+        "beside the column one, so `VIEW_TABLE_DEPENDENCIES` sees the join form on its own and "
+        "`decompiled_whole_row_reads` is redundant rather than wrong. Read that measurement before "
+        "changing anything: this assertion is the record of the behaviour the second reading "
+        "exists for, and if it has changed the rest of this file should be simplified deliberately "
+        "rather than left carrying a reading nothing needs."
+    )
+
+    detected = decompiled_whole_row_reads(connection, {USER_TABLE})
+    assert (PLANTED_JOIN_HIDDEN_VIEW, USER_TABLE) in detected, (
+        f"`{PLANTED_JOIN_HIDDEN_VIEW}` takes `to_jsonb` of a `{USER_TABLE}` row through a join and "
+        f"the decompiled reading does not report it; it reported {sorted(detected)}. Postgres "
+        f"decompiles every whole-row form to `{GUARDED_PREFIX_ALIAS}.*`, and the reading looks for "
+        "that spelling against the tokens the definition's FROM and JOIN clauses bind to the "
+        f"table. The definition it read is:\n\n{view_definitions(connection).get(PLANTED_JOIN_HIDDEN_VIEW)!r}"
+    )
+
+    read_whole = person_table_rows_read_whole(connection).get(PLANTED_JOIN_HIDDEN_VIEW, set())
+    assert whole in read_whole, (
+        f"The decompiled reading reports `{PLANTED_JOIN_HIDDEN_VIEW}` and the strict rule's "
+        f"whole-row half does not: it reported {sorted(read_whole)}. Then the new reading is "
+        "computed and discarded, which is the failure mode a second guard has that a first one "
+        "does not — it is the union of the two readings that has to reach the rule, or the item is "
+        "closed in a helper nobody consults."
+    )
+
+    reported = person_table_reads_reported(connection)
+    assert any(
+        PLANTED_JOIN_HIDDEN_VIEW in sentence and whole in sentence for sentence in reported
+    ), (
+        f"`{PLANTED_JOIN_HIDDEN_VIEW}` reads `{whole}` and the sentence the invariant prints does "
+        f"not name it: it reported {reported}. The chain fold is seeded from both grains and this "
+        "is the finding travelling all the way to "
+        "`test_no_view_reads_a_column_of_a_person_table_outside_the_join_keys`, which is the test "
+        "CI reads. A finding that stops short of it is a finding nobody is told about."
+    )
+
+
+@pytest.mark.invariant
+def test_a_whole_row_read_hidden_by_a_join_reaches_the_marker_scoped_rule_as_well(
+    db_session: Any,
+) -> None:
+    """The same closure on the other whole-row rule, which guards a different set.
+
+    Two rules in this module ask "does a view read this row whole", and they scope
+    themselves differently on purpose: `whole_row_identity_reads` asks it of the
+    tables the *marker* names, and `person_table_rows_read_whole` asks it of those
+    plus the tables that hold a person. The join form was invisible to both, and a
+    repair wired into one of them would leave the other exactly as it was — which
+    is the shape `docs/MISTAKES.md` entry 13 records: a hazard worked around in
+    one of the two places facing it.
+
+    So the plant here is over a **marked** table rather than over `user`.
+    `user_identity` carries `identity_name` and `identity_email` and is what
+    E0-34's rule was written about; a view naming one of its columns and taking
+    its row is recorded at column grain only, exactly as on `user`, and this is the
+    assertion that says the second reading reaches that rule too.
+
+    **The mutation it exists to survive**: dropping `decompiled_whole_row_reads`
+    from `whole_row_identity_reads` while leaving it in
+    `person_table_rows_read_whole` — a mutation every other control in this batch
+    survives, because every other plant is over `user`, which carries no marked
+    column by construction.
+    """
+    session = db_session
+    connection = session.connection()
+    marked_tables = {table for table, _ in database_marked_columns(connection)}
+    assert PLANTED_ALIAS_TABLE in marked_tables, (
+        f"`{PLANTED_ALIAS_TABLE}` carries no marked column, so it is outside the scope "
+        "`whole_row_identity_reads` guards and this plant would prove nothing about that rule. It "
+        f"guards {sorted(marked_tables)}; the sweep at the top of this module is where a missing "
+        "marker is diagnosed."
+    )
+    assert ENROLLMENT_TABLE in inspect(connection).get_table_names(), (
+        f"There is no `{ENROLLMENT_TABLE}` table to join through, so the join form cannot be "
+        "planted at all."
+    )
+
+    hidden = f"CREATE VIEW public.{PLANTED_JOIN_HIDDEN_MARKED_VIEW} AS SELECT ui.id, to_jsonb(ui) AS {PLANTED_WHOLE_ROW_ALIAS} FROM public.{ENROLLMENT_TABLE} e JOIN public.{PLANTED_ALIAS_TABLE} ui ON ui.{ENROLLMENT_KEY_COLUMN} = e.{ENROLLMENT_KEY_COLUMN}"  # noqa: S608
+    session.execute(text(hidden))
+
+    connection = session.connection()
+    at_column_grain = [tuple(row) for row in connection.execute(text(VIEW_COLUMN_DEPENDENCIES))]
+    assert (PLANTED_JOIN_HIDDEN_MARKED_VIEW, PLANTED_ALIAS_TABLE, "id") in at_column_grain, (
+        f"Postgres records no dependency of `{PLANTED_JOIN_HIDDEN_MARKED_VIEW}` on "
+        f"`{PLANTED_ALIAS_TABLE}.id`, so the planted view is not the shape this test believes it "
+        "is — and the named column is the mechanism, because it is what makes the catalog drop the "
+        "whole-row row."
+    )
+
+    at_table_grain = [tuple(row) for row in connection.execute(text(VIEW_TABLE_DEPENDENCIES))]
+    assert (PLANTED_JOIN_HIDDEN_MARKED_VIEW, PLANTED_ALIAS_TABLE) not in at_table_grain, (
+        f"The catalog records a whole-row dependency of `{PLANTED_JOIN_HIDDEN_MARKED_VIEW}` on "
+        f"`{PLANTED_ALIAS_TABLE}` after all: it reported {sorted(at_table_grain)}. Postgres has "
+        "begun keeping the `refobjsubid = 0` row beside the column one, which retires this whole "
+        "batch's first item — read that measurement before changing anything here."
+    )
+
+    leaking = whole_row_identity_reads(connection)
+    assert f"{PLANTED_JOIN_HIDDEN_MARKED_VIEW}: {PLANTED_ALIAS_TABLE}" in leaking, (
+        f"`{PLANTED_JOIN_HIDDEN_MARKED_VIEW}` takes the whole row of a table the identity marker "
+        f"names, through a join, and the marker-scoped rule does not report it: it reported "
+        f"{leaking}. That view carries every column `{PLANTED_ALIAS_TABLE}` has — a student's name "
+        "and email address — and the catalog is silent about it by the assertion above, so with "
+        "this rule silent as well the shape is reported by nothing at this grain. The second "
+        "reading has to reach *both* whole-row rules; wired into one of the two it closes half the "
+        "item and leaves the other exactly where it was."
+    )
+
+
+@pytest.mark.invariant
+def test_a_join_that_reads_only_named_columns_of_a_person_table_is_not_read_as_a_whole_row(
+    db_session: Any,
+) -> None:
+    """The first near miss: the same join, without the whole-row form, stays silent.
+
+    A guard that fires on correct SQL is repaired by weakening it, and the
+    casualty is the guard rather than the view. `SELECT u.id … JOIN public."user"
+    u ON u.id = e.user_id` is the shape a roster view has, and it must not become
+    a whole-row finding merely because the reading now looks at the view's text
+    instead of at a dependency row.
+
+    **The offender is planted in the same transaction**, and it is not decoration:
+    silence is also what a reading that has gone blind produces, so a control that
+    asserted only an absence would be green with `decompiled_whole_row_reads`
+    deleted (`docs/MISTAKES.md` entry 3).
+
+    **The mutation it exists to survive**: widening the pattern from
+    `<token>.*` to "the token appears at all", which is the obvious way to write
+    this reading and turns every aliased join into a whole-row finding.
+    """
+    session = db_session
+    assert (
+        ENROLLMENT_TABLE in inspect(session.connection()).get_table_names()
+    ), f"There is no `{ENROLLMENT_TABLE}` table, so neither half of this pair can be planted."
+
+    hidden = f'CREATE VIEW public.{PLANTED_JOIN_HIDDEN_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id, to_jsonb({GUARDED_PREFIX_ALIAS}) AS {PLANTED_WHOLE_ROW_ALIAS} FROM public.{ENROLLMENT_TABLE} e JOIN public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS} ON {GUARDED_PREFIX_ALIAS}.id = e.{ENROLLMENT_KEY_COLUMN}'  # noqa: S608
+    named = f'CREATE VIEW public.{PLANTED_JOIN_NAMED_COLUMN_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id AS member FROM public.{ENROLLMENT_TABLE} e JOIN public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS} ON {GUARDED_PREFIX_ALIAS}.id = e.{ENROLLMENT_KEY_COLUMN}'  # noqa: S608
+    session.execute(text(hidden))
+    session.execute(text(named))
+
+    connection = session.connection()
+    detected = decompiled_whole_row_reads(connection, {USER_TABLE})
+
+    assert (PLANTED_JOIN_HIDDEN_VIEW, USER_TABLE) in detected, (
+        f"The reading reports nothing for `{PLANTED_JOIN_HIDDEN_VIEW}`, which takes `to_jsonb` of "
+        f"a `{USER_TABLE}` row through the same join. It is blind, and the absence asserted below "
+        "is a fact about the computation rather than about the view it names."
+    )
+    assert (PLANTED_JOIN_NAMED_COLUMN_VIEW, USER_TABLE) not in detected, (
+        f"`{PLANTED_JOIN_NAMED_COLUMN_VIEW}` reads one named column of `{USER_TABLE}` through a "
+        "join and the whole-row reading reports it as reading the row. That is a red on the shape "
+        "every roster view has, and the repair somebody reaches for under that pressure is "
+        "deleting the reading. The definition it read is:\n\n"
+        f"{view_definitions(connection).get(PLANTED_JOIN_NAMED_COLUMN_VIEW)!r}"
+    )
+    assert not person_table_rows_read_whole(connection).get(PLANTED_JOIN_NAMED_COLUMN_VIEW), (
+        f"The strict rule's whole-row half reports `{PLANTED_JOIN_NAMED_COLUMN_VIEW}`, which reads "
+        "a join key by name and no row at all. The column-grain half is what answers for a named "
+        "column, and it allows this one because `id` is in `JOIN_KEY_COLUMNS`."
+    )
+
+
+@pytest.mark.invariant
+def test_a_whole_row_read_of_an_unguarded_table_beside_a_person_table_is_not_flagged(
+    db_session: Any,
+) -> None:
+    """The second near miss: whose row was read whole, not merely whether one was.
+
+    A view may legitimately take the whole row of a table that holds nobody, and
+    the fact that a person table is joined into the same statement must not make
+    that a finding. `SELECT u.id, to_jsonb(c) … FROM public."user" u JOIN
+    public.course c` is the shape: a whole row of `course`, a key of `user`, and
+    nothing that names a person.
+
+    **The liveness control is the same view, asked about the other table**, which
+    is stronger than planting a second one: the reading is required to report
+    `course` for this exact definition, so the absence of `user` from its answer
+    is a fact about which relation the `.*` is bound to and not about a reading
+    that found no `.*` at all (`docs/MISTAKES.md` entry 3, and entry 35's rule
+    that a mechanism must be *found* on a subject that certainly has it).
+
+    **The guarded scope is asserted before the absence is believed.** If `course`
+    were in `PERSON_TABLES` or carried a marker, this plant would be a whole-row
+    read of a guarded table and the assertion below would be measuring the
+    opposite of what it claims.
+
+    **The mutation it exists to survive**: dropping the per-table binding and
+    matching any `<something>.*` in the definition, which reports every view that
+    takes any row whole as a person-table finding.
+    """
+    session = db_session
+    inspector = inspect(session.connection())
+    assert UNGUARDED_JOIN_TABLE in inspector.get_table_names(), (
+        f"There is no `{UNGUARDED_JOIN_TABLE}` table, so the unguarded half of this pair cannot be "
+        "planted and the absence below would stand alone."
+    )
+
+    connection = session.connection()
+    guarded = {table for table, _ in database_marked_columns(connection)} | set(PERSON_TABLES)
+    assert UNGUARDED_JOIN_TABLE not in guarded, (
+        f"`{UNGUARDED_JOIN_TABLE}` is one of the tables the whole-row rule guards — it guards "
+        f"{sorted(guarded)} — so a whole-row read of it is a real finding, and this near miss is "
+        "asserting that a real finding goes unreported. Plant against a table the rule does not "
+        f"guard; and if `{UNGUARDED_JOIN_TABLE}` has genuinely gained a person, that belongs where "
+        "`PERSON_TABLES` is defined rather than here."
+    )
+
+    other = f'CREATE VIEW public.{PLANTED_JOIN_OTHER_WHOLE_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id, to_jsonb(c) AS payload FROM public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS} JOIN public.{UNGUARDED_JOIN_TABLE} c ON true'  # noqa: S608
+    session.execute(text(other))
+
+    unguarded_answer = decompiled_whole_row_reads(connection, {UNGUARDED_JOIN_TABLE})
+    assert (PLANTED_JOIN_OTHER_WHOLE_VIEW, UNGUARDED_JOIN_TABLE) in unguarded_answer, (
+        f"The reading does not report `{PLANTED_JOIN_OTHER_WHOLE_VIEW}` as taking the whole row of "
+        f"`{UNGUARDED_JOIN_TABLE}`; it reported {sorted(unguarded_answer)}. The view takes "
+        "`to_jsonb(c)` of it, so either Postgres no longer decompiles a whole-row form to "
+        "`alias.*` — in which case every control for this reading is measuring nothing and the "
+        "pattern needs rewriting against what it does emit — or the reading cannot bind the alias. "
+        "The definition it read is:\n\n"
+        f"{view_definitions(connection).get(PLANTED_JOIN_OTHER_WHOLE_VIEW)!r}"
+    )
+
+    guarded_answer = decompiled_whole_row_reads(connection, {USER_TABLE})
+    assert (PLANTED_JOIN_OTHER_WHOLE_VIEW, USER_TABLE) not in guarded_answer, (
+        f"`{PLANTED_JOIN_OTHER_WHOLE_VIEW}` takes the whole row of `{UNGUARDED_JOIN_TABLE}` and "
+        f"reads one key of `{USER_TABLE}`, and the reading reports it as a whole-row read of "
+        f"`{USER_TABLE}`. The `.*` in that definition is bound to the other relation, so the "
+        "reading is matching a star it did not attribute — which flags correct SQL, and the repair "
+        "somebody reaches for is to stop reading definitions at all."
+    )
+    assert not person_table_rows_read_whole(connection).get(PLANTED_JOIN_OTHER_WHOLE_VIEW), (
+        f"The strict rule's whole-row half reports `{PLANTED_JOIN_OTHER_WHOLE_VIEW}`, whose only "
+        f"whole row is a `{UNGUARDED_JOIN_TABLE}` row. A rule that flags every whole-row read "
+        "anywhere goes red on the first legitimate `to_jsonb` in the schema, and is then repaired "
+        "by narrowing it back to something that misses the case this batch closed."
+    )
+
+
+@pytest.mark.invariant
+def test_an_alias_bound_to_a_person_table_does_not_cross_match_an_overlapping_alias(
+    db_session: Any,
+) -> None:
+    """The token boundary the reading rests on, planted in both directions.
+
+    The reading looks for `<token>.*` where `<token>` is a name or alias bound to
+    the guarded table. Without a boundary at each end of the token that search is
+    a substring search, and a substring search over aliases is wrong in two
+    different ways:
+
+      - **an alias that is a prefix of another.** `u` is bound to `"user"`, `us`
+        to a table nobody guards, and `to_jsonb(us)` decompiles to `us.*`. A
+        pattern anchored only on the left reads that as `u` followed by
+        something, and reports a whole-row read of `user` that does not exist.
+      - **an alias that is a suffix of another.** `r` is bound to `"user"` and
+        `ur` to the unguarded table, and `ur.*` contains `r.*` outright. A pattern
+        with no left boundary reports the same thing.
+
+    Both fire on correct SQL rather than missing a leak, which is the direction
+    that gets a guard weakened rather than the direction that gets it noticed —
+    `person_table_columns_bound` in `test_identity_separated_views.py` records the
+    same lesson about the same boundary, learned from a mutation battery that
+    found nothing to tell two versions apart until a two-alias shape was planted.
+
+    **Three controls come before the absence**, because an absence is what a
+    reading that binds nothing also produces: the definition must actually carry
+    `us.*` and `ur.*` (so the text the boundary must not cross-match is there),
+    both aliases must be bound to the guarded table by the reading's own binder
+    (so it is the boundary being measured and not a failure to bind), and the
+    reading must report the unguarded table for this same view.
+
+    **The mutation it exists to survive**: dropping either end of the boundary —
+    the `(?<![\\w"])` lookbehind, or the requirement that the token be followed
+    immediately by its dot.
+    """
+    session = db_session
+    inspector = inspect(session.connection())
+    assert UNGUARDED_JOIN_TABLE in inspector.get_table_names(), (
+        f"There is no `{UNGUARDED_JOIN_TABLE}` table, so the overlapping aliases cannot be bound "
+        "to anything and this control cannot be planted."
+    )
+
+    boundary = f'CREATE VIEW public.{PLANTED_ALIAS_BOUNDARY_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id, {GUARDED_SUFFIX_ALIAS}.id AS second, to_jsonb({OTHER_ALIAS_STARTING_WITH_IT}) AS prefix_payload, to_jsonb({OTHER_ALIAS_ENDING_WITH_IT}) AS suffix_payload FROM public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS} JOIN public."{USER_TABLE}" {GUARDED_SUFFIX_ALIAS} ON {GUARDED_SUFFIX_ALIAS}.id = {GUARDED_PREFIX_ALIAS}.id JOIN public.{UNGUARDED_JOIN_TABLE} {OTHER_ALIAS_STARTING_WITH_IT} ON true JOIN public.{UNGUARDED_JOIN_TABLE} {OTHER_ALIAS_ENDING_WITH_IT} ON true'  # noqa: S608
+    session.execute(text(boundary))
+
+    connection = session.connection()
+    definition = view_definitions(connection).get(PLANTED_ALIAS_BOUNDARY_VIEW, "")
+
+    overlapping = [
+        f"{OTHER_ALIAS_STARTING_WITH_IT}.*",
+        f"{OTHER_ALIAS_ENDING_WITH_IT}.*",
+    ]
+    missing = [spelling for spelling in overlapping if spelling not in definition]
+    assert not missing, (
+        f"The decompiled definition does not carry {missing}, so the text this boundary must not "
+        f"cross-match is not there and the absence below is about nothing. It reads:\n\n"
+        f"{definition!r}"
+    )
+
+    tokens = relation_tokens_bound_to(definition, USER_TABLE)
+    unbound = [
+        alias for alias in (GUARDED_PREFIX_ALIAS, GUARDED_SUFFIX_ALIAS) if alias not in tokens
+    ]
+    assert not unbound, (
+        f"The binder does not bind {unbound} to `{USER_TABLE}` in this definition; it bound "
+        f"{sorted(tokens)}. Then the reading has no token to cross-match with and this control is "
+        "measuring a binder that found nothing rather than a boundary that held."
+    )
+
+    unguarded_answer = decompiled_whole_row_reads(connection, {UNGUARDED_JOIN_TABLE})
+    assert (PLANTED_ALIAS_BOUNDARY_VIEW, UNGUARDED_JOIN_TABLE) in unguarded_answer, (
+        f"The reading does not report `{PLANTED_ALIAS_BOUNDARY_VIEW}` as taking the whole row of "
+        f"`{UNGUARDED_JOIN_TABLE}`, which it does twice; it reported {sorted(unguarded_answer)}. "
+        "The reading is blind on this definition, so the absence below says nothing about the "
+        "token boundary."
+    )
+
+    guarded_answer = decompiled_whole_row_reads(connection, {USER_TABLE})
+    assert (PLANTED_ALIAS_BOUNDARY_VIEW, USER_TABLE) not in guarded_answer, (
+        f"The reading reports a whole-row read of `{USER_TABLE}` for "
+        f"`{PLANTED_ALIAS_BOUNDARY_VIEW}`, which reads two keys of it by name and takes the whole "
+        f"row of `{UNGUARDED_JOIN_TABLE}` twice. The two aliases overlap deliberately — "
+        f"`{OTHER_ALIAS_STARTING_WITH_IT}` starts with `{GUARDED_PREFIX_ALIAS}` and "
+        f"`{OTHER_ALIAS_ENDING_WITH_IT}` ends with `{GUARDED_SUFFIX_ALIAS}` — so this is the token "
+        "boundary failing at one end or the other, and the cost is a guard that is red on correct "
+        f"SQL. The definition it read is:\n\n{definition!r}"
+    )
+
+
+@pytest.mark.invariant
+def test_no_view_hides_a_whole_row_read_of_a_person_table_behind_a_join(
+    migrated_engine: Any,
+) -> None:
+    """The live half of item 1: no view in the migrated database reads a row this way.
+
+    The two rules above are asserted over the catalog, which is silent on the join
+    form; this asserts the same absence over what Postgres decompiles every view
+    back to. It is deliberately phrased over the guarded scope rather than over
+    every table — the tables the marker names and the tables that hold a person —
+    so a legitimate `to_jsonb` of a course or a section is not a finding.
+
+    **There is no "the reading returned something" guard here**, for the reason
+    the marker-based whole-row invariant above gives at greater length: on a
+    healthy schema this answer is empty, and requiring a row would be a red on the
+    day it landed for a reason having nothing to do with any view. The liveness is
+    proved where a subject exists — the five planted controls above require this
+    same computation to find the whole-row reads it certainly carries, and to
+    leave alone the ones it certainly does not.
+
+    **If this is red, it is a finding rather than a threshold.** Every live view
+    reaches the database through a file under `backend/app/views_sql/`, and a
+    whole-row read of a person table in one of them is what SPEC §8 forbids
+    outright; the repair is the view, not this test.
+
+    **The mutation it exists to survive**: any of the whole-row spellings added to
+    a live view alongside a named column of the same table — the arrangement that
+    was invisible to every guard in this repository's catalog half until Batch A.
+    """
+    with migrated_engine.connect() as connection:
+        views = public_views(connection)
+        definitions = view_definitions(connection)
+        guarded = {table for table, _ in database_marked_columns(connection)} | set(PERSON_TABLES)
+        hidden = sorted(
+            f"{view}: {table}.*" for view, table in decompiled_whole_row_reads(connection, guarded)
+        )
+
+    assert views, (
+        "The migrated database holds no view in `public`, so this reading looked at nothing and "
+        "would report success. `test_identity_separated_views.py` is where their absence is "
+        "diagnosed."
+    )
+    assert sorted(definitions) == views, (
+        f"`VIEW_DEFINITIONS` reports definitions for {sorted(definitions)} and `public_views` "
+        f"reports {views}. The two read the same catalog with the same filter, so a disagreement "
+        "means this reading is looking at a different set of views from the one every other rule "
+        "in this file guards — and the absence below would be an absence over the wrong set."
+    )
+    assert all(definitions.values()), (
+        f"Postgres returned an empty definition for "
+        f"{sorted(view for view, body in definitions.items() if not body)}. A view always "
+        "decompiles to something, so this reading is searching empty strings and would report "
+        "nothing whatever those views contain."
+    )
+
+    assert not hidden, (
+        f"{hidden} — each is a view whose stored definition takes the whole row of a table that "  # noqa: S608
+        "holds a person, or of a table the identity marker names, while Postgres records the "
+        "dependency at column grain because the same view also names a column of that table.\n\n"
+        "This is the shape E1-01 deferred and Batch A closed: `refobjsubid = 0` is dropped as soon "
+        "as a column is named, so `SELECT u.id, to_jsonb(u) FROM public.enrollment e JOIN "
+        'public."user" u ON u.id = e.user_id` was recorded as an ordinary read of `user.id` and '
+        "carried every column `user` has beside it — `lms_user_id` included, which resolves a "
+        "named student at the platform in one step.\n\n"
+        "SPEC §8 requires the instructor and leadership read paths to go through views that "
+        "'structurally cannot join to `user` identity columns — enforced in the database, not just "
+        "the application', and §4.1 makes the resulting rules automated assertions. A view is read "
+        "with its owner's privileges rather than its reader's, so no arrangement of ADR 0001's "
+        "grants closes this. The repair is that the view stops carrying the row: select the "
+        "columns it needs, which the join-key allow-list already permits."
+    )
+
+
+@pytest.mark.invariant
+def test_every_table_the_person_walk_reaches_is_recognised_or_recorded_as_carrying_nothing(
+    migrated_engine: Any,
+) -> None:
+    """E1-01 deferred item 2, E1-12's half: a table reached and recognised by nothing is named.
+
+    The sweeps in this file are phrased over names and markers, so their silence
+    has two causes and no way to tell them apart: the table carries nothing about
+    a person, or it carries a person under a name the vocabulary has no reason to
+    know. `web_login_subject` was the second, and `deferred.md` records what that
+    cost — `idp_subject` matches no fragment and never will, so nothing in this
+    repository would have gone red had the table shipped unmarked, and the only
+    thing holding it is a test somebody thought to write.
+
+    This is what makes the silence answerable. Every table the fixed-point walk
+    reaches is either recognised by the fragment rule or by one of the three
+    marker shapes, or its name is in `REACHED_TABLES_THAT_CARRY_NOTHING` with the
+    reason it carries nothing. A new table joins one of those two sets in the pull
+    request that adds it, and a reviewer is asked the question at the moment they
+    can answer it.
+
+    **The failure names the table**, which is the whole of the improvement over
+    the silence it replaces.
+
+    **Three non-vacuity guards.** The walk has to reach the tables it starts from,
+    it has to reach more than those, and the marker set has to be non-empty —
+    otherwise "everything reached is classified" is a fact about a walk that
+    reached nothing (`docs/MISTAKES.md` entry 3).
+
+    **The mutation it exists to survive**: the report reading `PERSON_TABLES`
+    instead of the walk, and the fragment or marker check inverted — both of which
+    are caught here or by the planted control below.
+    """
+    reached = people_tables(migrated_engine)
+    absent = [name for name in PERSON_TABLES if name not in reached]
+    assert not absent, (
+        f"The walk did not reach {absent}, the tables it starts from — it reached "
+        f"{sorted(reached)}. Whatever it says about the rest of the schema is a fact about a "
+        "broken reflection."
+    )
+    assert reached > set(PERSON_TABLES), (
+        f"The walk reached exactly {sorted(reached)}, the tables it starts from and nothing else. "
+        "Every table with a foreign-key path to one of them is supposed to be in that set — "
+        "`enrollment`, `role_assignment`, `web_login_subject` — so the fixed point is not "
+        "iterating, and a report over the tables it reached is a report over three tables this "
+        "file already names."
+    )
+    assert database_marked_columns(migrated_engine), (
+        "Nothing in the migrated database carries the identity marker in any shape this file "
+        "reads, so 'recognised' means only the fragment rule here and the classification below is "
+        "a weaker question than the one this test asks. The sweep at the top of this module is "
+        "where that is diagnosed."
+    )
+
+    unclassified = unclassified_reached_tables(migrated_engine)
+    inspector = inspect(migrated_engine)
+    detail = {
+        name: sorted(column["name"] for column in inspector.get_columns(name))
+        for name in sorted(unclassified)
+    }
+    assert not unclassified, (
+        f"{sorted(unclassified)} — the person walk reaches each of these and no rule in this file "
+        f"recognises anything on them. Their columns are {detail}.\n\n"
+        "That is not by itself a defect, and it is not by itself safe: the fragment rule reads "
+        f"names ({list(IDENTITY_NAME_FRAGMENTS)}) and the marker reads a column comment, an "
+        f"`{MARKER_PREFIXES[0]}` prefix or a comment on the whole table, so a column holding a "
+        "person under a name none of those knows — `idp_subject`, `external_ref`, a student "
+        "number — is invisible to every sweep above and this report is the only thing that says so."
+        "\n\nTwo answers, and the pull request picks one. If a column here holds a person, mark it "
+        "(ADR 0022) and this goes green with the sweeps able to see it. If the table genuinely "
+        "carries nothing about a person, add its name to `REACHED_TABLES_THAT_CARRY_NOTHING` above "
+        "with a one-line reason — that entry is the record the next reviewer reads, and the second "
+        "test below is what stops it from rotting once the table changes."
+    )
+
+
+@pytest.mark.invariant
+def test_every_table_recorded_as_carrying_nothing_is_still_reached_and_still_unrecognised(
+    migrated_engine: Any,
+) -> None:
+    """The other direction of the inventory, so the record cannot rot in silence.
+
+    `REACHED_TABLES_THAT_CARRY_NOTHING` is a hand-written list, and a hand-written
+    list that is only ever read in one direction accumulates entries nobody
+    re-examines: a table that has been dropped, or a table that later gained a
+    marker and no longer needs an entry at all. Either leaves a name exempting
+    something that is not there, and the exemption is invisible because the test
+    it feeds is green.
+
+    So both halves are asserted. Every name here must be a table the walk still
+    reaches, and every name here must still be one no rule recognises anything on
+    — the same two conditions the report itself applies, run the other way round.
+    A table that gains a marked column leaves this list in the pull request that
+    marks it, which is the intended cost.
+
+    This is the closed-set lesson written into a test: a closed-set guard is
+    defeated one level out, so the set is asserted from both ends rather than
+    from the end that happens to be convenient.
+
+    **The mutation it exists to survive**: adding a name to the mapping that no
+    longer needs to be there — the cheapest way to make the report above green,
+    and the one this catches.
+    """
+    assert REACHED_TABLES_THAT_CARRY_NOTHING, (
+        "`REACHED_TABLES_THAT_CARRY_NOTHING` is empty, so this test compares nothing and the "
+        "report it guards is exempting nothing. If every reached table is genuinely recognised "
+        "now, delete this test in the same change and say so; an empty inventory asserted in both "
+        "directions is two tests that cannot fail."
+    )
+    blank = sorted(name for name, reason in REACHED_TABLES_THAT_CARRY_NOTHING.items() if not reason)
+    assert not blank, (
+        f"{blank} carry no reason. The reason is the whole value of the entry — it is what a "
+        "reviewer reads when that table next gains a column — and a name with no sentence beside "
+        "it is an exemption nobody has to justify."
+    )
+
+    reached = people_tables(migrated_engine)
+    unreachable = sorted(set(REACHED_TABLES_THAT_CARRY_NOTHING) - reached)
+    assert not unreachable, (
+        f"{unreachable} are recorded as tables the person walk reaches that carry nothing, and the "
+        f"walk does not reach them: it reached {sorted(reached)}. Either the table has been "
+        "dropped, or it no longer has a foreign-key path to a person table — in both cases the "
+        "entry exempts nothing and belongs out of the mapping, in the pull request that made it "
+        "false."
+    )
+
+    recognised = {table for table, _ in identity_bearing_columns(migrated_engine)} | {
+        table for table, _ in database_marked_columns(migrated_engine)
+    }
+    recognised_now = sorted(
+        name
+        for name in REACHED_TABLES_THAT_CARRY_NOTHING
+        if name in recognised or table_marker_carried_by(migrated_engine, name)
+    )
+    assert not recognised_now, (
+        f"{recognised_now} are recorded as carrying nothing any rule in this file recognises, and "
+        "each of them now carries something — a column whose name matches a fragment, a marked "
+        "column, or a marker on the whole table. The entry is stale: the sweeps above can see the "
+        "table on their own, so the exemption is doing nothing except hiding the next change to "
+        "it. Take the name out of `REACHED_TABLES_THAT_CARRY_NOTHING` in the pull request that "
+        "marked the column."
+    )
+
+
+@pytest.mark.invariant
+def test_a_reached_table_recognised_by_nothing_is_reported_and_a_marked_one_is_not(
+    db_session: Any,
+) -> None:
+    """The report found on subjects that certainly have the property, in both directions.
+
+    Two tables are planted, identical but for one comment: each holds a foreign
+    key to `person`, so the walk reaches both, and each holds one text column
+    called `external_ref`, which ADR 0022's Consequences name as exactly the kind
+    of identity column "the widened set still cannot see". One is marked with a
+    comment on the whole table — ADR 0022's third shape, and the shape
+    `web_login_subject` really uses — and the other carries no marker at all.
+
+    The report must return the unmarked one and must not return the marked one.
+    Between them those two assertions say the report is asking about
+    classification rather than about the schema's shape: a rule that returned
+    every reached table would fail the second, and a rule that returned none would
+    fail the first.
+
+    **The fragment rule's silence about `external_ref` is asserted rather than
+    assumed** (`docs/MISTAKES.md` entry 3). If a future fragment made that name
+    recognisable, the unmarked plant would be classified and this control would be
+    measuring a table the sweeps can already see.
+
+    **The mutations it exists to survive**: the report reading `PERSON_TABLES`
+    instead of the walk, which kills the first assertion because neither plant is
+    in that tuple; and the marker half of the classification dropped, which kills
+    the second.
+
+    Both tables are planted inside `db_session`'s transaction and rolled back with
+    it — Postgres puts DDL inside the transaction — so `public` is unchanged at the
+    end and the assertions run in the same transaction as the plant.
+    """
+    session = db_session
+    person_key = primary_key_of(session.connection(), "person")
+
+    for table in (PLANTED_UNRECOGNISED_TABLE, PLANTED_UNRECOGNISED_MARKED_TABLE):
+        session.execute(
+            text(
+                f"CREATE TABLE {table} (id uuid PRIMARY KEY,"
+                f' person_id uuid NOT NULL REFERENCES public.person("{person_key}"),'
+                f" {PLANTED_UNRECOGNISED_COLUMN} text)"
+            )
+        )
+    session.execute(
+        text(
+            f"COMMENT ON TABLE {PLANTED_UNRECOGNISED_MARKED_TABLE} IS "
+            f"'{MARKER_TOKEN}: planted by Batch A'"
+        )
+    )
+
+    connection = session.connection()
+    reached = people_tables(connection)
+    unreached = [
+        table
+        for table in (PLANTED_UNRECOGNISED_TABLE, PLANTED_UNRECOGNISED_MARKED_TABLE)
+        if table not in reached
+    ]
+    assert not unreached, (
+        f"The walk does not reach {unreached}, which hold a foreign key straight to `person`; it "
+        f"reached {sorted(reached)}. That is the one hop it walked before any of this, so "
+        "something more basic is wrong than the report — most likely that the planted tables are "
+        "invisible to the reflection, in which case both assertions below prove nothing."
+    )
+
+    bearing = identity_bearing_columns(connection)
+    assert (PLANTED_UNRECOGNISED_TABLE, PLANTED_UNRECOGNISED_COLUMN) not in bearing, (
+        f"`{PLANTED_UNRECOGNISED_COLUMN}` now matches a fragment in "
+        f"{list(IDENTITY_NAME_FRAGMENTS)}, so the unmarked plant is recognised by the name rule "
+        "and is no longer the case this control is about — a table the sweeps can see nothing on. "
+        "ADR 0022 names that column as one the widened set cannot see; if the set has widened "
+        "again, pick a name it still cannot see and say which."
+    )
+    assert (PLANTED_UNRECOGNISED_MARKED_TABLE, PLANTED_UNRECOGNISED_COLUMN) in (
+        database_marked_columns(connection)
+    ), (
+        f"The comment on `{PLANTED_UNRECOGNISED_MARKED_TABLE}` does not make its columns read as "
+        "marked, so the near miss below is not the shape it claims to be: it would be an unmarked "
+        "table absent from the report for some other reason. `marked` accepts a comment on the "
+        "whole table carrying the token, which is what this plant writes and what "
+        "`web_login_subject` really carries."
+    )
+
+    unclassified = unclassified_reached_tables(connection)
+    assert PLANTED_UNRECOGNISED_TABLE in unclassified, (
+        f"`{PLANTED_UNRECOGNISED_TABLE}` reaches `person` by a foreign key, carries a text column "
+        f"called `{PLANTED_UNRECOGNISED_COLUMN}` that matches no fragment, carries no marker in "
+        f"any of the three shapes, and has no entry in `REACHED_TABLES_THAT_CARRY_NOTHING` — and "
+        f"the report does not name it; it reported {sorted(unclassified)}. That is the state "
+        "E1-12's entry in `deferred.md` describes: a table the sweep reached and recognised "
+        "nothing on, passed over in silence. A report that reads `PERSON_TABLES` rather than the "
+        "walk fails here, because neither plant is in that tuple."
+    )
+    assert PLANTED_UNRECOGNISED_MARKED_TABLE not in unclassified, (
+        f"`{PLANTED_UNRECOGNISED_MARKED_TABLE}` carries the identity marker on the whole table and "
+        f"the report names it anyway; it reported {sorted(unclassified)}. The report's question is "
+        "whether the sweeps above can see anything on the table, and a whole-table marker is one "
+        "of the three shapes they read — so a report that names a marked table would be asking "
+        "every ticket to record an exemption for a table it has just marked correctly."
     )

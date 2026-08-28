@@ -81,15 +81,20 @@ CONFIGURED_AUTHORIZATION_ENDPOINT = "http://identity-provider.invalid/dev-consol
 # spelled — which is a value the seeded containment chain generates.
 SECTION_ROW_TESTID_PREFIX = "dev-section-"
 
-# Two literals that are identity by construction wherever they appear on this
-# page. `@` is how an address gets onto a page at all, and the mock roster
+# Three literals that are identity by construction wherever they appear on this
+# page. `@` is how an email address gets onto a page at all, and the mock roster
 # exposes one per member (ADR 0050); `mock-lms-user-` is the stem of every
-# subject that platform signs, and SPEC §4 keys every response to a subject.
+# subject that platform signs, and SPEC §4 keys every response to a subject; and
+# `://` is how a service address gets onto a page, which for this table means the
+# roster address a launch stored on the section. The third is `SERVICE_ADDRESS_
+# MARK` and is declared further down, beside the read that collects the stored
+# addresses; it is asserted here for the same reason as the other two.
 #
 # They are asserted **as well as** the planted values below, not instead: the
-# planted set proves this reader can find what is there, and these two catch a
-# member from some other seed, or from some other platform, that the planted set
-# would not name.
+# planted set proves this reader can find what is there, and these three catch a
+# member from some other seed, from some other platform, or an address spelled in
+# a way the exact-string set cannot match — HTML-escaped, re-cased, or built up
+# from parts — that the planted set would not name.
 ADDRESS_MARK = "@"
 SUBJECT_STEM = "mock-lms-user-"
 
@@ -458,6 +463,13 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
     `user_id`, and a cell printing the stored roster address, which carries the
     platform's own context identifier and is a service credential's target.
 
+    **And one the exact-string set cannot kill on its own**, which is why the
+    literals are asserted beside it: an address that reaches the region in some
+    other spelling — HTML-escaped, re-cased, or assembled from parts — matches no
+    stored string and would walk through the planted set untouched. `@` and `://`
+    are what it cannot lose on the way, so the two of them are the backstop and
+    neither is a repeat of the search above.
+
     **Both of those were claims before they were assertions**, found one round
     apart and by different readers — the battery for the first, the security
     review for the second, which named it the identical survivor pattern one
@@ -584,6 +596,16 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
         f"The console's sections table carries an {ADDRESS_MARK!r}, which is how an email address "
         f"gets onto a page: {around(region, ADDRESS_MARK)!r}. The mock roster exposes an address "
         "per member (ADR 0050) and the sync stores it; the table reports the section."
+    )
+    assert SERVICE_ADDRESS_MARK not in region, (
+        f"The console's sections table carries a {SERVICE_ADDRESS_MARK!r}, which is how a service "
+        f"address gets onto a page: {around(region, SERVICE_ADDRESS_MARK)!r}. The roster address a "
+        "launch stored on the section is the one this table forbids — it carries the platform's "
+        "own context identifier and is where a bearer token gets spent (ADR 0100) — and the table "
+        "reports whether one is stored as a yes or a no, never the value. This backstops the "
+        "exact-string set above rather than repeating it: an address that reached the page "
+        "HTML-escaped, re-cased, or assembled from parts matches no stored string and still "
+        "carries its scheme separator."
     )
     assert SUBJECT_STEM not in region, (
         f"The console's sections table names a launch subject: {around(region, SUBJECT_STEM)!r}. "
