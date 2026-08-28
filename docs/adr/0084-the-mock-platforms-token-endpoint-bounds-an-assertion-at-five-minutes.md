@@ -139,3 +139,13 @@ expressible now.
 enforcement pairs with E1-11's client, so a roster read with no `Authorization`
 header still answers. What this record decides is the grant; what makes it
 load-bearing is the ticket that spends it.
+
+> **Half over, 2026-08-27, in E1-11's fix round.** The paragraph above is now
+> true of AGS alone. E1-11 built the conformant client, which is the event that
+> ruling named, so the roster refuses a call presenting no token this platform
+> issued for the membership scope — the grant this record decides is what it is
+> checked against, and nothing here changes. AGS keeps the open state and the
+> same argument for it: no grade-passback client exists until E3 builds one
+> (SPEC §3.4 states the rule, SPEC §14.3 names the epic).
+> [ADR 0099](0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md) records
+> the split and who owns the other half.

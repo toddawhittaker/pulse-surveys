@@ -529,3 +529,29 @@ Every E1 pull request that defers something adds it here in the same PR.
    `test_the_care_who_teaches_reaches_instructor_by_launch_and_care_by_web_login`
    and `tests/e2e/two-hat.spec.ts` name the consequence, and the seed's
    BIOL 101 scope is consistent with a decision that never reads the scope.
+
+## From E1-11's fix round — the mock enforces a token on NRPS
+
+1. **The mock platform's AGS routes still answer without a token.** E1-06 left
+   both Advantage services open on one argument — a service refusing before a
+   conformant client exists would be refusing this repository's own tests — and
+   named E1-11's client as the event that ends it. E1-11 shipped the client for
+   the roster, so this fix round closed the NRPS half: the memberships route
+   requires a token this platform issued for NRPS 2.0's membership scope
+   ([ADR 0099](../../adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md)).
+   The AGS half is not a defect and not an oversight; the same argument still
+   holds there, because no AGS client exists to prove conformance against —
+   SPEC §3.4 states the passback rule and SPEC §14.3 gives the work to **E3 —
+   Grade passback**. Enforcing now would turn every E0-15 line-item, score and
+   result test red for a reason none of them is about (`docs/MISTAKES.md` entry
+   22) and would assert nothing about a client.
+   **Owner: E3**, which builds the first AGS client. (Several places read "grade
+   passback is E2" when this was written; §14.3 is the authority and says E3,
+   and the test-side prose was corrected in the same pull request.)
+   **Done when** the AGS routes require a token this platform issued carrying
+   the AGS scope the call needs, refusing in the same RFC 6750 vocabulary the
+   roster uses, landing in the same change as the client that presents one —
+   and the AGS-only guard in the suite's mock-platform driver
+   (`refuse_an_unspecified_ags_token_flow`) is retired with it, that guard's
+   whole premise being that no such client exists.
+

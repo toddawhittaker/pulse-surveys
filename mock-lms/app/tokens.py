@@ -43,6 +43,16 @@ status of a refused token request and carves out one exception: a client that
 "attempted to authenticate via the `Authorization` request header field" MUST be
 answered 401. A `client_assertion` in the form body is not that, so the exception
 does not apply.
+
+**The second half of this module is the other end of the same token** — a
+service being presented one, added in E1-11's fix round for the roster and used
+by NRPS alone. It is here rather than in `app.nrps` because a token is only ever
+good if this endpoint issued it, and the rules for reading one back are the
+mirror image of `issued_token`'s for minting one: same issuer, same audience,
+same key, same clock. Two copies of that arithmetic in two modules would be two
+places for it to drift (`docs/MISTAKES.md` entry 13). Which *scope* opens which
+service stays with the service: `authorised_token` is asked for one and asks no
+questions about what it means.
 """
 
 import secrets
@@ -474,3 +484,226 @@ def granted_token(
     scopes = requested_scopes(form)
     verified_assertion(presented_assertion(form), settings, http)
     return issued_token(settings, key, scopes)
+
+
+# ---------------------------------------------------------------------------
+# The other end of the same token: a service being presented one (E1-11 fix
+# round). NRPS only — AGS stays unauthenticated until its first client exists.
+# ---------------------------------------------------------------------------
+
+# RFC 6750 §3.1's two error codes, and the status each answers with. Two codes
+# rather than one, because they are two different instructions: 401
+# `invalid_token` says "the credential is no good, go and get another one", and
+# 403 `insufficient_scope` says "the credential is fine and will never reach
+# this, ask for a different scope". A service that answered one code for every
+# refusal would leave a conformant client retrying the thing that cannot work.
+INVALID_TOKEN = "invalid_token"  # noqa: S105 - an error code, not a credential
+INSUFFICIENT_SCOPE = "insufficient_scope"
+
+UNAUTHORIZED = 401
+FORBIDDEN = 403
+
+
+class ServiceTokenError(Exception):
+    """A service call refused for its credential, carrying the challenge that says why.
+
+    The status and the RFC 6750 §3 `WWW-Authenticate` challenge travel on the
+    refusal rather than being chosen where it is caught, for the reason
+    `TokenRequestError` above carries its own code: which answer a client gets is
+    a fact about the rule that was broken and belongs beside it.
+
+    **The challenge states no `error_description`, deliberately.** RFC 6750's
+    ABNF excludes the double quote and the backslash from that parameter's value,
+    so it is the one part of a challenge where interpolating anything the caller
+    sent would let the caller write the challenge's own syntax. The description
+    goes in the response body, which has no such constraint and can say as much
+    as it likes.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        description: str,
+        *,
+        error: str | None = None,
+        scope: str | None = None,
+    ) -> None:
+        super().__init__(description)
+        self.status_code = status_code
+        self.description = description
+        self.error = error
+        self.scope = scope
+
+    def challenge(self) -> str:
+        """The `WWW-Authenticate` value for this refusal (RFC 6750 §3).
+
+        A bare `Bearer` where there is no error to state: §3.1 says a request
+        carrying no authentication at all SHOULD NOT be told which error it made,
+        there being no credential to have got wrong. The header itself is not
+        optional even then — RFC 7235 §3.1 requires it on a 401, and it is what
+        tells a tool it needs a bearer token rather than that the roster has
+        moved.
+
+        Where a scope is named it is the scope this resource requires, which is
+        §3's own `scope` parameter and the only thing in a refusal that tells a
+        client what to ask its token endpoint for next.
+        """
+        stated = [
+            (name, value)
+            for name, value in (("error", self.error), ("scope", self.scope))
+            if value is not None
+        ]
+        if not stated:
+            return BEARER_TOKEN_TYPE
+        parameters = ", ".join(f'{name}="{value}"' for name, value in stated)
+        return f"{BEARER_TOKEN_TYPE} {parameters}"
+
+
+def presented_credential(authorization: str | None) -> str:
+    """The bearer token an `Authorization` header presents (RFC 6750 §2.1).
+
+    `Bearer <token>` and nothing else: exactly two whitespace-separated parts,
+    the first of which names the scheme, which RFC 7235 §2.1 makes
+    case-insensitive.
+
+    **Each half of that rule refuses a shape a looser check accepts**, and they
+    are separate mistakes:
+
+      - Taking the last word of the header — `header.split()[-1]` — reads a
+        perfectly good token out of `Basic <token>`, a scheme this platform
+        issues nothing for. Asking what the *first* part says is what makes the
+        scheme part of the credential.
+      - Treating the whole header value as the token accepts a client that forgot
+        the scheme, and then accepts the same value dressed as anything else.
+      - Splitting on a space without asking whether anything followed it looks a
+        token up by the empty string, which is a token nobody was issued and an
+        answer that depends entirely on how the lookup treats it.
+
+    Refused with no error code, per §3.1: nothing arrived that could be the wrong
+    credential.
+    """
+    parts = (authorization or "").split()
+    if len(parts) != 2 or parts[0].lower() != BEARER_TOKEN_TYPE.lower():
+        raise ServiceTokenError(
+            UNAUTHORIZED,
+            "This service is reached with an access token this platform's token endpoint issued, "
+            f"presented as `Authorization: {BEARER_TOKEN_TYPE} <token>` (RFC 6750 §2.1). The "
+            "request carried no such header. Ask the `token_endpoint` in this platform's discovery "
+            "document for a token, under the `client_credentials` grant.",
+        )
+    return parts[1]
+
+
+def verified_access_token(
+    token: str, settings: PlatformSettings, key: IssuerKey
+) -> Mapping[str, Any]:
+    """The claims of `token`, once this platform has established it issued it.
+
+    In this order, and the order is what makes each refusal mean what it says:
+    the signature first, because claims read off an unverified token are claims
+    anybody wrote; then who it says issued it and who it is for; then the clock.
+
+    **The signature is checked against this platform's own key.** `issued_token`
+    mints a signed JWS precisely so that this check needs no store — E1-06's
+    "a service can check one without this process having remembered anything" —
+    and the whole of that argument rests on the signature being verified. A
+    service that decoded the token and read its `scope` would be authorising
+    anybody who can write a JSON object, and one that selected a key by the
+    header's `kid` and trusted the token because a key was found would be
+    authorising anybody who can copy a published `kid`.
+
+    `iss` and `aud` are checked as well as the signature: this process holds one
+    key, so they cannot currently disagree with it, and a platform that checked
+    only the signature would start handing out its roster the day it was given a
+    second key for something else.
+    """
+    try:
+        presented = CompactJws.parse(token)
+    except JwsError as failure:
+        raise ServiceTokenError(
+            UNAUTHORIZED,
+            f"The access token presented is not a compact JWS ({failure}), so this platform did "
+            "not issue it: every token this endpoint grants is a signed JWS.",
+            error=INVALID_TOKEN,
+        ) from None
+
+    if not presented.verifies_with(key.public_jwk()):
+        raise ServiceTokenError(
+            UNAUTHORIZED,
+            "The access token presented is not signed by this platform's issuer key, so it is not "
+            "one this platform granted. The signature is the whole of the check — an access token "
+            "here states its own scope, and a token nobody signed states whatever its bearer "
+            "wrote.",
+            error=INVALID_TOKEN,
+        )
+
+    claims = presented.claims
+    audience = claims.get("aud")
+    addressed = audience if isinstance(audience, list) else [audience]
+    if claims.get("iss") != settings.issuer or settings.issuer not in addressed:
+        raise ServiceTokenError(
+            UNAUTHORIZED,
+            f"The access token presented states `iss` {claims.get('iss')!r} and `aud` "
+            f"{audience!r}. This platform issues tokens for itself, {settings.issuer!r}, and "
+            "honours no others.",
+            error=INVALID_TOKEN,
+        )
+
+    expires_at = claims.get("exp")
+    if not isinstance(expires_at, int | float) or isinstance(expires_at, bool):
+        raise ServiceTokenError(
+            UNAUTHORIZED,
+            f"The access token presented states `exp` {expires_at!r}. Every token this platform "
+            "issues carries one as a number of seconds, and a token with no expiry is a credential "
+            "with no end, usable by whoever holds it for as long as this platform runs.",
+            error=INVALID_TOKEN,
+        )
+    now = time.time()
+    if expires_at <= now:
+        raise ServiceTokenError(
+            UNAUTHORIZED,
+            f"The access token presented expired at {int(expires_at)} and it is now {int(now)}. "
+            f"This endpoint grants tokens that live {ACCESS_TOKEN_LIFETIME_SECONDS} seconds; ask "
+            "it for another.",
+            error=INVALID_TOKEN,
+        )
+    return claims
+
+
+def authorised_token(
+    authorization: str | None,
+    required_scope: str,
+    settings: PlatformSettings,
+    key: IssuerKey,
+) -> Mapping[str, Any]:
+    """The claims of a token this platform issued that carries `required_scope`.
+
+    The one door a service goes through, so that "what makes a call authorised"
+    is answered in one place rather than once per route
+    (`docs/MISTAKES.md` entry 13). Raises `ServiceTokenError` for every refusal,
+    which the route turns into the status and the challenge it carries.
+
+    **The scope is asked for as membership of a list, not as equality.** RFC 6749
+    §3.3 makes `scope` space-delimited and `issued_token` grants every scope that
+    was asked for, so a tool that will read a roster and post grades holds one
+    token carrying both — which is exactly what `pylti1p3` obtains, asking its
+    token endpoint for whichever scopes the launch's service claims advertise. A
+    service comparing the whole `scope` claim against its own string refuses that
+    tool while passing every single-scope test.
+
+    403 rather than 401 for a token that is good and does not carry the scope,
+    per RFC 6750 §3.1: the client's credential is not the problem and a fresh one
+    of the same shape would be refused identically.
+    """
+    claims = verified_access_token(presented_credential(authorization), settings, key)
+    granted = str(claims.get("scope", "")).split()
+    if required_scope not in granted:
+        raise ServiceTokenError(
+            FORBIDDEN,
+            f"The access token presented was granted for {granted} and this service requires "
+            f"{required_scope!r}. Ask this platform's token endpoint for a token carrying that "
+            "scope; the credential presented is otherwise good and will never reach this service.",
+            error=INSUFFICIENT_SCOPE,
+            scope=required_scope,
+        )
+    return claims

@@ -331,7 +331,12 @@ def test_the_roster_refuses_the_nrps_query_parameters_it_does_not_implement(
         ("limit", "2"),
         ("rlid", "e0-28-resource-link"),
     ):
-        response = mock_platform.service_get(mock_platform.with_query(url, {parameter: value}))
+        # `roster_get` rather than `service_get`: since E1-11's fix round the
+        # mock's NRPS route requires an access token, and a tokenless call would
+        # be answered 401 before it ever reached the filter this test is about.
+        response = mock_platform.roster_get(
+            mock_platform.with_query(url, {parameter: value}), accept=None
+        )
         assert response.status_code == REFUSAL_STATUS, (
             f"Asking the membership container for `{parameter}={value}` answered "
             f"{response.status_code} rather than {REFUSAL_STATUS}. Body begins "
@@ -364,7 +369,11 @@ def test_the_roster_still_pages_by_the_parameter_it_does_implement(
     tests so the runner line says which way the container went wrong.
     """
     url = mock_platform.memberships_url(signed_launch)
-    response = mock_platform.service_get(mock_platform.with_query(url, {PAGE_PARAMETER: 1}))
+    # `roster_get` for the reason its twin above gives: the roster is behind a
+    # token since E1-11's fix round, and a tokenless read is 401 rather than 200.
+    response = mock_platform.roster_get(
+        mock_platform.with_query(url, {PAGE_PARAMETER: 1}), accept=None
+    )
     assert response.status_code == 200, (
         f"Asking the membership container for `{PAGE_PARAMETER}=1` answered "
         f"{response.status_code}. Body begins {response.text[:200]!r}. E0-28 item 2 refuses "

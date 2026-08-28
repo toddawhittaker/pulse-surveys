@@ -126,13 +126,15 @@ from app.launch import (
     id_token_claims,
     resolve_launch,
 )
-from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, membership_page
+from app.nrps import MEMBERSHIP_CONTAINER_MEDIA_TYPE, MEMBERSHIP_SCOPE, membership_page
 from app.pages import authorization_response_page, launch_page, registration_values
 from app.paging import (
+    FIRST_PAGE,
     PAGE_PARAMETER,
     PageOutOfRangeError,
     link_header,
     page_count,
+    page_number,
     page_size,
     window,
 )
@@ -143,7 +145,9 @@ from app.tokens import (
     CLIENT_CREDENTIALS_GRANT,
     INVALID_REQUEST,
     TOKEN_ENDPOINT_AUTH_METHOD,
+    ServiceTokenError,
     TokenRequestError,
+    authorised_token,
     granted_token,
 )
 from app.wrong_launches import DEFECT_QUERY_PARAM, WrongLaunchMinter
@@ -268,15 +272,28 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 # gradebook is built per application exactly as the issuer key is, so two
 # platforms started in one process hold two gradebooks (ADR 0049).
 #
-# **None of them is authenticated, and since E1-06 that is a gap rather than an
-# absence.** A real platform puts its Advantage services behind an OAuth 2.0
-# client-credentials grant. E0-14 built no token endpoint and E0-15 specified
-# none, so an endpoint that answered 401 then would have answered it to a tool
-# with nothing to present; E1-06 built the grant (`app.tokens`), and the token a
-# tool obtains there is presentable here but not required. E1-06 rules that
-# enforcement pairs with E1-11's client — a service that started refusing before
-# a conformant client existed would be refusing this repository's own tests —
-# and E1-11 is the ticket that closes it.
+# **NRPS is authenticated and AGS is not, and the split is deliberate.** A real
+# platform puts both behind an OAuth 2.0 client-credentials grant. E0-14 built no
+# token endpoint and E0-15 specified none, so an endpoint that answered 401 then
+# would have answered it to a tool with nothing to present; E1-06 built the grant
+# (`app.tokens`) and ruled that enforcement pairs with the first conformant
+# client, because a service refusing before one exists would be refusing this
+# repository's own tests.
+#
+#   - **The roster requires a token now.** E1-11 built the conformant client, so
+#     that argument has expired for NRPS: `memberships` below refuses a call that
+#     presents no token this platform issued for the membership scope, and
+#     `tests/integration/test_mock_lms_nrps_requires_a_token.py` holds the
+#     contract. Landed in E1-11's fix round, which E1-15's exit clause 5 needs.
+#   - **AGS still answers without one, and that is the same argument still
+#     standing.** No grade-passback client exists: §3.4 is the passback rule and
+#     SPEC §14.3 gives the work to **E3 — Grade passback**, which is where the
+#     first AGS client is built and therefore where this ends. E3 owns the
+#     enforcement; it is recorded with that owner and its "done when" in
+#     `docs/tickets/e1/deferred.md`. Until then a token is presentable at every
+#     AGS route below and required at none.
+#
+# See `docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md`.
 
 
 def require_context(platform: SeededPlatform, context_id: str) -> MockContext:
@@ -530,18 +547,46 @@ def _register_token(app: FastAPI, settings: PlatformSettings, key: IssuerKey) ->
         return JSONResponse(granted.response())
 
 
-def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPlatform) -> None:
-    """Names and Role Provisioning 2.0: one section's roster, paged."""
+def _register_nrps(
+    app: FastAPI, settings: PlatformSettings, platform: SeededPlatform, key: IssuerKey
+) -> None:
+    """Names and Role Provisioning 2.0: one section's roster, paged and authenticated."""
 
     @app.get(MEMBERSHIPS_PATH, summary="NRPS 2.0: one section's roster, one page at a time")
     def memberships(
+        request: Request,
         context_id: str,
-        page: Annotated[int, Query(alias=PAGE_PARAMETER, ge=1)] = 1,
+        page: Annotated[str | None, Query(alias=PAGE_PARAMETER)] = None,
         role: Annotated[str | None, Query()] = None,
         limit: Annotated[str | None, Query()] = None,
         rlid: Annotated[str | None, Query()] = None,
     ) -> JSONResponse:
         """One page of a membership container, and a `Link` header to the next.
+
+        **The credential is checked before anything else about the request**, and
+        the order is the decision rather than an accident: a caller with no token
+        learns that it needs one, and learns nothing about which contexts this
+        platform seeds, which query parameters it implements, or where its cursor
+        starts. Answering the `role` refusal or the context 404 first would make
+        an unauthenticated request a way to enumerate the first two.
+
+        **That is why `page` is typed here as a string with no bound.** It
+        carried `ge=1`, which FastAPI enforces before the handler is entered at
+        all, so `?page=0` answered 422 to a caller who had presented nothing —
+        the one exception to the sentence above, and a claim with an exception is
+        one nobody can rely on. The bound and the default now live in
+        `app.paging::page_number`, read below, behind the credential; the same
+        move covers `?page=abc`, which the framework would also have answered
+        before the token was looked at.
+
+        Every rule about the token is in `app.tokens`; this turns a refusal into
+        the status and the RFC 6750 §3 challenge it carries. The challenge is a
+        header rather than a body member because that is where a client reads it
+        — a bare 401 is indistinguishable from a route that has moved.
+
+        The verification is RSA arithmetic and this is a synchronous handler, so
+        FastAPI already runs it in a threadpool; there is nothing to hand off
+        here the way the token endpoint does.
 
         The header is the only place paging is expressed. A next URL in the body
         would read correctly to anyone looking at the response and would leave a
@@ -566,7 +611,26 @@ def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPla
         `page` keeps working. It is the cursor the roster walk moves by, and a
         container that refused every query parameter would turn every seeded
         roster into its first page.
+
+        **A `page` that is not a page number is refused with the same 400**, and
+        the code is E0-28 item 2's rather than a new decision: 400 says this
+        platform read the request and will not serve it, which is the sentence a
+        tool's author acts on, while a 422 reports that a value could not be
+        parsed — a different fact, and one this handler is no longer in a
+        position to state. It is also deliberately not the 404 that a page
+        *past* the end answers with: page nine of a three-page roster is a client
+        following a header into nowhere, and page zero is a cursor no collection
+        could ever have.
         """
+        try:
+            authorised_token(request.headers.get("authorization"), MEMBERSHIP_SCOPE, settings, key)
+        except ServiceTokenError as refusal:
+            raise HTTPException(
+                status_code=refusal.status_code,
+                detail=refusal.description,
+                headers={"WWW-Authenticate": refusal.challenge()},
+            ) from refusal
+
         refused = [
             name
             for name, value in (("role", role), ("limit", limit), ("rlid", rlid))
@@ -584,9 +648,22 @@ def _register_nrps(app: FastAPI, settings: PlatformSettings, platform: SeededPla
                     f"`{PAGE_PARAMETER}` is the one parameter this container implements."
                 ),
             )
+        requested = page_number(page)
+        if requested is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"`{PAGE_PARAMETER}={page}` is not a page of this membership container. "
+                    f"`{PAGE_PARAMETER}` is a whole number from {FIRST_PAGE} upwards — the cursor "
+                    "the roster walk moves by, and the one query parameter this container "
+                    "implements. A page past the end of the roster is a different answer, and "
+                    "this is not that."
+                ),
+            )
+
         context = require_context(platform, context_id)
         try:
-            served = membership_page(platform, settings, context, page)
+            served = membership_page(platform, settings, context, requested)
         except PageOutOfRangeError as refusal:
             raise HTTPException(status_code=404, detail=str(refusal)) from refusal
         return JSONResponse(
@@ -856,7 +933,7 @@ def create_app() -> FastAPI:
     _register_oidc_metadata(app, settings, key)
     _register_authorization(app, settings, platform, key, wrong_launches)
     _register_token(app, settings, key)
-    _register_nrps(app, settings, platform)
+    _register_nrps(app, settings, platform, key)
     _register_ags(app, settings, platform, grades)
     _register_mock_inspection(app, grades)
     return app

@@ -56,3 +56,24 @@ ticket is built against.
 The cheap generalisation, worth having: a twelve-minute gate is not dead time to
 be filled with edits. It is dead time for reading, and for drafting somewhere the
 gate cannot see.
+
+**E1-11's fix round, 2026-08-27 — the correction I did not make mid-run, and
+what the honest re-run then found.** The full suite was twelve minutes into its
+run when reading SPEC §14.3 showed that the AGS deferral I had just written
+named the wrong owner — E2, copied from the work order, where §14.3 gives grade
+passback to E3. The correction touched four records and one source comment, and
+the temptation was to make it while the run finished, since "documentation
+cannot change a Python result".
+
+It can: `tests/unit` holds sweeps that read `docs/` and the source comments, and
+they had already run. A verdict of "2 failed, 1858 passed" over a tree that
+gained five edits at minute twelve is a number belonging to neither tree. So the
+edits waited, and the affected suites were re-run afterwards — which is how the
+one-second race in
+`test_mock_lms_client_credentials_grant.py::test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_refused`
+was found at all: it fails when more than a second passes between the test
+reading `time.time()` and the platform reading its own, and it had passed in the
+full run an hour earlier. Had it appeared in a run I had edited under, the
+obvious diagnosis would have been my own edit, and the real defect — a test
+whose expected boundary is computed before two RSA signatures — would have gone
+back to sleep.
