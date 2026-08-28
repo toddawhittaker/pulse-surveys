@@ -21,12 +21,20 @@ merely *contains* the column serves no lookup by it. `called_at` is stored
 descending so that the row the probe wants sits at the near end of the section's
 range; ascending, the planner walks to the section's oldest call to find its newest.
 
-**What this revision does not do.** `ix_nrps_call_section_id` — the single-column
-index `e2c94b6a1f70` created — is left exactly where it is. The index below leads
-with the same column and therefore serves everything that one served, so it is now
-redundant and costs a write on every call row; dropping it is a second decision with
-a second downgrade to get right, and it is proposed in this batch's pull request
-rather than taken here.
+**`ix_nrps_call_section_id` goes, in the same revision.** The single-column index
+`e2c94b6a1f70` created leads with the same column as the one below, which therefore
+serves every lookup it served — so keeping both bought nothing and cost a second
+index write on every call row, and there is one row per HTTP call per section every
+hour. E0-06 dropped `ix_section_course_id` for exactly this reason, and `section`,
+`college.institution_id`, `department.college_id` and `course.prefix_id` are all
+left unindexed on the same argument: an index merely contained by another index's
+leading column is a write nobody reads.
+
+**The order within each direction matters.** The composite is created *before* the
+old index is dropped, and re-created *after* it on the way back, so there is no
+moment inside either transaction when `nrps_call` has no index on `section_id` —
+the debounce probe runs on the request path of every staff launch, and a migration
+window is not a reason to hand it a sequential scan.
 
 **`alembic check` sees an index by name and not by shape.** With this revision
 removed, `check` reports the declaration on `NrpsCall` as an added index; with it in
@@ -36,8 +44,11 @@ index reached the database is
 `tests/integration/test_the_nrps_call_log_is_indexed_for_the_debounce_probe.py`,
 which reads each key column's position and descending flag out of `pg_index`.
 
-**`downgrade()` drops exactly this index** and nothing else, leaving a database at
-`f3a5c92d8e14` with precisely the indexes that revision left it holding.
+**`downgrade()` restores exactly what was here** — the single-column index back,
+the composite gone, nothing else touched — leaving a database at `f3a5c92d8e14`
+with precisely the indexes that revision left it holding. Verified rather than
+claimed: a scratch round trip compares every index and column in `public` before
+and after, and `upgrade → downgrade → upgrade` is the identity.
 """
 
 from collections.abc import Sequence
@@ -52,14 +63,26 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 TABLE = "nrps_call"
+
+# The index this revision creates, and the one it supersedes. Both are plain
+# strings: `e2c94b6a1f70` created the second through `op.f`, which marks a name as
+# already final so the naming convention is not applied to it twice, and the two
+# spell the same thing. `op.f` is called **inside** the functions below where it is
+# used at all, because `op` is a proxy for the migration context and there is no
+# context while the revision map is importing this file — a module-scope call
+# raises `AttributeError: 'NoneType' object has no attribute 'f'` the moment
+# anything asks the script directory for a head.
 INDEX = "ix_nrps_call_section_id_called_at_desc"
+SUPERSEDED = "ix_nrps_call_section_id"
 
 
 def upgrade() -> None:
-    """Apply this revision."""
+    """Apply this revision: the composite in, the index it subsumes out."""
     op.create_index(INDEX, TABLE, ["section_id", sa.text("called_at DESC")])
+    op.drop_index(op.f(SUPERSEDED), table_name=TABLE)
 
 
 def downgrade() -> None:
-    """Reverse this revision."""
+    """Reverse this revision: the single-column index back, the composite out."""
+    op.create_index(op.f(SUPERSEDED), TABLE, ["section_id"], unique=False)
     op.drop_index(INDEX, table_name=TABLE)

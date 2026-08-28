@@ -1125,6 +1125,17 @@ class NrpsCall(UuidPrimaryKey, Base):
         # `called_at` is stored **descending**, so the row the probe wants is at the
         # near end of the section's range rather than the far one.
         #
+        # **It is the only index on `section_id`, and that is deliberate.**
+        # `e2c94b6a1f70` created `ix_nrps_call_section_id`; leading with the same
+        # column, this one serves every lookup that one served, so keeping both
+        # bought nothing and cost a second index write on every call row — of which
+        # there is one per HTTP call, per section, every hour. `a4d61c8f9b27` drops
+        # it in the same revision that creates this. That is the reasoning E0-06
+        # applied to `ix_section_course_id`, and the reasoning `section`,
+        # `college.institution_id`, `department.college_id` and `course.prefix_id`
+        # are all left unindexed under today: an index that is merely contained by
+        # another index's leading column is a write nobody reads.
+        #
         # An expression rather than a column list, because that is the only way to
         # state the sort direction here — and it is why this declaration is not the
         # guarantee. `alembic check` sees an index by name (measured: dropping the
@@ -1138,13 +1149,16 @@ class NrpsCall(UuidPrimaryKey, Base):
         Index("ix_nrps_call_section_id_called_at_desc", "section_id", text("called_at DESC")),
     )
 
-    # Which section's roster was being read. Indexed, because every one of the
-    # three jobs above is a query for one section's rows — the debounce most of
-    # all, which runs on a staff launch while somebody waits. RESTRICT, matching
+    # Which section's roster was being read. Every one of the three jobs above is
+    # a query for one section's rows — the debounce most of all, which runs on a
+    # staff launch while somebody waits — and the index that serves them is the
+    # composite declared in `__table_args__` above, which leads with this column.
+    # No `index=True` here: that would be a second index on the same leading
+    # column, paid for on every insert and read by nothing. RESTRICT, matching
     # every other reference to `section` in this schema: losing a section should
     # refuse rather than silently take its call history with it.
     section_id: Mapped[UUID] = mapped_column(
-        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
     )
     # The address actually called, page parameter and all — not the section's
     # stored address. A paged walk's second request is a URL the platform composed

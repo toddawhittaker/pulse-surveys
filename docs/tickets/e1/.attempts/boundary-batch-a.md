@@ -80,8 +80,41 @@ that upgrades a scratch container to head, records every index and column in
 removed and it is this one, none added, no column drift, and
 upgrade→downgrade→upgrade is the identity.
 
-**`ix_nrps_call_section_id` was left alone**, though the new index leads with the
-same column and makes it redundant — this repo drops such indexes elsewhere
-(E0-06 dropped `ix_section_course_id` for exactly this reason). The plan settles
-this migration as "adds … downgrade drops exactly it", so removing the old one is
-proposed in the PR rather than taken here.
+**`ix_nrps_call_section_id` was left alone at this point**, though the new index
+leads with the same column and makes it redundant — this repo drops such indexes
+elsewhere (E0-06 dropped `ix_section_course_id` for exactly this reason). The plan
+settles this migration as "adds … downgrade drops exactly it", so removing the old
+one was proposed in the PR rather than taken here. **Superseded by attempt 4**: the
+coordinator accepted the proposal and it is now dropped in this same revision.
+
+## Attempt 4 — dropping the index the composite supersedes, worked
+
+The coordinator accepted the proposal from attempt 3. In revision `a4d61c8f9b27`:
+`upgrade()` creates the composite and then drops `ix_nrps_call_section_id`;
+`downgrade()` re-creates the single-column index and then drops the composite. The
+create-before-drop order in each direction means `nrps_call` is never without an
+index on `section_id` inside either transaction — the debounce probe runs on the
+request path of every staff launch. `NrpsCall.section_id` loses its `index=True`.
+
+**One thing went wrong and the suite caught it.** `SUPERSEDED = op.f("…")` was
+first written at module scope, and `op` is a proxy for a migration context that
+does not exist while the revision map is importing the file — so anything asking
+the script directory for a head raised `AttributeError: 'NoneType' object has no
+attribute 'f'`. `test_alembic_baseline.py::test_upgrade_head_stamps_the_baseline_
+revision_on_an_empty_database` failed on it. `op.f` is now called inside the
+function bodies, which is what `e2c94b6a1f70` already does.
+
+**And my own instrument was briefly the thing that lied.** The scratch round trip
+passed *before* that failure was found, because `command.upgrade` loads the
+revision files lazily from inside a run, where `op` does have a context. It also
+still carried attempt 3's verdict rule — "exactly one index removed, none added" —
+which now printed `NOT exactly it` for behaviour that was entirely correct. The
+rule was rewritten to the new criterion before the answer was believed: the
+downgrade removes the composite and restores the superseded index and does nothing
+else, and at head `nrps_call` carries only the composite and its primary key, which
+is measured directly rather than inferred from the reverse direction.
+
+Re-run after the fix: round trip "exactly it"; 93 passed across the batch's four
+modules, the five adjacent roster-sync modules, `test_alembic_baseline.py` and
+`test_identity_schema.py`; `tests/unit` 951 passed; ruff format, ruff check and
+mypy over `backend/` all clean.
