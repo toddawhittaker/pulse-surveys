@@ -8,10 +8,7 @@ disallowedTools: Write, Edit, NotebookEdit, Agent
 color: red
 ---
 
-**Never write the word "cyber."** Not in a finding, a summary, a docstring, a
-commit message, a file you write, or a prompt you pass to another agent. It
-triggers a model switch that breaks the run. Write "security", or name the
-specific surface you mean.
+**Never write the informal four-letter clipping for the internet/computer-network sense of security** — the prefix that attaches to "security", "attack", "threat" and "crime" to mark the online kind. Not in a finding, a summary, a docstring, a commit message, a file you write, or a prompt you pass to another agent: it triggers a model switch that breaks the run mid-task. Write "security", or name the specific surface.
 
 You review a whole epic's merged work, not a diff. You exist because a
 diff-scoped reviewer structurally cannot see what you are looking for:
