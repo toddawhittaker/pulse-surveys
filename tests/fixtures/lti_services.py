@@ -21,7 +21,7 @@ The mock's NRPS route requires an access token its own endpoint issued carrying 
 membership scope, so every roster read here goes through `roster_get`, which asks
 `service_token` for one — one place rather than one per module
 (`docs/MISTAKES.md` entry 13). **AGS deliberately stays unauthenticated** until a
-grade-passback client exists in E2 (SPEC §3.4), which is why
+grade-passback client exists, which SPEC §14.3 gives to E3, which is why
 `refuse_an_unspecified_ags_token_flow` is still here and is still called by every
 AGS path. What the platform must refuse, and with which status and code, is
 `tests/integration/test_mock_lms_nrps_requires_a_token.py` and not this file.
@@ -587,18 +587,19 @@ class MockPlatform:
         `service_token` below, and `test_mock_lms_nrps_requires_a_token.py` for
         the refusals it is required to answer with.
 
-        AGS keeps the guard, and keeps it for the unchanged reason: grade
-        passback is E2 (SPEC §3.4), no AGS client exists, and a platform that
-        started refusing there would turn every E0-15 line-item and score test red
-        for a reason none of them is about (`docs/MISTAKES.md` entry 22).
+        AGS keeps the guard, and keeps it for the unchanged reason: SPEC §14.3
+        gives grade passback to E3, so no AGS client exists yet, and a platform
+        that started refusing there would turn every E0-15 line-item and score test
+        red for a reason none of them is about (`docs/MISTAKES.md` entry 22).
         """
         if response.status_code in (401, 403):
             pytest.fail(
                 f"The platform answered {response.status_code} for `{url}`, so it requires an "
                 "access token for an Advantage service this suite calls unauthenticated. NRPS "
-                "requires one and this driver presents it; **AGS deliberately does not** — no "
-                "grade-passback client exists before E2 (SPEC §3.4), so a service refusing there "
-                "would be refusing this repository's own tests. If AGS is meant to start requiring "
+                "requires one and this driver presents it; **AGS deliberately does not** — SPEC "
+                "§14.3 gives grade passback to E3 and no AGS client exists yet, so a service "
+                "refusing there would be refusing this repository's own tests. If AGS is meant to "
+                "start requiring "
                 "a token, that is a ticket rather than something to guess at in "
                 "tests/fixtures/lti_services.py."
             )

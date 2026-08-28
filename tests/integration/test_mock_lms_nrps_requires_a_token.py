@@ -26,10 +26,12 @@ this module reads them. Nothing here invents a vocabulary: the work order names
 the two strings and the two statuses, and they are that RFC's, so its own
 placement is the one they belong in.
 
-**AGS is deliberately not here.** No grade-passback client exists before E2 (SPEC
-§3.4), so the argument E1-06 made is still live for that half of the surface, and
+**AGS is deliberately not here.** No grade-passback client exists yet — SPEC §14.3
+gives AGS line-item creation and score posting to **E3**, "Grade passback" — so the
+argument E1-06 made is still live for that half of the surface, and
 `MockPlatform.refuse_an_unspecified_ags_token_flow` still reports an AGS 401 as a
-gap in a ticket rather than as a defect.
+gap in a ticket rather than as a defect. §3.4 states the rule the passback
+implements; §14.3 is what says whose it is.
 
 **Every refusal is one difference from a read that works, and carries it.** A
 401 is a 401: a platform that refused every roster read would satisfy each refusal

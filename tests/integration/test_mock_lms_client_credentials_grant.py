@@ -45,7 +45,7 @@ are asserted in `test_mock_lms_nrps_requires_a_token.py` rather than here — th
 module's subject is the endpoint that grants the token, not the service that checks
 it. `MockPlatform.refuse_an_unspecified_ags_token_flow`, which used to report a 401
 from either service as a gap, is narrowed to **AGS**, where the original argument
-still holds: no grade-passback client exists before E2 (SPEC §3.4).
+still holds: SPEC §14.3 gives grade passback to E3, so no AGS client exists yet.
 
 What the conformance test at the foot of this module asserts is unchanged and is
 the whole sequence completing — token requested with a tool-signed assertion, token
