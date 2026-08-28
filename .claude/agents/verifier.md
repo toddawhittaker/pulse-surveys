@@ -89,18 +89,32 @@ default.
 the mutated module's import sites outside `tests/`. A dotted import
 (`import app.api.lti`, `from app.api.lti import ...`) is not the only form a
 caller can take — `from app.api import lti` imports the same module by its
-package, and `from app.models import identity` likewise; a grep for only the
-dotted path never matches either. Grep for both forms:
-`grep -rn "from app\.<pkg>\.<mod> import\|import app\.<pkg>\.<mod>\|from app\.<pkg> import <mod>\b" backend scripts mock-lms mock-idp --include=*.py`
-with `<pkg>`/`<mod>` filled in for the module actually mutated, run across all
-of `backend/` (including `backend/migrations/`), `scripts/`, and both mocks —
-not just `backend/app/`. More than one caller means a shared entry point
-(MISTAKES #41: a ticket's own suites don't verify a shared entry point) — run
-the full suite for that row instead, and name the import sites in the report.
-An **empty** caller list for a module under `backend/app/services/` or
-`backend/app/api/` is suspicious, not reassuring — those directories exist to
-be imported from elsewhere; treat it as a reason to check the grep, not as
-proof the module is safely isolated.
+package, and this codebase's dominant form is a third: a top-level module with
+no package segment at all, imported by name off `app` itself
+(`from app.config import Settings`, `from app.db import get_session`,
+`from app.tokens import (...)`). A grep for only the dotted path misses all of
+these. For a module `app/<name>.py` or `app/<pkg>/<name>.py`, grep for all
+three forms — the dotted import, the bare `import`, and the parent-package
+import (parent may be `app` itself for a top-level module):
+`grep -rn "from app\.<path> import\|import app\.<path>\|from app\.<parent> import <name>\b" backend scripts mock-lms mock-idp --include=*.py`
+with `<path>` the mutated module's full dotted path (`config` for
+`app/config.py`, `api.lti` for `app/api/lti.py`), `<parent>` its containing
+package (`app` for a top-level module, `app.api` for `app/api/lti.py`), and
+`<name>` its bare module name (`config`, `lti`). Concrete example for
+`app/config.py`: `grep -rn "from app\.config import\|import app\.config\|from app import config\b" backend scripts mock-lms mock-idp --include=*.py`
+— the third alternative is the one a dotted-only grep would miss entirely.
+Run across all of `backend/` (including `backend/migrations/`), `scripts/`,
+and both mocks — not just `backend/app/`. More than one caller means a shared
+entry point (MISTAKES #41: a ticket's own suites don't verify a shared entry
+point) — run the full suite for that row instead, and name the import sites
+in the report. An **empty** caller list is suspicious, not reassuring, for any
+module `.claude/heavy-lane-paths.md` names as its own row rather than folding
+into a directory's fail-closed default — `backend/app/services/`,
+`backend/app/api/`, `backend/app/config.py`, `backend/app/db.py`,
+`mock-lms/app/tokens.py`, `mock-lms/app/signing.py`, and
+`mock-idp/app/signing.py` included. Those exist to be imported from
+elsewhere; treat an empty list as a reason to check the grep, not as proof the
+module is safely isolated.
 
 **Carve-out 2 — scoped survivor.** A SURVIVOR under the scoped run gets one
 full-suite check before it is recorded (MISTAKES #16's second incident: a

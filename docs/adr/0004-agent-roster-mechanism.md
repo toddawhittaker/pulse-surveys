@@ -25,11 +25,14 @@ per-PR review, four epic-boundary — invoked by three skills: `/build-ticket`,
 
 > **2026-08-28:** Four per-PR reviewers moved to the epic boundary —
 > `data-model`, `lti-oidc`, `a11y-copy`, `prompt-eval`. The roster is now
-> three construction, four per-PR review (`spec-conformance`, `app-security`,
-> `privacy-authz`, `verifier`), eight epic-boundary (`epic-exit`,
-> `invariant-coverage`, `adr-docs-completeness`, `threat-model`, plus the
-> four moved). Fifteen agents total, unchanged. The mechanism this record
-> decides — hooks, computed gating, session-scoped warmth — is unchanged.
+> four construction-loop agents (`builder`, `implementer`, `test-author`,
+> `verifier` — `verifier` runs per build round and appears in no
+> `review-pr` row, so it is construction, not per-PR review), three per-PR
+> review (`spec-conformance`, `app-security`, `privacy-authz`), eight
+> epic-boundary (`epic-exit`, `invariant-coverage`, `adr-docs-completeness`,
+> `threat-model`, plus the four moved). Fifteen agents total, unchanged. The
+> mechanism this record decides — hooks, computed gating, session-scoped
+> warmth — is unchanged.
 
 **Warmth comes from `SendMessage`, scoped to a session.** The implementer is
 spawned once per ticket and re-addressed by name; a send resumes it from its

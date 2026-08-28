@@ -134,7 +134,9 @@ standing to challenge any decision it judges unsafe.
 Findings get a fix round: **declare the stopping rule before the round starts**
 (tests-first fixes, one re-verification, targeted re-mutations, no further
 round unless something is red or a HIGH appears), then hold to it and record
-rule and residue in the PR body. A fix round has the defect density of the
+rule and residue in the PR body. The declared rule may extend a round to cover
+findings the round itself introduced; what it forbids is unbounded re-polish
+of work the review already accepted. A fix round has the defect density of the
 original work; the round's fixes get verified the same way **in kind** — no
 green believed on the fixer's word — but the battery is **targeted
 re-mutations of what the round touched, including any original battery rows
