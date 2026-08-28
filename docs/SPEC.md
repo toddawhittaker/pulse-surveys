@@ -259,10 +259,10 @@ Production deployment follows the same topology; reverse proxy / tunnel (e.g., c
 
 ### 7.3 LTI specifics (LMS-agnosticism in practice)
 
-- Strict LTI 1.3 core + LTI Advantage (NRPS 2.0, AGS 2.0, Deep Linking 2.0) — no platform-proprietary APIs anywhere in core code.
+- Strict LTI 1.3 core + LTI Advantage (NRPS 2.0, AGS 2.0; Deep Linking 2.0 is post-v1, below) — no platform-proprietary APIs anywhere in core code.
 - **Iframe cookie survival:** third-party cookie blocking is the norm; the tool uses the OIDC state-passing patterns `pylti1p3` supports (platform storage / postMessage) plus its own short-lived launch-session JWT so no third-party cookie is ever required.
 - Per-platform quirk isolation: a thin `PlatformProfile` adapter (Canvas, Moodle, D2L, Blackboard) for known deviations in AGS score semantics and NRPS paging — quirks live in one file each, nothing leaks into domain logic.
-- Deep Linking supported so the tool can be placed as a graded assignment where the platform prefers that flow; plain resource-link launch is the default.
+- Deep Linking is post-v1 (ruled 2026-08-28): plain resource-link launch is the only placement flow v1 supports. If a real platform demands the Deep Linking flow before then, the work belongs to E3, the epic that meets real platforms.
 - Roster sync: NRPS pulled on schedule and on launch (debounced), used for enrollment windows (§3.4) and email addresses where exposed.
 - **What triggers the first pull.** A launch by an instructor or any leadership role triggers a roster sync; a **student** launch does not. The roster service address arrives as a claim on that launch and is **stored**, which is what gives the scheduled job the discovery it otherwise lacks — it has no way of its own to learn that a section exists. So the first staff launch of a section bootstraps every later sync of it. The tool calls the roster service with its own credentials, so the launching person's role authorizes the *trigger*, never the request. Where a platform withholds the address even from a staff launch, the section has no roster and no sync can be attempted: the admin console shows it as never-synced (§6.1, §6.3) rather than as empty, because a section with no roster and a section with no enrollments are different states and only one of them is a fault.
 

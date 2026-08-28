@@ -150,24 +150,29 @@ client, the way NRPS's landed with E1-11's.
 No epic in §14.3 names logout; E1's sessions are short-lived JWTs that
 expire rather than end. Raised at the E1 breakdown (PR #89) and still
 unowned at E1 exit, which is the condition E1-09 set for carrying it here.
-**Owner:** unscheduled — Todd's call; the epic that first needs a session
-to end before it expires.
-**Done when:** an epic's breakdown schedules it, or a record says expiry is
-the product's answer and why.
+**Owner:** E9 (ruled 2026-08-28) — beside the role switcher and the admin
+surfaces, whose web-door roles are the people who need a session to end
+before its hour expires; E9 lands before the Care queue (E10) ships.
+**Done when:** E9's breakdown schedules it and it is built there.
 
 ## Local-account fallback for web login
 
 SPEC §7.1 names it as a pilot fallback; nothing in E1..E13 schedules it.
-Raised at the breakdown (PR #89), unanswered.
-**Owner:** unscheduled — Todd's call.
-**Done when:** scheduled or explicitly dropped from §7.1.
+Raised at the breakdown (PR #89).
+**Owner:** E13 (ruled 2026-08-28) — it is release-readiness insurance
+against the pilot IdP falling through, and E13 is where that risk is either
+real or expired.
+**Done when:** E13 either schedules and builds it, or deletes the §7.1
+sentence because the risk expired.
 
 ## Deep Linking
 
-§7.3 promises it, E0-14 deferred it out of the mock, no epic names it.
-Raised at the breakdown (PR #89), unanswered.
-**Owner:** unscheduled — Todd's call.
-**Done when:** an epic's breakdown schedules it, or §7.3 stops promising it.
+E0-14 deferred it out of the mock and no epic names it. Ruled 2026-08-28:
+post-v1, and §7.3 now says so rather than promising it — unless a real
+platform demands the flow before then, in which case it is E3's.
+**Owner:** post-v1 (§14.4); E3 only if a real platform forces it earlier.
+**Done when:** done — §7.3 was edited with the ruling (E1's cleanup Batch C
+PR); nothing further is owed unless a platform demands the flow.
 
 ## The mock's scope check is only provably a membership check while no advertised scope is a superstring
 
