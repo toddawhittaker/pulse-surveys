@@ -65,12 +65,18 @@ carrying what landed and where.
 Also closed by E1's cleanup batch (E1-05 item 3): `before_insert` and
 `before_update` events on `LtiPlatform` judge every ORM write, reading the
 environment from `Session.info["environment"]` and judging a session that
-states none as a deployment. What a later epic has to know is the shape of
-what is left: **a writer that states no environment on its session is
-refused in a deployment's terms**, so a new one says where it is where the
-session is built; and raw SQL and a Core `insert()` fire no mapper event and
-remain unjudged, which is recorded residue in ADR 0081 and ADR 0101. Source:
-`docs/tickets/e1/deferred.md`, E1-05 item 3.
+states none as a deployment. Two things a later epic — E11's registration
+console above all — has to know about what is left. **A writer that states
+no environment on its session is refused in a deployment's terms**, so a new
+one says where it is where the session is built. And **the events do not see
+every write the ORM can make**: `session.add`, an edit to a persistent row
+and `session.merge` are judged, while `Session.bulk_save_objects`, an
+ORM-enabled `session.execute(update(LtiPlatform).values(...))`, a Core
+`insert()` and raw SQL are not — measured on SQLAlchemy 2.0.52, and the
+bulk-`UPDATE` shape is a natural way to write a console's save. `pulse_app`
+holds `SELECT` on the table and nothing else, so a bypassing write on the
+application connection is refused by the database. Recorded residue in ADR
+0081 and ADR 0101. Source: `docs/tickets/e1/deferred.md`, E1-05 item 3.
 
 ## The TypeScript 7 pair waits on typescript-eslint
 

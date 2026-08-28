@@ -35,8 +35,13 @@ spelling rule refuses is never looked up.
   `authorization_endpoint` is refused.
 - The **IPv4-mapped form is unwrapped** before the question is asked, by the shape
   `app.config.is_a_loopback_host` already uses.
-- An **unresolvable host is refused**, in both of the shapes a resolver fails in —
-  a raise and an empty answer. Unresolvable is unjudgeable, and a name that
+- An **unresolvable host is refused**, in every shape a resolver fails in — an
+  empty answer, an `OSError` for a name nothing answers for, and a `UnicodeError`
+  for a name the IDNA codec will not encode at all (a label over 63 octets, an
+  empty label), which is a `ValueError` and no `OSError`. Catching only the first
+  two let the third escape the rules, the walk and the section's own error
+  handling, taking the refusal row and the validly-fetched prefix with it; the
+  review found that as a MEDIUM. Unresolvable is unjudgeable, and a name that
   resolves nowhere at the moment of the check resolves wherever its owner likes at
   the moment of the fetch.
 - Every rule stays **off under the development name**, rule 5 included, with one
@@ -136,10 +141,46 @@ into the registration and judged there, rather than a platform's run-time choice
 — and closing it means judging and pinning inside the library's own client, which
 is a wider change than this batch.
 
-**Raw SQL and a Core `insert()` still escape the flush chokepoint**, because
-mapper events do not fire for either. This extends rather than closes the residue
-ADR 0081 records, and it is stated here for the same reason: a reader who assumes
-the database enforces it will build the next writer accordingly.
+**Four write shapes still escape the flush chokepoint, and three that look like
+them do not.** Measured on SQLAlchemy 2.0.52 rather than assumed, because the
+review found the first list understated: `session.add`, an attribute changed on a
+persistent row, and `session.merge` are all **judged**, while
+`Session.bulk_save_objects`, an ORM-enabled
+`session.execute(update(LtiPlatform).values(...))`, a Core `insert()` and raw SQL
+fire **no event at all**. The ORM-enabled bulk `UPDATE` is the one that matters:
+it is written through the ORM's own API, it looks exactly like a judged write, and
+it is a natural way to write the save button on E11's registration console — which
+is the use case this chokepoint exists for. What bounds the residue is the grant
+rather than the event: `pulse_app` holds `SELECT` on `lti_platform` and nothing
+else, so a bypassing write on the application's own connection is refused by the
+database, and what is left is a writer connecting as an identity that may write —
+the seed's bootstrap superuser, a migration, `psql`. This extends rather than
+closes the residue ADR 0081 records, and it is stated for the same reason: a
+reader who assumes the database enforces it will build the next writer
+accordingly.
+
+**The pin depends on one canonical spelling of a host, and both ends share the
+helper that produces it.** A hostname has more than one legal spelling —
+`host.example.` and `host.example` are the same name, and so are `röster.example`
+and `xn--rster-jua.example`, because a transport encodes a non-ASCII host before
+it dials. The first cut of this decision wrote the pin under one folding and
+looked it up under another, so those spellings missed their own pin, and a miss is
+silent: the request goes out unpinned and the transport resolves the name a second
+time, which is precisely the window this record claims to close. E1 Batch C's
+security review found it as a HIGH.
+
+So `app.config.canonical_host` is the one implementation — case folded, one
+trailing dot stripped, and the IDNA form taken for a host that is not ASCII —
+`url_host` routes through it, every address rule keys on it, and
+`PinnedResolutionAdapter` looks its pin up under it. The IDNA step asks
+`urllib3`'s own `parse_url`, the encoder the request will actually use, rather
+than reproducing its rule: two IDNA implementations agree until the first name the
+two standards disagree on, and a disagreement there is a missed pin. An ASCII host
+never reaches that step, which is what leaves ADR 0077's three rules seeing
+exactly the strings they saw before. **A pinned request states the authority
+`requests` prepared** — encoded form, trailing dot and all — so the platform is
+asked for the virtual host an unpinned request would have asked for, and its
+certificate is verified against the name it serves.
 
 **A deployment pays a name lookup per registration write and per roster page.**
 The write is a rare administrative act. The page lookup is the hourly walk's, once

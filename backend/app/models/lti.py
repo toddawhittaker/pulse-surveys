@@ -387,10 +387,10 @@ def refuse_invalid_registration_addresses(
     and supersedes 0081 in part.
 
     **A validator rather than a `CHECK` constraint**, because every rule reads
-    `ENVIRONMENT` and the database does not hold it. The residue is that a writer
-    going round SQLAlchemy entirely — raw SQL, a Core `insert()`, `psql` — is not
-    judged, because mapper events do not fire for those; ADR 0081 and ADR 0101
-    both record it rather than hiding it.
+    `ENVIRONMENT` and the database does not hold it. The residue is the write
+    shapes no mapper event fires for — measured, and listed on the events at the
+    foot of this module rather than guessed at here; ADR 0081 and ADR 0101 both
+    record it rather than hiding it.
 
     **NULL passes.** Both new columns are nullable and absence means "not
     stated", never a default. A NULL `authorization_endpoint` is refused at the
@@ -667,9 +667,26 @@ def _judge_a_registrations_addresses(
     there), and in a deployment a registration write is a rare administrative act
     — this is not a hot path.
 
-    **What still escapes**: raw SQL and a Core `insert()`, for which no mapper
-    event fires. That is the residue ADR 0081 records, extended by ADR 0101, and
-    it is stated rather than papered over.
+    **What is judged and what escapes, measured on SQLAlchemy 2.0.52** rather
+    than assumed, because the shapes that look alike are not alike:
+
+      - **judged** — `session.add`, an attribute changed on a row already
+        persistent, and `session.merge`. Between them that is every way an
+        ordinary writer, E11's console included, would write or edit a
+        registration;
+      - **not judged** — `Session.bulk_save_objects`, an ORM-enabled
+        `session.execute(update(LtiPlatform).values(...))`, a Core `insert()`
+        against the table, and raw SQL. The second of those is the one to know
+        about: a bulk `UPDATE` through the ORM's own API looks exactly like a
+        judged write and fires nothing, and it is a natural way to write a
+        console's save.
+
+    What bounds that residue is the grant rather than this event: `pulse_app`
+    holds `SELECT` on `lti_platform` and nothing else, so a bypassing write on
+    the application's own connection is refused by the database. The residue is
+    a writer connecting as an identity that *may* write — the seed's bootstrap
+    superuser, a migration, `psql`. ADR 0081 records the shape and ADR 0101 the
+    measurement.
     """
     session = object_session(target)
     stated = session.info.get(ENVIRONMENT_SESSION_KEY) if session is not None else None

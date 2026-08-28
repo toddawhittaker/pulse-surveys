@@ -153,8 +153,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    demo seed's two registration writers from the configuration they are handed;
    a session that states none is judged as a deployment, which is the
    fail-closed direction and is what a writer nobody has thought about yet
-   meets. Raw SQL and a Core `insert()` fire no mapper event and are still
-   unjudged: recorded residue, in ADR 0081 and again in
+   meets. Four write shapes fire no mapper event and are still unjudged —
+   `Session.bulk_save_objects`, an ORM-enabled
+   `session.execute(update(LtiPlatform).values(...))`, a Core `insert()` and raw
+   SQL — while `session.add`, an attribute changed on a persistent row and
+   `session.merge` are all judged; measured rather than assumed, after the
+   security review found the first statement of this residue understated the
+   bulk-`UPDATE` case, which is the natural way to write a console's save.
+   `pulse_app` holds `SELECT` on this table and nothing else, so what is left is
+   a writer connecting as an identity that may write. Recorded residue, in ADR
+   0081 and again in
    [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md).
 
 ## From E1-03 — TypeScript 7 with typescript-eslint, one change
@@ -503,7 +511,11 @@ Every E1 pull request that defers something adds it here in the same PR.
    `backend/app/services/roster_sync.py` pins each host to the first address it
    resolved to, never re-pins it, and `PinnedResolutionAdapter` sends the GET to
    that address under the platform's own hostname with TLS verified against the
-   name — so a rebind between the check and the request swaps nothing.
+   name — so a rebind between the check and the request swaps nothing. **Both
+   ends of that pin key on one helper**, `app.config.canonical_host`: the first
+   cut wrote the key under one folding of the host and looked it up under
+   another, so a trailing-dot or non-ASCII spelling missed its own pin and went
+   out unpinned to be re-resolved, which the security review found as a HIGH.
    [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md)
    records it, including what is left: the sync's token request and the launch's
    key-set fetch are judged when the registration is written and never at fetch
