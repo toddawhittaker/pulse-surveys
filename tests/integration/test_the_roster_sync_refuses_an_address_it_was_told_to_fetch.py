@@ -79,6 +79,77 @@ LOOPBACK_URL = "http://127.0.0.1:9/memberships"
 # went to rather than which application answered it.
 SECOND_PAGE_PATH = "/rosters/second-host-page"
 
+# The fix round's own two paths, for the same reason.
+ODD_SPELLING_PAGE_PATH = "/rosters/oddly-spelled-host-page"
+UNENCODABLE_PAGE_PATH = "/rosters/unencodable-host-page"
+
+# A hostname carrying a single trailing dot — the root anchor, which every
+# resolver strips and which is a legal, ordinary spelling of the same host. It is
+# a host of its own here rather than the contract's second platform, so that a
+# failure names the spelling rather than a shared vector.
+A_TRAILING_DOT_HOST = "paged.roster-platform.invalid."
+
+# A hostname spelled with a character outside ASCII. `requests` encodes a prepared
+# URL's host to its IDNA form before it dials, so the string a `Link` header
+# carries and the string the transport sees are two spellings of one host — which
+# is one of the two ways a pin can be written under one key and looked for under
+# another. `.invalid` (RFC 2606) so that nothing could resolve it even if a test
+# leaked to a name server.
+A_UNICODE_HOST = "röster.roster-platform.invalid"
+
+# Two hosts a resolver refuses to *encode* rather than failing to find: a label
+# over the 63-octet limit, and an empty label. `socket.getaddrinfo` puts every
+# host through the `idna` codec, which raises `UnicodeError` — a `ValueError`,
+# not an `OSError` — for both, before any query leaves the machine. Held against
+# the real resolver by a control at the foot of this module.
+AN_OVERLONG_LABEL_HOST = f"{'a' * 300}.roster-platform.invalid"
+AN_EMPTY_LABEL_HOST = "roster..roster-platform.invalid"
+
+
+def canonical_host(host: str) -> str:
+    """One host, folded to the form two spellings of it share.
+
+    Lower-cased, with a single trailing dot removed and the IDNA form taken, which
+    is what a resolver and a transport between them do to a hostname. **This is a
+    comparison, not a claim about how the sync should spell anything**: whether a
+    pinned request states `Host: röster.example` or `Host: xn--rster-jua.example`,
+    and whether it keeps the trailing dot, are both legitimate and neither is this
+    module's to settle. What the tests below assert is that the name stated is the
+    name that was judged, however it is written.
+    """
+    folded = host.strip().strip("[]").lower()
+    folded = folded[:-1] if folded.endswith(".") else folded
+    try:
+        return folded.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return folded
+
+
+def names_the_same_host(stated: str | None, expected: str) -> bool:
+    """Whether a `Host` header names `expected`, in any spelling of it."""
+    if not stated:
+        return False
+    return canonical_host(stated.rsplit(":", 1)[0]) == canonical_host(expected)
+
+
+def answering_once_then(first: str, later: str) -> Any:
+    """A resolver answer that changes after the first lookup.
+
+    The trap the pin has to survive, and the only way to catch a connection that
+    re-resolved: the first answer is what the rules judged and what the request
+    must go to, and every answer after it is what an attacker's zero-TTL record
+    would say next. Shared between the spellings a host is registered under, so
+    "the second lookup" means the second lookup of the *host* rather than of one
+    of its names.
+    """
+    seen = {"count": 0}
+
+    def answer() -> tuple[str, ...]:
+        seen["count"] += 1
+        return (first,) if seen["count"] == 1 else (later,)
+
+    return answer
+
 
 @pytest.fixture
 def platform_on_https(roster_platforms: Any, roster_contract: Any) -> Any:
@@ -1041,4 +1112,388 @@ def test_a_development_stack_walks_a_hop_off_its_own_host_that_resolves_publicly
         f"The sync resolved {resolver.asked!r} and never asked about {second_host!r}, so this walk "
         "went through without rule 5 seeing the hop — the acceptance is then not the pair to the "
         "refusal above, because nothing judged the address either time."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The fix round. Two measured defects in the fix above, both about a host being
+# read twice and spelled differently the second time.
+#
+# **HIGH.** The pin is written under one normalisation of the host and looked for
+# under another — a trailing dot stripped on one side and kept on the other, and a
+# name IDNA-encoded by `requests` before it dials but not by the writer. The two
+# spellings miss each other, the adapter finds no pin, and the request goes out
+# unpinned to be resolved again by the transport, which is the rebind window
+# ADR 0101 claims to close.
+#
+# **MEDIUM.** The resolver's failure is caught as an `OSError`, and
+# `socket.getaddrinfo` raises `UnicodeError` — a `ValueError` — for a host it
+# cannot encode. That escapes the address rules entirely, so the designed refusal
+# never runs: no `nrps_call` row, and the pages already validly read are lost with
+# the transaction. It fails closed on the fetch, so it is an audit and
+# availability defect rather than an SSRF one, and it is still one `Link` header
+# erasing a section's sync record.
+#
+# **What the wire can and cannot show.** Nothing in this suite dials a real
+# socket, so "the unpinned request then reached a private address" is not
+# observable here. What is observable is the fingerprint the whole rebind window
+# rests on: whether the request went to the address that was judged. That is what
+# these assert.
+# ---------------------------------------------------------------------------
+
+ODDLY_SPELLED_HOSTS = {
+    "a single trailing dot": A_TRAILING_DOT_HOST,
+    "a label outside ASCII": A_UNICODE_HOST,
+}
+
+UNENCODABLE_HOSTS = {
+    "a label over the 63-octet limit": AN_OVERLONG_LABEL_HOST,
+    "an empty label": AN_EMPTY_LABEL_HOST,
+}
+
+
+@pytest.mark.parametrize("spelling", sorted(ODDLY_SPELLED_HOSTS))
+def test_a_next_page_on_an_oddly_spelled_host_is_dialed_at_the_address_that_was_judged(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+    spelling: str,
+) -> None:
+    """The HIGH: a pin is worth nothing if the connection looks for it under another name.
+
+    A hostname has more than one legal spelling, and the two ends of the pin have
+    to agree on which one it is filed under. `host.example.` and `host.example`
+    are the same host — the trailing dot is the root anchor and every resolver
+    drops it — and `röster.example` and `xn--rster-jua.example` are the same host,
+    because `requests` encodes the prepared URL's host to its IDNA form before it
+    dials. Written under one and looked for under the other, the lookup misses,
+    and a miss is not a failure anybody sees: the request simply goes out
+    unpinned, to be resolved a second time by the transport. That second
+    resolution is the whole of the window this batch exists to close, and a
+    platform that controls its own DNS chooses what it answers.
+
+    **What makes this a security test rather than a spelling test** is the
+    resolver: it answers a globally routable address the first time it is asked
+    about this host and a private one every time after. So the judgment passes —
+    the rules see a public address and admit the hop — and anything that resolves
+    the host a second time gets the address the attacker meant. The assertion is
+    that both the address dialled and the name stated are the *first* answer's.
+
+    **The mutation this kills**: the adapter's lookup key spelled by hand —
+    `(urlsplit(request.url).hostname or "").lower()` — instead of the same
+    canonical form the pin was written under. Both sides have to be one helper;
+    two implementations of "what is this host called" is `docs/MISTAKES.md` entry
+    13, and it is invisible until a host is spelled the second way.
+
+    **The boundary that must stay green**:
+    `test_the_walk_connects_to_the_address_it_judged_and_not_to_a_later_answer`
+    asks this of a plainly-spelled host and is not duplicated here. A fix that
+    canonicalised so eagerly that an ordinary host stopped matching would go red
+    there and nowhere else.
+    """
+    host = ODDLY_SPELLED_HOSTS[spelling]
+    first = roster_contract.a_global_address
+    later = roster_contract.a_private_address
+    changing = answering_once_then(first, later)
+    resolver = resolving(
+        {
+            platform_on_https.host: (roster_contract.another_global_address,),
+            host: changing,
+            canonical_host(host): changing,
+        }
+    )
+    members = [a_subject("before-the-odd-hop"), a_subject("after-the-odd-hop")]
+    following = f"https://{host}{ODD_SPELLING_PAGE_PATH}"
+    service_wire.serve(
+        compose_a_roster(
+            platform_on_https,
+            [roster_contract.member(members[0])],
+            next_url=following,
+        )
+    )
+    hop_page = compose_a_roster(platform_on_https, [roster_contract.member(members[1])])
+    hop_page.path = ODD_SPELLING_PAGE_PATH
+    service_wire.serve(hop_page)
+
+    failure = sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolver,
+    )
+
+    assert failure is None, (
+        f"A walk onto {following!r} raised {failure!r}. The host resolves to {first!r} on the "
+        "judgment, which the rules accept, so the hop is a legitimate page and the walk has to "
+        "reach it."
+    )
+    hop = [call for call in service_wire.calls if call.path == ODD_SPELLING_PAGE_PATH]
+    assert hop, (
+        f"The page at {following!r} was never fetched, so there is no connection to say anything "
+        f"about. The GETs the sync made were "
+        f"{[call.url for call in service_wire.calls if call.method.upper() == 'GET']}."
+    )
+    for call in hop:
+        assert urlsplit(call.url).hostname == first, (
+            f"The hop went to {call.url!r}. The judgment resolved {host!r} to {first!r} and that "
+            "is the address the request must be dialled at; a request that still carries the "
+            f"*name* is one the transport resolves for itself, and the next answer for this host "
+            f"is {later!r} — an address inside this network, reached with the tool's Bearer token. "
+            "The pin was written; it was looked for under a different spelling of the same host."
+        )
+        assert names_the_same_host(call.host_header, host), (
+            f"The hop was dialled at {call.url!r} stating `Host: {call.host_header!r}`, which does "
+            f"not name {host!r}. A pinned request has to carry the hostname it was judged for, or "
+            "its certificate is verified against an address no certificate names — the pin would "
+            "be a downgrade rather than a fix, and nothing in an in-process wire would notice."
+        )
+    for subject in members:
+        assert roster_rows.enrollments_for(subject), (
+            f"{subject!r} was not ingested from a walk that hopped onto {host!r}. The pages "
+            f"fetched were {[call.url for call in service_wire.calls if call.method.upper() == 'GET']}."
+        )
+
+
+@pytest.mark.parametrize("spelling", sorted(ODDLY_SPELLED_HOSTS))
+def test_an_oddly_spelled_next_page_host_that_resolves_privately_is_still_refused(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+    spelling: str,
+) -> None:
+    """The judgment half for the same two spellings, so a fix to the pin cannot cost it.
+
+    The defect above is about the *honoured* path — a hop the rules admitted, sent
+    to the wrong place — and judgment is a separate question that these spellings
+    do not today get wrong. This asserts it anyway, because the fix moves host
+    normalisation into a shared helper that both the pin writer and the adapter
+    call, and a helper that canonicalised a host into something the rules then
+    read differently would open the hole one layer up while closing it one layer
+    down.
+
+    **The mutation this kills**: a canonical-host helper applied to the pin and the
+    lookup but not to the address the rules judge, so that `host.example.` or a
+    unicode host reaches `refuse_invalid_fetched_address` in a form it resolves
+    differently — or does not resolve at all.
+
+    **Its pair** is the test above, where the same two spellings resolving
+    publicly are walked. Without that pair this is satisfied by refusing every
+    host that is not spelled plainly.
+    """
+    host = ODDLY_SPELLED_HOSTS[spelling]
+    resolver = resolving(
+        {
+            platform_on_https.host: (roster_contract.a_global_address,),
+            host: (roster_contract.a_private_address,),
+            canonical_host(host): (roster_contract.a_private_address,),
+        }
+    )
+    reachable = a_subject("before-the-odd-private-hop")
+    following = f"https://{host}{ODD_SPELLING_PAGE_PATH}"
+    service_wire.serve(
+        compose_a_roster(
+            platform_on_https,
+            [roster_contract.member(reachable)],
+            next_url=following,
+        )
+    )
+
+    sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolver,
+    )
+
+    assert not [call for call in service_wire.calls if call.path == ODD_SPELLING_PAGE_PATH], (
+        f"The sync fetched {following!r}, whose host resolves to "
+        f"{roster_contract.a_private_address!r}. A spelling is not an exemption."
+    )
+    asked = [canonical_host(name) for name in resolver.asked]
+    assert canonical_host(host) in asked, (
+        f"The sync resolved {resolver.asked!r} and never asked about {host!r} in any spelling, so "
+        "whatever stopped the walk was not the address being judged."
+    )
+    refusals = [
+        row
+        for row in roster_rows.calls_for(platform_on_https.id)
+        if row.get("response_code") is None
+    ]
+    assert refusals and all(row.get("url") == str(platform_on_https.address) for row in refusals), (
+        f"The refusal is not recorded against the section's stored address "
+        f"({str(platform_on_https.address)!r}) with a NULL `response_code`: "
+        f"{[dict(row) for row in roster_rows.calls_for(platform_on_https.id)]}. ADR 0096 fixes "
+        "both halves of that row."
+    )
+    assert roster_rows.enrollments_for(reachable), (
+        "The first page's member was not ingested, so the refusal threw away a page that was "
+        "validly fetched."
+    )
+
+
+@pytest.mark.parametrize("spelling", sorted(UNENCODABLE_HOSTS))
+def test_a_next_page_whose_host_the_resolver_cannot_encode_is_refused_as_an_address(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+    spelling: str,
+) -> None:
+    """The MEDIUM: a resolver has two ways to fail and the rules catch one of them.
+
+    `socket.getaddrinfo` puts every hostname through the `idna` codec before it
+    asks anybody anything, and that codec raises `UnicodeError` — a `ValueError`,
+    which is not an `OSError` — for a label over 63 octets and for an empty one.
+    A rule that catches `OSError` catches the host that could not be *found* and
+    not the host that could not be *spelled*, and the difference is one character
+    in a `Link` header.
+
+    What that costs is not a request to anywhere: the walk fails closed, and
+    nothing hostile is dialled. What it costs is the record and the work. The
+    exception escapes the address rules, escapes the walk — which catches the
+    refusal type and nothing else — and reaches the per-section handler, which
+    rolls the transaction back: no `nrps_call` row saying a platform advertised an
+    address this tool would not call, and the pages already validly read go with
+    it. One header, and a section's sync record for that run is gone, which is
+    exactly what §6.1's console is read for.
+
+    So the assertion is the designed refusal path, the same one every other
+    refusal in this module lands on: the row against the section's **stored**
+    address with a NULL `response_code`, and the prefix that was validly fetched
+    kept.
+
+    **The mutation this kills**: the resolver's `except` narrowed back to
+    `OSError` alone. **Its pair** is
+    `test_a_next_page_on_a_second_host_that_resolves_publicly_still_walks`, where
+    a host the resolver *can* encode is walked — not duplicated here, because a
+    broadened `except` that swallowed a working resolution would go red there.
+
+    The stub raises the exception the real resolver raises, and
+    `test_the_resolver_really_refuses_to_encode_these_hosts` is the control that
+    keeps that honest: a stub raising an exception nothing really raises would
+    make this test about a case that cannot happen.
+    """
+    host = UNENCODABLE_HOSTS[spelling]
+    following = f"https://{host}{UNENCODABLE_PAGE_PATH}"
+    reachable = a_subject("before-the-unencodable-hop")
+    resolver = resolving(
+        {
+            platform_on_https.host: (roster_contract.a_global_address,),
+            host: UnicodeError("label empty or too long"),
+        }
+    )
+    service_wire.serve(
+        compose_a_roster(
+            platform_on_https,
+            [roster_contract.member(reachable)],
+            next_url=following,
+        )
+    )
+
+    sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolver,
+    )
+
+    assert not [call for call in service_wire.calls if call.path == UNENCODABLE_PAGE_PATH], (
+        f"The sync fetched {following!r}. A host the resolver cannot encode is a host nothing "
+        "judged, and an unjudged address is not one this tool dials."
+    )
+    recorded = roster_rows.calls_for(platform_on_https.id)
+    assert not [row for row in recorded if row.get("url") == following], (
+        f"An `nrps_call` row carries the platform-chosen URL {following!r}: "
+        f"{[dict(row) for row in recorded]}. ADR 0096 records a refusal against the section's own "
+        "stored address."
+    )
+    refusals = [row for row in recorded if row.get("response_code") is None]
+    assert refusals, (
+        f"No `nrps_call` row records the refusal with a NULL `response_code` — the section's rows "
+        f"are {[dict(row) for row in recorded]}. The resolver raised something the rules did not "
+        "catch, so the refusal the design writes never ran: an operator reading §6.1's console "
+        "sees a section that was never called rather than one whose platform advertised a host "
+        "this tool would not resolve."
+    )
+    assert all(row.get("url") == str(platform_on_https.address) for row in refusals), (
+        f"A refusal row is keyed to something other than the section's stored address "
+        f"({str(platform_on_https.address)!r}): {[dict(row) for row in refusals]}."
+    )
+    assert roster_rows.enrollments_for(reachable), (
+        f"The first page's member was not ingested after a hop to {host!r}. The page before the "
+        "refusal was fetched validly and parsed correctly; losing it means the whole per-section "
+        "transaction was rolled back by an exception nothing expected, and every hourly run would "
+        "lose it again."
+    )
+
+
+@pytest.mark.parametrize("spelling", sorted(UNENCODABLE_HOSTS))
+def test_the_resolver_really_refuses_to_encode_these_hosts(spelling: str) -> None:
+    """A control: the exception the stub raises is the one the real resolver raises.
+
+    The test above hands its stub a `UnicodeError`, and a stub is free to raise
+    anything at all — including something no resolver has ever produced, which
+    would make the whole case imaginary (`docs/MISTAKES.md` entry 30: a fixture
+    supplying the value under test). So the real `socket.getaddrinfo` is asked
+    about these two hosts here, and required to raise a `UnicodeError` that is
+    **not** an `OSError`, which is the entire mechanism of the MEDIUM.
+
+    **This is not expected to perform a name lookup.** Both hosts fail inside the
+    `idna` codec, on a label length, before any query is composed — which is why
+    the failure is a `ValueError` and not a `gaierror` in the first place.
+
+    **A red here means these tests are broken, not the sync**, and it has one
+    likely cause worth naming in advance: if the interpreter takes a
+    pure-ASCII fast path and skips the codec, these hosts reach a real resolver
+    and answer `gaierror`, which *is* an `OSError`. Then the MEDIUM is not where
+    this says it is — it would live in whatever layer really raises, most likely
+    `requests`' own IDNA encoding of a prepared URL — and the two tests above need
+    re-basing on that. They would still be asserting the right behaviour (a
+    resolver failure the rules do not catch must not escape the refusal path);
+    only the exception's provenance would move.
+    """
+    import socket
+
+    host = UNENCODABLE_HOSTS[spelling]
+    raised: BaseException | None = None
+    try:
+        socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except Exception as failure:
+        raised = failure
+
+    assert isinstance(raised, UnicodeError), (
+        f"Resolving {host[:40]!r}… raised {raised!r}, and this module's stub raises a "
+        "`UnicodeError` on the strength of it. If the real resolver raises something else, the "
+        "MEDIUM is about that instead and the tests above are asserting a case that does not "
+        "arise."
+    )
+    assert not isinstance(raised, OSError), (
+        f"Resolving {host[:40]!r}… raised {raised!r}, which is an `OSError` — so a rule catching "
+        "`OSError` already catches it and there is no MEDIUM here to fix."
     )
