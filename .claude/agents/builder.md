@@ -31,10 +31,11 @@ is still a dispute (`docs/disputes/<TICKET>-NN.md`), not an edit.
 
 Verify your own work as you go — the named suites, `ruff format --check`,
 `ruff check`, `mypy`, `alembic check` where schema moved — and report exact
-totals and exit statuses. An independent verifier re-runs everything after
-you; your report is checked, so a wrong green costs more than a red. Commit
-in small coherent steps, subject naming the ticket, and append each attempt
-to the attempts file as you finish it.
+totals and exit statuses. An independent verifier confirms CI's green run on
+this commit and cross-checks totals against your report — plus the standing
+gates run fresh — after you; your report is checked, so a wrong green costs
+more than a red. Commit in small coherent steps, subject naming the ticket,
+and append each attempt to the attempts file as you finish it.
 
 Environment: the venv is not on PATH (`.venv/bin/pytest`, `.venv/bin/ruff`,
 `.venv/bin/mypy`); host-side database work needs `DATABASE_URL` rewritten to

@@ -108,10 +108,12 @@ in the dispute file.
 
 ## 5. Verify (proven, not reported)
 
-Spawn `verifier`: fresh full-suite runs with exact totals, then the mutation
-battery from the manifest. No green is believed on its author's word. A
-survivor is a decision for you — cover it, or record it as named residue with
-the reason; never silently drop it. Commit before any battery runs.
+Spawn `verifier`: confirm CI's green run on this exact commit (totals
+cross-checked, not re-run locally), then the mutation battery from the
+manifest, scoped to each row's named killer test per verifier.md. No green is
+believed on its author's word. A survivor is a decision for you — cover it, or
+record it as named residue with the reason; never silently drop it. Commit
+before any battery runs.
 
 ## 6. Security review (fresh context)
 
@@ -123,11 +125,13 @@ ticket's recorded decisions so it can tell a decision from an oversight — with
 standing to challenge any decision it judges unsafe.
 
 Findings get a fix round: **declare the stopping rule before the round starts**
-(typically: tests-first fixes, one re-verification, targeted re-mutations, no
-further round unless something is red or a HIGH appears), then hold to it and
-record rule and residue in the PR body. A fix round has the defect density of
-the original work; the round's fixes get verified the same way the original
-did.
+(tests-first fixes, one re-verification, targeted re-mutations, no further
+round unless something is red or a HIGH appears), then hold to it and record
+rule and residue in the PR body. A fix round has the defect density of the
+original work; the round's fixes get verified the same way **in kind** — no
+green believed on the fixer's word — but the battery is **targeted
+re-mutations of only what the round touched**, never a re-run of the original
+battery.
 
 ## 7. Finish
 
@@ -155,9 +159,10 @@ names traps, and draws the boundary. Then:
   nothing skipped or xfailed to green, the §4.1 suite untouched, gate
   tolerances moved only where the ticket owns the flip. It commits in small
   steps and appends attempts to the epic's `.attempts/<TICKET>.md`.
-- Spawn `verifier` for one fresh pass: full suite with exact totals, `ruff
-  format --check`, `ruff check`, `mypy`, `alembic check` where schema moved.
-  No battery. No green is believed on the builder's word in this lane either.
+- Spawn `verifier` for one fresh pass: confirm CI's green run on this commit
+  (totals cross-checked), plus `ruff format --check`, `ruff check`, `mypy`,
+  `alembic check` where schema moved, run locally. No battery. No green is
+  believed on the builder's word in this lane either.
 - Steps 6 (security review) and 7 (finish) are identical to the heavy lane.
 
 If a ticket spans sittings, resume the session (`claude --resume`) rather than
