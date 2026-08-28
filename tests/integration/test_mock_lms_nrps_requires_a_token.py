@@ -57,6 +57,7 @@ gives: the mock is a platform, not a Pulse read path.
 """
 
 import re
+import sys
 import time
 from typing import Any
 
@@ -884,6 +885,114 @@ def test_an_unauthenticated_read_is_refused_before_the_page_bound_is_checked(
             "The identical read presenting a granted token was answered "
             f"{authorised.status_code} a moment ago, naming the parameter, so the bound is "
             "enforced and this refusal was reached before it,"
+        ),
+    )
+
+
+def test_a_page_value_too_long_to_convert_is_refused_rather_than_crashed_on(
+    mock_platform: Any,
+) -> None:
+    """The hazard the in-handler bound brought with it, at both halves of the pair.
+
+    **Why it is here rather than in `test_mock_lms_paging_and_service_urls.py`**,
+    which owns what `page` does: the defect exists only because the bound moved
+    into the handler to satisfy the test above, so the two belong next to each
+    other where a later reader meets them together.
+
+    Moving the check off the route signature took the framework's parsing with it,
+    and the replacement converts the value itself. CPython refuses to convert a
+    decimal string past `sys.get_int_max_str_digits()` digits — 4300 by default —
+    and raises `ValueError`. A guard that checks the character set and not the
+    length passes a several-thousand-digit string straight into `int()`, and the
+    exception escapes the route: a 500, where the function's own docstring
+    promises `None` and the route promises a refusal.
+
+    **The mutation this kills: the length guard removed, so `int()` raises past
+    the conversion limit.** It is invisible to every other test here — `page=0`,
+    `page=1` and every seeded walk convert fine — and it turns a malformed request
+    from a sentence a tool's author reads into an unhandled server error.
+
+    **The expected status is read off the platform rather than written down.** The
+    refusal for `page=0` is driven first and this one is required to match it, so
+    the pair says what actually matters — a bad page value gets one answer, not a
+    refusal for a short one and a crash for a long one — without this test settling
+    400 against 422, which round 3 left to the implementer and
+    `test_mock_lms_paging_and_service_urls.py` owns.
+
+    **The digit count comes from the interpreter**, not from a copy of its limit:
+    a test carrying `4300` would go quietly wrong under an interpreter configured
+    differently, and would report that as a defect in the mock
+    (`docs/MISTAKES.md` entry 19). The mock runs in this process, so the limit read
+    here is the limit the handler meets.
+
+    **The unauthenticated half is a green guard rather than a red**, and it is
+    worth its two lines: the natural way to fix a length problem is a `max_length`
+    on the route signature, which would put the framework back in front of the
+    credential check and answer 422 to a stranger — the very thing the test above
+    exists to stop, arriving by another door.
+    """
+    limit = sys.get_int_max_str_digits()
+    assert limit > 0, (
+        "This interpreter has no integer conversion limit "
+        f"(`sys.get_int_max_str_digits()` is {limit}), so `int()` converts a string of any length "
+        "and the crash this test exists for cannot happen in this process at all. That is the "
+        "test being unposeable rather than the mock being right, and it is said here rather than "
+        "passing quietly."
+    )
+    too_long = "9" * (limit + 100)
+    url = roster_url(mock_platform)
+    credential = f"{BEARER_SCHEME} {mock_platform.service_token(NRPS_MEMBERSHIP_SCOPE)}"
+
+    short = read_roster(
+        mock_platform,
+        mock_platform.with_query(url, {BOUNDED_QUERY_PARAMETER: A_PAGE_BELOW_THE_BOUND}),
+        credential,
+    )
+    assert 400 <= short.status_code < 500, (
+        f"A read carrying a granted token and `{BOUNDED_QUERY_PARAMETER}="
+        f"{A_PAGE_BELOW_THE_BOUND}` answered {short.status_code}, so there is no known-good "
+        "refusal for the long value below to be compared against. "
+        "`test_an_unauthenticated_read_is_refused_before_the_page_bound_is_checked` is where that "
+        f"is the subject. Body begins {short.text[:300]!r}."
+    )
+
+    answered = read_roster(
+        mock_platform,
+        mock_platform.with_query(url, {BOUNDED_QUERY_PARAMETER: too_long}),
+        credential,
+    )
+    assert answered.status_code == short.status_code, (
+        f"A read carrying a granted token and a {len(too_long)}-digit "
+        f"`{BOUNDED_QUERY_PARAMETER}` answered {answered.status_code}, and the same read with "
+        f"`{BOUNDED_QUERY_PARAMETER}={A_PAGE_BELOW_THE_BOUND}` answered {short.status_code}. Both "
+        "are values this container will not page by, and a caller that sent one gets a sentence "
+        "while a caller that sent the other gets something else — a 500 here is the "
+        f"`ValueError` CPython raises past {limit} digits escaping the route, where the paging "
+        "helper's own docstring promises `None` and the route promises a refusal. Body begins "
+        f"{answered.text[:300]!r}."
+    )
+    assert BOUNDED_QUERY_PARAMETER in answered.text.lower(), (
+        f"The refusal of a {len(too_long)}-digit `{BOUNDED_QUERY_PARAMETER}` does not name "
+        f"`{BOUNDED_QUERY_PARAMETER}` — the body is {answered.text[:300]!r}. E0-28 item 2 asks a "
+        "parameter refusal to say which parameter it objects to, and this refusal has to be the "
+        "same sentence the short value gets rather than a generic one that happens to share a "
+        "status code."
+    )
+
+    refused(
+        mock_platform,
+        mock_platform.with_query(url, {BOUNDED_QUERY_PARAMETER: too_long}),
+        None,
+        status=UNAUTHORIZED,
+        code=None,
+        subject=(
+            f"A roster read carrying no credential and a {len(too_long)}-digit "
+            f"`{BOUNDED_QUERY_PARAMETER}`"
+        ),
+        control=(
+            "The identical read presenting a granted token was answered "
+            f"{answered.status_code}, naming the parameter, so the value is judged somewhere and "
+            "the credential was judged before it,"
         ),
     )
 
