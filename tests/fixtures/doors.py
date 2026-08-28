@@ -25,9 +25,10 @@ close before the caller touches anything.
 import base64
 import importlib
 import json
+import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple
@@ -213,6 +214,62 @@ def routed_through(
     return httpx.Client(transport=httpx.MockTransport(handle))
 
 
+def engines_behind(application: Any) -> list[Any]:
+    """Every SQLAlchemy engine the freshly imported application built, found structurally.
+
+    **Why this exists.** `import_app_module` drops every `app.*` module from
+    `sys.modules` before a test runs, so each `create_app()` re-imports `app.db`
+    and that module builds its engine at import time — a fresh engine, with a
+    fresh connection pool, per test that opens a door. Nothing disposed them:
+    the modules were discarded at teardown and the pools they held stayed open
+    for the rest of the session, so a full run accumulated one live pool per
+    door-opening test until Postgres answered `FATAL: remaining connection slots
+    are reserved for non-replication superuser connections` to whichever module
+    happened to run next.
+
+    Every other engine-holding fixture in this suite disposes —
+    `migrated_engine`, `application_engine` and the three admin engines in
+    `tests/fixtures/database.py` all end in `engine.dispose()` — and `tool_doors`
+    below now does the same for the engine it causes to be built.
+
+    **Found rather than named.** No ticket says what `app.db` calls its engine,
+    and `tests/integration/test_db_session.py` deliberately discovers that
+    module's session dependency structurally rather than pinning a name. This
+    does the same thing for the engine: any value that *is* a SQLAlchemy `Engine`
+    — on `app.db`, or held on the application's own `state` — is one to dispose.
+    An `AsyncEngine` is reached through its `sync_engine`, because disposing the
+    async wrapper is a coroutine and this runs in a synchronous teardown.
+
+    Answers an empty list rather than failing when it finds nothing. A door suite
+    whose application holds no engine is a possibility this has no business
+    ruling on, and the cost of being wrong is the leak that already existed.
+    """
+    from sqlalchemy.engine import Engine
+
+    found: list[Any] = []
+    seen: set[int] = set()
+
+    def consider(value: Any) -> None:
+        engine = getattr(value, "sync_engine", None)
+        if not isinstance(engine, Engine):
+            engine = value
+        if isinstance(engine, Engine) and id(engine) not in seen:
+            seen.add(id(engine))
+            found.append(engine)
+
+    module = sys.modules.get("app.db")
+    if module is not None:
+        for value in list(vars(module).values()):
+            consider(value)
+
+    held = getattr(getattr(application, "state", None), "_state", None)
+    if isinstance(held, dict):
+        for value in list(held.values()):
+            consider(value)
+
+    return found
+
+
 @contextmanager
 def clock_wound_back(seconds: int) -> Iterator[None]:
     """Move `time.time` back for the body, and put it back afterwards.
@@ -358,6 +415,13 @@ def tool_doors(
     convenience: every server-side fetch either door makes goes through one client,
     which is what lets a test serve the mocks in process without intercepting
     anything else.
+
+    **Every engine the built application holds is disposed at teardown.** The
+    application is imported fresh, which means `app.db` builds a fresh engine and a
+    fresh connection pool for each test that opens a door — and until this was
+    added nothing closed them, so a full run held one live pool per such test and
+    eventually exhausted the server's connection slots. `engines_behind` above says
+    what that cost and why the engine is discovered rather than named.
     """
     from fastapi.testclient import TestClient
 
@@ -365,6 +429,7 @@ def tool_doors(
         monkeypatch.setenv(name, value)
 
     opened: list[Any] = []
+    engines: list[Any] = []
 
     def open_the_tool(
         values: Mapping[str, str],
@@ -391,6 +456,12 @@ def tool_doors(
         client.__enter__()
         opened.append(client)
         client.app.state.http = routed_through(mocks or {}, around)
+        # Collected here rather than at teardown, because `import_app_module`
+        # restores `sys.modules` on the way out and the module this engine came
+        # from would be gone by then. Two tools built inside one test share one
+        # `app.db` — the second import finds the first in `sys.modules` — so
+        # `engines_behind` deduplicates and this list holds one entry per test.
+        engines.extend(engine for engine in engines_behind(client.app) if engine not in engines)
         return client
 
     try:
@@ -398,6 +469,13 @@ def tool_doors(
     finally:
         for client in reversed(opened):
             client.__exit__(None, None, None)
+        for engine in engines:
+            # Suppressed for the reason `care_connections` suppresses its closes:
+            # a teardown that raises replaces the test's own failure with its own,
+            # and a pool that cannot be disposed is a diagnosis for the run that
+            # provoked it rather than for the test that happened to be last.
+            with suppress(Exception):
+                engine.dispose()
 
 
 # How `lti_platform` and `lti_deployment` might spell the four values a launch is

@@ -326,7 +326,7 @@ doing nothing.
 
 ## 39. A gate run was invalidated by edits that landed while it ran
 
-**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
+**Caught: 1** · [the incidents, the root cause, and the whole rule](mistakes/39-a-gate-run-was-invalidated-by-edits-that.md)
 
 **Rule.** While a gate runs, the tree it runs in is read-only — no edits, no
 checkouts, no restores. A verdict is valid only for the tree it started on; if

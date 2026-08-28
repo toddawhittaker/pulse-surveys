@@ -50,6 +50,9 @@ boundary: `metadata_tables` is asked for by both.
   - `fixtures/web_identity.py` — E1-12: the `person`, `user` and
     `web_login_subject` rows a door resolves a subject through, seeded committed,
     and the session claims a landing carries them back in.
+  - `fixtures/landing.py` — E1-13: the names the assignment-derived landing is
+    settled under, one `enrollment` row with the window the caller chose, and the
+    rows a launch-driving suite needs before its subject can land at all.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -74,4 +77,5 @@ pytest_plugins = (
     "fixtures.provisioning",
     "fixtures.roster_sync",
     "fixtures.web_identity",
+    "fixtures.landing",
 )

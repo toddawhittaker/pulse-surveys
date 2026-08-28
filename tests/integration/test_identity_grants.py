@@ -4580,6 +4580,21 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
     # `person_id` names a `person` row and nothing else. `person.identity_name` is
     # marked identity (ADR 0022) and stays behind the view boundary; the key does
     # not carry it.
+    #
+    # **`permits_launch` and `permits_web_login` arrived with E1-13**, and this
+    # enumeration going red on them is E1-01's guard doing its job rather than a
+    # widening slipping past. They are ADR 0026's two stored generated columns on
+    # `role_assignment`, each derived from `role` and from nothing else: "Derived,
+    # so no write path can contradict the role; stored as columns, so the fact is
+    # on the row where a view, a seed script or a psql session can read it." The
+    # view withheld them until a ticket needed them — its own header said a later
+    # `_v002` would add them — and E1-13 is that ticket: the landing resolution
+    # filters a person's assignments by the entered door's permission column, so
+    # "a Care assignment is unreachable from a launch" is a property of the row
+    # rather than of a Python branch. Neither column carries anything about a
+    # person: each is a boolean function of one enum value, so nothing here
+    # narrows toward an identity, and what they widen is a fact SPEC §2.1's table
+    # already states in public.
     "assignment_scope": (
         "assignment_id",
         "person_id",
@@ -4590,6 +4605,8 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
         "department_id",
         "course_id",
         "section_id",
+        "permits_launch",
+        "permits_web_login",
     ),
     # ADR 0046's second: "which courses a person leads". SPEC §8:
     # "`lead_faculty_mapping` maps a person to the courses they lead (one lead per

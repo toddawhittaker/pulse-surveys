@@ -3,8 +3,11 @@
 SPEC §2 gives every role except instructor and student a second way in, and
 E0-16 built the provider it goes through. This module is the tool's half: an
 OAuth 2.0 authorization code flow with PKCE, issuing the session
-`app.services.session` defines and redirecting to the route the caller's
-**verified** roles claim names.
+`app.services.session` defines and redirecting to the route the signed-in
+person's own **assignments** entitle them to. Which route that is came from the
+`id_token`'s roles claim until E1-13 and comes from the assignment model now
+(ADR 0098): the provider asserts who somebody is, and Pulse's own records decide
+what they may act as.
 
 **A new module, and §13 does not name it.** §13's `api/` list is
 `deps.py, lti.py, student.py, instructor.py, leadership.py, care.py, admin.py` —
@@ -74,7 +77,7 @@ from app.api.deps import (
 )
 from app.config import Settings
 from app.db import get_session
-from app.services.landing import Door
+from app.services.authz import Door
 from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
 router = APIRouter(tags=["auth"])
@@ -92,9 +95,9 @@ CALLBACK_PATH = "/auth/oidc/callback"
 # What the tool asks the provider for. `code` because a code flow is the only one
 # that keeps the token off the browser's URL bar and out of its history;
 # `openid` because that is what makes the response an OpenID Connect one at all
-# (OIDC Core 1.0 §3.1.2.1) and without it there is no `id_token` to read a role
-# out of. `email` is asked for because E0-18 says to; nothing renders it, and the
-# landing pages carry no identifier of any kind.
+# (OIDC Core 1.0 §3.1.2.1) and without it there is no `id_token` to identify the
+# caller by at all. `email` is asked for because E0-18 says to; nothing renders
+# it, and the landing pages carry no identifier of any kind.
 RESPONSE_TYPE = "code"
 SCOPE = "openid email"
 
@@ -423,10 +426,6 @@ async def finish_web_login(request: Request, session: Session = Depends(get_sess
         db=session,
         settings=settings,
         secret=request.app.state.session_secret,
-        no_role_reason=(
-            "That sign-in states no role this tool has a view for, so there is nothing to show "
-            "you. SPEC §2 gives instructors and students the LMS launch rather than this door."
-        ),
     )
     clear_carried(landed, OIDC_LOGIN_COOKIE)
     return landed

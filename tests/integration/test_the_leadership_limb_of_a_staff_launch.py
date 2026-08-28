@@ -38,6 +38,27 @@ through `tool_doors` over `configured_env`, so `ENVIRONMENT` is the development
 name — which is what E1-10's address rules require before the mock's own cleartext
 roster address is storable at all — and `DATABASE_URL` names the session-wide
 testcontainers Postgres. Every row is removed by `committed_rows`'s diff-delete.
+
+**E1-13 changes what the second test's launch is answered with, and the assertion
+moved with it** (`docs/MISTAKES.md` entry 22). From that ticket the landing comes
+from the launching person's own live assignments filtered by ADR 0026's
+`permits_launch` — and a `CARE` assignment does not permit a launch, which is the
+whole of §2.1's door rule. So the Care officer's launch is met with the calm
+no-access page: not a refusal, and not a role route. That is *correct*, and it is
+also this module's near miss working exactly as designed — the assignment that
+authorizes nothing about a roster is the same assignment that opens no door here.
+Her launch, and the instructor launch that follows it, therefore assert
+`LaunchDriver.accepted`: the door did not refuse, so what the writer did or did
+not store is attributable to the role that launched. The first test's dean is
+unchanged and still asserts `landed`, because §2.1's table gives every leadership
+role the LTI launch and her assignment really does open it.
+
+**Giving her something to land on is deliberately not done.** An instructor
+assignment would make her a different person and would invert the very rule this
+module exists to hold; an enrollment would need a second `user` row for a subject
+`a_linked_person` has already written one for, which ADR 0045's uniqueness
+refuses. The difference between the two tests stays one row, and it stays the
+assignment's role.
 """
 
 from typing import Any
@@ -253,7 +274,7 @@ def test_a_launch_by_a_linked_person_holding_no_leadership_assignment_stores_not
 
     response, signed = launch_driver.launch(offer)
 
-    launch_driver.landed(response, "a linked non-leadership person's launch")
+    launch_driver.accepted(response, "a linked non-leadership person's launch")
     assert_the_launch_is_the_near_miss(signed, provisioning_contract)
     assert not courses_numbered(provisioned_rows, provisioning_contract, ground, label), (
         f"The launch created a course for {label.prefix} {label.number}. §7.3 makes the launching "
@@ -272,7 +293,7 @@ def test_a_launch_by_a_linked_person_holding_no_leadership_assignment_stores_not
 
     instructor = launch_driver.offer_for_role(provisioning_contract.instructor_role_urn)
     following, following_signed = launch_driver.launch(instructor)
-    launch_driver.landed(following, "the instructor's launch that follows")
+    launch_driver.accepted(following, "the instructor's launch that follows")
     assert provisioned_rows.addresses() == [
         provisioning_contract.memberships_url_in(following_signed.claims)
     ], (

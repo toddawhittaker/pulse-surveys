@@ -72,6 +72,20 @@ pytest put `tests/` on `sys.path`, and an import error is not a red — the same
 reason `test_web_login_door.py` keeps its own copy of the platform's variable
 names rather than reaching next door for them.
 
+**Reconciled for E1-13, which changed what makes a launch land at all.** The
+landing no longer comes from the verified token: it comes from the launching
+person's own live assignments, filtered by ADR 0026's `permits_launch`, with
+enrollment as the student fallback (ADR 0028). A launch by a subject Pulse holds
+nothing about is now answered with a calm `no-access` page carrying no session —
+which every scan below would read as a clean response, and which
+`redirected_to_role` correctly refuses to accept as a landing. So the `landings`
+fixture seeds the two rows each subject needs: a live enrollment for the learner,
+a live `INSTRUCTOR` assignment for the instructor. **It changes nothing this
+module asserts** — every test here is about what a *landing* carries, and the
+seeding is what makes there be one. Which view those rows choose is asserted in
+`tests/integration/test_landing_resolves_from_assignments.py`, and the two
+parameter cases below are still the two answers this door gives.
+
 **Reconciled for E1-08, arbitrated by dispute E1-08-03.** E1-08 retires the
 `200` + inline landing HTML this whole module was written against: a valid
 launch now answers a `302` to `/app/<role>#session=<jwt>` (ADR 0089), with the
@@ -96,12 +110,19 @@ about to report absent.
 
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
 pytestmark = [pytest.mark.integration, pytest.mark.lti]
+
+# How far back the seeded enrollment window starts. Comfortably longer than any
+# timezone offset, so a window opened this many days before UTC's today contains
+# the institution's today whatever `INSTITUTION_TIMEZONE` says — which is what
+# lets this module state no timezone at all. See the `landings` fixture.
+ENROLLED_SINCE_DAYS = 30
 
 # The mock platform's configuration surface, from `mock-lms/app/config.py`, set so
 # that its launch form posts at *this* tool and its authorization endpoint accepts
@@ -242,15 +263,71 @@ def jwks_url(platform: Any) -> str:
 
 
 @pytest.fixture
+def registration(platform: Any, jwks_url: str, register_platform: Any) -> Any:
+    """The `lti_platform` and `lti_deployment` rows this platform's launches resolve to.
+
+    Split out of `tool` below by E1-13's reconciliation: a `user` row belongs to a
+    registration, so the fixture that seeds one has to be able to name it. Nothing
+    else about the registration changed.
+    """
+    return register_platform(
+        platform.require_offers()[0], jwks_url, CONFIGURED_AUTHORIZATION_ENDPOINT
+    )
+
+
+@pytest.fixture
 def tool(
-    tool_doors: Any, door_contract: Any, platform: Any, jwks_url: str, register_platform: Any
+    tool_doors: Any, door_contract: Any, platform: Any, jwks_url: str, registration: Any
 ) -> Any:
     """The application, registered for this platform and able to reach it in process."""
-    register_platform(platform.require_offers()[0], jwks_url, CONFIGURED_AUTHORIZATION_ENDPOINT)
     return tool_doors(
         {door_contract.settings["public_base_url"]: door_contract.public_base_url},
         {urlsplit(jwks_url).hostname: platform},
     )
+
+
+@pytest.fixture
+def landings(
+    platform: Any, registration: Any, landing_ground: Any, web_identity: Any
+) -> dict[str, Any]:
+    """Give both launchable subjects the rows E1-13's door lands them on.
+
+    The learner subject gets a `user` row and a live enrollment; the instructor
+    subject gets a `person`, a `user` row, ADR 0024's link and a live `INSTRUCTOR`
+    assignment. That is the minimum a deployment holds for somebody who can use
+    this tool at all, and without it every launch below is answered with the calm
+    no-access page — a response that names nobody, carries no section code and
+    reports no roster count, and would therefore pass all six of this module's
+    invariants while proving nothing (`docs/MISTAKES.md` entry 3). The positive
+    control each test opens with, `redirected_to_role`, is what makes that
+    difference visible.
+
+    The subjects are read off the launches the platform signs rather than off its
+    seed, exactly as `offer_for_role` reads the roles.
+
+    The enrollment starts comfortably before UTC's today, which is far enough back
+    that it contains the institution's today under any `INSTITUTION_TIMEZONE` — so
+    this module still states no timezone, and the tests whose subject is the
+    window's edge live next door.
+    """
+    ground = landing_ground()
+    platform_id = registration.platform_row[web_identity.key_of("lti_platform")]
+    enrolled_since = datetime.now(UTC).date() - timedelta(days=ENROLLED_SINCE_DAYS)
+
+    seeded: dict[str, Any] = {}
+    for role_uri, name in ((LEARNER_ROLE_URI, "student"), (INSTRUCTOR_ROLE_URI, "instructor")):
+        offer = offer_for_role(platform, role_uri)
+        subject = platform.mint(offer).claims.get("sub")
+        assert isinstance(subject, str) and subject, (
+            f"The launch this platform signs for {role_uri!r} carries no `sub`, so there is no "
+            "subject to seed rows for and no launch here could land."
+        )
+        seeded[name] = (
+            ground.a_student(platform_id=platform_id, subject=subject, on=enrolled_since)
+            if name == "student"
+            else ground.an_instructor(platform_id=platform_id, subject=subject)
+        )
+    return seeded
 
 
 def strings_in(node: Any) -> list[str]:
@@ -537,6 +614,7 @@ def test_a_launch_landing_page_names_nobody_but_the_person_who_launched(
     claims_in_token: Any,
     role_uri: str,
     role: str,
+    landings: dict[str, Any],
 ) -> None:
     """SPEC §4 over the two ways a launch answers.
 
@@ -617,6 +695,7 @@ def test_a_launch_landing_page_carries_no_section_code_or_course_number(
     claims_in_token: Any,
     role_uri: str,
     role: str,
+    landings: dict[str, Any],
 ) -> None:
     """The section half of the criterion: neither response identifies a section.
 
@@ -722,6 +801,7 @@ def test_a_launch_landing_page_carries_no_roster_count(
     claims_in_token: Any,
     role_uri: str,
     role: str,
+    landings: dict[str, Any],
 ) -> None:
     """The numeric half: nothing in the response reports how many people are in the section.
 

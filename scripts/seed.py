@@ -850,23 +850,48 @@ MOCK_LMS_LEADERSHIP_USER_ID = "mock-lms-user-dean"
 
 # The mock world's people, in the order `mock-idp/app/seed.py` publishes them.
 #
-# **Six of the eight carry nothing but a linkage**, which is deliberate: what they
-# need is for their web login to reach a person rather than the no-account page,
-# and which view a person lands on comes from a claim until E1-13 replaces that
-# with the assignment model. Giving them assignments now would be inventing a
-# purview no ticket has asked for, on people reachable through a mock.
+# **Every one of them holds the assignment their persona names**, and until E1-13
+# six of the eight held nothing but a linkage. That was right at the time: which
+# view a person landed on came from a claim, so an assignment would have been a
+# purview no ticket had asked for, on people reachable through a mock. E1-13
+# resolves the landing from the assignment model instead (ADR 0098), which turns
+# the same absence into a mock world nobody can demonstrate anything on — all six
+# would sign in correctly and be met with the calm no-access page. So each now
+# holds one live assignment naming the role the provider publishes them under, and
+# `test_every_mock_world_persona_holds_the_assignment_their_role_names` pins the
+# inventory.
+#
+# **All eight are roots**: no `reports_to` anywhere in this table. A supervision
+# edge is SPEC §2.1's own subject and the demo eighteen are where the graph is
+# seeded and asserted; an edge invented here would be this file deciding who
+# answers to whom, for a screen that reads none of it in E1.
+#
+# **The scope nodes are the demo institution's**, because that is the only
+# containment tree a development box holds. Two of them avoid a node the demo
+# already uses the same way: the assistant dean sits in the College of Business
+# and Technology, whose own assistant dean the demo does not seed, and the lead
+# faculty leads `BUSA 300`, one of the eight courses `LEAD_FACULTY_MAPPINGS`
+# leaves unmapped on purpose — so neither can be mistaken for part of §2.1's
+# assistant-dean shape or for a second lead on a mapped course. The other four
+# share a node with a demo person holding the same role, which `role_assignment`
+# permits and no rule forbids: the institution cannot be duplicated at all (ADR
+# 0072), and every department in that college already has a chair.
 #
 # **The two that carry more are the two E1-12 is demonstrated with.** The two-hat
-# person holds Care at the institution and an instructor assignment, because §2
-# 's "entry doors are a property of the assignment" is the thing the whole ticket
-# is about and it is not visible on a stack where she holds one hat. Her
-# instructor assignment is scoped to a *demo* section rather than to the one the
-# mock platform launches into: `BIOL-215-R3WW` does not exist until somebody
-# launches it, and a seed cannot scope a grant to a row a later launch will
-# create. The dean holds a college the demo's own deans do not, so that a second
-# `DEAN` assignment cannot be mistaken for part of §2.1's assistant-dean shape.
+# person holds Care at the institution and an instructor assignment, because §2's
+# "entry doors are a property of the assignment" is the thing that ticket is about
+# and it is not visible on a stack where she holds one hat. Her instructor
+# assignment is scoped to a *demo* section rather than to the one the mock
+# platform launches into: `BIOL-215-R3WW` does not exist until somebody launches
+# it, and a seed cannot scope a grant to a row a later launch will create. The
+# dean is the launchable subject §7.3's leadership limb needs.
 MOCK_WORLD_PEOPLE: tuple[MockWorldPerson, ...] = (
-    MockWorldPerson("vpaa", "Demo Mock-World VP of Academics", "Leadership"),
+    MockWorldPerson(
+        "vpaa",
+        "Demo Mock-World VP of Academics",
+        "Leadership",
+        assignments=((AssignmentRole.VP_ACADEMICS, ("institution", INSTITUTION_NAME)),),
+    ),
     MockWorldPerson(
         "dean",
         "Demo Mock-World Dean",
@@ -874,11 +899,38 @@ MOCK_WORLD_PEOPLE: tuple[MockWorldPerson, ...] = (
         assignments=((AssignmentRole.DEAN, ("college", "College of Business and Technology")),),
         lms_user_id=MOCK_LMS_LEADERSHIP_USER_ID,
     ),
-    MockWorldPerson("assistant-dean", "Demo Mock-World Assistant Dean", "Leadership"),
-    MockWorldPerson("chair", "Demo Mock-World Chair", "Faculty"),
-    MockWorldPerson("lead-faculty", "Demo Mock-World Lead Faculty", "Faculty"),
-    MockWorldPerson("admin", "Demo Mock-World Administrator", "Staff"),
-    MockWorldPerson("care", "Demo Mock-World Care Officer", "Staff"),
+    MockWorldPerson(
+        "assistant-dean",
+        "Demo Mock-World Assistant Dean",
+        "Leadership",
+        assignments=(
+            (AssignmentRole.ASSISTANT_DEAN, ("college", "College of Business and Technology")),
+        ),
+    ),
+    MockWorldPerson(
+        "chair",
+        "Demo Mock-World Chair",
+        "Faculty",
+        assignments=((AssignmentRole.CHAIR, ("department", "Business Administration")),),
+    ),
+    MockWorldPerson(
+        "lead-faculty",
+        "Demo Mock-World Lead Faculty",
+        "Faculty",
+        assignments=((AssignmentRole.LEAD_FACULTY, ("course", "BUSA 300")),),
+    ),
+    MockWorldPerson(
+        "admin",
+        "Demo Mock-World Administrator",
+        "Staff",
+        assignments=((AssignmentRole.ADMIN, ("institution", INSTITUTION_NAME)),),
+    ),
+    MockWorldPerson(
+        "care",
+        "Demo Mock-World Care Officer",
+        "Staff",
+        assignments=((AssignmentRole.CARE, ("institution", INSTITUTION_NAME)),),
+    ),
     MockWorldPerson(
         "care-who-teaches",
         "Demo Mock-World Care Officer Who Also Teaches",

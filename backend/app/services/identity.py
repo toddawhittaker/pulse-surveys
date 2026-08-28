@@ -3,15 +3,15 @@
 SPEC §13 puts domain logic in `services/`, and this is the smallest piece of it
 there is: a verified subject comes in, and the primary key of the row this system
 stores for that person goes out. It is E1-12's first criterion — "the same stored
-identity, one row, by its primary key" — and it is what E1-13 will read
-assignments through.
+identity, one row, by its primary key" — and it is what E1-13 reads assignments
+and enrollment through.
 
 **A module of its own, and §13 names none.** Every module in §13's `services/`
 list is a screen's worth of domain logic and none of them is this. `authz.py` is
-the authorization chokepoint and answers what a purview covers; `landing.py`
-chooses a view from a claim and retires in E1-13; `session.py` signs and verifies
-the token a door hands over and touches no database; `provisioning.py` writes what
-a launch discovered. Three of those need this answer and none of them owns the
+the authorization chokepoint: it answers what a purview covers, and since E1-13
+which view a session's own identity opens on; `session.py` signs and verifies the
+token a door hands over and touches no database; `provisioning.py` writes what a
+launch discovered. Three of those need this answer and none of them owns the
 question — putting it in one would have the other doors importing that one's
 module for something it does not do. So: a module, because nothing fits, which is
 what §13 asks the pull request to say.

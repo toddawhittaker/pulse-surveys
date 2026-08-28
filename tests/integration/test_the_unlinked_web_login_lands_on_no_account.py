@@ -240,6 +240,7 @@ def test_a_web_login_by_a_linked_subject_lands_with_a_session_naming_its_person(
     published_person: Any,
     published_subject: Any,
     web_identity: Any,
+    committed_rows: Any,
 ) -> None:
     """The accepting half of the pair: a provisioned linkage is what opens this door.
 
@@ -252,12 +253,29 @@ def test_a_web_login_by_a_linked_subject_lands_with_a_session_naming_its_person(
     row the linkage points at, so a door that resolved by anything else — the first
     person in the table, a person it created — fails here rather than passing an
     "it landed somewhere" check.
+
+    **The `ADMIN` assignment is E1-13's arrival in this module**
+    (`docs/MISTAKES.md` entry 22). From that ticket the landing comes from the
+    assignment model, so a person with a linkage and no assignment lands on the
+    calm *no-access* page — which carries no session, and would make this half of
+    the pair unstatable while looking like the door was broken. One row, written in
+    the open, restores the difference the pair turns on: linkage and assignment
+    against no linkage at all. Which view the assignment chooses is not this
+    module's subject and is asserted in
+    `tests/integration/test_landing_resolves_from_assignments.py`.
     """
     person = published_person(web_door.provider, ADMIN_ROLE)
     person_id = web_identity.person()
     web_identity.link_web_subject(
         issuer=provider_issuer, subject=published_subject(person), person_id=person_id
     )
+    committed_rows.graph.assign(
+        ADMIN_ROLE,
+        scope=committed_rows.graph.scope("institution"),
+        person=person_id,
+        reports_to=None,
+    )
+    committed_rows.commit()
 
     response = web_door.login_as(person)
 

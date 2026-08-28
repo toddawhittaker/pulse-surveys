@@ -532,7 +532,25 @@ def everything_the_caller_received(response: Any, token: str) -> str:
 
 
 @pytest.fixture
-def provider(mock_idps: Any, door_contract: Any, link_published_people: Any) -> Any:
+def published_links() -> dict[str, Any]:
+    """Filled by `provider` below: each published subject, and the `person` it resolves to.
+
+    Added by E1-13's reconciliation. One test in this module drives a launch as
+    well as a login and has to hang a `user` row off the very `person` the linkage
+    names, and the mapping is what says which row that is. Empty until `provider`
+    has run, and empty for good while the linkage table does not exist — the same
+    tolerance `link_published_people` documents for the red phase.
+    """
+    return {}
+
+
+@pytest.fixture
+def provider(
+    mock_idps: Any,
+    door_contract: Any,
+    link_published_people: Any,
+    published_links: dict[str, Any],
+) -> Any:
     """The mock provider, registered to return to this tool's own callback.
 
     `MOCK_IDP_TOOL_REDIRECT_URI` is compared exactly — on the way in and again at
@@ -556,6 +574,23 @@ def provider(mock_idps: Any, door_contract: Any, link_published_people: Any) -> 
     unlinked case is not lost: it is E1-12's own subject, in
     `tests/integration/test_the_unlinked_web_login_lands_on_no_account.py`, where a
     subject is deliberately left without a row.
+
+    **E1-13 arrives here the same way, through the same fixture** — and this is
+    the second time a later ticket's rule has reached this module through it
+    (`docs/MISTAKES.md` entry 22). From that ticket the landing comes from the
+    assignment model, so a person with a linkage and no assignment lands on a calm
+    no-access page: the dean, the Care office, the administrator, the cookie
+    attributes, the login hints and the re-signed sessions would all answer 200
+    with that page instead of a session, in tests whose subject is none of it. So
+    `link_published_people` also writes the assignments the registration document
+    says each person holds — their `roles`, plus the `launch_only_roles` the
+    two-hat person carries on the other door (ADR 0058 makes both part of the
+    published contract). **What that costs**: a landing test in this module can no
+    longer be read as evidence that the assignment is what decided, because the
+    fixture is what put the assignment there. It is not asked to be — the rule is
+    asserted in the open in
+    `tests/integration/test_landing_resolves_from_assignments.py`, over rows each
+    test writes itself.
     """
     provider = mock_idps(
         {
@@ -564,7 +599,7 @@ def provider(mock_idps: Any, door_contract: Any, link_published_people: Any) -> 
             )
         }
     )
-    link_published_people(provider)
+    published_links.update(link_published_people(provider))
     return provider
 
 
@@ -1055,14 +1090,21 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
     """The claim produced a page, never a capability. E0-09 criterion 10, behaviourally.
 
     **Dies if the callback writes an assignment, or provisions a person, from the
-    claim.** This is the other half of the exception
-    `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` grants to
-    `backend/app/services/landing.py`. That exception rests on one factual claim —
-    the landing seam chooses a screen and writes nothing — and an exception that
-    rests on a sentence in a comment is an exception that stops being true without
-    anyone noticing. So the sentence is asserted here, against the whole flow, as
-    the Care person: authorization request, login form, code, server-side
-    exchange, the landing redirect, and not one row anywhere.
+    claim.** It was written as the behavioural half of the exception
+    `tests/unit/test_care_is_not_reachable_from_a_claim.py::EXCEPTIONS` used to
+    grant `backend/app/services/landing.py`: that exception rested on one factual
+    claim — the landing seam chooses a screen and writes nothing — and an exception
+    resting on a sentence in a comment is one that stops being true without anybody
+    noticing.
+
+    **E1-13 deleted both the module and the exception, and this test is worth more
+    rather than less for it.** The landing no longer comes from a claim at all, so
+    what is asserted here is the plainer and stronger fact: a verified session
+    stating `CARE` reaches this door, is landed, and writes nothing — no
+    assignment, no person, no user. A claim is an authentication context and never
+    a grant, and the whole flow is driven as the Care person to say so:
+    authorization request, login form, code, server-side exchange, the landing
+    redirect, and not one row anywhere.
 
     The Care half is the one that must never move. E0-09: "No LTI claim, no OIDC
     claim, and no LMS role may ever produce a `CARE` assignment… a claim-to-Care
@@ -1080,6 +1122,15 @@ def test_the_web_door_writes_no_row_for_the_care_person_it_lands(
     she lands with a session as she did before; what must not happen is a row
     appearing here, and that is now a rule of E1-12's as well as an artefact of
     E0's boundary.
+
+    **E1-13 did not move it either, and the count it is measured against changed.**
+    That ticket gives the Care person a live `CARE` assignment, seeded by the same
+    `provider` fixture ahead of the login, because a person with no assignment
+    lands on the calm no-access page. So the assignment count is non-zero before
+    the flow begins and must be **unchanged** after it — which is a stricter thing
+    to say than it was over an empty table, and is exactly what E0-09's criterion
+    10 is about: the row is provisioned by whoever administers Pulse, and the
+    claim's job stops at saying who signed in.
 
     Two guards keep this from passing on nothing having happened: the flow has to
     land on `/app/care` with a session, so a 4xx or a door that was never reached
@@ -1410,6 +1461,9 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     mock_platforms: Any,
     open_web_door: Any,
     register_platform: Any,
+    published_links: dict[str, Any],
+    published_subject: Any,
+    web_identity: Any,
 ) -> None:
     """E0-18: "the two-hat person exists on both doors and both doors open for her".
 
@@ -1447,6 +1501,15 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     session and CSRF cookies set. Neither half is a rendered page any more, and the
     fact this test exists for is untouched by that: one published identity opens
     both doors, and each door dispatches her on the assignment that opens it.
+
+    **Since E1-13, "the assignment that opens it" is literal.** Her two hats are
+    rows now: the `provider` fixture writes the `CARE` and `INSTRUCTOR` assignments
+    the registration document publishes for her, and this test adds the one thing
+    that fixture cannot know — the `user` row for her LMS subject at *this*
+    registration, and ADR 0024's link from her `person` to it, without which her
+    launch resolves nobody and is answered with the calm no-access page. That is
+    the same three-row shape `scripts/seed.py` writes for the mock world, and it is
+    what makes both halves below reach a session at all.
     """
     hers = person_holding(provider, "CARE", and_a_launch_assignment=True)
     lms_user_id = hers.get("lms_user_id")
@@ -1493,7 +1556,29 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
     # setting: this suite's subject is which person a launch lands as, so the
     # value only has to be one nothing could reach by accident. `.invalid` is
     # RFC 2606.
-    register_platform(offers[0], jwks_url, "http://lti-platform.invalid/e0-18-configured-authorize")
+    registration = register_platform(
+        offers[0], jwks_url, "http://lti-platform.invalid/e0-18-configured-authorize"
+    )
+    # E1-13: her launch resolves `sub` → `user` → `person`, so the `user` row for
+    # her LMS subject at this registration, and ADR 0024's link to the `person` the
+    # linkage already names, are what let the launch door reach her instructor
+    # assignment at all. `published_links` is where the `provider` fixture recorded
+    # which `person` her IdP subject resolves to; hanging the `user` row off any
+    # other row would make her two doors two humans, which is the very thing
+    # `tests/integration/test_dual_door_identity_merge.py` exists to forbid.
+    her_person = published_links.get(published_subject(hers))
+    assert her_person is not None, (
+        f"No `person` was linked for the two-hat person's IdP subject "
+        f"{published_subject(hers)!r}; the fixture linked {sorted(published_links)}. Without it "
+        "this test cannot hang her launch-side `user` row off the identity her web login resolves "
+        "to, and the two halves below would be about two different people."
+    )
+    her_user = web_identity.user(
+        platform_id=registration.platform_row[web_identity.key_of("lti_platform")],
+        subject=lms_user_id,
+    )
+    web_identity.link_person_to_user(person_id=her_person, user_id=her_user)
+
     launch_tool = tool_doors(
         {door_contract.settings["public_base_url"]: door_contract.public_base_url},
         {urlsplit(jwks_url).hostname: platform},
@@ -1530,9 +1615,21 @@ def test_the_two_hat_person_opens_the_care_view_here_and_the_instructor_view_by_
 
 
 # ---------------------------------------------------------------------------
-# One door, one vocabulary. This is the launch door's rule from the other side:
-# `test_lti_launch_door.py` asserts that door reads only the LIS roles claim, and
-# these three assert this one reads only `roles_claim` and never the LTI claim.
+# What a roles claim buys at this door, which since E1-13 is nothing.
+#
+# This section used to read "one door, one vocabulary": `test_lti_launch_door.py`
+# asserted that door reads only the LIS roles claim, and these three asserted this
+# one reads only `roles_claim` and never the LTI claim. **Both halves of that are
+# retired.** E1-13 resolves the landing from the person's live assignments,
+# filtered by ADR 0026's door column, so neither door consults a roles claim at
+# all — and the three tests below say the stronger thing: the Care officer reaches
+# `/app/care` with her own vocabulary present, with a foreign one smuggled in
+# beside it, and with her own removed entirely and only the foreign one left.
+# Her rows decide, three times over.
+#
+# The launch-door section this mirrors was rewritten in E1-13's red commit; the
+# last of the three here was missed and was rewritten under dispute E1-13-01,
+# which is the record of how one half of a stated pair moved without the other.
 # ---------------------------------------------------------------------------
 
 
@@ -1653,7 +1750,7 @@ def test_a_session_also_carrying_an_lti_roles_claim_lands_where_its_own_claim_na
     landed_with_session(response, door_contract, CARE_ROUTE)
 
 
-def test_a_session_stating_only_an_lti_roles_claim_is_refused(
+def test_a_session_stating_only_an_lti_roles_claim_lands_where_the_rows_already_said(
     open_web_door: Any,
     door_contract: Any,
     provider: Any,
@@ -1661,20 +1758,57 @@ def test_a_session_stating_only_an_lti_roles_claim_is_refused(
     claims_in_token: Any,
     suite_key_set: Any,
 ) -> None:
-    """**Dies if the web door consults the launch door's vocabulary.**
+    """**Dies if the web door consults either roles vocabulary.**
 
-    The session states the LIS Instructor role and nothing in this door's own roles
-    claim. SPEC §2 gives this door the roles the LMS may not name; a door that read
-    the LTI claim would take a role vocabulary an LMS administrator controls and
-    use it to choose a screen here — the mirror image of the rule
-    `test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused` asserts in
-    `tests/integration/test_lti_launch_door.py`.
+    The session states the LIS Instructor role and **nothing at all** in this
+    door's own roles claim, and the Care officer behind it lands on `/app/care`
+    anyway — because she holds a live `CARE` assignment, ADR 0026's
+    `permits_web_login` is true for it, and E1-13 gives no roles claim any say in
+    which view a person reaches. SPEC §2: "Entry doors are a property of the
+    assignment, not the person", and E1-13's scope is "session identity → that
+    person's live assignments filtered by the entered door's permission column →
+    landing view".
 
-    There is no view this door may serve for an instructor: E0-18 gives it
-    leadership, Care and admin, and the LIS roles belong to the launch door. So the
-    only answer is a refusal, and `refused` requires that no landing testid at all
-    appears — a door that fell through to a default fails here whichever view it
-    chose.
+    **Two mutations die here, in opposite directions.** A door that read the LTI
+    vocabulary lands her on the instructor view, or refuses because it serves no
+    instructor view at this door — either fails the landing assertion. A door that
+    read *this* door's own vocabulary finds nothing there at all, since the
+    adjustment removes it, and answers the calm no-access page or a refusal — which
+    fails the same assertion. Only a door that reads neither and asks her rows
+    lands her on Care.
+
+    **Rewritten by dispute E1-13-01, and the reason is worth having here.** It read
+    `test_a_session_stating_only_an_lti_roles_claim_is_refused` and required a 4xx,
+    which was the correct assertion while the landing came from a claim. Its own
+    docstring named its mirror —
+    `test_a_launch_naming_a_web_door_role_and_no_lis_role_is_refused` in
+    `tests/integration/test_lti_launch_door.py` — and E1-13's red commit rewrote
+    that half to `..._lands_where_the_rows_already_said` and missed this one. There
+    is no reading of this ticket under which the launch door stops consulting a
+    roles claim and the web door goes on doing it.
+
+    **The security property is stronger, not weaker.** The old test protected
+    "an LMS-controlled vocabulary must not choose a screen at this door" by
+    checking that such a token was refused; the door had to read the claim to
+    refuse on it. Now the claim is not read at all, which is the same movement work
+    order D10 records for the launch-door half. E0-09 criterion 10 is the rule
+    underneath — "The launch or login establishes who someone is; this table
+    establishes what they may do" — and a door that reads no vocabulary cannot be
+    talked into anything by one.
+
+    **The other direction of the pair is
+    `tests/integration/test_landing_resolves_from_assignments.py::test_a_web_login_by_a_linked_person_holding_no_assignment_lands_on_the_calm_page`**:
+    a linked person whose token states a role in *this door's own* vocabulary, and
+    who holds no assignment, is answered with the calm page. Together they kill a
+    door that reads the foreign vocabulary and a door that reads its own. Neither
+    alone does: this one is satisfied by a door that reads its own claim and
+    happens to agree with her rows, and that one by a door that reads the LTI claim
+    and finds none.
+
+    **The canary is kept and is doing more work than before.** The session the
+    provider issued has to have carried this door's own roles claim, or the
+    adjustment removed nothing and she would be landing on Care with her own
+    vocabulary still present — which is the sibling test above, not this one.
     """
     roles_claim = provider.roles_claim_name()
     seen: list[dict[str, Any]] = []
@@ -1693,14 +1827,10 @@ def test_a_session_stating_only_an_lti_roles_claim_is_refused(
 
     assert seen and seen[0].get(roles_claim), (
         f"The session the provider issued carries no `{roles_claim}`, so removing it changed "
-        "nothing and this test is not posing the question it names."
+        "nothing and this test is not posing the question it names — it would be the sibling "
+        "above, a session that still states its own vocabulary."
     )
-    refused(
-        response,
-        door_contract,
-        f"a session stating {INSTRUCTOR_ROLE_URI!r} in `{LTI_ROLES_CLAIM}` and nothing in "
-        f"`{roles_claim}`",
-    )
+    landed_with_session(response, door_contract, CARE_ROUTE)
 
 
 # ---------------------------------------------------------------------------

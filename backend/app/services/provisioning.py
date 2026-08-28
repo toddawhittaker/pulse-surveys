@@ -89,6 +89,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.lti.launch import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.models.identity import User
 from app.models.lti import (
     ROSTER_SERVICE_ADDRESS_COLUMN,
@@ -109,7 +110,6 @@ from app.services.authz import (
     sanction_for,
 )
 from app.services.identity import identity_behind_a_launch_subject
-from app.services.landing import INSTRUCTOR_ROLE_URI, LTI_ROLES_CLAIM, stated_roles
 from app.services.section_codes import SectionCodeError, apply_section_code
 
 __all__ = ["UnregisteredLaunchError", "provision_from_launch"]
@@ -121,10 +121,12 @@ logger = logging.getLogger("app.services.provisioning")
 # somebody's launch (ADR 0090).
 SANCTION: Final[WriteSanction] = sanction_for("launch_provisioning")
 
-# The two claims a context arrives in, spelled as LTI 1.3 and the Names and Role
+# The claims a context arrives in, spelled as LTI 1.3 and the Names and Role
 # Provisioning Service specification spell them. Not this project's to choose, and
-# not imported from `app.lti.launch`: that module spells the claims it *validates*,
-# and these are the two it does not look at.
+# spelled here rather than imported from `app.lti.launch`, which is where the
+# claims that module *validates* live. The roles vocabulary this module reads *is*
+# imported from there (E1-13), because that one is a vocabulary two modules share
+# rather than a claim one module happens to look at.
 LTI_CLAIM_PREFIX = "https://purl.imsglobal.org/spec/lti/claim/"
 CONTEXT_CLAIM = f"{LTI_CLAIM_PREFIX}context"
 DEPLOYMENT_ID_CLAIM = f"{LTI_CLAIM_PREFIX}deployment_id"

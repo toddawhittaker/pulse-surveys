@@ -127,6 +127,14 @@ serve nothing — is worse: it reports 200 over an empty tree, which is ADR
   and `frontend/src/lib/landings.ts` — until E1-13 retires the first. The
   duplication is deliberate and is marked at both ends; an edit to either has to
   be an edit to both while it lasts.
+
+  **The duplication is gone, and it ended earlier than this sentence expected.**
+  E1-08 removed the five headings and empty-state sentences from
+  `backend/app/services/landing.py` when both doors began answering a redirect,
+  so `frontend/src/lib/landings.ts` has been the only copy since then; E1-13
+  deleted that module outright. What the doors still render is the four
+  non-landing pages, which live in `backend/app/api/deps.py` and are duplicated
+  nowhere.
 - **The code-in-history note E0-18 recorded still stands.** Nothing here changes
   what those doors do, and it is E1-08 that reaches it.
 - **A future CDN, or a cache header policy, has nowhere to be configured.**

@@ -39,6 +39,29 @@ one that covers it rather than driving a second launch to prove the same thing.
 Without those, every assertion here would be equally true of a writer that writes
 nothing at all — which is what `test_a_catalog_that_grants_this_writer_nothing_
 stops_every_write` at the foot of this file is the standing control for.
+
+**E1-13 changes the second assertion in every test here, and it cannot be repaired
+by seeding** (`docs/MISTAKES.md` entry 22). From that ticket the landing comes from
+the launching person's own live assignments, with enrollment as the student
+fallback — so a launch by a subject Pulse holds nothing about is answered with the
+calm no-access page rather than a role route, and `LaunchDriver.landed` correctly
+refuses to call that a landing.
+
+The repair the sibling provisioning modules take — seed the launching subject a
+landing — is **unavailable here, and the reason is this file's own strictness**.
+`assert_the_write_did_not_happen` asserts that `course`, `section` and `user` are
+*entirely empty*, deliberately, because "a refused write and a write stored under
+a key this test did not predict are different failures". Every route to a landing
+writes into at least one of those three: an assignment needs a `person` linked to
+a `user` row, and an enrollment needs a `user` and a `section`. Seeding one would
+make the emptiness assertion — the thing this file exists for — unstatable.
+
+So these tests take `LaunchDriver.accepted` instead, which is the assertion they
+always meant: E1-10's rule is that "a provisioning refusal NEVER fails the launch
+or the person's landing", and both of the door's two non-refusal answers satisfy
+it. What the second assertion says is unchanged — a refused write does not become
+a person who cannot get in — and it is now said in the words that stay true when
+the person's rows entitle them to no view.
 """
 
 from typing import Any
@@ -223,7 +246,7 @@ def test_a_write_whose_table_the_catalog_no_longer_grants_does_not_happen(
         "turns a data-quality problem into a person who cannot get in, and it does it on the one "
         "path where the guard is working."
     )
-    launch_driver.landed(
+    launch_driver.accepted(
         response, f"an instructor's launch whose {table!r} write the catalog no longer grants"
     )
 
@@ -291,4 +314,4 @@ def test_a_catalog_that_grants_this_writer_nothing_stops_every_write(
         "it. E1-10's work order: a provisioning refusal never fails the launch or the person's "
         "landing."
     )
-    launch_driver.landed(response, "an instructor's launch whose writer is granted nothing")
+    launch_driver.accepted(response, "an instructor's launch whose writer is granted nothing")

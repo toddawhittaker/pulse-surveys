@@ -19,30 +19,87 @@ hides which of these are worth reading first.
 **The interface below is the settled ruling, not an inference** — see
 `/tmp/claude-1000/-home-todd-projects-pulse-surveys/5c7ece32-356e-499c-b2a7-7643017a73b6/scratchpad/E1-08-interface-ruling.md`,
 sent to this test-author after the first pass: `issue_session`/`verified_session`
-take `Door`/`LandingRole` enums from `app.services.landing` (an existing module
-— importing it is allowed; only reading `backend/app/**` and writing
-implementation are blocked) and a `bytes` secret; `now` is `int | None`, epoch
+take `Door`/`LandingRole` enums and a `bytes` secret; `now` is `int | None`, epoch
 seconds, not a `datetime`; the CSRF primitive is `issue_csrf_token`/
 `verify_csrf_token`, renamed from this test-author's first-pass guess.
 `session_from_request(request, secret)`'s positional shape was confirmed
 correct as originally written.
+
+**The two enums moved in E1-13, and how they are reached moved with them.** They
+lived in `app.services.landing`, which that ticket deletes: the landing view comes
+from the assignment model now, so `Door` and `LandingRole` live in
+`app.services.authz` — the module that answers "what may this session act as" —
+with their **member names unchanged**, because `verified_session` reads
+`Door[...]`/`LandingRole[...]` by member name and every session issued before the
+move has to keep verifying. They are resolved inside each test through
+`landing_enums()` rather than imported at the top of this file: a module-level
+import of a name that has not landed yet takes every test here down as a
+collection error, and an uncollected test is not a red test — it reports as a
+broken suite rather than as a criterion nobody has met, and the two are fixed by
+different people.
 """
 
+import importlib
 import time
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
-from app.services.landing import Door, LandingRole
+# The module E1-13 moves `Door` and `LandingRole` into, spelled once. Its own
+# tests are in `tests/unit/test_chosen_landing.py`; all this file needs is the two
+# enums, and a rename is this one line.
+LANDING_ENUM_MODULE = "app.services.authz"
+
+
+def landing_enums() -> tuple[Any, Any]:
+    """`Door` and `LandingRole`, or a failure naming where E1-13 puts them.
+
+    See the note in this module's docstring on why this is a function rather than
+    an import: a missing symbol has to fail the tests that use it, one by one,
+    rather than the whole file at collection.
+    """
+    try:
+        module = importlib.import_module(LANDING_ENUM_MODULE)
+    except ModuleNotFoundError as missing:  # pragma: no cover - a red, not a branch
+        pytest.fail(
+            f"`{LANDING_ENUM_MODULE}` does not import ({missing}). E0-11 puts the authorization "
+            "chokepoint there and E1-13 moves the session's two enums into it."
+        )
+    door = getattr(module, "Door", None)
+    role = getattr(module, "LandingRole", None)
+    if door is None or role is None:
+        pytest.fail(
+            f"`{LANDING_ENUM_MODULE}` exposes `Door`={door!r} and `LandingRole`={role!r}. E1-13's "
+            "work order moves both out of the deleted `app/services/landing.py` into the "
+            "chokepoint, members unchanged, because a session token carries a door and a role and "
+            "`verified_session` reads them back by member name."
+        )
+    return door, role
+
 
 # ---------------------------------------------------------------------------
 # This module's own choices — none of them a citation of the ruling.
 # ---------------------------------------------------------------------------
 
-A_DOOR = Door.LAUNCH
-A_ROLE = LandingRole.STUDENT
-ANOTHER_ROLE = LandingRole.INSTRUCTOR
+
+def a_door() -> Any:
+    """The door this module issues its stand-in sessions at."""
+    door, _ = landing_enums()
+    return door.LAUNCH
+
+
+def a_role() -> Any:
+    """The landing this module issues its stand-in sessions for."""
+    _, role = landing_enums()
+    return role.STUDENT
+
+
+def another_role() -> Any:
+    """A second landing, for the one test that needs two sessions to differ by role."""
+    _, role = landing_enums()
+    return role.INSTRUCTOR
+
 
 # An issuer and a subject this module invents, standing in for a launch's
 # `iss`/`sub` — this module's own choice of value, not a claim about what a
@@ -92,14 +149,27 @@ def issued(
     module: Any,
     *,
     secret: bytes = CORRECT_SECRET,
-    door: Door = A_DOOR,
-    role: LandingRole = A_ROLE,
+    door: Any = None,
+    role: Any = None,
     sub: str = A_SUBJECT,
     iss: str | None = AN_ISSUER,
     now: int | None = None,
 ) -> str:
-    """One session token, issued with this module's own stand-in claim values."""
-    return module.issue_session(door=door, role=role, sub=sub, iss=iss, secret=secret, now=now)
+    """One session token, issued with this module's own stand-in claim values.
+
+    `door` and `role` default to `None` and are resolved here rather than in the
+    signature, because a default evaluated at import time would need the two enums
+    at import time — which is the collection error this module's docstring
+    explains it is avoiding.
+    """
+    return module.issue_session(
+        door=a_door() if door is None else door,
+        role=a_role() if role is None else role,
+        sub=sub,
+        iss=iss,
+        secret=secret,
+        now=now,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +195,8 @@ def test_a_session_issued_then_verified_carries_back_the_same_claims() -> None:
         "`verified_session` answered `None` for a token this test just issued with the same "
         "secret. The round trip this module exists for does not hold."
     )
-    assert claims.door == A_DOOR, f"`.door` is {claims.door!r}, not {A_DOOR!r}."
-    assert claims.role == A_ROLE, f"`.role` is {claims.role!r}, not {A_ROLE!r}."
+    assert claims.door == a_door(), f"`.door` is {claims.door!r}, not {a_door()!r}."
+    assert claims.role == a_role(), f"`.role` is {claims.role!r}, not {a_role()!r}."
     assert claims.sub == A_SUBJECT, f"`.sub` is {claims.sub!r}, not {A_SUBJECT!r}."
     assert claims.iss == AN_ISSUER, f"`.iss` is {claims.iss!r}, not {AN_ISSUER!r}."
     assert claims.jti, "`.jti` is empty. E1-08's `SessionClaims` names a `jti` for every session."
@@ -395,8 +465,8 @@ def test_session_from_request_prefers_the_bearer_header_over_a_conflicting_cooki
     """
     module = imported_session_module()
     cookie_name = getattr(module, "SESSION_COOKIE", "session")
-    bearer_token = issued(module, role=ANOTHER_ROLE, sub="e1-08-bearer-subject")
-    cookie_token = issued(module, role=A_ROLE, sub="e1-08-cookie-subject")
+    bearer_token = issued(module, role=another_role(), sub="e1-08-bearer-subject")
+    cookie_token = issued(module, role=a_role(), sub="e1-08-cookie-subject")
 
     claims = module.session_from_request(
         request_carrying(bearer=bearer_token, cookie=cookie_token, cookie_name=cookie_name),

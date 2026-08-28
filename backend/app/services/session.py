@@ -57,7 +57,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.config import Settings, is_development
-from app.services.landing import Door, LandingRole
+from app.services.authz import Door, LandingRole
 
 __all__ = [
     "CSRF_COOKIE",
@@ -119,8 +119,9 @@ class SessionClaims:
     subject reaches. Neither names anybody: a name lives on `person` and
     `user_identity`, which `pulse_app` reaches through no path this session opens,
     and what a holder of this token gains is the ability to say *which* row they
-    are, which they already proved at the door. E1-13 reads assignments through
-    `person_id`.
+    are, which they already proved at the door. E1-13 is what reads assignments
+    through `person_id` and enrollment through `user_id`, in
+    `app.services.authz.resolve_landing`.
 
     **Both are `None`-able, and the two absences mean different things.**
     `person_id` is absent for a launch by somebody nobody has put in the people

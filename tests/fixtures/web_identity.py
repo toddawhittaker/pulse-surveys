@@ -8,13 +8,23 @@ an application that opens its own connection out of `DATABASE_URL` — and both 
 seeded here rather than in each module that needs them, because four modules need
 the same three rows (`docs/MISTAKES.md` entry 13).
 
-**What this seeds and what it deliberately refuses to decide.** It writes `person`
-rows, `user` rows and `web_login_subject` linkage rows, and nothing else. It writes
-no `role_assignment`: which view a person lands on is E1-13's decision and this
-ticket leaves `landing_role_for` reading the claim, so a fixture that attached
-assignments would be answering a question the ticket has not asked. Tests that need
-an assignment build it through `committed_rows.graph`, in the open, where the
-assertion can see it.
+**What this seeds and what it deliberately refuses to decide.** `WebIdentityRows`
+writes `person` rows, `user` rows and `web_login_subject` linkage rows, and nothing
+else — no `role_assignment`. Tests that need an assignment build it through
+`committed_rows.graph`, in the open, where the assertion can see it, and that is
+unchanged: which assignment a person holds is what decides their view, so a
+fixture that chose one would be answering the question under test
+(`docs/MISTAKES.md` entry 30).
+
+**E1-13 decided the question this paragraph used to say was open, and one fixture
+below moved with it.** Until that ticket the landing came from the roles claim and
+an assignment changed nothing; from E1-13 on it comes from the assignment model,
+so a person with a linkage and no assignment lands on the calm no-access page.
+`link_published_people` therefore writes the assignments the provider's own
+registration document says each published person holds, because its whole job is
+to stand up "a deployment whose people all have accounts" for suites whose subject
+is not the landing. Its docstring says what that costs and where the rule it
+mirrors is asserted in the open instead.
 
 **The names below are the settled contract, not a guess.** The linkage table is
 `web_login_subject` with `idp_issuer`, `idp_subject` and `person_id`; the session
@@ -43,7 +53,13 @@ from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
-from fixtures.supervision import foreign_key_columns, require_table, seed_row, single_primary_key
+from fixtures.supervision import (
+    ROLE_SCOPE_GRAIN,
+    foreign_key_columns,
+    require_table,
+    seed_row,
+    single_primary_key,
+)
 
 # ---------------------------------------------------------------------------
 # The linkage table, as E1-12 settles it.
@@ -367,9 +383,9 @@ def web_identity(committed_rows: Any, metadata_tables: dict[str, Any]) -> WebIde
 
 @pytest.fixture
 def link_published_people(
-    web_identity: WebIdentityRows,
+    web_identity: WebIdentityRows, committed_rows: Any
 ) -> Callable[[Any], dict[str, Any]]:
-    """Give every person a mock provider publishes a Pulse identity to resolve to.
+    """Give every person a mock provider publishes a Pulse identity, and the roles it publishes.
 
     **This exists because E1-12 changes what a successful web login requires**, and
     the modules that meet the change are ones this ticket does not otherwise edit
@@ -402,7 +418,69 @@ def link_published_people(
     by name and by the sweep it has to join, in
     `tests/integration/test_identity_column_marker.py`. So a table under a different
     name is a named failure there rather than a silent no-op here.
+
+    **E1-13 makes it write the assignments too, and for exactly the same reason.**
+    That ticket resolves the landing from the assignment model, so a person with a
+    linkage and no assignment lands on the calm no-access page — and every web
+    login in `test_web_login_door.py` would answer 200 with that page instead of a
+    session, in tests about PKCE, nonces, cookies and login hints. So each
+    published person is given the assignments the registration document says they
+    hold: their `roles`, which are what a session for them states, plus their
+    `launch_only_roles`, which is what the two-hat person holds on the other door
+    (ADR 0058 makes both members part of the published contract). That is what a
+    seeded deployment looks like — `scripts/seed.py` writes the same shape for the
+    running stack — and the roles come from the document rather than from a list
+    here, so a reseeding moves the assignments with it.
+
+    **What that costs, stated rather than implied.** A suite using this fixture
+    cannot prove *that* the landing comes from the assignment, because the fixture
+    is what put the assignment there. It is not asked to: the rule is asserted in
+    the open, over rows each test writes itself, in
+    `tests/integration/test_landing_resolves_from_assignments.py`. What a suite
+    using this fixture proves is everything else about a door, over a deployment
+    where the people have accounts and roles — which is the only state in which
+    those questions can be asked at all.
+
+    Assignments are written only where the graph can express the role's scope
+    grain, and a role it cannot place is skipped rather than guessed at: the scope
+    a role attaches to is SPEC §2.1's decision, and inventing one here would seed a
+    row the schema's grain rule may refuse and fail a test inside its own fixture
+    (`docs/MISTAKES.md` entry 13).
     """
+
+    def assignments_for(person_id: Any, user: Mapping[str, Any]) -> None:
+        """Every role the document publishes for this person, as a live assignment.
+
+        Each row gets a scope node of its own through `fresh_scope`, which shares
+        every ancestor above the role's grain and builds the node itself again.
+        Two people holding the same role at the same node is a shape the schema may
+        refuse — `SupervisionGraph.node` names "one chair per department, one
+        instructor per section" as rules E0-09's ticket does not mention and the
+        schema may still carry — and a fixture that tripped one would fail a suite
+        inside its own setup for a reason no test there is about. The institution
+        is the exception and cannot be duplicated (`uq_institution_one_row`, ADR
+        0072); `fresh_scope` hands back the one that is already there.
+
+        `reports_to` is explicitly null. Supervision edges are §2.1's own subject
+        and are asserted in `tests/integration/test_role_assignment_graph.py`; what
+        a door needs is a live assignment, and a graph invented here would be this
+        fixture deciding who answers to whom.
+        """
+        published = [
+            *(user.get("roles") or []),
+            *(user.get("launch_only_roles") or []),
+        ]
+        for role in published:
+            token = str(role).upper()
+            if token not in ROLE_SCOPE_GRAIN:
+                continue
+            committed_rows.graph.assign(
+                token,
+                scope=committed_rows.graph.fresh_scope(ROLE_SCOPE_GRAIN[token]),
+                person=person_id,
+                reports_to=None,
+            )
+        committed_rows.commit()
 
     def link(provider: Any) -> dict[str, Any]:
         if LINKAGE_TABLE not in web_identity.tables:
@@ -418,6 +496,7 @@ def link_published_people(
             subject = published_subject_of(user)
             person_id = web_identity.person()
             web_identity.link_web_subject(issuer=issuer, subject=subject, person_id=person_id)
+            assignments_for(person_id, user)
             linked[subject] = person_id
         assert len(set(linked.values())) == len(linked), (
             f"Two of the {len(linked)} published subjects were linked to one person: {linked}. "
