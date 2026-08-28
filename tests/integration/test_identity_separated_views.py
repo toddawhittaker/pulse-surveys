@@ -649,6 +649,7 @@ def test_alembic_upgrade_head_creates_the_identity_separated_read_views(
     )
 
 
+@pytest.mark.invariant
 def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     migrated_engine: Any,
 ) -> None:
@@ -667,6 +668,21 @@ def test_every_read_view_is_created_from_a_sql_file_under_views_sql(
     The search is by name and the canary is the word `select`: a directory of
     view SQL certainly contains it, so a search that has gone blind against these
     files says so here rather than passing (`docs/MISTAKES.md` entry 3).
+
+    **`invariant`-marked, as E1-01's deferral item 4 asks.** Every §4.1 rule this
+    module asserts over the `views_sql/` *files* — the schema-qualification sweep
+    and the identity-column sweep both — is total only because every live view
+    ships through one of those files, and this test is the whole of what says so.
+    It ran in the ordinary suite alone, so the isolated §4.1 pass never collected
+    the one test holding the text half's completeness: a view inlined into a
+    revision would have taken both file sweeps out of reach while that pass went
+    on reporting a clean run over the tests that were left. E1-01 item 1's
+    text/catalog complementarity is the argument that needs it.
+
+    The marker adds a second reader rather than a second rule: the body already
+    asserts directly, which is what `scripts/ci/check_invariant_assertions.py`
+    requires of a marked test under E0-36 §3, so nothing here was restructured to
+    carry it.
     """
     with migrated_engine.connect() as connection:
         views = read_views(connection)
