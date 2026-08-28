@@ -141,14 +141,30 @@ def test_the_wire_carries_a_request_to_the_platform_and_refuses_an_unmounted_hos
     is what stands between "the sync resolved the wrong platform" and a silent
     pass (deferred E1-10 item 1's failure mode).
 
+    **The fetch carries a real access token, and dispute E1-11-06 is why.** This
+    read used to carry no `Authorization` header at all, from a time when the mock
+    served its roster to anybody; E1-11's fix round made the route require a token
+    the platform's own endpoint issued, and SPEC §14.3's E1 exit line is what that
+    serves — "a roster read succeeds as an authenticated service call, not an
+    unauthenticated GET", a distinction only the platform can draw. What this test
+    is *for* is unchanged and never needed an unauthenticated read: it asks whether
+    the transport carries a request to the platform and brings a container back.
+    The token is obtained the way every other read in this suite obtains one, from
+    the one helper in `tests/fixtures/client_credentials.py`, reached through the
+    platform driver.
+
     **A red here means these tests are broken, not the sync.**
     """
     session = service_wire.session()
 
-    answered = session.get(str(synced_section.address))
+    answered = session.get(
+        str(synced_section.address),
+        headers={"authorization": f"Bearer {synced_section.platform.nrps_token()}"},
+    )
     assert answered.status_code == 200, (
         f"The wire answered {answered.status_code} for the section's own stored roster address "
-        f"{synced_section.address!r}. Body begins {answered.text[:200]!r}."
+        f"{synced_section.address!r}, carrying a token this platform's own endpoint issued for the "
+        f"membership scope. Body begins {answered.text[:200]!r}."
     )
     assert isinstance(answered.json().get("members"), list), (
         f"The wire carried back {answered.text[:200]!r}, which is not an NRPS membership "
@@ -179,21 +195,50 @@ def test_the_wire_refuses_a_service_read_that_carries_no_bearer_token(
     `test_the_sync_has_no_unauthenticated_path_to_the_roster` — would then be green
     against a client that attaches nothing.
 
-    Both directions, one request apart: the same URL with a bearer token and
-    without one.
+    **Three requests, and the third one is what dispute E1-11-06 cost.** The
+    accepted half used to present the string `"Bearer a-token-shaped-string"`,
+    which the harness gate lets past and which the platform now refuses; the ruling
+    puts a real token there so the 200 is genuine end to end. That change takes
+    something away, and it is put back rather than left implicit: once the platform
+    refuses a bare read too, a 401 on the refused half no longer says *which* of the
+    two refused it, so on its own it would no longer prove this gate fires at all —
+    which is precisely the state entry 9 warns about, wearing a passing test.
+
+    So the two refusers are told apart by what they answer with. The platform's
+    refusal carries an RFC 6750 §3 `WWW-Authenticate: Bearer` challenge, required by
+    `test_mock_lms_nrps_requires_a_token.py`; the wire's carries none, because it
+    answers `{"error": "invalid_token"}` and nothing else. The bare read is
+    therefore made twice — once with the gate off, which reaches the platform and
+    comes back challenged, and once with it on, which does not and comes back
+    unchallenged. Both directions of the instrument, so neither reading is an
+    absence taken on trust (`docs/MISTAKES.md` entry 3).
 
     **A red here means these tests are broken, not the sync.**
     """
-    service_wire.refusing_unauthenticated_reads()
     session = service_wire.session()
+    token = synced_section.platform.nrps_token()
 
-    granted = session.get(
-        str(synced_section.address), headers={"authorization": "Bearer a-token-shaped-string"}
-    )
+    granted = session.get(str(synced_section.address), headers={"authorization": f"Bearer {token}"})
     assert granted.status_code == 200, (
-        f"The wire refused a read carrying a bearer token with {granted.status_code}, so its gate "
-        "refuses everything and the pair below would be about nothing."
+        f"The wire answered {granted.status_code} for a read carrying a token this platform's own "
+        "endpoint issued, so either the transport or the platform refuses a read that must "
+        "succeed, and every half of the pair below would be about nothing."
     )
+
+    reaches_the_platform = session.get(str(synced_section.address))
+    assert reaches_the_platform.status_code == 401, (
+        f"With this suite's gate still off, a bare read reached the platform and was answered "
+        f"{reaches_the_platform.status_code}. `test_mock_lms_nrps_requires_a_token.py` is where "
+        "that refusal is the subject; here it is the instrument, and without it the pair below "
+        "cannot say which side did the refusing."
+    )
+    assert reaches_the_platform.headers.get("www-authenticate"), (
+        "The platform's own refusal of a bare read carries no `WWW-Authenticate` header, so it is "
+        "indistinguishable from this suite's wire gate, which sends none. The assertion below "
+        "would then hold whether the gate fired or not."
+    )
+
+    service_wire.refusing_unauthenticated_reads()
 
     refused = session.get(str(synced_section.address))
     assert refused.status_code == 401, (
@@ -201,6 +246,12 @@ def test_the_wire_refuses_a_service_read_that_carries_no_bearer_token(
         "while its unauthenticated gate was on. That gate is what AC1's forbidden state is "
         "asserted through — it refuses on the wire, where a second path in the client is visible "
         "rather than inferred — so with it inert, that state cannot be asserted at all."
+    )
+    assert not refused.headers.get("www-authenticate"), (
+        "The refusal carries a `WWW-Authenticate` challenge, which is the platform's answer and "
+        "not this wire's — so the request went past the gate to the mock, the gate did not fire, "
+        "and `test_the_sync_has_no_unauthenticated_path_to_the_roster` rests on something that "
+        "has never been watched refuse anything (`docs/MISTAKES.md` entry 9)."
     )
 
 
