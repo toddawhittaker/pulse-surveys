@@ -34,11 +34,30 @@ GitHub CI's green run on the exact commit under review is the independent
 fresh runner (MISTAKES #39: a verdict is valid only for the tree it ran
 against). Confirm that run rather than re-running the suite yourself:
 
-- `gh run list --workflow=CI --commit <sha>` to find the run, then
-  `gh run view <id> --json headSha,status,conclusion` — **assert `headSha`
-  equals the commit under review.** A mismatch, a non-success conclusion, or a
-  run that predates a fix landed after it are all rejections: demand a fresh
-  run rather than reasoning around a stale one.
+- `gh run list --workflow=CI --commit <sha>` can return several runs for the
+  same commit. The one to use is **the latest completed `pull_request` run of
+  the CI workflow whose `headSha` equals the commit under review** — not the
+  first one listed, not a `push` run. Then `gh run view <id>
+  --json headSha,status,conclusion` — **assert `headSha` equals the commit
+  under review.** A mismatch, a non-success conclusion, or a run that predates
+  a fix landed after it are all rejections: demand a fresh run rather than
+  reasoning around a stale one.
+- **`headSha` is not what ran.** A `pull_request` run executes against the
+  merge of the head into the base branch's tip at the time the run started,
+  not the bare head commit — that merge is closer to what will actually land,
+  and that is accepted (MISTAKES #39, scoped honestly: the verdict is valid
+  for the tree the run actually built, and for a `pull_request` run that tree
+  is the merge, not the head in isolation). But if the base branch has moved
+  since the run in a way that touches the same files the diff touches, the run
+  is stale against what would land now — demand a re-run rather than reasoning
+  around it.
+- **An inert run is not evidence.** A run is only evidence if its pytest steps
+  actually executed and printed summary totals. If the run instead took the
+  inert-documentation path (the job reports success without running the suite
+  at all) while the diff under review touches anything outside `docs/` and
+  `design/`, that is not a clean run — it is a finding against the path
+  classifier that routed a code change onto the docs-only path, and the run is
+  rejected.
 - **Cross-check totals.** Pull the pytest summary lines for the invariant step
   and for the unit+integration step out of `gh run view --log`, and compare
   them against the totals the implementer or builder claimed. A mismatch is a
@@ -67,12 +86,21 @@ narrower suite, not a narrower fixture set. No `-k` widening, no full suite by
 default.
 
 **Carve-out 1 — shared entry point.** Before trusting a scoped result, grep
-the mutated module's import sites outside `tests/`:
-`grep -rn "from app.<path> import\|import app.<path>" backend/app --include=*.py`,
-plus `mock-lms/` and `mock-idp/` where relevant. More than one caller means a
-shared entry point (MISTAKES #41: a ticket's own suites don't verify a shared
-entry point) — run the full suite for that row instead, and name the import
-sites in the report.
+the mutated module's import sites outside `tests/`. A dotted import
+(`import app.api.lti`, `from app.api.lti import ...`) is not the only form a
+caller can take — `from app.api import lti` imports the same module by its
+package, and `from app.models import identity` likewise; a grep for only the
+dotted path never matches either. Grep for both forms:
+`grep -rn "from app\.<pkg>\.<mod> import\|import app\.<pkg>\.<mod>\|from app\.<pkg> import <mod>\b" backend scripts mock-lms mock-idp --include=*.py`
+with `<pkg>`/`<mod>` filled in for the module actually mutated, run across all
+of `backend/` (including `backend/migrations/`), `scripts/`, and both mocks —
+not just `backend/app/`. More than one caller means a shared entry point
+(MISTAKES #41: a ticket's own suites don't verify a shared entry point) — run
+the full suite for that row instead, and name the import sites in the report.
+An **empty** caller list for a module under `backend/app/services/` or
+`backend/app/api/` is suspicious, not reassuring — those directories exist to
+be imported from elsewhere; treat it as a reason to check the grep, not as
+proof the module is safely isolated.
 
 **Carve-out 2 — scoped survivor.** A SURVIVOR under the scoped run gets one
 full-suite check before it is recorded (MISTAKES #16's second incident: a

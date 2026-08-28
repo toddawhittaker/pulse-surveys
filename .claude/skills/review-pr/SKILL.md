@@ -39,7 +39,10 @@ changed file, add its reviewer:
 
 `data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval` no longer run here —
 they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,
-`adr-docs-completeness`, and `threat-model` (ADR 0004).
+`adr-docs-completeness`, and `threat-model` (ADR 0004). Exception: during an
+epic whose declared subject is a moved reviewer's specialty (an epic
+integrating real LTI platforms re-lists `lti-oidc`, say), that reviewer runs
+per-PR for that epic's tickets — the epic README says so at breakdown.
 
 A docs-only diff triggers `spec-conformance` alone. That is correct, not a
 misconfiguration.
