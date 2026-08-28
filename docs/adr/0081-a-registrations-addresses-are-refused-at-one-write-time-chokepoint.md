@@ -52,6 +52,16 @@ outbound request.
 
 ## Decision
 
+**Superseded in part by [ADR 0101](0101-a-fetched-address-is-judged-by-what-it-resolves-to.md),
+in two paragraphs.** The "Private ranges are accepted on every column" decision
+below, and the "Refusing every address that is not publicly routable" paragraph
+under "Alternatives rejected", are both reversed: a fifth rule resolves the host
+and refuses every returned address that is not globally routable, keeping ADR
+0096's loopback split. The measured-residue paragraph below is what that rule
+closes, and the cost this record names for the other direction — a deployment
+whose platform lives on a private address cannot be registered — is stated there
+as the accepted price. Everything else here stands.
+
 **A validator, `app.models.lti.refuse_invalid_registration_addresses`, at one
 chokepoint every writer of an `lti_platform` row passes through.** It takes the
 environment name and the three addresses and raises

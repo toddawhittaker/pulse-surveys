@@ -152,6 +152,20 @@ Every E1 pull request that defers something adds it here in the same PR.
    both sides — before E11's console becomes a second writer.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-11 item 1 below into one entry; owner E11 at the
    latest.
+   **Fixed by the E1 cleanup Batch C pull request**, the first of the two
+   halves the done-when offered. Both helpers in `backend/app/models/lti.py`
+   resolve the URL's host and judge every address that comes back: an address
+   that is not globally routable is refused, except loopback on a column
+   outside `LOOPBACK_REFUSED_COLUMNS`, and a host that cannot be resolved —
+   by a raise or by an empty answer — is refused outright. All four residue
+   spellings are closed by the addresses they reach rather than by a list of
+   literals, which is also why the second half of the done-when was not taken:
+   a denylist says nothing about `metadata.google.internal`. The resolver is a
+   parameter so no test reaches a name server, and rule 5 runs after rules 1
+   to 4 so a refused spelling is never looked up.
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md)
+   records it and supersedes ADR 0081 in part: private ranges are refused now,
+   which reverses that record's decision and pays the cost it named.
 
 3. **The write-time chokepoint is a call convention** (security review,
    LOW). Nothing — mapper event, sweep, or grant — makes a future writer of
@@ -162,6 +176,27 @@ Every E1 pull request that defers something adds it here in the same PR.
    event on `LtiPlatform`) or a sweep asserts every write site calls it —
    in the same change that adds the second writer, E11 at the latest.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E11 at the latest.
+   **Fixed by the E1 cleanup Batch C pull request**, by the first of the two
+   the done-when names. `before_insert` and `before_update` events on
+   `LtiPlatform` in `backend/app/models/lti.py` call
+   `refuse_invalid_registration_addresses`, so a writer that never heard of it
+   is judged at the flush, on the first write and on every edit after. The
+   environment comes from `Session.info["environment"]`, stated by
+   `app.db.SessionLocal` from the settings it builds its engine from and by the
+   demo seed's two registration writers from the configuration they are handed;
+   a session that states none is judged as a deployment, which is the
+   fail-closed direction and is what a writer nobody has thought about yet
+   meets. Four write shapes fire no mapper event and are still unjudged —
+   `Session.bulk_save_objects`, an ORM-enabled
+   `session.execute(update(LtiPlatform).values(...))`, a Core `insert()` and raw
+   SQL — while `session.add`, an attribute changed on a persistent row and
+   `session.merge` are all judged; measured rather than assumed, after the
+   security review found the first statement of this residue understated the
+   bulk-`UPDATE` case, which is the natural way to write a console's save.
+   `pulse_app` holds `SELECT` on this table and nothing else, so what is left is
+   a writer connecting as an identity that may write. Recorded residue, in ADR
+   0081 and again in
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md).
 
 ## From E1-03 — TypeScript 7 with typescript-eslint, one change
 
@@ -498,6 +533,40 @@ Every E1 pull request that defers something adds it here in the same PR.
    both sides. Owed with E1-05 item 2, before a second fetched-address writer
    or E11's console ships.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-05 item 2; owner E11 at the latest.
+   **Fixed by the E1 cleanup Batch C pull request**, to the done-when's own
+   words. `refuse_invalid_fetched_address` resolves the host and refuses a
+   resolved address that is not `ip.is_global` — RFC 1918, carrier-grade NAT,
+   link-local and loopback — keeping ADR 0096's split, which leaves loopback
+   admitted on `jwks_url` and `auth_token_url` and refused on the roster
+   column. In development the section's own stored roster host is exempt and is
+   not resolved at all, while a `rel="next"` hop to any other host is judged in
+   full. And the walk connects to what it judged: `sync_section` in
+   `backend/app/services/roster_sync.py` pins each host to the first address it
+   resolved to, never re-pins it, and `PinnedResolutionAdapter` sends the GET to
+   that address under the platform's own hostname with TLS verified against the
+   name — so a rebind between the check and the request swaps nothing. **Both
+   ends of that pin key on one helper**, `app.config.canonical_host`: the first
+   cut wrote the key under one folding of the host and looked it up under
+   another, so a trailing-dot or non-ASCII spelling missed its own pin and went
+   out unpinned to be re-resolved, which the security review found as a HIGH.
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md)
+   records it, including what is left: the sync's token request and the launch's
+   key-set fetch are judged when the registration is written and never at fetch
+   time, so neither is pinned.
+   **Its fix round then judged the IPv4 embedded by two more IPv6 forms.** The
+   first cut unwrapped only the IPv4-mapped `::ffff:0:0/96`; the NAT64 well-known
+   `64:ff9b::/96` (RFC 6052) and the deprecated IPv4-compatible `::/96` (RFC 4291)
+   also embed an IPv4 that a DNS64/NAT64 egress translates the packet to, and both
+   read `is_global` true at the wrapper, so `64:ff9b::a9fe:a9fe` reached
+   `169.254.169.254`. All three forms are unwrapped now, `::` and `::1` excepted so
+   the IPv6 loopback split is left intact; a NAT64-wrapped *global* IPv4 stays
+   accepted, because that is the legitimate DNS64 synthesis for a v4-only platform.
+   **One residual is inherent:** a *custom* (network-specific) NAT64 prefix is
+   indistinguishable from an ordinary global IPv6 address without the egress's NAT64
+   configuration, which the application does not hold, so a name resolving to
+   `<custom-prefix>::a9fe:a9fe` is accepted as the global IPv6 it is spelled as —
+   the limit of resolve-and-judge on an IPv6-only NAT64 network, recorded in ADR
+   0101 rather than closed.
 
 ## From E1-12 — the dual-door identity merge
 

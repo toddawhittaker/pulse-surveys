@@ -36,6 +36,16 @@ builds the application under a deployment's `ENVIRONMENT` — which is also what
 makes the acceptance rows below mean something, since they are accepted under the
 same name that refuses their neighbours.
 
+**Rule 5 reaches this surface too, and it reversed one of these rows.** The
+cleanup batch resolves the host and refuses any returned address that is not
+globally routable, so a private address advertised in a launch claim is no longer
+stored. `provision_from_launch` passes neither the resolver nor an exempt host:
+in development the blanket admission is unchanged, and in a deployment it resolves
+with real DNS — one lookup on a rare staff launch, accepted deliberately. That is
+why every vector below is an IP literal or a value rules 1 to 4 refuse before
+anything is looked up: nothing in this suite may depend on what a name server
+answered.
+
 **Driven at the writer with one member rewritten.** The mock platform advertises
 one roster address and no mint changes it, so the claims are a real launch's from
 the registered platform, with the NRPS claim's `context_memberships_url` replaced
@@ -67,17 +77,33 @@ REFUSED_ADDRESSES = {
     "another address in the link-local range": "https://169.254.0.1/memberships",
     "the IPv6 link-local literal": "https://[fe80::1]/memberships",
     "cleartext to another host": f"http://{DEPLOYED_HOST}/lti/memberships",
+    # Rule 5's own rows, and the reversal it carries. These three were in
+    # `ACCEPTED_ADDRESSES` under ADR 0081's four rules — that record accepted
+    # private ranges everywhere and rejected `not ip.is_global` by name — and the
+    # cleanup batch refuses them, because a resolved private address is the
+    # residual finding E1-11 recorded and nothing at the point of judgment tells
+    # an institution's own LMS from an internal service holding a valid
+    # certificate. A launch claim is the *front door* for that value: a platform
+    # advertises the address and this tool stores it.
+    "an RFC 1918 address": "https://10.0.0.5/lti/memberships",
+    "another RFC 1918 address": "https://10.0.0.7/lti/memberships",
+    "an IPv6 unique local address": "https://[fd00::5]/lti/memberships",
 }
 
-# The other direction, and the half this rule stands or falls on. A private range
-# is an ordinary deployment — an institution running its LMS on RFC 1918 space —
-# and the cheapest way to satisfy every refusal above is to refuse every address
-# that is not publicly routable, which would make Pulse unable to sync a roster
-# for a great many real universities.
+# The other direction, and the half this rule stands or falls on: an address a
+# real platform advertises and this tool must go on storing. Both rows are IP
+# literals rather than hostnames, and that is forced rather than chosen —
+# `provision_from_launch` passes no resolver, so under a deployment it resolves
+# with the machine's own name server, and a hostname here would make this suite's
+# result depend on what DNS answered (`docs/MISTAKES.md` entry 40's shape). A
+# literal is resolved without a query.
+#
+# **Neither is in a documentation range**: `203.0.113.0/24` and `192.0.2.0/24`
+# read like public addresses and report `is_global` false, so either would be
+# refused by rule 5 and this whole pair would assert nothing.
 ACCEPTED_ADDRESSES = {
-    "a public https host": f"https://{DEPLOYED_HOST}/lti/memberships",
-    "an RFC 1918 address": "https://10.0.0.5/lti/memberships",
-    "an IPv6 unique local address": "https://[fd00::5]/lti/memberships",
+    "a globally routable address": "https://93.184.216.34/lti/memberships",
+    "a globally routable IPv6 address": "https://[2606:4700:4700::1111]/lti/memberships",
 }
 
 
@@ -210,18 +236,22 @@ def test_a_roster_address_the_registration_rules_allow_is_stored(
 ) -> None:
     """The near miss, under the same deployment name that refuses the rows above.
 
-    Three addresses a real institution holds. The public https host is the
-    ordinary case; the two private ones are the near miss rule 4 stands or falls
-    on, and E1-05 records the reason: "an institution's LMS on `10.0.0.5` is an
-    ordinary deployment, and that pair — link-local refused, private accepted — is
-    the near miss this rule stands or falls on." The cheapest way to close an SSRF
-    surface is `not ip.is_global`, which covers link-local in one line and takes
-    every university behind its own network with it.
+    Two addresses a real platform advertises: a globally routable IPv4 address and
+    a globally routable IPv6 one. This pair used to carry the private ranges as
+    well, on ADR 0081's reasoning that an institution running its LMS on RFC 1918
+    space is an ordinary deployment; rule 5 reverses that, and those rows are in
+    `REFUSED_ADDRESSES` now with the reversal written down beside them. What stays
+    here is the half without which every refusal above is satisfied by a writer
+    that stores nothing at all.
+
+    The IPv6 row is not decoration: a rule 5 written over the IPv4 classes alone
+    refuses every address it cannot classify, or accepts every one, and either way
+    this row is the only thing in the module that says which.
 
     **The mutation this kills**: any refusal wider than the chokepoint's — a
-    scheme allow-list, a public-routability test, a rule that refuses every IP
-    literal. Each of those passes every row above and silently stops the roster
-    sync for deployments nobody would think to test.
+    scheme allow-list, a rule that refuses every IP literal, a rule 5 that refuses
+    whenever it resolved anything at all. Each of those passes every row above and
+    silently stops the roster sync for deployments nobody would think to test.
 
     Nothing is recorded on this path either: a defect per successful launch would
     make E11's surface noise, which is what
