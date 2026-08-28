@@ -2175,9 +2175,7 @@ REASON_MARKER = re.compile(r"""data-reason=(?:"([^"]*)"|'([^']*)')""")
 
 def reason_markers(response: Any) -> list[str]:
     """Every `data-reason` value the response body carries, in document order."""
-    return [
-        double or single for double, single in REASON_MARKER.findall(response.text)
-    ]
+    return [double or single for double, single in REASON_MARKER.findall(response.text)]
 
 
 @pytest.mark.parametrize(
