@@ -1112,6 +1112,31 @@ class NrpsCall(UuidPrimaryKey, Base):
     """
 
     __tablename__ = "nrps_call"
+    __table_args__ = (
+        # **The debounce probe's own access path** (the E1 boundary review's M5).
+        # `request_section_sync` asks for the newest `called_at` of one section, on
+        # the request path of every staff launch, and this table grows all term
+        # because nothing purges it until E13. Measured at a million rows laid out
+        # hour-major: 2,006 buffers per probe against the `section_id` index alone,
+        # and 5 against this one.
+        #
+        # Both halves of the shape are the criterion. `section_id` leads, because
+        # that is what the probe filters on and Postgres 17 has no skip scan.
+        # `called_at` is stored **descending**, so the row the probe wants is at the
+        # near end of the section's range rather than the far one.
+        #
+        # An expression rather than a column list, because that is the only way to
+        # state the sort direction here — and it is why this declaration is not the
+        # guarantee. `alembic check` sees an index by name (measured: dropping the
+        # migration below makes it fail), but it reads this one's key columns as
+        # `('section_id',)` and cannot compare the expression at all, so it would
+        # equally accept a migration that created the wrong index under the right
+        # name. What says the shape reached the database is
+        # `tests/integration/test_the_nrps_call_log_is_indexed_for_the_debounce_probe.py`,
+        # which reads each key column's position and descending flag out of
+        # `pg_index` on the migrated schema.
+        Index("ix_nrps_call_section_id_called_at_desc", "section_id", text("called_at DESC")),
+    )
 
     # Which section's roster was being read. Indexed, because every one of the
     # three jobs above is a query for one section's rows — the debounce most of
