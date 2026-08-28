@@ -231,8 +231,9 @@ ruling named — so the mock's NRPS memberships route requires a token it issued
 for the membership scope, in RFC 6750's vocabulary; SPEC §14.3's E1 exit line
 asks for exactly that ("an authenticated service call, not an unauthenticated
 GET"), and it cannot be witnessed against a platform that answers either way.
-AGS keeps the open state, because no grade-passback client exists before E2
-(SPEC §3.4), and **E2 owns closing it** — carried with a "done when" in
+AGS keeps the open state, because no grade-passback client exists yet: SPEC §3.4
+states the passback rule and SPEC §14.3 gives the work to **E3 — Grade
+passback**, so **E3 owns closing it** — carried with a "done when" in
 [`deferred.md`](deferred.md). `docs/adr/0099` records the split.
 
 **Also read E0-35 before writing the roster sync** — a pointer rather than a

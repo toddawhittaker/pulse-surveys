@@ -284,9 +284,10 @@ async def json_object(request: Request, subject: str) -> dict[str, Any]:
 #     `tests/integration/test_mock_lms_nrps_requires_a_token.py` holds the
 #     contract. Landed in E1-11's fix round, which E1-15's exit clause 5 needs.
 #   - **AGS still answers without one, and that is the same argument still
-#     standing.** No grade-passback client exists — SPEC §3.4 puts it in E2 — so
-#     the first AGS client is what ends it, and E2 owns the enforcement. It is
-#     recorded with that owner and its "done when" in
+#     standing.** No grade-passback client exists: §3.4 is the passback rule and
+#     SPEC §14.3 gives the work to **E3 — Grade passback**, which is where the
+#     first AGS client is built and therefore where this ends. E3 owns the
+#     enforcement; it is recorded with that owner and its "done when" in
 #     `docs/tickets/e1/deferred.md`. Until then a token is presentable at every
 #     AGS route below and required at none.
 #

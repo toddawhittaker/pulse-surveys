@@ -145,6 +145,7 @@ load-bearing is the ticket that spends it.
 > ruling named, so the roster refuses a call presenting no token this platform
 > issued for the membership scope — the grant this record decides is what it is
 > checked against, and nothing here changes. AGS keeps the open state and the
-> same argument for it: no grade-passback client exists before E2 (SPEC §3.4).
+> same argument for it: no grade-passback client exists until E3 builds one
+> (SPEC §3.4 states the rule, SPEC §14.3 names the epic).
 > [ADR 0099](0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md) records
 > the split and who owns the other half.

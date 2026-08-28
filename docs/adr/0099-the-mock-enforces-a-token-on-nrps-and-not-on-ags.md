@@ -37,11 +37,12 @@ challenge because RFC 6750 §3 is the only document that defines them and that i
 where it puts them.
 
 **AGS does not enforce, and the reason is E1-06's argument still standing.**
-Grade passback is E2 (SPEC §3.4). No AGS client exists, so a `401` there would
-be refused by nothing but this repository's own E0-15 tests — `docs/MISTAKES.md`
-entry 22 exactly, and with no client to prove conformance against, the refusal
-would assert nothing. **Owner: E2, the first AGS client**, recorded with a "done
-when" in [`docs/tickets/e1/deferred.md`](../tickets/e1/deferred.md).
+SPEC §3.4 states the passback rule and SPEC §14.3 gives the work to **E3 — Grade
+passback**, so no AGS client exists yet and a `401` there would be refused by
+nothing but this repository's own E0-15 tests — `docs/MISTAKES.md` entry 22
+exactly, and with no client to prove conformance against, the refusal would
+assert nothing. **Owner: E3, which builds the first AGS client**, recorded with a
+"done when" in [`docs/tickets/e1/deferred.md`](../tickets/e1/deferred.md).
 
 **The check lives beside the mint.** `app.tokens::authorised_token` is the one
 door, and it is in the module that issues tokens rather than in `app.nrps`,
@@ -54,11 +55,12 @@ neither which contexts are seeded nor which filters exist.
 
 ## Alternatives rejected
 
-- **Enforce on AGS in the same change, for symmetry.** It would turn every
+- **Enforce on AGS in the same change, for symmetry** (E3's work, done early).
+  It would turn every
   E0-15 line-item, score and result test red for a reason none of them is about,
   and buy a refusal no client has ever asked for. Symmetry between two services
   at different stages of their life is not a property worth paying a suite for.
-- **Leave NRPS open until E2 as well, and prove the exit clause another way.**
+- **Leave NRPS open until E3 as well, and prove the exit clause another way.**
   There is no other way: the clause distinguishes an authenticated read from an
   unauthenticated one, and only the platform can tell them apart.
 - **A store of issued tokens, checked by lookup.** A mock with a store behaves
@@ -95,3 +97,10 @@ neither which contexts are seeded nor which filters exist.
 - The roster costs an RSA verification per request. The handler is synchronous,
   so FastAPI already runs it off the event loop, and the seed is a development
   stack.
+- **The AGS owner is E3 and several places in the repository say E2.** This
+  ticket's own work order, the mock-platform test driver and three test module
+  docstrings all read "grade passback is E2 (SPEC §3.4)". §3.4 is the section
+  that states the passback rule; SPEC §14.3 names **E3 — Grade passback** as the
+  epic that builds it, and E2 is the weekly survey. The records this change owns
+  say E3; the test-side prose is the test author's to correct, and is noted in
+  the pull request rather than edited here.
