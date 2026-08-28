@@ -1,6 +1,7 @@
 # 0004 — Agent roster mechanism
 
-**Status:** Accepted
+**Status:** Accepted — roster split amended 2026-08-28; the fifteen-agent
+mechanism and computed gating are unchanged
 **Date:** 2026-08-12
 **Intent:** `docs/AGENTS_INTENT.md`
 
@@ -21,6 +22,17 @@ differently.
 **Fifteen agent definitions in `.claude/agents/`** — three construction, eight
 per-PR review, four epic-boundary — invoked by three skills: `/build-ticket`,
 `/review-pr`, `/review-selftest`.
+
+> **2026-08-28:** Four per-PR reviewers moved to the epic boundary —
+> `data-model`, `lti-oidc`, `a11y-copy`, `prompt-eval`. The roster is now
+> four construction-loop agents (`builder`, `implementer`, `test-author`,
+> `verifier` — `verifier` runs per build round and appears in no
+> `review-pr` row, so it is construction, not per-PR review), three per-PR
+> review (`spec-conformance`, `app-security`, `privacy-authz`), eight
+> epic-boundary (`epic-exit`, `invariant-coverage`, `adr-docs-completeness`,
+> `threat-model`, plus the four moved). Fifteen agents total, unchanged. The
+> mechanism this record decides — hooks, computed gating, session-scoped
+> warmth — is unchanged.
 
 **Warmth comes from `SendMessage`, scoped to a session.** The implementer is
 spawned once per ticket and re-addressed by name; a send resumes it from its
@@ -78,6 +90,9 @@ test reviewer would have.
 **Running the epic-boundary agents as a CI job on the epic → `main` pull
 request.** Deferred rather than rejected: they run on demand first, so findings
 can change the PR body before it opens. Promote once the findings are trusted.
+**2026-08-28:** the boundary now holds eight agents rather than four, which
+raises what this deferred alternative would move into CI. Still deferred for
+the same reason.
 
 ## Consequences
 
@@ -97,8 +112,10 @@ can change the PR body before it opens. Promote once the findings are trusted.
   enforcement.** Intent is not detectable from a diff. Reviewer judgment only —
   recorded so nobody assumes coverage that does not exist.
 - **`/review-pr` costs tokens proportional to reviewers triggered.** Measured
-  against the eighteen E0 tickets: typically 2–3 reviewers, worst case 5 on
-  E0-10.
+  against the eighteen E0 tickets: typically 2–3 reviewers. **2026-08-28:** the
+  per-PR roster is three reviewers now (`privacy-authz`, `app-security`,
+  `spec-conformance`), so the ceiling is 3 by construction; E0-10's worst case
+  of 5 would now split across the per-PR comment and the epic-boundary run.
 - **Reviewer prompts are load-bearing and untested by CI.** A prompt edit can
   silently remove the sentence doing the work, which is why
   `/review-selftest` exists and why it should run after any reviewer edit.

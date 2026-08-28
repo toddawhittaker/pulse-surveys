@@ -55,6 +55,11 @@ MIT-compatible? `pip-audit` and the licence check already gate this in CI, so
 only flag what those would miss — a package that is technically clean but
 unmaintained or oddly scoped for what it does.
 
+**Eval floors.** Check that no committed eval floor value decreased in the
+diff. A lowered floor makes the eval gate pass by construction; lowering the
+§9.3 threat and self-harm recall floor is a safety decision and Todd's call
+alone.
+
 ## Merging the two passes
 
 Report **one** de-duplicated list. If the skill and your own pass found the same

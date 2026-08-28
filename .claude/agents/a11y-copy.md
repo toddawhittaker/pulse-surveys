@@ -1,6 +1,6 @@
 ---
 name: a11y-copy
-description: WCAG 2.2 AA against rendered output, plus copy register against the design brief. Keyboard operability, chart data-table equivalents, focus rings, reduced motion, and the language rules that keep this product from shaming anyone. Fires on frontend and design.
+description: WCAG 2.2 AA against rendered output, plus copy register against the design brief. Keyboard operability, chart data-table equivalents, focus rings, reduced motion, and the language rules that keep this product from shaming anyone. Fires on frontend and design. Always run before an epic merges to main.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash

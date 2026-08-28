@@ -230,19 +230,18 @@ ticket or its epic means heavy, and doubt means heavy. The ticket file is the
 authority — an epic README's table may summarize, but the header decides.
 
 **Heavy** is the orchestrated tests-first loop, for the surfaces an attacker
-would aim at: §4/§4.1 read paths, authz and purview, the two entry doors and
-token handling, sanctioned writers, key and secret custody, changes to CI
-gates. A separate test author writes failing tests from the ticket and the
-spec before any implementation exists; the implementer may not modify tests
-(a hook enforces the wall) and escalates disagreements as dispute files; an
-independent verifier re-runs every green claim from scratch and a mutation
-battery proves each test can actually fail.
+would aim at — the path table at `.claude/heavy-lane-paths.md`. A separate
+test author writes failing tests from the ticket and the spec before any
+implementation exists; the implementer may not modify tests (a hook enforces
+the wall) and escalates disagreements as dispute files; an independent
+verifier confirms CI's green run on the same commit and runs a scoped
+mutation battery proving each test can actually fail.
 
 **Light** is for everything else — frontend tooling, UI rendering, governed
 copy, plumbing that touches no guarded surface. One `builder` agent writes
-the code and ordinary tests together, and the verifier re-runs the gates
-once from scratch. No manifest, no mutation battery, no separate test
-author.
+the code and ordinary tests together, and the verifier confirms CI's green
+run and the standing gates once, fresh. No manifest, no mutation battery, no
+separate test author.
 
 What never varies by lane: CI green with nothing skipped or weakened, the
 §4.1 invariant suite, the independent security review on every pull request
@@ -268,7 +267,9 @@ security review, accessibility is handled in-slice rather than deferred to E13,
 and docs cover anything an operator or developer needs. The pull request
 template restates the per-ticket ones as a checklist. At the epic boundary,
 §14.2 item 6 adds the epic-level reviews — exit, invariant coverage, docs/ADR
-completeness, and a threat model on ⚠ epics — that gate the merge to `main`.
+completeness, and a threat model on ⚠ epics — that gate the merge to `main`,
+now joined by the per-PR reviewers moved to this boundary — data-model,
+lti-oidc, a11y-copy, and prompt-eval (see ADR 0004).
 
 Testing and security review are not separate epics. They are part of finishing
 each one.

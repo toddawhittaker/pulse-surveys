@@ -1,6 +1,6 @@
 ---
 name: prompt-eval
-description: Guards the eval gate. Were eval cases added for changed behavior, and were floors quietly lowered? Fires on ai/prompts, ai/contracts.py, and tests/evals.
+description: Guards the eval gate. Were eval cases added for changed behavior, and were floors quietly lowered? Fires on ai/prompts, ai/contracts.py, and tests/evals. Always run before an epic merges to main.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
