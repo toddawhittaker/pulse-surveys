@@ -15,26 +15,34 @@ boundary and a later epic's breakdown reads this file's successors.
 
 ## The §4.1 catalog sweep misses the whole-row join form
 
-The catalog half of the view sweep cannot see `to_jsonb(u)` once a view also
-names a column of the same table (Postgres drops the whole-row dependency
-row). The file-text half covers every spelling a reviewer could write today;
-the union is total only because every live view ships through `views_sql/`.
-Source: `docs/tickets/e1/deferred.md`, E1-01 item 1.
-**Owner:** E2, the first epic to add a view after the guard.
-**Done when:** the deferred entry's — the catalog half flags a whole-row
-read in the presence of a join, proved by the planted control.
+**Fixed inside E1 after all**, by the cleanup Batch A PR
+(`e1/sweep-closures`): the catalog half now reads `pg_get_viewdef` as well
+as `pg_depend` and flags the join-hidden whole-row form, proved by the
+planted hidden-case control and a live-view battery mutation. The deferred
+entry (`docs/tickets/e1/deferred.md`, E1-01 item 1) carries the detail;
+nothing is owed to E2.
 
 ## `PERSON_TABLES` has no structural source, and the name-sweep passes over tables it cannot read
 
-Two halves of E1-01 item 2 stay open: nothing generates the closed list of
-person tables, and a table whose column names match no identity fragment is
-passed over silently rather than reported (`web_login_subject` shipped
-holdable only by a hand-written test). Source: `docs/tickets/e1/deferred.md`,
+One half of E1-01 item 2 was fixed inside E1 by the cleanup Batch A PR
+(`e1/sweep-closures`): the sweep now reports a reached table it can
+classify by nothing, with each carries-nothing exemption pinned to the
+exact column set its reason was written against, so an added column
+expires the entry. The report classifies per table, not per column: a
+first unrecognizable column on a table that already carries a recognized
+one is still the per-epic review's question, as the function's docstring
+states.
+The other half — a structural source for the `PERSON_TABLES` roots — was
+attempted there and failed honestly (the grant-derived set over-reports
+five-fold; marker- and model-derived sources are circular), so it stays
+carried with the attempt recorded in the deferred entry. Residual blind
+spot: a person table with no foreign-key path into the graph is invisible
+to both the walk and the report. Source: `docs/tickets/e1/deferred.md`,
 E1-01 item 2.
 **Owner:** every epic's review asks the question for tables it adds
-(standing); the structural source and the unrecognized-table report are owed
-to E13 at the latest.
-**Done when:** the deferred entry's.
+(standing); the structural source is E13's at the latest (ruled
+2026-08-28), with the reached-table report as its compensating control.
+**Done when:** the deferred entry's, for the half still open.
 
 ## A non-development deployment has no way to supply the tool's signing key
 
