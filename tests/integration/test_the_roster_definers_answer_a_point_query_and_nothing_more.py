@@ -459,6 +459,7 @@ def test_resolve_person_for_user_answers_for_a_linked_user_and_null_for_an_unlin
     )
 
 
+@pytest.mark.invariant
 def test_record_roster_email_writes_the_address_and_never_a_name(
     committed_rows: Any, metadata_tables: dict[str, Any]
 ) -> None:
@@ -666,6 +667,7 @@ def an_assignable_pair(committed_rows: Any) -> dict[str, Any]:
     return pair
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize(
     "role", [INSTRUCTOR_ROLE, CARE_ASSIGNMENT_ROLE], ids=["instructor", "care"]
 )

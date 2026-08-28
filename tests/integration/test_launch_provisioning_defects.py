@@ -656,6 +656,7 @@ def test_the_defect_record_carries_exactly_the_fields_this_ticket_enumerates(
     )
 
 
+@pytest.mark.invariant
 def test_a_recorded_defect_names_nobody(
     launch_driver: Any,
     provisioning_contract: Any,
@@ -676,9 +677,18 @@ def test_a_recorded_defect_names_nobody(
     whole claims payload of a launch that happened to carry none of them
     (`docs/MISTAKES.md` entry 3).
 
-    Not marked `invariant`: SPEC §4.1's invariants are about what a read path
-    discloses to a person holding a role, and this is §10's rule about what gets
-    written down. The `invariant` pass has a meaning worth keeping narrow.
+    **Marked `invariant`, which reverses what this docstring used to say.** It
+    said §4.1's invariants are about what a read path discloses to a person
+    holding a role, that this is §10's rule about what gets written down, and that
+    the pass has a meaning worth keeping narrow. E1's boundary review ruled the
+    other way (finding M6, `docs/tickets/e1/boundary-review.md`), and the note is
+    corrected here rather than left standing beside a marker that contradicts it
+    (`docs/MISTAKES.md` entry 1). Two reasons: the row is the Admin-visible
+    surface E11 builds on — the structural test above says so — so a `sub` or a
+    name copied into it *is* disclosed to a person holding a role, by a slower
+    route than a view; and the pass exists so that a confidentiality denial cannot
+    be skipped, deleted or emptied without CI saying so, which is a property this
+    test wants whichever section states the rule it enforces.
     """
     offer = launch_driver.offer_for_role(provisioning_contract.instructor_role_urn)
     label = provisioning_contract.label_of(launch_driver.claims_of(offer))
