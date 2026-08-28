@@ -322,6 +322,28 @@ jobs:
           pip install --require-hashes -r requirements-dev.txt
           pip install -e . --no-deps --no-build-isolation
 
+      # mypy's incremental cache, which is what makes the three runs below cost
+      # seconds instead of minutes on a warm runner. All three write to the same
+      # `.mypy_cache/` at the repository root, so one entry covers them.
+      #
+      # The key is the runner OS, the pinned mypy version, and the hash of the
+      # dev lockfile: a cache written by a different mypy, or over a different
+      # set of installed type stubs, describes types this run does not have. The
+      # restore-keys prefix lets a lockfile bump start from the previous
+      # closure's cache rather than from nothing — mypy revalidates what it
+      # restores, so a stale entry costs time, never correctness. The same
+      # revalidation is why three packages all called `app` sharing one cache
+      # directory is safe: an entry records the source path it came from, and
+      # one written for another `app` is rejected and recomputed. What all three
+      # genuinely share is the third-party stub cache, which is the bulk of it.
+      - name: Cache mypy's incremental results
+        uses: actions/cache@v6
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ env.MYPY_VERSION }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ env.MYPY_VERSION }}-
+
       # mypy runs over backend/, with the strict profile pinned to
       # app/services/ and app/ai/contracts.py in pyproject.toml. Those two are
       # the authorization chokepoint and the AI output contract; they carry the
@@ -599,9 +621,25 @@ jobs:
   # Enforcing since e0/db-session-alembic (E0-04): the suite exists, so this job
   # no longer tolerates its absence. A change that breaks collection now fails
   # this gate instead of switching it off.
+  # This job does **not** wait on `fast-gate`. It is the longest job in the
+  # pipeline, and holding it behind a three-and-a-half minute lint gate added
+  # that gate's duration to every green run's wall clock. Nothing in the steps
+  # below reads anything `fast-gate` produces — the only `needs` output any of
+  # them consults is `changed.outputs.inert` — so the edge was ordering, not
+  # data, and ordering is what cost the time.
+  #
+  # `fast-gate` is unchanged and still a required leg of the aggregate `ci` job
+  # at the bottom of this file, so red lint still fails the pipeline. What is
+  # given up is runner minutes: a push with red lint now burns this job too.
+  # That is the trade and it is the whole trade — no job-level `if:` is
+  # introduced here or anywhere else, because the aggregate treats a skipped
+  # job as a failure and every tolerance in this pipeline stays at step level
+  # (docs/adr/0002-ci-gates-ship-tolerant.md, and
+  # tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py is the
+  # regression test).
   test:
     name: Test · pytest + invariants
-    needs: [changed, fast-gate]
+    needs: [changed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -652,6 +690,13 @@ jobs:
           python scripts/ci/check_invariants.py reports/invariants.xml
           python scripts/ci/check_invariant_assertions.py tests
 
+      # `-n 4` is pytest-xdist: four worker processes over the same collection.
+      # This pass is the pipeline's wall clock, and it is the only pass that
+      # runs under xdist — the invariant pass above stays serial on purpose
+      # (docs/adr/0104-the-unit-and-integration-pass-runs-under-xdist.md, which
+      # also records what the four workers cost: each is a full pytest session,
+      # so each provisions its own testcontainers Postgres and runs alembic
+      # once). `make test` runs the same flag.
       - name: Unit + integration with coverage
         if: needs.changed.outputs.inert != 'true'
         env:
@@ -659,7 +704,7 @@ jobs:
           # is what it talks to.
           TESTCONTAINERS_RYUK_DISABLED: 'false'
         run: |
-          pytest tests/unit tests/integration \
+          pytest tests/unit tests/integration -n 4 \
             --cov=backend/app --cov-report=term-missing --cov-report=xml \
             --junitxml=reports/pytest.xml
 

@@ -183,10 +183,17 @@ invariants: ## Run the §4.1 invariant suite alone; a skip, an empty run and a t
 
 # The integration tests start their own Postgres through testcontainers, so this
 # needs a running Docker daemon but not the Compose stack.
+#
+# `-n 4` is pytest-xdist, mirroring the workflow's "Unit + integration with
+# coverage" step. Four workers means four pytest sessions, so four
+# testcontainers Postgres instances and four alembic runs — accepted for the
+# wall clock, and recorded in
+# docs/adr/0104-the-unit-and-integration-pass-runs-under-xdist.md. The
+# `invariants` target above stays serial in both places.
 .PHONY: test
-test: invariants ## pytest unit + integration with coverage
+test: invariants ## pytest unit + integration with coverage, four workers
 	$(call banner,pytest unit + integration)
-	@pytest tests/unit tests/integration --cov=backend/app --cov-report=term-missing
+	@pytest tests/unit tests/integration -n 4 --cov=backend/app --cov-report=term-missing
 
 .PHONY: e2e
 # Enforcing since E0-18: the specs exist, so this runs the suite unconditionally
