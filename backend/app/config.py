@@ -261,19 +261,39 @@ def is_on_this_machine(host: str | None) -> bool:
         return False
 
 
-def url_host(value: str) -> str | None:
-    """A URL's host, read the way a resolver reads it, for every comparison below.
+def canonical_host(host: str | None) -> str | None:
+    """One host name, in the single spelling everything here compares and keys on.
 
-    `urlsplit(...).hostname` already does most of it: it strips an IPv6 literal's
-    brackets and lower-cases the name, which is what makes `MOCK-IDP` and
-    `mock-idp` one host (RFC 4343).
+    Three normalisations, and each answers a way the same host can be written
+    twice:
 
-    What it leaves is the **one trailing dot** that makes a name fully qualified.
-    `mock-idp.` and `mock-idp` reach the same container, and `localhost.` and
-    `localhost` reach the same interface, so a catalog that compares strings is
-    defeated by a one-character edit.
+      - **case**, which `urlsplit(...).hostname` already folds and which this
+        repeats for a host that did not come out of a URL (RFC 4343);
+      - **one trailing dot**, the root anchor — `mock-idp.` and `mock-idp` reach
+        the same container, and `localhost.` and `localhost` the same interface,
+        so a catalog comparing strings is defeated by a one-character edit;
+      - **the IDNA form**, so that `röster.example` and
+        `xn--rster-jua.example` are one name rather than two. A transport
+        encodes a non-ASCII host before it dials, so those two spellings are
+        already one host by the time a packet exists — and code that keyed on
+        the unencoded one would be filing something under a name the connection
+        never uses.
 
-    **What must not follow the strip is a loose comparison.**
+    **The IDNA step is the transport's own, not a second implementation of it.**
+    `urllib3` — which every outbound request in this process goes through —
+    lower-cases an ASCII host and IDNA-encodes only a host that is not ASCII,
+    with its own flags; so that is exactly what is asked of it here, through
+    `parse_url`, and only for a host that is not ASCII. Writing the rule again
+    would be `docs/MISTAKES.md` entry 13 in the place that entry was already
+    quoted about, and the two implementations would agree until the first name
+    the two IDNA standards disagree on. **An ASCII host never reaches it**, so
+    every host this repository has ever compared is byte-for-byte what it was.
+
+    A name the transport refuses to encode falls back to the folded form. That is
+    a name nothing can dial — `requests` raises before a socket exists — so the
+    fallback exists to keep a comparison total, not to permit anything.
+
+    **What must not follow the trailing-dot strip is a loose comparison.**
     `mock-idp.example.edu.` normalises to `mock-idp.example.edu`, which is not the
     mock however many trailing dots come off — but a rule that went on to compare
     by *prefix* would refuse it, and it is a perfectly ordinary institutional
@@ -282,14 +302,55 @@ def url_host(value: str) -> str | None:
     `mock-idp..`, a name with an empty label that resolves nowhere, which is more
     than normalising and buys nothing.
 
-    Written once and called by all three rules below rather than at each
-    comparison, because a normalisation applied at one site and not another
-    closes half of the hole it was written for (`docs/MISTAKES.md` entry 13).
+    Written once and called by every rule that compares a host, by `url_host`
+    below, and by the roster sync's pin — which writes its key under this and
+    looks it up under this — because a normalisation applied at one site and not
+    another closes half of the hole it was written for (`docs/MISTAKES.md` entry
+    13; the pin was that half, and E1's Batch C security review found it).
     """
-    host = urlsplit(value).hostname
-    if host is None:
+    if not host:
         return None
-    return host[:-1] if host.endswith(".") else host
+    folded = host.strip().strip("[]").lower()
+    if folded.endswith("."):
+        folded = folded[:-1]
+    if folded.isascii():
+        return folded
+    return _the_form_the_transport_dials(folded) or folded
+
+
+def _the_form_the_transport_dials(host: str) -> str | None:
+    """`host` as `urllib3` will spell it on the wire, or `None` if it refuses it.
+
+    A composed URL rather than the bare name, because `urllib3` normalises a host
+    only for a scheme it knows — asked about a bare authority it hands the name
+    straight back, unencoded, which is the answer this exists to avoid. Imported
+    inside the call the way `urllib3` imports `idna` inside its own, so nothing
+    is added to this module's import graph for a step only a non-ASCII host takes.
+    """
+    try:
+        from urllib3.exceptions import LocationParseError
+        from urllib3.util import parse_url
+    except ImportError:  # pragma: no cover - urllib3 arrives with `requests`
+        return None
+    try:
+        dialed = parse_url(f"https://{host}/").host
+    except LocationParseError:
+        return None
+    if dialed is None:
+        return None
+    return dialed[:-1] if dialed.endswith(".") else dialed
+
+
+def url_host(value: str) -> str | None:
+    """A URL's host, read the way a resolver reads it, for every comparison below.
+
+    `urlsplit(...).hostname` strips an IPv6 literal's brackets and lower-cases the
+    name; `canonical_host` above is the rest of it, and is where the reasoning
+    lives. This is the entry point for a value that is a whole URL, and that one
+    is the entry point for a value that is already a host — the roster sync's pin
+    adapter holds one of those, and it must key on exactly what the rules keyed on.
+    """
+    return canonical_host(urlsplit(value).hostname)
 
 
 def is_a_loopback_host(host: str | None) -> bool:

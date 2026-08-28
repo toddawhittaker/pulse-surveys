@@ -77,7 +77,7 @@ from sqlalchemy import insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.config import Settings, url_host
+from app.config import Settings, canonical_host, url_host
 from app.lti.launch import INSTRUCTOR_ROLE_URI, stated_roles
 from app.lti.registration import NoSigningKeyError, OrmToolConf
 from app.models.identity import AssignmentRole, Enrollment, User
@@ -381,10 +381,22 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
         proxies: dict[str, str] | None = None,
     ) -> requests.Response:
         split = urlsplit(str(request.url))
-        hostname = (split.hostname or "").lower()
+        # The same helper the pin was written under, and that is the whole of the
+        # correctness here: a host has more than one legal spelling, and a lookup
+        # that folded it differently would miss its own pin and hand the request
+        # to a transport that resolves the name a second time. The URL is the one
+        # `requests` prepared, so its host is already lower-cased and IDNA-encoded
+        # and may still carry a trailing dot; `canonical_host` answers for that
+        # spelling and for the one the `Link` header carried alike.
+        hostname = canonical_host(split.hostname) or ""
         address = self.pins.get(hostname)
         sending = self.inner if address is None else self._transport_for(split.scheme, hostname)
         if address is not None:
+            # The authority exactly as `requests` prepared it — the trailing dot
+            # and the encoded form included — so the platform is asked for the
+            # virtual host an unpinned request would have asked it for, byte for
+            # byte, and its certificate is checked against the name it serves
+            # rather than against a spelling this tool tidied up.
             authority = split.netloc.split("@")[-1]
             request.url = urlunsplit(
                 (
