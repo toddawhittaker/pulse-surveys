@@ -1,22 +1,51 @@
-// E0-18 PR 2 — the proof, flow 1 and 2: an LTI launch lands on the view its
-// verified LIS roles claim names.
+// E0-18 PR 2 — the proof, flow 1 and 2: what an LTI launch lands on.
 //
-// What it proves: a launch initiated from the mock LMS as a Learner reaches the
-// tool's student landing view; the same launch as an Instructor reaches the
-// instructor landing view. The landing role is derived from the verified token's
-// roles claim alone (ticket "The boundary with E1"), so this is the browser-level
-// witness that the claim is read and routed.
+// **Rewritten for E1-13, and the header is rewritten with it.** This comment used
+// to read "the landing role is derived from the verified token's roles claim
+// alone", which was true and is the model E1-13 retires. The landing now comes
+// from the launching person's own live assignments, filtered by ADR 0026's
+// `permits_launch` column, with enrollment as the student fallback (ADR 0028);
+// no roles claim, in either vocabulary, has any say in which view a person
+// reaches. That is the same one-level-up correction E1-13 made to the section
+// header in tests/integration/test_web_login_door.py — a record left asserting
+// the retired model is how the next reader learns the wrong rule.
 //
-// Falsification (the one change that must turn each case red): if the launch
-// ignored the LIS roles claim and landed on any testid but the one its role
-// names — the other role's view, or both views at once — the case fails. A door
-// that rendered a single fixed landing for every launch fails one case or the
-// other.
+// What the two cases prove now:
+//
+//   - **An Instructor launch reaches the instructor view**, because the seeded
+//     mock-world person behind that subject holds a live INSTRUCTOR assignment.
+//     This case is unchanged and is now a stronger witness than it was: it used
+//     to show a claim being routed and now shows an assignment being resolved.
+//   - **A Learner launch on a fresh stack reaches the calm no-access page**, and
+//     no landing view at all. That is the browser-level witness that the claim
+//     stopped deciding: the token says Learner as loudly as it ever did, and the
+//     person behind it holds nothing Pulse's own records can land them on.
+//
+// Why the Learner case cannot land on a freshly seeded stack, which is a fact
+// about the seed rather than a gap: a student's access resolves from `enrollment`
+// (ADR 0028), enrollment rows are written by the roster sync, a **student** launch
+// triggers no sync (SPEC §7.3 — instructors and leadership only), and the seed
+// cannot write an enrollment scoped to a section that does not exist until the
+// first staff launch provisions it. So on a fresh stack the ordering is
+// staff launch → sync → student launch, and only then does a Learner land.
+//
+// **The student-lands-in-a-browser proof is not dropped, it is owned elsewhere.**
+// E1-15's exit clause owns that orchestration — staff launch, roster sync, then a
+// student launch that lands on `pulse-landing-student` — because it is the spec
+// that can drive the three steps in order. Nothing here should be read as saying
+// a student never reaches a view in a browser.
+//
+// Falsification (the changes that must turn these red): a door that landed a
+// person on a view their rows do not entitle them to — the Learner reaching any
+// landing testid at all — fails the first case, and that is the mutation E1-13
+// exists to kill. A door that stopped resolving assignments, or filtered them by
+// the wrong permission column, lands the instructor on the calm page and fails
+// the second. A door that rendered a single fixed answer for every launch fails
+// one or the other.
 //
 // This spec cannot be run without the implementer's Playwright harness
 // (package.json, playwright.config.ts, baseURL) and a seeded, running Compose
-// stack. At HEAD it is "red" only in the sense that no harness exists to run it;
-// its green is confirmed by the implementer's stack-up run and CI.
+// stack.
 
 import { test, expect, Page } from '@playwright/test';
 
@@ -36,35 +65,62 @@ async function launchAs(page: Page, subject: string): Promise<void> {
   // Subject by its settled value (the option's wire value is the user_id).
   await page.getByTestId(LAUNCH_USER).selectOption(subject);
   // Placement by the first offered option rather than a hardcoded
-  // resource_link_id: both launch-page users are enrolled in every seeded
-  // section, so any offered placement is a valid launch, and reading the offered
-  // value keeps this from encoding a section identifier the seed may renumber.
+  // resource_link_id: the mock LMS offers both launch-page users a placement in
+  // every section it seeds, so any offered placement is a valid launch, and
+  // reading the offered value keeps this from encoding a section identifier the
+  // seed may renumber.
+  //
+  // "A placement the mock offers" is not "a row in Pulse's `enrollment` table",
+  // and since E1-13 the difference decides where a launch lands. The mock's
+  // placements are what a platform lets somebody launch *from*; enrollment is
+  // Pulse's own record of who is in a section, written by the roster sync, and
+  // it is what the student fallback reads. The Learner case below turns on
+  // exactly that gap.
   await page.getByTestId(LAUNCH_PLACEMENT).selectOption({ index: 0 });
   await page.getByTestId(LAUNCH_SUBMIT).click();
 }
 
-const cases = [
-  {
-    name: 'a Learner launch lands on the student view and nothing else',
-    subject: 'mock-lms-user-learner',
-    lands: 'pulse-landing-student',
-    forbidden: 'pulse-landing-instructor',
-  },
-  {
-    name: 'an Instructor launch lands on the instructor view and nothing else',
-    subject: 'mock-lms-user-instructor',
-    lands: 'pulse-landing-instructor',
-    forbidden: 'pulse-landing-student',
-  },
+// Every landing view the tool can render, so "no landing at all" is a statement
+// about all five rather than about the one this file happened to think of. The
+// same five are named in tests/fixtures/doors.py and in landing-views.spec.ts.
+const ALL_LANDINGS = [
+  'pulse-landing-student',
+  'pulse-landing-instructor',
+  'pulse-landing-leadership',
+  'pulse-landing-care',
+  'pulse-landing-admin',
 ];
 
-for (const c of cases) {
-  test(c.name, async ({ page }) => {
-    await launchAs(page, c.subject);
-    // Positive assertion first: getByTestId(...).toBeVisible() waits for the
-    // correct landing to render, so the absence check below cannot pass merely
-    // because navigation had not finished (docs/MISTAKES.md entry 3).
-    await expect(page.getByTestId(c.lands)).toBeVisible();
-    await expect(page.getByTestId(c.forbidden)).toHaveCount(0);
-  });
-}
+// E1-13's calm page, by the testid the server-rendered page carries. Not one of
+// the five landings and not the refusal page: a launch this door verified, by a
+// person whose rows entitle them to no view, is a state rather than a fault.
+const NO_ACCESS = 'no-access';
+
+test('a Learner launch on a fresh stack is answered with the calm page and no landing view', async ({
+  page,
+}) => {
+  await launchAs(page, 'mock-lms-user-learner');
+
+  // Positive assertion first: `.toBeVisible()` waits for the calm page to
+  // render, so the absence checks below cannot pass merely because navigation
+  // had not finished (docs/MISTAKES.md entry 3). It also makes this a statement
+  // about *which* answer arrived: a refusal page or a blank document would fail
+  // here rather than sail through five absence checks.
+  await expect(page.getByTestId(NO_ACCESS)).toBeVisible();
+
+  // The whole of what the claim bought her. Her token states the Learner role,
+  // verified and signed, and Pulse's own records hold no assignment and no live
+  // enrollment for the subject behind it — so she reaches none of the five.
+  for (const landing of ALL_LANDINGS) {
+    await expect(page.getByTestId(landing)).toHaveCount(0);
+  }
+});
+
+test('an Instructor launch lands on the instructor view and nothing else', async ({ page }) => {
+  await launchAs(page, 'mock-lms-user-instructor');
+  // Positive assertion first: getByTestId(...).toBeVisible() waits for the
+  // correct landing to render, so the absence check below cannot pass merely
+  // because navigation had not finished (docs/MISTAKES.md entry 3).
+  await expect(page.getByTestId('pulse-landing-instructor')).toBeVisible();
+  await expect(page.getByTestId('pulse-landing-student')).toHaveCount(0);
+});

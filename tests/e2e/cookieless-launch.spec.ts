@@ -11,6 +11,20 @@
 // cookies, drives a launch inside an iframe, and asserts the landing view renders
 // and the session token is in the frame's sessionStorage.
 //
+// **The launch subject changed under E1-13, and nothing this spec asserts did.**
+// It used to drive the Learner subject and expect the student view. From E1-13
+// the landing comes from the launching person's live assignments rather than
+// from the token's roles claim, and on a freshly seeded stack the Learner
+// subject holds none — a student's access resolves from `enrollment` (ADR 0028),
+// which the roster sync writes and which no student launch triggers (SPEC §7.3),
+// so that launch is answered with the calm no-access page. That page issues no
+// session and no fragment, so this spec would have failed for a reason that has
+// nothing to do with its subject, which is how a session is *delivered*. It now
+// drives the two-hat instructor, `mock-lms-user-instructor`, who lands
+// `/app/instructor` off a live INSTRUCTOR assignment. Which view she reaches is
+// asserted next door in lti-launch.spec.ts; what is asserted here is that the
+// session got to her browser on the fragment and not on a cookie.
+//
 // Test-fidelity guard: on the dev stack every service is a port on localhost, and
 // localhost:8000 embedded in localhost:8080 is same-site, so the browser's
 // third-party-cookie block does not actually engage — a cookie could in
@@ -60,8 +74,13 @@ const TOOL_ORIGIN = 'http://localhost:8000';
 const LAUNCH_USER = 'mock-lms-login-hint';
 const LAUNCH_PLACEMENT = 'mock-lms-message-hint';
 const LAUNCH_SUBMIT = 'mock-lms-launch';
-const LEARNER_SUBJECT = 'mock-lms-user-learner';
-const STUDENT_VIEW = 'pulse-landing-student';
+// The two-hat person's launch-side subject. She holds a live INSTRUCTOR
+// assignment on the seeded stack, so her launch lands `/app/instructor` — which
+// is what gives this spec a session to follow. See the header on why it is not
+// the Learner.
+const INSTRUCTOR_SUBJECT = 'mock-lms-user-instructor';
+const INSTRUCTOR_VIEW = 'pulse-landing-instructor';
+const INSTRUCTOR_ROUTE = '/app/instructor';
 const SESSION_STORAGE_KEY = 'pulse.session';
 
 const WRAPPER_URL = `${TOOL_ORIGIN}/e2e-cookieless-wrapper`;
@@ -78,7 +97,7 @@ async function openLaunchFrame(page: Page): Promise<Frame> {
   );
   await page.goto(WRAPPER_URL);
   const frame = page.frameLocator('iframe[title="lms"]');
-  await frame.getByTestId(LAUNCH_USER).selectOption(LEARNER_SUBJECT);
+  await frame.getByTestId(LAUNCH_USER).selectOption(INSTRUCTOR_SUBJECT);
   await frame.getByTestId(LAUNCH_PLACEMENT).selectOption({ index: 0 });
   await frame.getByTestId(LAUNCH_SUBMIT).click();
   const launched = page.frames().find((f) => f !== page.mainFrame());
@@ -88,7 +107,7 @@ async function openLaunchFrame(page: Page): Promise<Frame> {
   return launched;
 }
 
-test('a cookie-blocked launch reaches the student view and carries its session in the fragment', async ({
+test('a cookie-blocked launch reaches its landing view and carries its session in the fragment', async ({
   page,
   context,
 }) => {
@@ -96,8 +115,12 @@ test('a cookie-blocked launch reaches the student view and carries its session i
 
   // Positive assertion first: `.toBeVisible()` waits for the correct landing
   // to render, so nothing below can pass merely because navigation had not
-  // finished yet (docs/MISTAKES.md entry 3).
-  await expect(frame.getByTestId(STUDENT_VIEW)).toBeVisible();
+  // finished yet (docs/MISTAKES.md entry 3). It is also what distinguishes a
+  // landing from E1-13's calm no-access page, which renders no landing view and
+  // hands over no session at all — so a launch that stopped resolving her
+  // assignment fails here rather than further down, where "no session in
+  // sessionStorage" would read as the fragment path being broken.
+  await expect(frame.getByTestId(INSTRUCTOR_VIEW)).toBeVisible();
 
   const storedSession = await frame.evaluate(
     (key) => window.sessionStorage.getItem(key),
@@ -110,7 +133,7 @@ test('a cookie-blocked launch reaches the student view and carries its session i
   expect(storedSession).toContain('.');
 
   const frameUrl = frame.url();
-  expect(frameUrl.startsWith(`${TOOL_ORIGIN}/app/student`)).toBeTruthy();
+  expect(frameUrl.startsWith(`${TOOL_ORIGIN}${INSTRUCTOR_ROUTE}`)).toBeTruthy();
   expect(
     frameUrl,
     'the fragment should have been stripped from the address bar once captured',
