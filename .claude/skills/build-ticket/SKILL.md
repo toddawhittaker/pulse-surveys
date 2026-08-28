@@ -20,11 +20,10 @@ Read the ticket header's `**Lane:**` field first. A missing field, a ⚠
 anywhere on the ticket, or doubt means **heavy** — steps 1 through 7 below.
 `**Lane:** light` means step 1, then the **Light lane** section at the end of
 this file in place of steps 2–5, then steps 6 and 7 unchanged. If mid-build
-the diff reaches a surface CLAUDE.md's lane rule names as heavy (read paths,
-authz, the doors, token handling, guarded writers, key custody, CI gates),
-stop and re-lane: what exists becomes the heavy lane's starting material, the
-tests get a `test-author` pass before they are trusted, and the PR records
-the switch.
+the diff reaches a surface CLAUDE.md's lane rule names as heavy (the path
+table at .claude/heavy-lane-paths.md), stop and re-lane: what exists becomes
+the heavy lane's starting material, the tests get a `test-author` pass before
+they are trusted, and the PR records the switch.
 
 ## 1. Plan, before any agent
 

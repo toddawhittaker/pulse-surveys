@@ -70,11 +70,11 @@ PR across epics — close it and re-cut the branch.
 Every ticket's header carries a `**Lane:**` field, set at breakdown time; a
 missing field, any ⚠, or doubt means heavy. The heavy loop (`test-author`
 writes red; the implementer codes to green without touching a test, disputes
-via `docs/disputes/`; `verifier` re-runs every green claim and the mutation
-battery) guards the attacked surfaces: read paths, authz, the doors, token
-handling, guarded writers, key custody, CI gates. The light lane (`builder`
-writes code and ordinary tests together; `verifier` re-runs the gates fresh
-once, no battery) covers the rest. Neither lane believes a green on its
+via `docs/disputes/`; `verifier` confirms CI's green run on the commit and
+runs the scoped mutation battery) guards the attacked surfaces named in
+`.claude/heavy-lane-paths.md`. The light lane (`builder` writes code and
+ordinary tests together; `verifier` confirms CI's green run and the standing
+gates fresh, no battery) covers the rest. Neither lane believes a green on its
 author's word, and everything outside the loop — the per-PR security review
 included — stands unchanged in both. A light diff reaching a heavy surface
 stops and re-lanes in the PR record. Mechanics: `.claude/skills/build-ticket`.

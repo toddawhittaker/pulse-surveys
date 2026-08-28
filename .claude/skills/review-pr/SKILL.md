@@ -36,10 +36,10 @@ changed file, add its reviewer:
 |---|---|
 | `privacy-authz` | `backend/app/views_sql/`, `backend/app/services/authz`, `backend/app/models/identity`, `backend/app/models/org`, `scripts/db-init/`, `scripts/seed.py`, `*audit*`, `*care*`, `*safety*`, or any test marked `invariant` |
 | `app-security` | `backend/app/api/`, `backend/app/lti/`, `mock-lms/`, `mock-idp/`, `scripts/`, `Dockerfile*`, `docker-compose*`, `pyproject.toml`, `frontend/package.json`, `.github/workflows/` |
-| `data-model` | `backend/migrations/`, `backend/app/models/`, `backend/app/views_sql/` |
-| `lti-oidc` | `backend/app/lti/`, `mock-lms/`, `mock-idp/`, session or auth code |
-| `a11y-copy` | `frontend/src/`, `design/` |
-| `prompt-eval` | `backend/app/ai/prompts/`, `backend/app/ai/contracts.py`, `tests/evals/` |
+
+`data-model`, `lti-oidc`, `a11y-copy`, and `prompt-eval` no longer run here —
+they run at the epic boundary alongside `epic-exit`, `invariant-coverage`,
+`adr-docs-completeness`, and `threat-model` (ADR 0004).
 
 A docs-only diff triggers `spec-conformance` alone. That is correct, not a
 misconfiguration.
@@ -76,13 +76,12 @@ Each reviewer returns a `### <name>` block containing either `Nothing found.` or
 findings ranked HIGH → MED → LOW. Concatenate them in this order — most
 consequential first, so the top of the comment is worth reading:
 
-`privacy-authz`, `app-security`, `lti-oidc`, `spec-conformance`, `data-model`,
-`prompt-eval`, `a11y-copy`
+`privacy-authz`, `app-security`, `spec-conformance`
 
 Then list every reviewer that did **not** run, with the reason:
 
 ```
-_Not triggered: a11y-copy (no frontend changes), prompt-eval (no AI changes)._
+_Not triggered: privacy-authz (no read-path or authz changes)._
 ```
 
 Silence must never be ambiguous. A reviewer that did not run and a reviewer that

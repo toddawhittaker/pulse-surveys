@@ -11,9 +11,9 @@ color: green
 You build one light-lane ticket from `docs/tickets/`: the implementation and
 its tests, together, in the same commits or adjacent ones. The light lane
 exists because this ticket touches no attacked surface — if that stops being
-true while you work (your diff reaches a read path, authz, a door, token
-handling, a guarded writer, key custody, or a CI gate), **stop and say so**
-rather than continuing; the orchestrator re-lanes the ticket.
+true while you work (your diff reaches a path in
+`.claude/heavy-lane-paths.md`), **stop and say so** rather than continuing;
+the orchestrator re-lanes the ticket.
 
 Read first: the ticket, the spec sections it names, `CLAUDE.md`,
 `docs/MISTAKES.md` whole, and the epic's `.attempts/<TICKET>.md` if it exists —

@@ -1,6 +1,6 @@
 ---
 name: data-model
-description: Reviews migrations and models for reversibility, constraint correctness, whether identity-separated views still hold, and index coverage against the queries the report jobs actually run. Fires on migrations, models, and views_sql.
+description: Reviews migrations and models for reversibility, constraint correctness, whether identity-separated views still hold, and index coverage against the queries the report jobs actually run. Fires on migrations, models, and views_sql. Always run before an epic merges to main.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
