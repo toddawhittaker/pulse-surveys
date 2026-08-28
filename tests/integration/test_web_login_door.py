@@ -77,6 +77,7 @@ untrusted text logged.
 import base64
 import json
 import logging
+import re
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -1218,6 +1219,69 @@ def test_a_callback_carrying_no_state_at_all_is_refused(
     response = tool.get(door_contract.oidc_callback, params={"code": submitted.code})
 
     refused(response, door_contract, "a callback carrying no `state` at all")
+
+
+# ---------------------------------------------------------------------------
+# E1 cleanup Batch B, item 2 — the machine-readable reason marker, on this
+# door too. The launch door has ten guards and this one has a single refusal
+# type, so the marker here carries one value; it is asserted anyway, because
+# a marker that reached only one of the two doors is a marker a reader cannot
+# rely on, and the refusal page is shared between them.
+# ---------------------------------------------------------------------------
+
+
+# The guard name the web door's single refusal type carries. **Not this
+# module's invention**: the batch's work order settles that each call site
+# passes `type(refusal).__name__`, and the web door raises one
+# `SessionRefusedError`. A rename on the implementation side is meant to break
+# this — the class name *is* the published vocabulary, which is the whole
+# design, and a rename is a change to what a reader of the page is told.
+WEB_DOOR_GUARD = "SessionRefusedError"
+
+# `data-reason="<guard>"` as it is rendered. Both quote styles are matched:
+# which one the renderer emits is not this test's decision.
+REASON_MARKER = re.compile(r"""data-reason=(?:"([^"]*)"|'([^']*)')""")
+
+
+def reason_markers(response: Any) -> list[str]:
+    """Every `data-reason` value the response body carries, in document order."""
+    return [double or single for double, single in REASON_MARKER.findall(response.text)]
+
+
+def test_a_refused_callback_names_its_guard_in_a_machine_readable_marker(
+    tool: Any, door_contract: Any, provider: Any
+) -> None:
+    """The web door's refusal page carries `data-reason="SessionRefusedError"`.
+
+    **The mutation this must kill:** leaving the web door's call site passing
+    no guard while the launch door's two pass theirs. The refusal page renders
+    no attribute then, every other test in this module stays green — none of
+    them reads the page's prose or its markup — and the marker silently covers
+    one door out of two.
+
+    **The near miss it must survive:** a page rendering `data-reason=""`. The
+    assertion is on the exact list of values, so an empty attribute fails here
+    rather than satisfying a `data-reason` substring search.
+
+    Posed on the `state` mismatch because it is this module's simplest refusal
+    and the one whose cause is unambiguous: a real `code` from the provider,
+    and beside it a `state` this tool never issued.
+    """
+    parameters = begin(tool, door_contract)
+    submitted = sign_in(provider, parameters, person_holding(provider, "DEAN"))
+
+    response = tool.get(
+        door_contract.oidc_callback,
+        params={"code": submitted.code, "state": "a-state-this-tool-never-issued"},
+    )
+
+    refused(response, door_contract, "a callback carrying a `state` the tool never issued")
+    assert reason_markers(response) == [WEB_DOOR_GUARD], (
+        f"The web door's refusal page carries the reason markers {reason_markers(response)}; it "
+        f"should carry exactly {[WEB_DOOR_GUARD]}. The guard's class name is what a browser-side "
+        "spec reads to say which refusal this was, and a page carrying none of it leaves that "
+        "spec matching error copy."
+    )
 
 
 def test_a_session_carrying_a_nonce_the_tool_never_sent_is_refused(

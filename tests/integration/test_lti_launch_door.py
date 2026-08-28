@@ -80,6 +80,7 @@ and reading the LIS roles claim, rather than by naming a seeded user identifier.
 """
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -2101,3 +2102,188 @@ def test_the_session_and_csrf_cookies_carry_the_session_adrs_attributes(
             "every in-iframe request."
         )
         assert "path=/" in lowered, f"The {name} cookie does not carry `path=/`: {header!r}."
+
+
+# ---------------------------------------------------------------------------
+# E1 cleanup Batch B, item 3 — this module's own copy of E1-07's selector
+# vocabulary, checked against the list the platform serves.
+#
+# ADR 0088's consequences record the hazard and record that nothing enforces
+# it: "a name renamed in `app.wrong_launches` without a matching rename in
+# every copy fails loudly ... but only once something actually calls it with
+# the stale name". This module is the third copy — the one the deferred item's
+# done-when does not name, and the same hazard for the same reason
+# (`docs/MISTAKES.md` entry 13: a quirk worked around in one of the places
+# facing it).
+# ---------------------------------------------------------------------------
+
+
+def test_this_modules_copied_selector_names_are_the_ones_the_platform_serves(
+    platform: Any,
+) -> None:
+    """`DEFECT_GUARDS`'s keys and `REUSED_NONCE` are all names the mock answers to.
+
+    **The mutation this must kill:** rename one member of `ALL_SELECTORS` in
+    `mock-lms/app/wrong_launches.py` and leave the constants above alone.
+    Today that surfaces as a 400 from the dispatcher *inside* the parametrised
+    refusal case that selected the stale name — which reads as "the door
+    refused", because a 400 is what that case is looking for, and
+    `assert_guard_fired` is the only thing between that and a green.
+    After this, it surfaces here, naming the spelling.
+
+    **The near miss it must survive:** the served list carrying names this
+    module does not drive. It legitimately does — `ALL_SELECTORS` holds the
+    near-miss and edge fixtures E1-10 consumes, which this door module has no
+    case for — so this is a subset check in one direction only, and the
+    equality in both directions is
+    `test_mock_lms_wrong_launches.py`'s.
+    """
+    driven = sorted({*DEFECT_GUARDS, REUSED_NONCE})
+    served = platform.served_defect_selectors()
+
+    unknown = sorted(name for name in driven if name not in served)
+    assert not unknown, (
+        f"This module selects mints by {unknown}, which the platform does not serve. It serves "
+        f"{sorted(served)}. Every refusal case here drives one of these strings through "
+        "`?defect=`, so a name that has drifted is a case asserting a dispatcher's 400 rather "
+        "than the guard it is named for."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 cleanup Batch B, item 2 — the machine-readable reason marker.
+#
+# The refusal page prints each guard's own sentence, and E1-15's Playwright
+# specs read that prose to say *whose* guard refused. That coupling is what
+# this closes: the guard's class name is already the machine vocabulary (the
+# ten `LaunchRefusedError` subclasses, one per validate step), and it reaches
+# the page as `data-reason` so a spec can name a guard without naming a
+# sentence.
+# ---------------------------------------------------------------------------
+
+
+# The refusal page's own testid, copied whole from
+# `tests/e2e/exit-refused-launches.spec.ts:118` — the spec that reads this
+# page in a browser today, and the file this marker is built for.
+REFUSAL_TESTID = "pulse-entry-refused"
+
+# `data-reason="<guard>"` as it is rendered into the page. Both quote styles
+# are matched: which one the renderer emits is not something this test
+# decides, and a marker written with single quotes is the same marker.
+REASON_MARKER = re.compile(r"""data-reason=(?:"([^"]*)"|'([^']*)')""")
+
+
+def reason_markers(response: Any) -> list[str]:
+    """Every `data-reason` value the response body carries, in document order."""
+    return [
+        double or single for double, single in REASON_MARKER.findall(response.text)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("defect", "guard"),
+    ((FOREIGN_SIGNATURE, SIGNATURE_REFUSED), (TAMPERED_STATE, STATE_REFUSED)),
+)
+def test_a_refused_launch_names_the_guard_that_fired_in_a_machine_readable_marker(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    defect: str,
+    guard: str,
+) -> None:
+    """The refusal page carries `data-reason="<guard>"`, and carries no other guard's.
+
+    **Two defects rather than one, and that is the whole design of this test.**
+    A single case is satisfied by a page that renders one constant marker —
+    `data-reason="LaunchRefused"`, say, or the first guard's name every time —
+    and a marker that does not vary tells a spec nothing it could not already
+    read off the status line. Two cases whose guards differ are what make the
+    marker a *reading* of which guard fired.
+
+    **The mutation this must kill:** dropping the guard at a call site — the
+    change that leaves `refusal_page` rendering no attribute at all, or
+    rendering `data-reason=""`. Both go red here on the emptiness rather than
+    on a mismatch, which is why the assertion is on the exact set of values
+    rather than on `guard in body`.
+
+    **The near miss it must survive, and it is the sharp one:** a page that
+    prints *every* guard's marker. That leaves "the guard's name is on the
+    page" true and meaningless, and it is exactly the failure
+    `exit-refused-launches.spec.ts` found in its own prose assertions and
+    closed by asserting the other guard's sentence absent. So this requires the
+    set of markers to be exactly one value, not to contain one.
+
+    A refusal that reaches this page at all is what the parametrised guard
+    tests above already establish; this asserts nothing about the status,
+    deliberately, so a failure here reads as the marker and not as the door.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, defect)
+
+    response = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(response, door_contract, f"a launch minted with `defect={defect}`")
+    assert REFUSAL_TESTID in response.text, (
+        f"A launch minted with `defect={defect}` was refused with a body carrying no "
+        f"`{REFUSAL_TESTID}` testid (body begins {response.text[:400]!r}). This test is about "
+        "what that page carries, so a refusal rendered by something else is a different subject."
+    )
+    assert reason_markers(response) == [guard], (
+        f"The refusal page for `defect={defect}` carries the reason markers "
+        f"{reason_markers(response)}; it should carry exactly {[guard]}. The guard's class name "
+        "is the machine vocabulary the ten `LaunchRefusedError` subclasses already define, and a "
+        "page carrying none of it leaves every browser-side refusal spec reading error prose — "
+        "while a page carrying all of it cannot tell one guard from another at all."
+    )
+
+
+def test_a_replayed_launch_names_the_replay_guard_in_the_marker(
+    tool: Any,
+    door_contract: Any,
+    platform: Any,
+    landings_for_the_platforms_subjects: dict[str, Any],
+) -> None:
+    """The replay refusal's marker is the replay guard's, not the generic nonce one.
+
+    Its own test rather than a third parametrised case, for the reason
+    `test_a_replayed_nonce_is_refused_by_the_replay_guard_not_by_a_generic_
+    nonce_check` above is its own test: a replay needs two deliveries of the
+    same artifact, and the first one has to be *accepted*.
+
+    It is here because `exit-refused-launches.spec.ts` rests on it. That spec's
+    replay case asserts the replay guard's own sentence present and the state
+    guard's absent, and the marker is what those two assertions become — so a
+    marker that named `NonceRefused` here would leave the browser spec asserting
+    against a value the door never emits, red for a reason that is not the
+    door's.
+
+    **The mutation this must kill:** passing the wrong guard at the replay call
+    site — `NonceRefused` for `NonceReplayedError`. The refusal is real either
+    way and every status-and-landing assertion in this module stays green.
+
+    **The near miss it must survive:** the first delivery. It succeeds, so it
+    renders no refusal page and no marker, and this reads the second delivery's
+    response only.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+
+    minted = mint_defect(tool, door_contract, platform, offer, REUSED_NONCE)
+
+    first = land(tool, door_contract, minted.id_token, minted.state)
+    redirected_to_role(first, door_contract, STUDENT_ROLE)
+    assert not reason_markers(first), (
+        f"The *accepted* first delivery carries the reason markers {reason_markers(first)}. A "
+        "launch that landed was refused by nobody, so a marker on it means the page renders one "
+        "unconditionally — and every assertion below would then be about a constant."
+    )
+
+    second = land(tool, door_contract, minted.id_token, minted.state)
+
+    refused(second, door_contract, "the same launch, presented to `/lti/launch` a second time")
+    assert reason_markers(second) == [NONCE_REPLAYED], (
+        f"The replayed launch's refusal page carries the reason markers "
+        f"{reason_markers(second)}; it should carry exactly {[NONCE_REPLAYED]}. A replay and a "
+        "mismatched nonce are different guards for different mutations, and the browser-side "
+        "replay spec tells them apart by this value."
+    )
