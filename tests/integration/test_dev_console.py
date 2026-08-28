@@ -40,6 +40,7 @@ from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 import pytest
+from fixtures.lti_platform import origin_of
 
 pytestmark = pytest.mark.integration
 
@@ -134,18 +135,13 @@ def anchors_in(markup: str) -> list[Anchor]:
     return reader.anchors
 
 
-def origin_of(url: str) -> str:
-    """The scheme-and-authority of `url`, without a path — its origin.
-
-    A launcher link is the origin of a registered platform's authorization
-    endpoint (`http://host:port`, no path), so this is what a launcher href is
-    compared against. Computed from the value the test registered, so the two
-    cannot become different strings.
-    """
-    split = urlsplit(url)
-    return f"{split.scheme}://{split.netloc}"
-
-
+# A launcher link is the origin of a registered platform's authorization endpoint
+# (`http://host:port`, no path), so that is what a launcher href is compared
+# against. `origin_of` lives in `tests/fixtures/lti_platform.py` beside the other
+# URL arithmetic, because the framing policy in
+# `test_the_security_response_headers.py` asks the same question of the same
+# column (`docs/MISTAKES.md` entry 13). Each origin is still computed from the
+# value *this* module registered, so the two cannot become different strings.
 FIRST_LAUNCHER_ORIGIN = origin_of(FIRST_PLATFORM_AUTHORIZATION_ENDPOINT)
 SECOND_LAUNCHER_ORIGIN = origin_of(SECOND_PLATFORM_AUTHORIZATION_ENDPOINT)
 

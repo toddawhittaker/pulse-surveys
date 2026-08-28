@@ -110,6 +110,16 @@ copied. Source: `docs/tickets/e1/deferred.md`, E1-04 item 2.
 **Owner:** E2, before real survey content reaches the SPA.
 **Done when:** the deferred entry's.
 
+**Residue owed to E11 — source-side origin validation.** The framing emitter
+drops a malformed origin (`launcher_origins` validates each
+`authorization_endpoint`-derived origin, ADR 0102), so the header is robust
+whatever the column holds. But the registration chokepoint still stores an
+`authorization_endpoint` carrying a space, `;`, `,` or `*` verbatim, and E11's
+dynamic registration takes that endpoint from an untrusted party — so E11 owes
+a write-time rejection of a CSP-breaking `authorization_endpoint` at the
+chokepoint. Source: `docs/tickets/e1/deferred.md`, E1-04 item 2 residue.
+**Owner:** E11. **Done when:** the deferred entry's.
+
 ## The mock IdP's key-set spelling is unpinned
 
 The unpadded-base64url pin covers the tool's and the mock LMS's key sets;

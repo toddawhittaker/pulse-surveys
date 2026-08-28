@@ -34,7 +34,9 @@ publishes two integers, which is the smallest thing that library does.
 import base64
 import hashlib
 import json
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
@@ -52,6 +54,7 @@ __all__ = [
     "NoSigningKeyError",
     "OrmToolConf",
     "ToolRegistration",
+    "launcher_origins",
     "public_jwk",
     "published_key_set",
     "rfc7638_thumbprint",
@@ -322,3 +325,72 @@ def published_key_set(session: Session) -> dict[str, Any]:
             "else."
         )
     return {"keys": [public_jwk(stored.private_key_pem)]}
+
+
+# A syntactically valid browser origin: `scheme://host[:port]` and nothing else.
+# The scheme is `http` or `https`; the host is a hostname or IPv4 literal
+# (`[A-Za-z0-9.-]+`) or a bracketed IPv6 literal (`\[[0-9A-Fa-f:]+\]`); the port,
+# if present, is digits. Anchored end to end, so a value carrying whitespace, a
+# `;`, a `,`, a `*`, a quote, or any other character is not an origin and does not
+# match. `urlsplit` strips none of these from the netloc — `urlsplit("https://h
+# .invalid *").netloc` keeps the space — so the emitter must reject them by their
+# characters rather than trust the parser to have removed them.
+_VALID_ORIGIN = re.compile(r"^https?://(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(?::[0-9]+)?$")
+
+
+def launcher_origins(session: Session) -> list[str]:
+    """The distinct browser-facing origins every registered platform launches from.
+
+    The browser-facing address a registration exposes is its
+    `authorization_endpoint`, and its origin — `scheme://host[:port]`, path
+    stripped — is the thing two callers ask this table for. The developer console
+    links to it so a developer reaches a platform's launcher page (E1-05); the
+    security-headers middleware admits it as a `frame-ancestors` source, because a
+    launch from that platform arrives inside its iframe (ADR 0102). It lives here,
+    in the platform-config module SPEC §13 names, rather than in either caller, so
+    the framing policy and the console read one derivation of one column
+    (`docs/MISTAKES.md` entry 13).
+
+    **Read from `lti_platform` and from nowhere else** (E1-05). This used to be
+    the origin of one process-wide setting, which is one link whatever the
+    database holds — the same address for every registration, and a link even
+    when there is no registration at all. A registration with no authorization
+    endpoint states none, so it offers no launcher; that is the same NULL the
+    launch door refuses rather than defaults.
+
+    **Only a syntactically valid origin is yielded, and a malformed one is
+    dropped** (ADR 0102). `urlsplit` does not strip a space, a `;`, a `,` or a
+    `*` from the host, and the registration chokepoint does not reject those
+    characters in `authorization_endpoint` — it is browser-facing, not
+    resolve-judged. So a stored `https://lms.edu *` would emit
+    `https://lms.edu *`, whose trailing token a policy reader splits into a bare
+    `*` wildcard, and a stored `https://lms.edu;script-src *` would graft a second
+    CSP directive onto the header. Each candidate origin is matched against
+    `_VALID_ORIGIN` and skipped if it does not match, so a malformed endpoint
+    contributes no framing source and no console link at all rather than
+    corrupting the header for every response — fail-safe, since that platform's
+    iframe simply is not permitted rather than every origin's being permitted.
+    Source-side validation at registration time is owed to E11, which takes the
+    endpoint from an untrusted party through dynamic registration; this emitter is
+    robust regardless.
+
+    Distinct, in the order the issuers sort, because two registrations of one
+    platform — a pilot beside production, which is why `lti_platform` is unique
+    on the pair — share one launcher page and two identical links would be a
+    duplicate rather than a choice.
+    """
+    endpoints = session.execute(
+        select(LtiPlatform.authorization_endpoint)
+        .where(LtiPlatform.authorization_endpoint.is_not(None))
+        .order_by(LtiPlatform.issuer)
+    ).scalars()
+
+    origins: list[str] = []
+    for endpoint in endpoints:
+        split = urlsplit(str(endpoint))
+        origin = f"{split.scheme}://{split.netloc}"
+        if _VALID_ORIGIN.match(origin) is None:
+            continue
+        if origin not in origins:
+            origins.append(origin)
+    return origins

@@ -362,6 +362,22 @@ def local_target(url: str) -> str:
     return f"{target}?{split.query}" if split.query else target
 
 
+def origin_of(url: str) -> str:
+    """The scheme-and-authority of `url`, with the path stripped — its origin.
+
+    Two suites ask this of the same column. The developer console links to the
+    origin of a registered platform's `authorization_endpoint`, and the framing
+    policy admits that same origin as a `frame-ancestors` source — so it is
+    answered once rather than once per module (`docs/MISTAKES.md` entry 13).
+
+    Always applied to a value the *test* registered, never to anything the
+    application computed, so the expectation and the thing under test cannot
+    become one string (`docs/MISTAKES.md` entry 19).
+    """
+    split = urlsplit(url)
+    return f"{split.scheme}://{split.netloc}"
+
+
 def url_with_query(url: str, query: Mapping[str, Any]) -> str:
     """`url` with `query` appended to whatever it already carries.
 

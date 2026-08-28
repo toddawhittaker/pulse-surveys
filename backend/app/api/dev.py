@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import date
 from html import escape
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
@@ -64,7 +64,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import LOGIN_PATH
 from app.config import Settings, is_development
 from app.db import get_session
-from app.models.lti import LtiPlatform
+from app.lti.registration import launcher_origins
 from app.models.org import Course, Prefix, Section
 
 router = APIRouter(tags=["dev"])
@@ -378,40 +378,6 @@ def roster_users(settings: Settings, http: httpx.Client) -> list[dict[str, Any]]
     if not isinstance(users, list):
         return None
     return [user for user in users if isinstance(user, dict)]
-
-
-def launcher_origins(session: Session) -> list[str]:
-    """The distinct origins of every registered platform's authorization endpoint.
-
-    The console links to the origin — `scheme://host[:port]`, path stripped — so
-    a developer reaches the platform's launcher page rather than its
-    authorization route itself.
-
-    **Read from `lti_platform` and from nowhere else** (E1-05). This used to be
-    the origin of one process-wide setting, which is one link whatever the
-    database holds — the same address for every registration, and a link even
-    when there is no registration at all. A registration with no authorization
-    endpoint states none, so it offers no launcher; that is the same NULL the
-    launch door refuses rather than defaults.
-
-    Distinct, in the order the issuers sort, because two registrations of one
-    platform — a pilot beside production, which is why `lti_platform` is unique
-    on the pair — share one launcher page and two identical links would be a
-    duplicate rather than a choice.
-    """
-    endpoints = session.execute(
-        select(LtiPlatform.authorization_endpoint)
-        .where(LtiPlatform.authorization_endpoint.is_not(None))
-        .order_by(LtiPlatform.issuer)
-    ).scalars()
-
-    origins: list[str] = []
-    for endpoint in endpoints:
-        split = urlsplit(str(endpoint))
-        origin = f"{split.scheme}://{split.netloc}"
-        if origin not in origins:
-            origins.append(origin)
-    return origins
 
 
 def console_sections(session: Session) -> list[ConsoleSection]:
