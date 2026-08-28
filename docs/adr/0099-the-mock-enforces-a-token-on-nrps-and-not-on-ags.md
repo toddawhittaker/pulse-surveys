@@ -53,6 +53,22 @@ questions about what it means. The credential is checked before the query
 parameters and before the context lookup, so an unauthenticated caller learns
 neither which contexts are seeded nor which filters exist.
 
+**That ordering is why `page` carries no bound in the route signature.** It was
+declared `ge=1`, and a constraint on a route parameter is enforced by the
+framework before the handler is entered at all — so `?page=0` answered `422`,
+naming the parameter and the bound it broke, to a caller who had presented
+nothing. The security review's LOW 1, and the one exception to the sentence
+above; a claim with an exception is one nobody can rely on. The parameter is now
+an unconstrained string and `app.paging::page_number` reads it behind the
+credential, which covers `?page=abc` in the same move. A value that is not a
+page number is refused **400**, which is E0-28 item 2's code for a parameter
+this container will not serve on rather than a new decision, and deliberately
+not the `404` that a page *past* the end of a roster answers with — that one is
+a client following a header into nowhere, and page zero is a cursor no
+collection could have. The bound also stops being two rules in two places: it
+lived in the signature and again in `window`, and `page_number` is now where a
+request's cursor is judged.
+
 ## Alternatives rejected
 
 - **Enforce on AGS in the same change, for symmetry** (E3's work, done early).
@@ -97,6 +113,11 @@ neither which contexts are seeded nor which filters exist.
 - The roster costs an RSA verification per request. The handler is synchronous,
   so FastAPI already runs it off the event loop, and the seed is a development
   stack.
+- **The AGS containers keep their `ge=1` page bound in the signature**, and that
+  is not an inconsistency: nothing is checked before it there, so the framework
+  answering first gives away nothing a caller could not have asked for anyway.
+  The day AGS starts requiring a token — E3's, per the deferral — those two
+  signatures are part of the work, and this consequence is the note saying so.
 - **The AGS owner is E3 and several places in the repository say E2.** This
   ticket's own work order, the mock-platform test driver and three test module
   docstrings all read "grade passback is E2 (SPEC §3.4)". §3.4 is the section
