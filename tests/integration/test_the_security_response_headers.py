@@ -54,6 +54,7 @@ mounted — nothing here makes a server-side fetch, so a door that reached for o
 would fail loudly rather than be quietly served.
 """
 
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -207,6 +208,49 @@ COLUMN_PROBE_AUTHORIZATION_ORIGIN = origin_of(COLUMN_PROBE_AUTHORIZATION_ENDPOIN
 COLUMN_PROBE_ISSUER_ORIGIN = origin_of(COLUMN_PROBE_ISSUER)
 COLUMN_PROBE_JWKS_ORIGIN = origin_of(COLUMN_PROBE_JWKS_URL)
 
+# ---------------------------------------------------------------------------
+# Malformed and valid `authorization_endpoint` values, for the injection tests.
+# ---------------------------------------------------------------------------
+#
+# The registration chokepoint that validates an address for SSRF (ADR 0081)
+# fires only in a deployment environment, and it does not reject a space, a
+# semicolon, a comma or a `*` in the host in any case. This suite seeds the
+# `lti_platform` table directly through `register_platform_row`, which never runs
+# the chokepoint, so a malformed `authorization_endpoint` is stored verbatim —
+# the same value a malicious registration, or an admin's stray keystroke, would
+# leave in the column. `.invalid` (RFC 2606) is used throughout so nothing here
+# could ever resolve, and nothing here is ever fetched.
+#
+# **A space in the host.** `urlsplit` does not strip it — `urlsplit("https://h
+# .invalid *").netloc` keeps the space — so a middleware that emits
+# `scheme://netloc` writes `https://framing-malformed-space.invalid *` into the
+# directive. Split on whitespace by any policy reader, that trailing `*` is a
+# bare wildcard token that lets *any* origin frame the app, silently defeating
+# the clickjacking control this batch exists to provide.
+MALFORMED_SPACE_ISSUER = "https://framing-malformed-space.invalid:9601"
+MALFORMED_SPACE_AUTHORIZATION_ENDPOINT = "https://framing-malformed-space.invalid *"
+
+# **A semicolon in the host.** The `;` is the directive separator in a
+# Content-Security-Policy, so a value emitted raw does not merely add a framing
+# source — it appends a whole new directive. `https://h.invalid;script-src *` in
+# the `frame-ancestors` clause parses as `frame-ancestors … ; script-src *`: a
+# second, attacker-chosen directive grafted onto the policy from a stored column.
+MALFORMED_SEMICOLON_ISSUER = "https://framing-malformed-semicolon.invalid:9602"
+MALFORMED_SEMICOLON_AUTHORIZATION_ENDPOINT = (
+    "https://framing-malformed-semicolon.invalid;script-src *"
+)
+
+# **A well-formed origin the fix must keep.** An IPv6 literal with a port
+# exercises exactly the characters a too-eager repair would over-reject — the
+# brackets and the colons — so a fix that admits only bare hostnames, or that
+# drops every origin to be safe, is caught here rather than shipping an
+# application whose legitimate LMS iframes silently stop loading. The expected
+# origin is computed from the URL *this module* registered, with the shared test
+# helper `origin_of`, never the production deriver (`docs/MISTAKES.md` entry 19).
+IPV6_ISSUER = "https://framing-ipv6.invalid:9603"
+IPV6_AUTHORIZATION_ENDPOINT = "https://[2001:db8::1]:9000/authorize"
+IPV6_ORIGIN = origin_of(IPV6_AUTHORIZATION_ENDPOINT)
+
 
 # ---------------------------------------------------------------------------
 # Reading a Content-Security-Policy.
@@ -274,12 +318,38 @@ def admits_any_origin(sources: list[str]) -> list[str]:
     ]
 
 
-def policy_of(response: Any, path: str) -> dict[str, list[str]]:
-    """The parsed `Content-Security-Policy` of `response`, or a failure naming what came.
+def raw_directive_names(policy: str) -> list[str]:
+    """The directive name of every non-empty `;`-clause, in order and **with duplicates kept**.
+
+    Deliberately not `directives(policy).keys()`: `directives` models a user
+    agent's first-wins rule and collapses a repeated directive to one key, which
+    is the right thing for asking what a browser enforces and the wrong thing for
+    asking what the header *text* was made to carry. A stored value bearing a `;`
+    grafts an extra clause onto the policy; if that clause repeats a directive the
+    application already emits, the dict parser hides it behind the first
+    occurrence — so the injection is only visible in the raw clause list. This is
+    the reader the injection test compares a malformed build against a clean one
+    with, and `test_raw_directive_names_...` is its control (`docs/MISTAKES.md`
+    entry 3).
+    """
+    names: list[str] = []
+    for clause in policy.split(";"):
+        tokens = clause.split()
+        if tokens:
+            names.append(tokens[0].lower())
+    return names
+
+
+def policy_header(response: Any, path: str) -> str:
+    """The raw `Content-Security-Policy` text of `response`, or a failure naming what came.
 
     The **enforcing** header, never `Content-Security-Policy-Report-Only`: a
     report-only policy enforces nothing, so an application carrying only that one
     has the appearance of the criterion and none of its effect.
+
+    The raw string, not the parsed dict, because the injection test asks a
+    question about the header *text* — how many directive clauses a stored value
+    made it carry — that the dict parser's first-wins collapse would hide.
     """
     header = response.headers.get(CONTENT_SECURITY_POLICY)
     assert header, (
@@ -290,6 +360,12 @@ def policy_of(response: Any, path: str) -> dict[str, list[str]]:
         "response, a CSP among them. If a `Content-Security-Policy-Report-Only` is present "
         "instead, that reports violations and prevents none of them."
     )
+    return header
+
+
+def policy_of(response: Any, path: str) -> dict[str, list[str]]:
+    """The parsed `Content-Security-Policy` of `response`, or a failure naming what came."""
+    header = policy_header(response, path)
     parsed = directives(header)
     assert parsed, (
         f"`GET {path}` carried a `{CONTENT_SECURITY_POLICY}` of {header!r}, which parses to no "
@@ -392,6 +468,31 @@ def test_the_wildcard_reader_finds_a_wildcard_and_leaves_an_origin_alone() -> No
         f"The wildcard reader found {found}. It has to see a bare `*`, a wildcard host and a "
         "scheme-only source — each admits an origin no row registers — and it must leave "
         f"`{SELF_SOURCE}` and a concrete origin alone, or the test using it never passes."
+    )
+
+
+def test_raw_directive_names_keeps_the_repeat_the_dict_parser_collapses() -> None:
+    """The control on `raw_directive_names` (`docs/MISTAKES.md` entry 3).
+
+    The injection test uses this reader precisely because it sees a grafted clause
+    the dict parser would hide. That only holds if it keeps duplicates and drops
+    empty clauses, so both are shown here against text a `;`-bearing stored value
+    produces: a repeated `script-src` is kept twice — where `directives` would
+    collapse it to one key — and the empty clauses a trailing or doubled `;`
+    leaves behind are ignored rather than counted as directives.
+    """
+    kept = raw_directive_names("default-src 'self'; script-src 'self'; script-src *")
+    assert kept == ["default-src", "script-src", "script-src"], (
+        f"The raw reader collapsed a repeated directive to {kept}. A user agent keeps the first "
+        "`script-src` and ignores the second, but the *header text* carries both — and a grafted "
+        "clause that repeats an existing directive is invisible unless this reader keeps it. If "
+        "this deduplicates, the injection test goes blind to exactly the case it exists for."
+    )
+
+    assert raw_directive_names("frame-ancestors 'self';;") == ["frame-ancestors"], (
+        "An empty `;`-clause was counted as a directive. A trailing or doubled separator leaves "
+        "empty clauses, and counting them would make the malformed and clean builds disagree for "
+        "a reason that is not an injection."
     )
 
 
@@ -994,3 +1095,217 @@ def test_frame_ancestors_is_derived_from_the_authorization_endpoint_not_another_
                 "`issuer` or `jwks_url` here is the middleware reading the wrong column.",
             ]
         )
+
+
+# ---------------------------------------------------------------------------
+# `frame-ancestors` is built from *syntactically valid* origins only — a
+# malformed stored `authorization_endpoint` contributes no framing permission
+# rather than corrupting the header.
+# ---------------------------------------------------------------------------
+
+
+def test_frame_ancestors_drops_an_authorization_endpoint_whose_host_carries_a_space(
+    register_platform_row: Any, serve: Any
+) -> None:
+    """A space-bearing `authorization_endpoint` injects no bare `*` into `frame-ancestors`.
+
+    One platform is registered whose `authorization_endpoint` is
+    `https://framing-malformed-space.invalid *` — a value the SSRF chokepoint does
+    not reject and `urlsplit` does not strip, so a middleware emitting
+    `scheme://netloc` writes it verbatim. Split on whitespace by any policy
+    reader, its trailing token is a bare `*`, and `frame-ancestors *` lets **any**
+    origin frame the app: the clickjacking control this batch provides, defeated
+    by a single stored value. The fix is fail-safe — a platform whose stored
+    endpoint is malformed contributes no framing source at all — so with only this
+    platform registered the directive is `'self'` and nothing else.
+
+    **The assertion is on the parsed token list, not a substring** (`docs/MISTAKES.md`
+    entry 3): a bare `*` is a token distinct from a legitimate `https://host`, and
+    only the parsed set can tell them apart. The set is required to equal exactly
+    `{'self'}`, which excludes the wildcard *and* the malformed host token in one
+    check; `admits_any_origin` names the wildcard in the failure message.
+
+    **The mutation this kills:** the middleware building each source as
+    `scheme://netloc` and appending it unfiltered, so a malformed host reaches the
+    header — the defect this ticket confirms exploitable. **The near miss that must
+    stay green:** a valid platform's origin, which
+    `test_frame_ancestors_admits_a_valid_ipv6_origin_with_a_port` holds and this
+    does not touch.
+
+    Colour on the current (unfixed) tree: **RED**. Today the directive reads
+    `frame-ancestors 'self' https://framing-malformed-space.invalid *`, so the set
+    is three tokens including `*`, not `{'self'}`.
+    """
+    register_platform_row(
+        issuer=MALFORMED_SPACE_ISSUER,
+        authorization_endpoint=MALFORMED_SPACE_AUTHORIZATION_ENDPOINT,
+        jwks_url=f"{MALFORMED_SPACE_ISSUER}/.well-known/jwks.json",
+    )
+
+    documents = every_response(serve())
+
+    wrong: dict[str, list[str]] = {}
+    for path in DOCUMENT_PATHS:
+        sources = framing_sources(documents[path], path)
+        if set(sources) != {SELF_SOURCE}:
+            wrong[path] = sorted(sources)
+
+    assert not wrong, "\n".join(
+        [
+            f"A malformed `authorization_endpoint` corrupted the `{FRAME_ANCESTORS_DIRECTIVE}` "
+            "directive instead of being dropped from it:",
+            *(
+                f"  {path} -> {sources} (wildcard tokens: {admits_any_origin(sources)})"
+                for path, sources in sorted(wrong.items())
+            ),
+            "",
+            f"The one registered platform's `authorization_endpoint` is "
+            f"{MALFORMED_SPACE_AUTHORIZATION_ENDPOINT!r} — a value the SSRF chokepoint does not "
+            "reject and `urlsplit` does not strip. Emitted as `scheme://netloc` it lands in the "
+            f"directive with a trailing space, and any policy reader splits that into a bare `*` "
+            "token that admits every origin. A syntactically valid origin is "
+            f"`scheme://host[:port]`; a host carrying whitespace, `;`, `,` or `*` is not one, and "
+            f"the fail-safe answer is to drop it — leaving `{FRAME_ANCESTORS_DIRECTIVE}` at "
+            f"exactly {{{SELF_SOURCE!r}}}, since no other platform is registered.",
+        ]
+    )
+
+
+def test_frame_ancestors_semicolon_in_a_host_cannot_append_a_csp_directive(
+    register_platform_row: Any, serve: Any
+) -> None:
+    """A `;`-bearing `authorization_endpoint` grafts no extra directive onto the policy.
+
+    The `;` is a Content-Security-Policy directive separator, so a stored value
+    `https://framing-malformed-semicolon.invalid;script-src *` emitted into the
+    `frame-ancestors` clause does not merely add a source — it appends a whole
+    second directive, `script-src *`, chosen by whoever wrote the column. The fix
+    drops the malformed origin entirely, so the policy carries exactly the
+    directives the application intends and no more.
+
+    **The clean policy is captured from the same application family first, with
+    nothing registered**, and the malformed-registration build is required to
+    carry the identical multiset of directive names. That comparison is made over
+    `raw_directive_names`, not the dict parser, on purpose (`docs/MISTAKES.md`
+    entry 3): if the application already emits a `script-src`, the grafted
+    duplicate hides behind the first occurrence in a dict but still lengthens the
+    raw clause list — so only the raw multiset sees the injection whichever way the
+    real policy is shaped. The empty-table build is the control that proves the
+    application emits a real, non-empty policy to compare against, and that its own
+    `frame-ancestors` is `'self'` before anything is registered.
+
+    **The mutation this kills:** a source emitted as `scheme://netloc` reaching the
+    header, letting a stored `;` split the clause and append a directive — the
+    second half of the confirmed finding. **The near miss that must stay green:**
+    every directive the application legitimately carries, which this compares like
+    for like rather than enumerating.
+
+    Colour on the current (unfixed) tree: **RED**. The malformed build emits
+    `frame-ancestors 'self' https://framing-malformed-semicolon.invalid;script-src *`,
+    so its raw directive multiset gains a `script-src` the clean build has not, and
+    its `frame-ancestors` carries the malformed host beside `'self'`.
+    """
+    clean_documents = every_response(serve())
+    clean_names = {
+        path: Counter(raw_directive_names(policy_header(clean_documents[path], path)))
+        for path in DOCUMENT_PATHS
+    }
+    for path in DOCUMENT_PATHS:
+        control = set(framing_sources(clean_documents[path], path))
+        assert control == {SELF_SOURCE}, (
+            f"With nothing registered, `GET {path}`'s `{FRAME_ANCESTORS_DIRECTIVE}` is {control}, "
+            f"not {{{SELF_SOURCE!r}}}. This build is the clean baseline the malformed one is "
+            "compared against, so if it is already wrong the comparison means nothing "
+            "(`docs/MISTAKES.md` entry 3)."
+        )
+
+    register_platform_row(
+        issuer=MALFORMED_SEMICOLON_ISSUER,
+        authorization_endpoint=MALFORMED_SEMICOLON_AUTHORIZATION_ENDPOINT,
+        jwks_url=f"{MALFORMED_SEMICOLON_ISSUER}/.well-known/jwks.json",
+    )
+
+    malformed_documents = every_response(serve())
+
+    wrong: dict[str, str] = {}
+    for path in DOCUMENT_PATHS:
+        header = policy_header(malformed_documents[path], path)
+        names = Counter(raw_directive_names(header))
+        framing = set(framing_sources(malformed_documents[path], path))
+        if names != clean_names[path] or framing != {SELF_SOURCE}:
+            injected = sorted((names - clean_names[path]).elements())
+            wrong[path] = (
+                f"injected directives {injected}; {FRAME_ANCESTORS_DIRECTIVE} {sorted(framing)}"
+            )
+
+    assert not wrong, "\n".join(
+        [
+            "A `;`-bearing `authorization_endpoint` changed the policy beyond its intended "
+            "directives:",
+            *(f"  {path} -> {detail}" for path, detail in sorted(wrong.items())),
+            "",
+            f"The one registered platform's `authorization_endpoint` is "
+            f"{MALFORMED_SEMICOLON_AUTHORIZATION_ENDPOINT!r}. The `;` is a CSP directive "
+            "separator, so emitted raw it appends a second, attacker-chosen directive to the "
+            "policy and drags the malformed host into `frame-ancestors`. A malformed stored value "
+            "must contribute no framing permission at all, leaving the directive multiset exactly "
+            f"the clean build's and `{FRAME_ANCESTORS_DIRECTIVE}` at {{{SELF_SOURCE!r}}}.",
+        ]
+    )
+
+
+def test_frame_ancestors_admits_a_valid_ipv6_origin_with_a_port(
+    register_platform_row: Any, serve: Any
+) -> None:
+    """A validly-formed origin is still admitted — the fix drops malformed, not everything.
+
+    One platform is registered whose `authorization_endpoint` is a well-formed
+    IPv6 literal with a port, `https://[2001:db8::1]:9000/authorize`. Its origin
+    must appear in `frame-ancestors` beside `'self'`. This is the boundary that
+    keeps the two malformed-value tests honest: a middleware that answered them by
+    emitting no origins at all — dropping every platform to be safe — would pass
+    both and break every real LMS iframe, and the brackets and colons of an IPv6
+    literal are exactly the characters a too-narrow host allowlist would
+    over-reject.
+
+    The expected origin is computed from the URL *this test* registered, with the
+    shared test helper `origin_of`, never the production deriver (`docs/MISTAKES.md`
+    entry 19).
+
+    **The mutation this kills:** a fix that emits no framing origins, or one whose
+    validity check forbids the `[`, `]` or `:` a valid IPv6 origin needs. **The
+    near miss that must stay green:** `'self'` and the order of sources, neither
+    read here beyond membership.
+
+    Colour on the current (unfixed) tree: **GREEN**, and it must stay green. Today
+    a valid origin is emitted as `scheme://netloc` and admitted; this test exists
+    to redden only under a repair that drops valid origins along with malformed
+    ones.
+    """
+    register_platform_row(
+        issuer=IPV6_ISSUER,
+        authorization_endpoint=IPV6_AUTHORIZATION_ENDPOINT,
+        jwks_url=f"{IPV6_ISSUER}/.well-known/jwks.json",
+    )
+
+    documents = every_response(serve())
+
+    wrong: dict[str, list[str]] = {}
+    for path in DOCUMENT_PATHS:
+        sources = framing_sources(documents[path], path)
+        if IPV6_ORIGIN not in sources or SELF_SOURCE not in sources:
+            wrong[path] = sorted(sources)
+
+    assert not wrong, "\n".join(
+        [
+            f"A valid origin was not admitted to `{FRAME_ANCESTORS_DIRECTIVE}`:",
+            *(f"  {path} -> {sources}" for path, sources in sorted(wrong.items())),
+            "",
+            f"The registered `authorization_endpoint` is {IPV6_AUTHORIZATION_ENDPOINT!r}, whose "
+            f"origin is {IPV6_ORIGIN!r} — a well-formed IPv6 literal with a port. It must be "
+            f"admitted beside `{SELF_SOURCE}`. A directive missing it is a repair that dropped a "
+            "valid origin rather than only the malformed ones: the fix admits syntactically valid "
+            "origins and drops malformed ones, and an IPv6 literal's brackets and colons are "
+            "valid.",
+        ]
+    )
