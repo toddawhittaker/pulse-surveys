@@ -859,12 +859,20 @@ def test_the_launch_page_submits_by_http_post(mock_platform: Any) -> None:
 # "every combination of the two selectors is a launch that works" held by
 # construction and nothing had to assert it. E1-12's deferral 1 needs a
 # leadership subject launchable from the page, and enrolling that person in
-# every section would put a thirteenth member in `NURS-8100-Q2FF`, whose five
-# members are exactly one page and are the fixture
+# every section would put a sixth member in `NURS-8100-Q2FF`, whose five members
+# are exactly one page and are the fixture
 # `test_a_single_page_roster_advertises_first_last_and_current_and_no_next`
-# rests on. So the page now offers anybody enrolled in at least one context and
-# pairs each user with their own sections, and the property that used to be
-# free has to be asserted.
+# rests on.
+#
+# So the one rule became two. `LAUNCH_PAGE_CAST` says who a browser picks from —
+# a written list, filtered to the members the seed actually enrolled — and
+# `placements_for()` says which sections each of them launches from. It is
+# deliberately **not** "anybody enrolled in at least one context": that would put
+# E0-28's windowless member on the page, which
+# `test_the_windowless_member_is_an_active_student_away_from_the_add_and_drop_section`
+# forbids, and it would bury the three people every other suite reaches by name
+# under eighteen anonymous students. Either way the property that used to hold by
+# construction now has to be asserted.
 #
 # Three tests, and the first is the control for the other two: a filter written
 # to offer the new user without narrowing the placements would hand a browser a

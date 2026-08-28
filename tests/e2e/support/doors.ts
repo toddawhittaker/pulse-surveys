@@ -225,9 +225,13 @@ export async function launchAs(page: Page, subject: string, placement?: string):
   expect(
     offered,
     `The mock LMS launch page does not offer ${subject}. It offers ${JSON.stringify(offered)}. ` +
-      'Since E1-15 the page offers `app.seed.launch_users()` — anybody enrolled in at least one ' +
-      'seeded context — so a subject missing here is a person the mock platform does not seed at ' +
-      'all, rather than one seeded into too few sections.',
+      'Since E1-15 the page offers `app.seed.launch_users()`, which returns the members of the ' +
+      'written cast `LAUNCH_PAGE_CAST` that the seed actually enrolled — not everybody enrolled ' +
+      'somewhere. The narrower rule is deliberate: "anybody enrolled in at least one context" ' +
+      'would put E0-28’s windowless member on the page, which ' +
+      '`test_the_windowless_member_is_an_active_student_away_from_the_add_and_drop_section` ' +
+      'forbids. So a subject missing here is one the cast does not name, or one it names that ' +
+      'the seed never enrolled.',
   ).toContain(subject);
   await page.getByTestId(LAUNCH_USER).selectOption(subject);
   await page
