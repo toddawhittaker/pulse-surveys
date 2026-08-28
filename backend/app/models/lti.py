@@ -32,9 +32,11 @@ E1, with the code that reads them (`docs/adr/0075`); `authorization_endpoint` an
 deployment IDs, JWKS URL and last fetch, which is what this module built until
 now.
 
-**What a legitimate address is, is decided here too** (`docs/adr/0081`).
-`refuse_invalid_registration_addresses` below is the chokepoint every writer of
-an `lti_platform` row passes through. E0-24 item 1 left `jwks_url`
+**What a legitimate address is, is decided here too** (`docs/adr/0081`, and
+`docs/adr/0101` for rule 5). `refuse_invalid_registration_addresses` below is the
+chokepoint every writer of an `lti_platform` row passes through, and the mapper
+events at the foot of this module are what make that a property of the model
+rather than something each writer has to remember. E0-24 item 1 left `jwks_url`
 credential-equivalent and unconstrained — it decides which keys may sign an
 accepted launch, and it is fetched server-side on every launch — and E1 is the
 epic that writes and fetches it, so E1 says what it may hold.
@@ -56,13 +58,15 @@ chooses it.
 """
 
 import ipaddress
+import socket
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from enum import StrEnum
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from sqlalchemy import Enum, ForeignKey, Index, Text, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Connection, Enum, ForeignKey, Index, Text, UniqueConstraint, event, text
+from sqlalchemy.orm import Mapped, Mapper, mapped_column, object_session
 
 # ADR 0077's host vocabulary, imported rather than re-derived. Each of these
 # answers a question this module asks in exactly the same words: is this
@@ -144,6 +148,22 @@ FETCHED_COLUMNS = (JWKS_URL_COLUMN, AUTH_TOKEN_URL_COLUMN, ROSTER_SERVICE_ADDRES
 # them together.
 LOOPBACK_REFUSED_COLUMNS = (AUTHORIZATION_ENDPOINT_COLUMN, ROSTER_SERVICE_ADDRESS_COLUMN)
 
+# The port rule 5's resolution is asked under. `getaddrinfo` wants a service as
+# well as a host, and every address judged here is opened over TLS in the case
+# that matters, so 443 is the honest one to ask with — the addresses a host
+# answers with are the same either way.
+RESOLUTION_PORT = 443
+
+# What a write is judged under when nobody said where it was made — the mapper
+# events at the foot of this module read `Session.info["environment"]`, and a
+# session that carries none gets this. It is a deployment by `is_a_deployment`,
+# which is the fail-closed direction: a legitimate development writer that has
+# not said so is refused loudly on its first run, with a message naming the
+# column and a one-line repair where the session is built, while the other
+# reading lets a writer nobody thought about register the mock platform in
+# production with nothing anywhere noticing.
+UNSTATED_ENVIRONMENT = "unstated"
+
 
 class RegistrationAddressError(Exception):
     """A registration states an address this environment will not accept.
@@ -186,35 +206,180 @@ def _is_a_link_local_host(host: str | None) -> bool:
     return address.is_link_local
 
 
+def _resolved_addresses(host: str) -> tuple[str, ...]:
+    """Every address this machine's resolver answers for `host`, in the order given.
+
+    Rule 5's default resolution, and the only place in `backend/` that asks a name
+    server anything. It is a parameter everywhere it is used (`resolve`) so that a
+    test can describe an answer instead of depending on what DNS said — a rule
+    measured against a machine's resolver is green on one machine and red on
+    another (`docs/MISTAKES.md` entry 40).
+
+    De-duplicated with the order preserved, because the sync pins its connection
+    to the first address and "the first" has to mean the resolver's first rather
+    than a set's arbitrary one. An IP literal is answered by `getaddrinfo` without
+    a query, so a literal host costs nothing here.
+    """
+    found: list[str] = []
+    for *_family, sockaddr in socket.getaddrinfo(host, RESOLUTION_PORT, proto=socket.IPPROTO_TCP):
+        address = str(sockaddr[0])
+        if address not in found:
+            found.append(address)
+    return tuple(found)
+
+
+def _is_an_acceptable_resolved_address(column: str, address: str) -> bool:
+    """Whether one address a host resolved to is one this column may reach.
+
+    Globally routable is acceptable, and nothing else is — private (RFC 1918),
+    carrier-grade NAT, link-local, reserved and loopback are all refused by the
+    one question `ipaddress` already answers. The single exception is **loopback
+    on a column outside `LOOPBACK_REFUSED_COLUMNS`**, which keeps ADR 0096's
+    split: an operator registering a key-set or token sidecar reached at a
+    loopback address in the same pod is doing it on purpose, and rule 5 adds a
+    resolution dimension to that split rather than reopening it.
+
+    The IPv4-mapped form is unwrapped first, by the shape and for the reason
+    `_is_a_link_local_host` above and `app.config.is_a_loopback_host` both use:
+    `::ffff:10.0.0.7` is `10.0.0.7` reached over an IPv6 socket, and a rule that
+    asked the wrapper reads a different answer from the one the packet gets.
+
+    An answer that does not parse as an address at all is refused, for the same
+    reason an unresolvable host is: what cannot be judged is not something to
+    reach.
+    """
+    try:
+        resolved = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    if isinstance(resolved, ipaddress.IPv6Address) and resolved.ipv4_mapped is not None:
+        resolved = resolved.ipv4_mapped
+    if resolved.is_global:
+        return True
+    return resolved.is_loopback and column not in LOOPBACK_REFUSED_COLUMNS
+
+
+def _refuse_an_unacceptable_resolution(
+    column: str, value: str, resolve: Callable[[str], Sequence[str]]
+) -> tuple[str, ...]:
+    """Rule 5, applied to one address: resolve the host and judge every answer.
+
+    Rules 1 to 4 judge *spellings*, and ADR 0081 measured what that leaves:
+    `127.1`, `2130706433`, `0x7f.0.0.1` and any name a resolver answers with a
+    refused address walk past all four while reaching exactly the addresses they
+    refuse. Rule 5 is the close, and it is a resolution rather than a fifth
+    spelling because a name is not a spelling anybody can enumerate. ADR 0101.
+
+    **Every returned address is judged, not the first.** A name with one public
+    and one internal record is an ordinary split-horizon arrangement and is also
+    the way past a rule that reads `resolve(host)[0]`; which record comes back
+    first is the resolver's business and, for a hostile platform, its own DNS's.
+
+    **An unresolvable host is refused, in both shapes.** A resolver can fail by
+    raising and by answering nothing at all, and admitting either is the hole the
+    whole rule is walked through: a name that resolves nowhere at the moment of
+    the check resolves wherever its owner likes at the moment of the fetch.
+
+    Answers the addresses it resolved, which is what the roster sync pins its
+    connection to — the address that was judged is the address the request goes
+    to. The refusal names the column and quotes neither the value nor the
+    addresses: a deployment's internal addressing reaching a container log
+    through a value a platform supplied is the same house rule one level in.
+    """
+    host = url_host(value)
+    if host is None:
+        raise RegistrationAddressError(
+            f"The registration's `{column}` names no host at all, so there is nothing to resolve "
+            "and nothing to judge. Register the platform's own address, or run with "
+            "ENVIRONMENT=development."
+        )
+
+    unresolvable = RegistrationAddressError(
+        f"The registration's `{column}` names a host this container cannot resolve to any "
+        "address. An address that cannot be resolved cannot be judged, and a name that resolves "
+        "nowhere now resolves wherever its owner chooses at the moment this container fetches it. "
+        "Register a platform address this container can resolve, or run with "
+        "ENVIRONMENT=development."
+    )
+    try:
+        resolved = tuple(resolve(host))
+    except OSError:
+        raise unresolvable from None
+    if not resolved:
+        raise unresolvable
+
+    for address in resolved:
+        if not _is_an_acceptable_resolved_address(column, address):
+            raise RegistrationAddressError(
+                f"The registration's `{column}` names a host that resolves to an address this "
+                "container will not reach: one that is not globally routable — a private range, "
+                "the carrier-grade NAT range, link-local, loopback or reserved space. This tool "
+                "fetches that address with its own credentials, and an internal service holding a "
+                "valid certificate inside this network is indistinguishable here from a "
+                "platform's own. Register an address on the public internet, or run with "
+                "ENVIRONMENT=development."
+            )
+    return resolved
+
+
+def _is_judged_in_development(address: str, development_exempt_host: str | None) -> bool:
+    """Whether rule 5 runs in development for this fetched address.
+
+    Only for a host that is **not** the one the caller named as its own. A
+    development stack's stored roster address is the operator's own — judged at
+    registration-write time, where development deliberately admits the mock — and
+    the hourly walk would otherwise pay a name lookup for it once per page of
+    every section, on a stack whose platform is a Compose service that half the
+    time resolves to nothing. A `rel="next"` hop to any *other* host is a value
+    the platform chose, and it is judged.
+
+    Equality on the parsed host, never a substring: `mock-lms.evil.example` is a
+    host somebody else controls, and a prefix comparison would hand it the whole
+    of rule 5. The exempt host goes through `url_host` as well, so both sides are
+    read the way a resolver reads them — folded, and with one trailing dot off
+    (`docs/MISTAKES.md` entry 13: one normalisation, applied at both ends).
+
+    A caller that names no exempt host gets development's blanket admission,
+    which is what `app.services.provisioning` passes at launch-time storage.
+    """
+    if development_exempt_host is None:
+        return False
+    return url_host(address) != url_host(f"//{development_exempt_host}")
+
+
 def refuse_invalid_registration_addresses(
     environment: str,
     *,
     authorization_endpoint: str | None,
     jwks_url: str,
     auth_token_url: str | None,
+    resolve: Callable[[str], Sequence[str]] | None = None,
 ) -> None:
     """Refuse a registration whose addresses this environment will not accept.
 
-    The chokepoint every writer of an `lti_platform` row is expected to call —
-    today `scripts/seed.py` does, and E11's registration console must. **A call
-    convention, not an enforcement point**: no mapper event or sweep makes a
-    future writer call it, which this ticket's security review recorded and
-    `docs/tickets/e1/deferred.md` carries with a done-when. E0-24 item 1 left
-    `jwks_url` credential-equivalent and unconstrained, and E1 writes and fetches
-    it, so E1 says what a legitimate value looks like. `docs/adr/0081` is this
-    ticket's own decision and states where ADR 0077's vocabulary carries over and
-    where it deliberately differs.
+    The chokepoint every writer of an `lti_platform` row passes through, and
+    since ADR 0101 that is structural rather than a convention: the mapper events
+    at the foot of this module call it on every ORM insert and update of
+    `LtiPlatform`, so a writer that never heard of it — E11's registration
+    console, a script, a service in a later epic — is judged anyway. `scripts/seed.py`
+    also calls it directly, before it builds a flush at all, and that is belt and
+    braces rather than the guarantee. E0-24 item 1 left `jwks_url`
+    credential-equivalent and unconstrained, and E1 writes and fetches it, so E1
+    says what a legitimate value looks like. `docs/adr/0081` is that decision and
+    states where ADR 0077's vocabulary carries over; `docs/adr/0101` adds rule 5
+    and supersedes 0081 in part.
 
     **A validator rather than a `CHECK` constraint**, because every rule reads
     `ENVIRONMENT` and the database does not hold it. The residue is that a writer
-    going round SQLAlchemy is not judged at all; that is the same accepted
-    posture ADR 0068's guard has, and ADR 0081 records it rather than hiding it.
+    going round SQLAlchemy entirely — raw SQL, a Core `insert()`, `psql` — is not
+    judged, because mapper events do not fire for those; ADR 0081 and ADR 0101
+    both record it rather than hiding it.
 
     **NULL passes.** Both new columns are nullable and absence means "not
     stated", never a default. A NULL `authorization_endpoint` is refused at the
     *launch* (`app.lti.launch.begin_a_launch`), not at the write.
 
-    Four rules, all of them switched off where `environment` is exactly the
+    Five rules, all of them switched off where `environment` is exactly the
     development name — the mock's own addresses have to seed, and a rule that
     kept firing there would meet a developer as an unexplained refusal from
     `make seed`:
@@ -233,9 +398,16 @@ def refuse_invalid_registration_addresses(
       4. **Link-local is refused on the two fetched columns.** They are the only
          addresses a stored row makes this container fetch, the cloud metadata
          service lives at `169.254.169.254`, and no legitimate LMS does.
-         **Private ranges are accepted everywhere**: an institution running its
-         LMS on `10.0.0.5` behind its own network is an ordinary deployment, and
-         `not ip.is_global` would sweep that up with the metadata service.
+      5. **The host is resolved and every returned address is judged** (ADR
+         0101). An address that is not globally routable is refused — private
+         ranges included, which reverses ADR 0081's acceptance of them and is the
+         price that record named for the other direction. The one exception is
+         loopback on a column outside `LOOPBACK_REFUSED_COLUMNS`, which keeps ADR
+         0096's sidecar split; an unresolvable host is refused outright.
+
+    **Rule 5 runs after rules 1 to 4 have judged the whole registration**, so an
+    address a spelling rule refuses is never looked up (`docs/MISTAKES.md` entry
+    29: a value handled before the check that should have refused it).
 
     Rules 1 and 3 **compose rather than short-circuit**: `http://localhost:8080`
     on the browser-facing column is exempt from the transport rule and refused by
@@ -250,13 +422,23 @@ def refuse_invalid_registration_addresses(
         JWKS_URL_COLUMN: jwks_url,
         AUTH_TOKEN_URL_COLUMN: auth_token_url,
     }
-    for column, value in addresses.items():
-        if value is None:
-            continue
+    stated = [(column, value) for column, value in addresses.items() if value is not None]
+    for column, value in stated:
         _refuse_an_unacceptable_address(column, value)
+    for column, value in stated:
+        _refuse_an_unacceptable_resolution(
+            column, value, _resolved_addresses if resolve is None else resolve
+        )
 
 
-def refuse_invalid_fetched_address(environment: str, *, column: str, address: str | None) -> None:
+def refuse_invalid_fetched_address(
+    environment: str,
+    *,
+    column: str,
+    address: str | None,
+    resolve: Callable[[str], Sequence[str]] | None = None,
+    development_exempt_host: str | None = None,
+) -> tuple[str, ...] | None:
     """Judge one address this container fetches, by the rules above and no others.
 
     E1-10's roster service address (`section.lms_context_memberships_url`) is the
@@ -266,9 +448,11 @@ def refuse_invalid_fetched_address(environment: str, *, column: str, address: st
     column, so `refuse_invalid_registration_addresses` above cannot judge it — and
     a second copy of the rules would be `docs/MISTAKES.md` entry 13, a hazard
     worked around in one of the two places facing it. So both callers reach the
-    same four rules through `_refuse_an_unacceptable_address`, and this one
-    exists to supply the two things that function cannot infer: the environment
-    gate, and that `None` is "not stated" rather than a value to judge.
+    same five rules through `_refuse_an_unacceptable_address` and
+    `_refuse_an_unacceptable_resolution`, and this one exists to supply the three
+    things those functions cannot infer: the environment gate, that `None` is
+    "not stated" rather than a value to judge, and which host in development is
+    the caller's own.
 
     `column` is the name a refusal quotes, and it decides which rules apply —
     which is why `ROSTER_SERVICE_ADDRESS_COLUMN` is in `FETCHED_COLUMNS` above.
@@ -281,14 +465,37 @@ def refuse_invalid_fetched_address(environment: str, *, column: str, address: st
     is the server-side request forgery the review found. `jwks_url` and
     `auth_token_url` keep accepting loopback because an operator registers a sidecar
     through them on purpose; ADR 0096 records the split.
+
+    **The two gates are not the same gate** (ADR 0101). Rules 1 to 4 are the
+    deployment's, exactly as they were. Rule 5 runs always in a deployment — the
+    stored address included, because a registration console writes it and a launch
+    claim can carry it — and in development only when the caller names its own
+    host and the address is somewhere else. `app.services.roster_sync` names the
+    section's stored host, so the demo stack's own roster costs no lookup while a
+    `rel="next"` hop anywhere else is judged; `app.services.provisioning` names
+    none, so launch-time storage keeps development's blanket admission.
+
+    Answers the addresses rule 5 resolved, or `None` where it did not resolve at
+    all. The roster sync pins its connection to what comes back: the address that
+    was judged is the address the GET goes to.
     """
-    if not is_a_deployment(environment) or address is None:
-        return
-    _refuse_an_unacceptable_address(column, address)
+    if address is None:
+        return None
+    if is_a_deployment(environment):
+        _refuse_an_unacceptable_address(column, address)
+    elif not _is_judged_in_development(address, development_exempt_host):
+        return None
+    return _refuse_an_unacceptable_resolution(
+        column, address, _resolved_addresses if resolve is None else resolve
+    )
 
 
 def _refuse_an_unacceptable_address(column: str, value: str) -> None:
-    """The four rules, applied to one stated address. See the two callers above.
+    """Rules 1 to 4 — the spelling rules — applied to one stated address.
+
+    See the two callers above; rule 5, which resolves the host, is
+    `_refuse_an_unacceptable_resolution` and runs after every one of these has
+    passed.
 
     Extracted from `refuse_invalid_registration_addresses`'s own loop in E1-10
     round 3 and otherwise unchanged, so the rules have one home and both callers
@@ -406,6 +613,55 @@ class LtiPlatform(UuidPrimaryKey, Base):
     # the same change, which is what the carried entry means by all four parts
     # moving together.
     auth_token_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+@event.listens_for(LtiPlatform, "before_insert")
+@event.listens_for(LtiPlatform, "before_update")
+def _judge_a_registrations_addresses(
+    _mapper: Mapper[LtiPlatform], _connection: Connection, target: LtiPlatform
+) -> None:
+    """Put every ORM write of a registration through the address rules (ADR 0101).
+
+    Deferred E1-05 item 3: the chokepoint above was a *call convention*, kept by
+    `scripts/seed.py` because that script calls it. Nothing made the next writer
+    do the same, and E11's registration console is that writer — a console that
+    built the model and flushed would have been exactly as unjudged as the raw-SQL
+    writer ADR 0081 records, with the difference that every test of the rules
+    would still have been green, because the rules would still have been right.
+    These two events are the fix: the rules fire on a writer that never called
+    them, on the first write and on every edit after it. A registration is edited
+    more often than it is created — a typo in a key set address, a platform
+    repointed after a migration — so `before_update` is not decoration.
+
+    **The environment comes from the session, and a session that states none is
+    judged as a deployment.** The rules read `ENVIRONMENT` and an event has no
+    `Settings` in hand, so the writer states where it is writing:
+    `Session(info={"environment": …})`, stamped by `app.db.SessionLocal` from the
+    settings it already builds its engine from, by `scripts/seed.py`, and by the
+    suite's own session fixtures. Failing closed is the whole decision. Read as
+    development, a writer nobody thought about registers the mock platform in
+    production and nothing anywhere notices; read as a deployment, a legitimate
+    development writer is refused loudly on its first run, with a message naming
+    the column and a one-line repair where the session is built.
+
+    **The default resolver, and no injection seam.** Rule 5 resolves through
+    `_resolved_addresses` here, because an event has no caller to take a
+    parameter from. In development it resolves nothing at all (every rule is off
+    there), and in a deployment a registration write is a rare administrative act
+    — this is not a hot path.
+
+    **What still escapes**: raw SQL and a Core `insert()`, for which no mapper
+    event fires. That is the residue ADR 0081 records, extended by ADR 0101, and
+    it is stated rather than papered over.
+    """
+    session = object_session(target)
+    stated = session.info.get("environment") if session is not None else None
+    refuse_invalid_registration_addresses(
+        stated if isinstance(stated, str) else UNSTATED_ENVIRONMENT,
+        authorization_endpoint=target.authorization_endpoint,
+        jwks_url=target.jwks_url,
+        auth_token_url=target.auth_token_url,
+    )
 
 
 class LtiDeployment(UuidPrimaryKey, Base):
