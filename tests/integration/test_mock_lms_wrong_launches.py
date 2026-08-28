@@ -313,6 +313,93 @@ def test_an_unrecognised_defect_name_is_refused_with_a_400(mock_platform: Any) -
 
 
 # ---------------------------------------------------------------------------
+# The served vocabulary. E1-07's deferred item 1, closed by E1's cleanup
+# Batch B: one source serves the selector list to every consumer that is not
+# `mock-lms/` itself, and the copies are checked against it rather than
+# against each other.
+# ---------------------------------------------------------------------------
+
+
+def test_the_served_defect_vocabulary_is_the_platforms_own_all_selectors(
+    mock_platform: Any, mock_lms_selectors: tuple[str, ...]
+) -> None:
+    """`GET /mock/defects` answers exactly `app.wrong_launches.ALL_SELECTORS`.
+
+    E1-07's deferred item 1's done-when, verbatim: "one source serves the
+    vocabulary to every consumer that is not `mock-lms/` itself ... proven by
+    a test that the served list and `ALL_SELECTORS` agree".
+
+    **Neither side of this comparison is a literal in this file.** The left is
+    what the route serves; the right is the tuple itself, reached through
+    `mock_lms_selectors`, which imports it under the meta-path resolution ADR
+    0039's collision otherwise forbids. A version of this test that compared
+    the served list against a hand-written list would be comparing two copies,
+    and would agree with a route that had gone stale in the same direction
+    (`docs/MISTAKES.md` entry 19 — a test holding its expectation in a copy of
+    the thing it is checking).
+
+    **The mutation this must kill:** a `/mock/defects` handler that serves a
+    written-out list rather than `list(ALL_SELECTORS)` — delete one name from
+    the served list, or add one the tuple does not carry, and this goes red
+    naming the difference in both directions.
+
+    **The near miss it must survive:** a handler serving the right names in a
+    different order. Order is not part of the vocabulary — a consumer asks
+    whether a name is a member — so this compares sorted, and a test pinning
+    the order would be red for a reordering that costs nobody anything.
+
+    **What it deliberately also checks:** multiplicity. A served list carrying
+    a name twice has the same set as one carrying it once, and sorted-list
+    equality is what tells them apart.
+    """
+    served = mock_platform.served_defect_selectors()
+
+    assert sorted(served) == sorted(mock_lms_selectors), (
+        f"`/mock/defects` serves {sorted(served)} and `app.wrong_launches.ALL_SELECTORS` is "
+        f"{sorted(mock_lms_selectors)}. Served and not declared: "
+        f"{sorted(set(served) - set(mock_lms_selectors))}; declared and not served: "
+        f"{sorted(set(mock_lms_selectors) - set(served))}. The route exists so that every "
+        "consumer outside `mock-lms/` can stop holding a copy, and a served list that is not "
+        "the tuple is a third copy wearing the source's clothes."
+    )
+
+
+def test_this_suites_copied_selector_names_are_the_ones_the_platform_serves(
+    mock_platform: Any,
+) -> None:
+    """This module's own eighteen-plus-one literals, checked against the served list.
+
+    The copy at the top of this file is the one ADR 0088's consequences record
+    as unenforced — "a name renamed in `app.wrong_launches` without a matching
+    rename in every copy fails loudly ... but only once something actually
+    calls it with the stale name". This is what makes it fail at a name rather
+    than at a call.
+
+    **The mutation this must kill:** rename one member of `ALL_SELECTORS` in
+    `mock-lms/app/wrong_launches.py` and leave this module's constant alone.
+    Today that shows up as a 400 from the dispatcher inside whichever
+    parametrised case happens to select the stale name; after this, it shows up
+    here, naming both spellings.
+
+    **Why it is a separate test from the one above.** That one asks whether the
+    *route* tells the truth about the mock; this one asks whether *this suite*
+    does. A single test asserting `ALL_SELECTORS == served == this module's
+    copy` would be red for either failure and would not say which, and the two
+    have different repairs — one is the mock's, one is this file's.
+    """
+    served = mock_platform.served_defect_selectors()
+
+    assert sorted(ALL_SELECTORS) == sorted(served), (
+        f"This module's copied selector names are {sorted(ALL_SELECTORS)} and the platform serves "
+        f"{sorted(served)}. Copied here and not served: "
+        f"{sorted(set(ALL_SELECTORS) - set(served))}; served and not copied here: "
+        f"{sorted(set(served) - set(ALL_SELECTORS))}. Every parametrised case in this module "
+        "selects a mint by one of these strings, so a name that has drifted is a case testing a "
+        "400 from the dispatcher rather than the defect it is named for."
+    )
+
+
+# ---------------------------------------------------------------------------
 # The signature-shaped defects.
 # ---------------------------------------------------------------------------
 

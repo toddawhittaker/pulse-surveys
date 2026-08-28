@@ -152,6 +152,20 @@ Every E1 pull request that defers something adds it here in the same PR.
    both sides — before E11's console becomes a second writer.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-11 item 1 below into one entry; owner E11 at the
    latest.
+   **Fixed by the E1 cleanup Batch C pull request**, the first of the two
+   halves the done-when offered. Both helpers in `backend/app/models/lti.py`
+   resolve the URL's host and judge every address that comes back: an address
+   that is not globally routable is refused, except loopback on a column
+   outside `LOOPBACK_REFUSED_COLUMNS`, and a host that cannot be resolved —
+   by a raise or by an empty answer — is refused outright. All four residue
+   spellings are closed by the addresses they reach rather than by a list of
+   literals, which is also why the second half of the done-when was not taken:
+   a denylist says nothing about `metadata.google.internal`. The resolver is a
+   parameter so no test reaches a name server, and rule 5 runs after rules 1
+   to 4 so a refused spelling is never looked up.
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md)
+   records it and supersedes ADR 0081 in part: private ranges are refused now,
+   which reverses that record's decision and pays the cost it named.
 
 3. **The write-time chokepoint is a call convention** (security review,
    LOW). Nothing — mapper event, sweep, or grant — makes a future writer of
@@ -162,6 +176,27 @@ Every E1 pull request that defers something adds it here in the same PR.
    event on `LtiPlatform`) or a sweep asserts every write site calls it —
    in the same change that adds the second writer, E11 at the latest.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E11 at the latest.
+   **Fixed by the E1 cleanup Batch C pull request**, by the first of the two
+   the done-when names. `before_insert` and `before_update` events on
+   `LtiPlatform` in `backend/app/models/lti.py` call
+   `refuse_invalid_registration_addresses`, so a writer that never heard of it
+   is judged at the flush, on the first write and on every edit after. The
+   environment comes from `Session.info["environment"]`, stated by
+   `app.db.SessionLocal` from the settings it builds its engine from and by the
+   demo seed's two registration writers from the configuration they are handed;
+   a session that states none is judged as a deployment, which is the
+   fail-closed direction and is what a writer nobody has thought about yet
+   meets. Four write shapes fire no mapper event and are still unjudged —
+   `Session.bulk_save_objects`, an ORM-enabled
+   `session.execute(update(LtiPlatform).values(...))`, a Core `insert()` and raw
+   SQL — while `session.add`, an attribute changed on a persistent row and
+   `session.merge` are all judged; measured rather than assumed, after the
+   security review found the first statement of this residue understated the
+   bulk-`UPDATE` case, which is the natural way to write a console's save.
+   `pulse_app` holds `SELECT` on this table and nothing else, so what is left is
+   a writer connecting as an identity that may write. Recorded residue, in ADR
+   0081 and again in
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md).
 
 ## From E1-03 — TypeScript 7 with typescript-eslint, one change
 
@@ -305,6 +340,13 @@ Every E1 pull request that defers something adds it here in the same PR.
    E1-07 and stays open, owed to whichever ticket next touches `mock-idp/app/
    signing.py`'s encoder.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, owner unchanged.
+   **Closed by E1 cleanup Batch B (item 4).** The third encoder now has the
+   same test as the other two —
+   `test_mock_idp_authorization_code_flow.py::test_the_published_keys_numbers_
+   are_spelled_as_unpadded_base64url` — proven against the same mutation
+   (`.rstrip(b"=")` dropped from `mock-idp/app/signing.py`'s `base64url`) by the
+   battery. The encoder was already correct, so no code changed; the pin now
+   covers all three served key sets and the carried entry is resolved.
 
 ## From E1-07 — the mock mints deliberately wrong launches
 
@@ -329,6 +371,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    *E1-15's `exit-refused-launches.spec.ts` became that consumer, holding the
    two selector literals as its recorded cost.* **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner: the next ticket
    that adds a selector or a consumer.
+   **Closed by E1 cleanup Batch B (item 3).** The mock serves its own list from
+   a `GET /mock/defects` route (`MOCK_DEFECTS_PATH` in `mock-lms/app/config.py`),
+   returning `{"selectors": list(ALL_SELECTORS)}` — the tuple itself, not a
+   written-out copy. `test_mock_lms_wrong_launches.py::test_the_served_defect_
+   vocabulary_is_the_platforms_own_all_selectors` pins the served list to
+   `ALL_SELECTORS` in both directions, and each copied-literal consumer now
+   checks itself against the served source (that suite's own copy, and this
+   module's in `test_lti_launch_door.py`). The Playwright spec's two literals
+   stay its own until E2 points the browser at the route; the served source they
+   are owed is now in place.
 
 ## From E1-08 — the launch door on pylti1p3
 
@@ -345,13 +397,30 @@ Every E1 pull request that defers something adds it here in the same PR.
    that the pin is load-bearing *end-to-end* — that the whole door refuses a
    launch `pylti1p3`'s matching would otherwise accept — because there is no
    live forgery: both layers agree.
-   **Done when** a mock platform variant publishes a permissive-algorithm key
-   set — a JWK a confused verifier would accept an `alg: none` or HS256 token
-   against — and an end-to-end refusal test drives a launch signed that way and
-   asserts the door still refuses it, so the pin's removal turns a green launch
-   red. Owed to the ticket that gives a mock platform a permissive-alg mint (a
-   natural companion to E1-07's wrong-launch selectors).
-   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E13 at the latest.
+   **Resolved in E1's cleanup Batch B, as an accepted survivor — the
+   end-to-end proof the done-when asked for is impossible, and the reason is
+   structural, settled from the library source, not a missing fixture.**
+   `pylti1p3`'s `get_public_key` matches a published key by both `kid` and
+   `alg`, then verifies the token against `export_to_pem()` of that matched key
+   with `algorithms=[that key's alg]`. So an HS256-confusion launch can only be
+   accepted if the door is handed a key whose PEM export equals the exact bytes
+   the mock's mint keyed its HMAC with — and it never is: `jwcrypto` cannot
+   PEM-export a symmetric (`oct`) key (it raises `InvalidJWKType`, which is not
+   a `ValueError`/`TypeError` and so escapes even `get_public_key`'s own
+   `except` clause), and an RSA key exported to PEM is not what the mock signed
+   with — `hs256_confusion` keys its HMAC with the canonical RFC 7638 JWK JSON
+   (`public_key_material`), and ADR 0035 bars this mock from producing a PEM to
+   forge against. Removing `_refuse_unpinned_algorithm` therefore does *not*
+   turn the launch green; `pylti1p3` and this construction refuse the confusion
+   independently. The pin is genuinely redundant defence in depth, the
+   verifier's survivor is a true redundancy rather than a test gap, and the
+   end-to-end refusal is already asserted by the pre-existing parametrised
+   `test_a_launch_carrying_one_e1_07_defect_is_refused_by_its_specific_guard`
+   at `hs256_confusion`. Recorded the way Batch A recorded its measured
+   survivor; nothing is built and nothing further is owed, so the E1-15 carry
+   to E13 for this item is moot. (`alg: none` is not a second case: with no
+   permissive key published there is no key its header would match, so it is
+   refused at key selection and proves nothing about the pin.)
 
 ## From E1-10 — launch-time provisioning and the sanctioned writer
 
@@ -511,6 +580,40 @@ Every E1 pull request that defers something adds it here in the same PR.
    both sides. Owed with E1-05 item 2, before a second fetched-address writer
    or E11's console ships.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, merged with E1-05 item 2; owner E11 at the latest.
+   **Fixed by the E1 cleanup Batch C pull request**, to the done-when's own
+   words. `refuse_invalid_fetched_address` resolves the host and refuses a
+   resolved address that is not `ip.is_global` — RFC 1918, carrier-grade NAT,
+   link-local and loopback — keeping ADR 0096's split, which leaves loopback
+   admitted on `jwks_url` and `auth_token_url` and refused on the roster
+   column. In development the section's own stored roster host is exempt and is
+   not resolved at all, while a `rel="next"` hop to any other host is judged in
+   full. And the walk connects to what it judged: `sync_section` in
+   `backend/app/services/roster_sync.py` pins each host to the first address it
+   resolved to, never re-pins it, and `PinnedResolutionAdapter` sends the GET to
+   that address under the platform's own hostname with TLS verified against the
+   name — so a rebind between the check and the request swaps nothing. **Both
+   ends of that pin key on one helper**, `app.config.canonical_host`: the first
+   cut wrote the key under one folding of the host and looked it up under
+   another, so a trailing-dot or non-ASCII spelling missed its own pin and went
+   out unpinned to be re-resolved, which the security review found as a HIGH.
+   [ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md)
+   records it, including what is left: the sync's token request and the launch's
+   key-set fetch are judged when the registration is written and never at fetch
+   time, so neither is pinned.
+   **Its fix round then judged the IPv4 embedded by two more IPv6 forms.** The
+   first cut unwrapped only the IPv4-mapped `::ffff:0:0/96`; the NAT64 well-known
+   `64:ff9b::/96` (RFC 6052) and the deprecated IPv4-compatible `::/96` (RFC 4291)
+   also embed an IPv4 that a DNS64/NAT64 egress translates the packet to, and both
+   read `is_global` true at the wrapper, so `64:ff9b::a9fe:a9fe` reached
+   `169.254.169.254`. All three forms are unwrapped now, `::` and `::1` excepted so
+   the IPv6 loopback split is left intact; a NAT64-wrapped *global* IPv4 stays
+   accepted, because that is the legitimate DNS64 synthesis for a v4-only platform.
+   **One residual is inherent:** a *custom* (network-specific) NAT64 prefix is
+   indistinguishable from an ordinary global IPv6 address without the egress's NAT64
+   configuration, which the application does not hold, so a name resolving to
+   `<custom-prefix>::a9fe:a9fe` is accepted as the global IPv6 it is spelled as —
+   the limit of resolve-and-judge on an IPv6-only NAT64 network, recorded in ADR
+   0101 rather than closed.
 
 ## From E1-12 — the dual-door identity merge
 

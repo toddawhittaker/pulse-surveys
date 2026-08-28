@@ -53,25 +53,38 @@ rotation needs. Source: `docs/tickets/e1/deferred.md`, E1-05 item 1.
 **Owner:** E3, the first epic to register a real platform.
 **Done when:** the deferred entry's.
 
-## The address rules judge spellings, not resolved addresses
+## The address rules judge spellings, not resolved addresses — fixed inside E1
 
-One defect recorded at two surfaces, fixed together: the registration-write
-rules accept `127.1`-style literals and resolver-backed names (E1-05 item
-2), and the fetched-URL path trusts the host literal, so a registered
-platform's `rel="next"` can point a tokened GET at an internal service
-holding a valid certificate on a private address (E1-11 item 1, residual
-MEDIUM). Source: both entries in `docs/tickets/e1/deferred.md`.
-**Owner:** E11 at the latest, before its console becomes a second writer of
-either surface.
-**Done when:** the E1-11 entry's — resolve, judge the resolved address, pin
-the connection, pairs both sides.
+One defect recorded at two surfaces (E1-05 item 2 and E1-11 item 1, the
+residual MEDIUM), and E1's cleanup batch closed both rather than handing
+them on: the address rules resolve the host and refuse every returned
+address that is not globally routable, and the roster walk connects to the
+address it judged. E2 inherits nothing to do here. Two things to know
+instead: **private ranges are refused now**, which reverses ADR 0081 and is
+recorded in
+[ADR 0101](../../adr/0101-a-fetched-address-is-judged-by-what-it-resolves-to.md);
+and the sync's token request and the launch's key-set fetch are judged when
+the registration is written and never at fetch time, so neither is pinned —
+residue that record states. Source: both entries in `docs/tickets/e1/deferred.md`, each
+carrying what landed and where.
 
-## Nothing makes a future `lti_platform` writer call the address rules
+## Nothing makes a future `lti_platform` writer call the address rules — fixed inside E1
 
-The write-time chokepoint is a call convention, not a mapper event or a
-sweep. Source: `docs/tickets/e1/deferred.md`, E1-05 item 3.
-**Owner:** the change that adds a second writer; E11 at the latest.
-**Done when:** the deferred entry's.
+Also closed by E1's cleanup batch (E1-05 item 3): `before_insert` and
+`before_update` events on `LtiPlatform` judge every ORM write, reading the
+environment from `Session.info["environment"]` and judging a session that
+states none as a deployment. Two things a later epic — E11's registration
+console above all — has to know about what is left. **A writer that states
+no environment on its session is refused in a deployment's terms**, so a new
+one says where it is where the session is built. And **the events do not see
+every write the ORM can make**: `session.add`, an edit to a persistent row
+and `session.merge` are judged, while `Session.bulk_save_objects`, an
+ORM-enabled `session.execute(update(LtiPlatform).values(...))`, a Core
+`insert()` and raw SQL are not — measured on SQLAlchemy 2.0.52, and the
+bulk-`UPDATE` shape is a natural way to write a console's save. `pulse_app`
+holds `SELECT` on the table and nothing else, so a bypassing write on the
+application connection is refused by the database. Recorded residue in ADR
+0081 and ADR 0101. Source: `docs/tickets/e1/deferred.md`, E1-05 item 3.
 
 ## The TypeScript 7 pair waits on typescript-eslint
 
@@ -114,6 +127,9 @@ the mock IdP's encoder is the third copy and nothing asserts its spelling.
 Source: `docs/tickets/e1/deferred.md`, E1-06 item 3.
 **Owner:** whichever ticket next touches `mock-idp/app/signing.py`.
 **Done when:** the deferred entry's.
+**Closed by E1 cleanup Batch B (item 4):** the third encoder now has the
+spelling test, proven against the `.rstrip(b"=")` mutation by the battery;
+the encoder was already correct, so no code changed. Nothing for E2 to do.
 
 ## The wrong-launch selector vocabulary has no served source
 
@@ -125,16 +141,26 @@ consumer is `tests/e2e/exit-refused-launches.spec.ts`.
 **Owner:** the next ticket that adds a selector or a consumer.
 **Done when:** the deferred entry's — one served source, proven to agree
 with `ALL_SELECTORS`.
+**Closed by E1 cleanup Batch B (item 3):** the mock serves `ALL_SELECTORS`
+from `GET /mock/defects`, and both integration copies (the wrong-launches
+suite's and the launch-door module's) now check themselves against it. The
+`exit-refused-launches.spec.ts` literals stay the spec's own until E2 points
+the browser at the route; the served source they were owed is in place.
 
-## The launch door's algorithm pin has no end-to-end forgery proof
+## The launch door's algorithm pin has no end-to-end forgery proof — resolved inside E1
 
-The pin is defence in depth behind `pylti1p3`'s own matching; no mock
-publishes a permissive-algorithm key set, so no live forgery can show the
-whole door refusing what the library alone would accept. Source:
-`docs/tickets/e1/deferred.md`, E1-08 item 1.
-**Owner:** E13 at the latest, with the permissive-alg mint as a companion
-to E1-07's catalog.
-**Done when:** the deferred entry's.
+E1's cleanup Batch B settled this rather than carrying it: the end-to-end
+proof is impossible, because `pylti1p3` matches a key by `kid` and `alg` and
+verifies against the PEM export of that matched key, while the mock's
+`hs256_confusion` mint keys its HMAC with the canonical JWK JSON and ADR 0035
+bars the mock from producing a PEM to forge against — so `jwcrypto` cannot
+PEM-export the symmetric key the confusion would need, and an RSA key's PEM is
+not what the mock signed with. `_refuse_unpinned_algorithm` is therefore a
+confirmed redundant defence-in-depth guard whose removal does not turn the
+launch green, and the confusion launch's end-to-end refusal is already
+asserted by an existing parametrised test. E2 inherits nothing to do here.
+Source: `docs/tickets/e1/deferred.md`, E1-08 item 1 (the full reasoning is
+there).
 
 ## A squatted section binding is never reconciled or aged out
 
@@ -168,24 +194,29 @@ client, the way NRPS's landed with E1-11's.
 No epic in §14.3 names logout; E1's sessions are short-lived JWTs that
 expire rather than end. Raised at the E1 breakdown (PR #89) and still
 unowned at E1 exit, which is the condition E1-09 set for carrying it here.
-**Owner:** unscheduled — Todd's call; the epic that first needs a session
-to end before it expires.
-**Done when:** an epic's breakdown schedules it, or a record says expiry is
-the product's answer and why.
+**Owner:** E9 (ruled 2026-08-28) — beside the role switcher and the admin
+surfaces, whose web-door roles are the people who need a session to end
+before its hour expires; E9 lands before the Care queue (E10) ships.
+**Done when:** E9's breakdown schedules it and it is built there.
 
 ## Local-account fallback for web login
 
 SPEC §7.1 names it as a pilot fallback; nothing in E1..E13 schedules it.
-Raised at the breakdown (PR #89), unanswered.
-**Owner:** unscheduled — Todd's call.
-**Done when:** scheduled or explicitly dropped from §7.1.
+Raised at the breakdown (PR #89).
+**Owner:** E13 (ruled 2026-08-28) — it is release-readiness insurance
+against the pilot IdP falling through, and E13 is where that risk is either
+real or expired.
+**Done when:** E13 either schedules and builds it, or deletes the §7.1
+sentence because the risk expired.
 
 ## Deep Linking
 
-§7.3 promises it, E0-14 deferred it out of the mock, no epic names it.
-Raised at the breakdown (PR #89), unanswered.
-**Owner:** unscheduled — Todd's call.
-**Done when:** an epic's breakdown schedules it, or §7.3 stops promising it.
+E0-14 deferred it out of the mock and no epic names it. Ruled 2026-08-28:
+post-v1, and §7.3 now says so rather than promising it — unless a real
+platform demands the flow before then, in which case it is E3's.
+**Owner:** post-v1 (§14.4); E3 only if a real platform forces it earlier.
+**Done when:** done — §7.3 was edited with the ruling (E1's cleanup Batch C
+PR); nothing further is owed unless a platform demands the flow.
 
 ## The mock's scope check is only provably a membership check while no advertised scope is a superstring
 

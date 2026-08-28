@@ -151,9 +151,11 @@ which is a different schema and a different product.
 **The roster address is judged by the rules every address this container fetches
 passes** (round 3). It arrives as an NRPS claim and E1-11 calls it with the tool's
 own client credentials, on a schedule, with nobody present — so it goes through
-`app.models.lti.refuse_invalid_fetched_address`, the same four rules `jwks_url`
-and `auth_token_url` pass, reached through the one function that holds them rather
-than a copy beside it (`docs/MISTAKES.md` entry 13). A refused address leaves the
+`app.models.lti.refuse_invalid_fetched_address`, the same rules `jwks_url` and
+`auth_token_url` pass — four of them when this was written, five since
+[ADR 0101](0101-a-fetched-address-is-judged-by-what-it-resolves-to.md) added the
+resolution — reached through the one function that holds them rather than a copy
+beside it (`docs/MISTAKES.md` entry 13). A refused address leaves the
 column NULL, records `roster_address_refused`, and **still provisions the
 section**: §7.3 makes a section with no roster a state rather than a fault, and
 refusing the launch would take a real course out of the product over a URL.

@@ -197,6 +197,22 @@ class LaunchRefusedError(Exception):
     message into a 4xx page.
     """
 
+    def __init__(self, *args: object, guard: str | None = None) -> None:
+        super().__init__(*args)
+        self._guard = guard
+
+    @property
+    def guard(self) -> str:
+        """The machine-readable name of the guard that refused (ADR 0103).
+
+        The class name for every subclass below, because the class *is* the
+        guard vocabulary. The one exception is the nonce-ledger replay, which is
+        wrapped in a bare `LaunchRefusedError` (`NonceReplayedError` is not one
+        of these subclasses) and names the wrapped guard here instead — so the
+        `data-reason` marker on the refusal page and the WARNING in the log agree.
+        """
+        return self._guard if self._guard is not None else type(self).__name__
+
 
 class SignatureRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
     """The signature, the algorithm, or the key that signed the launch did not hold."""
@@ -332,9 +348,10 @@ def verified_launch(
     try:
         return _validate(session, http, form, settings, delivered_state)
     except NonceReplayedError as replay:
-        logger.warning("NonceReplayedError")
+        guard = type(replay).__name__
+        logger.warning(guard)
         consume_launch(session, state=delivered_state)
-        raise LaunchRefusedError(str(replay)) from replay
+        raise LaunchRefusedError(str(replay), guard=guard) from replay
     except LaunchRefusedError as refusal:
         logger.warning(type(refusal).__name__)
         consume_launch(session, state=delivered_state)

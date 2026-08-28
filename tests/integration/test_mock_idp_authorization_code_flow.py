@@ -79,6 +79,7 @@ session signed with anything else is one E1 could not validate with a conformant
 library.
 """
 
+import re
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -150,6 +151,14 @@ UNADVERTISED_PATH_PREFIXES = ("/.well-known", "/mock", "/static", "/docs", "/ope
 # parameters. A published key set carrying any of them has served the signing key
 # to whoever asked.
 PRIVATE_JWK_MEMBERS = ("d", "p", "q", "dp", "dq", "qi", "k")
+
+# RFC 7515 appendix C's base64url alphabet, with no `=`. Used by
+# `test_the_published_keys_numbers_are_spelled_as_unpadded_base64url` below to
+# pin the spelling by looking at the characters — see that test's docstring for
+# why decoding cannot be the check. Spelled the same way
+# `tests/integration/test_mock_lms_launch.py:86` spells it, because it is the
+# same alphabet from the same appendix and not two decisions.
+UNPADDED_BASE64URL = re.compile(r"[A-Za-z0-9_-]+")
 
 # The token type OIDC Core 1.0 §3.1.3.3 fixes for this flow, lower-cased because
 # RFC 6749 §5.1 makes the value case-insensitive.
@@ -735,6 +744,67 @@ def test_the_published_key_set_carries_no_private_key_material(mock_idp: Any) ->
         "`q`, `dp`, `dq`, `qi` and `k` the private members of a JWK; publishing any of them "
         "serves the signing key to anyone who asks. Serialise the public half."
     )
+
+
+def test_the_published_keys_numbers_are_spelled_as_unpadded_base64url(mock_idp: Any) -> None:
+    """`n` and `e` carry no `=`, because JOSE's base64url has no padding.
+
+    **Owed here, not invented here.** `docs/tickets/e1/deferred.md`'s E1-06
+    entry, item 3: the same pin exists for the tool's own `/lti/jwks`
+    (`tests/integration/test_the_tool_publishes_its_key_set.py`) and for the
+    mock platform's (`tests/integration/test_mock_lms_launch.py:285`), and the
+    entry names the third — `mock-idp/app/signing.py`'s copy of the same
+    `base64url` encoder — as still open, "owed to whichever ticket touches
+    [it] first". E1's cleanup Batch B is that ticket. All three encoders are
+    correct today; what was missing is anything that would notice if one
+    stopped being.
+
+    **Asserted on the strings, and deliberately never by decoding.** Decoding
+    is exactly the operation that forgives this defect — every base64url
+    decoder re-pads its input first, so a padded value decodes to the correct
+    integer and a test built on a decode passes regardless. That is not a
+    hypothesis: the E1-06 mutation battery dropped `.rstrip(b"=")` from the
+    tool's encoder and the whole suite it was checked against stayed green.
+    Everything else in this module reaches these members only by decoding, for
+    that reason; the encoding is one property, checked once, here, by looking
+    at the characters rather than the number they represent.
+
+    **The mutation this must kill:** dropping `.rstrip(b"=")` from
+    `mock-idp/app/signing.py`'s `base64url`. Nothing else in this repository
+    goes red under it — every session still verifies, the key set is still a
+    well-formed JWK Set, and `verify_rs256` re-pads before it decodes.
+
+    **The near misses it must survive, which is why this is a whole-string
+    match against the alphabet rather than a search for `=`:** a `+` or a `/`
+    from standard base64's alphabet, which mean different bits; a trailing
+    newline, which `base64.encodebytes` produces and which some readers strip
+    and others hand straight to a decoder.
+    """
+    keys = mock_idp.published_keys()
+    assert keys, "The JWKS endpoint serves no keys, so this test has nothing to inspect."
+
+    for key in keys:
+        for member in ("n", "e"):
+            value = key.get(member)
+            assert isinstance(value, str) and value, (
+                f"The published key {key.get('kid')!r} carries `{member}` {value!r}, so there is "
+                "no spelling here to judge."
+            )
+            assert "=" not in value, (
+                f"The published key {key.get('kid')!r} spells `{member}` as {value!r}, which "
+                "carries base64 padding. RFC 7518 §2 fixes JOSE's encoding as base64url with the "
+                "trailing `=` removed; a document spelled this way is one a strict JOSE "
+                "implementation refuses to parse, and it also makes the key's RFC 7638 "
+                "thumbprint depend on whether the reader strips the padding before hashing — two "
+                "conformant clients then compute two `kid` values for one key."
+            )
+            assert UNPADDED_BASE64URL.fullmatch(value), (
+                f"The published key {key.get('kid')!r} spells `{member}` as {value!r}, which is "
+                "not base64url. RFC 7515 appendix C allows `A-Z`, `a-z`, `0-9`, `-` and `_` and "
+                "nothing else — `+` and `/` are standard base64's alphabet and mean different "
+                "bits, and whitespace or a newline is a value some readers strip and others hand "
+                "straight to a decoder."
+            )
 
 
 def test_two_provider_instances_publish_different_signing_keys(mock_idps: Any) -> None:

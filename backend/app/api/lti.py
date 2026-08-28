@@ -124,7 +124,7 @@ async def login(request: Request, session: Session = Depends(get_session)) -> Re
     try:
         url = await run_in_threadpool(begin_a_launch, session, settings, form)
     except LaunchRefusedError as refusal:
-        return refused(str(refusal))
+        return refused(str(refusal), guard=refusal.guard)
 
     await run_in_threadpool(session.commit)
     return RedirectResponse(url, status_code=FOUND)
@@ -186,7 +186,7 @@ async def launch(request: Request, session: Session = Depends(get_session)) -> R
             verified_launch, session, request.app.state.http, settings, form
         )
     except LaunchRefusedError as refusal:
-        answer: Response = refused(str(refusal))
+        answer: Response = refused(str(refusal), guard=refusal.guard)
         await run_in_threadpool(session.commit)
         return answer
 

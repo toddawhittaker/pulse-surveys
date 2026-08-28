@@ -119,6 +119,21 @@ SCORE_MEDIA_TYPE = "application/vnd.ims.lis.v1.score+json"
 # platform serves.
 MOCK_POSTED_SCORES_PATH = "/mock/posted-scores"
 
+# E1 cleanup Batch B, item 3 — where the platform serves the vocabulary of defect
+# selectors it answers to, and the member that list lives under. **Settled in the
+# batch's work order, not chosen here**: `GET /mock/defects`, outside the OIDC
+# namespace exactly as `/mock/posted-scores` sits outside the AGS one, answering
+# `{"selectors": [...]}`.
+#
+# Named here rather than discovered, and the `/mock/` prefix is the reason — the
+# same reason `MOCK_POSTED_SCORES_PATH` gives. A fixture that went looking for a
+# route whose path carries "defect" would also accept the authorization endpoint,
+# which is where `?defect=` is actually answered (ADR 0088); the prefix is what
+# rules that out, and a tool that learned this route would have learned something
+# no real platform serves.
+MOCK_DEFECTS_PATH = "/mock/defects"
+SERVED_SELECTORS_MEMBER = "selectors"
+
 # The two AGS scopes SPEC §3.4 needs: one line item per section, and a score
 # posted to it. Specification constants, not preferences.
 AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
@@ -416,6 +431,50 @@ class MockPlatform:
         """
         signature = token if isinstance(token, JsonWebSignature) else split_jws(str(token))
         return verifying_key(signature, self.jwks())
+
+    # -- the served defect vocabulary (E1 cleanup Batch B, item 3) ------------
+
+    def served_defect_selectors(self) -> list[str]:
+        """Every defect selector this platform says it answers to, in served order.
+
+        E1-07's deferred item 1. `app.wrong_launches.ALL_SELECTORS` cannot be
+        imported by any consumer outside `mock-lms/` — both mocks declare a
+        package called `app` (SPEC §13), the collision ADR 0039 records — so
+        every consumer that needed a selector name held a copied literal, and
+        ADR 0088's own consequences say nothing enforces that the copies move
+        together. This is the served source they are checked against.
+
+        **The shape is asserted rather than normalised**, for the reason
+        `posted_scores` below gives in full: an earlier version of that helper
+        accepted four shapes because its ticket named none, and three of the
+        four were mocks that did not do what the ticket said. The batch's work
+        order names one shape, so one shape is read.
+        """
+        response = self.client.get(MOCK_DEFECTS_PATH)
+        assert response.status_code == 200, (
+            f"`GET {MOCK_DEFECTS_PATH}` answered {response.status_code} rather than 200, so this "
+            "platform serves no defect vocabulary and every consumer of one is still holding a "
+            "copied literal nothing checks (E1-07 deferred item 1). Body begins "
+            f"{response.text[:200]!r}."
+        )
+        document = response.json()
+        assert isinstance(document, dict), (
+            f"`{MOCK_DEFECTS_PATH}` served {document!r}. The shape is "
+            f'`{{"{SERVED_SELECTORS_MEMBER}": [...]}}` — an object, the way `/mock/posted-scores` '
+            "is an object, so a member can be added later without changing what a reader parses."
+        )
+        served = document.get(SERVED_SELECTORS_MEMBER)
+        assert isinstance(served, list) and served, (
+            f"`{MOCK_DEFECTS_PATH}` served an object carrying {sorted(document)} rather than a "
+            f"non-empty `{SERVED_SELECTORS_MEMBER}` array. An empty list would agree with a stale "
+            "copy about nothing while satisfying every membership check made against it."
+        )
+        wrong = [name for name in served if not isinstance(name, str) or not name]
+        assert not wrong, (
+            f"`{MOCK_DEFECTS_PATH}` served {wrong!r} among its selectors. A selector is the string "
+            "a caller puts in `?defect=`, so anything else is a name no launch can be minted by."
+        )
+        return [str(name) for name in served]
 
     # -- launches ------------------------------------------------------------
 
@@ -1270,6 +1329,57 @@ def mock_lms_paths() -> MockLmsPaths:
     return MockLmsPaths(
         jwks=str(found["JWKS_PATH"]), authorization=str(found["AUTHORIZATION_PATH"])
     )
+
+
+@pytest.fixture
+def mock_lms_selectors() -> tuple[str, ...]:
+    """`app.wrong_launches.ALL_SELECTORS`, read out of the mock and copied nowhere.
+
+    E1-07's deferred item 1 exists because this tuple cannot be imported by a
+    consumer outside `mock-lms/`: both mocks declare a package called `app` (SPEC
+    §13), so an `import app.wrong_launches` from a test module resolves to
+    whichever of the two was on `sys.path` first — ADR 0039's collision. The
+    resolution `mock_package_resolved` installs is the honest way in, and this is
+    the only place in the suite that takes it for this tuple.
+
+    **Read out and the resolution closed before the caller's body runs**, exactly
+    as `mock_lms_paths` above does and for exactly the reason its docstring
+    gives: while the mock's `app` is resolved, *this repository's* `app` is not
+    importable, so a test that migrates a database inside that window dies in
+    `ModuleNotFoundError` before its first assertion. These are plain strings, so
+    nothing is lost by copying the values out.
+
+    This is deliberately **not** a second literal copy of the vocabulary — it is
+    the tuple itself, reached the one way it can be reached. A test comparing the
+    served list against a hand-written list would be comparing two copies and
+    would agree with a served route that had gone stale in the same direction
+    (`docs/MISTAKES.md` entry 19).
+    """
+    if not MOCK_LMS_DIR.is_dir():
+        pytest.fail(
+            f"{MOCK_LMS_DIR} does not exist, so there is no `app.wrong_launches` to read the "
+            "selector vocabulary out of. SPEC §13 puts the in-repo LTI 1.3 platform at "
+            "`mock-lms/`, and E1-07 is the ticket that writes the mints."
+        )
+    with mock_package_resolved(MOCK_LMS_DIR):
+        module = importlib.import_module(f"{MOCK_PACKAGE}.wrong_launches")
+        declared = getattr(module, "ALL_SELECTORS", None)
+        found = tuple(declared) if isinstance(declared, tuple | list) else None
+
+    if not found:
+        pytest.fail(
+            "`mock-lms/app/wrong_launches.py` declares no non-empty `ALL_SELECTORS`. ADR 0088 "
+            "decision 2 makes that tuple the whole vocabulary this platform answers to, and every "
+            "check that the served list and the copied literals agree is made against it — an "
+            "absent or empty tuple would agree with everything."
+        )
+    wrong = [name for name in found if not isinstance(name, str) or not name]
+    if wrong:
+        pytest.fail(
+            f"`ALL_SELECTORS` carries {wrong!r}. A selector is the string a caller puts in "
+            "`?defect=`, so anything else names no mint."
+        )
+    return tuple(str(name) for name in found)
 
 
 @pytest.fixture
