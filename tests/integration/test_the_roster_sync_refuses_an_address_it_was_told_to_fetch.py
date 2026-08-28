@@ -73,6 +73,23 @@ pytestmark = [pytest.mark.integration, pytest.mark.lti]
 METADATA_URL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 LOOPBACK_URL = "http://127.0.0.1:9/memberships"
 
+
+# The cloud metadata address inside the NAT64 well-known prefix `64:ff9b::/96`
+# (RFC 6052) — the AAAA a hostile platform's own DNS answers on an IPv6-only egress
+# running DNS64/NAT64, which the gateway translates back to `169.254.169.254`.
+# `ipaddress` reports the wrapper `is_global` and its `.ipv4_mapped` None, so a rule
+# that unwraps only the mapped form admits it. Built from the IPv4 rather than
+# hand-typed, so the embedded address is provably the metadata service, and held to
+# that premise by `test_the_nat64_metadata_vector_sits_where_this_module_claims`.
+def nat64(v4: str) -> str:
+    """`64:ff9b::<v4>` — the NAT64 well-known prefix (RFC 6052) embedding `v4`."""
+    from ipaddress import IPv4Address, IPv6Address
+
+    return str(IPv6Address(int(IPv6Address("64:ff9b::")) | int(IPv4Address(v4))))
+
+
+A_NAT64_METADATA_ADDRESS = nat64("169.254.169.254")
+
 # Where the second page of a two-host walk is served from. A path of its own, so
 # the wire can answer it without the second host being mounted — a roster is
 # looked up by path, and the point of these tests is which *address* the request
@@ -263,6 +280,37 @@ def test_the_wire_advertises_the_hostile_next_url_verbatim(
         f"{METADATA_URL!r} — its whole `Link` header is {answered.headers.get('link')!r}. Without "
         "that relation the walk has nowhere hostile to go, and every refusal below would pass "
         "against a sync that validates nothing."
+    )
+
+
+def test_the_nat64_metadata_vector_sits_where_this_module_claims() -> None:
+    """A control: the NAT64 vector is the metadata service, wrapped so HEAD admits it.
+
+    The wire refusal below rests on three facts about `ipaddress`, and a red on any
+    of them means the vector is wrong rather than the sync (`docs/MISTAKES.md`
+    entry 3): the wrapper is judged `is_global` (so a rule unwrapping only the
+    mapped form admits it — this is why the refusal below is red before the fix),
+    its `.ipv4_mapped` is `None` (so the existing unwrap walks past it), and its
+    low 32 bits are `169.254.169.254` (so what unwrap-and-judge reads is the
+    metadata service). Arithmetic on `ipaddress`, green before and after the fix.
+
+    **A red here means these tests are broken, not the sync.**
+    """
+    from ipaddress import IPv4Address, ip_address
+
+    wrapped = ip_address(A_NAT64_METADATA_ADDRESS)
+    assert wrapped.is_global, (
+        f"{A_NAT64_METADATA_ADDRESS!r} is not judged globally routable, so a rule unwrapping only "
+        "the mapped form would refuse it already and the refusal below proves nothing about NAT64."
+    )
+    assert wrapped.ipv4_mapped is None, (
+        f"{A_NAT64_METADATA_ADDRESS!r} has `.ipv4_mapped` {wrapped.ipv4_mapped!r} rather than None, "
+        "so the existing unwrap already catches it and this is not a NAT64 test."
+    )
+    assert IPv4Address(int(wrapped) & 0xFFFFFFFF) == IPv4Address("169.254.169.254"), (
+        f"{A_NAT64_METADATA_ADDRESS!r} embeds "
+        f"{IPv4Address(int(wrapped) & 0xFFFFFFFF)!r} rather than the metadata service, so the "
+        "refusal below is about a different address than it claims."
     )
 
 
@@ -789,6 +837,90 @@ def test_a_next_page_on_a_host_that_resolves_privately_is_refused(
         f"{[dict(row) for row in recorded]}. The refusal is recorded against the section's own "
         f"stored address ({str(platform_on_https.address)!r}), which is E1-11's F1-4 and is not "
         "this batch's to reopen."
+    )
+    refusals = [row for row in recorded if row.get("response_code") != 200]
+    assert refusals, (
+        f"No `nrps_call` row records the refusal — the section's rows are "
+        f"{[dict(row) for row in recorded]}. §6.1's console is where an operator learns that a "
+        "platform is advertising addresses this tool will not call."
+    )
+    assert roster_rows.enrollments_for(reachable), (
+        "The first page's member was not ingested. The refusal is per URL: a walk that discarded "
+        "the whole container because its second page was hostile would lose a class that synced "
+        "correctly up to the boundary."
+    )
+
+
+def test_a_next_page_on_a_host_that_resolves_to_a_nat64_wrapped_metadata_address_is_refused(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+) -> None:
+    """The NAT64 finding, driven over the wire: the embedded IPv4 is judged, not the wrapper.
+
+    The same residual finding as the private-hop test above, one address family
+    over. On an IPv6-only egress running DNS64/NAT64 the platform's `rel="next"`
+    names a host whose only address is `64:ff9b::a9fe:a9fe`, which `ipaddress`
+    reports `is_global` and whose `.ipv4_mapped` is `None`; the NAT64 gateway
+    translates the GET — with the tool's Bearer token — to `169.254.169.254`, the
+    cloud metadata service. A rule that unwrapped only the mapped form before asking
+    `is_global` dials it. Rule 5 must unwrap the embedded IPv4 and judge that.
+
+    Same refusal contract as the private hop: the hostile URL is never fetched, no
+    `nrps_call` row carries the platform-chosen URL, a refusal is recorded against
+    the section's stored address, and the first page's member is kept.
+
+    **The mutation this kills:** the resolved-address unwrap threaded for the mapped
+    form only, which admits every NAT64-wrapped internal address. **Its pair** is
+    `test_a_next_page_on_a_second_host_that_resolves_publicly_still_walks`, where a
+    hop resolving to a public address walks — a NAT64-wrapped *global* IPv4 resolves
+    to a public address once unwrapped, so this cannot be a blanket refusal of the
+    prefix.
+    """
+    hostile = f"https://{roster_contract.an_internal_host}/memberships"
+    reachable = a_subject("before-the-nat64-hop")
+    resolver = resolving(
+        {
+            platform_on_https.host: (roster_contract.a_global_address,),
+            roster_contract.an_internal_host: (A_NAT64_METADATA_ADDRESS,),
+        }
+    )
+    service_wire.serve(
+        compose_a_roster(
+            platform_on_https,
+            [roster_contract.member(reachable)],
+            next_url=hostile,
+        )
+    )
+
+    sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolver,
+    )
+
+    assert not [call for call in service_wire.calls if call.url == hostile], (
+        f"The sync fetched {hostile!r}, whose host resolves to {A_NAT64_METADATA_ADDRESS!r} — the "
+        "NAT64 well-known prefix embedding the cloud metadata service — because a platform's `Link` "
+        "header named it. On an IPv6-only NAT64 egress the gateway translates that GET, with the "
+        "tool's Bearer token, to 169.254.169.254. `ipaddress` reports the wrapper globally routable "
+        "and its `.ipv4_mapped` None, so a rule unwrapping only the mapped form admits it."
+    )
+    recorded = roster_rows.calls_for(platform_on_https.id)
+    assert not [row for row in recorded if row.get("url") == hostile], (
+        f"An `nrps_call` row carries the platform-chosen URL {hostile!r}: "
+        f"{[dict(row) for row in recorded]}. The refusal is recorded against the section's own "
+        f"stored address ({str(platform_on_https.address)!r})."
     )
     refusals = [row for row in recorded if row.get("response_code") != 200]
     assert refusals, (

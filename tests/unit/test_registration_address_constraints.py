@@ -1351,6 +1351,201 @@ def test_a_host_resolving_to_an_ipv4_mapped_global_address_is_accepted_outside_d
     )
 
 
+# ---------------------------------------------------------------------------
+# Rule 5, the two OTHER IPv6 forms that embed an IPv4 address. `resolved.ipv4_mapped`
+# unwraps only the IPv4-**mapped** form `::ffff:0:0/96`, so the test above is the only
+# embedded-IPv4 shape rule 5 judges by its embedded address. Two more embed one:
+#
+#   - the **NAT64 well-known prefix** `64:ff9b::/96` (RFC 6052), where
+#     `64:ff9b::a9fe:a9fe` embeds `169.254.169.254`, the cloud metadata address;
+#   - the deprecated **IPv4-compatible** form `::/96` (RFC 4291), where `::a9fe:a9fe`
+#     embeds the same.
+#
+# `ipaddress` reports `is_global` **true** for either wrapper whatever IPv4 it
+# embeds, and `.ipv4_mapped` **None** for both — so a rule that unwraps only the
+# mapped form and then asks `is_global` admits an internal IPv4 one address family
+# over. On an IPv6-only egress running DNS64/NAT64 a hostile platform's own DNS
+# answers a `64:ff9b::`-prefixed AAAA for a fetched host and the gateway translates
+# it to the embedded IPv4 — the SSRF rule 5 exists to refuse, arriving through IPv6.
+#
+# **The fix is to unwrap the embedded IPv4 for these two /96 prefixes and judge THAT,
+# exactly as the mapped form is already unwrapped — not to blanket-reject the
+# prefixes.** DNS64 legitimately synthesises `64:ff9b::<global-v4>` for a v4-only
+# global platform on such a network, so a reject-all rule would refuse a legitimate
+# platform. The acceptance rows below are what tell unwrap-and-judge from reject-all:
+# a suite of only refusals passes against reject-all, which breaks real DNS64.
+#
+# A residual limit lives here that no test can pin: a **custom** NAT64 prefix (a
+# network-specific prefix rather than the well-known `64:ff9b::/96`) is
+# indistinguishable from an ordinary global IPv6 address without the egress's own
+# configuration, so it is recorded in the ADR/deferred notes, not asserted here.
+
+
+def nat64(v4: str) -> str:
+    """`64:ff9b::<v4>` — the NAT64 well-known prefix (RFC 6052) embedding `v4`.
+
+    Built from the IPv4 by `ipaddress`, not hand-typed as hex, so the embedded
+    address is provably the one the test names rather than a copy that could drift
+    from it (`docs/MISTAKES.md` entry 19). Held against its own premises — global
+    wrapper, no `ipv4_mapped`, low 32 bits equal to `v4` — by
+    `test_the_embedded_ipv4_vectors_sit_where_this_module_claims`.
+    """
+    from ipaddress import IPv4Address, IPv6Address
+
+    return str(IPv6Address(int(IPv6Address("64:ff9b::")) | int(IPv4Address(v4))))
+
+
+def ipv4_compatible(v4: str) -> str:
+    """`::<v4>` — the deprecated IPv4-compatible form (RFC 4291) embedding `v4`."""
+    from ipaddress import IPv4Address, IPv6Address
+
+    return str(IPv6Address(int(IPv4Address(v4))))
+
+
+# The cloud metadata address the NAT64 attack aims at, and the two internal IPv4s
+# that must stay refused however they are embedded. `A_PRIVATE_ADDRESS` is this
+# module's own rule-5 constant, held on the non-global side of the line by the
+# control at the foot of the file; `A_METADATA_ADDRESS` is link-local and
+# non-global for the same reason `169.254.169.254` is refused by rule 4.
+A_METADATA_ADDRESS = "169.254.169.254"
+EMBEDDED_INTERNAL_ADDRESSES = {
+    "the cloud metadata service": A_METADATA_ADDRESS,
+    "an RFC 1918 address": A_PRIVATE_ADDRESS,
+}
+
+# The two wrappers, as a parameter: a test that named only one would leave the
+# other family open, which is exactly the shape of the finding (the mapped form was
+# handled and these two were not).
+EMBEDDING_PREFIXES = [
+    pytest.param(nat64, id="nat64-well-known-prefix"),
+    pytest.param(ipv4_compatible, id="ipv4-compatible"),
+]
+
+
+@pytest.mark.parametrize("wrap", EMBEDDING_PREFIXES)
+@pytest.mark.parametrize("embedded", list(EMBEDDED_INTERNAL_ADDRESSES))
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_resolving_to_an_embedded_internal_ipv4_is_refused_outside_development(
+    resolving: Any, column: str, embedded: str, wrap: Any
+) -> None:
+    """The embedded IPv4 is unwrapped and judged, as the mapped form already is.
+
+    `64:ff9b::a9fe:a9fe` and `::a9fe:a9fe` are `169.254.169.254` reached over an
+    IPv6 socket on a DNS64/NAT64 egress, and `ipaddress` reports the wrapper
+    `is_global` while its `.ipv4_mapped` is `None`. A rule that unwrapped only the
+    mapped form and then asked `is_global` of the wrapper reads a different answer
+    from the one the packet gets — which is the exact hazard the mapped-form test
+    above closes, in the second and third of the three places that face it
+    (`docs/MISTAKES.md` entry 13). Both the metadata address and an RFC 1918 block
+    are here because unwrapping has to judge the embedded address itself, not the
+    fact that it is embedded, and each is refused on its own account by rule 5.
+
+    Refused on every column, because rule 5's `is_global` refusal has no
+    column exemption for these two classes — the only exemption is loopback, which
+    is the test after next.
+
+    **The mutation this kills:** rule 5 unwrapping `ipv4_mapped` alone (the state at
+    HEAD, which admits both of these). **Its pair** is the boundary acceptance
+    below, where the same prefix embedding a global IPv4 is accepted, so this
+    cannot be satisfied by refusing every `64:ff9b::` or `::`-prefixed answer.
+    """
+    wrapped = wrap(EMBEDDED_INTERNAL_ADDRESSES[embedded])
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+            described(resolving, {AN_INTERNAL_NAME: (wrapped,)}),
+        )
+
+
+@pytest.mark.parametrize("wrap", EMBEDDING_PREFIXES)
+def test_a_host_resolving_to_an_embedded_loopback_is_refused_on_the_browser_facing_column(
+    resolving: Any, wrap: Any
+) -> None:
+    """The embedded-loopback case, judged the way the module judges resolved loopback.
+
+    `64:ff9b::7f00:1` and `::7f00:1` embed `127.0.0.1`. Unwrapped and judged, that
+    is a loopback address, and the module's own split — loopback refused on the
+    browser-facing column and admitted on the two this container fetches — is what
+    a faithful unwrap produces. So this asserts the refusal on
+    `authorization_endpoint`, the column where loopback is always refused, and says
+    nothing about the fetched columns: whether a NAT64-wrapped loopback is a
+    registrable sidecar is a question the module leaves open exactly as it leaves
+    the plain loopback split, and asserting it either way here would settle on the
+    implementer's behalf a case no real deployment reaches (a sidecar is dialed at
+    `127.0.0.1`, not synthesised through NAT64).
+
+    **The mutation this kills:** the mapped-only unwrap at HEAD, which judges the
+    wrapper `is_global` (true) and admits this. **Its pair** is the browser-facing
+    loopback refusals in rule 3, which this joins one wrapper out.
+    """
+    wrapped = wrap(A_LOOPBACK_ADDRESS)
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{AUTHORIZATION_ENDPOINT: f"https://{AN_INTERNAL_NAME}/oidc/authorize"}),
+            described(resolving, {AN_INTERNAL_NAME: (wrapped,)}),
+        )
+
+
+@pytest.mark.parametrize("wrap", EMBEDDING_PREFIXES)
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_resolving_to_an_embedded_global_ipv4_is_accepted_outside_development(
+    resolving: Any, column: str, wrap: Any
+) -> None:
+    """The boundary that distinguishes unwrap-and-judge from reject-all.
+
+    `64:ff9b::808:808` and `::808:808` embed `8.8.8.8`, a globally routable
+    address. This is the DNS64 synthesis a v4-only global platform is legitimately
+    reached through on an IPv6-only NAT64 network, so it must be accepted — and a
+    fix that blanket-rejected the two prefixes would refuse it while every refusal
+    row above stayed green. That is why this row is mandatory rather than
+    decorative: a suite of only refusals passes against the reject-all
+    implementation that breaks real platforms.
+
+    **This row is green on the current tree, and it is green there by accident:**
+    HEAD accepts it because the wrapper's own `is_global` is true, not because it
+    judged the embedded `8.8.8.8`. It must stay green after the fix, where it is
+    accepted because the embedded address is global. So it does not prove the fix
+    by itself — the refusal rows above are what do that — but it is what stops the
+    fix from being reject-all.
+    """
+    wrapped = wrap(ANOTHER_GLOBAL_ADDRESS)
+    judge_with_resolver(
+        "production",
+        registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+        described(resolving, {AN_INTERNAL_NAME: (wrapped,)}),
+    )
+
+
+@pytest.mark.parametrize("wrap", EMBEDDING_PREFIXES)
+def test_a_fetched_roster_address_resolving_to_an_embedded_internal_ipv4_is_refused(
+    resolving: Any, wrap: Any
+) -> None:
+    """The same shape at the fetched surface, which is where the attack actually lands.
+
+    The roster walk's pagination URL is chosen by the platform at run time and
+    judged by `refuse_invalid_fetched_address`, the second entry into the shared
+    resolved-address judgment where this finding lives. A hostile `rel="next"` on
+    an IPv6-only NAT64 egress names a host whose AAAA is `64:ff9b::a9fe:a9fe`, and
+    the gateway translates the GET — with the tool's Bearer token — to the cloud
+    metadata service. So the unwrap has to hold on this surface too, not only at the
+    registration write.
+
+    **The mutation this kills:** the embedded-IPv4 unwrap threaded into the
+    registration function alone, leaving the fetched helper — the surface a platform
+    can actually reach — judging the wrapper `is_global`.
+    """
+    wrapped = wrap(A_METADATA_ADDRESS)
+    with pytest.raises(registration_error()):
+        judge_fetched(
+            "production",
+            column=ROSTER_ADDRESS_COLUMN,
+            address=f"https://{AN_INTERNAL_NAME}/memberships",
+            resolve=resolving({AN_INTERNAL_NAME: (wrapped,)}),
+        )
+
+
 @pytest.mark.parametrize("column", EVERY_COLUMN)
 def test_a_host_that_cannot_be_resolved_is_refused_outside_development(
     resolving: Any, column: str
@@ -1941,6 +2136,59 @@ def test_the_address_vectors_sit_on_the_side_of_is_global_this_module_claims() -
             f"`PRIVATE_URL_HOSTS[{spelling!r}]` is {host!r}, which is globally routable — so the "
             "refusal rows built on it are about an address rule 5 accepts."
         )
+
+
+def test_the_embedded_ipv4_vectors_sit_where_this_module_claims() -> None:
+    """A control: the NAT64 and IPv4-compatible vectors are what the finding describes.
+
+    Every embedded-IPv4 test above rests on three facts about `ipaddress`, and if
+    any were false the test would be green or red for a reason unrelated to what it
+    asserts (`docs/MISTAKES.md` entry 3):
+
+      - the **wrapper** is judged `is_global` true — this is *why* the mapped-only
+        unwrap at HEAD admits it, and the reason the refusal rows are red today;
+      - the wrapper's `.ipv4_mapped` is `None` — this is *why* the existing unwrap
+        walks past it, so the fix cannot lean on the attribute it already reads;
+      - the low 32 bits equal the IPv4 the vector names — this is what
+        unwrap-and-judge reads, so a fix that read the wrong bits would confuse a
+        prefix embedding a global address with one embedding an internal one.
+
+    And the embedded IPv4s themselves sit on the side of `is_global` the tests
+    need: the metadata, RFC 1918 and loopback addresses are non-global (refused
+    once unwrapped) and `8.8.8.8` is global (accepted once unwrapped). Arithmetic
+    on `ipaddress` and this module's own constants, green today and after the fix —
+    the fix changes the rule, not the standard library.
+    """
+    from ipaddress import IPv4Address, ip_address
+
+    internal = (A_METADATA_ADDRESS, A_PRIVATE_ADDRESS, A_LOOPBACK_ADDRESS)
+    for wrap in (nat64, ipv4_compatible):
+        for v4 in (*internal, ANOTHER_GLOBAL_ADDRESS):
+            wrapped = ip_address(wrap(v4))
+            assert wrapped.is_global, (
+                f"{wrap.__name__}({v4!r}) is {wrapped!r}, which `ipaddress` does not report "
+                "globally routable — so the mapped-only unwrap at HEAD would refuse it already "
+                "and the refusal rows built on it prove nothing about the embedded-IPv4 fix."
+            )
+            assert wrapped.ipv4_mapped is None, (
+                f"{wrap.__name__}({v4!r}) is {wrapped!r}, whose `.ipv4_mapped` is "
+                f"{wrapped.ipv4_mapped!r} rather than None — so the existing unwrap would catch it "
+                "and this whole section is about a case the code already handles."
+            )
+            assert IPv4Address(int(wrapped) & 0xFFFFFFFF) == IPv4Address(v4), (
+                f"{wrap.__name__}({v4!r}) is {wrapped!r}, whose low 32 bits are "
+                f"{IPv4Address(int(wrapped) & 0xFFFFFFFF)!r} rather than {v4!r} — so a fix that "
+                "unwrapped the low 32 bits would judge an address this vector does not embed."
+            )
+    for v4 in internal:
+        assert not IPv4Address(v4).is_global, (
+            f"{v4!r} is globally routable, so the refusal rows that embed it are about an address "
+            "rule 5 accepts once it is unwrapped."
+        )
+    assert IPv4Address(ANOTHER_GLOBAL_ADDRESS).is_global, (
+        f"{ANOTHER_GLOBAL_ADDRESS!r} is not globally routable, so the boundary acceptance built on "
+        "it would be asserting the opposite of what it says."
+    )
 
 
 def test_the_residue_spellings_parse_as_no_address_at_all() -> None:
