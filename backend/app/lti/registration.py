@@ -35,6 +35,7 @@ import base64
 import hashlib
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
@@ -52,6 +53,7 @@ __all__ = [
     "NoSigningKeyError",
     "OrmToolConf",
     "ToolRegistration",
+    "launcher_origins",
     "public_jwk",
     "published_key_set",
     "rfc7638_thumbprint",
@@ -322,3 +324,43 @@ def published_key_set(session: Session) -> dict[str, Any]:
             "else."
         )
     return {"keys": [public_jwk(stored.private_key_pem)]}
+
+
+def launcher_origins(session: Session) -> list[str]:
+    """The distinct browser-facing origins every registered platform launches from.
+
+    The browser-facing address a registration exposes is its
+    `authorization_endpoint`, and its origin — `scheme://host[:port]`, path
+    stripped — is the thing two callers ask this table for. The developer console
+    links to it so a developer reaches a platform's launcher page (E1-05); the
+    security-headers middleware admits it as a `frame-ancestors` source, because a
+    launch from that platform arrives inside its iframe (ADR 0102). It lives here,
+    in the platform-config module SPEC §13 names, rather than in either caller, so
+    the framing policy and the console read one derivation of one column
+    (`docs/MISTAKES.md` entry 13).
+
+    **Read from `lti_platform` and from nowhere else** (E1-05). This used to be
+    the origin of one process-wide setting, which is one link whatever the
+    database holds — the same address for every registration, and a link even
+    when there is no registration at all. A registration with no authorization
+    endpoint states none, so it offers no launcher; that is the same NULL the
+    launch door refuses rather than defaults.
+
+    Distinct, in the order the issuers sort, because two registrations of one
+    platform — a pilot beside production, which is why `lti_platform` is unique
+    on the pair — share one launcher page and two identical links would be a
+    duplicate rather than a choice.
+    """
+    endpoints = session.execute(
+        select(LtiPlatform.authorization_endpoint)
+        .where(LtiPlatform.authorization_endpoint.is_not(None))
+        .order_by(LtiPlatform.issuer)
+    ).scalars()
+
+    origins: list[str] = []
+    for endpoint in endpoints:
+        split = urlsplit(str(endpoint))
+        origin = f"{split.scheme}://{split.netloc}"
+        if origin not in origins:
+            origins.append(origin)
+    return origins
