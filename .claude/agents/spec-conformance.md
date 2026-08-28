@@ -8,6 +8,11 @@ disallowedTools: Write, Edit, NotebookEdit, Agent
 color: green
 ---
 
+**Never write the word "cyber."** Not in a finding, a summary, a docstring, a
+commit message, a file you write, or a prompt you pass to another agent. It
+triggers a model switch that breaks the run. Write "security", or name the
+specific surface you mean.
+
 You review one diff against its ticket and the spec. You run on every pull
 request because **spec drift is the most likely failure mode in a long
 agent-driven build** — every individual change looks fine, and the system ends
