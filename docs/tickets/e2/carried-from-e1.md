@@ -26,7 +26,12 @@ nothing is owed to E2.
 
 One half of E1-01 item 2 was fixed inside E1 by the cleanup Batch A PR
 (`e1/sweep-closures`): the sweep now reports a reached table it can
-classify by nothing, so `web_login_subject`'s shape cannot recur silently.
+classify by nothing, with each carries-nothing exemption pinned to the
+exact column set its reason was written against, so an added column
+expires the entry. The report classifies per table, not per column: a
+first unrecognizable column on a table that already carries a recognized
+one is still the per-epic review's question, as the function's docstring
+states.
 The other half — a structural source for the `PERSON_TABLES` roots — was
 attempted there and failed honestly (the grant-derived set over-reports
 five-fold; marker- and model-derived sources are circular), so it stays

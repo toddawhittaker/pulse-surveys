@@ -128,8 +128,10 @@ one alike. The second is a *report* rather than a guard: the sweeps above are al
 phrased over names and markers, so a table the walk reaches whose columns none of
 them recognises is passed over in silence, which is how `web_login_subject` would
 have shipped unmarked. `unclassified_reached_tables` names such a table, and
-`REACHED_TABLES_THAT_CARRY_NOTHING` is where the five that carry nothing today are
-recorded with the reason a reviewer needs when one of them next changes.
+`REACHED_TABLES_THAT_CARRY_NOTHING` is where the five the silence is acceptable
+over today are recorded — each with the columns that judgement was made against,
+so the entry expires the moment one of them grows a column, and with the reason a
+reviewer reads when it does.
 
 What remains outside the search is stated on `IDENTITY_NAME_FRAGMENTS` below
 rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14).
@@ -137,7 +139,7 @@ rather than here, beside the tuple that decides it (`docs/MISTAKES.md` entry 14)
 
 import re
 from importlib import import_module
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from sqlalchemy import Table, inspect, text
@@ -387,7 +389,18 @@ VIEW_DEFINITIONS = """
 # that `FROM public."user" WHERE …` does not bind an alias called `where` and then
 # go looking for `where.*`. Deliberately a stop list rather than a full grammar:
 # the text being read is decompiled, so the shapes are Postgres's own and few.
+#
+# **`as` is in the list, and it is a discriminator rather than an oversight.**
+# Postgres decompiles a *relation* alias with no `AS` (`FROM enrollment e`) and a
+# *target-list* alias with one (`SELECT u.person AS p`). The binder below reads a
+# comma-separated `FROM` list, so without this it would read the second shape as a
+# relation called `person` carrying an alias, and bind a token off a column that
+# happens to share a table's name. Refusing the word is what stops that. If a
+# future Postgres starts writing `AS` for relation aliases, the alias goes unbound
+# and the planted controls at the foot of this file go red saying so, because each
+# of them asserts the binder bound the alias it planted.
 CLAUSE_KEYWORDS = (
+    "as",
     "on",
     "using",
     "where",
@@ -963,14 +976,36 @@ def relation_tokens_bound_to(definition: str, table: str) -> set[str]:
     qualification may or may not be present, a keyword may be cased any way, and
     the same relation may be named twice; this one reads what Postgres wrote.
 
+    **Three introducers, not one, and the second two are a security review's
+    finding.** A relation is bound after `FROM`, after `JOIN`, and after a **comma**
+    in an old-style join list — `FROM enrollment e, "user" u WHERE u.id = e.user_id`
+    — which Postgres decompiles as the comma list it was written as. The first
+    version of this read `FROM` and `JOIN` only, so the reviewer's comma-join probe
+    bound no alias, `to_jsonb(u.*)` matched no token, and the whole-row read was
+    reported by nothing in the catalog half. The `ONLY` of `FROM ONLY "user" u`
+    round-trips through the decompiler too and is skipped over here for the same
+    reason: `relation_bindings` in `test_identity_separated_views.py` already reads
+    it, and two readings of one question that disagree is `docs/MISTAKES.md`
+    entry 13.
+
     **What it does not see, stated rather than left to be found**
-    (`docs/MISTAKES.md` entry 14): a relation bound by an old-style comma join
-    (`FROM enrollment e, "user" u`), which this deliberately does not read, and a
-    relation bound by a `WITH` clause. The table's own name is a token whatever
-    happens, so the unaliased spellings stay covered; what is missed is the alias.
-    Both shapes are over-reported by `identity_rows_read_whole` in
-    `test_identity_separated_views.py`, which reads the `views_sql/` file every
-    live view must ship through, so neither is an open path.
+    (`docs/MISTAKES.md` entry 14):
+
+      - **a relation bound by a `WITH` clause.** `WITH ui AS (SELECT * FROM
+        public.user_identity) SELECT to_jsonb(ui) FROM ui` binds `ui` to a CTE, and
+        the whole row it takes is the CTE's rather than the table's. What holds
+        that shape is `VIEW_COLUMN_DEPENDENCIES` and the strict rule built on it:
+        a CTE cannot carry a column out of a table without the stored view
+        depending on that column, so the read is recorded at column grain and
+        reported there. This is not the file sweep's job and this note used to say
+        it was.
+      - **a quoted alias containing a space or punctuation.** `FROM public."user"
+        "the person"` binds an alias `(\\w+)` cannot capture, so only the table's
+        own name stays a token. Postgres writes such an alias only if a view's
+        author did; the text sweep next door reads the file either way.
+
+    The table's own name is a token whatever happens, so every unaliased spelling
+    stays covered; what these two cost is the alias.
 
     **And it is blind to scope, which over-reports rather than under-reports.** A
     subquery may bind the same short alias to a different relation, and every
@@ -981,8 +1016,9 @@ def relation_tokens_bound_to(definition: str, table: str) -> set[str]:
     """
     stop = "|".join(CLAUSE_KEYWORDS)
     pattern = re.compile(
-        rf'(?:\bFROM\b|\bJOIN\b)\s+(?:"?\w+"?\s*\.\s*)?"?{re.escape(table)}"?(?!\w)'
-        rf'(?:\s+(?:AS\s+)?(?!(?:{stop})\b)"?(\w+)"?)?',
+        r"(?:(?:\bFROM\b|\bJOIN\b)\s+|,\s*)(?:\bONLY\b\s+)?"
+        rf'(?:"?\w+"?\s*\.\s*)?"?{re.escape(table)}"?(?!\w)'
+        rf'(?:\s+(?!(?:{stop})\b)"?(\w+)"?)?',
         re.IGNORECASE,
     )
     return {table} | {found.group(1) for found in pattern.finditer(definition) if found.group(1)}
@@ -2372,8 +2408,9 @@ def test_the_join_key_allow_list_is_still_the_three_structural_keys() -> None:
 #     `web_login_subject` would have shipped unmarked, and E1-12's entry in
 #     `deferred.md` says so in as many words. `unclassified_reached_tables` names
 #     such a table instead, and `REACHED_TABLES_THAT_CARRY_NOTHING` is where the
-#     ones that genuinely carry nothing are recorded, each with the reason a
-#     reviewer needs when that table next changes.
+#     ones the silence is acceptable over are recorded — each with the columns the
+#     judgement was made against, which is what makes the entry expire rather than
+#     exempt a name forever, and with the reason a reviewer reads when it does.
 # ---------------------------------------------------------------------------
 
 # The views item 1's controls plant, named for the batch so that one surviving a
@@ -2383,6 +2420,15 @@ PLANTED_JOIN_HIDDEN_MARKED_VIEW = "e1_batch_a_planted_join_hidden_marked_view"
 PLANTED_JOIN_NAMED_COLUMN_VIEW = "e1_batch_a_planted_join_named_column_view"
 PLANTED_JOIN_OTHER_WHOLE_VIEW = "e1_batch_a_planted_join_other_whole_view"
 PLANTED_ALIAS_BOUNDARY_VIEW = "e1_batch_a_planted_alias_boundary_view"
+
+# The two binding shapes a security review found the first version of the binder
+# blind to, and the near miss each is planted beside. The comma-join probe is the
+# reviewer's own statement; the `ONLY` pair is the shape the sibling binder in
+# `test_identity_separated_views.py` already read, so the two disagreed.
+PLANTED_COMMA_JOIN_VIEW = "e1_batch_a_planted_comma_join_view"
+PLANTED_COMMA_JOIN_NAMED_VIEW = "e1_batch_a_planted_comma_join_named_view"
+PLANTED_ONLY_FORM_VIEW = "e1_batch_a_planted_only_form_view"
+PLANTED_ONLY_FORM_NAMED_VIEW = "e1_batch_a_planted_only_form_named_view"
 
 # A real table this rule does not guard, joined to a person table so that the near
 # misses below are the shapes they claim to be. `course` is Pulse's own org
@@ -2413,42 +2459,104 @@ PLANTED_UNRECOGNISED_TABLE = "e1_batch_a_planted_unrecognised_table"
 PLANTED_UNRECOGNISED_MARKED_TABLE = "e1_batch_a_planted_unrecognised_marked_table"
 PLANTED_UNRECOGNISED_COLUMN = "external_ref"
 
-# Every table the fixed-point walk reaches that carries nothing any rule in this
-# file can recognise, with the reason it carries nothing. **This is a record, not
-# an exemption**: a table listed here is still swept by everything above, and all
-# the entry says is that the sweeps are correctly silent about it rather than
-# blind to it.
+# The column the pin's control adds to a recorded table. It matches no fragment in
+# `IDENTITY_NAME_FRAGMENTS` deliberately: a column the sweeps could see on their
+# own would take the table out of the mapping by the recognition rule and the
+# control would be proving that instead of the pin.
+PLANTED_DRIFT_COLUMN = "e1_batch_a_planted_note"
+
+
+class CarriesNothing(NamedTuple):
+    """One recorded table: the columns the reason was written against, and the reason.
+
+    **The columns are half of the record and not decoration**, and a security
+    review is what put them here. Without them an entry exempts a *name* forever:
+    `enrollment` is recorded as carrying nothing about the person in it, a later
+    ticket adds `last_seen_email` or a free-text note, and the report above stays
+    green because the exemption was written against a table that no longer exists
+    in the shape it was judged in. With them, the first column added expires the
+    entry and a human re-reads the reason — which is the only thing the reason was
+    ever worth.
+    """
+
+    columns: tuple[str, ...]
+    reason: str
+
+
+# Every table the fixed-point walk reaches that no rule in this file recognises
+# anything on, with the columns that was judged against and the reason it is
+# acceptable. **This is a record, not an exemption**: a table listed here is still
+# swept by everything above, and all the entry claims is that the name-and-marker
+# sweeps are correctly *silent* about it rather than blind to it.
 #
-# Both directions are asserted, because a one-directional inventory rots in
+# **Silent is not the same as harmless, and one entry here is the proof.** `user`
+# holds a key that resolves a named student at the platform in one step; what
+# makes the silence acceptable there is not the row's contents but the grants and
+# the view rule, and its reason says so. An entry whose answer is "something else
+# holds this" must name the something else — a reason that says "nothing to see"
+# where that is untrue is the record this file most needs not to carry
+# (`docs/MISTAKES.md` entry 1).
+#
+# Three directions are asserted, because a one-directional inventory rots in
 # silence (the closed-set lesson: a closed-set guard is defeated one level out).
 # `test_every_table_the_person_walk_reaches_is_recognised_or_recorded_as_carrying_
 # nothing` requires every reached table to be recognised or listed here;
 # `test_every_table_recorded_as_carrying_nothing_is_still_reached_and_still_
-# unrecognised` requires every name here to be a table the walk still reaches and
-# still recognises nothing on. So a dropped table and a table that later gained a
-# marker are both a named red rather than a line nobody re-reads.
+# unrecognised` requires every name here to be a table the walk still reaches, to
+# be one nothing recognises, and to carry exactly the columns its reason was
+# written against. So a dropped table, a table that gained a marker and a table
+# that grew a column are three named reds rather than a line nobody re-reads.
 #
 # The reasons are one line each and they are what a reviewer reads when the table
 # next changes: a table that grows a column holding a person belongs in the marker
 # convention, not in a longer sentence here.
-REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, str] = {
-    "user": (
-        "ADR 0001 puts the LMS key and the platform reference here and identity on "
-        "`user_identity`, so nothing on the row names a person; the columns are held by "
-        "`JOIN_KEY_COLUMNS` and the table by the grants."
+REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
+    "user": CarriesNothing(
+        ("id", "lms_user_id", "lti_platform_id"),
+        "Not silent because there is nothing here: `lms_user_id` is the LTI `sub`, an opaque "
+        "platform key that names a student in the LMS one step out, and no rule in this file "
+        "sees it. What holds it is grant separation — `pulse_app` is granted no `SELECT` on this "
+        "table — and the bound-column rule, which admits only the structural keys and never this "
+        "one.",
     ),
-    "audit_log": (
+    "audit_log": CarriesNothing(
+        ("action", "actor_person_id", "case_id", "id", "occurred_at", "subject_user_id"),
         "References to people and no identity payload: an actor, a subject, a case, an action "
-        "token and a timestamp."
+        "token and a timestamp.",
     ),
-    "enrollment": (
-        "A section membership: the two keys it joins on and the dates the enrollment window is "
-        "derived from, and nothing about the person in it."
+    "enrollment": CarriesNothing(
+        (
+            "ended_on",
+            "id",
+            "lms_window_end",
+            "lms_window_start",
+            "section_id",
+            "started_on",
+            "user_id",
+        ),
+        "A section membership: the two keys it joins on and the two dated pairs the enrollment "
+        "window is derived from, and nothing about the person in it.",
     ),
-    "lead_faculty_mapping": "Two foreign keys, a person and a course, and no other column.",
-    "role_assignment": (
+    "lead_faculty_mapping": CarriesNothing(
+        ("course_id", "id", "person_id"),
+        "Two foreign keys, a person and a course, and no other column.",
+    ),
+    "role_assignment": CarriesNothing(
+        (
+            "college_id",
+            "course_id",
+            "department_id",
+            "id",
+            "institution_id",
+            "permits_launch",
+            "permits_web_login",
+            "person_id",
+            "reports_to",
+            "role",
+            "section_id",
+        ),
         "A role token, the scope keys the role is held over, and two booleans about which doors "
-        "it opens; the person is a foreign key."
+        "it opens; the person is a foreign key.",
     ),
 }
 
@@ -2478,6 +2586,34 @@ def table_marker_carried_by(engine: Any, table_name: str) -> bool:
     return marked(table_name, "", None, comment)
 
 
+def pinned_column_drift(engine: Any) -> dict[str, tuple[list[str], list[str]]]:
+    """Every recorded table whose live columns are not the ones its reason was judged against.
+
+    `table -> (pinned, live)`, so a failure can print both and a reader can see
+    which column arrived. Tables the walk no longer reaches, or that are gone
+    altogether, are skipped here and caught by the reachability half beside this
+    one — two questions, two messages, and this one has nothing useful to say
+    about a table that is not there.
+
+    The comparison is over the sorted names and nothing else: not the types, not
+    the order, not the constraints. What the entry is a record of is *which
+    columns a human read before writing that reason*, and a column arriving is the
+    event that makes them read it again. A type change on an existing column does
+    not, which is why this does not look at types and why saying so is worth a
+    line (`docs/MISTAKES.md` entry 14).
+    """
+    inspector = inspect(engine)
+    present = set(inspector.get_table_names())
+    drifted: dict[str, tuple[list[str], list[str]]] = {}
+    for name, record in REACHED_TABLES_THAT_CARRY_NOTHING.items():
+        if name not in present:
+            continue
+        live = sorted(column["name"] for column in inspector.get_columns(name))
+        if live != sorted(record.columns):
+            drifted[name] = (sorted(record.columns), live)
+    return drifted
+
+
 def unclassified_reached_tables(engine: Any) -> set[str]:
     """Every table the person walk reaches that no rule here recognises anything on.
 
@@ -2499,8 +2635,8 @@ def unclassified_reached_tables(engine: Any) -> set[str]:
     file, which is the correct division — this asks whether the sweeps can see the
     table at all.
 
-    What is left over is either a table that genuinely carries nothing about a
-    person, in which case its name and the reason belong in
+    What is left over is either a table the silence is acceptable over, in which
+    case its name, its columns and the reason belong in
     `REACHED_TABLES_THAT_CARRY_NOTHING`, or a table like `web_login_subject`
     arriving unmarked, in which case the marker is missing and this is what says
     so. The two cannot be told apart mechanically — `external_ref` and a student
@@ -2749,6 +2885,160 @@ def test_a_join_that_reads_only_named_columns_of_a_person_table_is_not_read_as_a
         f"The strict rule's whole-row half reports `{PLANTED_JOIN_NAMED_COLUMN_VIEW}`, which reads "
         "a join key by name and no row at all. The column-grain half is what answers for a named "
         "column, and it allows this one because `id` is in `JOIN_KEY_COLUMNS`."
+    )
+
+
+@pytest.mark.invariant
+def test_a_whole_row_read_hidden_by_a_comma_join_is_flagged(db_session: Any) -> None:
+    """The binding shape a security review walked the first version of the binder past.
+
+    The reviewer's probe, copied whole rather than described:
+
+        SELECT u.id, to_jsonb(u) AS payload
+        FROM enrollment e, "user" u
+        WHERE u.id = e.user_id
+
+    It is the same exposure as the explicit-join form — every column `user` has,
+    carried under one harmless-looking output column, with the whole-row
+    dependency row dropped because `u.id` is named. What defeated the reading was
+    not the star but the *binding*: a member of a comma-separated `FROM` list has
+    no `FROM` and no `JOIN` in front of it, so the binder bound no `u`,
+    `to_jsonb(u.*)` matched no token, and `decompiled_whole_row_reads` returned
+    nothing. Only the text sweep next door still caught it, which is one guard
+    where the pair is supposed to be two.
+
+    **The binding is asserted before the flag**, and that ordering is the point:
+    the star is in the text either way, so a green here that came from a lucky
+    substring match would say nothing about the repair. `relation_tokens_bound_to`
+    must bind `u` to `"user"` out of a comma list, and only then is the flag
+    evidence of anything.
+
+    **What the decompiler does with a comma join is read rather than assumed.**
+    Postgres deparses each member of the join tree's `FROM` list and joins them
+    with commas, so a stored comma join is expected to come back as one — but the
+    control does not rest on that: it asserts the alias is bound and the read is
+    flagged, which holds whichever canonical form the text turns out to be, and
+    the definition is printed in every failure message so the run settles the
+    question rather than this docstring (`docs/MISTAKES.md` entry 3).
+
+    **The near miss is planted in the same transaction**: the same comma join
+    reading only a named column must stay silent, or the repair is a binder that
+    reports every comma list as a whole-row read.
+
+    **The mutation it exists to survive**: dropping `,\\s*` from the introducer
+    alternation in `relation_tokens_bound_to`, which is the state the reviewer
+    found and which leaves the explicit-join controls above green.
+    """
+    session = db_session
+    assert (
+        ENROLLMENT_TABLE in inspect(session.connection()).get_table_names()
+    ), f"There is no `{ENROLLMENT_TABLE}` table, so neither half of this pair can be planted."
+
+    hidden = f'CREATE VIEW public.{PLANTED_COMMA_JOIN_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id, to_jsonb({GUARDED_PREFIX_ALIAS}) AS payload FROM public.{ENROLLMENT_TABLE} e, public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS} WHERE {GUARDED_PREFIX_ALIAS}.id = e.{ENROLLMENT_KEY_COLUMN}'  # noqa: S608
+    named = f'CREATE VIEW public.{PLANTED_COMMA_JOIN_NAMED_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id AS member FROM public.{ENROLLMENT_TABLE} e, public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS} WHERE {GUARDED_PREFIX_ALIAS}.id = e.{ENROLLMENT_KEY_COLUMN}'  # noqa: S608
+    session.execute(text(hidden))
+    session.execute(text(named))
+
+    connection = session.connection()
+    definitions = view_definitions(connection)
+    definition = definitions.get(PLANTED_COMMA_JOIN_VIEW, "")
+
+    assert f"{GUARDED_PREFIX_ALIAS}.*" in definition, (
+        f"The decompiled definition carries no `{GUARDED_PREFIX_ALIAS}.*`, so the whole-row form "
+        "did not survive decompilation in the spelling this whole reading is built on and the "
+        f"binding assertion below would be about the wrong thing. It reads:\n\n{definition!r}"
+    )
+    tokens = relation_tokens_bound_to(definition, USER_TABLE)
+    assert GUARDED_PREFIX_ALIAS in tokens, (
+        f"The binder does not bind `{GUARDED_PREFIX_ALIAS}` to `{USER_TABLE}` in a comma-separated "
+        f"FROM list; it bound {sorted(tokens)}. That is the security review's finding exactly: a "
+        "comma-list member has no `FROM` and no `JOIN` in front of it, so a binder reading only "
+        f"those two keywords never learns what `{GUARDED_PREFIX_ALIAS}` is, and the whole-row read "
+        f"below is invisible to it. The definition reads:\n\n{definition!r}"
+    )
+
+    detected = decompiled_whole_row_reads(connection, {USER_TABLE})
+    assert (PLANTED_COMMA_JOIN_VIEW, USER_TABLE) in detected, (
+        f"`{PLANTED_COMMA_JOIN_VIEW}` takes the whole row of `{USER_TABLE}` through a comma join "
+        f"and the reading does not report it; it reported {sorted(detected)}. The alias is bound by "
+        "the assertion above and the star is in the text by the one above that, so the failure is "
+        "in the match rather than in the binding."
+    )
+    assert (PLANTED_COMMA_JOIN_NAMED_VIEW, USER_TABLE) not in detected, (
+        f"`{PLANTED_COMMA_JOIN_NAMED_VIEW}` reads one named column of `{USER_TABLE}` through the "
+        "same comma join and the reading calls it a whole-row read. A binder taught to read comma "
+        "lists must not also start reporting every relation in one; that is a red on correct SQL, "
+        "which is the direction that gets a guard weakened. The definition reads:\n\n"
+        f"{definitions.get(PLANTED_COMMA_JOIN_NAMED_VIEW)!r}"
+    )
+    assert f"{USER_TABLE}.*" in person_table_rows_read_whole(connection).get(
+        PLANTED_COMMA_JOIN_VIEW, set()
+    ), (
+        f"The reading reports `{PLANTED_COMMA_JOIN_VIEW}` and the strict rule's whole-row half does "
+        "not, so the repair stops inside the helper and never reaches the rule CI reads."
+    )
+
+
+@pytest.mark.invariant
+def test_a_whole_row_read_of_an_only_qualified_person_table_is_flagged(db_session: Any) -> None:
+    """`FROM ONLY "user" u` — the shape the two binders in this suite disagreed about.
+
+    `relation_bindings` in `test_identity_separated_views.py` reads `ONLY` and the
+    first version of this binder did not, so one guard saw a relation the other did
+    not — two readings of one question that disagree, which is `docs/MISTAKES.md`
+    entry 13 in the small. `ONLY` suppresses inheritance and changes nothing about
+    what the row carries: `SELECT u.id, to_jsonb(u) FROM ONLY public."user" u` is
+    every column `user` has, with the whole-row dependency row dropped because
+    `u.id` is named.
+
+    **The binding is asserted before the flag**, as in the comma-join control, and
+    for the same reason. **The near miss is planted beside it**: the same `ONLY`
+    form reading one named column must stay silent.
+
+    **Whether `ONLY` survives decompilation is read rather than assumed.** Postgres
+    stores the inheritance flag on the range-table entry and the deparser writes
+    `ONLY ` back out from it, so it is expected to round-trip; if it does not, the
+    definition is the plain form, the binder already handled that, and this test
+    stays green having proved something weaker than its name. The definition is
+    printed in every failure here so the run says which happened.
+
+    **The mutation it exists to survive**: dropping `(?:\\bONLY\\b\\s+)?` from
+    `relation_tokens_bound_to`, which every other control in this batch survives
+    because none of them writes the keyword.
+    """
+    session = db_session
+    hidden = f'CREATE VIEW public.{PLANTED_ONLY_FORM_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id, to_jsonb({GUARDED_PREFIX_ALIAS}) AS payload FROM ONLY public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS}'  # noqa: S608
+    named = f'CREATE VIEW public.{PLANTED_ONLY_FORM_NAMED_VIEW} AS SELECT {GUARDED_PREFIX_ALIAS}.id AS member FROM ONLY public."{USER_TABLE}" {GUARDED_PREFIX_ALIAS}'  # noqa: S608
+    session.execute(text(hidden))
+    session.execute(text(named))
+
+    connection = session.connection()
+    definitions = view_definitions(connection)
+    definition = definitions.get(PLANTED_ONLY_FORM_VIEW, "")
+
+    assert f"{GUARDED_PREFIX_ALIAS}.*" in definition, (
+        f"The decompiled definition carries no `{GUARDED_PREFIX_ALIAS}.*`, so the whole-row form "
+        f"did not survive decompilation and nothing below is about the `ONLY` binding. It "
+        f"reads:\n\n{definition!r}"
+    )
+    tokens = relation_tokens_bound_to(definition, USER_TABLE)
+    assert GUARDED_PREFIX_ALIAS in tokens, (
+        f"The binder does not bind `{GUARDED_PREFIX_ALIAS}` to `{USER_TABLE}` through an `ONLY` "
+        f"qualifier; it bound {sorted(tokens)}. `relation_bindings` in "
+        "`test_identity_separated_views.py` reads that keyword, so with this one blind to it the "
+        "two halves of the §4.1 pair disagree about which relations a statement even mentions. The "
+        f"definition reads:\n\n{definition!r}"
+    )
+
+    detected = decompiled_whole_row_reads(connection, {USER_TABLE})
+    assert (PLANTED_ONLY_FORM_VIEW, USER_TABLE) in detected, (
+        f"`{PLANTED_ONLY_FORM_VIEW}` takes the whole row of an `ONLY`-qualified `{USER_TABLE}` and "
+        f"the reading does not report it; it reported {sorted(detected)}."
+    )
+    assert (PLANTED_ONLY_FORM_NAMED_VIEW, USER_TABLE) not in detected, (
+        f"`{PLANTED_ONLY_FORM_NAMED_VIEW}` reads one named column of an `ONLY`-qualified "
+        f"`{USER_TABLE}` and the reading calls it a whole-row read. The definition reads:\n\n"
+        f"{definitions.get(PLANTED_ONLY_FORM_NAMED_VIEW)!r}"
     )
 
 
@@ -3079,19 +3369,33 @@ def test_every_table_recorded_as_carrying_nothing_is_still_reached_and_still_unr
     something that is not there, and the exemption is invisible because the test
     it feeds is green.
 
-    So both halves are asserted. Every name here must be a table the walk still
-    reaches, and every name here must still be one no rule recognises anything on
-    — the same two conditions the report itself applies, run the other way round.
-    A table that gains a marked column leaves this list in the pull request that
-    marks it, which is the intended cost.
+    So three things are asserted of every name here. It must be a table the walk
+    still reaches; it must still be one no rule recognises anything on; and it must
+    still carry exactly the columns its reason was written against. The first two
+    are the report's own conditions run the other way round. The third is a
+    security review's, and it is the one that makes the entry expire: without it an
+    entry exempts a *name* for as long as the name exists, and a table judged
+    harmless in 2026 goes on being exempt through every column added to it
+    afterwards.
 
     This is the closed-set lesson written into a test: a closed-set guard is
-    defeated one level out, so the set is asserted from both ends rather than
-    from the end that happens to be convenient.
+    defeated one level out, so the set is asserted from every end rather than from
+    the end that happens to be convenient.
 
-    **The mutation it exists to survive**: adding a name to the mapping that no
-    longer needs to be there — the cheapest way to make the report above green,
-    and the one this catches.
+    **What this catches, said exactly, because the first version of this sentence
+    was wrong.** It catches a *stale* entry — a table that has been dropped, and a
+    table that has since gained a marker or an identity-shaped column name and no
+    longer needs exempting — and, through the column pin, an entry whose subject
+    has changed under it. What it does **not** catch is a name added for a table
+    that genuinely is reached and recognised by nothing: exempting such a table is
+    a human's judgement, recorded in the reason, and no test can second-guess it.
+    The column pin is what stops that judgement outliving the thing it was made
+    about.
+
+    **The mutations it exists to survive**: adding `"nrps_call"` to the mapping,
+    which the walk does not reach; adding `"web_login_subject"`, which the marker
+    recognises; and ignoring `record.columns` in `pinned_column_drift`, which is
+    what the planted control below drives.
     """
     assert REACHED_TABLES_THAT_CARRY_NOTHING, (
         "`REACHED_TABLES_THAT_CARRY_NOTHING` is empty, so this test compares nothing and the "
@@ -3099,11 +3403,16 @@ def test_every_table_recorded_as_carrying_nothing_is_still_reached_and_still_unr
         "now, delete this test in the same change and say so; an empty inventory asserted in both "
         "directions is two tests that cannot fail."
     )
-    blank = sorted(name for name, reason in REACHED_TABLES_THAT_CARRY_NOTHING.items() if not reason)
+    blank = sorted(
+        name
+        for name, record in REACHED_TABLES_THAT_CARRY_NOTHING.items()
+        if not record.reason or not record.columns
+    )
     assert not blank, (
-        f"{blank} carry no reason. The reason is the whole value of the entry — it is what a "
-        "reviewer reads when that table next gains a column — and a name with no sentence beside "
-        "it is an exemption nobody has to justify."
+        f"{blank} carry no reason, or no columns for the reason to have been written against. Both "
+        "halves are the entry: the reason is what a reviewer reads when that table next gains a "
+        "column, and the columns are what make that moment arrive. A name with neither is an "
+        "exemption nobody has to justify and nothing can expire."
     )
 
     reached = people_tables(migrated_engine)
@@ -3131,6 +3440,98 @@ def test_every_table_recorded_as_carrying_nothing_is_still_reached_and_still_unr
         "table on their own, so the exemption is doing nothing except hiding the next change to "
         "it. Take the name out of `REACHED_TABLES_THAT_CARRY_NOTHING` in the pull request that "
         "marked the column."
+    )
+
+    drifted = pinned_column_drift(migrated_engine)
+    assert not drifted, (
+        f"{sorted(drifted)} no longer carry the columns their entry was written against. Pinned "
+        "against live, per table: "
+        + "; ".join(
+            f"`{name}` was judged on {pinned} and now holds {live}"
+            for name, (pinned, live) in sorted(drifted.items())
+        )
+        + ".\n\nThis is not a schema defect and the repair is not to update the tuple and move on. "
+        "The entry says a human read that table's columns and judged that the name-and-marker "
+        "sweeps being silent about it was acceptable; a column has arrived since, and the "
+        "judgement has to be made again over the table as it is now. Read the reason beside the "
+        "name, decide whether it is still true of the new column — a free-text note, a "
+        "'last contacted' address, a display name under a spelling the fragments miss are each a "
+        "reason it is not — and then either mark the new column under ADR 0022, which takes the "
+        "table out of this mapping altogether, or re-earn the entry by updating both the columns "
+        "and the sentence in the same pull request."
+    )
+
+
+@pytest.mark.invariant
+def test_a_column_added_to_a_recorded_table_expires_its_entry(db_session: Any) -> None:
+    """The pin found doing its work, on a table that certainly has an entry.
+
+    The closure test above asserts an absence — no recorded table has drifted —
+    and an absence is also what a pin that compares nothing produces
+    (`docs/MISTAKES.md` entry 3). So the drift is planted: a column is added to a
+    table the mapping records, inside the transaction, and the same computation the
+    closure test reads must report it.
+
+    **The clean state is asserted first, in the same transaction.** Without it a
+    failure here cannot be told from the mapping already disagreeing with the
+    schema before this test touched anything — a different defect, with a different
+    fix, diagnosed by the closure test rather than by this one.
+
+    **The planted column is deliberately one no fragment matches.** A column called
+    `student_email` would take `enrollment` out of the mapping through the
+    recognition rule instead, and this control would go green having proved the
+    wrong mechanism.
+
+    **The mutation it exists to survive**: dropping the column comparison from
+    `pinned_column_drift` — `if live != sorted(record.columns)` made unconditionally
+    false, or the function reduced to `return {}` — which leaves every other test in
+    this file green, because on the unmutated schema the drift is empty anyway. That
+    is exactly the shape of guard that ships looking like a guarantee.
+    """
+    session = db_session
+    assert ENROLLMENT_TABLE in REACHED_TABLES_THAT_CARRY_NOTHING, (
+        f"`{ENROLLMENT_TABLE}` is not recorded in `REACHED_TABLES_THAT_CARRY_NOTHING`, so adding a "
+        f"column to it drifts no entry and this control is about nothing. It records "
+        f"{sorted(REACHED_TABLES_THAT_CARRY_NOTHING)}; plant against one of those."
+    )
+
+    connection = session.connection()
+    before = pinned_column_drift(connection)
+    assert not before, (
+        f"{sorted(before)} had already drifted from their pinned columns before this test added "
+        f"anything: {before}. The plant below would then be indistinguishable from the state the "
+        "schema was already in, so this control proves nothing until the closure test above is "
+        "green — that is where a mapping out of step with the schema is diagnosed."
+    )
+
+    session.execute(
+        text(f"ALTER TABLE public.{ENROLLMENT_TABLE} ADD COLUMN {PLANTED_DRIFT_COLUMN} text")
+    )
+
+    connection = session.connection()
+    after = pinned_column_drift(connection)
+    assert ENROLLMENT_TABLE in after, (
+        f"A column was added to `{ENROLLMENT_TABLE}`, which the mapping records against a fixed "
+        f"column set, and the pin does not report it; it reported {sorted(after)}. Then an entry "
+        "exempts a table name for as long as the name exists: the reason was written about the "
+        "columns that were there when somebody read them, and every column added afterwards "
+        "inherits the exemption without anybody looking at it."
+    )
+    pinned, live = after[ENROLLMENT_TABLE]
+    assert PLANTED_DRIFT_COLUMN in live and PLANTED_DRIFT_COLUMN not in pinned, (
+        f"`{ENROLLMENT_TABLE}` is reported as drifted and the planted column is not what the "
+        f"report is about: it says the entry was judged on {pinned} and the table now holds "
+        f"{live}. The drift is real but it is somebody else's, so this control has caught the "
+        "state the assertion above was supposed to have refused."
+    )
+    assert ENROLLMENT_TABLE not in unclassified_reached_tables(connection) and (
+        ENROLLMENT_TABLE,
+        PLANTED_DRIFT_COLUMN,
+    ) not in identity_bearing_columns(connection), (
+        f"`{PLANTED_DRIFT_COLUMN}` is recognised by the fragment rule, or the report now names "
+        f"`{ENROLLMENT_TABLE}`. Either way the planted column is visible to a sweep on its own, so "
+        "the drift asserted above is not the thing being measured — the pin is what has to catch a "
+        "column the sweeps cannot see, and a column they can see needs no pin to be noticed."
     )
 
 

@@ -26,14 +26,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2, the first epic to add a view after the guard.
    **Fixed by E1's cleanup Batch A** (`e1/sweep-closures`), inside E1 after
    all. `decompiled_whole_row_reads` in `test_identity_column_marker.py`
-   reads `pg_get_viewdef` for every view holding a column-grain edge to a
-   guarded table and reports a whole-row token of that table's aliases; its
-   result is unioned into both whole-row consumers, so the join-hidden form
-   travels the chain like a catalog edge. Proven by the hidden-case plant
-   (a view naming `u.id` *and* taking `to_jsonb(u)`, which drops the
-   `refobjsubid = 0` row), by alias near-misses, and by a battery mutation
-   that hid a whole-row read behind a join in a live `views_sql/` file and
-   watched the check fail.
+   reads `pg_get_viewdef` for every view and materialized view in `public`
+   — deliberately not gated on any dependency edge, so a view holding a
+   whole-row reference and no column edge is still read — and reports a
+   whole-row token of a guarded table's aliases; its result is unioned into
+   both whole-row consumers, so the join-hidden form travels the chain like
+   a catalog edge. Proven by the hidden-case plant (a view naming `u.id`
+   *and* taking `to_jsonb(u)`, which drops the `refobjsubid = 0` row), by
+   the comma-join and `ONLY` spellings the security round added, by alias
+   near-misses, and by a battery mutation that hid a whole-row read behind
+   a join in a live `views_sql/` file and watched the check fail.
 
 2. **`PERSON_TABLES` is a hand-written closed list.** Nothing guards that a
    future person table joins it. E1-05 and E1-11 are the tickets that could
