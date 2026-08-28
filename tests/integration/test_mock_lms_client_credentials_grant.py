@@ -37,13 +37,27 @@ its own scope section — "E1-11's client is only conformant if nonconformance i
 distinguishable" — and a platform answering one code for all six is a platform
 whose client cannot tell a clock problem from a key problem.
 
-**The services do not begin requiring a token here**, which is E1-06's ruling and
-not an omission. Enforcement pairs with E1-11's client, so there is no test below
-that an unauthenticated roster read is refused, and `MockPlatform.
-refuse_an_unspecified_token_flow` still reports a 401 from NRPS or AGS as a gap.
-What the conformance test asserts is the whole sequence completing — token
-requested with a tool-signed assertion, token attached, container returned — which
-is the carried entry's own definition of done.
+**The services did not begin requiring a token here**, which was E1-06's ruling and
+not an omission: enforcement paired with E1-11's client. **That pairing has since
+landed for NRPS.** The roster route now refuses a read that carries no token, one
+the endpoint never issued, or one without the membership scope, and those refusals
+are asserted in `test_mock_lms_nrps_requires_a_token.py` rather than here — this
+module's subject is the endpoint that grants the token, not the service that checks
+it. `MockPlatform.refuse_an_unspecified_ags_token_flow`, which used to report a 401
+from either service as a gap, is narrowed to **AGS**, where the original argument
+still holds: SPEC §14.3 gives grade passback to E3, so no AGS client exists yet.
+
+What the conformance test at the foot of this module asserts is unchanged and is
+the whole sequence completing — token requested with a tool-signed assertion, token
+attached, container returned — which is the carried entry's own definition of done.
+
+**Why this module still builds its own token request by hand.** Every other suite
+that needs a credential now goes through one helper,
+`tests/fixtures/client_credentials.py::access_token_granted_to`, reached as
+`MockPlatform.service_token` (`docs/MISTAKES.md` entry 13). This module is the one
+that does not, deliberately: the *shape* of the form and the code each malformed one
+is refused with are its subject, so a conformance test driven through that helper
+would be checking the helper against itself (`docs/MISTAKES.md` entry 19).
 
 **How the platform is told what the tool's key is.** Through one seam, described
 in `tests/fixtures/client_credentials.py`, which pins an interface the ticket
@@ -105,6 +119,30 @@ ASSERTION_SKEW_ALLOWANCE_SECONDS = 30
 # a bound tested from one side only is satisfied by a platform with no bound at
 # all, or by one that refuses everything.
 ASSERTION_LIFETIME_BOUND_SECONDS = 300
+
+# How far past the wall-clock line the refused half of that clamp's pair is dated.
+# **This suite's choice, and it is a repair to a flake rather than part of the
+# contract**, so it is named here with what it buys and what it costs rather than
+# left as a magic `+ 1`.
+#
+# The clamp compares the assertion's `exp` against **the platform's** clock at the
+# moment it reads it, and this test computes `exp` from **its own** read some
+# milliseconds earlier — signing an assertion, posting it, letting the platform
+# fetch a key set and verify a signature all happen in between. `int(time.time())`
+# truncates downward, which costs up to another second. So the two clocks differ by
+# a small positive amount, and an `exp` exactly one second past the line lands back
+# inside it whenever that amount reaches a second: measured as a real failure in a
+# combined run, passing when the module ran alone.
+#
+# **What five seconds buys**: the refusal is attributable to the clamp under any
+# drift a loaded run plausibly produces. **What it costs**: the line is pinned to
+# five seconds rather than to one, so a platform whose clamp sat anywhere in
+# [330, 335) would pass both halves. Against a line at 330 seconds built out of a
+# 300-second bound and a 30-second allowance, that is a resolution the numbers do
+# not depend on. The *accepted* half is deliberately not widened and still sits
+# exactly on the line, because drift moves it the safe way — a later platform clock
+# raises the ceiling — so that half stays as tight as it ever was.
+WALL_CLOCK_DRIFT_MARGIN_SECONDS = 5
 
 # The scopes a token may be requested for. **Specification constants, not this
 # suite's choice**, and the same strings `test_mock_lms_ags_line_items_and_scores.py`
@@ -1122,22 +1160,27 @@ def test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_re
     requirement rather than a formality: a tool whose clock is 30 seconds fast is an
     honest tool, and the allowance exists so that this endpoint does not refuse it.
 
-    **One second either side of the line**, for the reason the lifetime bound's own
-    pair gives: a refusal at an hour and an acceptance at a minute is satisfied by a
-    clamp anywhere between them.
+    **Close either side of the line**, for the reason the lifetime bound's own pair
+    gives: a refusal at an hour and an acceptance at a minute is satisfied by a clamp
+    anywhere between them. The accepted half sits *exactly* on the line. The refused
+    half sits `WALL_CLOCK_DRIFT_MARGIN_SECONDS` past it rather than one second past
+    it, and that constant carries the whole reason — this test reads one clock and
+    the platform reads another a moment later, so a one-second margin is a race
+    rather than a measurement. Each half reads the clock immediately before its own
+    request, so neither pays for the other's round trip.
     """
-    now = int(time.time())
     bound = ASSERTION_LIFETIME_BOUND_SECONDS
     allowance = ASSERTION_SKEW_ALLOWANCE_SECONDS
 
+    now = int(time.time())
     at_the_line = claims_for_an_assertion(client_id, token_url, issued_at=now + allowance)
-    assert at_the_line["exp"] - at_the_line["iat"] <= bound, (
-        "The claims this test means to sit at the wall-clock line already break the lifetime "
-        "bound, so it would be refused for its stated lifetime and this test would say nothing "
-        "about the clamp."
-    )
     at_the_line["exp"] = now + bound + allowance
     at_the_line["iat"] = at_the_line["exp"] - bound
+    assert at_the_line["exp"] - at_the_line["iat"] == bound, (
+        "The claims this test means to sit at the wall-clock line do not state the permitted "
+        "lifetime, so this half would be refused for its stated lifetime instead and would say "
+        "nothing about the clamp."
+    )
     granted(
         platform,
         token_url,
@@ -1146,19 +1189,30 @@ def test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_re
         f"lifetime of {bound}",
     )
 
+    # Read again here rather than reusing the read above: the grant that just
+    # happened signed an assertion, posted it, and had a key set fetched and a
+    # signature verified, and every millisecond of that would otherwise come out of
+    # this half's margin.
+    now = int(time.time())
+    past = bound + allowance + WALL_CLOCK_DRIFT_MARGIN_SECONDS
     past_the_line = claims_for_an_assertion(client_id, token_url)
-    past_the_line["exp"] = now + bound + allowance + 1
+    past_the_line["exp"] = now + past
     past_the_line["iat"] = past_the_line["exp"] - bound
+    assert past_the_line["exp"] - past_the_line["iat"] == bound, (
+        "The assertion this test means to be refused by the clamp states a lifetime other than "
+        f"{bound}, so it would be refused for that instead and the refusal would be about the "
+        "bound rather than about the platform's own clock."
+    )
     refused(
         platform,
         token_url,
         token_request(tool_key_pair.sign(past_the_line), NRPS_MEMBERSHIP_SCOPE),
         INVALID_GRANT,
-        f"An assertion expiring {bound + allowance + 1} seconds from now — one second past the "
-        "bound plus the stated skew — whose own arithmetic still claims a "
-        f"{bound}-second lifetime",
-        f"An assertion expiring {bound + allowance} seconds from now, dated the same way, was "
-        "granted a moment ago,",
+        f"An assertion expiring {past} seconds from now — "
+        f"{WALL_CLOCK_DRIFT_MARGIN_SECONDS} past the bound plus the stated skew — whose own "
+        f"arithmetic still claims a {bound}-second lifetime",
+        f"An assertion expiring exactly {bound + allowance} seconds from now, dated the same way, "
+        "was granted a moment ago,",
     )
 
 
@@ -1186,12 +1240,14 @@ def test_a_roster_is_read_with_a_token_obtained_the_way_a_service_connector_obta
     advertises an endpoint it does not serve answers HTML. Each of those is a
     separate test above, and this is the one that says they compose.
 
-    **What it deliberately cannot say.** E1-06 rules that NRPS does not yet
-    require a token, so a roster that answered the same way with no header at all
-    would satisfy the last step. That is stated rather than hidden: the substance
-    here is the grant, and the roster read is what proves the granted token is
-    presentable — a token a service refuses is not one E1-11 can use, and
-    enforcement arrives with that ticket.
+    **What it could not say when it was written, and what now says it.** Under
+    E1-06's ruling NRPS did not require a token, so a roster that answered the same
+    way with no header at all would have satisfied the last step; the substance
+    here was the grant, and the roster read only proved the granted token was
+    presentable. E1-11's fix round closed that half: a tokenless read is refused,
+    asserted in `test_mock_lms_nrps_requires_a_token.py`. This test is unchanged and
+    still asserts what it always did — that the four parts compose into a sequence
+    a conformant client can complete.
     """
     contexts = platform.seeded_contexts()
     assert contexts, (

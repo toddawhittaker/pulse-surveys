@@ -73,6 +73,7 @@ from uuid import uuid4
 
 import pytest
 
+from fixtures.client_credentials import key_pair_from_pem
 from fixtures.doors import routed_through
 from fixtures.lti_services import NRPS_CLAIM, NRPS_MEDIA_TYPE
 from fixtures.supervision import require_column, require_table, single_primary_key
@@ -524,12 +525,15 @@ class ServiceWire:
         """Answer 401 to a service read that carries no bearer token.
 
         **The harness's gate, not the platform's**, and the difference is stated
-        rather than hidden: E1-06 ruled that the mock's Advantage services do not
-        require a token and E1-11's boundary keeps it that way, so an
-        unauthenticated roster read still answers 200 against the real mock. What
-        this switch turns on is the *conformance* question AC1 asks — that the
-        client has no unauthenticated path left in it — and it can only be asked by
-        something that refuses one.
+        rather than hidden. It was written when E1-06's ruling stood and an
+        unauthenticated roster read still answered 200 against the real mock;
+        E1-11's fix round closed that, so the mock refuses one now too. This gate
+        stays, and for a reason the mock's own refusal does not cover: what it
+        turns on is the *conformance* question AC1 asks — that the client has no
+        unauthenticated path left in it — asserted over the wire the client's own
+        requests are recorded on, where a second path can be seen rather than
+        inferred from a status code. The mock's refusal is asserted in
+        `tests/integration/test_mock_lms_nrps_requires_a_token.py`.
         """
         self.refuse_unauthenticated = True
 
@@ -1098,8 +1102,16 @@ def roster_platforms(
         # The platform fetches the tool's key set while it verifies an assertion
         # (ADR 0084 decision 4, and the seam `tests/fixtures/client_credentials.py`
         # pins). Installed after the platform's lifespan has run, for the reason
-        # that fixture gives.
+        # that fixture gives, and it replaces the driver's own default: here the
+        # key set the platform verifies against is the **real tool's**, served out
+        # of the `tool_signing_key` row at `/lti/jwks`.
         platform.application.state.http = routed_through({tool_host: _Held(tool)})
+        # So an assertion this driver signs has to be signed with that same row.
+        # Without this the platform would refuse it as `invalid_client` — the key
+        # is not in the set it just fetched — and every ground-truth roster read
+        # in this suite would fail at the mock's NRPS token check rather than say
+        # anything about the sync (`docs/MISTAKES.md` entry 22).
+        platform.tool_key_pair = key_pair_from_pem("e1-11-stored-tool-key", stored_signing_key)
 
         contexts = platform.seeded_contexts()
         assert contexts, (

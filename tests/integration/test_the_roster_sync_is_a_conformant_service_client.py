@@ -7,15 +7,18 @@ assertion, attached to every service call, the way `pylti1p3`'s `ServiceConnecto
 performs it" — and this module is that sequence asserted from the client's side of
 the wire.
 
-**Why the evidence is what the client *sent* rather than what it got back.** E1-06
-ruled that the mock's Advantage services do not begin requiring a token — "a roster
-read with no `Authorization` header still answers" (ADR 0084's consequences) — and
-E1-11's boundary keeps the mock that way. So a 200 from the membership service says
-nothing at all about whether a token was attached, and a test written on it would
-pass against exactly the client this ticket exists to replace. Every assertion below
-reads `service_wire`, which records each request as it left the client, and the
-forbidden-state half turns the harness's own gate on: a wire that refuses an
-unauthenticated read, so that a client with any such path left in it fails.
+**Why the evidence is what the client *sent* rather than what it got back.** These
+assertions were written while E1-06's ruling stood — the mock's Advantage services
+did not require a token, "a roster read with no `Authorization` header still
+answers" (ADR 0084's consequences) — so a 200 from the membership service said
+nothing about whether a token had been attached. **E1-11's fix round changed that
+for NRPS**, and the evidence here stays where it is anyway, because a status code
+is still the weaker instrument: it says a token arrived, not that every path in the
+client sends one. Every assertion below reads `service_wire`, which records each
+request as it left the client, and the forbidden-state half turns the harness's own
+gate on: a wire that refuses an unauthenticated read, so that a client with any such
+path left in it fails. The mock's own refusal is asserted next door, in
+`test_mock_lms_nrps_requires_a_token.py`.
 
 **The controls come first and they must be green.** The wire, the composed roster
 and the two-platform arrangement are new machinery, and machinery whose only
@@ -138,14 +141,30 @@ def test_the_wire_carries_a_request_to_the_platform_and_refuses_an_unmounted_hos
     is what stands between "the sync resolved the wrong platform" and a silent
     pass (deferred E1-10 item 1's failure mode).
 
+    **The fetch carries a real access token, and dispute E1-11-06 is why.** This
+    read used to carry no `Authorization` header at all, from a time when the mock
+    served its roster to anybody; E1-11's fix round made the route require a token
+    the platform's own endpoint issued, and SPEC §14.3's E1 exit line is what that
+    serves — "a roster read succeeds as an authenticated service call, not an
+    unauthenticated GET", a distinction only the platform can draw. What this test
+    is *for* is unchanged and never needed an unauthenticated read: it asks whether
+    the transport carries a request to the platform and brings a container back.
+    The token is obtained the way every other read in this suite obtains one, from
+    the one helper in `tests/fixtures/client_credentials.py`, reached through the
+    platform driver.
+
     **A red here means these tests are broken, not the sync.**
     """
     session = service_wire.session()
 
-    answered = session.get(str(synced_section.address))
+    answered = session.get(
+        str(synced_section.address),
+        headers={"authorization": f"Bearer {synced_section.platform.nrps_token()}"},
+    )
     assert answered.status_code == 200, (
         f"The wire answered {answered.status_code} for the section's own stored roster address "
-        f"{synced_section.address!r}. Body begins {answered.text[:200]!r}."
+        f"{synced_section.address!r}, carrying a token this platform's own endpoint issued for the "
+        f"membership scope. Body begins {answered.text[:200]!r}."
     )
     assert isinstance(answered.json().get("members"), list), (
         f"The wire carried back {answered.text[:200]!r}, which is not an NRPS membership "
@@ -167,35 +186,72 @@ def test_the_wire_refuses_a_service_read_that_carries_no_bearer_token(
 ) -> None:
     """The gate AC1's forbidden state is asserted with, proven able to fire.
 
-    `refusing_unauthenticated_reads` is a harness gate rather than the platform's,
-    because E1-06 ruled the mock's services do not require a token. A gate nobody
-    has watched refuse anything is a comment (`docs/MISTAKES.md` entry 9), and the
-    test that rests on it —
+    `refusing_unauthenticated_reads` is a harness gate rather than the platform's.
+    It was built when E1-06's ruling stood and the mock required no token; E1-11's
+    fix round made the mock refuse too, and the gate stays because this suite
+    asserts over the wire the client's requests are recorded on rather than over
+    the mock's status codes. A gate nobody has watched refuse anything is a comment
+    (`docs/MISTAKES.md` entry 9), and the test that rests on it —
     `test_the_sync_has_no_unauthenticated_path_to_the_roster` — would then be green
     against a client that attaches nothing.
 
-    Both directions, one request apart: the same URL with a bearer token and
-    without one.
+    **Three requests, and the third one is what dispute E1-11-06 cost.** The
+    accepted half used to present the string `"Bearer a-token-shaped-string"`,
+    which the harness gate lets past and which the platform now refuses; the ruling
+    puts a real token there so the 200 is genuine end to end. That change takes
+    something away, and it is put back rather than left implicit: once the platform
+    refuses a bare read too, a 401 on the refused half no longer says *which* of the
+    two refused it, so on its own it would no longer prove this gate fires at all —
+    which is precisely the state entry 9 warns about, wearing a passing test.
+
+    So the two refusers are told apart by what they answer with. The platform's
+    refusal carries an RFC 6750 §3 `WWW-Authenticate: Bearer` challenge, required by
+    `test_mock_lms_nrps_requires_a_token.py`; the wire's carries none, because it
+    answers `{"error": "invalid_token"}` and nothing else. The bare read is
+    therefore made twice — once with the gate off, which reaches the platform and
+    comes back challenged, and once with it on, which does not and comes back
+    unchallenged. Both directions of the instrument, so neither reading is an
+    absence taken on trust (`docs/MISTAKES.md` entry 3).
 
     **A red here means these tests are broken, not the sync.**
     """
-    service_wire.refusing_unauthenticated_reads()
     session = service_wire.session()
+    token = synced_section.platform.nrps_token()
 
-    granted = session.get(
-        str(synced_section.address), headers={"authorization": "Bearer a-token-shaped-string"}
-    )
+    granted = session.get(str(synced_section.address), headers={"authorization": f"Bearer {token}"})
     assert granted.status_code == 200, (
-        f"The wire refused a read carrying a bearer token with {granted.status_code}, so its gate "
-        "refuses everything and the pair below would be about nothing."
+        f"The wire answered {granted.status_code} for a read carrying a token this platform's own "
+        "endpoint issued, so either the transport or the platform refuses a read that must "
+        "succeed, and every half of the pair below would be about nothing."
     )
+
+    reaches_the_platform = session.get(str(synced_section.address))
+    assert reaches_the_platform.status_code == 401, (
+        f"With this suite's gate still off, a bare read reached the platform and was answered "
+        f"{reaches_the_platform.status_code}. `test_mock_lms_nrps_requires_a_token.py` is where "
+        "that refusal is the subject; here it is the instrument, and without it the pair below "
+        "cannot say which side did the refusing."
+    )
+    assert reaches_the_platform.headers.get("www-authenticate"), (
+        "The platform's own refusal of a bare read carries no `WWW-Authenticate` header, so it is "
+        "indistinguishable from this suite's wire gate, which sends none. The assertion below "
+        "would then hold whether the gate fired or not."
+    )
+
+    service_wire.refusing_unauthenticated_reads()
 
     refused = session.get(str(synced_section.address))
     assert refused.status_code == 401, (
         f"The wire answered {refused.status_code} for a read carrying no `Authorization` header "
-        "while its unauthenticated gate was on. That gate is the only thing in this suite that "
-        "refuses an unauthenticated roster read — the mock deliberately does not — so with it "
-        "inert, AC1's forbidden state cannot be asserted at all."
+        "while its unauthenticated gate was on. That gate is what AC1's forbidden state is "
+        "asserted through — it refuses on the wire, where a second path in the client is visible "
+        "rather than inferred — so with it inert, that state cannot be asserted at all."
+    )
+    assert not refused.headers.get("www-authenticate"), (
+        "The refusal carries a `WWW-Authenticate` challenge, which is the platform's answer and "
+        "not this wire's — so the request went past the gate to the mock, the gate did not fire, "
+        "and `test_the_sync_has_no_unauthenticated_path_to_the_roster` rests on something that "
+        "has never been watched refuse anything (`docs/MISTAKES.md` entry 9)."
     )
 
 
@@ -270,10 +326,11 @@ def test_the_sync_reads_the_roster_with_a_token_it_requested_with_a_tool_signed_
     Four things have to be true at once and each is a separate mutation:
 
       - a **client-credentials grant** was posted to the token endpoint the
-        section's own registration carries, asking for the NRPS scope. A client
-        that skipped the grant and read the roster reaches a 200 from this mock,
-        which is why this is asserted from the request record rather than from the
-        answer.
+        section's own registration carries, asking for the NRPS scope. Asserted
+        from the request record rather than from the answer, and still asserted
+        that way now that the mock refuses an unauthenticated read: a status code
+        says a token arrived on *this* call, while the record says the client has
+        one path and it is this one.
       - its `client_assertion` **verifies against the tool's published key set**.
         Signed with any other key it is refused by every real platform, and by this
         one — ADR 0084 decision 4. A decode is not enough: a decoded assertion
@@ -316,8 +373,8 @@ def test_the_sync_reads_the_roster_with_a_token_it_requested_with_a_tool_signed_
     assert roster_contract.membership_scope in " ".join(body.get("scope", [])).split(), (
         f"The grant asked for scope {body.get('scope')!r} and not "
         f"{roster_contract.membership_scope!r}. A token is granted for the exact scope string the "
-        "NRPS claim names, and one granted for anything else is a token the service will refuse "
-        "the moment E1-06's deferred enforcement lands."
+        "NRPS claim names, and one granted for anything else is a token this service refuses — "
+        "403 `insufficient_scope`, since E1-11's fix round landed the enforcement E1-06 deferred."
     )
 
     assertion = (body.get("client_assertion") or [""])[0]
@@ -342,7 +399,9 @@ def test_the_sync_reads_the_roster_with_a_token_it_requested_with_a_tool_signed_
         assert token, (
             f"A roster read carried `Authorization` {call.authorization!r}. The exit clause this "
             "ticket exists for is that the roster read is 'an authenticated service call, not an "
-            "unauthenticated GET', and this mock answers either."
+            "unauthenticated GET'. The mock refuses the second now, so this would also have failed "
+            "at the platform — but it is asserted here, on what the client sent, because that is "
+            "what says the client has no second path rather than that this one call was refused."
         )
         assert token.count(".") == 2 and synced_section.platform.verifies(token) is not None, (
             "The token the sync presented on the roster read is not one this platform issued: it "

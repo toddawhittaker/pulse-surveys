@@ -31,6 +31,21 @@ installs the tool's. `ToolKeySetServer.requested` records every URL asked for, s
 generated once per pytest run and live in memory, which is SPEC §9.1's rule and the
 reason `tests/unit/test_mock_lms_service.py`'s repository-wide sweep can stay an
 equality against zero.
+
+**The one place a test obtains an access token.** `client_credentials_form` and
+`access_token_granted_to` are the grant sequence — form, assertion, post, token —
+extracted out of `tests/integration/test_mock_lms_client_credentials_grant.py`'s
+machinery so that the suites that merely *need* a token have one helper rather than
+a copy each (`docs/MISTAKES.md` entry 13). Every such asker reaches it through
+`MockPlatform.service_token`, which supplies the post; nothing calls it twice over.
+
+That grant module is deliberately the one caller that goes on building its own
+request by hand, and the reason is not oversight: its subject **is** the shape of
+the form and the codes each malformed one is refused with, so a conformance test
+driven through this helper would be checking the helper against itself
+(`docs/MISTAKES.md` entry 19). What keeps the two from drifting is
+`test_mock_lms_nrps_requires_a_token.py`'s control on the form's members, which
+fails if this helper stops posting what RFC 6749 §4.4 and RFC 7523 §2.2 require.
 """
 
 import base64
@@ -63,6 +78,13 @@ DEFAULT_ASSERTION_LIFETIME_SECONDS = 60
 # route through (`docs/MISTAKES.md` entry 13 is about a hazard, and this is a
 # specification's own list).
 PRIVATE_JWK_MEMBERS = frozenset({"d", "p", "q", "dp", "dq", "qi", "k"})
+
+# The grant and the assertion profile, spelled as RFC 6749 §4.4 and RFC 7523 §2.2
+# spell them. Specification constants: a platform accepting some other spelling is
+# one no conformant client reaches, which is why the grant suite transcribes the
+# same two strings independently rather than importing these.
+CLIENT_CREDENTIALS_GRANT = "client_credentials"
+JWT_BEARER_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
 # One RSA key pair per label, for the length of a pytest run. Generating a
 # 2048-bit key is the slow part and nothing here is a credential: it exists in
@@ -144,9 +166,15 @@ class ToolKeyPair:
     how the assertion was built.
     """
 
-    def __init__(self, label: str) -> None:
+    def __init__(self, label: str, private_key: Any | None = None) -> None:
         self.label = label
-        self.private_key = rsa_key(label)
+        # `private_key` is for the one caller that cannot generate its own: the
+        # roster-sync fixture, where the key the platform will verify against is
+        # the *tool's* stored `tool_signing_key` row rather than anything this
+        # module made up. A pair built from that PEM signs assertions the real
+        # tool's published key set verifies, which is what lets the shared token
+        # helper work against a platform pointed at the real tool's JWKS route.
+        self.private_key = rsa_key(label) if private_key is None else private_key
 
     def jwk(self) -> dict[str, Any]:
         """The public half, as RFC 7517 spells a signing key.
@@ -241,6 +269,94 @@ def assertion_claims(
         "iat": issued,
         "exp": issued + lifetime,
     }
+
+
+def key_pair_from_pem(label: str, private_key_pem: str) -> ToolKeyPair:
+    """A `ToolKeyPair` over a private key that already exists, given as a PEM.
+
+    For the caller whose key is not this module's to invent: the roster-sync
+    fixture points its platform at the real tool's `/lti/jwks`, so an assertion
+    that platform will accept has to be signed by the `tool_signing_key` row the
+    tool publishes. Loading the row's PEM is the only way to hold both halves.
+    """
+    from cryptography.hazmat.primitives import serialization
+
+    loaded = serialization.load_pem_private_key(private_key_pem.encode("ascii"), password=None)
+    return ToolKeyPair(label, private_key=loaded)
+
+
+# ---------------------------------------------------------------------------
+# The grant, as the one sequence every suite that merely needs a token uses.
+# ---------------------------------------------------------------------------
+
+
+def client_credentials_form(assertion: str | None, scope: str) -> dict[str, str]:
+    """The form body `ServiceConnector` posts to a platform's token endpoint.
+
+    `assertion` may be `None`, which posts the body **without** a
+    `client_assertion` member rather than with an empty one: a missing parameter
+    and an empty one are two different requests, and the missing one is the case a
+    fail-open check matches.
+    """
+    body = {
+        "grant_type": CLIENT_CREDENTIALS_GRANT,
+        "client_assertion_type": JWT_BEARER_ASSERTION_TYPE,
+        "scope": scope,
+    }
+    if assertion is not None:
+        body["client_assertion"] = assertion
+    return body
+
+
+def access_token_granted_to(
+    post: Callable[[str, dict[str, str]], Any],
+    *,
+    token_url: str,
+    client_id: str,
+    key_pair: ToolKeyPair,
+    scope: str,
+) -> dict[str, Any]:
+    """One client-credentials grant, from a signed assertion to the token response.
+
+    The whole sequence in one place, because every suite below the grant module
+    asks the same question — "give me a token I can present to a service" — and a
+    copy per suite is `docs/MISTAKES.md` entry 13 in the shape this fix round is
+    most exposed to: enforcement lands, six modules need a token, and five of them
+    grow their own minting code that drifts from the sixth.
+
+    `post` is supplied by the caller rather than a client being built here, so the
+    request travels over whatever seam that caller's platform is reachable through.
+
+    **A failure here is the machinery, not the platform.** Everything this asserts
+    — that the endpoint answered 200 with an `access_token` — is already the
+    subject of `test_mock_lms_client_credentials_grant.py`, so a red raised from
+    inside this helper means a test that only wanted a credential could not get
+    one, and the grant suite is where the reason is diagnosed.
+    """
+    claims = assertion_claims(client_id, token_url)
+    response = post(token_url, client_credentials_form(key_pair.sign(claims), scope))
+    if response.status_code != 200:
+        pytest.fail(
+            f"Asking `{token_url}` for an access token carrying {scope!r} answered "
+            f"{response.status_code} rather than 200, so a test that needed a credential to "
+            "present to a service has none. That is this suite's machinery failing rather than "
+            "the thing under test: `test_mock_lms_client_credentials_grant.py` is where a refused "
+            f"grant is diagnosed. Body begins {response.text[:300]!r}."
+        )
+    try:
+        granted = response.json()
+    except ValueError:
+        pytest.fail(
+            f"`{token_url}` answered 200 with a body that is not JSON, so there is no "
+            f"`access_token` to read. Body begins {response.text[:300]!r}."
+        )
+    if not isinstance(granted, dict) or not str(granted.get("access_token") or ""):
+        pytest.fail(
+            f"`{token_url}` answered 200 with {granted!r}, which carries no `access_token`. RFC "
+            "6749 §5.1 makes that member REQUIRED, and an empty one is a credential every service "
+            "refuses — which would read as the service being wrong."
+        )
+    return granted
 
 
 @pytest.fixture
