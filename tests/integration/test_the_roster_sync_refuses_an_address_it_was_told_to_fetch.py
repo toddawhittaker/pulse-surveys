@@ -862,3 +862,181 @@ def test_a_development_stack_fetches_its_own_roster_host_without_resolving_it(
         "The development stack's roster member was not ingested, so whatever this asserts about "
         "resolution is being asserted about a walk that did not happen."
     )
+
+
+def test_a_development_stack_refuses_a_hop_off_its_own_host_that_resolves_privately(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    development_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+) -> None:
+    """The other half of the exemption: what a development stack still judges.
+
+    The test above proves a development stack does **not** resolve its own stored
+    roster host. On its own that is only half a statement, and the missing half is
+    the one the exemption exists to protect: everywhere the platform points the
+    walk *other* than that host is judged, in development exactly as in a
+    deployment. Without this, "the exemption works" is satisfied by a development
+    stack that judges nothing at all — which is the whole of rule 5 switched off
+    on every developer's machine and in every `make seed` demo, with the mock
+    platform free to page the walk into anything the host can route to.
+
+    **The mutation this kills**: `development_exempt_host=exempt_host` at the
+    sync's per-URL judgment mutated to `development_exempt_host=None`. Under the
+    settled design that argument is what *turns rule 5 on* in development — with
+    `None` the rules are off there entirely — so the mutation does not weaken the
+    exemption, it removes the judgment. It survives every other test in this
+    module: the deployment-side tests ignore the argument (rule 5 fires there
+    regardless of it), and the development test above only ever asserts that
+    something was **not** resolved, which is even more true when nothing is.
+
+    A refusal test whose subject is an argument that switches judging on cannot
+    rest on the refusal alone (`docs/MISTAKES.md` entry 3): a walk that fetched
+    nothing hostile because it never got that far reads identically. So the
+    resolver is required to have been **asked about the hostile host** — that is
+    the fingerprint of rule 5 running, and it is exactly what the mutation
+    removes.
+
+    The refusal contract is the deployment-side test's, unchanged and asserted
+    again here because it is a different code path reaching it: the walk stops,
+    the row is recorded against the section's **stored** address with a NULL
+    `response_code` (ADR 0096, which fixes both), the platform-chosen URL never
+    reaches the `nrps_call.url` column a console reads, and the first page's
+    member is kept.
+
+    The hop is spelled `https` deliberately. Were the environment misread as a
+    deployment, the mock's own cleartext stored address would be refused at the
+    *first* page and the ingestion assertion at the foot of this test would say so
+    — so this cannot quietly become a deployment test.
+    """
+    hostile = f"https://{roster_contract.an_internal_host}/memberships"
+    reachable = a_subject("before-the-development-hop")
+    # The stored host is deliberately absent from the stub: it is the exempt one,
+    # nothing may resolve it, and a lookup would raise rather than be answered.
+    resolver = resolving({roster_contract.an_internal_host: (roster_contract.a_private_address,)})
+    service_wire.serve(
+        compose_a_roster(
+            synced_section,
+            [roster_contract.member(reachable)],
+            next_url=hostile,
+        )
+    )
+
+    sync(
+        roster_sync,
+        synced_section,
+        service_wire,
+        committed_rows,
+        development_settings,
+        resolve=resolver,
+    )
+
+    assert not [call for call in service_wire.calls if call.url == hostile], (
+        f"A development stack fetched {hostile!r}, whose host resolves to "
+        f"{roster_contract.a_private_address!r}, because the platform's `Link` header named it. "
+        "The exemption is for the section's own stored address and for nothing else; a hop off it "
+        "is a URL the platform chose, and the tool's Bearer token goes with the request."
+    )
+    asked = [host.lower().rstrip(".") for host in resolver.asked]
+    assert roster_contract.an_internal_host in asked, (
+        f"The sync resolved {resolver.asked!r} and never asked about "
+        f"{roster_contract.an_internal_host!r}. Then rule 5 did not run for the hop at all, and "
+        "whatever stopped the walk was not the address being judged — which is precisely what "
+        "passing `development_exempt_host=None` at the judgment looks like from the outside."
+    )
+    recorded = roster_rows.calls_for(synced_section.id)
+    assert not [row for row in recorded if row.get("url") == hostile], (
+        f"An `nrps_call` row carries the platform-chosen URL {hostile!r}: "
+        f"{[dict(row) for row in recorded]}. ADR 0096 records the refusal against the section's "
+        f"own stored address ({str(synced_section.address)!r}), because a row keyed to the "
+        "platform's string puts a value somebody else supplied onto §6.1's console."
+    )
+    refusals = [row for row in recorded if row.get("response_code") is None]
+    assert refusals, (
+        f"No `nrps_call` row records the refusal with a NULL `response_code` — the section's rows "
+        f"are {[dict(row) for row in recorded]}. ADR 0096: the refused page is a call the tool "
+        "decided not to make, and an operator reading the console learns that from the row."
+    )
+    assert all(row.get("url") == str(synced_section.address) for row in refusals), (
+        f"A refusal row is keyed to something other than the section's stored address "
+        f"({str(synced_section.address)!r}): {[dict(row) for row in refusals]}."
+    )
+    assert roster_rows.enrollments_for(reachable), (
+        "The first page's member was not ingested. The refusal is per URL — a partial walk keeps "
+        "the pages that were validly fetched — and on a development stack this is also the "
+        "assertion that says the sync got past its own stored address, which it could not have "
+        "done under a deployment's rules."
+    )
+
+
+def test_a_development_stack_walks_a_hop_off_its_own_host_that_resolves_publicly(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    development_settings: Any,
+    resolving: Any,
+    a_subject: Any,
+) -> None:
+    """The pair, in development, and no existing test holds it.
+
+    `test_a_next_page_on_a_second_host_that_resolves_publicly_still_walks` asks
+    this question under a deployment, where the exempt host argument is ignored;
+    nothing asked it under the development name, which is the only environment
+    where that argument decides anything. Without this row, the refusal above is
+    satisfied by a development stack that refuses **every** host that is not its
+    own stored one — a walk that judges nothing and refuses everything reads the
+    same from a single refusal test, and it would stop pagination dead on the demo
+    stack the moment a platform paged onto a second name.
+
+    So: same environment, same shape of hop, same stub with one value different —
+    the second host resolves to a globally routable address — and the walk has to
+    reach the member on the second page.
+    """
+    second_host = roster_contract.a_second_platform_host
+    following = f"https://{second_host}{SECOND_PAGE_PATH}"
+    members = [a_subject("development-first-host"), a_subject("development-second-host")]
+    resolver = resolving({second_host: (roster_contract.another_global_address,)})
+    service_wire.serve(
+        compose_a_roster(
+            synced_section,
+            [roster_contract.member(members[0])],
+            next_url=following,
+        )
+    )
+    second_page = compose_a_roster(synced_section, [roster_contract.member(members[1])])
+    second_page.path = SECOND_PAGE_PATH
+    service_wire.serve(second_page)
+
+    failure = sync(
+        roster_sync,
+        synced_section,
+        service_wire,
+        committed_rows,
+        development_settings,
+        resolve=resolver,
+    )
+
+    assert (
+        failure is None
+    ), f"A development stack walking onto a publicly-resolving second host raised {failure!r}."
+    for subject in members:
+        assert roster_rows.enrollments_for(subject), (
+            f"{subject!r} was not ingested on a development stack. The pages the sync fetched were "
+            f"{[call.url for call in service_wire.calls if call.method.upper() == 'GET']}."
+        )
+    asked = [host.lower().rstrip(".") for host in resolver.asked]
+    assert second_host in asked, (
+        f"The sync resolved {resolver.asked!r} and never asked about {second_host!r}, so this walk "
+        "went through without rule 5 seeing the hop — the acceptance is then not the pair to the "
+        "refusal above, because nothing judged the address either time."
+    )
