@@ -1051,7 +1051,20 @@ def test_every_relation_a_view_sql_file_names_is_schema_qualified(migrated_engin
         if found:
             offenders[path.name] = found
 
-    assert not offenders, (
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not offenders`, pytest's assertion rewriting
+    # appends the repr of the dict to the exception, so the offending file name
+    # appears in `str(failure.value)` whatever this message says — and
+    # `test_the_schema_qualification_failure_does_not_hide_the_identity_failure`,
+    # whose whole job is to establish that this message names the file, would
+    # pass against a message that had stopped naming anything. With a plain bool
+    # there is nothing for the rewriter to expand: the explanation is
+    # `assert False`, and the names below are the only names in the failure.
+    # The same fix, in the same shape, as `agrees` in
+    # `tests/integration/test_identity_grants.py`, where the mutation battery
+    # measured it (E1-01, deferral item 3).
+    clean = not offenders
+    assert clean, (
         f"These view files name a relation without a schema: {offenders}. Postgres searches the "
         "temporary schema first for relation names — being unlisted in `search_path` is what puts "
         "it first, not what skips it — so an unqualified name is a table the *reader* can choose. "
@@ -2690,7 +2703,21 @@ def test_no_view_created_under_views_sql_names_an_identity_column(
                 for finding in findings
             )
 
-    assert not offenders, (
+    # **The operand is a bool on purpose, and it is a repair rather than a
+    # style.** Written as `assert not offenders`, pytest's assertion rewriting
+    # appends the repr of the dict to the exception, so the identity column
+    # appears in `str(failure.value)` whatever this message says — and both
+    # planted-file demonstrations at the foot of this module
+    # (`test_a_view_sql_file_reading_a_marked_identity_column_fails_the_guard`
+    # and `test_the_schema_qualification_failure_does_not_hide_the_identity_
+    # failure`) exist to establish that this message names it. With a plain bool
+    # there is nothing for the rewriter to expand: the explanation is
+    # `assert False`, and the findings printed below are the only place the
+    # column is named. The same fix, in the same shape, as `agrees` in
+    # `tests/integration/test_identity_grants.py`, where the mutation battery
+    # measured it (E1-01, deferral item 3).
+    clean = not offenders
+    assert clean, (
         f"These files under {VIEWS_SQL_DIR} create a view that reads an identity column: "
         f"{offenders}.\n\n"
         "SPEC §8 requires the instructor and leadership read paths to go through views that "
