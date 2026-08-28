@@ -42,6 +42,18 @@ PAGE_PARAMETER = "page"
 # reads back out of `first` is two cursors.
 FIRST_PAGE = 1
 
+# How many digits a page number may be written with. **Nine, and both halves of
+# that are the point.** Generous: 999,999,999 pages of this container's five
+# members is five billion people in one section, and a page number that will not
+# fit in a signed 32-bit integer is one no platform on the other end could hold
+# anyway. Small: CPython refuses to convert a decimal string longer than
+# `sys.get_int_max_str_digits()` and raises `ValueError` instead, and the
+# smallest limit that interpreter will accept is
+# `sys.int_info.str_digits_check_threshold`, 640 — so nine digits cannot reach
+# that conversion under any configuration a deployment could be running, and
+# `int()` below cannot raise.
+MAX_PAGE_DIGITS = 9
+
 T = TypeVar("T")
 
 
@@ -65,6 +77,21 @@ def page_number(requested: str | None) -> int | None:
     that is not a run of ASCII digits is not a page number, and repairing one
     before judging it is `docs/MISTAKES.md` entry 29.
 
+    **The length is judged before the conversion, and that order is the fix
+    rather than a tidy-up.** Digits alone are not enough to make `int()` safe:
+    CPython refuses to convert a decimal string past
+    `sys.get_int_max_str_digits()` and raises `ValueError`, so a several-thousand
+    digit run of nines satisfied the character check and came back out of this
+    function as an exception — a `500` where this docstring promises `None` and
+    the route promises a refusal. `MAX_PAGE_DIGITS` says why nine is both
+    generous for any page and far below the smallest conversion limit an
+    interpreter will accept.
+
+    The guard belongs here rather than as a `max_length` on the route parameter,
+    for the reason the paragraph above gives about the bound itself: a constraint
+    in a signature is checked before the credential is, and an overlong `page`
+    would then be answered by the framework to a caller who presented nothing.
+
     Absent is `FIRST_PAGE`, because a client that names no cursor is asking for
     the start; that is the same default the route parameter carried, moved here
     with the bound so both halves of "what page is this" are answered in one
@@ -73,6 +100,8 @@ def page_number(requested: str | None) -> int | None:
     if requested is None:
         return FIRST_PAGE
     if not requested.isascii() or not requested.isdigit():
+        return None
+    if len(requested) > MAX_PAGE_DIGITS:
         return None
     number = int(requested)
     return number if number >= FIRST_PAGE else None
