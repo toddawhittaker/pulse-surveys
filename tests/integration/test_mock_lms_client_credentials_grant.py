@@ -120,6 +120,30 @@ ASSERTION_SKEW_ALLOWANCE_SECONDS = 30
 # all, or by one that refuses everything.
 ASSERTION_LIFETIME_BOUND_SECONDS = 300
 
+# How far past the wall-clock line the refused half of that clamp's pair is dated.
+# **This suite's choice, and it is a repair to a flake rather than part of the
+# contract**, so it is named here with what it buys and what it costs rather than
+# left as a magic `+ 1`.
+#
+# The clamp compares the assertion's `exp` against **the platform's** clock at the
+# moment it reads it, and this test computes `exp` from **its own** read some
+# milliseconds earlier — signing an assertion, posting it, letting the platform
+# fetch a key set and verify a signature all happen in between. `int(time.time())`
+# truncates downward, which costs up to another second. So the two clocks differ by
+# a small positive amount, and an `exp` exactly one second past the line lands back
+# inside it whenever that amount reaches a second: measured as a real failure in a
+# combined run, passing when the module ran alone.
+#
+# **What five seconds buys**: the refusal is attributable to the clamp under any
+# drift a loaded run plausibly produces. **What it costs**: the line is pinned to
+# five seconds rather than to one, so a platform whose clamp sat anywhere in
+# [330, 335) would pass both halves. Against a line at 330 seconds built out of a
+# 300-second bound and a 30-second allowance, that is a resolution the numbers do
+# not depend on. The *accepted* half is deliberately not widened and still sits
+# exactly on the line, because drift moves it the safe way — a later platform clock
+# raises the ceiling — so that half stays as tight as it ever was.
+WALL_CLOCK_DRIFT_MARGIN_SECONDS = 5
+
 # The scopes a token may be requested for. **Specification constants, not this
 # suite's choice**, and the same strings `test_mock_lms_ags_line_items_and_scores.py`
 # quotes for AGS: a tool asks its token endpoint for the exact strings the service
@@ -1136,22 +1160,27 @@ def test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_re
     requirement rather than a formality: a tool whose clock is 30 seconds fast is an
     honest tool, and the allowance exists so that this endpoint does not refuse it.
 
-    **One second either side of the line**, for the reason the lifetime bound's own
-    pair gives: a refusal at an hour and an acceptance at a minute is satisfied by a
-    clamp anywhere between them.
+    **Close either side of the line**, for the reason the lifetime bound's own pair
+    gives: a refusal at an hour and an acceptance at a minute is satisfied by a clamp
+    anywhere between them. The accepted half sits *exactly* on the line. The refused
+    half sits `WALL_CLOCK_DRIFT_MARGIN_SECONDS` past it rather than one second past
+    it, and that constant carries the whole reason — this test reads one clock and
+    the platform reads another a moment later, so a one-second margin is a race
+    rather than a measurement. Each half reads the clock immediately before its own
+    request, so neither pays for the other's round trip.
     """
-    now = int(time.time())
     bound = ASSERTION_LIFETIME_BOUND_SECONDS
     allowance = ASSERTION_SKEW_ALLOWANCE_SECONDS
 
+    now = int(time.time())
     at_the_line = claims_for_an_assertion(client_id, token_url, issued_at=now + allowance)
-    assert at_the_line["exp"] - at_the_line["iat"] <= bound, (
-        "The claims this test means to sit at the wall-clock line already break the lifetime "
-        "bound, so it would be refused for its stated lifetime and this test would say nothing "
-        "about the clamp."
-    )
     at_the_line["exp"] = now + bound + allowance
     at_the_line["iat"] = at_the_line["exp"] - bound
+    assert at_the_line["exp"] - at_the_line["iat"] == bound, (
+        "The claims this test means to sit at the wall-clock line do not state the permitted "
+        "lifetime, so this half would be refused for its stated lifetime instead and would say "
+        "nothing about the clamp."
+    )
     granted(
         platform,
         token_url,
@@ -1160,19 +1189,30 @@ def test_an_assertion_dated_beyond_the_platforms_clock_and_the_stated_skew_is_re
         f"lifetime of {bound}",
     )
 
+    # Read again here rather than reusing the read above: the grant that just
+    # happened signed an assertion, posted it, and had a key set fetched and a
+    # signature verified, and every millisecond of that would otherwise come out of
+    # this half's margin.
+    now = int(time.time())
+    past = bound + allowance + WALL_CLOCK_DRIFT_MARGIN_SECONDS
     past_the_line = claims_for_an_assertion(client_id, token_url)
-    past_the_line["exp"] = now + bound + allowance + 1
+    past_the_line["exp"] = now + past
     past_the_line["iat"] = past_the_line["exp"] - bound
+    assert past_the_line["exp"] - past_the_line["iat"] == bound, (
+        "The assertion this test means to be refused by the clamp states a lifetime other than "
+        f"{bound}, so it would be refused for that instead and the refusal would be about the "
+        "bound rather than about the platform's own clock."
+    )
     refused(
         platform,
         token_url,
         token_request(tool_key_pair.sign(past_the_line), NRPS_MEMBERSHIP_SCOPE),
         INVALID_GRANT,
-        f"An assertion expiring {bound + allowance + 1} seconds from now — one second past the "
-        "bound plus the stated skew — whose own arithmetic still claims a "
-        f"{bound}-second lifetime",
-        f"An assertion expiring {bound + allowance} seconds from now, dated the same way, was "
-        "granted a moment ago,",
+        f"An assertion expiring {past} seconds from now — "
+        f"{WALL_CLOCK_DRIFT_MARGIN_SECONDS} past the bound plus the stated skew — whose own "
+        f"arithmetic still claims a {bound}-second lifetime",
+        f"An assertion expiring exactly {bound + allowance} seconds from now, dated the same way, "
+        "was granted a moment ago,",
     )
 
 
