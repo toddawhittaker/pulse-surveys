@@ -79,9 +79,12 @@ Every E1 pull request that defers something adds it here in the same PR.
    (`e1/sweep-closures`): `unclassified_reached_tables` fails naming any
    table the walk reaches that no fragment, no marker shape and no
    `REACHED_TABLES_THAT_CARRY_NOTHING` entry classifies, and the entry list
-   is closed in both directions so it cannot rot. The five measured entries
-   are `user`, `audit_log`, `enrollment`, `lead_faculty_mapping` and
-   `role_assignment`, each with its reason beside it.
+   is closed in three directions so it cannot rot: every entry must still be
+   reached, still be unrecognized, and still carry exactly the column set
+   its reason was written against — an added column expires the entry. The
+   five measured entries are `user`, `audit_log`, `enrollment`,
+   `lead_faculty_mapping` and `role_assignment`, each with its pinned
+   columns and its reason beside it.
    **The structural-source half was attempted by Batch A and failed
    honestly; it stays carried to E13.** Measured 2026-08-28: the
    grant-derived candidate (tables `pulse_app` holds no SELECT on) returns
