@@ -35,6 +35,29 @@ format/check clean; all three mypy passes clean. Item 4's spelling test
 (`test_the_published_keys_numbers_are_spelled_as_unpadded_base64url`) already
 passes with no code change (encoder already correct), closed as a records line.
 
+## Verification (2026-08-28) — batteries and the fresh security pass
+
+An independent verifier re-ran the gates from scratch (846 unit + 1031
+integration + 112 invariant, all green) and the batteries. Every code claim is
+killed by a mutation: item 4 by dropping `.rstrip(b"=")` (its only proof, the
+test being green at rest); item 2 by dropping the guard at a call site, by
+rendering a second marker (the exact-list assertion, not contains-one), and by
+the replay wrapper raising a bare `LaunchRefusedError` (the `guard` property is
+load-bearing for the replay path); item 3 by serving a hand-edited list in
+either direction.
+
+**One measured survivor, recorded not fixed.** The "an accepted first delivery
+carries no marker" control (`test_lti_launch_door.py`, `assert not
+reason_markers(first)`) cannot be reddened by any rendering mutation: the
+accepted landing is a 302 redirect with an empty body, and the `data-reason`
+marker is only ever rendered into the HTML refusal page, which the accepted
+path never reaches. The control is structurally satisfied rather than
+load-bearing under the current redirect-based landing; it would begin to guard
+something only if a success path ever rendered an HTML page. Named here the way
+Batch A named its measured survivor. A fresh-context security pass over the diff
+found nothing (marker escaped and only ever a fixed class name; no disclosure
+beyond the prose; `/mock/defects` mock-only).
+
 Records: deferred.md closures for items 3 and 4; carried-from-e1.md closures for
 the served-vocabulary and mock-IdP-spelling entries. Item 2 had no deferred.md
 entry — it lived only in the cleanup plan as a PR #110 review note — so its
