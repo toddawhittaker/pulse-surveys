@@ -83,6 +83,21 @@ export const DEV_CONSOLE_PATH = '/dev';
 export const LOGIN_URL_GLOB = 'http://localhost:8000/lti/login*';
 export const DEFECT_QUERY_PARAM = 'defect';
 
+// Where the mock serves the vocabulary of selectors it answers to, and the
+// member the list lives under (E1 cleanup Batch B, item 3). Outside the OIDC
+// namespace the way `/mock/posted-scores` sits outside the AGS one.
+//
+// **This is the one place a selector name is checked rather than assumed.**
+// E1-07's deferred item 1: `app.wrong_launches.ALL_SELECTORS` cannot be imported
+// by anything outside `mock-lms/` (both mocks' packages are called `app` — ADR
+// 0039's collision), so this file and the integration suite each held a copy,
+// and ADR 0088's consequences record that nothing enforced they move together.
+// A stale name used to surface only when something dispatched it: the mock
+// answers 400, no refusal page renders, and the spec fails on the page it was
+// waiting for — a real failure, arriving as a timeout in the wrong place.
+export const MOCK_DEFECTS_PATH = 'mock/defects';
+export const SERVED_SELECTORS_MEMBER = 'selectors';
+
 // Testids the mock LMS launch form publishes (`mock-lms/app/pages.py`).
 export const LAUNCH_USER = 'mock-lms-login-hint';
 export const LAUNCH_PLACEMENT = 'mock-lms-message-hint';
@@ -371,6 +386,44 @@ export function launchTokensDelivered(page: Page): string[] {
     if (token !== null && token.length > 0) tokens.push(token);
   });
   return tokens;
+}
+
+/**
+ * The defect selectors the mock platform says it answers to, fetched over HTTP.
+ *
+ * The served source E1-07's deferred item 1 asks for, read the way a consumer
+ * outside `mock-lms/` has to read it. A spec asserts that the selector it is
+ * about to drive is a member of this list, so a rename in
+ * `app.wrong_launches.ALL_SELECTORS` fails at the name — naming both spellings —
+ * rather than thirty seconds later at a page that never rendered.
+ *
+ * **Controlled by its own non-emptiness**, which is not ceremony: a route that
+ * answered `{"selectors": []}`, or an object with the list under some other
+ * member, would make every membership assertion below a comparison against
+ * nothing, and every one of them would fail rather than pass — but they would
+ * fail saying "this selector is not served", which points at the wrong file.
+ * The assertion here is what points at this one.
+ */
+export async function servedDefectSelectors(page: Page): Promise<string[]> {
+  const response = await page.request.get(`${MOCK_LMS_ORIGIN}${MOCK_DEFECTS_PATH}`);
+  expect(
+    response.status(),
+    `GET ${MOCK_LMS_ORIGIN}${MOCK_DEFECTS_PATH} answered ${response.status()}. The mock serves ` +
+      'its selector vocabulary there so that no consumer outside `mock-lms/` has to hold a copy ' +
+      '(E1-07 deferred item 1).',
+  ).toBe(200);
+  const document: unknown = await response.json();
+  const served =
+    typeof document === 'object' && document !== null
+      ? (document as Record<string, unknown>)[SERVED_SELECTORS_MEMBER]
+      : undefined;
+  expect(
+    Array.isArray(served) && served.length > 0,
+    `${MOCK_DEFECTS_PATH} served ${JSON.stringify(document)}. The shape is ` +
+      `{"${SERVED_SELECTORS_MEMBER}": [...]}, non-empty — an empty list agrees with a stale ` +
+      'name about nothing.',
+  ).toBeTruthy();
+  return served as string[];
 }
 
 /**

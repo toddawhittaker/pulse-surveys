@@ -327,6 +327,13 @@ Every E1 pull request that defers something adds it here in the same PR.
    E1-07 and stays open, owed to whichever ticket next touches `mock-idp/app/
    signing.py`'s encoder.
    **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15, owner unchanged.
+   **Closed by E1 cleanup Batch B (item 4).** The third encoder now has the
+   same test as the other two —
+   `test_mock_idp_authorization_code_flow.py::test_the_published_keys_numbers_
+   are_spelled_as_unpadded_base64url` — proven against the same mutation
+   (`.rstrip(b"=")` dropped from `mock-idp/app/signing.py`'s `base64url`) by the
+   battery. The encoder was already correct, so no code changed; the pin now
+   covers all three served key sets and the carried entry is resolved.
 
 ## From E1-07 — the mock mints deliberately wrong launches
 
@@ -351,6 +358,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    *E1-15's `exit-refused-launches.spec.ts` became that consumer, holding the
    two selector literals as its recorded cost.* **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner: the next ticket
    that adds a selector or a consumer.
+   **Closed by E1 cleanup Batch B (item 3).** The mock serves its own list from
+   a `GET /mock/defects` route (`MOCK_DEFECTS_PATH` in `mock-lms/app/config.py`),
+   returning `{"selectors": list(ALL_SELECTORS)}` — the tuple itself, not a
+   written-out copy. `test_mock_lms_wrong_launches.py::test_the_served_defect_
+   vocabulary_is_the_platforms_own_all_selectors` pins the served list to
+   `ALL_SELECTORS` in both directions, and each copied-literal consumer now
+   checks itself against the served source (that suite's own copy, and this
+   module's in `test_lti_launch_door.py`). The Playwright spec's two literals
+   stay its own until E2 points the browser at the route; the served source they
+   are owed is now in place.
 
 ## From E1-08 — the launch door on pylti1p3
 
@@ -367,13 +384,30 @@ Every E1 pull request that defers something adds it here in the same PR.
    that the pin is load-bearing *end-to-end* — that the whole door refuses a
    launch `pylti1p3`'s matching would otherwise accept — because there is no
    live forgery: both layers agree.
-   **Done when** a mock platform variant publishes a permissive-algorithm key
-   set — a JWK a confused verifier would accept an `alg: none` or HS256 token
-   against — and an end-to-end refusal test drives a launch signed that way and
-   asserts the door still refuses it, so the pin's removal turns a green launch
-   red. Owed to the ticket that gives a mock platform a permissive-alg mint (a
-   natural companion to E1-07's wrong-launch selectors).
-   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E13 at the latest.
+   **Resolved in E1's cleanup Batch B, as an accepted survivor — the
+   end-to-end proof the done-when asked for is impossible, and the reason is
+   structural, settled from the library source, not a missing fixture.**
+   `pylti1p3`'s `get_public_key` matches a published key by both `kid` and
+   `alg`, then verifies the token against `export_to_pem()` of that matched key
+   with `algorithms=[that key's alg]`. So an HS256-confusion launch can only be
+   accepted if the door is handed a key whose PEM export equals the exact bytes
+   the mock's mint keyed its HMAC with — and it never is: `jwcrypto` cannot
+   PEM-export a symmetric (`oct`) key (it raises `InvalidJWKType`, which is not
+   a `ValueError`/`TypeError` and so escapes even `get_public_key`'s own
+   `except` clause), and an RSA key exported to PEM is not what the mock signed
+   with — `hs256_confusion` keys its HMAC with the canonical RFC 7638 JWK JSON
+   (`public_key_material`), and ADR 0035 bars this mock from producing a PEM to
+   forge against. Removing `_refuse_unpinned_algorithm` therefore does *not*
+   turn the launch green; `pylti1p3` and this construction refuse the confusion
+   independently. The pin is genuinely redundant defence in depth, the
+   verifier's survivor is a true redundancy rather than a test gap, and the
+   end-to-end refusal is already asserted by the pre-existing parametrised
+   `test_a_launch_carrying_one_e1_07_defect_is_refused_by_its_specific_guard`
+   at `hs256_confusion`. Recorded the way Batch A recorded its measured
+   survivor; nothing is built and nothing further is owed, so the E1-15 carry
+   to E13 for this item is moot. (`alg: none` is not a second case: with no
+   permissive key published there is no key its header would match, so it is
+   refused at key selection and proves nothing about the pin.)
 
 ## From E1-10 — launch-time provisioning and the sanctioned writer
 

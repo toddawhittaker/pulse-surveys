@@ -416,7 +416,7 @@ async def finish_web_login(request: Request, session: Session = Depends(get_sess
             carried,
         )
     except SessionRefusedError as refusal:
-        answer = refused(str(refusal))
+        answer = refused(str(refusal), guard=type(refusal).__name__)
         clear_carried(answer, OIDC_LOGIN_COOKIE)
         return answer
 

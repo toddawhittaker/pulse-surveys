@@ -117,6 +117,9 @@ the mock IdP's encoder is the third copy and nothing asserts its spelling.
 Source: `docs/tickets/e1/deferred.md`, E1-06 item 3.
 **Owner:** whichever ticket next touches `mock-idp/app/signing.py`.
 **Done when:** the deferred entry's.
+**Closed by E1 cleanup Batch B (item 4):** the third encoder now has the
+spelling test, proven against the `.rstrip(b"=")` mutation by the battery;
+the encoder was already correct, so no code changed. Nothing for E2 to do.
 
 ## The wrong-launch selector vocabulary has no served source
 
@@ -128,16 +131,26 @@ consumer is `tests/e2e/exit-refused-launches.spec.ts`.
 **Owner:** the next ticket that adds a selector or a consumer.
 **Done when:** the deferred entry's — one served source, proven to agree
 with `ALL_SELECTORS`.
+**Closed by E1 cleanup Batch B (item 3):** the mock serves `ALL_SELECTORS`
+from `GET /mock/defects`, and both integration copies (the wrong-launches
+suite's and the launch-door module's) now check themselves against it. The
+`exit-refused-launches.spec.ts` literals stay the spec's own until E2 points
+the browser at the route; the served source they were owed is in place.
 
-## The launch door's algorithm pin has no end-to-end forgery proof
+## The launch door's algorithm pin has no end-to-end forgery proof — resolved inside E1
 
-The pin is defence in depth behind `pylti1p3`'s own matching; no mock
-publishes a permissive-algorithm key set, so no live forgery can show the
-whole door refusing what the library alone would accept. Source:
-`docs/tickets/e1/deferred.md`, E1-08 item 1.
-**Owner:** E13 at the latest, with the permissive-alg mint as a companion
-to E1-07's catalog.
-**Done when:** the deferred entry's.
+E1's cleanup Batch B settled this rather than carrying it: the end-to-end
+proof is impossible, because `pylti1p3` matches a key by `kid` and `alg` and
+verifies against the PEM export of that matched key, while the mock's
+`hs256_confusion` mint keys its HMAC with the canonical JWK JSON and ADR 0035
+bars the mock from producing a PEM to forge against — so `jwcrypto` cannot
+PEM-export the symmetric key the confusion would need, and an RSA key's PEM is
+not what the mock signed with. `_refuse_unpinned_algorithm` is therefore a
+confirmed redundant defence-in-depth guard whose removal does not turn the
+launch green, and the confusion launch's end-to-end refusal is already
+asserted by an existing parametrised test. E2 inherits nothing to do here.
+Source: `docs/tickets/e1/deferred.md`, E1-08 item 1 (the full reasoning is
+there).
 
 ## A squatted section binding is never reconciled or aged out
 

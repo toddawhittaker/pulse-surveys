@@ -73,21 +73,32 @@
 // the replay case green, still refused, proving nothing about the mint it is
 // named for.
 //
-// **Closed by asserting each guard's own reason**, which the refusal page prints
-// (`backend/app/api/deps.py:381-385`) and which is the seam that tells them
-// apart. Each case now requires its own guard's sentence present *and* the other
-// guard's sentence absent — the second half is what would catch a page that
-// printed every reason it knows, which would leave the first half true and
-// meaningless. `REPLAY_REASON` and `TAMPERED_STATE_REASON` below carry the
-// sentences and the note on how they were copied.
+// **Closed by asserting each guard's own reason**, which is the seam that tells
+// them apart. Each case requires its own guard present *and* no other guard's —
+// the second half is what would catch a page that printed every reason it knows,
+// which would leave the first half true and meaningless.
 //
-// The coupling to that prose is deliberate and was weighed: these are fixed
-// error sentences rather than §4.1-governed copy, so a reword breaks this
-// loudly, which is the right direction for a guard somebody has edited. A
-// machine-readable reason marker on the page would be the more durable seam and
-// is recorded in the pull request as a candidate for whichever ticket next
-// touches the refusal page; adding one here would have been fresh implementation
-// at the end of a fix round.
+// **Since E1's cleanup Batch B that reading is the marker, not the prose.** The
+// refusal page carries `data-reason="<guard>"` — the firing
+// `LaunchRefusedError` subclass's own class name, which was always the machine
+// vocabulary and used to be discarded at the page's door. The old version of
+// this file matched the guards' error sentences instead, which worked and cost
+// what the note here used to admit it cost: a reword of an error message broke
+// two exit specs, and the file said so in a paragraph explaining why that was
+// acceptable. It is not acceptable now that there is a marker.
+//
+// So each case reads `[data-reason]` and requires **exactly one** of them,
+// carrying its own guard's name. The count is the cross-guard negative
+// assertion the sentence-absent check used to be, and it is stronger: it fails
+// on a page that renders every guard it knows *and* on one that renders an
+// empty marker.
+//
+// **One prose assertion is kept, deliberately, and it is the canary.** The
+// replay case still matches `REPLAY_REASON`. Without it, error copy on this
+// page would have nothing asserting it at all: the marker is a machine name and
+// a page could carry the right one above a blank space, or above the wrong
+// sentence, and every assertion here would pass. One case guards the copy; the
+// rest read the marker.
 //
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
@@ -99,6 +110,7 @@ import {
   launchAs,
   launchResponseStatuses,
   mintDefectiveLaunches,
+  servedDefectSelectors,
   sessionToken,
   sessionsDelivered,
 } from './support/doors';
@@ -106,7 +118,13 @@ import {
 const INSTRUCTOR_SUBJECT = 'mock-lms-user-instructor';
 const INSTRUCTOR_VIEW = 'pulse-landing-instructor';
 
-// E1-07's two selectors, copied whole from `mock-lms/app/wrong_launches.py`.
+// E1-07's two selectors. They are still literals here — nothing outside
+// `mock-lms/` can import `ALL_SELECTORS` (ADR 0039's collision) — but since E1's
+// cleanup Batch B they are **checked**: each refusal case below asserts its
+// selector is a member of the list the mock serves at `/mock/defects` before it
+// arms anything. That is E1-07's deferred item 1, and it turns a rename into a
+// failure that names both spellings instead of a page that never renders.
+//
 // `reused_nonce` hands back the identical signed bytes for a `nonce` it has
 // already minted for; `tampered_state` signs a correct token and echoes a
 // `state` that is the tool's own with a suffix appended.
@@ -119,30 +137,41 @@ const REFUSAL_VIEW = 'pulse-entry-refused';
 const REFUSAL_HEADING = 'This did not open';
 const REFUSAL_STATUS = 400;
 
-// The reason each guard prints, which is what says *whose* refusal this was.
-// The refusal page renders the guard's own sentence through `escape(reason)`
-// into its empty-state slot (`backend/app/api/deps.py:381-385`); neither
-// sentence contains a character `html.escape` rewrites, so what a browser shows
-// is the source text, backticks and all.
+// The marker each guard puts on the page, and it is the guard's own class name.
+// The ten `LaunchRefusedError` subclasses are the door's machine vocabulary —
+// one per validate step, each already classified by which step raised — and
+// `tests/integration/test_lti_launch_door.py`'s `DEFECT_GUARDS` is where the
+// mapping from an E1-07 selector to the guard it fires is pinned on the Python
+// side. `reused_nonce` is not in that mapping (a replay needs two deliveries, so
+// it has its own test there), and the guard it fires is `NonceReplayedError` —
+// the whole point of that test being that a replay is not the ordinary
+// `NonceRefused` a missing or mismatched nonce gets.
+//
+// A rename of one of those classes breaks this file, which is the intended
+// coupling and is a narrower one than the prose these assertions used to match:
+// the class name is a published vocabulary a reader is meant to depend on, and
+// an error sentence is copy somebody may reword on a Tuesday.
+const REPLAY_GUARD = 'NonceReplayedError';
+const TAMPERED_STATE_GUARD = 'StateRefused';
+
+// What reads a marker off the page. An attribute selector rather than a testid,
+// so nothing here pins which element carries it.
+const REASON_MARKER = '[data-reason]';
+
+// The one prose assertion kept as the copy canary — see the note at the top of
+// this file for why exactly one is kept and why zero would be wrong.
 //
 // **Copied as whole source lines, which is the rule and not a formality**
 // (`docs/MISTAKES.md` entry 3: build the sample by copying whole lines, the line
 // the sentence starts on included — a sentence retyped from where you think it
-// begins is the thing the sample exists to disprove). The replay reason is one
-// sentence pair built from two adjacent literals in
-// `backend/app/lti/replay_guard.py:76-79`, and the split below is written to
-// mirror that source split — the first part ends with `and ` exactly as the
-// source line does, so the join this assertion depends on is visible in this
-// file rather than assumed. The state reason is a single line,
-// `backend/app/lti/launch.py:387`.
-//
-// A reword in either place breaks this loudly, which is the intended coupling:
-// these are fixed error prose rather than §4.1-governed copy, and a guard whose
-// message changed is a guard somebody edited.
+// begins is the thing the sample exists to disprove). It is one sentence pair
+// built from two adjacent literals in `backend/app/lti/replay_guard.py:76-79`,
+// and the split below is written to mirror that source split — the first part
+// ends with `and ` exactly as the source line does, so the join this assertion
+// depends on is visible in this file rather than assumed.
 const REPLAY_REASON =
   'This launch has already been delivered once. A launch nonce is single-use, and ' +
   'presenting the same signed launch a second time is refused.';
-const TAMPERED_STATE_REASON = 'The launch returns a `state` this tool did not issue.';
 
 test('an undefected launch lands on the instructor view and hands over a session', async ({
   page,
@@ -188,11 +217,32 @@ test('an undefected launch lands on the instructor view and hands over a session
     'an undefected launch must not be refused; if it is, the refusal assertions below are about ' +
       'a door that refuses everything',
   ).toHaveLength(0);
+
+  // The control for the reason marker, and the other half of the pair the two
+  // refusal cases below make: a launch nobody refused carries no guard name.
+  // Without it, "this page carries exactly one marker naming my guard" could be
+  // satisfied by a page that renders a marker unconditionally, and the count
+  // assertions below would be measuring the template rather than the refusal.
+  await expect(
+    page.locator(REASON_MARKER),
+    'a launch that landed carries a `data-reason` marker. Nothing refused it, so nothing should ' +
+      'have named a guard — a marker rendered unconditionally makes both refusal cases below ' +
+      'assertions about a constant.',
+  ).toHaveCount(0);
 });
 
 test('a replayed launch is refused and delivers no second session', async ({ page }) => {
   const delivered = sessionsDelivered(page);
   const statuses = launchResponseStatuses(page);
+
+  // Before anything is armed: the mock still answers to this name. A rename in
+  // `ALL_SELECTORS` used to surface as a 400 nobody sees and a refusal page that
+  // never renders, thirty seconds later, in an assertion about something else.
+  expect(
+    await servedDefectSelectors(page),
+    `the mock platform does not serve the selector \`${REUSED_NONCE}\`, so the mint this case is ` +
+      'named for cannot be selected and everything below would be about an ordinary launch',
+  ).toContain(REUSED_NONCE);
 
   // Every launch this page begins now selects `reused_nonce`. The first request
   // for a given `nonce` mints a correct token and remembers it; every later
@@ -255,21 +305,35 @@ test('a replayed launch is refused and delivers no second session', async ({ pag
   // or not the mint handed back identical bytes, so "a refusal page appeared"
   // stays true with `wrong_launches.py`'s `reused_nonce` branch deleted
   // altogether — refused, green, and proving nothing about the mint this case is
-  // named for. The reason the page prints is what tells the guards apart.
+  // named for. The marker the page carries is what tells the guards apart.
+  //
+  // Exactly one marker, and it is the replay guard's. The count is what would
+  // catch a page rendering every guard it knows, which would leave the name
+  // assertion true and meaningless.
+  await expect(
+    page.locator(REASON_MARKER),
+    'the refusal page carries no single `data-reason` marker, so nothing on it says which guard ' +
+      'refused. More than one means the page names every guard it knows, and neither this case ' +
+      'nor the tamper case could then tell one from another.',
+  ).toHaveCount(1);
+  await expect(
+    page.locator(REASON_MARKER),
+    `the refusal page does not name \`${REPLAY_GUARD}\`. Something refused this launch and it ` +
+      'was not the nonce ledger — read the page before changing anything, because a refusal from ' +
+      'a different guard here means the replay never reached the one this case is about.',
+  ).toHaveAttribute('data-reason', REPLAY_GUARD);
+
+  // The copy canary, and this file's only prose assertion. The marker above is
+  // a machine name: a page could carry the right one over a blank space or over
+  // the wrong sentence and every other assertion here would pass. This is what
+  // keeps the words a refused person actually reads under guard.
   await expect(
     page.getByText(REPLAY_REASON),
-    "the refusal page does not carry the replay guard's own reason. Something refused this " +
-      'launch and it was not the nonce ledger — read the page before changing anything, because ' +
-      'a refusal from a different guard here means the replay never reached the one this case is ' +
-      'about.',
+    "the refusal page does not carry the replay guard's own sentence. The marker says the right " +
+      'guard fired, so this is about the copy rather than the door: either the message was ' +
+      'reworded — update the literal in this file and say so — or the page is naming a guard ' +
+      'whose words it does not print.',
   ).toBeVisible();
-  await expect(
-    page.getByText(TAMPERED_STATE_REASON),
-    "the refusal page carries the *state* guard's reason on a replayed launch whose `state` was " +
-      'never altered. Either the door is refusing for the wrong reason, or the page prints every ' +
-      "guard's sentence rather than the one that fired — and in that case neither this assertion " +
-      'nor the tamper case can tell one guard from another.',
-  ).toHaveCount(0);
 
   expect(
     statuses,
@@ -293,6 +357,13 @@ test('a replayed launch is refused and delivers no second session', async ({ pag
 test('a state-tampered launch is refused and no session is ever delivered', async ({ page }) => {
   const delivered = sessionsDelivered(page);
   const statuses = launchResponseStatuses(page);
+
+  // Before anything is armed: the mock still answers to this name.
+  expect(
+    await servedDefectSelectors(page),
+    `the mock platform does not serve the selector \`${TAMPERED_STATE}\`, so the mint this case ` +
+      'is named for cannot be selected and everything below would be about an ordinary launch',
+  ).toContain(TAMPERED_STATE);
 
   // `tampered_state` signs a perfectly correct `id_token` and returns a `state`
   // that is the tool's own with a suffix appended — so the only thing wrong with
@@ -323,20 +394,22 @@ test('a state-tampered launch is refused and no session is ever delivered', asyn
   // up by that value would refuse with "no such handshake" — a refusal, and the
   // wrong one. This is what distinguishes the guard that compared a `state` from
   // one that merely failed to find it.
+  //
+  // The count first: one marker, so a page naming every guard fails here rather
+  // than satisfying the name assertion beneath it. This case carries no prose
+  // assertion — the replay case above holds the file's one copy canary.
   await expect(
-    page.getByText(TAMPERED_STATE_REASON),
-    "the refusal page does not carry the state guard's own reason. The launch was refused by " +
+    page.locator(REASON_MARKER),
+    'the refusal page carries no single `data-reason` marker, so nothing on it says which guard ' +
+      'refused a launch whose `state` came back altered.',
+  ).toHaveCount(1);
+  await expect(
+    page.locator(REASON_MARKER),
+    `the refusal page does not name \`${TAMPERED_STATE_GUARD}\`. The launch was refused by ` +
       'something else — read the page: a refusal for a missing handshake, or for a signature, is ' +
       'not the same fact as a tool refusing a `state` it did not issue, and only the second is ' +
       'what SPEC §14.3 (E1) asks this case to prove.',
-  ).toBeVisible();
-  await expect(
-    page.getByText(REPLAY_REASON),
-    "the refusal page carries the replay guard's reason on a launch that was delivered once. " +
-      'Either this launch was refused as a replay — in which case the tamper was never reached — ' +
-      "or the page prints every guard's sentence, which would make both of this file's reason " +
-      'assertions unable to tell one guard from another.',
-  ).toHaveCount(0);
+  ).toHaveAttribute('data-reason', TAMPERED_STATE_GUARD);
 
   expect(
     statuses,
