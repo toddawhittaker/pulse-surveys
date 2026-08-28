@@ -599,9 +599,25 @@ jobs:
   # Enforcing since e0/db-session-alembic (E0-04): the suite exists, so this job
   # no longer tolerates its absence. A change that breaks collection now fails
   # this gate instead of switching it off.
+  # This job does **not** wait on `fast-gate`. It is the longest job in the
+  # pipeline, and holding it behind a three-and-a-half minute lint gate added
+  # that gate's duration to every green run's wall clock. Nothing in the steps
+  # below reads anything `fast-gate` produces — the only `needs` output any of
+  # them consults is `changed.outputs.inert` — so the edge was ordering, not
+  # data, and ordering is what cost the time.
+  #
+  # `fast-gate` is unchanged and still a required leg of the aggregate `ci` job
+  # at the bottom of this file, so red lint still fails the pipeline. What is
+  # given up is runner minutes: a push with red lint now burns this job too.
+  # That is the trade and it is the whole trade — no job-level `if:` is
+  # introduced here or anywhere else, because the aggregate treats a skipped
+  # job as a failure and every tolerance in this pipeline stays at step level
+  # (docs/adr/0002-ci-gates-ship-tolerant.md, and
+  # tests/unit/test_the_aggregate_ci_check_sees_an_upstream_failure.py is the
+  # regression test).
   test:
     name: Test · pytest + invariants
-    needs: [changed, fast-gate]
+    needs: [changed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
