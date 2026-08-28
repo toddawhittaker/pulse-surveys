@@ -13,10 +13,17 @@ this module is it.
 advertises requires an `Authorization: Bearer <token>` whose token this
 platform's own endpoint (`mock-lms/app/tokens.py`) issued carrying the NRPS
 membership scope. Missing or malformed header → **401** with a
-`WWW-Authenticate: Bearer` challenge. A token this endpoint never issued, or one
-that has expired → **401**, `invalid_token`. A token issued without the
-membership scope → **403**, `insufficient_scope`. A token issued with it → the
-container, exactly as before.
+`WWW-Authenticate: Bearer` challenge naming **no** error code. A token this
+endpoint never issued, or one that has expired → **401**, `invalid_token`. A token
+issued without the membership scope → **403**, `insufficient_scope`. A token issued
+with it → the container, exactly as before.
+
+**And the credential is judged before anything else about the request**, which the
+handler states as a decision and which two pairs below assert: an unauthenticated
+read carrying a query parameter this container refuses is answered 401 rather than
+the 400 an authenticated one gets, and one naming a context nothing seeds is
+answered 401 rather than 404. A stranger learns neither which parameters this
+endpoint understands nor which sections exist.
 
 **Where the status codes and the two error strings come from.** RFC 6750 — it is
 the only document that defines `invalid_token` and `insufficient_scope`, §3.1
@@ -94,6 +101,26 @@ EXPIRY_MARGIN_SECONDS = 60
 # value the endpoint never issued", and the JWT-shaped near miss has a test of its
 # own below.
 A_TOKEN_NOBODY_ISSUED = "not-a-token-this-platform-ever-issued"  # noqa: S105 - a fake, by design
+
+# One of the three NRPS query parameters E0-28 item 2 rules this container refuses
+# with a 400 rather than accepting and disregarding, and the status it refuses
+# with. Both are transcribed from `test_mock_lms_paging_and_service_urls.py`, which
+# owns that ruling and asserts it in full; what is needed here is only that an
+# *authenticated* caller gets that 400, so that an unauthenticated one getting a
+# 401 says something about the order the handler works in.
+#
+# The role's value is beside the point — the request is refused whatever it says —
+# but a plausible one from the LIS vocabulary keeps the request honest about what
+# it is asking for.
+REFUSED_QUERY_PARAMETER = "role"
+INSTRUCTOR_ROLE = "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"
+PARAMETER_REFUSAL_STATUS = 400
+
+# A context identifier nothing seeds. **This suite's own string**, from a shape no
+# seed uses, and asserted absent from the seeded contexts before it is used so it
+# cannot quietly become one of them.
+A_CONTEXT_NOBODY_SEEDED = "a-context-nobody-seeded"
+CONTEXT_NOT_FOUND_STATUS = 404
 
 
 # ---------------------------------------------------------------------------
@@ -226,10 +253,17 @@ def refused(
     credential, versus the credential you hold will never reach this — and a
     platform answering one code for every refusal tells a tool neither.
 
-    `code=None` is the missing-or-malformed case, and it is `None` on purpose:
-    RFC 6750 §3.1 says a request carrying no authentication SHOULD NOT be told
-    which error it made, because there is no credential to have got wrong. So that
-    case asserts the challenge and stops there.
+    **`code=None` asserts the challenge carries no `error` parameter at all**, and
+    it is a requirement rather than a gap. RFC 6750 §3.1: a request carrying no
+    authentication SHOULD NOT be told which error it made, because there is no
+    credential to have got wrong, and naming one tells an unauthenticated caller
+    what this endpoint would have objected to.
+
+    There is deliberately **no "do not check" mode**. One existed, and the
+    weakened-guard battery is what found the cost: an implementation that stamped
+    `error="invalid_token"` on every challenge, including the ones RFC 6750 says
+    must carry none, survived both rows that passed `None`. A helper that can be
+    asked to skip a check is a helper that will be.
     """
     response = read_roster(platform, url, credential)
     assert response.status_code == status, (
@@ -237,9 +271,19 @@ def refused(
         f"{response.text[:300]!r}."
     )
     challenge = bearer_challenge(response, subject, control)
-    if code is None:
-        return
     parameters = challenge_parameters(challenge)
+    if code is None:
+        assert "error" not in parameters, (
+            f"{subject} was challenged with {challenge!r}, which states `error` "
+            f"{parameters.get('error')!r}. This request presented nothing this endpoint reads as a "
+            "bearer credential, so there is no token it has found fault with — and RFC 6750 §3.1 "
+            "says so in as many words: a request carrying no authentication SHOULD NOT be answered "
+            "with an error code. A challenge that names one anyway tells a caller who presented "
+            "nothing what this endpoint would have objected to, and it is the same code an "
+            "unrelated failure carries — so a client cannot tell 'you sent no credential' from "
+            "'the one you sent is bad'."
+        )
+        return
     assert parameters.get("error") == code, (
         f"{subject} was challenged with {challenge!r}, whose `error` is "
         f"{parameters.get('error')!r} rather than {code!r}. {control} RFC 6750 §3.1 is the only "
@@ -296,6 +340,12 @@ def test_the_challenge_reader_finds_the_error_code_and_not_a_mention_of_it() -> 
     `{}` for everything would make every code assertion in this module fail for a
     reason that is this file's, and a reader that matched a substring would pass a
     challenge whose `error` says one thing and whose prose mentions another.
+
+    **The two bare-challenge cases at the foot are load-bearing rather than
+    tidiness**, and became so when the missing-credential rows started asserting
+    that a challenge carries *no* `error` parameter. An absence found by a reader
+    that cannot find a presence is not an absence, so both directions are needed
+    here before either row means anything (`docs/MISTAKES.md` entry 35).
     """
     found = challenge_parameters(
         'Bearer realm="pulse-mock-lms", error="invalid_token", '
@@ -476,6 +526,15 @@ def test_a_roster_read_carrying_no_authorization_header_is_refused_with_a_bearer
     "refused for authentication" from "gone", and it is why an assertion on the
     absence of members would be the wrong test entirely.
 
+    **The challenge is also required to name no error code**, which is RFC 6750
+    §3.1's own rule — nothing was presented for this endpoint to find fault with —
+    and it kills a second mutation the weakened-guard battery found: an
+    implementation that stamps `error="invalid_token"` on every challenge it sends.
+    That tells a caller who presented nothing what this endpoint would have
+    objected to, and it makes "you sent no credential" indistinguishable from "the
+    one you sent is bad". `refused(code=None)` is where that is asserted, and it
+    has no "do not check" mode for exactly this reason.
+
     The authorised read comes first and is the criterion's own accepted half: the
     container still answers exactly as it did.
     """
@@ -521,7 +580,11 @@ def test_a_roster_read_whose_credential_is_not_a_bearer_token_is_refused(
         accept the same value in `Basic` clothing.
 
     Each shape gets the challenge asserted, not just the status, for the reason the
-    test above gives: a client that is told nothing goes looking for the URL.
+    test above gives: a client that is told nothing goes looking for the URL. And
+    each is required to carry **no** error code, per RFC 6750 §3.1 — a credential
+    this endpoint cannot even read as a bearer token is one it has found no fault
+    with, because it never got as far as looking. That is the half the battery
+    showed a blanket `error="invalid_token"` survived.
     """
     url = roster_url(mock_platform)
     token = mock_platform.service_token(NRPS_MEMBERSHIP_SCOPE)
@@ -550,6 +613,173 @@ def test_a_roster_read_whose_credential_is_not_a_bearer_token_is_refused(
                 "200 a moment ago,"
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# The credential is checked **before anything else about the request**, so an
+# unauthenticated caller learns nothing about what this endpoint would have
+# served. Each pair asserts the ordering rather than the 401: a handler that
+# answered 401 to everything would satisfy the refused half of both.
+# ---------------------------------------------------------------------------
+
+
+def url_for_an_unseeded_context(platform: Any) -> str:
+    """A memberships URL whose context identifier is one nothing seeds.
+
+    Derived from the address the platform published rather than assembled from a
+    path this file knows, the way every other URL in this module is: the memberships
+    URL carries its context's identifier, which is the relationship
+    `test_mock_lms_nrps_roster.py::test_the_membership_container_names_the_context_
+    the_launch_came_from` already rests on.
+
+    Both guards are load-bearing. An identifier that appears nowhere in its own
+    URL, or more than once, means this substitution is not the thing it looks like
+    — and a URL that came back unchanged would leave the test asking about a
+    context that *is* seeded, which answers 200 and says nothing.
+    """
+    contexts = platform.seeded_contexts()
+    assert contexts, (
+        "The launch page offers no launches, so there is no seeded memberships URL to derive an "
+        "unseeded one from. E0-14 seeds the launches and E0-15 the roster behind them."
+    )
+    identifiers = {context.context_id for context in contexts}
+    assert A_CONTEXT_NOBODY_SEEDED not in identifiers, (
+        f"The platform seeds a context called {A_CONTEXT_NOBODY_SEEDED!r} (it seeds "
+        f"{sorted(identifiers)}), so the read below asks for one that exists and the 404 this "
+        "test poses its refusal against would never happen."
+    )
+    seeded = contexts[0].context_id
+    url = contexts[0].memberships_url
+    assert url.count(seeded) == 1, (
+        f"The memberships URL {url!r} carries the context identifier {seeded!r} "
+        f"{url.count(seeded)} times rather than once, so swapping it either changes nothing or "
+        "changes more than the context. This test addresses an unseeded context by substitution "
+        "rather than by assembling a path, because E0-15 spells no URL."
+    )
+    return url.replace(seeded, A_CONTEXT_NOBODY_SEEDED)
+
+
+def test_an_unauthenticated_read_is_refused_before_the_query_parameters_are_judged(
+    mock_platform: Any,
+) -> None:
+    """The credential is checked before the request is parsed, and the pair says so.
+
+    `mock-lms/app/main.py`'s memberships handler states this as a decision: the
+    credential is checked before anything else about the request, so that an
+    unauthenticated caller learns neither which query parameters this container
+    implements nor which it objects to. E0-28 item 2 makes `role`, `limit` and
+    `rlid` answer 400 **naming the parameter** — a sentence written for a tool's
+    author, and one that tells an unauthenticated stranger what this endpoint
+    understands.
+
+    **The mutation this kills: enforcement moved below the parameter refusal.**
+    The handler still refuses every unauthenticated read of a plain URL, so every
+    other test in this module stays green; what changes is that a request carrying
+    `role=…` is answered 400 before the credential is looked at, and the refusal
+    body names the parameter. Nothing asserted that ordering — moving the check
+    left all 41 related tests green, which is how the weakened-guard battery found
+    it.
+
+    **Both halves, because the 401 alone proves nothing.** A handler that answered
+    401 to every request whatsoever satisfies the unauthenticated half completely,
+    and would break the parameter refusal E0-28 owns. So the authenticated
+    counterpart is asserted beside it: with a token, the same URL still answers
+    400. The pair is the ordering; either half alone is a status code.
+    """
+    filtered = mock_platform.with_query(
+        roster_url(mock_platform), {REFUSED_QUERY_PARAMETER: INSTRUCTOR_ROLE}
+    )
+
+    authorised = read_roster(
+        mock_platform,
+        filtered,
+        f"{BEARER_SCHEME} {mock_platform.service_token(NRPS_MEMBERSHIP_SCOPE)}",
+    )
+    assert authorised.status_code == PARAMETER_REFUSAL_STATUS, (
+        f"A read carrying a granted token and `{REFUSED_QUERY_PARAMETER}=` answered "
+        f"{authorised.status_code} rather than {PARAMETER_REFUSAL_STATUS}, so this test cannot "
+        "show that the credential is judged first — there is no parameter refusal for the "
+        "credential check to come before. If this answered 401, the token is what failed and "
+        "`test_the_token_helper_obtains_a_credential_the_platform_itself_granted` diagnoses it; "
+        "if it answered 200, E0-28 item 2's refusal is gone and "
+        "`test_mock_lms_paging_and_service_urls.py` owns that. Body begins "
+        f"{authorised.text[:300]!r}."
+    )
+
+    refused(
+        mock_platform,
+        filtered,
+        None,
+        status=UNAUTHORIZED,
+        code=None,
+        subject=(
+            f"A roster read carrying no credential and the `{REFUSED_QUERY_PARAMETER}` parameter "
+            "this container refuses"
+        ),
+        control=(
+            "The identical read presenting a granted token was answered "
+            f"{PARAMETER_REFUSAL_STATUS} a moment ago, so the parameter refusal is there and this "
+            "one was reached before it,"
+        ),
+    )
+
+
+def test_an_unauthenticated_read_is_refused_before_the_context_is_looked_up(
+    mock_platform: Any,
+) -> None:
+    """The same decision at the other end of the request: which sections exist.
+
+    **The mutation this kills: enforcement moved below the context lookup.** An
+    unauthenticated read naming a context nothing seeds would then be answered 404
+    rather than 401 — and a 404 and a 401 are two different sentences to a
+    stranger. One says "not here", which is an answer about the platform's
+    contents; the other says "you are not authenticated", which is an answer about
+    the caller. Sweeping identifiers against a route that distinguishes them is how
+    a caller enumerates what exists, and this handler is scoped to a context, so
+    the identifier is the thing worth enumerating.
+
+    **Both halves, for the reason the parameter pair gives.** A handler answering
+    401 to everything satisfies the unauthenticated half and would hide a real
+    404 from a tool addressing the wrong course. So the authenticated counterpart
+    is asserted beside it: with a token, the same unseeded context still answers
+    404.
+
+    The URL is the seeded one with its identifier swapped, so nothing here
+    assembles a path E0-15 leaves open — see `url_for_an_unseeded_context`.
+    """
+    unseeded = url_for_an_unseeded_context(mock_platform)
+
+    authorised = read_roster(
+        mock_platform,
+        unseeded,
+        f"{BEARER_SCHEME} {mock_platform.service_token(NRPS_MEMBERSHIP_SCOPE)}",
+    )
+    assert authorised.status_code == CONTEXT_NOT_FOUND_STATUS, (
+        "A read carrying a granted token and naming the unseeded context "
+        f"{A_CONTEXT_NOBODY_SEEDED!r} answered {authorised.status_code} rather than "
+        f"{CONTEXT_NOT_FOUND_STATUS}, so there is no context lookup for the credential check to "
+        "come before and this test cannot show the ordering. If this answered 401, the token is "
+        "what failed; if it answered 200, the container served a roster for a section nobody "
+        "seeded, which `test_mock_lms_nrps_roster.py` is where to take. Body begins "
+        f"{authorised.text[:300]!r}."
+    )
+
+    refused(
+        mock_platform,
+        unseeded,
+        None,
+        status=UNAUTHORIZED,
+        code=None,
+        subject=(
+            "A roster read carrying no credential and naming the unseeded context "
+            f"{A_CONTEXT_NOBODY_SEEDED!r}"
+        ),
+        control=(
+            "The identical read presenting a granted token was answered "
+            f"{CONTEXT_NOT_FOUND_STATUS} a moment ago, so the lookup is there and the credential "
+            "was judged before it,"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
