@@ -377,16 +377,25 @@ def plant_in(metadata_tables: dict[str, Any]) -> Callable[..., Any]:
     Positional-only for the same reason `seed_row` is: an override called `name`
     is a column on four tables here and would otherwise collide with the table
     argument.
+
+    **The session states the environment it plants under**, for the reason
+    `db_session` gives: Batch C's mapper event on `LtiPlatform` reads
+    `Session.info["environment"]` and judges a session that states nothing as a
+    deployment. What this plants is a demo institution, which is a development
+    stack by definition — `scripts/seed.py` refuses to run anywhere else
+    (ADR 0063).
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
+
+    from app.config import DEVELOPMENT_ENVIRONMENT
 
     def plant(
         demo: DemoSeed, name: str, chain: dict[str, Any] | None = None, /, **overrides: Any
     ) -> Any:
         engine = create_engine(demo.database.superuser_url)
         try:
-            with Session(bind=engine) as session:
+            with Session(bind=engine, info={"environment": DEVELOPMENT_ENVIRONMENT}) as session:
                 row = seed_row(session, metadata_tables, name, chain, **overrides)
                 session.commit()
                 return row

@@ -7,12 +7,41 @@ adds two more columns beside it — the platform's browser-facing
 `authorization_endpoint` and its tool-facing `auth_token_url` — and fixes the
 floor for all three at one chokepoint.
 
-**The subject is one function**, `app.models.lti.refuse_invalid_registration_addresses`,
-called by every writer of an `lti_platform` row. It takes the environment name
+**The subject is two functions.** `app.models.lti.refuse_invalid_registration_addresses`
+is called by every writer of an `lti_platform` row; it takes the environment name
 and the three addresses and either returns or raises
-`app.models.lti.RegistrationAddressError`. Nothing here reaches the database:
-the rules read `ENVIRONMENT`, which the database does not hold, which is why the
-chokepoint is a validator and not a `CHECK` constraint.
+`app.models.lti.RegistrationAddressError`.
+`app.models.lti.refuse_invalid_fetched_address` is the same rules applied to one
+address at a time, by the code that is about to *fetch* it — ADR 0096 added it for
+the roster walk, and the cleanup batch that adds rule 5 gives it the two
+parameters the walk needs. Nothing here reaches the database: the rules read
+`ENVIRONMENT`, which the database does not hold, which is why the chokepoint is a
+validator and not a `CHECK` constraint.
+
+**Rule 5, and what it reversed.** ADR 0081 measured its own residue and named the
+price: rules 3 and 4 judge *spellings*, so `127.1`, `2130706433`, `0x7f.0.0.1` and
+any name a resolver answers with a refused address all walk past them. The
+cleanup batch closes that by resolving the host and judging every address that
+comes back — an address that is not `is_global` is refused, except a loopback
+address on a column outside `LOOPBACK_REFUSED_COLUMNS`, which stays admitted
+because an operator registering a cleartext key-set sidecar beside the
+application is doing it on purpose (ADR 0077, ADR 0096).
+
+That **reverses ADR 0081's acceptance of private ranges**, and the reversal is
+stated here rather than left to be discovered: `10.0.0.5` on a registration
+column was accepted by that record's decision and is refused by rule 5, because a
+resolved private address is exactly the SSRF the batch exists to close and there
+is no way to tell "an institution's own LMS" from "an internal service holding a
+valid certificate" at the point of judgment. The tests below that used to assert
+the acceptance now assert the refusal, and they still carry the development pair,
+because in development every rule here is still off.
+
+**No test in this module performs real DNS.** Every call goes through `judge` or
+`judge_fetched`, which inject a resolver this file describes. A test that reached
+a name server would be green on a developer's machine and red in CI, or the
+reverse, and would be measuring the machine rather than the rules
+(`docs/MISTAKES.md` entry 40's shape, arriving through a resolver instead of an
+environment variable).
 
 **Four rules, and every one of them is asserted from both sides.** A validator
 that refuses everything outside development passes every refusal test in this
@@ -35,10 +64,14 @@ and the sharpest of them is
      are resolved here.
   4. **Link-local is refused on `jwks_url` and `auth_token_url`**, which are the
      two fetched server-side on every launch, because the cloud metadata service
-     lives at `169.254.169.254` and no legitimate LMS does. **Private ranges are
-     accepted everywhere**: an institution's LMS on `10.0.0.5` is an ordinary
-     deployment, and that pair — link-local refused, private accepted — is the
-     near miss this rule stands or falls on.
+     lives at `169.254.169.254` and no legitimate LMS does. Private ranges were
+     accepted everywhere under this rule and **rule 5 refuses them**; the near
+     miss that now keeps the class honest is a globally-routable address, not a
+     private one.
+  5. **The host is resolved and every returned address is judged**, outside
+     development: an address that is not `is_global` is refused, except loopback
+     on a column outside `LOOPBACK_REFUSED_COLUMNS`, and an unresolvable host is
+     refused outright.
 
 **A NULL passes.** Both new columns are nullable and NULL means "not stated",
 never a default: the launch door refuses a registration whose
@@ -76,7 +109,8 @@ one's vocabulary where the question is the same and says where it differs; the
 ticket requires the decision itself to be E1-05's own, in its own ADR.
 """
 
-from collections.abc import Mapping
+import inspect
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import pytest
@@ -210,10 +244,14 @@ LINK_LOCAL_URL_HOSTS = {
     "the IPv6 link-local literal": "[fe80::1]",
 }
 
-# Private ranges, which are **accepted**, and are the near miss that keeps rule 4
-# honest: an institution running its LMS on RFC 1918 space, or on an IPv6 unique
-# local address, is an ordinary deployment and the cheapest way to satisfy every
-# link-local refusal above is to refuse every non-public address.
+# Private ranges. These were **accepted** under ADR 0081's four rules and are
+# **refused** under rule 5, and the reversal is the batch's own decision rather
+# than a drift: a resolved private address is the SSRF E1-11's residual finding is
+# about — an internal service holding a valid certificate on an RFC 1918 or
+# split-horizon address, fetched with the tool's Bearer token attached — and
+# nothing at the point of judgment can tell it from an institution's own LMS. The
+# price ADR 0081 named for the other direction is real and is now paid: a
+# university running Canvas on `10.0.0.5` cannot be registered in a deployment.
 PRIVATE_URL_HOSTS = {
     "RFC 1918": "10.0.0.5",
     "the other RFC 1918 block": "192.168.10.4",
@@ -221,9 +259,77 @@ PRIVATE_URL_HOSTS = {
 }
 
 # An address that is emphatically neither loopback nor private nor link-local, so
-# that "an IP literal" cannot stand in for any of the three classes. TEST-NET-3
-# (RFC 5737) is reserved for documentation and names nobody's real host.
-NON_LOOPBACK_IP_LITERAL = "203.0.113.10"
+# that "an IP literal" cannot stand in for any of the three classes.
+#
+# **It was `203.0.113.10` until rule 5, and that stopped working.** TEST-NET-3
+# (RFC 5737) is reserved for documentation, which makes `ipaddress` report
+# `is_global` false for it — so under a rule that refuses every resolved address
+# which is not globally routable, the documentation range is refused and a test
+# using it as "an ordinary public address" asserts the opposite of what it says.
+# The same trap holds `192.0.2.0/24`. `93.184.216.34` is globally routable, which
+# is the only property this row needs.
+NON_LOOPBACK_IP_LITERAL = "93.184.216.34"
+
+# ---------------------------------------------------------------------------
+# Rule 5: the host is resolved and every returned address is judged.
+# ---------------------------------------------------------------------------
+
+# Two globally routable addresses and one that is not. Held against `ipaddress`
+# itself by a control at the foot of this module, because the whole of rule 5 is
+# `is_global` and a vector on the wrong side of it turns a refusal test into an
+# acceptance test with no visible change (`docs/MISTAKES.md` entry 3).
+A_GLOBAL_ADDRESS = "93.184.216.34"
+ANOTHER_GLOBAL_ADDRESS = "8.8.8.8"
+A_PRIVATE_ADDRESS = "10.0.0.7"
+A_LOOPBACK_ADDRESS = "127.0.0.1"
+
+# ADR 0081's measured residue, verbatim: the spellings that reach a refused
+# address while parsing as no address at all. `ipaddress.ip_address` refuses every
+# one of them, which is why rules 3 and 4 walk past them and why closing this
+# needs a resolver rather than another spelling in a list.
+RESIDUE_LOOPBACK_HOSTS = {
+    "a shortened dotted quad": "127.1",
+    "a bare decimal": "2130706433",
+    "dotted hex": "0x7f.0.0.1",
+    "a name a resolver answers with loopback": "sidecar.platform.invalid",
+}
+
+# A name that resolves to a private address — the case ADR 0081 records as
+# `metadata.google.internal` and the one E1-11's residual finding is about: an
+# internal service holding a valid certificate on an address inside the network
+# the worker sits in. Spelled `.invalid` (RFC 2606) so that a stub is the only
+# thing that could ever answer it.
+AN_INTERNAL_NAME = "internal.platform.invalid"
+
+# A name nothing answers for. The design refuses an unresolvable host outright —
+# unresolvable is unjudgeable — in both of the two shapes a resolver fails in.
+AN_UNRESOLVABLE_NAME = "nowhere.platform.invalid"
+AN_EMPTY_ANSWER_NAME = "silent.platform.invalid"
+
+# The two columns of `refuse_invalid_fetched_address` this module drives, and the
+# split ADR 0096 draws between them: the roster address is chosen by the platform
+# at run time and refuses loopback, the key set address is written by an operator
+# and admits it. Held against `app.models.lti`'s own two tuples by a control.
+ROSTER_ADDRESS_COLUMN = "lms_context_memberships_url"
+
+# The host a development stack's own roster lives on, for the exemption. Compared
+# by equality against the parsed hostname, never as a substring — the near miss is
+# the fourth row of `NON_MOCK_URL_SPELLINGS` one level out.
+AN_EXEMPT_HOST = "mock-lms"
+A_HOST_THE_EXEMPT_ONE_PREFIXES = "mock-lms.evil.example"
+
+# Every hostname this module drives, and what a resolver answers for it. IP
+# literals are not listed: the stub answers a literal with itself, which is what
+# `socket.getaddrinfo` does, and which leaves open whether the implementation
+# short-circuits a literal or resolves it like anything else.
+DEFAULT_RESOLUTIONS: dict[str, tuple[str, ...]] = {
+    DEPLOYED_HOST: (A_GLOBAL_ADDRESS,),
+    "localhost": (A_LOOPBACK_ADDRESS,),
+    MOCK_SERVICE: (A_GLOBAL_ADDRESS,),
+    f"{MOCK_SERVICE}.example.edu": (A_GLOBAL_ADDRESS,),
+    f"{MOCK_SERVICE}-2.example.edu": (A_GLOBAL_ADDRESS,),
+    f"staging-{MOCK_SERVICE}": (A_GLOBAL_ADDRESS,),
+}
 
 # The offending value the refusal-message tests use. The path and query are
 # distinctive so that "the message does not quote the value" is a statement about
@@ -311,9 +417,144 @@ def registration(**overrides: str | None) -> dict[str, str | None]:
     return values
 
 
-def judge(environment: str, addresses: Mapping[str, str | None]) -> None:
-    """Put one registration through the chokepoint under one environment name."""
-    refuse_addresses()(environment, **dict(addresses))
+def refuse_fetched_address() -> Any:
+    """The per-address chokepoint, imported inside the test so a missing one fails loudly.
+
+    ADR 0096's helper: the same rules applied to one address that is about to be
+    *fetched*, by the roster walk and by the launch-time writer. Imported the way
+    `refuse_addresses` above is, and for the same reason.
+    """
+    try:
+        from app.models.lti import refuse_invalid_fetched_address
+    except ImportError as absent:
+        pytest.fail(
+            "`app.models.lti` exposes no `refuse_invalid_fetched_address` "
+            f"({absent}). ADR 0096 puts the per-address half of the registration rules there, "
+            "called once per URL the roster walk is about to fetch and once by the launch-time "
+            "writer storing an address out of a claim."
+        )
+    return refuse_invalid_fetched_address
+
+
+def resolution_key(host: str) -> str:
+    """A hostname as a resolver keys it: unbracketed, one trailing dot off, folded."""
+    return host.strip().strip("[]").rstrip(".").lower()
+
+
+def default_resolution(host: str) -> Sequence[str]:
+    """What a resolver answers for the hostnames this module already drove.
+
+    Every test written before rule 5 goes through this, so that the calls those
+    tests always made keep meaning what they meant — and so that not one of them
+    reaches a name server. An IP literal answers itself, which is what
+    `socket.getaddrinfo` does with one and which deliberately leaves open whether
+    the implementation short-circuits a literal or resolves it like anything else.
+
+    A hostname nobody described stops the test rather than being reported as
+    unresolvable: "unresolvable" is a *refusal* under rule 5, so a stub that
+    guessed would turn a test driving an undescribed host into a green refusal
+    (`docs/MISTAKES.md` entry 3).
+    """
+    from ipaddress import ip_address
+
+    key = resolution_key(host)
+    if key in DEFAULT_RESOLUTIONS:
+        return DEFAULT_RESOLUTIONS[key]
+    try:
+        ip_address(key)
+    except ValueError:
+        raise AssertionError(
+            f"The chokepoint asked a resolver about {host!r}, which this module never described "
+            f"(it describes {sorted(DEFAULT_RESOLUTIONS)}). Add the host to `DEFAULT_RESOLUTIONS` "
+            "with the answer the test means, or hand the test its own resolver — nothing here may "
+            "reach real DNS."
+        ) from None
+    return (key,)
+
+
+def resolves(function: Any) -> bool:
+    """Whether this build's chokepoint takes the resolution seam rule 5 needs."""
+    return "resolve" in inspect.signature(function).parameters
+
+
+def require_resolution_seam(function: Any, *extra: str) -> None:
+    """Stop with a named failure where the parameters rule 5 needs are absent.
+
+    The module's own idiom, one level in: an absent *parameter* is reported as a
+    failed assertion naming what the cleanup batch is asked to add, rather than as
+    a `TypeError` about an unexpected keyword — which reads as a broken test.
+    """
+    parameters = inspect.signature(function).parameters
+    missing = [name for name in ("resolve", *extra) if name not in parameters]
+    if missing:
+        pytest.fail(
+            f"`{getattr(function, '__name__', function)}` takes no {missing} parameter — it takes "
+            f"{sorted(parameters)}. Rule 5 resolves the URL's host and judges every address that "
+            "comes back, and `resolve` is the seam that keeps that out of real DNS: "
+            "`refuse_invalid_registration_addresses(environment, *, authorization_endpoint, "
+            "jwks_url, auth_token_url, resolve=None)` and "
+            "`refuse_invalid_fetched_address(environment, *, column, address, resolve=None, "
+            "development_exempt_host=None)`. Until the parameter is there, this test would "
+            "either measure a name server or measure nothing."
+        )
+
+
+def judge(
+    environment: str,
+    addresses: Mapping[str, str | None],
+    *,
+    resolve: Callable[[str], Sequence[str]] | None = None,
+) -> None:
+    """Put one registration through the chokepoint under one environment name.
+
+    `resolve` is passed where this build's chokepoint takes it and omitted where
+    it does not, so the tests written before rule 5 keep asserting exactly what
+    they asserted — and, once it does take it, resolve through this module's own
+    table rather than through DNS. A test whose *subject* is rule 5 calls
+    `judge_with_resolver` instead, which requires the parameter and says so.
+    """
+    function = refuse_addresses()
+    if not resolves(function):
+        function(environment, **dict(addresses))
+        return
+    resolver = default_resolution if resolve is None else resolve
+    function(environment, **dict(addresses), resolve=resolver)
+
+
+def judge_with_resolver(
+    environment: str,
+    addresses: Mapping[str, str | None],
+    resolve: Callable[[str], Sequence[str]],
+) -> None:
+    """The same, for a test whose subject is rule 5: the seam is required, not optional."""
+    function = refuse_addresses()
+    require_resolution_seam(function)
+    function(environment, **dict(addresses), resolve=resolve)
+
+
+def judge_fetched(
+    environment: str,
+    *,
+    column: str,
+    address: str | None,
+    resolve: Callable[[str], Sequence[str]],
+    development_exempt_host: str | None = None,
+) -> Any:
+    """Put one fetched address through ADR 0096's helper, and answer what it returned.
+
+    The return value is part of the contract rather than incidental: rule 5 hands
+    back the tuple of addresses it resolved, which is what the roster sync pins its
+    connection to, and `None` where it did not resolve at all.
+    """
+    function = refuse_fetched_address()
+    require_resolution_seam(function, "development_exempt_host")
+    return function(
+        environment,
+        column=column,
+        address=address,
+        resolve=resolve,
+        development_exempt_host=development_exempt_host,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -636,8 +877,11 @@ def test_a_non_loopback_ip_literal_authorization_endpoint_is_accepted_outside_de
     loopback". An institution that publishes its platform at an address rather
     than a name is then unregistrable, and every refusal row above stays green.
 
-    TEST-NET-3 (RFC 5737), so the row is unambiguously an address, unambiguously
-    not loopback, and names nobody's real host.
+    A globally-routable address, so the row is unambiguously an address and
+    unambiguously not loopback. It was TEST-NET-3 (RFC 5737) until rule 5, which
+    judges `is_global` and reports false for every documentation range — see
+    `test_the_address_vectors_sit_on_the_side_of_is_global_this_module_claims`,
+    which holds both halves of that trap.
 
     **The mutation this kills:** `ipaddress.ip_address(host)` succeeding treated
     as the refusal, rather than `.is_loopback` on the parsed result. **Its pair**
@@ -676,9 +920,10 @@ def test_a_cleartext_loopback_authorization_endpoint_is_refused_outside_developm
 
 
 # ---------------------------------------------------------------------------
-# Rule 4 — link-local refused on the two columns this container fetches, and
-# private ranges accepted everywhere. The pair is the rule: one without the other
-# is either an open SSRF surface or an undeployable product.
+# Rule 4 — link-local refused on the two columns this container fetches. Private
+# ranges were the acceptance that kept this rule honest and rule 5 reverses them;
+# the pair that keeps *rule 5* honest is the globally-routable address, which is
+# in the rule 5 section below.
 # ---------------------------------------------------------------------------
 
 
@@ -740,27 +985,54 @@ def test_a_link_local_fetched_address_is_accepted_in_development(
 
 @pytest.mark.parametrize("spelling", list(PRIVATE_URL_HOSTS))
 @pytest.mark.parametrize("column", EVERY_COLUMN)
-def test_a_private_range_address_is_accepted_on_every_column_outside_development(
+def test_a_private_range_address_is_refused_on_every_column_outside_development(
     column: str, spelling: str
 ) -> None:
-    """An institution's LMS on a private address is an ordinary deployment.
+    """Rule 5 refuses a resolved address that is not globally routable, on every column.
 
-    This is the near-miss half of rule 4 and the reason the ticket asks for the
-    position to be taken explicitly rather than inherited. The cheapest way to
-    close an SSRF surface is to refuse every address that is not publicly
-    routable, and that rule would refuse a university running Canvas on
-    `10.0.0.5` behind its own network — which is a very ordinary way for an
-    institution to run an LMS, and which no test above would notice.
+    **This assertion is the reverse of the one that stood here**, and the reversal
+    is the batch's, stated rather than slipped in. ADR 0081 accepted private
+    ranges everywhere and rejected `not ip.is_global` by name, on the argument
+    that a university running Canvas on `10.0.0.5` behind its own network is an
+    ordinary deployment. E1-11's residual finding is the other side of that
+    argument: an internal service holding a valid public certificate on an RFC
+    1918 or split-horizon address passes every one of the four rules, and this
+    tool then issues a GET to it with its NRPS Bearer token attached. Nothing at
+    the point of judgment distinguishes the two, so rule 5 refuses both.
 
-    All three columns, including the browser-facing one: a browser on the
-    institution's network resolves a private address perfectly well.
+    All three columns, and both families: RFC 1918, the second RFC 1918 block, and
+    an IPv6 unique local address, which is `is_global` false for the same reason
+    and which a rule written over the IPv4 blocks alone would let through.
 
-    **The mutation this kills:** `not ip.is_global` used as the refusal, which
-    covers loopback, link-local and private in one line and reads like a
-    tightening.
+    **The mutation this kills:** rule 5 written as a loopback-and-link-local class
+    rather than as `is_global`, which passes every other refusal in this module.
+    **Its pairs, both of which must stay green:** the development row below, where
+    every rule here is off, and the globally-routable address rows in the rule 5
+    section, which are what stop "refuse every IP literal" from passing this.
     """
     host = PRIVATE_URL_HOSTS[spelling]
-    judge("production", registration(**{column: f"https://{host}/lti/token"}))
+    with pytest.raises(registration_error()):
+        judge("production", registration(**{column: f"https://{host}/lti/token"}))
+
+
+@pytest.mark.parametrize("spelling", list(PRIVATE_URL_HOSTS))
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_private_range_address_is_accepted_on_every_column_in_development(
+    column: str, spelling: str
+) -> None:
+    """The environment pair for the reversal above, and the seed depends on it.
+
+    Rule 5 joins the other four in being switched off under the development name.
+    A developer running a platform, a key-set sidecar or a roster service on a
+    private address inside Compose is doing nothing wrong, and the demo stack's
+    own addresses are on a container network — a rule that fired here would meet
+    them as an unexplained refusal from `make seed`.
+
+    **The mutation this kills:** rule 5 written without the environment condition,
+    which passes every refusal row above.
+    """
+    host = PRIVATE_URL_HOSTS[spelling]
+    judge(development_environment(), registration(**{column: f"https://{host}/lti/token"}))
 
 
 # ---------------------------------------------------------------------------
@@ -851,11 +1123,691 @@ def test_the_refusal_names_the_column_and_does_not_quote_the_value(column: str) 
 
 
 # ---------------------------------------------------------------------------
+# Rule 5, at the registration-write surface. The host is resolved and every
+# address that comes back is judged. Applied **after** rules 1-4, so an address a
+# spelling rule refuses is never resolved (`docs/MISTAKES.md` entry 29: a value
+# repaired — or here, looked up — before the check that should have refused it).
+# ---------------------------------------------------------------------------
+
+
+def described(resolving: Any, answers: Mapping[str, Any]) -> Any:
+    """A stub resolver answering this module's background hosts, plus `answers`.
+
+    The background matters: every row here sets one column and takes the other two
+    from `registration()`, whose host has to resolve to something acceptable or
+    the refusal under test could be rule 5 firing on a neighbour
+    (`docs/MISTAKES.md` entry 3, which this module already guards for the other
+    four rules).
+    """
+    return resolving({**DEFAULT_RESOLUTIONS, **answers})
+
+
+def test_both_chokepoints_take_the_resolution_seam_rule_five_needs() -> None:
+    """The parameters this batch adds, named once so the rest of the section has a cause.
+
+    Every rule 5 test below fails on this same absence, and reading forty of those
+    is how a missing parameter gets mistaken for forty broken tests. This is the
+    one that says it plainly: the two functions grow a `resolve` argument, and the
+    fetched one grows `development_exempt_host` beside it, exactly as the batch's
+    settled design spells them.
+
+    It is also what stops a quieter failure. `judge` passes `resolve` only where
+    this build's chokepoint takes it, so that the tests written before rule 5 keep
+    asserting what they asserted — and if the parameter were ever renamed, those
+    tests would silently fall back to the default resolver and start reaching real
+    DNS. This assertion is what makes that a red rather than a suite that goes
+    green or red depending on the machine's name server.
+    """
+    require_resolution_seam(refuse_addresses())
+    require_resolution_seam(refuse_fetched_address(), "development_exempt_host")
+
+
+@pytest.mark.parametrize("spelling", list(RESIDUE_LOOPBACK_HOSTS))
+def test_a_spelling_that_resolves_to_loopback_is_refused_on_the_browser_facing_column(
+    resolving: Any, spelling: str
+) -> None:
+    """ADR 0081's measured residue, closed: the address decides, not the spelling.
+
+    Four vectors, and they are that record's own list rather than this module's
+    invention: `127.1`, `2130706433`, `0x7f.0.0.1` and a name a resolver answers
+    with a loopback address. Every one of them reaches `127.0.0.1` and every one
+    of them parses as no address at all, so rule 3 — which asks
+    `ipaddress.ip_address(host).is_loopback` — walks straight past them. That is
+    the whole reason closing this needs a resolver rather than a fifth spelling in
+    a list, and it is why the residue survived a class-based rule that was already
+    written as a class.
+
+    What a deployment that registered one of these answers every launch with is a
+    redirect to a port on the launching person's own computer — rule 3's own
+    finding, arriving through a spelling that rule cannot read.
+
+    **The mutation this kills:** rule 5 written only for hosts that already parse
+    as an address, which is a no-op over exactly these four vectors and passes
+    every other test in this module. **Its pair** is the next test, where the same
+    four spellings are admitted on the two columns that admit loopback.
+    """
+    host = RESIDUE_LOOPBACK_HOSTS[spelling]
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{AUTHORIZATION_ENDPOINT: f"https://{host}:8080/oidc/authorize"}),
+            described(resolving, {host: (A_LOOPBACK_ADDRESS,)}),
+        )
+
+
+@pytest.mark.parametrize(
+    "host",
+    [*RESIDUE_LOOPBACK_HOSTS.values(), A_LOOPBACK_ADDRESS],
+)
+@pytest.mark.parametrize("column", FETCHED_COLUMNS)
+def test_a_spelling_that_resolves_to_loopback_is_admitted_on_a_column_that_admits_loopback(
+    resolving: Any, column: str, host: str
+) -> None:
+    """The split ADR 0096 drew survives rule 5: the sidecar is still registrable.
+
+    An operator registering a key-set or token sidecar reached at a loopback
+    address, in the same pod, is doing it on purpose — ADR 0077 protects the shape
+    by name and ADR 0096 kept it when it added loopback to the roster column. Rule
+    5 adds a *resolution* dimension to that split; it does not reopen it. So
+    `127.1` on `jwks_url` is a badly-spelled sidecar and stays admitted, while the
+    same string on `authorization_endpoint` is refused by the test above.
+
+    The literal `127.0.0.1` row is here as the control inside the pair: it is the
+    spelling that was always admitted, so a red on it alone means the split broke
+    rather than that the residue did.
+
+    **The mutation this kills:** rule 5 written as "no resolved address may be
+    non-global", with no exception for loopback on the columns outside
+    `LOOPBACK_REFUSED_COLUMNS` — which passes every refusal above and makes a
+    supported deployment unregistrable.
+    """
+    judge_with_resolver(
+        "production",
+        registration(**{column: f"https://{host}:8443/lti/token"}),
+        described(resolving, {host: (A_LOOPBACK_ADDRESS,)}),
+    )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_name_that_resolves_to_a_private_address_is_refused_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """E1-11's residual finding at the write surface: the name is innocent, the address is not.
+
+    `metadata.google.internal` is ADR 0081's own example and the shape is general:
+    a host that parses as no address, carries a valid certificate, passes rules
+    1-4 without a mark, and resolves to something inside the network this
+    container sits in. Two of these three columns are fetched by this tool on
+    every launch, so a registration naming one is an outbound authenticated
+    request to an internal service.
+
+    **The mutation this kills:** rule 5 applied only to hosts that are already IP
+    literals — which closes the `10.0.0.5` case and leaves the case that actually
+    needs a resolver open. **Its pair** is the next test, where the identical name
+    resolving to a globally-routable address is accepted.
+    """
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+            described(resolving, {AN_INTERNAL_NAME: (A_PRIVATE_ADDRESS,)}),
+        )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_name_that_resolves_to_a_global_address_is_accepted_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """The pair without which every rule 5 refusal is satisfied by refusing everything.
+
+    A real LMS is a hostname that resolves to a public address, and that is the
+    only registration anybody actually writes. A rule 5 that refused whenever it
+    resolved anything at all passes every refusal in this section and makes Pulse
+    registrable nowhere — the same cheapest-wrong-implementation this module's
+    original acceptance rows were written against, one rule later.
+    """
+    judge_with_resolver(
+        "production",
+        registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+        described(resolving, {AN_INTERNAL_NAME: (A_GLOBAL_ADDRESS,)}),
+    )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_resolving_to_a_global_and_a_private_address_is_refused_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """Every returned address is judged, not the first one.
+
+    A name with two A records — one public, one on the internal network — is an
+    ordinary split-horizon arrangement, and it is also the way past a rule that
+    reads `resolve(host)[0]` and stops. Which record a resolver returns first is
+    not stable: it depends on the resolver, the cache and, for a hostile platform,
+    on what the platform's own DNS chooses to answer at the moment of the check.
+
+    **The mutation this kills:** `addresses[0]` judged instead of every address —
+    which passes the single-address refusal above and every acceptance here.
+    **Its pair** is the next test, where two addresses that are both global are
+    accepted, so this cannot be satisfied by refusing any multi-address answer.
+    """
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+            described(resolving, {AN_INTERNAL_NAME: (A_GLOBAL_ADDRESS, A_PRIVATE_ADDRESS)}),
+        )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_resolving_to_two_global_addresses_is_accepted_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """The pair for "every address is judged": more than one answer is not itself a fault.
+
+    A load-balanced LMS answers several A records and all of them are ordinary.
+    Without this row, the mixed-answer refusal above is satisfied by a rule that
+    refuses any host resolving to more than one address.
+    """
+    judge_with_resolver(
+        "production",
+        registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+        described(resolving, {AN_INTERNAL_NAME: (A_GLOBAL_ADDRESS, ANOTHER_GLOBAL_ADDRESS)}),
+    )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_resolving_to_an_ipv4_mapped_private_address_is_refused_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """The mapped form is unwrapped before it is judged, as rule 3 already unwraps it.
+
+    `::ffff:10.0.0.7` is `10.0.0.7` reached over an IPv6 socket, and it is the
+    form a dual-stack resolver hands back. A rule that asked `is_global` of the
+    wrapper without unwrapping it reads a different answer from the one the packet
+    will get, and the existing loopback rule already faced this exact quirk — so
+    not unwrapping here is `docs/MISTAKES.md` entry 13, the same hazard in the
+    second of the two places that face it.
+
+    **Its pair** is the next test: the mapped form of a global address is
+    accepted, so this cannot be satisfied by refusing every mapped address.
+    """
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+            described(resolving, {AN_INTERNAL_NAME: (f"::ffff:{A_PRIVATE_ADDRESS}",)}),
+        )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_resolving_to_an_ipv4_mapped_global_address_is_accepted_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """The pair: unwrapping must decide the class, not the wrapper's presence."""
+    judge_with_resolver(
+        "production",
+        registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+        described(resolving, {AN_INTERNAL_NAME: (f"::ffff:{A_GLOBAL_ADDRESS}",)}),
+    )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_that_cannot_be_resolved_is_refused_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """Unresolvable is unjudgeable, and unjudgeable is refused.
+
+    The alternative — admitting a host the resolver cannot answer for — is the
+    hole the whole rule is walked through: a name that does not resolve at the
+    moment of the write resolves to whatever its owner likes at the moment of the
+    fetch, and the write-time check has certified it.
+
+    **The mutation this kills:** a `try/except` around the resolution that
+    swallows the failure and carries on, which is the natural way to write it and
+    which leaves rule 5 doing nothing for exactly the hosts that most need it.
+    """
+    import socket
+
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{column: f"https://{AN_UNRESOLVABLE_NAME}/lti/token"}),
+            described(resolving, {AN_UNRESOLVABLE_NAME: socket.gaierror("no such host")}),
+        )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_host_that_resolves_to_no_address_at_all_is_refused_outside_development(
+    resolving: Any, column: str
+) -> None:
+    """The second shape of a failed resolution, which raises nothing.
+
+    A resolver can answer "no addresses" without raising — an empty answer
+    section, a filtered family — and a rule written as "refuse if it raised"
+    admits that silently. Both shapes refuse, and they are separate rows because
+    an implementation can close one and leave the other.
+
+    **The mutation this kills:** `if not addresses: return` — which reads as
+    "nothing to judge" and is precisely the case that cannot be judged.
+    """
+    with pytest.raises(registration_error()):
+        judge_with_resolver(
+            "production",
+            registration(**{column: f"https://{AN_EMPTY_ANSWER_NAME}/lti/token"}),
+            described(resolving, {AN_EMPTY_ANSWER_NAME: ()}),
+        )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param((A_PRIVATE_ADDRESS,), id="a-private-address"),
+        pytest.param((), id="no-address-at-all"),
+    ],
+)
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_rule_five_admits_everything_in_development(
+    resolving: Any, column: str, answer: tuple[str, ...]
+) -> None:
+    """The environment pair for the whole of rule 5, on both of its refusals.
+
+    Development admits everything at write time, rule 5 included: ADR 0081's
+    decision, unchanged by this batch and stated in its settled design. A
+    developer's stack resolves the mock platform to a container address on a
+    private network and half the time cannot resolve it at all, and either of the
+    two refusals above firing there would stop `make seed` — which takes SPEC
+    §14.3's exit criterion with it.
+
+    **The mutation this kills:** rule 5 written outside the environment gate the
+    other four sit inside, which passes every refusal in this section.
+    """
+    judge_with_resolver(
+        development_environment(),
+        registration(**{column: f"https://{AN_INTERNAL_NAME}/lti/token"}),
+        described(resolving, {AN_INTERNAL_NAME: answer}),
+    )
+
+
+@pytest.mark.parametrize("column", EVERY_COLUMN)
+def test_a_rule_five_refusal_names_the_column_and_does_not_quote_the_value(
+    resolving: Any, column: str
+) -> None:
+    """The house rule reaches the new rule too: name the column, quote no value.
+
+    Its own row rather than a parameter of the rule 2 message test, because the
+    refusal that carries a *resolved address* is the one most likely to be written
+    as an f-string — "the host resolved to 10.0.0.7" is the most helpful sentence
+    to write and it puts a deployment's internal addressing into a container log
+    (SPEC §10) and onto E11's console.
+
+    **The mutation this kills:** a refusal built from the offending address or
+    from the addresses it resolved to, and a refusal that names the rule without
+    naming the column.
+    """
+    offending = f"https://{AN_INTERNAL_NAME}/lti/token?tenant={OFFENDING_DETAIL}"
+    with pytest.raises(registration_error()) as refusal:
+        judge_with_resolver(
+            "production",
+            registration(**{column: offending}),
+            described(resolving, {AN_INTERNAL_NAME: (A_PRIVATE_ADDRESS,)}),
+        )
+
+    message = str(refusal.value)
+    assert column.lower() in message.lower(), (
+        f"The refusal does not name `{column}`: {message!r}. Three columns can carry a refused "
+        "address and whoever reads this has to learn which one did."
+    )
+    assert offending not in message and OFFENDING_DETAIL not in message, (
+        f"The refusal quotes the address back: {message!r}. The host is what is being refused and "
+        "may be named; the rest is the deployment's own configuration."
+    )
+    assert A_PRIVATE_ADDRESS not in message, (
+        f"The refusal quotes the resolved address back: {message!r}. That is the deployment's "
+        "internal addressing, arriving in a log stream and on a rendered console page — the same "
+        "rule as the value, one level in, and the one an implementer is most likely to miss "
+        "because the sentence is genuinely more helpful with it."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 5, at the fetched surface — `refuse_invalid_fetched_address`, the helper
+# the roster walk calls once per URL it is about to GET. Two parameters this
+# batch adds: `resolve`, and `development_exempt_host`, which is how a
+# development stack keeps fetching its own roster without a name lookup while
+# still judging anywhere the platform points it.
+# ---------------------------------------------------------------------------
+
+A_PLATFORM_HOST = "roster.example.edu"
+
+
+def fetched(
+    environment: str,
+    resolve: Any,
+    *,
+    column: str = ROSTER_ADDRESS_COLUMN,
+    host: str = A_PLATFORM_HOST,
+    exempt: str | None = None,
+) -> Any:
+    """One fetched address, spelled `https` so only the rule under test can fire."""
+    return judge_fetched(
+        environment,
+        column=column,
+        address=f"https://{host}/memberships",
+        resolve=resolve,
+        development_exempt_host=exempt,
+    )
+
+
+def test_a_development_stack_does_not_resolve_its_own_roster_host(resolving: Any) -> None:
+    """The exemption, and the assertion is that the resolver was **never called**.
+
+    Not "the address was accepted", which is equally true of a development stack
+    that resolved the host and liked the answer, and equally true of one where the
+    rules do not run at all. The roster walk runs hourly over every section in the
+    institution; a name lookup per page, on a stack whose platform is a Compose
+    service that half the time resolves to nothing, is a cost and a flake with no
+    security value — the operator chose this address.
+
+    **The mutation this kills:** rule 5 running in development for every host,
+    with the exemption implemented as "resolve, then forgive" rather than as "do
+    not resolve". A test asserting only acceptance cannot tell those apart.
+    """
+    resolver = resolving({})
+
+    answered = fetched(development_environment(), resolver, exempt=A_PLATFORM_HOST)
+
+    assert not resolver.asked, (
+        f"The rules resolved {resolver.asked!r} while judging a development stack's own stored "
+        "roster host, which is the one address the exemption is for. Every roster page of every "
+        "section would carry that lookup."
+    )
+    assert answered is None, (
+        f"The helper answered {answered!r} where it resolved nothing. The return value is the pin "
+        "the sync connects to, and `None` is how it says there is nothing to pin — a tuple here "
+        "would have the sync pin an address rule 5 never judged."
+    )
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param("{host}", id="exactly"),
+        pytest.param("{host}.", id="one-trailing-dot"),
+        pytest.param("{upper}", id="upper-case"),
+    ],
+)
+def test_the_exempt_host_is_compared_the_way_a_resolver_reads_a_host(
+    resolving: Any, spelling: str
+) -> None:
+    """Case-insensitive, with the one-trailing-dot strip ADR 0077 already carries.
+
+    `MOCK-LMS.` and `mock-lms` reach the same service — host names are
+    case-insensitive (RFC 4343) and a single trailing dot is the root anchor. A
+    comparison that missed either would judge a development stack's own address
+    after all, which is the exemption failing in the direction nobody notices: the
+    stack still works, and every page costs a lookup.
+
+    **The mutation this kills:** `address_host == development_exempt_host` on the
+    raw string. **Its pair** is the next test, where a host the exempt one merely
+    prefixes is *not* exempt.
+    """
+    resolver = resolving({})
+    host = spelling.format(host=AN_EXEMPT_HOST, upper=AN_EXEMPT_HOST.upper())
+
+    fetched(development_environment(), resolver, host=host, exempt=AN_EXEMPT_HOST)
+
+    assert not resolver.asked, (
+        f"The rules resolved {resolver.asked!r} while judging {host!r} against the exempt host "
+        f"{AN_EXEMPT_HOST!r}. The two name the same service."
+    )
+
+
+def test_a_host_the_exempt_one_merely_prefixes_is_judged_and_refused(resolving: Any) -> None:
+    """Equality, never a substring — the near miss that decides whether this is a hole.
+
+    `mock-lms.evil.example` is a host somebody else controls, and an exemption
+    written as `host.startswith(exempt)` or `exempt in host` hands it the whole of
+    rule 5: a platform's `rel="next"` naming it would be fetched with the tool's
+    Bearer token, unjudged, on a development stack. That is the same defeat
+    `NON_MOCK_URL_SPELLINGS` records for rule 2's catalog, one level out and on
+    the permissive side this time.
+
+    **The mutation this kills:** a substring or prefix comparison. **Its pair** is
+    the test above, where the host that really is the exempt one is not judged.
+    """
+    resolver = resolving({A_HOST_THE_EXEMPT_ONE_PREFIXES: (A_PRIVATE_ADDRESS,)})
+
+    with pytest.raises(registration_error()):
+        fetched(
+            development_environment(),
+            resolver,
+            host=A_HOST_THE_EXEMPT_ONE_PREFIXES,
+            exempt=AN_EXEMPT_HOST,
+        )
+
+    assert resolver.asked, (
+        "The rules never resolved anything, so the refusal — if there was one — was not rule 5's. "
+        f"{A_HOST_THE_EXEMPT_ONE_PREFIXES!r} is not the exempt host and has to be judged."
+    )
+
+
+def test_a_host_that_is_not_the_exempt_one_is_judged_and_accepted_in_development(
+    resolving: Any,
+) -> None:
+    """The pair the refusal above cannot stand without.
+
+    A platform may legitimately page its roster onto a second host of its own, and
+    a development stack must still be able to walk it. Without this row, "the
+    non-exempt host is judged" is satisfied by a rule that refuses every host that
+    is not the exempt one — which stops paging on the demo stack and passes every
+    refusal in this section.
+    """
+    resolver = resolving({A_HOST_THE_EXEMPT_ONE_PREFIXES: (A_GLOBAL_ADDRESS,)})
+
+    answered = fetched(
+        development_environment(),
+        resolver,
+        host=A_HOST_THE_EXEMPT_ONE_PREFIXES,
+        exempt=AN_EXEMPT_HOST,
+    )
+
+    assert answered == (A_GLOBAL_ADDRESS,), (
+        f"The helper answered {answered!r} where it resolved {(A_GLOBAL_ADDRESS,)!r}. The sync "
+        "pins the connection to what this returns, so an answer that is not the resolved addresses "
+        "either sends the GET somewhere else or leaves it unpinned."
+    )
+
+
+def test_no_exempt_host_in_development_switches_rule_five_off(resolving: Any) -> None:
+    """A caller that names no exempt host gets development's blanket admission.
+
+    `provision_from_launch` is that caller: it stores an address out of a launch
+    claim and passes neither new argument, so a development stack keeps admitting
+    everything at launch time exactly as it did. The rule has to be off rather
+    than merely permissive, because there is no address for it to be measured
+    against and a lookup on a staff launch buys nothing.
+
+    **The mutation this kills:** `development_exempt_host=None` treated as "no
+    host is exempt, so judge everything", which is the reading the name invites
+    and which turns every development launch into a DNS lookup that can refuse the
+    mock platform's own roster address. **Its pair** is the test above, where the
+    identical host and resolver under an exempt host *are* judged and refused.
+    """
+    resolver = resolving({A_HOST_THE_EXEMPT_ONE_PREFIXES: (A_PRIVATE_ADDRESS,)})
+
+    fetched(
+        development_environment(),
+        resolver,
+        host=A_HOST_THE_EXEMPT_ONE_PREFIXES,
+        exempt=None,
+    )
+
+    assert not resolver.asked, (
+        f"The rules resolved {resolver.asked!r} in development with no exempt host named. Rule 5 "
+        "is off there, and a lookup that happens anyway is one a launch pays for."
+    )
+
+
+def test_a_deployment_judges_even_the_stored_roster_host(resolving: Any) -> None:
+    """The exemption is development's alone, and a deployment has no such thing.
+
+    The stored address is where the finding lives, not only the pagination URL: a
+    registration console writes it, and a launch claim can carry it. Exempting it
+    in a deployment would leave the one address an attacker can put there through
+    the front door unjudged.
+
+    **The mutation this kills:** the exemption applied wherever it is supplied,
+    rather than only under the development name. **Its pair** is the next test,
+    where the same exempt host resolving to a public address is accepted, so this
+    cannot be satisfied by refusing the exempt host outright.
+    """
+    resolver = resolving({A_PLATFORM_HOST: (A_PRIVATE_ADDRESS,)})
+
+    with pytest.raises(registration_error()):
+        fetched("production", resolver, exempt=A_PLATFORM_HOST)
+
+    assert resolver.asked, (
+        "Nothing was resolved, so whatever refused this was not rule 5. A deployment resolves "
+        "every fetched address, the section's own included."
+    )
+
+
+def test_a_deployment_accepts_the_stored_roster_host_when_it_resolves_publicly(
+    resolving: Any,
+) -> None:
+    """The pair, and the return value contract at the same time.
+
+    A real institution's roster service is a hostname on a public address, and it
+    is fetched hourly. The tuple that comes back is what the sync pins the
+    connection to — the address that was judged is the address the GET goes to —
+    so an implementation that judged correctly and answered `None` would leave the
+    walk re-resolving between the check and the request, which is the rebind this
+    batch closes.
+    """
+    resolver = resolving({A_PLATFORM_HOST: (A_GLOBAL_ADDRESS, ANOTHER_GLOBAL_ADDRESS)})
+
+    answered = fetched("production", resolver, exempt=A_PLATFORM_HOST)
+
+    assert answered == (A_GLOBAL_ADDRESS, ANOTHER_GLOBAL_ADDRESS), (
+        f"The helper answered {answered!r} where it resolved "
+        f"{(A_GLOBAL_ADDRESS, ANOTHER_GLOBAL_ADDRESS)!r}. The order is the resolver's and the sync "
+        "pins the first, so a reordered or truncated answer sends the connection somewhere the "
+        "resolver did not put first."
+    )
+
+
+@pytest.mark.parametrize("spelling", list(RESIDUE_LOOPBACK_HOSTS))
+def test_a_fetched_roster_address_that_resolves_to_loopback_is_refused(
+    resolving: Any, spelling: str
+) -> None:
+    """ADR 0096's column split, at the fetched surface, through the resolver.
+
+    The roster's pagination URL is chosen by the platform at run time, which is
+    why loopback joined link-local on that column and on no other. `127.1` in a
+    `Link: rel="next"` header reaches whatever this container is running beside,
+    with the tool's Bearer token attached, and it parses as no address at all.
+
+    **The mutation this kills:** the loopback half of rule 5 written against the
+    registration function only, leaving the fetched one — the surface a hostile
+    platform can actually reach — judging spellings.
+    """
+    host = RESIDUE_LOOPBACK_HOSTS[spelling]
+    with pytest.raises(registration_error()):
+        judge_fetched(
+            "production",
+            column=ROSTER_ADDRESS_COLUMN,
+            address=f"https://{host}/memberships",
+            resolve=resolving({host: (A_LOOPBACK_ADDRESS,)}),
+        )
+
+
+@pytest.mark.parametrize("spelling", list(RESIDUE_LOOPBACK_HOSTS))
+def test_a_fetched_key_set_address_that_resolves_to_loopback_is_admitted(
+    resolving: Any, spelling: str
+) -> None:
+    """The other side of the same split, and the reason it is drawn by column.
+
+    `jwks_url` is written by an operator under their own hand; the roster's next
+    page is written by the platform. So the sidecar stays admitted here and is
+    refused there, which is ADR 0096's decision and not this batch's to reopen.
+
+    **The mutation this kills:** rule 5 refusing every non-global resolved address
+    on every fetched column, which passes the test above and breaks a supported
+    deployment. **Its pair** is that test, one column across.
+    """
+    host = RESIDUE_LOOPBACK_HOSTS[spelling]
+    judge_fetched(
+        "production",
+        column=JWKS_URL,
+        address=f"https://{host}/.well-known/jwks.json",
+        resolve=resolving({host: (A_LOOPBACK_ADDRESS,)}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "answer"),
+    [
+        pytest.param("raises", None, id="unresolvable"),
+        pytest.param("empty", (), id="no-address-at-all"),
+    ],
+)
+def test_a_fetched_address_whose_host_does_not_resolve_is_refused(
+    resolving: Any, label: str, answer: Any
+) -> None:
+    """Both failure shapes, at the surface where the address was chosen at run time.
+
+    A `rel="next"` naming a host that does not resolve is not a page this tool can
+    judge, so it is not a page this tool fetches. Two rows because an
+    implementation can catch the raise and miss the empty answer.
+    """
+    import socket
+
+    described_answer = socket.gaierror("no such host") if label == "raises" else answer
+    with pytest.raises(registration_error()):
+        judge_fetched(
+            "production",
+            column=ROSTER_ADDRESS_COLUMN,
+            address=f"https://{AN_UNRESOLVABLE_NAME}/memberships",
+            resolve=resolving({AN_UNRESOLVABLE_NAME: described_answer}),
+        )
+
+
+def test_a_fetched_refusal_names_the_column_and_does_not_quote_the_value(resolving: Any) -> None:
+    """The house rule at the fetched surface, where the value came from a platform.
+
+    Sharper here than at the write surface: the refused string was chosen by the
+    platform, so quoting it back writes an attacker-supplied value into a
+    container log and, through `nrps_call`, onto a console an operator reads —
+    which is the second channel E1-11's F1-4 closed for the stored row.
+    """
+    offending = f"https://{AN_INTERNAL_NAME}/memberships?tenant={OFFENDING_DETAIL}"
+    with pytest.raises(registration_error()) as refusal:
+        judge_fetched(
+            "production",
+            column=ROSTER_ADDRESS_COLUMN,
+            address=offending,
+            resolve=resolving({AN_INTERNAL_NAME: (A_PRIVATE_ADDRESS,)}),
+        )
+
+    message = str(refusal.value)
+    assert (
+        ROSTER_ADDRESS_COLUMN.lower() in message.lower()
+    ), f"The refusal does not name `{ROSTER_ADDRESS_COLUMN}`: {message!r}."
+    assert (
+        offending not in message and OFFENDING_DETAIL not in message
+    ), f"The refusal quotes the platform-chosen address back: {message!r}."
+    assert A_PRIVATE_ADDRESS not in message, (
+        f"The refusal quotes the resolved address back: {message!r}. That is this deployment's "
+        "internal addressing, put into a log by a value a platform supplied."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Controls. Two constants decide most of this module, and a stale one refuses
 # nothing while reporting exactly what a correct one reports (`docs/MISTAKES.md`
 # entry 35). **A red in this section means these tests are broken, not the code.**
-# Nothing here imports the application except the last row, which reads one
-# already-shipped constant.
+# Nothing here imports the application except the last rows, which read
+# already-shipped constants.
 # ---------------------------------------------------------------------------
 
 
@@ -950,4 +1902,114 @@ def test_the_development_environment_name_is_read_from_its_one_definition() -> N
     assert development_environment().strip() == development_environment(), (
         "`DEVELOPMENT_ENVIRONMENT` carries surrounding whitespace, so the rows built from it are "
         "not the names a deployment would set."
+    )
+
+
+def test_the_address_vectors_sit_on_the_side_of_is_global_this_module_claims() -> None:
+    """A control: rule 5 is `is_global`, so a vector on the wrong side inverts a test.
+
+    This is the trap the batch's own work order names, and it is invisible in the
+    test that trips over it: `203.0.113.10` (TEST-NET-3) and `192.0.2.1`
+    (TEST-NET-1) read like public addresses and are reserved, so `is_global` is
+    false for both. A refusal test using one is green for the wrong reason, and an
+    acceptance test using one is red for the wrong reason — and this module used
+    TEST-NET-3 as its "not loopback, not private" literal until rule 5 arrived.
+
+    Arithmetic on `ipaddress` and this module's own constants, which is why it can
+    be relied on to say something about the rest.
+    """
+    from ipaddress import ip_address
+
+    for address in (A_GLOBAL_ADDRESS, ANOTHER_GLOBAL_ADDRESS, NON_LOOPBACK_IP_LITERAL):
+        assert ip_address(address).is_global, (
+            f"This module uses {address!r} as an ordinary public address, and `ipaddress` reports "
+            "it is not globally routable. Every acceptance row built on it is asserting the "
+            "opposite of what it says."
+        )
+    for address in ("203.0.113.10", "192.0.2.1"):
+        assert not ip_address(address).is_global, (
+            f"{address!r} is globally routable on this interpreter, so the documentation ranges "
+            "would be usable here after all and this control's premise is stale."
+        )
+    for address in (A_PRIVATE_ADDRESS, A_LOOPBACK_ADDRESS):
+        assert not ip_address(address).is_global, (
+            f"This module uses {address!r} as an address rule 5 refuses, and `ipaddress` reports "
+            "it is globally routable. Every refusal row built on it would be asserting nothing."
+        )
+    for spelling, host in PRIVATE_URL_HOSTS.items():
+        assert not ip_address(host.strip("[]")).is_global, (
+            f"`PRIVATE_URL_HOSTS[{spelling!r}]` is {host!r}, which is globally routable — so the "
+            "refusal rows built on it are about an address rule 5 accepts."
+        )
+
+
+def test_the_residue_spellings_parse_as_no_address_at_all() -> None:
+    """A control: the residue vectors are residue, rather than addresses in disguise.
+
+    Every one of ADR 0081's four residue spellings is here because
+    `ipaddress.ip_address` refuses it — that is what makes rules 3 and 4 blind to
+    them and what makes a resolver the only fix. If any of them started parsing,
+    the rule-5 test built on it would be green against a rule that never resolved
+    anything, which is `docs/MISTAKES.md` entry 3 exactly.
+    """
+    from ipaddress import ip_address
+
+    for spelling, host in RESIDUE_LOOPBACK_HOSTS.items():
+        with pytest.raises(ValueError):
+            ip_address(host)
+        assert host, f"`RESIDUE_LOOPBACK_HOSTS[{spelling!r}]` is empty."
+
+
+def test_the_fetched_columns_split_on_loopback_the_way_this_module_drives_them() -> None:
+    """A control: this module's two fetched columns are the ones the code splits on.
+
+    `docs/MISTAKES.md` entry 35's shape — a guard that only ever reports absence
+    cannot tell you which mechanisms it can see. Every fetched-surface test above
+    asserts that the roster column refuses a resolved loopback address and that
+    `jwks_url` admits one, and both halves are satisfied by column names the
+    module under test has never heard of: a refusal for the wrong reason on one
+    side and no rule at all on the other.
+
+    So both tuples are read from `app.models.lti` and each column is *found* in
+    the one it belongs to, rather than merely missing from the other.
+    """
+    from app.models.lti import FETCHED_COLUMNS as CODE_FETCHED
+    from app.models.lti import LOOPBACK_REFUSED_COLUMNS as CODE_LOOPBACK_REFUSED
+
+    assert ROSTER_ADDRESS_COLUMN in CODE_FETCHED, (
+        f"`{ROSTER_ADDRESS_COLUMN}` is not among the fetched columns {tuple(CODE_FETCHED)}, so the "
+        "roster-address tests above are driving a column the rules do not judge."
+    )
+    assert ROSTER_ADDRESS_COLUMN in CODE_LOOPBACK_REFUSED, (
+        f"`{ROSTER_ADDRESS_COLUMN}` is not among {tuple(CODE_LOOPBACK_REFUSED)}, so the loopback "
+        "refusal asserted for it is asserting something ADR 0096 does not say."
+    )
+    assert (
+        JWKS_URL in CODE_FETCHED
+    ), f"`{JWKS_URL}` is not among the fetched columns {tuple(CODE_FETCHED)}."
+    assert JWKS_URL not in CODE_LOOPBACK_REFUSED, (
+        f"`{JWKS_URL}` is among {tuple(CODE_LOOPBACK_REFUSED)}, so ADR 0096's split has moved and "
+        "the sidecar acceptance above contradicts it."
+    )
+
+
+def test_this_modules_address_vectors_are_the_ones_the_wire_tests_drive(
+    roster_contract: Any,
+) -> None:
+    """A control: the unit and integration halves of rule 5 judge the same addresses.
+
+    The pin tests over the wire drive `roster_contract`'s vectors and the rules
+    here drive this module's. Two copies of the same three addresses is
+    `docs/MISTAKES.md` entry 19's shape — a test holding its expectation in a copy
+    of the thing it is checking — and the failure it produces is the worst kind: a
+    green unit suite about `10.0.0.7` and a green wire suite about an address that
+    drifted onto the other side of `is_global`.
+    """
+    assert (roster_contract.a_global_address, roster_contract.a_private_address) == (
+        A_GLOBAL_ADDRESS,
+        A_PRIVATE_ADDRESS,
+    ), (
+        "The wire tests drive "
+        f"{(roster_contract.a_global_address, roster_contract.a_private_address)!r} and this "
+        f"module drives {(A_GLOBAL_ADDRESS, A_PRIVATE_ADDRESS)!r}."
     )
