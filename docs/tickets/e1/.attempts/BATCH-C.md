@@ -86,3 +86,31 @@ three spellings of one string with nothing comparing them is entry 13.
 Worked: the seed module plus the four batch modules, **283 passed**, exit 0.
 `mypy` clean after the adapter's `send` was given `BaseAdapter`'s own signature —
 `(self, request, **kwargs)` is an incompatible override and mypy said so.
+
+## Attempt 4 — the records, and the verification they were written against
+
+Records last, after the code stopped moving. ADR 0101; a superseded-in-part
+pointer at the top of ADR 0081's decision section naming the two paragraphs it
+falsifies; the "four rules" claims in ADR 0091, `docs/adr/README.md`'s rows for
+0081 and 0091, `org.py`'s roster-address comment and `provisioning.py`'s writer;
+the three deferred entries; the two E2 hand-off entries. `.env.example` was read
+rather than assumed: the change adds no configuration variable, so it needs no
+line.
+
+One claim in the ADR draft was wrong and was corrected before it was committed:
+the sync's token request does *not* travel over a transport of `pylti1p3`'s own —
+it goes through the same session the pinned adapter is mounted on, and is
+unpinned because nothing ever judged its host at fetch time. The residue is the
+same; the reason is not.
+
+Verified, on the tree at the records commit:
+
+- `pytest tests/unit tests/integration`: **1966 passed**, exit 0, 12:24.
+- `pytest -m invariant`: **112 passed, 1854 deselected**, exit 0;
+  `check_invariants.py` "112 invariant test(s) ran, none skipped, none failed";
+  `check_invariant_assertions.py` "78 invariant-marked test(s) each assert
+  something".
+- `ruff check .`, `ruff format --check .` (220 files), `mypy`, `mypy
+  mock-lms/app`, `mypy mock-idp/app`: all exit 0.
+- No migration: a mapper event is not DDL, and no column, constraint or index
+  moved.
