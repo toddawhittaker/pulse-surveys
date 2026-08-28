@@ -19,10 +19,21 @@ durable one, over rows a test owns and members it can name.
 nobody" is trivially true of a page that renders nothing, of a console with no
 sections table, and of a section nobody is enrolled in — three states that look
 identical to a scan (`docs/MISTAKES.md` entry 3). So the order below is fixed:
-the roster is synced first, the identity strings the tool actually stored are
-read out of the database and required non-empty, the sections table is required
-present, and only then is it searched. Every string searched for is one this
-tool demonstrably holds about a member of a section on that page.
+the roster is synced first, the values that would constitute a leak are read out
+of the database and required non-empty, the sections table is required present,
+and only then is it searched. Every string searched for is one this tool
+demonstrably holds about a member of a section on that page.
+
+**What "a leak" means here is two sets, and the second is the live one.** The
+subjects and addresses the sync stored are unreachable by this page today —
+`pulse_app` is granted no `SELECT` on `user` or `user_identity` — so they are
+defence in depth against a future grant. The member keys on `public.section_roster`
+*are* reachable, because that view is granted deliberately, and they are what a
+console-only mutation can actually render. The first version of this module
+searched for the unreachable half alone and a battery mutation that rendered
+each section's `user_id` walked through it: a `user_id` is a UUID, so it matched
+neither the string-valued planted set nor the two literal shapes. Both halves
+are searched now, and the reachable one carries the canary.
 
 **Placed beside `test_dev_console.py` rather than inside it.** That module builds
 its application with the mock identity provider mounted and no platform, no
@@ -39,6 +50,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
+from sqlalchemy import text
 
 pytestmark = [pytest.mark.integration, pytest.mark.lti]
 
@@ -80,7 +92,25 @@ SUBJECT_STEM = "mock-lms-user-"
 # a correct page contains, which would make this red against every
 # implementation. Eight is comfortably shorter than a subject or an address and
 # comfortably longer than anything that collides by accident.
+#
+# The member keys added below clear it without needing an exemption: a UUID is 36
+# characters written out and 32 with the hyphens stripped.
 SHORTEST_TELLING_VALUE = 8
+
+# The read view the console's own connection can reach a member through, and the
+# column on it that names one. **`pulse_app` is granted `SELECT` on this view and
+# on `user_id` deliberately** — `tests/integration/test_identity_grants.py`'s
+# `SANCTIONED_VIEW_COLUMNS` records the sentence that admits it, because the
+# Pulse-internal key "is what makes a de-identified response addressable" for
+# instructor-scoped code. Sanctioned there is not sanctioned here: E1-15's
+# contract for the sections table is a calendar, a count and a yes/no, and a
+# stable per-person key on a developer console is an identity column whether or
+# not it resolves to a name by itself.
+#
+# This is the reachable surface, so it is the one a console-only mutation can
+# render, and it is what the battery proved this sweep was blind to.
+ROSTER_VIEW = "section_roster"
+ROSTER_MEMBER_KEY = "user_id"
 
 # HTML elements that never carry an end tag, so the row reader's depth counter
 # does not go looking for one.
@@ -178,6 +208,16 @@ def stored_identity_strings(roster_rows: Any) -> set[str]:
     other side of the wall. Column names are not spelled anywhere here: every
     string value of every row is taken, and the short ones are dropped for the
     reason `SHORTEST_TELLING_VALUE` gives.
+
+    **This half is defence in depth and not the live half, which is worth saying
+    so nobody later reads it as dead code.** The battery established that
+    `pulse_app` holds no `SELECT` on `user` or `user_identity` at all, so no
+    mutation confined to the console can put a subject or an address on the page
+    — the connection cannot read them. It stays because the grant is what makes
+    that true, and a grant is one migration away from changing; the day one
+    arrives, this set is already searching for what it would expose.
+
+    The half that *is* live is `member_keys_the_console_can_reach` below.
     """
     found: set[str] = set()
     for row in list(roster_rows.users()) + list(roster_rows.identities()):
@@ -185,6 +225,62 @@ def stored_identity_strings(roster_rows: Any) -> set[str]:
             if isinstance(value, str) and len(value) >= SHORTEST_TELLING_VALUE:
                 found.add(value)
     return found
+
+
+def member_keys_the_console_can_reach(committed: Any, section_id: Any) -> tuple[set[str], set[str]]:
+    """Every member key reachable through `section_roster`, and this section's own.
+
+    **The half the battery found missing.** A mutation that rendered each
+    section's member `user_id` into a cell — from the one view the console's
+    connection is granted — survived this module untouched, and two decisions of
+    mine let it: `stored_identity_strings` keeps only `str` values, and a
+    `user_id` is a `uuid.UUID`, so it was in neither the planted set nor the two
+    literals. The rule the docstring states ("names no member") and the contract
+    the ticket writes ("no user ids") both forbid it, and nothing asserted it.
+
+    Both forms are returned. `str(...)` is the hyphenated spelling anything
+    rendering a UUID produces by default, and the hyphen-stripped one is the near
+    miss — `uuid.hex`, or a template that tidies it — which would otherwise walk
+    straight through a search for the first.
+
+    Two sets rather than one, because they answer two questions. Every key on the
+    view is the search set: the console lists every section, so a key belonging
+    to some other test's section is as much a leak as one belonging to this
+    test's. This section's own keys are the canary: the sync above demonstrably
+    wrote them, so a page searched for them is a page searched for values that
+    certainly exist behind it.
+
+    **`committed` is the `CommittedRows` the `committed_rows` fixture yields**,
+    not the `RosterRows` beside it, and the difference is one this function got
+    wrong once: `RosterRows` keeps its `CommittedRows` as `self.rows` and exposes
+    no `session` of its own, so a `roster_rows.session` here raised
+    `AttributeError` before any assertion ran — a broken test rather than a red
+    one. `CommittedRows.__init__` is where `session` is defined
+    (`tests/fixtures/authz_data.py`), and the test already holds that object,
+    which is what it passes.
+    """
+    # Rollback first, so this read sees what another connection committed. That
+    # is `RosterRows.all_of`'s own arrangement, made through the same
+    # `CommittedRows`, and it is the fixture's intent rather than this module's
+    # invention.
+    committed.session.rollback()
+    # Column and view names are the two constants above; the statement is written
+    # out rather than interpolated so nothing here composes SQL from a name.
+    statement = text("SELECT section_id, user_id FROM public.section_roster")
+    found = committed.session.execute(statement).all()
+
+    def spellings(value: Any) -> set[str]:
+        written = str(value)
+        return {written, written.replace("-", "")}
+
+    reachable = {spelling for _, member in found for spelling in spellings(member)}
+    this_section = {
+        spelling
+        for section, member in found
+        if section == section_id
+        for spelling in spellings(member)
+    }
+    return reachable, this_section
 
 
 @pytest.fixture
@@ -314,14 +410,41 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
     developer console and the reason this rule needed writing down. A table that
     prints the stored roster address, which carries the platform's own context
     identifier and is a service credential's target. A column added later that
-    holds "who last synced this" and turns out to be a member.
+    holds "who last synced this" and turns out to be a member. And — the one it
+    missed the first time — a cell holding each member's `user_id`.
+
+    **The mutation that survived, and what it changed here.** The Loop B battery
+    rendered `section_roster.user_id` into a cell and this test passed. Two
+    decisions of mine let it through: the planted set was built from `str` values
+    only, and a `user_id` is a `uuid.UUID`; and the two literals it also searches
+    for, an `@` and the launch-subject stem, are shapes a UUID does not have. So
+    the sweep was searching diligently for the two things the console's own
+    connection **cannot** reach and not for the one thing it can. That is
+    `docs/MISTAKES.md` entry 3 in the plainest form: a green that measured the
+    wrong surface.
+
+    The battery's other finding runs the other way and is in the code's favour:
+    `pulse_app` holds no `SELECT` on `user` or `user_identity`, so no
+    console-only mutation can put a subject or an address on the page at all.
+    Those stay in the planted set as defence in depth against a future grant —
+    `stored_identity_strings` says so — and `section_roster` is the live half.
+
+    **A member key is an identity column even though it names nobody**, and the
+    grant on that view is not a licence for this page. `carried-from-e0.md`'s
+    sweep entry is the record: a stable per-person key resolves a de-identified
+    response to a person in one join, which is why the reveal's composition
+    treats it as the thing to guard. `section_roster.user_id` is sanctioned for
+    instructor-scoped code, by name, in
+    `tests/integration/test_identity_grants.py`; E1-15's contract for this table
+    is a calendar, a count and a yes/no, and nothing on it is a person.
 
     **What makes it non-vacuous, in order.** The sync runs first, so the section
     on the page has real members behind it; the strings the tool stored about
-    those members are read out of the database and required non-empty, so the
-    page is searched for values it demonstrably could have printed; and the
-    sections table is required present before it is searched, so an absent table
-    fails saying so rather than passing because there was nothing to find.
+    those members and the member keys the console's connection can reach are both
+    read out of the database and each required non-empty, so the page is searched
+    for values it demonstrably could have printed; and the sections table is
+    required present before it is searched, so an absent table fails saying so
+    rather than passing because there was nothing to find.
     """
     roster_sync.call(
         roster_sync.sync_one_section,
@@ -331,14 +454,29 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
     )
     committed_rows.commit()
 
-    planted = stored_identity_strings(roster_rows)
-    assert planted, (
+    stored = stored_identity_strings(roster_rows)
+    assert stored, (
         "The sync wrote no `user` or `user_identity` row carrying a string this test could "
         "look for, so there is nothing the console could have leaked. The section is "
         f"{synced_section.id} and its roster address is {synced_section.address!r}; if the "
         "sync did not run, every assertion below passes over a page about a section nobody "
         "is in."
     )
+
+    reachable, this_section = member_keys_the_console_can_reach(committed_rows, synced_section.id)
+    assert this_section, (
+        f"`public.{ROSTER_VIEW}` reports no {ROSTER_MEMBER_KEY} for section "
+        f"{synced_section.id}, so the live half of this sweep is searching for nothing. That "
+        "view is the one surface the console's own connection is granted a member through, "
+        "which makes it the only thing a console-only mutation can render — the sync above "
+        "wrote the enrollments behind it, so an empty answer here means the sync did not "
+        "reach this section rather than that the console is clean."
+    )
+
+    # The live half and the defence-in-depth half, searched as one set. The member
+    # keys clear `SHORTEST_TELLING_VALUE` on their own — a UUID is 36 characters,
+    # 32 without hyphens — so no exemption is needed for them.
+    planted = stored | reachable
 
     answered = dev_console.get(DEV_CONSOLE_PATH)
     assert answered.status_code == 200, (
@@ -359,12 +497,19 @@ def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
 
     leaked = sorted(value for value in planted if value in region)
     assert not leaked, (
-        f"The console's sections table carries {len(leaked)} value(s) the tool stored about the "
-        f"people in that section: {leaked[:5]}. The first sits in "
-        f"{around(region, leaked[0])!r}. E1-15's contract for this table is one row per section "
-        "with its derived calendar, an enrolled count and a yes/no on the roster address — no "
-        "identity column of any kind. SPEC §4 keys every response to a subject and §4.1 separates "
-        "an address from it; a development console is not an exemption from either."
+        f"The console's sections table carries {len(leaked)} value(s) that name a member of a "
+        f"section: {leaked[:5]}. The first sits in {around(region, leaked[0])!r}.\n\n"
+        f"If it is a `{ROSTER_MEMBER_KEY}` from `public.{ROSTER_VIEW}`, read this before "
+        "reaching for the grant: that view hands the key to instructor-scoped code by design and "
+        "is sanctioned by name in `tests/integration/test_identity_grants.py`, so the repair is "
+        "not a grant change — it is that a stable per-person key does not belong on this page. It "
+        "resolves a de-identified response to a person in one join, which is what "
+        "`carried-from-e0.md`'s sweep entry records, and it is an identity column even though it "
+        "names nobody by itself.\n\n"
+        "E1-15's contract for this table is one row per section with its derived calendar, an "
+        "enrolled count and a yes/no on the roster address — no identity column of any kind. "
+        "SPEC §4 keys every response to a subject and §4.1 separates an address from it; a "
+        "development console is not an exemption from either."
     )
     assert ADDRESS_MARK not in region, (
         f"The console's sections table carries an {ADDRESS_MARK!r}, which is how an email address "
