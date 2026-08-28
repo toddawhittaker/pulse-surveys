@@ -25,13 +25,41 @@ because a sentence in this file says so. The closure is transitive for free — 
 view built on a view has both bodies parsed — and it needs no judgement call
 anywhere, which is what makes it a closed set rather than a longer list.
 
-**A relation nothing in the catalog reads is not policed.** Ordinary product
-tables no view is defined over stay outside this rule, which is deliberate:
-reading a `section` row is not a §4.1 question, and a guard that said it was
-would be red against correct code and deleted rather than fixed. If parsing the
-view bodies pulls in an identity table, that is correct and not over-reach — the
-overlap with `tests/unit/test_no_service_reads_an_identity_table_directly.py`
-costs nothing.
+**The set this builds is broad, and the breadth is the point.** As this is
+written the parse yields fourteen relations — the three org views, the two roster
+views, `enrollment` and `role_assignment` beneath them, and the org containment
+tables the purview views are computed over, `course` and `section` among them.
+That is wider than "the relations SPEC §4.1 is about", and it is chosen over a
+narrower set deliberately: **no judgement is exercised anywhere in the parse**,
+so there is no step at which somebody decides a relation does not matter, and no
+step at which they can decide it wrongly. A hand-curated inventory is exactly
+what M8 found, and the three names it had left out were the three E1 added.
+
+The count moves with the catalog and is written nowhere in this file — a view
+added by a later ticket brings its base tables with it, and a relation no view is
+defined over (`nrps_call`, `launch_defect`, `lti_launch_nonce`) stays outside the
+rule. Fourteen is what the parse yielded when this paragraph was written, not a
+number anything here asserts.
+
+**What to do when a legitimate raw read reds this sweep**, written down because
+the wrong answer is the cheap one. A read path may one day name `course` or
+`section` in a statement of its own for reasons that have nothing to do with
+§4.1. There are then exactly two answers. Move the read to a sanctioned location
+— a grant function in `authz.py` is where a read of these relations belongs — or
+add a location exemption **in its own reviewed commit**, with a statement pin like
+the two the exempt files below carry, so the exemption covers the statement its
+reason describes and nothing else.
+
+**The inventory is never narrowed.** Trimming the parse, or lifting one relation
+out of it, is the repair that looks smallest under time pressure and silently
+reopens every hole the closure was built to close — a guard deleted rather than
+fixed, which is how this file came to be policing a hand-written list of three
+names in the first place. A red here is a question about one statement; it is
+never a question about the inventory.
+
+If parsing the view bodies pulls in an identity table, that is correct and not
+over-reach — the overlap with
+`tests/unit/test_no_service_reads_an_identity_table_directly.py` costs nothing.
 
 **Why the rule is the same rule for a table as for a view.** Nothing in the
 database narrows any of these. `pulse_app` holds an unfiltered `SELECT`, and the
@@ -58,31 +86,50 @@ route — importing `app.views_sql.queries`, the module holding the statements t
 grant functions already run, and running one of them on a session of the
 caller's own, which names no relation in the importing module at all.
 
-**Exemptions are locations, never shapes.** Four of them for the SQL half:
+**Exemptions are locations, never shapes.** Four of them for the SQL half, and
+**two of the four are pinned to the statement their reason describes** — the
+location is how the exemption is *spelled*, and the pin is how wide it is:
 
-  - `backend/app/services/authz.py`, the chokepoint the rule is written around;
+  - `backend/app/services/authz.py`, the chokepoint the rule is written around.
+    Unpinned, because reading these relations under §2.1's purview rules is the
+    whole of what that module is for;
   - `backend/app/api/dev.py`, ADR 0100's count-only read of the enrolled figure
-    off the development console;
+    off the development console. **Pinned to `section_enrollment_count`**: the
+    ADR's own consequence is that "the enrolled figure has to keep coming from
+    the view", and a console that grew a second read would otherwise inherit this
+    exemption for it;
   - `backend/app/services/safety.py`, the Care service's own revalidation of the
     holds-Care rule. Its `EXISTS` over `role_assignment` is one of the four
     statements of that rule that move together, and it is written there rather
     than called out of `authz.py` because the Care path revalidates on its own
     `pulse_care` credential — a grant function in `authz.py` would answer on the
     `pulse_app` connection, which is the wrong one. This exemption was added by
-    the fix round's verifier pass, which is the run that found it;
+    the fix round's verifier pass, which is the run that found it. **Pinned to
+    `role_assignment`**: when E9 or E10 gives that module a query over
+    `assignment_scope`, it is an offender again and this file says so;
   - the `backend/app/views_sql/` package, which is where the SQL lives (ADR 0041:
     "the SQL lives in `backend/app/views_sql/<object>_v<NNN>.sql`, and the
     revision executes it by name"). A rule forbidding the query module from
     naming the relations it queries would forbid the design the ticket describes,
     and what keeps that module honest is the second half below — one importer.
 
-The console is the one that has to be spelled as a location. A count is a
-*shape*, and "a read that only counts is fine" is a rule no sweep can grade:
-`SELECT count(*) FROM enrollment WHERE section_id = :id` counts one section and
-`SELECT count(*) FROM enrollment` counts the institution, and a sweep reading for
-`count(` cannot tell which of them the next one is. So the console is exempt for
-being the console, and a count-only read written anywhere else is caught — which
-is asserted below rather than described.
+The console is the one that shows why an exemption has to be spelled as a
+location rather than as a shape. A count is a *shape*, and "a read that only
+counts is fine" is a rule no sweep can grade: `SELECT count(*) FROM enrollment
+WHERE section_id = :id` counts one section and `SELECT count(*) FROM enrollment`
+counts the institution, and a sweep reading for `count(` cannot tell which of
+them the next one is. So the console is exempt for being the console, and a
+count-only read written anywhere else is caught — which is asserted below rather
+than described.
+
+**The pin is what keeps the location from being wider than its reason.** An
+exemption by location excuses a *file*, and the reasons above are about single
+statements; without a pin, the exemption a module was granted for one query
+silently covers the next one somebody adds to it. So each pinned file's policed
+reads are asserted as an **equality** against the relation its reason names —
+which is both halves at once: the read must still be there (an exemption that
+excuses nothing is dead, and a sweep that cannot see it is blind), and there must
+be nothing else.
 
 **Read out of the syntax tree, not out of the file text**, for the reason
 `tests/unit/test_no_service_reads_an_identity_table_directly.py` gives: a correct
@@ -103,6 +150,11 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
     counts, or because it carries a `WHERE`.
     `test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape`
     goes red on the planted count-only read at an unexempt location.
+  - **Growing a pinned exemption past the statement its reason names** — a second
+    query added to the development console, or the `assignment_scope` read E9 or
+    E10 will want in `safety.py`.
+    `test_each_pinned_exemption_covers_exactly_the_statement_its_reason_names`
+    goes red on the file whose reads have grown, and names what it grew by.
   - **Re-adding the hand-written list** — replacing the parse with a tuple of
     the three org views. The premise test goes red on the other three names,
     which is the failure M8 reported and the reason the list is gone.
@@ -991,46 +1043,83 @@ def test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape() -> N
         )
 
 
-def test_the_dev_console_exemption_covers_a_read_this_sweep_can_actually_see() -> None:
-    """The exemption is load-bearing, which is the control that the sweep is not blind.
+# The statement each pinned exemption exists for, as the relations that file's
+# own statements may name — an equality, not a floor. The reason is carried with
+# the pin so a failure message can say what the exemption was granted for without
+# anybody opening the module.
+#
+# `services/authz.py` and the `views_sql/` package carry no pin, and that is not
+# an oversight. The grant functions may hold their statements in
+# `app.views_sql.queries` rather than in their own text, so which of the two
+# carries the SQL is a construction choice this file does not settle — and the
+# chokepoint's whole job is reading these relations under §2.1's rules, so there
+# is no single statement to pin it to. The import half below is what keeps that
+# route to one module.
+STATEMENT_PINS = (
+    (
+        DEV_CONSOLE_MODULE,
+        ["section_enrollment_count"],
+        "ADR 0100's count-only read of the enrolled figure, which that ADR requires to keep "
+        "coming from the view rather than from `public.enrollment`",
+    ),
+    (
+        CARE_REVALIDATION_MODULE,
+        ["role_assignment"],
+        "the Care service's own revalidation of the holds-Care rule, on the `pulse_care` "
+        "credential, which is one of the four statements of that rule that move together",
+    ),
+)
 
-    `docs/MISTAKES.md` entry 35: a guard that only ever reports absence cannot tell
-    you which mechanisms it can see. So one exempt location is required to be a
-    module the sweep *would* have flagged — ADR 0100's console, which "spells that
-    view's `SELECT` itself rather than importing `app.views_sql.queries`".
 
-    Two things fail here, and both are worth knowing. The console stops reading a
-    policed relation in a statement — in which case its exemption is excusing
-    nothing and should go, or the read has moved somewhere this sweep cannot see
-    it, which is the same defect wearing ADR 0100's name. Or the sweep has gone
-    blind to reads written in real application code, in which case every green
-    below means nothing.
+@pytest.mark.parametrize(
+    ("module", "pinned", "reason"),
+    STATEMENT_PINS,
+    ids=[path.stem for path, _, _ in STATEMENT_PINS],
+)
+def test_each_pinned_exemption_covers_exactly_the_statement_its_reason_names(
+    module: Path, pinned: list[str], reason: str
+) -> None:
+    """An exemption excuses a file; its reason is about one statement. This is the gap.
 
-    `services/authz.py` and the `views_sql/` package are deliberately not asserted
-    this way: the grant functions may hold their statements in
-    `app.views_sql.queries` rather than in their own text, so which of the two
-    carries the SQL is a construction choice this file does not settle. The import
-    half below is what keeps that route to one module. `services/safety.py` is not
-    asserted this way either — its exemption came from the verifier's run, which is
-    the sweep finding it, and pinning that module's statement here would make this
-    file assert where the Care revalidation is written.
+    **The floor half** is `docs/MISTAKES.md` entry 35: a guard that only ever
+    reports absence cannot tell you which mechanisms it can see. Each pinned file
+    is required to be a module the sweep *would* have flagged, so a sweep that had
+    gone blind to reads in real application code cannot pass this file green.
+
+    **The ceiling half** is the finding this shape answers. An exemption granted
+    for one query covers every query the module later grows, silently: a second
+    read added to the development console, or the `assignment_scope` query E9 or
+    E10 will want in the Care service, would each inherit an exemption written for
+    something else. With the pin, both are offenders again and the failure message
+    names what the file grew by.
+
+    **The mutations this exists to survive**, in both directions: the pinned read
+    disappearing from the module (the exemption excuses nothing and should go, or
+    the read moved somewhere this sweep cannot see it — the same defect wearing
+    the ADR's name), and the module gaining a policed read the exemption was never
+    granted for.
     """
-    assert DEV_CONSOLE_MODULE.is_file(), (
-        f"{DEV_CONSOLE_MODULE.relative_to(REPO_ROOT)} does not exist, so ADR 0100's console is "
-        "somewhere else and this exemption excuses a file nobody has."
+    assert module.is_file(), (
+        f"{module.relative_to(REPO_ROOT)} is exempt from this sweep and does not exist, so the "
+        f"exemption granted for {reason} excuses a file nobody has."
     )
     inventory = policed_relations()
     pattern = reference_to(inventory)
-    tree = ast.parse(
-        DEV_CONSOLE_MODULE.read_text(encoding="utf-8"), filename=str(DEV_CONSOLE_MODULE)
-    )
+    tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
 
     found = relations_named_by(tree, pattern)
-    assert found, (
-        f"{DEV_CONSOLE_MODULE.relative_to(REPO_ROOT)} names no policed relation in any statement "
-        "it runs, so its exemption excuses nothing and this file cannot show that the sweep sees "
-        "a real read at all. ADR 0100: the console's enrolled figure comes from the view, spelled "
-        f"as a `SELECT` in that module. The inventory is {sorted(inventory)}."
+    assert found == pinned, (
+        f"{module.relative_to(REPO_ROOT)} runs statements naming {found}, and its exemption is "
+        f"pinned to {pinned}.\n\n"
+        f"The exemption exists for {reason} — one statement, not a standing licence for the "
+        "module.\n\n"
+        f"If {found} is the shorter list, that read is gone: the exemption now excuses nothing "
+        "and should go with it, or the read has moved somewhere this sweep cannot see, which is "
+        "the same defect wearing the reason's name. If it is the longer list, the module has "
+        "grown a read of a relation nobody exempted it for — `pulse_app` holds an unfiltered "
+        "`SELECT` on every name in the inventory, so that statement computes SPEC §2.1's purview "
+        "itself. Move it to a grant function in `services/authz.py`, or widen this pin in its own "
+        f"reviewed commit with the reason beside it. The inventory is {sorted(inventory)}."
     )
 
 
