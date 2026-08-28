@@ -52,7 +52,16 @@ heavy.
 | 12 | [Dual-door identity merge](E1-12-dual-door-identity-merge.md) | `e1/dual-door-identity-merge` | 09, 10 | Both doors resolve the two-hat person to one stored identity row by primary key; the constant-pinning test E0-18 left is deleted the same day. ⚠ line-by-line | #106 |
 | 13 | [Role resolution from assignments; `landing.py` retires](E1-13-role-resolution-from-assignments.md) | `e1/role-resolution-from-assignments` | 12 | The landing view comes from live role assignments (students from enrollment, per ADR 0028), the claims-derived mapping is deleted with its `EXCEPTIONS` entry, and any surviving precedence gets a two-role fixture person and a pinning test. ⚠ | #108 |
 | 14 | [`/healthz` and `/dev` get one verdict about the environment name](E1-14-healthz-dev-verdict.md) | `e1/healthz-dev-verdict` | none | The carried entry's three honest options; whichever is chosen reaches both routes, with an ADR. | #100 |
-| 15 | [E1 exit: five clauses, both doors, in a browser](E1-15-e1-exit.md) | `e1/e1-exit` | 04, 08, 09, 11, 12, 13, 14 | Playwright proves every clause of §14.3 E1's exit line against the running stack, including the refusals; writes `carried-from-e1.md` for anything E1 hands on. | in review |
+| 15 | [E1 exit: five clauses, both doors, in a browser](E1-15-e1-exit.md) | `e1/e1-exit` | 04, 08, 09, 11, 12, 13, 14 | Playwright proves every clause of §14.3 E1's exit line against the running stack, including the refusals; writes `../e2/carried-from-e1.md` for anything E1 hands on. | #110 |
+
+After the build order, and before the epic boundary: the deferred-item
+cleanup plan (#111) and its four batches — A = #112 (sweep closures),
+C = #114 (address judgment), B = #115 (the mock's wrong sentences, reversing
+ADR 0081 in part via ADR 0101), D = #116 (security response headers,
+ADR 0102) — then the two process PRs #117 (lanes, scoped battery, reviewer
+cadence) and #118 (CI wall clock, ADR 0104). The epic-boundary review record
+is [`boundary-review.md`](boundary-review.md); its fix round is
+[`boundary-fix-plan.md`](boundary-fix-plan.md).
 
 ## Dependency graph
 

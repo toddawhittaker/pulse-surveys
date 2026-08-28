@@ -102,13 +102,16 @@ shipping fallbacks is decided against E2's first real screen. Source:
 `docs/tickets/e1/deferred.md`, E1-04 item 1.
 **Owner:** E2. **Done when:** the deferred entry's.
 
-## The application sends no security response headers
+## The security response headers — closed inside E1; only the E11 residue below is carried
 
-No CSP, no `X-Content-Type-Options`, no referrer or framing policy — and
-the framing policy has to admit the LMS iframe, so it is designed, not
-copied. Source: `docs/tickets/e1/deferred.md`, E1-04 item 2.
-**Owner:** E2, before real survey content reaches the SPA.
-**Done when:** the deferred entry's.
+E1's cleanup Batch D (PR #116, ADR 0102) shipped the full set: CSP without
+`'unsafe-inline'`, `X-Content-Type-Options`, `Referrer-Policy`, and a
+per-document `frame-ancestors` read from the registration table, each pinned
+by a test. E2 owes **nothing** on the headers themselves. This entry
+originally carried the whole set to E2; the E1 boundary review corrected it
+(the same PR that shipped the headers added the residue below but never
+updated the top-level claim). Source: `docs/tickets/e1/deferred.md`, E1-04
+item 2, which records the closure.
 
 **Residue owed to E11 — source-side origin validation.** The framing emitter
 drops a malformed origin (`launcher_origins` validates each
@@ -144,8 +147,10 @@ with `ALL_SELECTORS`.
 **Closed by E1 cleanup Batch B (item 3):** the mock serves `ALL_SELECTORS`
 from `GET /mock/defects`, and both integration copies (the wrong-launches
 suite's and the launch-door module's) now check themselves against it. The
-`exit-refused-launches.spec.ts` literals stay the spec's own until E2 points
-the browser at the route; the served source they were owed is in place.
+browser side is already pointed at the route too — `tests/e2e/support/doors.ts`
+fetches `/mock/defects` — so the spec literals are checked against the served
+source today, not deferred to E2 (the E1 boundary review corrected this
+line, which predated that fetch).
 
 ## The launch door's algorithm pin has no end-to-end forgery proof — resolved inside E1
 
@@ -239,6 +244,30 @@ instructor's read scope compose") — kept there, pointed at from here.
 **Owner:** E4, whose §14.3 entry binds the deadline: before any
 instructor-facing surface renders roster-derived rows.
 **Done when:** the carried-from-e0 entry's.
+
+## A leadership assignment anywhere is an unscoped roster-ingestion trigger
+
+From the E1 boundary review (threat-model, verified;
+`docs/tickets/e1/boundary-review.md` M9). §7.3's leadership limb admits any
+holder of a live leadership assignment as a staff-launch trigger with no
+reference to the launch's context: a Lead Faculty enrolled as a Learner in a
+sibling lead's course can launch from it, and Pulse binds that section,
+stores its roster address permanently, and pulls the full membership —
+including the squat hazard on the `(course, term, section_code)` name
+(`docs/tickets/e1/deferred.md`, E1-10 item 4, reachable here by a much wider
+actor set than that entry describes). Verified character: write/ingest
+integrity, not a read leak — the roster is never disclosed to the trigger,
+and the INSTRUCTOR row goes to the section's real teacher. The fix is a
+purview condition on storing the discovered address, but it needs a design
+answer first: a dean's legitimate first launch into a brand-new course no
+purview yet covers must keep working.
+**Owner:** E2. **Deadline (Todd's ruling, 2026-08-28):** fixed before any
+surface renders roster-derived data — the same shape as E4's reveal-guard
+deadline.
+**Done when:** a staff launch stores a roster address only for a section
+within the launcher's resolved purview (with the first-launch case settled
+and recorded), a launch outside it records a defect row rather than binding,
+and a two-directional test pair pins both sides.
 
 ## Owned by the spec already
 

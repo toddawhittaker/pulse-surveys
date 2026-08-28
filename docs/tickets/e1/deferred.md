@@ -275,7 +275,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    `authorization_endpoint` whose host carries whitespace, `;`, `,`, `*`, or a
    quote, with a test pinning the refusal; owner E11.
 
-   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E2.
+   **Closed inside E1** by cleanup Batch D (PR #116, ADR 0102): the app
+   factory attaches the full header set — CSP without `'unsafe-inline'`,
+   `X-Content-Type-Options`, `Referrer-Policy`, and a per-document
+   `frame-ancestors` read from the registration table — with tests pinning
+   each header. The carried entry in `../e2/carried-from-e1.md` is corrected
+   to match; E2 owes nothing here. Only the E11 residue above (source-side
+   origin validation at the registration chokepoint) remains open, owner
+   unchanged. The stale "Carried … owner E2" line stood until the E1 boundary
+   review caught it (three reviewers independently, against the live
+   responses).
 
 ## From E1-06 — the mock learns the client-credentials grant
 
@@ -551,6 +560,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    drives a launch with a `.env` in the working directory and `ENVIRONMENT`
    absent from the process, and asserts both halves: the address stored, and no
    `roster_address_refused` recorded.
+
+6. **The refusal log line in provisioning is unasserted by any test.**
+   `_log_a_refused_write` is exercised by nothing under `caplog`, so nothing
+   pins that a refused write's log record carries no claim values. PR #105's
+   body promised this entry and it was never written; the E1 boundary review
+   caught the gap (its `epic-exit` report), and this entry is the correction.
+   **Done when** a test drives a refused provisioning write under `caplog`
+   and scans every record for planted claim values, the same canary shape as
+   the launch-view scans. Scheduled: boundary fix batch B
+   (`boundary-fix-plan.md`).
 
 ## From E1-11 — the roster sync service client
 
