@@ -116,10 +116,15 @@ PRESERVED_KEY_COLUMN = "section_id"
 # the primary key, and it is the primary key of this table too, so a second copy
 # of a section's binding cannot be written at all.
 #
-# **Dropped first, so a second trip is like the first.** A downgrade is the
-# operation somebody repeats, and a `CREATE TABLE` that raised on the leftovers
-# of the last trip — or an insert that added a second copy per section beside
-# them — is a failure that only ever shows up the second time.
+# **Dropped first, and it is defence rather than the thing that makes a second
+# trip work.** The upgrade drops this table after restoring from it, so an
+# ordinary down-up-down-up journey finds nothing here to collide with — mutating
+# this line away leaves both round-trip tests green, which was measured rather
+# than assumed. What it covers is the journey where the upgrade did not run or
+# did not finish: a downgrade that meets its own leftovers would otherwise fail
+# on `CREATE TABLE`, or insert a second copy of every section's binding beside
+# the first, and either way the operator learns it on the trip after the one
+# that went wrong.
 PRESERVE_THE_BINDINGS = f"""
 DROP TABLE IF EXISTS public.{PRESERVED_TABLE};
 CREATE TABLE public.{PRESERVED_TABLE} (
