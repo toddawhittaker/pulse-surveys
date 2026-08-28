@@ -541,7 +541,35 @@ def the_no_access_page(response: Any, contract: Any, what: str) -> None:
 
 
 def refused(response: Any, contract: Any, what: str) -> None:
-    """The tool refused, and rendered nobody's landing page while doing it."""
+    """The tool refused, rendered nobody's landing page, and said which guard did it.
+
+    **The last two assertions are the E1 boundary fix round's M7 arriving here**
+    rather than in a module of their own. `refusal_page` is the one door answer
+    whose body no test scanned, and the fix makes its copy come from the guard
+    name alone through a module constant — so the integration half of that rule
+    is that every refusal either door answers with still renders a page, and
+    still carries exactly one machine-readable marker on it. Extended in place,
+    because every refusal in this module already comes through here and a
+    parallel helper would be the same rule asserted in two places
+    (`docs/MISTAKES.md` entry 13).
+
+    **The mutation the marker assertion kills:** a refusal path that renders
+    something other than the shared page — a bare `HTTPException` detail, a
+    framework error body — which satisfies "4xx and no landing testid" and
+    leaves a reader with nothing that says what refused. **The near miss it must
+    survive**, and it is the reason the assertion is on the exact list rather
+    than on `"data-reason" in body`: a page that prints every guard's marker
+    leaves "the guard is named" true and useless, which is the failure
+    `exit-refused-launches.spec.ts` found in its own prose assertions.
+
+    The body-is-not-empty assertion is first, because "no landing testid",
+    "exactly one marker" and every scan below are all satisfiable by a response
+    with nothing in it (`docs/MISTAKES.md` entry 3).
+
+    `reason_markers` and `REASON_MARKER` are defined further down this module,
+    beside the tests that read a marker's *value*; a name in a function body
+    resolves when the function runs, so the order costs nothing.
+    """
     assert 400 <= response.status_code < 500, (
         f"The tool answered {response.status_code} to {what}. E0-18 requires a 4xx: this is auth "
         f"code, and 'absence of basic state/nonce/signature checks is not tolerable even "
@@ -552,6 +580,19 @@ def refused(response: Any, contract: Any, what: str) -> None:
         f"The tool refused {what} with {response.status_code} and still rendered {found}. A "
         "refusal that serves a landing page has admitted the launch and merely said so in the "
         "status line."
+    )
+    assert response.text.strip(), (
+        f"The tool refused {what} with an empty body. Every other assertion made about a refusal "
+        "here — no landing testid, one reason marker, no key set address — is true of a page with "
+        "nothing on it, and the person who provoked this is owed words."
+    )
+    markers = reason_markers(response)
+    assert len(markers) == 1 and markers[0].strip(), (
+        f"The page the tool refused {what} with carries the reason markers {markers}; it should "
+        "carry exactly one, naming the guard that fired. The refusal page is shared by both doors "
+        "and its copy comes from that name alone (E1 boundary fix, M7), so a refusal rendered by "
+        "something else — or by a page that names every guard, or none — is a refusal a reader "
+        "cannot act on and a browser-side spec cannot address."
     )
 
 
@@ -2284,4 +2325,356 @@ def test_a_replayed_launch_names_the_replay_guard_in_the_marker(
         f"{reason_markers(second)}; it should carry exactly {[NONCE_REPLAYED]}. A replay and a "
         "mismatched nonce are different guards for different mutations, and the browser-side "
         "replay spec tells them apart by this value."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 boundary fix batch B, item 1 (M4) — a launch that names nobody.
+#
+# LTI 1.3 Core §5.3.6.1 says a tool MUST treat an `id_token` with no `sub` as
+# an anonymous-user launch, so such a message is *conformant* and a platform
+# may send one. Pulse has no anonymous user: every door resolves a subject to a
+# `user` row and every view is somebody's. Todd's ruling is to refuse politely
+# and record the deliberate break with the MUST in ADR 0106 — the alternative
+# the boundary review measured is what happens today, which is that the launch
+# spends its nonce and then answers a 500 from inside provisioning.
+#
+# The pair is the whole design of this section: the *same* launch, minted the
+# same way, re-signed by the same key set, differing in exactly one claim.
+# ---------------------------------------------------------------------------
+
+
+# The claim LTI 1.3 (and OIDC Core §2) carries the subject in, and the one
+# thing the launches below differ by.
+SUBJECT_CLAIM = "sub"
+
+# The new guard's class name, settled with the rest of this batch's scope and
+# spelled here exactly as the implementation must spell it: the eleven
+# `LaunchRefusedError` subclasses *are* the machine vocabulary this door
+# publishes (see the ten above), and `data-reason` carries the name. A rename
+# on either side is meant to break this — it is a change to what a reader of
+# the page, and `exit-refused-launches.spec.ts`, is told.
+ANONYMOUS_LAUNCH_REFUSED = "AnonymousLaunchRefused"
+
+# The two roles a launch from this platform can carry, with the route each
+# subject's seeded rows send them to. Both are driven, because "no `sub`" is a
+# property of the token rather than of the person: the boundary review found
+# the crash inside provisioning, which a staff launch reaches further into than
+# a learner's, and a guard placed on one path only would leave the other
+# answering a 500 with nothing here to say so.
+LAUNCHES_BY_ROLE = ((LEARNER_ROLE_URI, STUDENT_ROLE), (INSTRUCTOR_ROLE_URI, INSTRUCTOR_ROLE))
+
+
+def re_signed_delivery(
+    tool: Any,
+    contract: Any,
+    platform: Any,
+    keys: Any,
+    claims_in_token: Any,
+    role_uri: str,
+    adjust: Any,
+    what: str,
+) -> tuple[dict[str, Any], Any]:
+    """A whole launch for `role_uri`, re-signed after `adjust`, and what the tool answered.
+
+    `re_signed_launch` above does almost this and cannot be used: it drives the
+    learner offer only, and the two tests below need the same mutation posed on
+    a staff launch as well. Everything else is that helper's design and its
+    reasons — the platform's own form, the tool's own authorization request, the
+    platform's signed answer, and a token re-signed by the key set the
+    registration in front of this tool names, so the signature, issuer,
+    audience, deployment, nonce, `state` and expiry are all still correct and
+    the only thing wrong with the delivered launch is what `adjust` did.
+
+    **Its must-be-green control is
+    `test_the_same_launch_carrying_its_subject_lands_on_a_view`**, which drives
+    this with an `adjust` that changes nothing and requires a landing. If that
+    is red, the refusals below are about this helper rather than about the door
+    (`docs/MISTAKES.md` entry 3).
+
+    The delivery goes through `answer_to`, because the state this batch exists
+    to close is a door that *raises* instead of answering — `TestClient` is
+    built with `raise_server_exceptions` at the default, so a 500 arrives here
+    as an exception and would otherwise read as a broken test rather than as
+    the defect it is.
+
+    Answers the claims that were actually signed alongside the response, so a
+    test asserts against the token that was delivered rather than against a
+    dictionary it wrote down.
+    """
+    offer = offer_for_role(platform, role_uri)
+    started = initiate(tool, contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    id_token, state, _ = authorize(platform, parameters)
+
+    claims = dict(claims_in_token(id_token))
+    adjusted = adjust(dict(claims))
+    signed = keys.sign(adjusted)
+    return adjusted, answer_to(lambda: land(tool, contract, signed, state), what)
+
+
+def without_the_subject(claims: dict[str, Any]) -> dict[str, Any]:
+    """`claims` with `sub` removed outright — not blanked, not replaced.
+
+    The absent case rather than an empty one, deliberately, for the reason
+    `test_a_launch_with_no_lis_roles_claim_at_all_and_a_web_door_role_lands_the_
+    same_way` gives about the roles claim: `claims["sub"]` and
+    `claims.get("sub")` behave differently when the key is missing rather than
+    empty, and it is the missing one LTI 1.3 Core §5.3.6.1 describes.
+    """
+    claims.pop(SUBJECT_CLAIM, None)
+    return claims
+
+
+@pytest.mark.parametrize("role_uri", [role_uri for role_uri, _ in LAUNCHES_BY_ROLE])
+def test_a_launch_carrying_no_subject_is_refused_with_the_calm_page(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    role_uri: str,
+) -> None:
+    """A conformant anonymous launch is answered, not crashed on.
+
+    The launch is correct in every other respect — signed by the key set this
+    tool's registration names, right issuer, audience, deployment, nonce,
+    `state` and expiry — and carries no `sub`. LTI 1.3 Core §5.3.6.1 makes that
+    a message a platform may legitimately send; Pulse has no anonymous user, so
+    the answer is the calm refusal page and its own marker.
+
+    **The mutation this must kill, and it is the state of the code today:** no
+    guard at all. The launch verifies, the door spends the handshake, and the
+    subject claim is read inside `app.services.provisioning` where nothing
+    handles its absence — a 500 with a traceback, from an unauthenticated
+    caller, on a message the specification says is well formed.
+
+    **The near miss it must survive:** a door that answers *any* 4xx. A bare
+    status check is satisfied by a launch refused for something else entirely —
+    a signature, a nonce, a deployment — so the marker is asserted as the exact
+    single value `AnonymousLaunchRefused`, which no other guard emits. The
+    status is asserted as exactly 400 for the same reason: 500 is not a 4xx but
+    a door that answered 401 or 403 would be saying something about
+    authorization it has no grounds to say.
+
+    **No session is issued**, asserted as the forbidden state (`docs/MISTAKES.md`
+    entry 2) over both routes a session can leave by: the `Set-Cookie` header
+    and a `session=` fragment on the redirect. A refusal that issued one would
+    have admitted a launch that names nobody, which is the whole thing Pulse has
+    no representation for.
+
+    **The refusal is logged, because "the same shape as every other refused
+    launch" includes the line an operator reads.** E1-08: one `WARNING` on
+    `app.lti.launch` per refusal, carrying only the guard name.
+    `assert_guard_fired` makes both halves of that one assertion. **The mutation
+    it kills:** a guard that renders the page and logs nothing — the browser is
+    answered, every assertion above stays green, and the one place a deployment
+    could see that conformant launches are being turned away says nothing at
+    all. **And the second mutation, on the same capture:** a line that reports
+    what it refused. This launch has had its `sub` taken off it and still
+    carries the deployment id and whatever the platform says about the person,
+    so `assert_no_claim_leaked` has real values to look for — criterion 6, and
+    the reason it reads the vocabulary off the delivered claims rather than off
+    a fixed list.
+
+    **Its boundary pair is
+    `test_the_same_launch_carrying_its_subject_lands_on_a_view`**: the identical
+    launch, differing only in that `sub` is present, has to land. Without it,
+    every assertion here is satisfied by a door that refuses this platform's
+    launches wholesale.
+    """
+    try:
+        from app.services.session import SESSION_COOKIE
+    except ModuleNotFoundError as missing:  # pragma: no cover - a red, not a branch
+        pytest.fail(
+            f"`app.services.session` does not import ({missing}). E1-08's interface ruling names "
+            '`SESSION_COOKIE = "pulse_session"` there, and this test is about a refusal not '
+            "setting it."
+        )
+
+    caplog.set_level(logging.WARNING, logger=LAUNCH_LOGGER_NAME)
+    what = f"a launch for {role_uri} carrying no `{SUBJECT_CLAIM}` claim"
+    delivered, response = re_signed_delivery(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        role_uri,
+        without_the_subject,
+        what,
+    )
+
+    assert SUBJECT_CLAIM not in delivered, (
+        f"The launch delivered still carries `{SUBJECT_CLAIM}`, so this test posed nothing and "
+        "whatever the door answered it was not answering an anonymous launch "
+        "(`docs/MISTAKES.md` entry 3)."
+    )
+    refused(response, door_contract, what)
+    assert response.status_code == 400, (
+        f"The tool answered {response.status_code} to {what}. This launch is well formed and "
+        "names nobody: 400 is the answer — the message cannot be accepted, and nothing about it "
+        "is a question of who the caller is or what they may do. Body begins "
+        f"{response.text[:400]!r}."
+    )
+    assert REFUSAL_TESTID in response.text, (
+        f"The tool answered {what} with a body carrying no `{REFUSAL_TESTID}` testid (body begins "
+        f"{response.text[:400]!r}). Every other refused launch reaches the shared refusal page and "
+        "this one is 'the same shape as every other refused launch'; a 4xx rendered by something "
+        "else is a different answer wearing the same status code."
+    )
+    assert reason_markers(response) == [ANONYMOUS_LAUNCH_REFUSED], (
+        f"The refusal page for {what} carries the reason markers {reason_markers(response)}; it "
+        f"should carry exactly {[ANONYMOUS_LAUNCH_REFUSED]}. The guard's class name is this "
+        "door's machine vocabulary, and an anonymous launch answered under some other guard's "
+        "name tells whoever reads the page — or the browser-side refusal spec — that a signature, "
+        "a nonce or a deployment was wrong when none of them was."
+    )
+    handed = {header.split("=", 1)[0].strip() for header in response.headers.get_list("set-cookie")}
+    assert SESSION_COOKIE not in handed, (
+        f"The tool set {sorted(handed)} while refusing {what}, which includes "
+        f"{SESSION_COOKIE!r}. That is a session issued for a token that names nobody."
+    )
+    assert "session=" not in (response.headers.get("location") or ""), (
+        f"The tool answered {what} with `Location: {response.headers.get('location')!r}`, which "
+        "carries a session token. A refusal hands the browser nothing."
+    )
+    assert_guard_fired(caplog, guard=ANONYMOUS_LAUNCH_REFUSED, claims=delivered)
+
+
+@pytest.mark.parametrize(("role_uri", "role"), LAUNCHES_BY_ROLE)
+def test_the_same_launch_carrying_its_subject_lands_on_a_view(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
+    role_uri: str,
+    role: str,
+) -> None:
+    """The pair, and the control on `re_signed_delivery` itself.
+
+    The same platform, the same offer, the same handshake, the same key set and
+    the same re-signing — with the claims passed through untouched, so `sub` is
+    the one thing this launch has that the refused one above does not. The
+    subject's own rows entitle them to a view (`landings_for_the_re_signed_
+    subjects` seeds a live enrollment for the learner and an `INSTRUCTOR`
+    assignment for the instructor), so it lands.
+
+    **The mutation this kills:** a guard that refuses more than it was written
+    for — reading a `sub` that is present but, say, not a string it recognises,
+    or firing on any launch whose claims were re-signed. That is the cheapest
+    way to make the test above green and it takes the door down for everybody.
+
+    **If this is red, the test above proves nothing**: a refusal in a harness
+    that cannot produce an acceptable launch is a statement about the harness
+    (`docs/MISTAKES.md` entry 3).
+    """
+    what = f"a launch for {role_uri} carrying its `{SUBJECT_CLAIM}` claim"
+    delivered, response = re_signed_delivery(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        platform,
+        suite_key_set,
+        claims_in_token,
+        role_uri,
+        lambda claims: claims,
+        what,
+    )
+
+    assert delivered.get(SUBJECT_CLAIM), (
+        f"The launch this platform signed carries no `{SUBJECT_CLAIM}` of its own (it carries "
+        f"{sorted(delivered)}), so this is not the paired opposite of the launch above — it is the "
+        "same launch, and neither test would be about the claim."
+    )
+    redirected_to_role(response, door_contract, role)
+
+
+def test_a_launch_refused_for_having_no_subject_consumes_its_handshake(
+    tool_verifying_against_this_suites_key: Any,
+    door_contract: Any,
+    platform: Any,
+    suite_key_set: Any,
+    claims_in_token: Any,
+    landings_for_the_re_signed_subjects: dict[str, Any],
+) -> None:
+    """The nonce and `state` are treated exactly as every other refusal treats them.
+
+    The implementer's standing rule, proven for a signature refusal by
+    `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal`:
+    on **any** refusal the server-side handshake row for the delivered `state`
+    is gone, whatever refused it. This says the new guard is inside that rule
+    rather than beside it. The first delivery carries the tool's own real
+    `state` and no `sub`; the second carries the same `state` with a complete,
+    validly-signed token whose subject holds a live enrollment — a launch that
+    would otherwise land.
+
+    **The mutation this must kill:** an anonymous-launch guard that returns
+    early, before the refusal path runs, leaving the handshake row in place.
+    The `state` is then still spendable and the second delivery *lands* — a
+    launch replayable after a refusal, which is the property the cookieless
+    handshake exists to hold.
+
+    **Why the guard is named, and it is the whole discrimination.** "Refused"
+    alone would not tell the mutation from the fix: the first delivery gets far
+    enough to have claimed the nonce, so a door that left the handshake row
+    behind would still refuse this second one — as `NonceReplayedError`, on the
+    nonce, having looked the row up and found it. `StateRefused` is what a
+    *consumed* handshake answers, which is precisely what
+    `test_a_delivered_state_is_refused_on_replay_after_an_unrelated_refusal`
+    establishes for a signature refusal. So the marker is the difference
+    between the row being gone and the row being there.
+
+    **Its control is the first delivery being refused at all**: over a door
+    that accepted the anonymous launch, "the second one did not land" would be
+    about something else entirely.
+    """
+    offer = offer_for_role(platform, LEARNER_ROLE_URI)
+    started = initiate(tool_verifying_against_this_suites_key, door_contract, offer)
+    parameters = query_of(redirect_target(started, "a registered platform began a launch"))
+    id_token, state, _ = authorize(platform, parameters)
+    assert state, (
+        "The platform returned no `state`, so there is no handshake row for this test to prove "
+        "was consumed."
+    )
+    claims = dict(claims_in_token(id_token))
+    assert claims.get(SUBJECT_CLAIM), (
+        f"The launch this platform signed carries no `{SUBJECT_CLAIM}` of its own, so the second "
+        "delivery below is not the complete launch this test needs it to be."
+    )
+
+    first = answer_to(
+        lambda: land(
+            tool_verifying_against_this_suites_key,
+            door_contract,
+            suite_key_set.sign(without_the_subject(dict(claims))),
+            state,
+        ),
+        f"a launch carrying no `{SUBJECT_CLAIM}` claim",
+    )
+    refused(first, door_contract, f"a launch carrying no `{SUBJECT_CLAIM}` claim")
+
+    second = land(
+        tool_verifying_against_this_suites_key,
+        door_contract,
+        suite_key_set.sign(dict(claims)),
+        state,
+    )
+
+    replayed = (
+        f"the same `state` presented again, with a complete validly-signed token, after a launch "
+        f"carrying no `{SUBJECT_CLAIM}` was refused on it"
+    )
+    refused(second, door_contract, replayed)
+    assert reason_markers(second) == [STATE_REFUSED], (
+        f"The second delivery's refusal page carries the reason markers {reason_markers(second)}; "
+        f"it should carry exactly {[STATE_REFUSED]}. That is what a *consumed* handshake answers, "
+        "and it is the only thing here that tells the two states apart: a door that left the row "
+        f"in place would look it up, find the nonce already claimed, and answer {NONCE_REPLAYED!r} "
+        "— refusing this launch for a reason that says the row survived the first refusal. The "
+        "rule this door already keeps is that any refusal deletes the handshake row for the "
+        "delivered `state`, whatever refused it."
     )
