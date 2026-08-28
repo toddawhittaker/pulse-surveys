@@ -43,7 +43,9 @@ discipline (the model for `carried-from-e1.md`).
      unauthenticated accident).
 - The CI e2e job runs the new specs on every non-inert diff exactly as today;
   no tolerance is added or widened.
-- **`docs/tickets/e1/carried-from-e1.md`** written per §14.1: every deferral
+- **`docs/tickets/e2/carried-from-e1.md`** written per §14.1 (this line first
+  said `e1/`; §14.1 routes the file through the *next* epic's directory, as
+  `e1/carried-from-e0.md` did, and the spec governs): every deferral
   E1 accumulated, one entry each, owner and "done when" — seeded from the
   README's not-do list (the E4 reveal guard hand-off restated; anything E1's
   build rounds added; the local-account fallback and logout questions from
