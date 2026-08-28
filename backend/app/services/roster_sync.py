@@ -61,6 +61,7 @@ afterwards.
 """
 
 import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -138,6 +139,31 @@ DEBOUNCE_WINDOW: Final[timedelta] = timedelta(minutes=5)
 # member means and what every real platform sends for somebody still enrolled.
 MEMBER_STATUS = "status"
 DROPPED_STATUSES: Final[frozenset[str]] = frozenset({"Inactive", "Deleted"})
+
+# One `<url>` of an RFC 8288 `Link` header, with the parameter list belonging to
+# it. The parameter tail stops at a comma so that two links in one header are read
+# as two, which is the shape a platform sends when it offers `prev`, `next` and
+# `first` together; `[^>]*` inside the angle brackets is the URI-reference, which
+# RFC 8288 §3 says carries no `>` unencoded.
+#
+# **This tool reads the header itself rather than taking `pylti1p3`'s answer**, and
+# the boundary review's H1 is why. `ServiceConnector.make_service_request` searches
+# a **lower-cased** copy of the whole header with `<([^>]*)>;\s*rel="next"`, and
+# that is wrong twice over: RFC 3986 §6.2.2.1 makes a URL's path and query
+# case-sensitive, so a platform paging on a base64 cursor (Canvas's
+# `?page=Bookmark:QUJDeHl6`) is asked for a page it does not serve; and the pattern
+# requires `rel` to be the link's *first* parameter and its value to be quoted,
+# where RFC 8288 §3 makes a link's parameters unordered and its `rel` value a token
+# that may be bare. A header the pattern misses ends the walk early **as complete**,
+# which closes the enrollment of every member on the pages that were never fetched.
+LINK_HEADER_ENTRY: Final[re.Pattern[str]] = re.compile(
+    r"<(?P<url>[^>]*)>(?P<parameters>(?:\s*;[^,;]*)*)"
+)
+
+# The link relation a paged container advertises its next page under (RFC 8288 §3
+# and NRPS 2.0 §3.2), and the name of the header carrying it.
+NEXT_RELATION: Final[str] = "next"
+LINK_HEADER: Final[str] = "link"
 
 # The member document's own names for a subject, its roles and its address, as
 # NRPS 2.0 spells them.
@@ -308,7 +334,14 @@ def sync_section(
     if walked is None:
         return
     members, complete = walked
-    _ingest(session, section, platform.id, members, _today(settings), complete=complete)
+    _ingest(
+        session,
+        section,
+        platform.id,
+        _deduplicated(members, section_id),
+        _today(settings),
+        complete=complete,
+    )
 
 
 def _no_redirects(http: requests.Session | None) -> requests.Session:
@@ -710,12 +743,23 @@ def _walked_roster(
     because it is the operator's own and the hourly walk would otherwise pay a
     lookup per page of every section.
 
-    **A token or transport failure answers `None`**, and the difference from a
-    validation refusal is a section's whole enrollment. Those leave no usable prefix:
-    the token endpoint refused everything, or a page this tool *did* choose to fetch
-    could not be reached — so `_ingest` never runs and nothing is closed. The call is
-    recorded either way, with the response code that says which it was; a NULL
-    response code means the call never reached the platform at all.
+    **A token failure answers `None`**, because it leaves no usable prefix: the
+    token endpoint refused everything, no page was ever asked for, and `_ingest`
+    never runs. The call is recorded, with the response code that says which failure
+    it was; a NULL response code means the call never reached the platform at all.
+
+    **A page that could not be fetched answers what was already read, incomplete** —
+    the same answer a refused address gets, for the same reason (the boundary
+    review's H1 pair). A page-boundary failure that threw the container away would
+    lose a class that synced correctly up to it, every hour, invisibly: the members
+    of page one are on the roster whatever page two answered. `complete` is `False`,
+    so nothing is closed on the strength of a walk that did not reach the end.
+
+    **The next page is read out of the response's own `Link` header** by
+    `_next_page_url`, rather than from the `next_page_url` `pylti1p3` computes. See
+    `LINK_HEADER_ENTRY` for what that library gets wrong and why the walk cannot use
+    it. `get_nrps_data` is the same call `get_members_page` makes — same scope, same
+    `Accept` — and it is used here because it hands back the headers as well.
 
     **A refused token is recorded against the roster's own URL, carrying the token
     endpoint's status.** A sync makes two calls to two endpoints and only one of
@@ -815,26 +859,149 @@ def _walked_roster(
         walked.add(following)
         called = following
         try:
-            page, following = service.get_members_page(called)
+            answered_page = service.get_nrps_data(members_url=called)
         except LtiServiceException as refusal:
             answered = _answered_status(refusal)
             _record_call(session, section_id, called, answered, None)
             logger.warning(
-                "the roster at %s answered %s, so section %s was not ingested",
+                "the roster at %s answered %s, so section %s was not ingested past the %d member(s) "
+                "already read",
                 called,
                 answered,
                 section_id,
+                len(members),
             )
-            return None
+            return members, False
         except requests.RequestException:
             _record_call(session, section_id, called, None, None)
             logger.exception(
-                "the roster at %s could not be reached for section %s", called, section_id
+                "the roster at %s could not be reached for section %s, which keeps the %d member(s) "
+                "already read and closes nobody",
+                called,
+                section_id,
+                len(members),
             )
-            return None
+            return members, False
+        page = _page_members(answered_page)
+        following = _next_page_url(answered_page["headers"])
         _record_call(session, section_id, called, 200, len(page))
         members.extend(page)
     return members, True
+
+
+def _page_members(answered: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
+    """One page's members, read exactly as `NamesRolesProvisioningService` reads them.
+
+    Deliberately no more forgiving than the library's own
+    `data_body.get("members", [])`: a container that is not an object at all raises
+    here, and that is the right answer rather than a shape to absorb. An unreadable
+    body read as *no members* is an empty page, an empty page on a walk that then
+    ends completely is a container this tool believes it read to the end, and
+    `_ingest` closes the enrollment of everybody a complete walk did not carry. A
+    loud failure is one section's, caught by `sync_all_rosters`' savepoint and
+    recorded against that section; a quiet empty page ends a whole class's term.
+    """
+    body: Any = answered["body"]
+    carried: Any = body.get("members", [])
+    return list(carried)
+
+
+def _next_page_url(headers: Mapping[str, Any]) -> str | None:
+    """The next page a container's `Link` header advertises, spelled as it was sent.
+
+    The boundary review's H1, and `LINK_HEADER_ENTRY` above carries the argument for
+    reading the header here rather than taking `pylti1p3`'s answer for it. Three
+    rules, all of them RFC 8288 §3's:
+
+      - the header's parameters are **unordered**, so `rel` is looked for among all
+        of them rather than required to be the first;
+      - a `rel` value is a **token**, quoted or bare, and may name several relations
+        on one link (`rel="first next"`), so the value is unquoted and split;
+      - a header may carry **several comma-separated links**, so each is read and
+        only the one declaring `next` is followed.
+
+    The URL is handed back byte for byte. Nothing is lower-cased, unescaped or
+    resolved against the page it came from: what a platform put between the angle
+    brackets is what it will answer to, and a relative reference — which no platform
+    in this system sends — is left to `refuse_invalid_fetched_address` to refuse
+    rather than guessed at here.
+
+    The first `next` declared wins, which is how a client reads a header that
+    repeats one, and it is what keeps a decoy link later in the header from moving
+    the walk.
+    """
+    header = next(
+        (value for name, value in headers.items() if str(name).lower() == LINK_HEADER), None
+    )
+    if not isinstance(header, str) or not header:
+        return None
+    for entry in LINK_HEADER_ENTRY.finditer(header.replace("\n", " ")):
+        for parameter in entry.group("parameters").split(";"):
+            name, _, value = parameter.partition("=")
+            if name.strip().lower() != "rel":
+                continue
+            if NEXT_RELATION in value.strip().strip('"').lower().split():
+                return entry.group("url").strip() or None
+    return None
+
+
+def _deduplicated(roster: Sequence[Mapping[str, Any]], section_id: UUID) -> list[Mapping[str, Any]]:
+    """The assembled pages with each subject kept once — its first occurrence (M2).
+
+    A container is paged over a collection that is still changing: a member added,
+    removed or re-ordered between the fetch of page one and the fetch of page two
+    shifts every later row along, and the member on the boundary is served on both.
+    Nothing about that is a defect at the platform. Before this, the second copy was
+    written as a second enrollment for one user and one section, ADR 0023's
+    exclusion constraint refused the overlap, and the uncaught `ExclusionViolation`
+    took the section's whole sync with it — every hour, for as long as the platform
+    kept paging that way.
+
+    **Here rather than inside the ingest loop**, and by `user_id` rather than by
+    anything coarser. A duplicate caught by catching the constraint violation would
+    make a database constraint part of the ingest loop's control flow and leave the
+    section half-written; a rule keyed on the page, or on the member's position,
+    drops half of every class that pages. So the roster is one list of documents by
+    the time `_ingest` sees it, and the constraint stays what it is — the guard over
+    a *genuine* overlap, which this cannot produce and must not be allowed to hide.
+
+    **First occurrence wins** because the walk reads a container in the platform's
+    own order and the earlier page is the one this tool asked for first; there is no
+    rule that would let it prefer the later copy, and inventing one would be this
+    module deciding which of two identical documents is the truer.
+
+    A member document with no usable `user_id` is passed through untouched: it is
+    not a duplicate of anything, and `_read_member` is where a document that cannot
+    be keyed is refused, with one refusal per member rather than a silent merge here.
+
+    **The note carries a count and the section, and never a member.** That a
+    platform re-serves members across its page boundary is a fact about the
+    platform, and it is worth an operator's attention precisely because dedup makes
+    it otherwise invisible; which student it was is no part of it, and SPEC §10
+    keeps a roster's subjects and addresses out of the log.
+    """
+    kept: list[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    repeated = 0
+    for member in roster:
+        subject = member.get(MEMBER_SUBJECT)
+        if not isinstance(subject, str) or not subject:
+            kept.append(member)
+            continue
+        if subject in seen:
+            repeated += 1
+            continue
+        seen.add(subject)
+        kept.append(member)
+    if repeated:
+        logger.info(
+            "the platform served %d duplicate member document(s) across the pages of section %s's "
+            "container, so the first occurrence of each was kept and the rest dropped; a container "
+            "paged over a collection that is changing re-serves the member on the boundary",
+            repeated,
+            section_id,
+        )
+    return kept
 
 
 def _answered_status(refusal: LtiServiceException) -> int | None:
