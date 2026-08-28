@@ -99,8 +99,8 @@ Cool paper and botanical ink — deliberately outside both the warm-cream AI clu
 | `--spruce` | `#1E3932` | Ink: body text, primary buttons, chart axes |
 | `--spruce-60` | `#5B7269` | Secondary text, muted labels |
 | `--hairline` | `#DCE4DD` | 1px borders, dividers |
-| `--marigold` | `#DFA320` | Signature accent: the section pulse line, focus rings, selected states (never body text on white) |
-| `--marigold-deep` | `#8F6A10` | Text-safe marigold (links, small accents) |
+| `--marigold` | `#DFA320` | Signature accent: the section pulse line, selected states (never body text on white, never the focus ring — 2.2:1 against paper, under the 3:1 non-text floor) |
+| `--marigold-deep` | `#8F6A10` | Text-safe marigold (links, small accents, the focus ring — 4.6:1 on chalk, 5.0:1 on paper) |
 | `--madder` | `#A93F32` | Flags, destructive, required-state — reserved so it always means "attend to this" |
 | `--mist` | `#93A5A0` | Benchmark + university lines, disabled states |
 
@@ -143,6 +143,6 @@ Purposeful, brief, and all disabled under `prefers-reduced-motion`. Micro-intera
 ### Components and CSS architecture
 
 - All tokens above as CSS custom properties in one `tokens.css`; components consume tokens only — no raw hex in component styles. Spacing on a 4px scale; a `--space-*` and `--text-*` ramp.
-- Focus visible everywhere: 2px marigold ring, 2px offset, on every interactive element (WCAG 2.2 AA is a floor, not a feature).
+- Focus visible everywhere: 2px deep-marigold ring (`--marigold-deep` — the accent marigold fails SC 1.4.11's 3:1 on both grounds), 2px offset, on every interactive element (WCAG 2.2 AA is a floor, not a feature).
 - The primitives listed in the component inventory (Likert input, workload slider, trend chart, comment card, AI-content label, small-N notice, hold banner, audit-warning modal, drill-down nav) are each built once as a reusable component with variants — Claude Design should be told explicitly to reuse them across screens rather than redraw per screen, so the eventual handoff maps 1:1 onto `frontend/src/components/`.
 - AI-generated content (summaries, drafts, coaching notes) always sits on a chalk-tinted inset panel with a small mono "AI" label in spruce-60 — one consistent treatment, so provenance is legible at a glance and never mistaken for a human voice.

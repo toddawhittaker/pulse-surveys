@@ -260,10 +260,12 @@ published, expired, or claiming to live longer than five minutes is refused with
 the RFC 6749 error code that says which
 ([ADR 0084](docs/adr/0084-the-mock-platforms-token-endpoint-bounds-an-assertion-at-five-minutes.md)).
 
-**The two services do not yet require that token**, and that is a gap with an
-owner rather than an oversight: enforcing it before a conformant client exists
-would refuse this repository's own tests, so E1-11 turns it on with the client
-that presents one.
+**NRPS requires that token; AGS still does not.** The roster route refuses a
+call presenting no token issued for the membership scope
+([ADR 0099](docs/adr/0099-the-mock-enforces-a-token-on-nrps-and-not-on-ags.md),
+E1-11's fix round). AGS stays open deliberately — its first client is E3's,
+and a service refusing before its first client exists would refuse this
+repository's own tests — a gap with an owner rather than an oversight.
 
 - **NRPS 2.0** serves one section's roster five members at a time, and says where
   the next page is in an RFC 8288 `Link` header — never in the body. Every page
@@ -343,9 +345,10 @@ end-to-end specs read
 
 A login **starts at the client**, not on that page: send an authorization request
 to `/oidc/authorize` with a PKCE challenge, pick an identity on the form that
-comes back, and redeem the code at `/oidc/token` with the verifier. Until E1
-builds the tool's side, the redirect at the end lands on a 404 — the honest state
-of a provider whose client does not exist yet.
+comes back, and redeem the code at `/oidc/token` with the verifier. Since E1-09
+the tool's side exists: the redirect lands on `/auth/oidc/callback`, which
+finishes the code flow and issues the shared session — or renders the calm
+cancel page when the person backs out.
 
 Four things about it are worth knowing before debugging anything:
 

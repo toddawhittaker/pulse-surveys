@@ -2,13 +2,11 @@
  * The five empty landing views: the testid each one carries and the governed
  * copy each one renders.
  *
- * **This is a deliberate, temporary duplication of
- * `backend/app/services/landing.py`'s `VIEW_HEADINGS`, and it is copied from
- * there verbatim.** E0-18's server-rendered landings still answer at both entry
- * URLs, so the same five headings and five empty-state sentences exist in two
- * places for as long as both surfaces do. E1-13 retires `landing.py` when role
- * resolution moves to the assignment model, and this file is the copy that
- * survives that; until then, an edit to either one has to be an edit to both.
+ * **This file is the single source of these strings.** It began as a
+ * deliberate duplication of `backend/app/services/landing.py`, and E1-13
+ * deleted that module when role resolution moved to the assignment model —
+ * this is the copy that survived, and there is no second place to keep in
+ * step.
  *
  * The strings are governed copy under SPEC §4.1 items 4 and 5 — calm, plain,
  * counting nothing and blaming nobody — enforced by review until E2's copy
