@@ -316,13 +316,30 @@ Every E1 pull request that defers something adds it here in the same PR.
    that the pin is load-bearing *end-to-end* — that the whole door refuses a
    launch `pylti1p3`'s matching would otherwise accept — because there is no
    live forgery: both layers agree.
-   **Done when** a mock platform variant publishes a permissive-algorithm key
-   set — a JWK a confused verifier would accept an `alg: none` or HS256 token
-   against — and an end-to-end refusal test drives a launch signed that way and
-   asserts the door still refuses it, so the pin's removal turns a green launch
-   red. Owed to the ticket that gives a mock platform a permissive-alg mint (a
-   natural companion to E1-07's wrong-launch selectors).
-   **Carried** to [`../e2/carried-from-e1.md`](../e2/carried-from-e1.md) by E1-15; owner E13 at the latest.
+   **Resolved in E1's cleanup Batch B, as an accepted survivor — the
+   end-to-end proof the done-when asked for is impossible, and the reason is
+   structural, settled from the library source, not a missing fixture.**
+   `pylti1p3`'s `get_public_key` matches a published key by both `kid` and
+   `alg`, then verifies the token against `export_to_pem()` of that matched key
+   with `algorithms=[that key's alg]`. So an HS256-confusion launch can only be
+   accepted if the door is handed a key whose PEM export equals the exact bytes
+   the mock's mint keyed its HMAC with — and it never is: `jwcrypto` cannot
+   PEM-export a symmetric (`oct`) key (it raises `InvalidJWKType`, which is not
+   a `ValueError`/`TypeError` and so escapes even `get_public_key`'s own
+   `except` clause), and an RSA key exported to PEM is not what the mock signed
+   with — `hs256_confusion` keys its HMAC with the canonical RFC 7638 JWK JSON
+   (`public_key_material`), and ADR 0035 bars this mock from producing a PEM to
+   forge against. Removing `_refuse_unpinned_algorithm` therefore does *not*
+   turn the launch green; `pylti1p3` and this construction refuse the confusion
+   independently. The pin is genuinely redundant defence in depth, the
+   verifier's survivor is a true redundancy rather than a test gap, and the
+   end-to-end refusal is already asserted by the pre-existing parametrised
+   `test_a_launch_carrying_one_e1_07_defect_is_refused_by_its_specific_guard`
+   at `hs256_confusion`. Recorded the way Batch A recorded its measured
+   survivor; nothing is built and nothing further is owed, so the E1-15 carry
+   to E13 for this item is moot. (`alg: none` is not a second case: with no
+   permissive key published there is no key its header would match, so it is
+   refused at key selection and proves nothing about the pin.)
 
 ## From E1-10 — launch-time provisioning and the sanctioned writer
 
