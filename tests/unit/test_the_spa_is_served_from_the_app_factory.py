@@ -90,6 +90,32 @@ ASSET_BODY = f'export const marker = "{ASSET_MARKER}";\n'
 
 HEALTHZ_PATH = "/healthz"
 
+# The framing directive the security-headers middleware attaches, and the one
+# value it degrades to when it cannot read the registration table. `frame-ancestors
+# 'self'` is stricter, never wider: with the table unreachable the app admits only
+# itself as a frame, and never every origin. Named here because the fail-closed
+# degrade is asserted below over this module's no-database factory path.
+CONTENT_SECURITY_POLICY = "Content-Security-Policy"
+FRAME_ANCESTORS_DIRECTIVE = "frame-ancestors"
+SELF_SOURCE = "'self'"
+
+
+def frame_ancestors_of(csp: str) -> list[str] | None:
+    """The `frame-ancestors` sources of a Content-Security-Policy, or `None` if it has none.
+
+    Parsed rather than searched (`docs/MISTAKES.md` entry 3): the directive is
+    found by splitting the policy on `;`, matching the first token of each clause,
+    and returning the rest — so `frame-ancestors '*'` reads as `["'*'"]` and an
+    absent directive reads as `None`, and the two cannot be confused with the
+    `["'self'"]` the fail-closed degrade must produce. Tokens are lowered because a
+    CSP directive name and its keyword sources are ASCII case-insensitive.
+    """
+    for clause in csp.split(";"):
+        tokens = clause.split()
+        if tokens and tokens[0].lower() == FRAME_ANCESTORS_DIRECTIVE:
+            return [token.lower() for token in tokens[1:]]
+    return None
+
 
 def built_dist(root: Path) -> Path:
     """A directory shaped like a Vite build output, with an entry document and one asset."""
@@ -351,4 +377,68 @@ def test_the_api_answers_the_same_with_a_build_and_without_one(
         "carry the frontend's state that is a decision for the ticket that wants it — and it "
         "would have to be read against SPEC §4.1 and the `/healthz` disclosure question E1 "
         "carries."
+    )
+
+
+def test_the_framing_policy_fails_closed_to_self_when_the_registration_table_is_unreachable(
+    configured_env: dict[str, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """On a database error the framing policy degrades to `'self'` — stricter, never `'*'`.
+
+    The security-headers middleware (E1-04 item 2) computes `frame-ancestors` per
+    request from the `lti_platform` registration table, admitting each registered
+    platform's origin. When that read fails it must degrade to exactly
+    `frame-ancestors 'self'` — fail *closed*, so a database outage narrows who may
+    frame the app to the app itself and never widens it. The opposite mistake,
+    degrading to `frame-ancestors '*'`, would let any site frame the tool inside an
+    iframe at exactly the moment the tool cannot tell which platforms are its own —
+    a clickjacking hole opened by an outage.
+
+    This lives here, beside the other factory tests, because this module already
+    drives `create_app()` with **no reachable database**: `configured_env` points
+    `DATABASE_URL` at the Compose service host `db`, which does not resolve from a
+    test process, so a per-request registration read fails and the middleware takes
+    its degrade branch. The security-headers work referenced this same no-database
+    HTML path, and reusing `client_over` keeps the degrade genuinely exercised
+    rather than mocked (`docs/MISTAKES.md` entry 3): a test that reached a working
+    but empty table would read `frame-ancestors 'self'` too, and would pass without
+    the degrade branch running at all.
+
+    **The response is proved to be the built entry document first** — 200 carrying
+    `INDEX_MARKER` — so "the framing directive is `'self'`" is a statement about a
+    real served HTML document and not about a 404 or an error page that carries no
+    such header.
+
+    **The mutation this kills:** the degrade widened to `frame-ancestors '*'`, or
+    to any origin, or dropped so the directive is absent. Each reddens because the
+    directive is asserted equal to `['self']` exactly. **The near miss that must
+    stay green:** whatever the rest of the policy carries, which this does not read.
+    """
+    with client_over(built_dist(tmp_path), monkeypatch) as client:
+        response = client.get(f"{MOUNT}/")
+
+    assert response.status_code == 200 and INDEX_MARKER in response.text, (
+        f"`GET {MOUNT}/` answered {response.status_code} with something that is not the built "
+        f"entry document (body begins {response.text[:200]!r}). The framing assertion below reads "
+        "this response, so it must first be the served HTML document and not an error page."
+    )
+
+    policy = response.headers.get(CONTENT_SECURITY_POLICY)
+    assert policy, (
+        f"`GET {MOUNT}/` carried no `{CONTENT_SECURITY_POLICY}` with the registration table "
+        f"unreachable (headers: {sorted(response.headers)}). The middleware attaches the header on "
+        "every response, so its absence here means the degrade path drops it rather than narrowing "
+        "it."
+    )
+
+    sources = frame_ancestors_of(policy)
+    assert sources == [SELF_SOURCE], (
+        f"With the registration table unreachable, `{FRAME_ANCESTORS_DIRECTIVE}` is {sources} "
+        f"rather than {[SELF_SOURCE]} exactly. The whole policy reads {policy!r}.\n"
+        "\n"
+        "The middleware reads `frame-ancestors` from `lti_platform` per request, and on a database "
+        "error it must fail *closed*: `frame-ancestors 'self'`, admitting only the app itself. A "
+        f"`{FRAME_ANCESTORS_DIRECTIVE} '*'` here — or any origin, or no directive at all — is the "
+        "degrade opened wide, letting any site frame the tool in an iframe precisely when it cannot "
+        "tell its own platforms from anyone else's."
     )

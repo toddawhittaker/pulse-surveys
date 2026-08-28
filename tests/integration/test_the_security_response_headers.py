@@ -58,7 +58,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from fixtures.lti_platform import origin_of
 
 pytestmark = pytest.mark.integration
@@ -190,6 +189,23 @@ UNREGISTERED_ORIGIN = origin_of(UNREGISTERED_AUTHORIZATION_ENDPOINT)
 
 FIRST_PLATFORM_ISSUER = "https://framing-platform-one.invalid:9543"
 SECOND_PLATFORM_ISSUER = "https://framing-platform-two.invalid:9544"
+
+# One platform whose three registered URLs sit on three *different* origins, so a
+# framing policy can only agree with one of them. E1-05 settles which: the
+# browser-facing origin a registration exposes is its `authorization_endpoint`,
+# and `issuer` and `jwks_url` are the two other columns a regression could read
+# by mistake. The existing framing tests give all three columns one origin, so a
+# policy read from any of them looks identical there; here each column is a
+# distinct host and port, so a policy built from the wrong one names an origin the
+# `authorization_endpoint` does not — and a dropped port fails visibly.
+# `.invalid` is RFC 2606 and nothing here is ever fetched.
+COLUMN_PROBE_AUTHORIZATION_ENDPOINT = "https://auth.framing-column.invalid:9000/authorize"
+COLUMN_PROBE_ISSUER = "https://issuer.framing-column.invalid:7000"
+COLUMN_PROBE_JWKS_URL = "https://jwks.framing-column.invalid:8000/.well-known/jwks.json"
+
+COLUMN_PROBE_AUTHORIZATION_ORIGIN = origin_of(COLUMN_PROBE_AUTHORIZATION_ENDPOINT)
+COLUMN_PROBE_ISSUER_ORIGIN = origin_of(COLUMN_PROBE_ISSUER)
+COLUMN_PROBE_JWKS_ORIGIN = origin_of(COLUMN_PROBE_JWKS_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -904,3 +920,77 @@ def test_frame_ancestors_admits_a_platform_registered_after_the_application_star
         "every registration made afterwards. Caching is allowed; a cache with no invalidation is "
         "what this fails."
     )
+
+
+def test_frame_ancestors_is_derived_from_the_authorization_endpoint_not_another_column(
+    register_platform_row: Any, serve: Any
+) -> None:
+    """The framing origin is the `authorization_endpoint`'s, and no other column's.
+
+    Every other framing test in this module registers a platform whose `issuer`,
+    `authorization_endpoint` and `jwks_url` reduce to one origin, so a policy read
+    from any of the three is the same string and none of them says *which* column
+    the middleware reads. E1-05 settles that it is the `authorization_endpoint`:
+    that is the browser-facing origin a launch arrives from, and the same column
+    `launcher_origins` reads for the developer console.
+
+    One platform is registered here with its three URLs on three different
+    origins. `frame-ancestors` must then admit the `authorization_endpoint`'s
+    origin and neither of the other two — so a middleware that read `issuer` or
+    `jwks_url` by mistake names an origin no launch would arrive from and fails to
+    name the one that would.
+
+    **The registered `authorization_endpoint` origin is asserted present first**,
+    so "the other two are absent" cannot pass because the directive came back
+    empty, missing, or naming nobody (`docs/MISTAKES.md` entry 3).
+
+    **The mutations this kills:** a middleware that derives the framing source from
+    the registration's `issuer`, and one that derives it from its `jwks_url`. Each
+    reddens because the origin it would admit is one this test can name exactly and
+    the `authorization_endpoint` origin it drops is another.
+
+    **The near miss that must stay green:** `'self'`, and the order the sources
+    appear in, neither of which this reads. Each expected origin is computed from
+    the URL *this test* registered, so a policy that agrees with it agrees with the
+    table (`docs/MISTAKES.md` entry 19).
+    """
+    register_platform_row(
+        issuer=COLUMN_PROBE_ISSUER,
+        authorization_endpoint=COLUMN_PROBE_AUTHORIZATION_ENDPOINT,
+        jwks_url=COLUMN_PROBE_JWKS_URL,
+    )
+
+    documents = every_response(serve())
+
+    other_columns = {
+        "issuer": COLUMN_PROBE_ISSUER_ORIGIN,
+        "jwks_url": COLUMN_PROBE_JWKS_ORIGIN,
+    }
+
+    for path in DOCUMENT_PATHS:
+        sources = framing_sources(documents[path], path)
+
+        assert COLUMN_PROBE_AUTHORIZATION_ORIGIN in sources, (
+            f"`GET {path}`'s framing policy does not admit "
+            f"{COLUMN_PROBE_AUTHORIZATION_ORIGIN!r}, the origin of the one registered platform's "
+            f"`authorization_endpoint`; it admits {sources}. That is the column E1-05 says the "
+            "policy is read from, and the rest of this test — that neither other column's origin "
+            "appears — would pass over a policy that admits nobody at all."
+        )
+
+        admitted = {column: origin for column, origin in other_columns.items() if origin in sources}
+        assert not admitted, "\n".join(
+            [
+                f"`GET {path}`'s framing policy admits an origin belonging to a column that is "
+                "not the `authorization_endpoint`:",
+                *(f"  {column}: {origin}" for column, origin in sorted(admitted.items())),
+                "",
+                f"The whole directive reads {sources}. The registered platform's "
+                f"`authorization_endpoint` is {COLUMN_PROBE_AUTHORIZATION_ENDPOINT!r}, its "
+                f"`issuer` is {COLUMN_PROBE_ISSUER!r}, and its `jwks_url` is "
+                f"{COLUMN_PROBE_JWKS_URL!r} — three different origins on purpose. E1-05 makes the "
+                "framing source the origin of the `authorization_endpoint` and no other column, "
+                "the same one `launcher_origins` reads for the developer console. An origin from "
+                "`issuer` or `jwks_url` here is the middleware reading the wrong column.",
+            ]
+        )

@@ -40,7 +40,6 @@ from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 import pytest
-
 from fixtures.lti_platform import origin_of
 
 pytestmark = pytest.mark.integration
