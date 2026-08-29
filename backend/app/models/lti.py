@@ -65,6 +65,8 @@ from enum import StrEnum
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import requests
+from requests.models import PreparedRequest
 from sqlalchemy import Connection, Enum, ForeignKey, Index, Text, UniqueConstraint, event, text
 from sqlalchemy.orm import Mapped, Mapper, mapped_column, object_session
 
@@ -538,6 +540,21 @@ def refuse_invalid_fetched_address(
     `rel="next"` hop anywhere else is judged; `app.services.provisioning` names
     none, so launch-time storage keeps development's blanket admission.
 
+    **Rule 6 is this function's own, and the two registration columns do not carry
+    it.** `_refuse_a_disputed_authority` below refuses an address whose authority
+    the judging parser and the fetching client disagree about, which is the E1
+    boundary round's security finding. It is applied here because this is the
+    column whose value a *platform* chooses at fetch time — a `rel="next"` is
+    attacker-supplied in a way a registered `jwks_url` is not, which needs an
+    administrative write. The same vector is spellable in those two columns and is
+    proposed there separately rather than widened into this change; it is a real
+    gap and is named in this batch's pull request rather than left implied.
+
+    It runs wherever rule 5 runs, in development as well, because where the packet
+    goes is not a property of the environment. And it runs *before* the resolution,
+    so an address that cannot be dialled honestly is never looked up
+    (`docs/MISTAKES.md` entry 29).
+
     Answers the addresses rule 5 resolved, or `None` where it did not resolve at
     all. The roster sync pins its connection to what comes back: the address that
     was judged is the address the GET goes to.
@@ -548,8 +565,95 @@ def refuse_invalid_fetched_address(
         _refuse_an_unacceptable_address(column, address)
     elif not _is_judged_in_development(address, development_exempt_host):
         return None
+    _refuse_a_disputed_authority(column, address)
     return _refuse_an_unacceptable_resolution(
         column, address, _resolved_addresses if resolve is None else resolve
+    )
+
+
+def _prepared_host(value: str) -> str | None:
+    """The host `requests` will actually dial for this URL, or `None` if it cannot.
+
+    `PreparedRequest.prepare_url` is exactly what `Session.send` runs before it
+    opens a socket, so this is the dialled authority itself rather than a model of
+    it. Reading it back through `url_host` puts it in the same spelling every rule
+    in this module judges — one normalisation applied at both ends
+    (`docs/MISTAKES.md` entry 13).
+
+    `None` for a URL `requests` refuses to prepare at all: no scheme, a label it
+    will not encode. The caller reads that as a refusal rather than as agreement,
+    which is the fail-closed direction — an address that cannot be prepared cannot
+    be fetched, and a refusal here is a recorded `nrps_call` row where an exception
+    escaping mid-walk is a section whose whole transaction is rolled back.
+    """
+    request = PreparedRequest()
+    try:
+        request.prepare_url(value, None)
+    except (requests.RequestException, UnicodeError, ValueError):
+        return None
+    return url_host(str(request.url))
+
+
+def _refuse_a_disputed_authority(column: str, value: str) -> None:
+    """Rule 6: the authority that was judged is the authority that will be dialled.
+
+    Every rule above reads the host out of `urlsplit(...).hostname`. The client
+    that then fetches the address is `requests`, and the two do not agree about
+    where an authority ends when the URL carries a raw backslash: WHATWG's URL
+    standard makes `\\` a terminator and RFC 3986 does not, so
+    `https://internal.corp\\@public.example/memberships` is `public.example` with
+    userinfo to one reader and `internal.corp` to the other. Measured against the
+    installed libraries, not reasoned about.
+
+    Judge with the first and connect with the second, and **every rule in this
+    module has been applied to a host the packet never goes to** — with the tool's
+    access token attached, past the resolution pin (which pins the address resolved
+    for the judged name, a name this request never asks for), and inside whatever
+    network the worker sits in. It is ADR 0081's rules defeated one level out: not
+    by a spelling they missed but by a parser they never consulted.
+
+    **Stated as a property, not as a refused character** (`docs/MISTAKES.md` entry
+    35: a catalog of spellings is defeated by the one nobody enumerated). The
+    backslash is today's disagreement; the rule is that there may be no
+    disagreement, so whatever the next one turns out to be is refused by the same
+    line.
+
+    **Both sides go through `prepare_url`**, which is what makes this a comparison
+    of authorities rather than of spellings. `requests` IDNA-encodes a non-ASCII
+    host before it dials, so comparing the prepared host against the raw parsed one
+    would refuse every internationalized domain in the field — `röster.example` is
+    judged as itself and dialled as `xn--rster-jua.example`, and both are the same
+    host. Preparing the judged name too puts the same encoder on both sides, so the
+    only thing left that can differ is where the authority ends. Measured across
+    every host shape this suite drives — unicode, a trailing dot, an over-long
+    label, an empty label, IPv6, IPv4-mapped, a port, userinfo — and the vector is
+    the only one that differs.
+
+    **The judged host is re-bracketed if it is an IPv6 literal**, because
+    `url_host` strips the brackets and `https://2606:4700::1111/` is not a URL any
+    parser accepts. Without that, this rule refused every IPv6 roster address in
+    existence; it was found by probing the rule against the suite's host shapes
+    before writing it rather than by a test, and it is spelled out here because the
+    next person to touch this comparison will rebuild the URL the same way.
+
+    A value naming no host at all is left to rule 5, which refuses it in terms an
+    operator can act on. Refusing it here would answer a clear question with a
+    confusing message.
+    """
+    judged = url_host(value)
+    if judged is None:
+        return
+    authority = f"[{judged}]" if ":" in judged else judged
+    dialled = _prepared_host(value)
+    if dialled is not None and dialled == _prepared_host(f"https://{authority}/"):
+        return
+    raise RegistrationAddressError(
+        f"The registration's `{column}` is read as one host by the parser these rules judge with "
+        "and as another by the client that would fetch it — a URL carrying a raw backslash in its "
+        "authority is split in two places by two standards. Every rule above would have been "
+        "applied to a name the request never goes to, and the tool's own credentials would be "
+        "presented wherever it does go. Register an address whose authority is spelled once, or "
+        "run with ENVIRONMENT=development."
     )
 
 
