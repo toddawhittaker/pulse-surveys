@@ -118,3 +118,83 @@ Re-run after the fix: round trip "exactly it"; 93 passed across the batch's four
 modules, the five adjacent roster-sync modules, `test_alembic_baseline.py` and
 `test_identity_schema.py`; `tests/unit` 951 passed; ruff format, ruff check and
 mypy over `backend/` all clean.
+
+# Round 2 — the battery's survivors and two security findings
+
+Tests committed red at `0d0783f`. Confirmed cold before touching anything:
+**4 failed / 272 passed**, exactly the coordinator's measurement, and the four
+reds were the four named ones. The load-bearing control
+`test_the_two_url_parsers_disagree_about_this_modules_authority_vector` was
+green, so the authority vector still holds against the installed libraries and
+the finding did not need re-verifying.
+
+## Attempt 5 — the parser learns what a quoted string is, worked
+
+Commit `fc17bb3`. `LINK_HEADER_ENTRY`'s parameter tail was `[^,;]*`, which knows
+nothing about quoting, and the parameters were split with a bare `split(";")`.
+Both directions of the defect are now closed: the tail matches bare text or a
+whole quoted-string with its `\` escapes, and `_split_outside_quotes` splits
+parameters on semicolons outside quotation marks.
+
+**Probed before the suite ran**, against sixteen header shapes in one script —
+the two new reds, every round-1 green, and the cases nobody asked about: a comma
+inside the URL's angle brackets (still one link, which the old regex also got
+right and which a naive comma-split of the whole header would break), an escaped
+quotation mark inside a title, `rel="first next"`, a repeated `next`, an
+unterminated quote, and all four spellings of the header name. Sixteen of
+sixteen. The suite then passed first time.
+
+**An unterminated quotation mark leaves the rest of the header quoted**, so the
+parser finds no relation and the walk ends. That is a deliberate choice between
+two readings of a malformed header, and it is the one that refuses to invent a
+relation; it is written into `_split_outside_quotes`'s docstring rather than left
+as behaviour nobody chose.
+
+## Attempt 6 — rule 6, and the probe that saved it, worked
+
+Commit `8fa4104`. `refuse_invalid_fetched_address` gains
+`_refuse_a_disputed_authority`: the authority `requests.PreparedRequest`
+prepares must be the authority `urlsplit` gave the rules to judge.
+
+**The probe is the whole of why this attempt worked first time.** Before writing
+the rule I ran `prepare_url` against every host shape this suite drives and
+compared three readings of each — judged, dialled, and the judged name put back
+through the same preparer. Two things came out of it that no test in the round
+would have caught:
+
+1. Comparing the prepared host against the *raw* parsed host refuses every
+   internationalized domain, because `requests` IDNA-encodes a non-ASCII host
+   before it dials. `röster.roster-platform.invalid` is an existing green test in
+   the refusal module — but it is judged there under a *stored* address, not a
+   fetched hop, so it might well not have caught it. Preparing both sides puts
+   the same encoder on each and cancels it.
+2. Rebuilding the judged URL as `https://{host}/` refuses **every IPv6 address**,
+   because `url_host` strips an IPv6 literal's brackets and
+   `https://2606:4700::1111/` parses as nothing. No test in this batch drives a
+   fetched IPv6 address, so this would have shipped.
+
+Both are written into the function's docstring, because the next person to touch
+this comparison will rebuild the URL the same way.
+
+**The rule is a property, not a character.** `docs/MISTAKES.md` entry 35: a
+catalog of spellings is defeated by the one nobody enumerated. The backslash is
+today's disagreement; the rule is that there may be none.
+
+**It runs before rule 5** (entry 29 — a value handled before the check that
+should have refused it), and in development wherever rule 5 runs, because where
+the packet goes is not a property of the environment.
+
+**Scope held deliberately.** Rule 6 is on the fetched column only, as settled.
+The same vector is spellable in `jwks_url` and `auth_token_url`, which this
+container also fetches; that needs an administrative write rather than a
+platform-supplied header, so it is lower severity, and it is proposed in the PR
+rather than widened into this change. It is a real gap and is named rather than
+left implied.
+
+## Round 2 verification
+
+336 passed across the four round-2 modules plus every adjacent one (the five
+roster-sync modules, the address-rules integration module,
+`test_alembic_baseline.py`, `test_identity_schema.py`); `tests/unit` 954 passed;
+ruff format, ruff check and mypy over `backend/` clean. No schema moved, so no
+migration round trip was owed this round.
