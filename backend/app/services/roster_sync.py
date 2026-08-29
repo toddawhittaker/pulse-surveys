@@ -61,6 +61,7 @@ afterwards.
 """
 
 import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -138,6 +139,57 @@ DEBOUNCE_WINDOW: Final[timedelta] = timedelta(minutes=5)
 # member means and what every real platform sends for somebody still enrolled.
 MEMBER_STATUS = "status"
 DROPPED_STATUSES: Final[frozenset[str]] = frozenset({"Inactive", "Deleted"})
+
+# One `<url>` of an RFC 8288 `Link` header, with the parameter list belonging to
+# it. The parameter tail stops at a comma so that two links in one header are read
+# as two, which is the shape a platform sends when it offers `prev`, `next` and
+# `first` together; `[^>]*` inside the angle brackets is the URI-reference, which
+# RFC 8288 §3 says carries no `>` unencoded — and which is why a comma *inside* a
+# link's URL cannot end it either.
+#
+# **A quoted parameter value is a single value, comma and semicolon included**
+# (RFC 9110 §5.6.4, which RFC 8288 §3 builds its parameters on). That is the
+# alternation in the tail: a run of characters that are neither delimiter nor
+# quote, or a quoted-string with its `\"` escapes. A tail that stopped at
+# the first comma read `<url>; title="Page 2, of 9"; rel="next"` as a link ending
+# mid-title, whose `rel="next"` belonged to nothing — the walk ends early and
+# **complete**, which is H1's own silent truncation reached through a spelling the
+# specification explicitly permits.
+#
+# **The closing quote is optional (`"?`) so an unterminated quote consumes to the
+# end of the header**, which is the reading `_split_outside_quotes` below already
+# takes. The two have to agree: a mandatory closing quote made this pattern treat
+# an unterminated `title="see <url>; rel=next` as an unquoted tail and resume the
+# `<...>` scan inside it, finding a link the platform never terminated — while
+# `_split_outside_quotes` read the same characters as one quoted value. A reader
+# and a splitter that disagree about where a quote ends is the very shape of the
+# defect this rule closes, one level in. What the platform terminated and declared
+# governs; unterminated content declares nothing.
+#
+# **This tool reads the header itself rather than taking `pylti1p3`'s answer**, and
+# the boundary review's H1 is why. `ServiceConnector.make_service_request` searches
+# a **lower-cased** copy of the whole header with `<([^>]*)>;\s*rel="next"`, and
+# that is wrong twice over: RFC 3986 §6.2.2.1 makes a URL's path and query
+# case-sensitive, so a platform paging on a base64 cursor (Canvas's
+# `?page=Bookmark:QUJDeHl6`) is asked for a page it does not serve; and the pattern
+# requires `rel` to be the link's *first* parameter and its value to be quoted,
+# where RFC 8288 §3 makes a link's parameters unordered and its `rel` value a token
+# that may be bare. A header the pattern misses ends the walk early **as complete**,
+# which closes the enrollment of every member on the pages that were never fetched.
+LINK_HEADER_ENTRY: Final[re.Pattern[str]] = re.compile(
+    r"""<(?P<url>[^>]*)>                    # the URI-reference, opaque between the brackets
+        (?P<parameters>                     # its parameters, up to the next link
+            (?: \s*;                        # each one introduced by a semicolon
+                (?: [^,;"] | "(?:[^"\\]|\\.)*"? )*   # bare text, or a quoted-string
+            )*
+        )""",
+    re.VERBOSE,
+)
+
+# The link relation a paged container advertises its next page under (RFC 8288 §3
+# and NRPS 2.0 §3.2), and the name of the header carrying it.
+NEXT_RELATION: Final[str] = "next"
+LINK_HEADER: Final[str] = "link"
 
 # The member document's own names for a subject, its roles and its address, as
 # NRPS 2.0 spells them.
@@ -290,11 +342,24 @@ def sync_section(
 
     # One pin table per sync, shared by reference with the adapter that reads it:
     # the walk fills it in as it judges each host, and the next request out of the
-    # transport is already pinned.
+    # transport is already pinned. `unpinned_hosts` is the small set of hosts this
+    # sync dials *without* a pin on purpose — the token endpoint, and in development
+    # the section's own exempt roster host — so the adapter can fail closed on any
+    # other pin miss (a name that reached the transport without being judged and
+    # pinned) rather than resolving it a second time. Both are shared by reference
+    # and filled below, before the first request leaves.
     pins: dict[str, str] = {}
-    transport = _pinned(_no_redirects(http), pins)
+    unpinned_hosts: set[str] = set()
+    transport = _pinned(_no_redirects(http), pins, unpinned_hosts)
     platform = _platform_for(session, section)
-    connector = ServiceConnector(_registration_for(session, platform), requests_session=transport)
+    registration = _registration_for(session, platform)
+    token_host = url_host(registration.get_auth_token_url() or "")
+    if token_host is not None:
+        unpinned_hosts.add(token_host)
+    exempt = url_host(address)
+    if exempt is not None:
+        unpinned_hosts.add(exempt)
+    connector = ServiceConnector(registration, requests_session=transport)
     walked = _walked_roster(
         session,
         section_id,
@@ -308,7 +373,14 @@ def sync_section(
     if walked is None:
         return
     members, complete = walked
-    _ingest(session, section, platform.id, members, _today(settings), complete=complete)
+    _ingest(
+        session,
+        section,
+        platform.id,
+        _deduplicated(members, section_id),
+        _today(settings),
+        complete=complete,
+    )
 
 
 def _no_redirects(http: requests.Session | None) -> requests.Session:
@@ -346,10 +418,20 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
     **What it does to a pinned request**, and nothing else: the URL's host becomes
     the pinned address, and the `Host` header states the original hostname (with
     its explicit port, where the URL carried one) so the platform serves the right
-    virtual host. **A host with no pin passes through untouched** — the token
-    endpoint, a development stack's own exempt roster host, and the in-process
-    transport a test hands in are all unpinned, and an adapter that rewrote a host
-    it holds no pin for would send a request to an address nothing judged.
+    virtual host.
+
+    **A pin miss for a host the walk did not name unpinned is refused, not sent.**
+    Rule 6 refuses an address whose judged host and dialled host differ before the
+    walk ever pins it, so in normal operation every roster page's dialled host is
+    the host that was pinned. If a request none the less arrives for a host that is
+    neither pinned nor in `unpinned_hosts` — the token endpoint and the development
+    stack's own exempt roster host, the two hosts this sync dials without a pin on
+    purpose — then a name reached the transport without being judged, which is the
+    rebind window this adapter exists to close arriving one spelling further out.
+    Falling through to the inner adapter would resolve that name a second time, at
+    dial time, with the tool's token attached; the adapter fails closed instead,
+    raising a `RequestException` the walk records as a call it would not make. This
+    is the second layer behind rule 6: it is only reached if rule 6 is removed.
 
     **TLS is verified against the name, not the address.** A request addressed to
     an IP literal would otherwise have its certificate checked against the
@@ -366,9 +448,15 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
     the adapter cannot disagree with what was judged.
     """
 
-    def __init__(self, inner: requests.adapters.BaseAdapter, pins: Mapping[str, str]) -> None:
+    def __init__(
+        self,
+        inner: requests.adapters.BaseAdapter,
+        pins: Mapping[str, str],
+        unpinned_hosts: set[str],
+    ) -> None:
         self.inner = inner
         self.pins = pins
+        self.unpinned_hosts = unpinned_hosts
         self._pinned_transports: dict[str, requests.adapters.HTTPAdapter] = {}
 
     def send(
@@ -390,6 +478,15 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
         # spelling and for the one the `Link` header carried alike.
         hostname = canonical_host(split.hostname) or ""
         address = self.pins.get(hostname)
+        if address is None and hostname not in self.unpinned_hosts:
+            raise requests.exceptions.ConnectionError(
+                f"the roster sync refused to dial {hostname!r}: it holds no pin for that host and "
+                "it is not one this sync dials unpinned on purpose (the token endpoint or a "
+                "development stack's own exempt roster host). A request reaching the transport for "
+                "a host the walk did not judge and pin is a name that would be resolved a second "
+                "time at dial time, which is the bypass the pin closes.",
+                request=request,
+            )
         sending = self.inner if address is None else self._transport_for(split.scheme, hostname)
         if address is not None:
             # The authority exactly as `requests` prepared it — the trailing dot
@@ -440,7 +537,9 @@ def _netloc_at(address: str, port: int | None) -> str:
     return host if port is None else f"{host}:{port}"
 
 
-def _pinned(http: requests.Session, pins: Mapping[str, str]) -> requests.Session:
+def _pinned(
+    http: requests.Session, pins: Mapping[str, str], unpinned_hosts: set[str]
+) -> requests.Session:
     """Mount `PinnedResolutionAdapter` over whatever this session already answers with.
 
     Both schemes, because a walk that judged an `http` page must reach the address
@@ -453,11 +552,14 @@ def _pinned(http: requests.Session, pins: Mapping[str, str]) -> requests.Session
     session to every section in the institution, and a wrapper per section would
     be a chain hundreds deep by the end of an hourly run, each link holding a pin
     table belonging to a section already synced.
+
+    `unpinned_hosts` is the caller's set of hosts that are dialled without a pin on
+    purpose; the adapter refuses any other pin miss (see its docstring).
     """
     for scheme in ("https://", "http://"):
         held = http.get_adapter(scheme)
         inner = held.inner if isinstance(held, PinnedResolutionAdapter) else held
-        http.mount(scheme, PinnedResolutionAdapter(inner, pins))
+        http.mount(scheme, PinnedResolutionAdapter(inner, pins, unpinned_hosts))
     return http
 
 
@@ -710,12 +812,23 @@ def _walked_roster(
     because it is the operator's own and the hourly walk would otherwise pay a
     lookup per page of every section.
 
-    **A token or transport failure answers `None`**, and the difference from a
-    validation refusal is a section's whole enrollment. Those leave no usable prefix:
-    the token endpoint refused everything, or a page this tool *did* choose to fetch
-    could not be reached — so `_ingest` never runs and nothing is closed. The call is
-    recorded either way, with the response code that says which it was; a NULL
-    response code means the call never reached the platform at all.
+    **A token failure answers `None`**, because it leaves no usable prefix: the
+    token endpoint refused everything, no page was ever asked for, and `_ingest`
+    never runs. The call is recorded, with the response code that says which failure
+    it was; a NULL response code means the call never reached the platform at all.
+
+    **A page that could not be fetched answers what was already read, incomplete** —
+    the same answer a refused address gets, for the same reason (the boundary
+    review's H1 pair). A page-boundary failure that threw the container away would
+    lose a class that synced correctly up to it, every hour, invisibly: the members
+    of page one are on the roster whatever page two answered. `complete` is `False`,
+    so nothing is closed on the strength of a walk that did not reach the end.
+
+    **The next page is read out of the response's own `Link` header** by
+    `_next_page_url`, rather than from the `next_page_url` `pylti1p3` computes. See
+    `LINK_HEADER_ENTRY` for what that library gets wrong and why the walk cannot use
+    it. `get_nrps_data` is the same call `get_members_page` makes — same scope, same
+    `Accept` — and it is used here because it hands back the headers as well.
 
     **A refused token is recorded against the roster's own URL, carrying the token
     endpoint's status.** A sync makes two calls to two endpoints and only one of
@@ -815,26 +928,198 @@ def _walked_roster(
         walked.add(following)
         called = following
         try:
-            page, following = service.get_members_page(called)
+            answered_page = service.get_nrps_data(members_url=called)
         except LtiServiceException as refusal:
             answered = _answered_status(refusal)
             _record_call(session, section_id, called, answered, None)
             logger.warning(
-                "the roster at %s answered %s, so section %s was not ingested",
+                "the roster at %s answered %s, so section %s was not ingested past the %d member(s) "
+                "already read",
                 called,
                 answered,
                 section_id,
+                len(members),
             )
-            return None
+            return members, False
         except requests.RequestException:
             _record_call(session, section_id, called, None, None)
             logger.exception(
-                "the roster at %s could not be reached for section %s", called, section_id
+                "the roster at %s could not be reached for section %s, which keeps the %d member(s) "
+                "already read and closes nobody",
+                called,
+                section_id,
+                len(members),
             )
-            return None
+            return members, False
+        page = _page_members(answered_page)
+        following = _next_page_url(answered_page["headers"])
         _record_call(session, section_id, called, 200, len(page))
         members.extend(page)
     return members, True
+
+
+def _page_members(answered: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
+    """One page's members, read exactly as `NamesRolesProvisioningService` reads them.
+
+    Deliberately no more forgiving than the library's own
+    `data_body.get("members", [])`: a container that is not an object at all raises
+    here, and that is the right answer rather than a shape to absorb. An unreadable
+    body read as *no members* is an empty page, an empty page on a walk that then
+    ends completely is a container this tool believes it read to the end, and
+    `_ingest` closes the enrollment of everybody a complete walk did not carry. A
+    loud failure is one section's, caught by `sync_all_rosters`' savepoint and
+    recorded against that section; a quiet empty page ends a whole class's term.
+    """
+    body: Any = answered["body"]
+    carried: Any = body.get("members", [])
+    return list(carried)
+
+
+def _next_page_url(headers: Mapping[str, Any]) -> str | None:
+    """The next page a container's `Link` header advertises, spelled as it was sent.
+
+    The boundary review's H1, and `LINK_HEADER_ENTRY` above carries the argument for
+    reading the header here rather than taking `pylti1p3`'s answer for it. Three
+    rules, all of them RFC 8288 §3's:
+
+      - the header's parameters are **unordered**, so `rel` is looked for among all
+        of them rather than required to be the first;
+      - a `rel` value is a **token**, quoted or bare, and may name several relations
+        on one link (`rel="first next"`), so the value is unquoted and split;
+      - a header may carry **several comma-separated links**, so each is read and
+        only the one declaring `next` is followed;
+      - a **quoted** parameter value is one value whatever it contains, so a
+        parameter is separated from the next by a semicolon *outside* quotation
+        marks. A `rel=next` written inside some other parameter's quoted value is
+        that value's text and not a relation this platform declared — and the
+        difference decides where the tool sends its access token, so it is the
+        platform's declaration that governs and never a string it quoted.
+
+    The header's name is matched case-insensitively, because RFC 9110 §5.1 makes a
+    field name case-insensitive and RFC 8288 §3 spells this one `Link`, which is
+    what a real platform sends.
+
+    The URL is handed back byte for byte. Nothing is lower-cased, unescaped or
+    resolved against the page it came from: what a platform put between the angle
+    brackets is what it will answer to, and a relative reference — which no platform
+    in this system sends — is left to `refuse_invalid_fetched_address` to refuse
+    rather than guessed at here.
+
+    The first `next` declared wins, which is how a client reads a header that
+    repeats one, and it is what keeps a decoy link later in the header from moving
+    the walk.
+    """
+    header = next(
+        (value for name, value in headers.items() if str(name).lower() == LINK_HEADER), None
+    )
+    if not isinstance(header, str) or not header:
+        return None
+    for entry in LINK_HEADER_ENTRY.finditer(header.replace("\n", " ")):
+        for parameter in _split_outside_quotes(entry.group("parameters"), ";"):
+            name, _, value = parameter.partition("=")
+            if name.strip().lower() != "rel":
+                continue
+            if NEXT_RELATION in value.strip().strip('"').lower().split():
+                return entry.group("url").strip() or None
+    return None
+
+
+def _split_outside_quotes(text: str, delimiter: str) -> list[str]:
+    """Split `text` on `delimiter`, ignoring any that falls inside a quoted-string.
+
+    RFC 9110 §5.6.4's quoted-string, which is what a `Link` header's parameter
+    values are: between the quotation marks every character is content, including
+    the `;` that separates two parameters, and `\\` escapes the character after it
+    so that a quoted value can contain a quotation mark of its own.
+
+    A bare `str.split(";")` reads `title="a; rel=next"; rel="prev"` as three
+    parameters, two of them fragments of one title — and the fragment `rel=next`
+    then answers the question "what relation does this link declare?" with a value
+    the platform put inside quotation marks rather than with the relation it
+    declared. That is the platform choosing which of its addresses this tool walks
+    into, and how often, from a string it never offered as a relation.
+
+    An unterminated quotation mark leaves the rest of the text quoted, so the
+    delimiters inside it are content. That is the reading that refuses to find a
+    relation rather than the one that invents one out of a malformed header.
+    """
+    parts: list[str] = []
+    held: list[str] = []
+    quoted = False
+    escaped = False
+    for character in text:
+        held.append(character)
+        if escaped:
+            escaped = False
+        elif quoted and character == "\\":
+            escaped = True
+        elif character == '"':
+            quoted = not quoted
+        elif character == delimiter and not quoted:
+            held.pop()
+            parts.append("".join(held))
+            held = []
+    parts.append("".join(held))
+    return parts
+
+
+def _deduplicated(roster: Sequence[Mapping[str, Any]], section_id: UUID) -> list[Mapping[str, Any]]:
+    """The assembled pages with each subject kept once — its first occurrence (M2).
+
+    A container is paged over a collection that is still changing: a member added,
+    removed or re-ordered between the fetch of page one and the fetch of page two
+    shifts every later row along, and the member on the boundary is served on both.
+    Nothing about that is a defect at the platform. Before this, the second copy was
+    written as a second enrollment for one user and one section, ADR 0023's
+    exclusion constraint refused the overlap, and the uncaught `ExclusionViolation`
+    took the section's whole sync with it — every hour, for as long as the platform
+    kept paging that way.
+
+    **Here rather than inside the ingest loop**, and by `user_id` rather than by
+    anything coarser. A duplicate caught by catching the constraint violation would
+    make a database constraint part of the ingest loop's control flow and leave the
+    section half-written; a rule keyed on the page, or on the member's position,
+    drops half of every class that pages. So the roster is one list of documents by
+    the time `_ingest` sees it, and the constraint stays what it is — the guard over
+    a *genuine* overlap, which this cannot produce and must not be allowed to hide.
+
+    **First occurrence wins** because the walk reads a container in the platform's
+    own order and the earlier page is the one this tool asked for first; there is no
+    rule that would let it prefer the later copy, and inventing one would be this
+    module deciding which of two identical documents is the truer.
+
+    A member document with no usable `user_id` is passed through untouched: it is
+    not a duplicate of anything, and `_read_member` is where a document that cannot
+    be keyed is refused, with one refusal per member rather than a silent merge here.
+
+    **The note carries a count and the section, and never a member.** That a
+    platform re-serves members across its page boundary is a fact about the
+    platform, and it is worth an operator's attention precisely because dedup makes
+    it otherwise invisible; which student it was is no part of it, and SPEC §10
+    keeps a roster's subjects and addresses out of the log.
+    """
+    kept: list[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    repeated = 0
+    for member in roster:
+        subject = member.get(MEMBER_SUBJECT)
+        if not isinstance(subject, str) or not subject:
+            kept.append(member)
+            continue
+        if subject in seen:
+            repeated += 1
+            continue
+        seen.add(subject)
+        kept.append(member)
+    if repeated:
+        logger.info(
+            "the platform served %d duplicate member document(s) across the pages of section %s's "
+            "container, so the first occurrence of each was kept and the rest dropped; a container "
+            "paged over a collection that is changing re-serves the member on the boundary",
+            repeated,
+            section_id,
+        )
+    return kept
 
 
 def _answered_status(refusal: LtiServiceException) -> int | None:

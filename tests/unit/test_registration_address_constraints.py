@@ -43,7 +43,7 @@ reverse, and would be measuring the machine rather than the rules
 (`docs/MISTAKES.md` entry 40's shape, arriving through a resolver instead of an
 environment variable).
 
-**Four rules, and every one of them is asserted from both sides.** A validator
+**Six rules, and every one of them is asserted from both sides.** A validator
 that refuses everything outside development passes every refusal test in this
 module and makes Pulse undeployable; a validator that refuses nothing in
 development passes them too and stops the demo seed writing the mock's own
@@ -72,6 +72,17 @@ and the sharpest of them is
      development: an address that is not `is_global` is refused, except loopback
      on a column outside `LOOPBACK_REFUSED_COLUMNS`, and an unresolvable host is
      refused outright.
+  6. **An address whose authority two parsers disagree about is refused**, on the
+     fetched column and on the two registration columns this container fetches.
+     The E1 boundary fix round added it after a security pass measured the
+     disagreement against the installed libraries; the re-pass then measured the
+     first form of it being defeated, because the rule compared the judged host
+     with *itself* put through the client's parser rather than with the host the
+     client will actually dial. The comparison is between the two readings, and
+     the acceptance rows — an IDN, a punycoded label, a trailing dot, a port,
+     userinfo, IP literals — are what stop it being bought by refusing everything
+     unusual. Its own two sections near the foot of this module say why each
+     vector is built the way it is.
 
 **A NULL passes.** Both new columns are nullable and NULL means "not stated",
 never a default: the launch door refuses a registration whose
@@ -1998,12 +2009,497 @@ def test_a_fetched_refusal_names_the_column_and_does_not_quote_the_value(resolvi
 
 
 # ---------------------------------------------------------------------------
+# Rule 6: the authority that was judged is the authority that will be dialled.
+#
+# Every rule above reads a host out of `urlsplit(...).hostname`. The client that
+# then fetches the address is `requests`, which does not agree with `urlsplit`
+# about where an authority ends when the URL carries a raw backslash: WHATWG's
+# URL standard treats `\` as a segment terminator and RFC 3986 does not, so
+# `https://internal.corp\@public.example/x` is `public.example` with userinfo to
+# one of them and `internal.corp` to the other. Judge with the first and connect
+# with the second and every rule in this module has been applied to a host the
+# packet never goes to — with the tool's Bearer token attached, past the
+# resolution pin, and inside whatever network the worker sits in.
+#
+# The rule is stated as a property rather than as a mechanism: an address whose
+# prepared authority differs from its parsed one is refused. That covers the
+# backslash and whatever the next disagreement between two parsers turns out to
+# be, which a catalog of characters would not (`docs/MISTAKES.md` entry 35).
+# ---------------------------------------------------------------------------
+
+# The vector, verified against the installed libraries by the control at the foot
+# of this module. Two hosts that both resolve, and both resolve *globally*, so
+# that no other rule in this module can be what refuses it: rule 1 is satisfied
+# (https), rules 2, 3 and 4 name neither host, and rule 5 accepts both answers.
+# The only thing left that can refuse this address is the disagreement itself.
+#
+# The same string is driven end to end in
+# `tests/integration/test_the_roster_sync_refuses_an_address_it_was_told_to_fetch.py`,
+# where it arrives in a platform's `Link` header. Two copies of one literal,
+# deliberately: the modules share no import path, and a constant that drifted
+# would be caught by the control below, which derives both hostnames from the URL
+# rather than restating them.
+A_JUDGED_HOST = "public.example"
+A_DIALLED_HOST = "internal.corp"
+AN_AUTHORITY_CONFUSING_URL = f"https://{A_DIALLED_HOST}\\@{A_JUDGED_HOST}/memberships"
+
+# The same address without the backslash: one authority, spelled once, which every
+# rule reads the same way. The pair, and the thing a rule that refused too much
+# would break.
+AN_ORDINARY_FETCHED_URL = f"https://{A_JUDGED_HOST}/memberships"
+
+
+def test_a_fetched_address_whose_authority_two_parsers_disagree_about_is_refused(
+    resolving: Any,
+) -> None:
+    """The address that is judged as one host and connected to as another.
+
+    **The mutation this kills**: no authority check at all, which is the state at
+    HEAD. Every rule in this module reads `urlsplit(...).hostname`, so a `Link:
+    rel="next"` carrying this URL is judged as `public.example` — https, globally
+    routable, named by no catalog — and `requests` then dials `internal.corp` and
+    sends the tool's access token there. It is the ADR 0081 rules defeated one
+    level out, not by a spelling they missed but by a parser they never consulted.
+
+    **Both hosts resolve globally**, so no other rule can be what refuses this: a
+    refusal here is about the disagreement and nothing else (`docs/MISTAKES.md`
+    entry 3 — a test that passes for a reason unrelated to what it asserts).
+
+    **Its pair is the test below**, the same address with one authority, which has
+    to keep passing: a rule that refused every URL carrying a character it did not
+    like would pass this row and break every ordinary roster.
+
+    What the rule *is* is deliberately left open. Comparing the prepared authority
+    with the parsed one is the shape the fix round settled on; refusing the
+    character outright, or normalising before judging, would satisfy this test too.
+    """
+    with pytest.raises(registration_error()):
+        judge_fetched(
+            "production",
+            column=ROSTER_ADDRESS_COLUMN,
+            address=AN_AUTHORITY_CONFUSING_URL,
+            resolve=resolving(
+                {
+                    A_JUDGED_HOST: (A_GLOBAL_ADDRESS,),
+                    A_DIALLED_HOST: (ANOTHER_GLOBAL_ADDRESS,),
+                }
+            ),
+        )
+
+
+def test_an_ordinary_fetched_address_with_one_authority_is_still_accepted(
+    resolving: Any,
+) -> None:
+    """The pair: the same host, spelled the way every roster address is spelled.
+
+    **The mutation this kills**: a rule broad enough to refuse an address both
+    parsers agree about — the cheapest wrong fix, which passes the refusal above
+    and stops every sync in the institution.
+    """
+    judge_fetched(
+        "production",
+        column=ROSTER_ADDRESS_COLUMN,
+        address=AN_ORDINARY_FETCHED_URL,
+        resolve=resolving({A_JUDGED_HOST: (A_GLOBAL_ADDRESS,)}),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 6, the second round: the comparison has to be between the two readings,
+# not between one reading and itself.
+#
+# The security re-pass measured the first form of this rule being defeated one
+# level out, which is `docs/MISTAKES.md` entry 35's shape arriving for the second
+# time on the same rule. The rule ran the *judged* host back through the client's
+# own parser before comparing it with the dialled one — so a backslash inside the
+# judged host truncated both sides identically, the two agreed, and the address
+# was allowed. The exploit the pass measured needs no `@` at all:
+#
+#     Link: <https://internal.corp\a.evil.example/p2>; rel="next"
+#
+# `urlsplit` reads the host as `internal.corp\a.evil.example`; `requests` reads
+# `internal.corp`. A platform that publishes an A record for
+# `internal.corpa.evil.example` gets the judged spelling resolved to its own
+# public address by glibc, which escape-processes the backslash — so rules 1 to 5
+# all pass, the pin is written under the judged spelling and looked for under the
+# dialled one, and the GET carrying the tool's Bearer token goes to
+# `internal.corp` inside the deployment's network.
+#
+# The two forms this section's refusals have to kill are therefore both: *no*
+# comparison, and a comparison whose two sides have been put through the same
+# parser. What a green here must not cost is the ordinary spellings of a host —
+# an IDN, a punycoded label, a trailing dot, a port, userinfo, an IP literal —
+# which is what the acceptance rows below are for, one per shape.
+# ---------------------------------------------------------------------------
+
+# The measured exploit: a backslash *inside* the host, with no `@` anywhere.
+A_TRUNCATED_DIALLED_HOST = "internal.corp"
+AN_ESCAPING_JUDGED_HOST = "internal.corp\\a.evil.example"
+
+# A percent-escape of an unreserved character. `urlsplit` leaves it alone and
+# `requests` un-escapes it while it re-quotes the URL, so the two readings are two
+# different names — a divergence with no backslash in it, which is what says the
+# rule is about the disagreement rather than about a character.
+A_PERCENT_ESCAPED_JUDGED_HOST = "ex%41mple.com"
+A_PERCENT_DECODED_DIALLED_HOST = "example.com"
+
+# Two authorities carrying characters a URL may not contain. Whether `requests`
+# reads a second host out of them or refuses to prepare them at all, the tool has
+# no business fetching an address whose authority it cannot agree with itself
+# about.
+A_SPACED_AUTHORITY = "good.example evil.example"
+A_QUOTED_AUTHORITY = 'good.example"evil.example'
+
+# Every address whose two readings differ, and every one of them is refused. Each
+# is https, names no catalogued host, and resolves globally below, so rule 6 is
+# the only rule left that can fire (`docs/MISTAKES.md` entry 3).
+DIVERGING_AUTHORITIES = {
+    "a backslash inside the judged host": f"https://{AN_ESCAPING_JUDGED_HOST}/memberships",
+    "a backslash before an at sign": AN_AUTHORITY_CONFUSING_URL,
+    "a percent-escaped letter in the host": f"https://{A_PERCENT_ESCAPED_JUDGED_HOST}/memberships",
+    "a space in the authority": f"https://{A_SPACED_AUTHORITY}/memberships",
+    "a quotation mark in the authority": f"https://{A_QUOTED_AUTHORITY}/memberships",
+}
+
+# What a resolver answers for every host any of the above can be read as, plus the
+# background registration's own. All globally routable, so that rule 5 cannot be
+# what refuses any of these and a refusal is about the divergence itself.
+DIVERGING_RESOLUTIONS = {
+    host: (A_GLOBAL_ADDRESS,)
+    for host in (
+        DEPLOYED_HOST,
+        A_JUDGED_HOST,
+        A_DIALLED_HOST,
+        AN_ESCAPING_JUDGED_HOST,
+        A_TRUNCATED_DIALLED_HOST,
+        "internal.corpa.evil.example",
+        "a.evil.example",
+        A_PERCENT_ESCAPED_JUDGED_HOST,
+        A_PERCENT_DECODED_DIALLED_HOST,
+        A_SPACED_AUTHORITY,
+        A_QUOTED_AUTHORITY,
+        "good.example",
+        "evil.example",
+    )
+}
+
+# The spellings of one host that are **not** a divergence, one row per shape the
+# rule's own docstring names. A host written in a legal but unusual way is an
+# ordinary institution's address, and a rule that refused these would refuse
+# every platform whose name is not seven ASCII letters — which passes every
+# refusal above and is the cheapest wrong fix.
+#
+# `röster.example` is the one to watch: `requests` IDNA-encodes a non-ASCII host
+# while it prepares the URL, so a comparison made between the raw spellings sees
+# `röster.example` and `xn--rster-jua.example` and refuses a legitimate address.
+# That is what this row exists to catch, and a red on it is a fix that
+# over-refuses rather than a broken test.
+AN_IDN_HOST = "röster.example"
+A_PUNYCODED_HOST = "xn--rster-jua.example"
+AN_UNDERSCORED_HOST = "my_host.example"
+A_GLOBAL_IPV6_LITERAL = "[2606:4700::1111]"
+AN_IPV4_MAPPED_GLOBAL_LITERAL = f"[::ffff:{A_GLOBAL_ADDRESS}]"
+
+ONE_AUTHORITY_SPELLINGS = {
+    "a label outside ASCII": f"https://{AN_IDN_HOST}/memberships",
+    "the same label punycoded": f"https://{A_PUNYCODED_HOST}/memberships",
+    "a single trailing dot": f"https://{A_JUDGED_HOST}./memberships",
+    "a port": f"https://{A_JUDGED_HOST}:8443/memberships",
+    "userinfo": f"https://tool@{A_JUDGED_HOST}/memberships",
+    "mixed case": "https://PuBlic.Example/memberships",
+    "an underscore in a label": f"https://{AN_UNDERSCORED_HOST}/memberships",
+    "an IPv4 literal": f"https://{A_GLOBAL_ADDRESS}/memberships",
+    "an IPv6 literal": f"https://{A_GLOBAL_IPV6_LITERAL}/memberships",
+    "an IPv4-mapped IPv6 literal": f"https://{AN_IPV4_MAPPED_GLOBAL_LITERAL}/memberships",
+}
+
+ONE_AUTHORITY_RESOLUTIONS = {
+    host: (A_GLOBAL_ADDRESS,)
+    for host in (A_JUDGED_HOST, AN_IDN_HOST, A_PUNYCODED_HOST, AN_UNDERSCORED_HOST)
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DIVERGING_AUTHORITIES))
+def test_every_address_whose_two_readings_differ_is_refused(resolving: Any, shape: str) -> None:
+    """Rule 6 as a property, on every divergence the security passes have measured.
+
+    **Two mutations, and the second is the one this round exists for.** The first
+    is no comparison at all. The second is **re-preparing the judged host before
+    comparing it** — putting both sides through the client's own parser, so that a
+    backslash inside the host truncates both readings identically and the rule
+    reports agreement about a name the packet will not go to. The row `a backslash
+    inside the judged host` is the exploit the security re-pass measured against
+    the pinned libraries, and it is allowed by that form of the rule.
+
+    The other rows are the same property reached by other characters: a
+    percent-escape the client un-escapes and the parser does not, and two
+    authorities carrying characters no URL may contain. None of them is a catalog
+    entry — a rule written as "refuse a backslash" passes the first row and fails
+    the rest, which is `docs/MISTAKES.md` entry 35 for the third time on this rule.
+
+    **Every host here resolves globally**, so no other rule can be what refuses
+    these and a green is about the divergence (`docs/MISTAKES.md` entry 3).
+
+    **A refusal, and specifically a `RegistrationAddressError`.** If an
+    `InvalidURL` or a `ValueError` comes out of the chokepoint instead, that is the
+    escape the test below this section's next heading is about: the caller catches
+    the registration error and nothing else, so an exception from another family
+    walks past every handler the walk has.
+    """
+    with pytest.raises(registration_error()):
+        judge_fetched(
+            "production",
+            column=ROSTER_ADDRESS_COLUMN,
+            address=DIVERGING_AUTHORITIES[shape],
+            resolve=resolving(DIVERGING_RESOLUTIONS),
+        )
+
+
+@pytest.mark.parametrize("shape", sorted(ONE_AUTHORITY_SPELLINGS))
+def test_a_legal_spelling_of_one_authority_is_still_accepted(resolving: Any, shape: str) -> None:
+    """The acceptance half, one row per shape a host is legally written in.
+
+    **The mutation this kills**: a rule 6 that compares two spellings which are not
+    meant to match — the raw host against the prepared one, where `requests` has
+    IDNA-encoded it, stripped the userinfo, or dropped the port. Every one of these
+    is one authority written once; refusing any of them stops a real institution
+    syncing, and every refusal row above stays green while it happens.
+
+    The IDN rows are the sharp ones. `requests` encodes `röster.example` to
+    `xn--rster-jua.example` before it dials, which is *the same host*, and a
+    comparison that has not accounted for it reads a legitimate platform as an
+    attack. That is a fix that over-refuses, and it is caught here rather than by
+    an institution.
+
+    The over-long label is deliberately not in this table: it is refused, for a
+    reason that has nothing to do with rule 6 (nothing can resolve it), and the row
+    that keeps it honest is `test_a_host_that_cannot_be_resolved_is_refused_
+    outside_development` beside a `RegistrationAddressError` requirement in the
+    next section.
+    """
+    judge_fetched(
+        "production",
+        column=ROSTER_ADDRESS_COLUMN,
+        address=ONE_AUTHORITY_SPELLINGS[shape],
+        resolve=resolving(ONE_AUTHORITY_RESOLUTIONS),
+    )
+
+
+@pytest.mark.parametrize("column", FETCHED_COLUMNS)
+def test_a_registration_address_whose_two_readings_differ_is_refused(
+    resolving: Any, column: str
+) -> None:
+    """Rule 6 on the columns written at registration, not only on the fetched one.
+
+    **The mutation this kills**: rule 6 applied to `refuse_invalid_fetched_address`
+    alone. The deferral that left it there assumed rule 5 backstops these columns,
+    and it does not: `https://10.0.0.5\\@public.example/jwks` is judged *and
+    resolved* as `public.example`, which is globally routable and passes, while the
+    client dials `10.0.0.5`. The private address never appears to the rule that
+    exists to refuse private addresses.
+
+    **Why these two columns and why it is credential exposure.** `auth_token_url`
+    is where `pylti1p3` posts the tool's signed client assertion — an assertion
+    audienced at that URL, sent to whatever host the client resolves out of it. A
+    registration written with one of these addresses hands a signed credential to
+    the authority nobody judged, on every token request, for as long as the row
+    lives. `jwks_url` decides which keys may sign an accepted launch, which is the
+    signing oracle ADR 0077 closed for the web door.
+
+    `authorization_endpoint` is deliberately not asserted, the same stance this
+    module takes on rule 4: it is a browser-facing string that this container never
+    fetches, so the argument that closes these two does not reach it, and answering
+    it here would settle a question the ticket leaves open.
+    """
+    with pytest.raises(registration_error()):
+        judge(
+            "production",
+            registration(**{column: AN_AUTHORITY_CONFUSING_URL}),
+            resolve=resolving(DIVERGING_RESOLUTIONS),
+        )
+
+
+@pytest.mark.parametrize("column", FETCHED_COLUMNS)
+def test_an_ordinary_registration_address_is_still_accepted(resolving: Any, column: str) -> None:
+    """The pair for the two columns above: the registration a real institution writes.
+
+    **The mutation this kills**: rule 6 widened until it refuses an address both
+    parsers agree about, which passes both refusals above and makes every platform
+    unregistrable. The background registration is the one every other acceptance
+    row in this module rests on.
+    """
+    judge(
+        "production",
+        registration(**{column: f"https://{A_JUDGED_HOST}/lti/token"}),
+        resolve=resolving(DIVERGING_RESOLUTIONS),
+    )
+
+
+# ---------------------------------------------------------------------------
+# The exception family: a fetched address may be refused, and may not raise
+# something the caller does not catch.
+#
+# Rule 5's own comment claims this family closed. The security re-pass found a
+# third member: an authority carrying `[` or `]` makes `urlsplit` raise
+# `ValueError: Invalid IPv6 URL` out of the host reader, which is not a
+# `RegistrationAddressError`. The walk catches the registration error; a
+# `ValueError` goes past it to the per-section handler, the savepoint rolls back,
+# no `nrps_call` row is written, and every member already read is discarded. One
+# `Link` header erases a section's sync record and its audit trail.
+# ---------------------------------------------------------------------------
+
+# An authority a URL parser cannot read at all. Refused, and refused *as this
+# family's own error*, which is the whole of the finding.
+A_BRACKETED_AUTHORITY = "a]b.example"
+AN_UNPARSEABLE_URL = f"https://{A_BRACKETED_AUTHORITY}/memberships"
+
+
+def test_an_address_whose_authority_cannot_be_parsed_is_refused_as_a_registration_error(
+    resolving: Any,
+) -> None:
+    """The refusal has to arrive in the family the callers catch.
+
+    **The mutation this kills**: letting the host reader's `ValueError` out of the
+    chokepoint. `pytest.raises(registration_error())` is what catches it — a bare
+    `ValueError` is not an instance of the registration error, whatever the
+    registration error inherits from, so this row goes red on the escape rather
+    than swallowing it. The walk's half of the same finding is asserted where the
+    walk is, because a chokepoint that refuses correctly and a caller that catches
+    the wrong class are two different defects with the same symptom.
+
+    A caller that catches `RegistrationAddressError` and nothing else is not
+    written wrongly: the chokepoint's contract is that it returns or raises that
+    one class. An exception of another family means the contract has a hole, and
+    the hole costs a section its whole sync record rather than one page.
+    """
+    with pytest.raises(registration_error()):
+        judge_fetched(
+            "production",
+            column=ROSTER_ADDRESS_COLUMN,
+            address=AN_UNPARSEABLE_URL,
+            resolve=resolving({A_BRACKETED_AUTHORITY: (A_GLOBAL_ADDRESS,)}),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Controls. Two constants decide most of this module, and a stale one refuses
 # nothing while reporting exactly what a correct one reports (`docs/MISTAKES.md`
 # entry 35). **A red in this section means these tests are broken, not the code.**
 # Nothing here imports the application except the last rows, which read
 # already-shipped constants.
 # ---------------------------------------------------------------------------
+
+
+def test_the_two_url_parsers_disagree_about_this_modules_authority_vector() -> None:
+    """A control: the vector really is read as two different hosts by the two readers.
+
+    Everything rule 6 asserts rests on a claim about two libraries — that
+    `urlsplit` sees `public.example` where `requests` sees `internal.corp`. If a
+    version of either ever agreed with the other, the refusal above would still
+    pass (a rule can refuse an address for any reason) while the thing it was
+    written to stop had ceased to exist, and nobody would know. That is
+    `docs/MISTAKES.md` entry 9 with the evidence removed.
+
+    So both readings are taken here, from the same string, and required to differ
+    and to be the two hosts this module names. `PreparedRequest.prepare_url` is
+    exactly what `requests.Session.send` will have done to the URL before it dials.
+
+    **A red here means the vector has moved, not that the code is wrong** — and a
+    moved vector needs the security finding re-verified rather than the test
+    relaxed.
+    """
+    from urllib.parse import urlsplit
+
+    from requests.models import PreparedRequest
+
+    parsed = urlsplit(AN_AUTHORITY_CONFUSING_URL).hostname
+    prepared = PreparedRequest()
+    prepared.prepare_url(AN_AUTHORITY_CONFUSING_URL, None)
+    dialled = urlsplit(str(prepared.url)).hostname
+
+    assert parsed == A_JUDGED_HOST, (
+        f"`urlsplit` reads {AN_AUTHORITY_CONFUSING_URL!r} as host {parsed!r} and this module's "
+        f"rules are written as though it read {A_JUDGED_HOST!r}. Every other assertion about this "
+        "vector describes a judgment that is not being made."
+    )
+    assert dialled == A_DIALLED_HOST, (
+        f"`requests` prepares {AN_AUTHORITY_CONFUSING_URL!r} as {prepared.url!r}, whose host is "
+        f"{dialled!r} rather than {A_DIALLED_HOST!r}. The finding is that the judged host and the "
+        "dialled host differ; if they no longer do, this vector is no longer a vector and the "
+        "refusal above is protecting against nothing."
+    )
+    assert parsed != dialled, (
+        f"Both readers agree that {AN_AUTHORITY_CONFUSING_URL!r} names {parsed!r}, so there is no "
+        "authority confusion here at all."
+    )
+
+
+# The two rows whose readings the security re-pass measured by name. The rest of
+# `DIVERGING_AUTHORITIES` is required only to *diverge*, because whether the
+# client reads a second host out of a space or refuses to prepare the URL at all
+# is the client's business and either answer makes the address one this tool must
+# not fetch.
+NAMED_AUTHORITY_READINGS = {
+    "a backslash inside the judged host": (AN_ESCAPING_JUDGED_HOST, A_TRUNCATED_DIALLED_HOST),
+    "a percent-escaped letter in the host": (
+        A_PERCENT_ESCAPED_JUDGED_HOST,
+        A_PERCENT_DECODED_DIALLED_HOST,
+    ),
+    "a backslash before an at sign": (A_JUDGED_HOST, A_DIALLED_HOST),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DIVERGING_AUTHORITIES))
+def test_every_vector_in_the_diverging_table_really_diverges(shape: str) -> None:
+    """A control: each refusal row above is a divergence against the installed libraries.
+
+    A refusal test proves nothing about a vector that is not one. If a version of
+    either parser ever agreed with the other about one of these strings, that row
+    would keep passing — a rule may refuse an address for any reason — while the
+    thing it was written to stop had quietly ceased to exist. That is
+    `docs/MISTAKES.md` entry 9 with the evidence removed, and it is why every row
+    is measured here rather than argued for.
+
+    The measurement is: what `urlsplit` reads as the host, and what
+    `PreparedRequest.prepare_url` — the exact call `requests.Session.send` makes
+    before it dials — leaves behind. They must differ, or the client must refuse to
+    prepare the URL at all, which is the same conclusion by a shorter route.
+
+    The three rows whose two readings the security passes named are checked against
+    those names as well, so a vector that starts diverging into some *third* host
+    is reported rather than accepted as still-a-divergence.
+
+    **A red here means a vector has moved, not that the code is wrong.**
+    """
+    from urllib.parse import urlsplit
+
+    from requests.exceptions import InvalidURL
+    from requests.models import PreparedRequest
+
+    url = DIVERGING_AUTHORITIES[shape]
+    judged = urlsplit(url).hostname
+    assert judged, f"`urlsplit` reads no host at all out of {url!r}, so nothing here is judged."
+
+    prepared = PreparedRequest()
+    try:
+        prepared.prepare_url(url, None)
+    except (InvalidURL, UnicodeError, ValueError):
+        dialled = None
+    else:
+        dialled = urlsplit(str(prepared.url)).hostname
+
+    assert dialled is None or dialled != judged, (
+        f"Both readers agree that {url!r} names {judged!r}. This row is in the refusal table as a "
+        "divergence and it is not one any more — the refusal above may still pass, and it is no "
+        "longer evidence of anything."
+    )
+    named = NAMED_AUTHORITY_READINGS.get(shape)
+    if named is not None:
+        assert (judged, dialled) == named, (
+            f"{url!r} is read as {(judged, dialled)!r} and the security pass measured "
+            f"{named!r}. The vector has changed shape; re-verify the finding before trusting the "
+            "refusal that rests on it."
+        )
 
 
 def test_the_refused_host_is_the_compose_service_the_mock_platform_runs_as(

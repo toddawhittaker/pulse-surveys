@@ -47,6 +47,26 @@ closes the gap between the check and the connection: a name resolved twice can
 answer differently the second time, so the sync connects to the address it
 judged, under the hostname it judged it for.
 
+**The E1 boundary round adds one more, and it is a different kind of bypass.**
+Every rule above judges the host `urlsplit` reads out of the URL. `requests` reads
+a different host out of a URL whose authority carries a raw backslash — measured
+against the installed libraries, not reasoned about — so the whole list can be
+applied to a name the connection never goes to, past the resolution pin, with the
+tool's token attached. The rule is stated as a property (the judged authority must
+be the dialled one) rather than as a refused character, and its chokepoint half
+lives in `tests/unit/test_registration_address_constraints.py` as rule 6.
+
+**The security re-pass added two more subjects here, and the second is not a rule
+about a string at all.** A `Link` header whose authority no parser can read raises
+out of the host reader in a family the walk does not catch, which costs the section
+its members *and* its call log rather than costing it one page — so it is asserted
+as a refusal that is recorded, beside the members it must not lose. And behind
+every spelling rule sits the property that survives the next spelling nobody
+thought of: a roster page is only ever fetched at a host this walk asked its own
+resolver about. That last one goes green whenever a spelling rule refuses first,
+which its docstring says out loud; it is the second layer, and it is asserted so
+that removing the first layer has something to fail against.
+
 **Every hostname these tests drive is answered by an injected resolver, never by
 DNS.** `roster-platform.invalid` resolves nowhere, so a sync that reached a name
 server would be red here for a reason that has nothing to do with the rules
@@ -60,6 +80,7 @@ resolving its own roster host only exists there, so it cannot be posed anywhere
 else.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -99,6 +120,37 @@ SECOND_PAGE_PATH = "/rosters/second-host-page"
 # The fix round's own two paths, for the same reason.
 ODD_SPELLING_PAGE_PATH = "/rosters/oddly-spelled-host-page"
 UNENCODABLE_PAGE_PATH = "/rosters/unencodable-host-page"
+
+# The two hosts one URL names, depending on which parser reads it. WHATWG's URL
+# standard terminates the authority at a raw backslash and RFC 3986 does not, so
+# `urlsplit` reads the host after the `@` as the host and `requests` reads the part
+# before the backslash. Both are ordinary public names here and both resolve
+# globally in the test below, so nothing but the disagreement itself can refuse it.
+#
+# The same literal is driven at the chokepoint in
+# `tests/unit/test_registration_address_constraints.py`, where a control proves the
+# disagreement against the installed libraries. Two copies of one string, because
+# the two modules share no import path; the control is what keeps them honest.
+A_JUDGED_HOST = "public.example"
+A_DIALLED_HOST = "internal.corp"
+AN_AUTHORITY_CONFUSING_URL = f"https://{A_DIALLED_HOST}\\@{A_JUDGED_HOST}/memberships"
+
+# The same divergence with no `@` in it, which is the exploit the security re-pass
+# measured: the backslash sits *inside* the host. `urlsplit` reads the whole string
+# as the host and `requests` stops at the backslash, and a platform that publishes
+# an address for `internal.corpa.evil.example` gets the judged spelling resolved to
+# its own public record, because glibc escape-processes the backslash. Judged
+# globally routable, dialled inside the network.
+AN_ESCAPING_JUDGED_HOST = "internal.corp\\a.evil.example"
+A_TRUNCATED_DIALLED_HOST = "internal.corp"
+AN_ESCAPING_NEXT_PAGE = f"https://{AN_ESCAPING_JUDGED_HOST}/rosters/escaped-page"
+
+# An authority no parser here can read: `urlsplit` raises `ValueError: Invalid IPv6
+# URL` on a bracket outside the IPv6-literal position. The refusal has to arrive as
+# this family's own error, because a `ValueError` walks past the walk's handler and
+# takes the section's whole transaction with it.
+A_BRACKETED_AUTHORITY = "a]b.example"
+AN_UNPARSEABLE_NEXT_PAGE = f"https://{A_BRACKETED_AUTHORITY}/rosters/unparseable-page"
 
 # A hostname carrying a single trailing dot — the root anchor, which every
 # resolver strips and which is a legal, ordinary spelling of the same host. It is
@@ -542,6 +594,268 @@ def test_a_legitimate_next_page_on_the_platforms_own_host_still_walks_to_the_las
             f"The pages the sync fetched were "
             f"{[call.url for call in service_wire.calls if call.method.upper() == 'GET']}."
         )
+
+
+def test_a_next_page_whose_authority_two_parsers_disagree_about_is_refused(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving_the_platform: Any,
+    a_subject: Any,
+) -> None:
+    """The bypass that goes past every rule in this module by being read twice.
+
+    The E1 boundary round's security pass, measured against the installed
+    libraries: `urlsplit` and `requests` do not agree about where a URL's authority
+    ends when it carries a raw backslash. WHATWG's URL standard treats `\\` as a
+    terminator and RFC 3986 does not, so
+    `https://internal.corp\\@public.example/x` is `public.example` with userinfo to
+    the parser this tool judges with, and `internal.corp` to the client that dials
+    it.
+
+    Every rule this module asserts is then applied to a host the packet never goes
+    to. The address passes rule 1 (https), names nothing in rules 2, 3 or 4, and
+    resolves globally under rule 5 — and the pin added by the cleanup batch pins
+    the connection to an address resolved for the *judged* host, which is not the
+    host `requests` will ask for. One `Link` header and the tool's Bearer token
+    goes to a name inside the network the worker sits in.
+
+    **The mutation this kills**: no authority check at all, which is the state
+    before the fix round. Nothing else in this module or in the suite sees it: the
+    URL is legitimate to every rule that reads a spelling, and the two hosts here
+    both resolve to globally routable addresses, so no other refusal can be what
+    fires.
+
+    **The pair is the accepted case in this module** —
+    `test_a_legitimate_next_page_on_the_platforms_own_host_still_walks_to_the_last`
+    — and the unit half, with the parser disagreement proven against the libraries
+    themselves, is
+    `tests/unit/test_registration_address_constraints.py::test_a_fetched_address_
+    whose_authority_two_parsers_disagree_about_is_refused` and its control. The
+    refusal there is asserted at the chokepoint; here it is asserted as the walk's
+    behaviour, so a chokepoint the walk forgot to call still fails.
+
+    The first page's member is required to be ingested, for the reason every
+    refusal in this module gives: the refusal is per URL, and a walk that discarded
+    the container it had already read would lose a class that synced correctly up
+    to the boundary.
+    """
+    reachable = a_subject("first-page")
+    service_wire.serve(
+        compose_a_roster(
+            platform_on_https,
+            [roster_contract.member(reachable)],
+            next_url=AN_AUTHORITY_CONFUSING_URL,
+        )
+    )
+    resolver = resolving_the_platform.answering(
+        A_JUDGED_HOST, (roster_contract.a_global_address,)
+    ).answering(A_DIALLED_HOST, (roster_contract.another_global_address,))
+
+    sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolver,
+    )
+
+    reached = [
+        call.url
+        for call in service_wire.calls
+        if A_JUDGED_HOST in call.url or A_DIALLED_HOST in call.url
+    ]
+    assert not reached, (
+        f"The sync issued {reached} after a platform advertised {AN_AUTHORITY_CONFUSING_URL!r} as "
+        f"its next page. `urlsplit` reads that URL's host as {A_JUDGED_HOST!r} and `requests` dials "
+        f"{A_DIALLED_HOST!r}, so whichever of the two this request went to, the address that was "
+        "judged is not the address that was reached — and the tool's Bearer token went with it."
+    )
+    stored_address = str(platform_on_https.address)
+    recorded = roster_rows.calls_for(platform_on_https.id)
+    refusals = [row for row in recorded if row.get("response_code") != 200]
+    assert refusals, (
+        f"No `nrps_call` row records the refusal: the section's rows are "
+        f"{[dict(row) for row in recorded]}. A page this tool declined to fetch is a call it "
+        "decided not to make, and §6.1's console is where an operator learns that a platform is "
+        "advertising addresses this tool refuses."
+    )
+    assert all(row.get("url") == stored_address for row in refusals), (
+        f"A refusal row is keyed to something other than the section's stored address "
+        f"({stored_address!r}): {[dict(row) for row in refusals]}. F1-4's rule holds here too — the "
+        "platform-chosen URL must not reach the `url` column, where it would put an "
+        "attacker-supplied string on an operator's screen."
+    )
+    assert roster_rows.enrollments_for(reachable), (
+        "The first page's member was not ingested. The refusal is per URL: a walk that discards "
+        "the whole container because its second page was hostile loses a class that synced "
+        "correctly up to the boundary."
+    )
+
+
+def test_a_next_page_whose_authority_cannot_be_parsed_is_refused_and_recorded(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving_the_platform: Any,
+    seed_a_member: Any,
+    a_subject: Any,
+) -> None:
+    """A `Link` header that erases the section's sync record instead of being refused.
+
+    An authority carrying `[` or `]` makes `urlsplit` raise `ValueError: Invalid
+    IPv6 URL` inside the host reader. That is not a `RegistrationAddressError`, so
+    the walk's `except RegistrationAddressError` does not see it: it travels to the
+    per-section handler, the savepoint rolls back, and the section loses the
+    `nrps_call` row *and* every member already read. One header, and a section's
+    whole sync — including its audit trail — is gone, every hour, silently.
+
+    **The mutation this kills**: any refusal that leaves the chokepoint as an
+    exception of another family. The unit half asserts the class at the chokepoint
+    (`test_an_address_whose_authority_cannot_be_parsed_is_refused_as_a_registration_
+    error`); this half asserts what the walk does with it, because a chokepoint that
+    raises the right class and a caller that catches the wrong one are two defects
+    with one symptom.
+
+    Three assertions, and they are the difference between a refusal and a crash:
+    the page is not fetched, the refusal reaches the call log, and what was already
+    read survives. The fourth — the member on the page that was never read is not
+    closed — is what says the walk ended *incomplete* rather than treating a crash
+    as the end of the container.
+    """
+    reachable = a_subject("first-page")
+    returning = a_subject("synced-three-weeks-ago")
+    seed_a_member(platform_on_https, returning, started_on=datetime.now(UTC) - timedelta(weeks=3))
+    service_wire.serve(
+        compose_a_roster(
+            platform_on_https,
+            [roster_contract.member(reachable)],
+            next_url=AN_UNPARSEABLE_NEXT_PAGE,
+        )
+    )
+
+    sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolving_the_platform,
+    )
+
+    assert not [call for call in service_wire.calls if A_BRACKETED_AUTHORITY in call.url], (
+        f"The sync issued a request for {AN_UNPARSEABLE_NEXT_PAGE!r}, whose authority no parser "
+        "here can read."
+    )
+    recorded = roster_rows.calls_for(platform_on_https.id)
+    assert recorded, (
+        f"The section has no `nrps_call` row at all after a platform advertised "
+        f"{AN_UNPARSEABLE_NEXT_PAGE!r}. That is the finding: the host reader's `ValueError` is not "
+        "a `RegistrationAddressError`, so it escapes the walk's handler, the transaction is rolled "
+        "back, and the section's whole record of the attempt — the successful first page included "
+        "— goes with it. On §6.1's console the section reads as never synced."
+    )
+    assert roster_rows.enrollments_for(reachable), (
+        f"The first page's member {reachable!r} was not ingested. The pages already validly read "
+        "are lost with the transaction, so a section that synced correctly up to the bad header "
+        "syncs to nothing at all."
+    )
+    still_open = roster_rows.enrollments_for(returning)
+    assert len(still_open) == 1 and still_open[0][roster_contract.ended_on_column] is None, (
+        f"The member the walk never reached was closed: {[dict(row) for row in still_open]}. A "
+        "walk stopped by a header it could not read has learned nothing about anybody, and a "
+        "refusal it treats as the end of the container ends the enrollment of every member of "
+        "every page it did not fetch."
+    )
+
+
+def test_no_roster_page_is_dialled_at_a_host_this_walk_did_not_resolve(
+    roster_sync: Any,
+    platform_on_https: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_contract: Any,
+    deployment_settings: Any,
+    resolving_the_platform: Any,
+    a_subject: Any,
+) -> None:
+    """The braces behind rule 6: the tool dials only what it resolved.
+
+    Rule 6 is a rule about a string, and a rule about a string can be defeated by a
+    spelling nobody thought of — this one already has been, twice. Behind it sits a
+    property with no spelling in it: **every host a roster page is fetched at is a
+    host this walk asked its resolver about.** A pin written under one name and
+    looked for under another produces a request that fails this, whatever character
+    caused the two names to differ.
+
+    **The mutation this kills**: the pin lookup falling through to an unpinned
+    connection when the host it is asked for is not in the map. That is a silent
+    downgrade — the request goes out to whatever the client resolves at dial time,
+    which is the rebind window the pin exists to close, and today nothing observes
+    it.
+
+    **What this test cannot do on its own, said plainly.** It goes green the moment
+    rule 6 refuses the vector, because then no second request is made at all — the
+    belt hides the braces. To see this assert the braces, the battery has to remove
+    rule 6 and watch this stay red. That is a property of layered defences rather
+    than a weakness in the test, and it is written here so nobody reads a green as
+    the pin having been exercised.
+
+    The walk is required to have fetched *something* first: over a sync that made
+    no request at all, "every request went somewhere resolved" is true and empty
+    (`docs/MISTAKES.md` entry 3).
+    """
+    reachable = a_subject("first-page")
+    service_wire.serve(
+        compose_a_roster(
+            platform_on_https,
+            [roster_contract.member(reachable)],
+            next_url=AN_ESCAPING_NEXT_PAGE,
+        )
+    )
+    resolver = resolving_the_platform.answering(
+        AN_ESCAPING_JUDGED_HOST, (roster_contract.a_global_address,)
+    ).answering(A_TRUNCATED_DIALLED_HOST, (roster_contract.another_global_address,))
+
+    sync(
+        roster_sync,
+        platform_on_https,
+        service_wire,
+        committed_rows,
+        deployment_settings,
+        resolve=resolver,
+    )
+
+    fetched = [call for call in service_wire.calls if call.method.upper() == "GET"]
+    assert fetched, (
+        "The sync made no GET at all, so this test's assertion is true of nothing. The section's "
+        "own stored address is served here and is the walk's first page."
+    )
+    asked = {canonical_host(name) for name in resolver.asked}
+    dialled = {
+        canonical_host((call.host_header or "").rsplit(":", 1)[0] or (call.host or ""))
+        for call in fetched
+    }
+    unresolved = sorted(name for name in dialled if name and name not in asked)
+    assert not unresolved, (
+        f"The walk fetched a roster page at {unresolved}, and the hosts it asked its resolver "
+        f"about were {sorted(asked)}. A request to a host this walk never resolved is a request "
+        "the address rules never judged and the pin never covered: the name is resolved again at "
+        "dial time, by the client, with the tool's Bearer token attached. The requests it made "
+        f"were {[call.url for call in fetched]}."
+    )
 
 
 def test_a_page_that_answers_a_redirect_is_refused_rather_than_followed(

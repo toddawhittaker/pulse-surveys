@@ -65,6 +65,8 @@ from enum import StrEnum
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import requests
+from requests.models import PreparedRequest
 from sqlalchemy import Connection, Enum, ForeignKey, Index, Text, UniqueConstraint, event, text
 from sqlalchemy.orm import Mapped, Mapper, mapped_column, object_session
 
@@ -442,7 +444,7 @@ def refuse_invalid_registration_addresses(
     stated", never a default. A NULL `authorization_endpoint` is refused at the
     *launch* (`app.lti.launch.begin_a_launch`), not at the write.
 
-    Five rules, all of them switched off where `environment` is exactly the
+    Six rules, all of them switched off where `environment` is exactly the
     development name — the mock's own addresses have to seed, and a rule that
     kept firing there would meet a developer as an unexplained refusal from
     `make seed`:
@@ -467,10 +469,21 @@ def refuse_invalid_registration_addresses(
          price that record named for the other direction. The one exception is
          loopback on a column outside `LOOPBACK_REFUSED_COLUMNS`, which keeps ADR
          0096's sidecar split; an unresolvable host is refused outright.
+      6. **The judged host and the dialled host must be the same**, on
+         `jwks_url` and `auth_token_url` — the two columns this container fetches.
+         `_refuse_a_disputed_authority` is the same check the fetched column takes,
+         and it is here because rule 5 does not backstop it: `10.0.0.5\\@public
+         .example` is judged and resolved as `public.example`, globally routable,
+         while the client dials `10.0.0.5`. `auth_token_url` is where the tool
+         posts its signed client assertion, so a divergence there hands a credential
+         to a host nobody judged. `authorization_endpoint` is deliberately not
+         covered: a browser fetches it, not this container, the same stance rule 4
+         takes.
 
-    **Rule 5 runs after rules 1 to 4 have judged the whole registration**, so an
-    address a spelling rule refuses is never looked up (`docs/MISTAKES.md` entry
-    29: a value handled before the check that should have refused it).
+    **Rule 5 runs after rules 1 to 4 and rule 6 have judged the whole
+    registration**, so an address a spelling rule refuses is never looked up
+    (`docs/MISTAKES.md` entry 29: a value handled before the check that should
+    have refused it).
 
     Rules 1 and 3 **compose rather than short-circuit**: `http://localhost:8080`
     on the browser-facing column is exempt from the transport rule and refused by
@@ -488,6 +501,9 @@ def refuse_invalid_registration_addresses(
     stated = [(column, value) for column, value in addresses.items() if value is not None]
     for column, value in stated:
         _refuse_an_unacceptable_address(column, value)
+    for column, value in stated:
+        if column in (JWKS_URL_COLUMN, AUTH_TOKEN_URL_COLUMN):
+            _refuse_a_disputed_authority(column, value)
     for column, value in stated:
         _refuse_an_unacceptable_resolution(
             column, value, _resolved_addresses if resolve is None else resolve
@@ -538,18 +554,150 @@ def refuse_invalid_fetched_address(
     `rel="next"` hop anywhere else is judged; `app.services.provisioning` names
     none, so launch-time storage keeps development's blanket admission.
 
+    **Rule 6, `_refuse_a_disputed_authority` below, refuses an address whose judged
+    host and dialled host differ** — the E1 boundary round's security finding. It
+    runs here on the fetched column, where a `rel="next"` is a value the *platform*
+    chooses at fetch time, and it runs in `refuse_invalid_registration_addresses`
+    on `jwks_url` and `auth_token_url` too, because rule 5 does not backstop the
+    divergence: a `\\@`-form judged as a public name resolves globally and passes
+    while the client dials the private host inside it.
+
+    It runs wherever rule 5 runs, in development as well, because where the packet
+    goes is not a property of the environment. And it runs *before* the resolution,
+    so an address that cannot be dialled honestly is never looked up
+    (`docs/MISTAKES.md` entry 29).
+
     Answers the addresses rule 5 resolved, or `None` where it did not resolve at
     all. The roster sync pins its connection to what comes back: the address that
     was judged is the address the GET goes to.
     """
     if address is None:
         return None
+    # The parse every rule below depends on, forced once and turned into a refusal
+    # if it fails, before any rule — or `_is_judged_in_development` — reads the host
+    # and lets a `ValueError` escape the family the walk catches (rule 5's comment
+    # claims this closed; this is where it is). In every environment, because an
+    # unparseable authority is nobody's legitimate address.
+    _judged_host_or_refuse(column, address)
     if is_a_deployment(environment):
         _refuse_an_unacceptable_address(column, address)
     elif not _is_judged_in_development(address, development_exempt_host):
         return None
+    _refuse_a_disputed_authority(column, address)
     return _refuse_an_unacceptable_resolution(
         column, address, _resolved_addresses if resolve is None else resolve
+    )
+
+
+def _judged_host_or_refuse(column: str, value: str) -> str | None:
+    """`url_host(value)`, with a parse failure turned into a refusal (rule 5's family).
+
+    `url_host` runs `urlsplit`, which raises `ValueError` on an authority carrying a
+    stray `[` or `]` (`Invalid IPv6 URL`), and `canonical_host` runs urllib3's
+    parser, which raises on some others. A bare `ValueError` is not a
+    `RegistrationAddressError`, and the roster walk catches only the latter — so an
+    unparseable `Link` header escaped every rule here, reached the per-section
+    handler, rolled the savepoint back, and cost the section its `nrps_call` row
+    *and* the members already read rather than one page. Rule 5's own comment
+    already claimed this family closed; this is where it becomes true, at the one
+    parse every rule in this module depends on.
+
+    A URL that names no host answers `None`, which each caller reads as "not a host
+    to judge" — the empty-host refusal an operator can act on is rule 5's, not this.
+    """
+    try:
+        return url_host(value)
+    except ValueError as unparseable:
+        raise RegistrationAddressError(
+            f"The registration's `{column}` carries an authority no URL parser here can read "
+            f"({unparseable}). An address whose host cannot even be parsed cannot be judged and "
+            "must not be fetched; a `Link` header of this shape would otherwise abort the whole "
+            "walk in an exception the caller does not catch. Register a well-formed address, or "
+            "run with ENVIRONMENT=development."
+        ) from None
+
+
+def _dialled_host(value: str) -> str | None:
+    """The host `requests` will actually dial for this URL, or `None` if it cannot.
+
+    `PreparedRequest.prepare_url` is exactly what `Session.send` runs before it
+    opens a socket, so this is the dialled authority itself rather than a model of
+    it. Reading it back through `url_host` puts it in the same spelling the judged
+    host is read in — one normalisation, `canonical_host`, applied at both ends
+    (`docs/MISTAKES.md` entry 13), so a non-ASCII host that both sides IDNA-encode
+    reads as one host rather than as a divergence.
+
+    `None` for a URL `requests` refuses to prepare at all: no scheme, a label it
+    will not encode, an authority it reads as malformed. The caller reads that as a
+    divergence — an address that cannot be prepared cannot be dialled honestly, and
+    refusing it is the fail-closed direction.
+    """
+    request = PreparedRequest()
+    try:
+        request.prepare_url(value, None)
+    except (requests.RequestException, UnicodeError, ValueError):
+        return None
+    try:
+        return url_host(str(request.url))
+    except ValueError:
+        return None
+
+
+def _refuse_a_disputed_authority(column: str, value: str) -> None:
+    """Rule 6: the host that was judged is the host that will be dialled.
+
+    Every rule above reads the host out of `url_host` — `urlsplit` then
+    `canonical_host`. The client that then fetches the address is `requests`, and
+    the two do not always agree about where an authority ends. A raw backslash is
+    the measured case: WHATWG's URL standard makes `\\` a terminator and RFC 3986
+    does not, so `https://internal.corp\\a.evil.example/memberships` is the whole
+    string to the parser that judges and `internal.corp` to the client that dials.
+    A percent-escape is another: `ex%41mple.com` is judged as written and dialled
+    as `example.com`. There is no `@` needed and no single character to blame.
+
+    Judge with the first and connect with the second, and **every rule in this
+    module has been applied to a host the packet never goes to** — with the tool's
+    access token attached, past the resolution pin (which pins the address resolved
+    for the judged name, a name this request never asks for), and inside whatever
+    network the worker sits in. It is ADR 0081's rules defeated one level out: not
+    by a spelling they missed but by a parser they never consulted.
+
+    **Stated as a property, not as a refused character** (`docs/MISTAKES.md` entry
+    35: a catalog of spellings is defeated by the one nobody enumerated). The rule
+    is that the two readings must be the same host, so whatever the next
+    disagreement turns out to be is refused by the same line.
+
+    **The comparison is between the two readings directly, each read once through
+    `url_host` and no second time.** An earlier form of this rule ran the *judged*
+    host back through the client's own parser before comparing — and a backslash
+    inside the judged host truncated both sides identically, so the rule reported
+    agreement about a name the packet would not go to, and a percent-escape did the
+    same. `canonical_host` already spells a host the way the transport will:
+    urllib3 IDNA-encodes a non-ASCII host, and `canonical_host` calls the same
+    encoder, so `röster.example` is `xn--rster-jua.example` on *both* sides and
+    reads as one host with no second preparation. Preparing again was not only
+    unnecessary — it re-introduced the divergence it was meant to catch. Verified
+    across every host shape this suite drives (IDN, punycode, a trailing dot, a
+    port, userinfo, IPv4, IPv6, IPv4-mapped): each is accepted, and the backslash,
+    the percent-escape, a space and a quotation mark are each refused.
+
+    A value naming no host at all — `judged is None` — is left to rule 5, which
+    refuses it in terms an operator can act on. A URL the client will not prepare —
+    `dialled is None` — is a divergence and is refused here: the judged host is a
+    real name and the address cannot be dialled to it.
+    """
+    judged = _judged_host_or_refuse(column, value)
+    if judged is None:
+        return
+    dialled = _dialled_host(value)
+    if dialled is not None and dialled == judged:
+        return
+    raise RegistrationAddressError(
+        f"The registration's `{column}` is read as the host {judged!r} by the parser these rules "
+        f"judge with and as {dialled!r} by the client that would fetch it. Every rule above would "
+        "have been applied to a name the request never goes to, and the tool's own credentials "
+        "would be presented wherever it does go. Register an address whose authority is spelled "
+        "once, or run with ENVIRONMENT=development."
     )
 
 
@@ -1112,14 +1260,53 @@ class NrpsCall(UuidPrimaryKey, Base):
     """
 
     __tablename__ = "nrps_call"
+    __table_args__ = (
+        # **The debounce probe's own access path** (the E1 boundary review's M5).
+        # `request_section_sync` asks for the newest `called_at` of one section, on
+        # the request path of every staff launch, and this table grows all term
+        # because nothing purges it until E13. Measured at a million rows laid out
+        # hour-major: 2,006 buffers per probe against the `section_id` index alone,
+        # and 5 against this one.
+        #
+        # Both halves of the shape are the criterion. `section_id` leads, because
+        # that is what the probe filters on and Postgres 17 has no skip scan.
+        # `called_at` is stored **descending**, so the row the probe wants is at the
+        # near end of the section's range rather than the far one.
+        #
+        # **It is the only index on `section_id`, and that is deliberate.**
+        # `e2c94b6a1f70` created `ix_nrps_call_section_id`; leading with the same
+        # column, this one serves every lookup that one served, so keeping both
+        # bought nothing and cost a second index write on every call row — of which
+        # there is one per HTTP call, per section, every hour. `a4d61c8f9b27` drops
+        # it in the same revision that creates this. That is the reasoning E0-06
+        # applied to `ix_section_course_id`, and the reasoning `section`,
+        # `college.institution_id`, `department.college_id` and `course.prefix_id`
+        # are all left unindexed under today: an index that is merely contained by
+        # another index's leading column is a write nobody reads.
+        #
+        # An expression rather than a column list, because that is the only way to
+        # state the sort direction here — and it is why this declaration is not the
+        # guarantee. `alembic check` sees an index by name (measured: dropping the
+        # migration below makes it fail), but it reads this one's key columns as
+        # `('section_id',)` and cannot compare the expression at all, so it would
+        # equally accept a migration that created the wrong index under the right
+        # name. What says the shape reached the database is
+        # `tests/integration/test_the_nrps_call_log_is_indexed_for_the_debounce_probe.py`,
+        # which reads each key column's position and descending flag out of
+        # `pg_index` on the migrated schema.
+        Index("ix_nrps_call_section_id_called_at_desc", "section_id", text("called_at DESC")),
+    )
 
-    # Which section's roster was being read. Indexed, because every one of the
-    # three jobs above is a query for one section's rows — the debounce most of
-    # all, which runs on a staff launch while somebody waits. RESTRICT, matching
+    # Which section's roster was being read. Every one of the three jobs above is
+    # a query for one section's rows — the debounce most of all, which runs on a
+    # staff launch while somebody waits — and the index that serves them is the
+    # composite declared in `__table_args__` above, which leads with this column.
+    # No `index=True` here: that would be a second index on the same leading
+    # column, paid for on every insert and read by nothing. RESTRICT, matching
     # every other reference to `section` in this schema: losing a section should
     # refuse rather than silently take its call history with it.
     section_id: Mapped[UUID] = mapped_column(
-        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("section.id", ondelete="RESTRICT"), nullable=False
     )
     # The address actually called, page parameter and all — not the section's
     # stored address. A paged walk's second request is a URL the platform composed

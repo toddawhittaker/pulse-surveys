@@ -179,7 +179,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 8. Prescribing a fix without probing it
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/08-prescribing-a-fix-without-probing-it.md)
 
 ## 15. A property test's generator excluded the case its own docstring named
 
@@ -212,7 +212,7 @@ built around is the one least likely to hold its privileges the ordinary way.
 
 ## 34. A pipeline discarded a non-zero exit and printed a line that read as success
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/34-a-pipeline-discarded-a-non-zero-exit-and-printed.md)
 
 **Rule.** Never read a gate's result through a pipe. `cmd | tail` reports the
 exit status of `tail`, so a failing gate prints a passing line. Redirect to a
