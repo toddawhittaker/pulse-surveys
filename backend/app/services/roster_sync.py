@@ -150,11 +150,21 @@ DROPPED_STATUSES: Final[frozenset[str]] = frozenset({"Inactive", "Deleted"})
 # **A quoted parameter value is a single value, comma and semicolon included**
 # (RFC 9110 §5.6.4, which RFC 8288 §3 builds its parameters on). That is the
 # alternation in the tail: a run of characters that are neither delimiter nor
-# quote, or a whole quoted-string with its `\"` escapes. A tail that stopped at
+# quote, or a quoted-string with its `\"` escapes. A tail that stopped at
 # the first comma read `<url>; title="Page 2, of 9"; rel="next"` as a link ending
 # mid-title, whose `rel="next"` belonged to nothing — the walk ends early and
 # **complete**, which is H1's own silent truncation reached through a spelling the
 # specification explicitly permits.
+#
+# **The closing quote is optional (`"?`) so an unterminated quote consumes to the
+# end of the header**, which is the reading `_split_outside_quotes` below already
+# takes. The two have to agree: a mandatory closing quote made this pattern treat
+# an unterminated `title="see <url>; rel=next` as an unquoted tail and resume the
+# `<...>` scan inside it, finding a link the platform never terminated — while
+# `_split_outside_quotes` read the same characters as one quoted value. A reader
+# and a splitter that disagree about where a quote ends is the very shape of the
+# defect this rule closes, one level in. What the platform terminated and declared
+# governs; unterminated content declares nothing.
 #
 # **This tool reads the header itself rather than taking `pylti1p3`'s answer**, and
 # the boundary review's H1 is why. `ServiceConnector.make_service_request` searches
@@ -170,7 +180,7 @@ LINK_HEADER_ENTRY: Final[re.Pattern[str]] = re.compile(
     r"""<(?P<url>[^>]*)>                    # the URI-reference, opaque between the brackets
         (?P<parameters>                     # its parameters, up to the next link
             (?: \s*;                        # each one introduced by a semicolon
-                (?: [^,;"] | "(?:[^"\\]|\\.)*" )*   # bare text, or a whole quoted-string
+                (?: [^,;"] | "(?:[^"\\]|\\.)*"? )*   # bare text, or a quoted-string
             )*
         )""",
     re.VERBOSE,
@@ -332,11 +342,24 @@ def sync_section(
 
     # One pin table per sync, shared by reference with the adapter that reads it:
     # the walk fills it in as it judges each host, and the next request out of the
-    # transport is already pinned.
+    # transport is already pinned. `unpinned_hosts` is the small set of hosts this
+    # sync dials *without* a pin on purpose — the token endpoint, and in development
+    # the section's own exempt roster host — so the adapter can fail closed on any
+    # other pin miss (a name that reached the transport without being judged and
+    # pinned) rather than resolving it a second time. Both are shared by reference
+    # and filled below, before the first request leaves.
     pins: dict[str, str] = {}
-    transport = _pinned(_no_redirects(http), pins)
+    unpinned_hosts: set[str] = set()
+    transport = _pinned(_no_redirects(http), pins, unpinned_hosts)
     platform = _platform_for(session, section)
-    connector = ServiceConnector(_registration_for(session, platform), requests_session=transport)
+    registration = _registration_for(session, platform)
+    token_host = url_host(registration.get_auth_token_url() or "")
+    if token_host is not None:
+        unpinned_hosts.add(token_host)
+    exempt = url_host(address)
+    if exempt is not None:
+        unpinned_hosts.add(exempt)
+    connector = ServiceConnector(registration, requests_session=transport)
     walked = _walked_roster(
         session,
         section_id,
@@ -395,10 +418,20 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
     **What it does to a pinned request**, and nothing else: the URL's host becomes
     the pinned address, and the `Host` header states the original hostname (with
     its explicit port, where the URL carried one) so the platform serves the right
-    virtual host. **A host with no pin passes through untouched** — the token
-    endpoint, a development stack's own exempt roster host, and the in-process
-    transport a test hands in are all unpinned, and an adapter that rewrote a host
-    it holds no pin for would send a request to an address nothing judged.
+    virtual host.
+
+    **A pin miss for a host the walk did not name unpinned is refused, not sent.**
+    Rule 6 refuses an address whose judged host and dialled host differ before the
+    walk ever pins it, so in normal operation every roster page's dialled host is
+    the host that was pinned. If a request none the less arrives for a host that is
+    neither pinned nor in `unpinned_hosts` — the token endpoint and the development
+    stack's own exempt roster host, the two hosts this sync dials without a pin on
+    purpose — then a name reached the transport without being judged, which is the
+    rebind window this adapter exists to close arriving one spelling further out.
+    Falling through to the inner adapter would resolve that name a second time, at
+    dial time, with the tool's token attached; the adapter fails closed instead,
+    raising a `RequestException` the walk records as a call it would not make. This
+    is the second layer behind rule 6: it is only reached if rule 6 is removed.
 
     **TLS is verified against the name, not the address.** A request addressed to
     an IP literal would otherwise have its certificate checked against the
@@ -415,9 +448,15 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
     the adapter cannot disagree with what was judged.
     """
 
-    def __init__(self, inner: requests.adapters.BaseAdapter, pins: Mapping[str, str]) -> None:
+    def __init__(
+        self,
+        inner: requests.adapters.BaseAdapter,
+        pins: Mapping[str, str],
+        unpinned_hosts: set[str],
+    ) -> None:
         self.inner = inner
         self.pins = pins
+        self.unpinned_hosts = unpinned_hosts
         self._pinned_transports: dict[str, requests.adapters.HTTPAdapter] = {}
 
     def send(
@@ -439,6 +478,15 @@ class PinnedResolutionAdapter(requests.adapters.BaseAdapter):
         # spelling and for the one the `Link` header carried alike.
         hostname = canonical_host(split.hostname) or ""
         address = self.pins.get(hostname)
+        if address is None and hostname not in self.unpinned_hosts:
+            raise requests.exceptions.ConnectionError(
+                f"the roster sync refused to dial {hostname!r}: it holds no pin for that host and "
+                "it is not one this sync dials unpinned on purpose (the token endpoint or a "
+                "development stack's own exempt roster host). A request reaching the transport for "
+                "a host the walk did not judge and pin is a name that would be resolved a second "
+                "time at dial time, which is the bypass the pin closes.",
+                request=request,
+            )
         sending = self.inner if address is None else self._transport_for(split.scheme, hostname)
         if address is not None:
             # The authority exactly as `requests` prepared it — the trailing dot
@@ -489,7 +537,9 @@ def _netloc_at(address: str, port: int | None) -> str:
     return host if port is None else f"{host}:{port}"
 
 
-def _pinned(http: requests.Session, pins: Mapping[str, str]) -> requests.Session:
+def _pinned(
+    http: requests.Session, pins: Mapping[str, str], unpinned_hosts: set[str]
+) -> requests.Session:
     """Mount `PinnedResolutionAdapter` over whatever this session already answers with.
 
     Both schemes, because a walk that judged an `http` page must reach the address
@@ -502,11 +552,14 @@ def _pinned(http: requests.Session, pins: Mapping[str, str]) -> requests.Session
     session to every section in the institution, and a wrapper per section would
     be a chain hundreds deep by the end of an hourly run, each link holding a pin
     table belonging to a section already synced.
+
+    `unpinned_hosts` is the caller's set of hosts that are dialled without a pin on
+    purpose; the adapter refuses any other pin miss (see its docstring).
     """
     for scheme in ("https://", "http://"):
         held = http.get_adapter(scheme)
         inner = held.inner if isinstance(held, PinnedResolutionAdapter) else held
-        http.mount(scheme, PinnedResolutionAdapter(inner, pins))
+        http.mount(scheme, PinnedResolutionAdapter(inner, pins, unpinned_hosts))
     return http
 
 
