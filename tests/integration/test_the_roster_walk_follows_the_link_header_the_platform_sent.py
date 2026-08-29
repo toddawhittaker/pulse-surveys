@@ -61,6 +61,11 @@ survivors; the four are the subject of the second half of this module.
     first is the same silent truncation as H1 itself, reached through a spelling
     RFC 8288 explicitly permits; the second is a platform-controlled string
     choosing where this tool sends its Bearer token.
+  - **And a third differential, once the quoting rule was written into one reader
+    and not the other**: on an *unterminated* quote the two disagree about where
+    the quoted value ends, so content inside it is read as a declaration again.
+    The rule the tests hold to is the same in all three cases — what the platform
+    terminated and declared is what governs.
 
 **One vector this module drives is a security finding rather than a paging one.**
 A URL whose authority carries a raw backslash is parsed one way by `urlsplit` and
@@ -1082,4 +1087,100 @@ def test_a_relation_spelled_inside_a_quoted_parameter_value_is_not_a_next_page(
         f"The real next page's member {second!r} has no enrollment. The header declares `next` at "
         f"{following!r} after the decoy, so a reader that stopped at the decoy — or that read the "
         "quoted title as the relation — never reached the page the platform actually offered."
+    )
+
+
+def test_an_unterminated_quote_does_not_let_quoted_content_declare_the_next_page(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    a_subject: Any,
+) -> None:
+    """The third parser differential: two readers disagreeing about where a quote ends.
+
+    A quoted parameter value that is never closed. The header's own pattern requires
+    a closing quote before it will treat a value as quoted, so on this header the
+    parameter list ends *at* the opening quote and the scan resumes on the
+    remainder — where it meets a second `<...>` and a bare `rel=next` and reads
+    them as a link the platform declared. The helper that decides what is inside a
+    quoted string reaches the opposite conclusion about the same characters, and
+    the two together let content inside RFC 9110 quoted text choose the next page.
+
+    Measured by the security re-pass on the string this test builds: the reader
+    returns the URL from inside the unterminated title.
+
+    **The mutation this kills**: a quoted-string rule written into one of the two
+    readers and not the other — which is exactly how the previous round's fix was
+    built, and why this is a third differential rather than a new idea.
+
+    **What governs is what the platform declared**: `rel="prev"`, on the first
+    link, terminated and unambiguous. There is no next page here, so the walk ends
+    and neither URL in this header is fetched. Both are served, so "not fetched" is
+    a refusal to go rather than nowhere to go (`docs/MISTAKES.md` entry 3).
+
+    **The guards are structural**, for the reason the two tests above give: both
+    parsers available in this repository share the family of defect being tested,
+    so neither can be the oracle for this header.
+    """
+    first = a_subject("first-page")
+    declared_previous = a_subject("declared-prev-page")
+    inside_the_quote = a_subject("quoted-page")
+    previous = page_url(synced_section, DECOY_PAGE_PATH)
+    hidden = page_url(synced_section, NEXT_PAGE_PATH)
+    header = f'<{previous}>; rel="prev"; title="see <{hidden}>; rel=next'
+
+    assert header.count('"') % 2 == 1, (
+        f"{header!r} has an even number of quotation marks, so its title is terminated and this is "
+        "not the case this test is named after."
+    )
+    assert header.index("rel=next") > header.rindex('"'), (
+        f"The `rel=next` in {header!r} is not inside the unterminated quoted value, so the "
+        "platform may really be declaring a next page and following it would be correct."
+    )
+    assert 'rel="prev"' in header, (
+        f"{header!r} carries no terminated `rel=\"prev\"`, so there is no real declaration for the "
+        "quoted content to be judged against."
+    )
+
+    service_wire.serve(
+        HeaderRewritten(
+            compose_a_roster(synced_section, [roster_contract.member(first)]), header
+        )
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(inside_the_quote)]),
+            NEXT_PAGE_PATH,
+        )
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(declared_previous)]),
+            DECOY_PAGE_PATH,
+        )
+    )
+
+    during, _ = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert hidden not in gets(during), (
+        f"The walk fetched {hidden!r}, which appears only inside an unterminated quoted title "
+        f"({header!r}). A platform's quoted text is not a declaration: the one relation this "
+        f"header terminates is `prev`. It fetched {gets(during)}."
+    )
+    assert previous not in gets(during), (
+        f"The walk fetched {previous!r}, which the platform declared as `prev`. It fetched "
+        f"{gets(during)}."
+    )
+    for subject, why in (
+        (inside_the_quote, "from a URL inside an unterminated quoted title"),
+        (declared_previous, "from the page the platform declared `prev`"),
+    ):
+        assert not roster_rows.enrollments_for(subject), f"{subject!r} was ingested {why}."
+    assert roster_rows.enrollments_for(first), (
+        f"The first page's own member {first!r} has no enrollment, so this walk ingested nothing "
+        "and the denials above hold of a sync that did not run."
     )
