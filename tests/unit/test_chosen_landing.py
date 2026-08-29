@@ -89,10 +89,19 @@ CHOSEN_LANDING_PARAMETERS = {"roles", "enrolled_today", "door"}
 # somebody who authenticated correctly, and none of them has anything a caller
 # could legitimately need to say.
 #
-# **`refusal_page` is deliberately absent.** It takes a `reason` — it is the 4xx a
-# door answers when it cannot accept a token, and naming which check refused is
-# its job — so a blanket rule over every page in the module would be wrong about
-# it. What is swept here is the set that claims the property, not the module.
+# **`refusal_page` is deliberately absent.** It takes one required argument, the
+# name of the guard that refused — it is the 4xx a door answers when it cannot
+# accept a token, and naming which check refused is its job — so a blanket rule
+# over every page in the module would be wrong about it. What is swept here is
+# the set that claims the property, not the module.
+#
+# **That is a narrower exception than it used to be**, since the E1 boundary fix
+# round (M7): the page takes no free-text parameter at all now, its body copy
+# comes from a module constant map keyed by the guard name with a constant
+# default, and the name itself reaches only the `data-reason` attribute. So it
+# cannot repeat a caller's words either — it just proves it somewhere else, in
+# `tests/unit/test_the_refusal_page_repeats_nothing_it_was_handed.py`, which
+# scans the rendered body rather than reading the signature.
 PAGES_BUILT_ONLY_FROM_CONSTANTS = ("no_access", "cancelled_page", "no_account_page")
 
 # A value no `AssignmentRole` is, used for the fail-closed pair. The work order:
@@ -703,9 +712,17 @@ def test_a_page_built_only_from_constants_takes_no_parameter_at_all(
     it at all.
 
     **Three pages, not one, and `refusal_page` is deliberately not among them.**
-    That page takes a `reason` — it is the 4xx a door answers when it cannot
-    accept a token, and it says which check refused — so a blanket rule over every
-    page in the module would be wrong about it. What these three share is a
+    That page takes one required argument, the name of the guard that refused —
+    it is the 4xx a door answers when it cannot accept a token, and saying which
+    check refused is its job — so a blanket rule over every page in the module
+    would be wrong about it. Since the E1 boundary fix round (M7) that name is
+    the *only* thing it takes: no free-text parameter, body copy from a module
+    constant map keyed by the guard with a constant default, and the name itself
+    reaching only the `data-reason` attribute. The equivalent guarantee for that
+    page is therefore made over its rendered body rather than over its
+    signature, in
+    `tests/unit/test_the_refusal_page_repeats_nothing_it_was_handed.py`. What
+    these three share is a
     docstring that claims to take nothing: E1-13's `no_access`, E1-09's
     `cancelled_page` and E1-12's `no_account_page` are all reached by people who
     authenticated correctly, and none of them has anything a caller could
@@ -748,9 +765,13 @@ def test_a_page_built_only_from_constants_takes_no_parameter_at_all(
         "something still can, and the page that renders it is one an unauthenticated stranger can "
         "provoke. E1-13 takes `no_role_reason` *off* `landing_with_session` for this reason, and a "
         "parameter here would be that one back under another name.\n\n"
-        f"`refusal_page` legitimately takes a `reason` and is deliberately not in "
-        f"{list(PAGES_BUILT_ONLY_FROM_CONSTANTS)}. If this page has genuinely joined it, that is a "
-        "decision to make in the pull request rather than a name to add here quietly."
+        f"`refusal_page` legitimately takes one required argument — the name of the guard that "
+        f"refused — and is deliberately not in {list(PAGES_BUILT_ONLY_FROM_CONSTANTS)}. That name "
+        "is not free text: its body copy comes from a module constant map keyed by the guard, and "
+        "the name reaches only the `data-reason` attribute, which is asserted over the rendered "
+        "body in `tests/unit/test_the_refusal_page_repeats_nothing_it_was_handed.py`. If this page "
+        "has genuinely joined the three swept here, that is a decision to make in the pull request "
+        "rather than a name to add here quietly."
     )
 
 

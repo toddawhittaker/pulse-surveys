@@ -501,6 +501,20 @@ Every E1 pull request that defers something adds it here in the same PR.
    database anybody keeps: `select count(*) from section where lms_context_id
    like 'pre-binding-section-%'` answers 0 — re-seeds since E1-10 cleared the
    bound rows, so no such row exists anywhere.
+   **And the hazard behind that measurement is closed by the E1 boundary fix,
+   batch B.** A count of zero says no such row exists *today*; it says nothing
+   about whether one can come back. The E1 boundary review's H2 proved on a
+   scratch database that one could, and by an ordinary operation: the
+   `b8c41f7d2e05` downgrade dropped both binding columns and kept nothing, so a
+   downgrade and re-upgrade re-stamped *every* bound section with
+   `pre-binding-section-<uuid>` — this item's residue manufactured wholesale,
+   on rows that did have a real context, refusing every staff launch from it
+   afterwards as a `context_collision`. That downgrade now preserves both
+   columns into `section_binding_preserved` and the upgrade restores them by
+   key, and
+   `tests/integration/test_the_section_binding_survives_a_downgrade.py` drives
+   the round trip once and twice with two sections whose bindings differ in
+   both halves, keyed per row so a swapped restore fails too.
 
 4. **A squatted binding is never reconciled or aged out** (round-3 security
    re-pass, MEDIUM). The binding makes `(course, term, lms_section_code)`
@@ -570,6 +584,16 @@ Every E1 pull request that defers something adds it here in the same PR.
    and scans every record for planted claim values, the same canary shape as
    the launch-view scans. Scheduled: boundary fix batch B
    (`boundary-fix-plan.md`).
+   **Closed by the E1 boundary fix, batch B (R6).**
+   `tests/integration/test_a_refused_provisioning_write_names_nothing_from_the_launch.py`
+   drives a real refused write under `caplog` and scans every record from
+   `app.services.provisioning` for the claim values the launch planted,
+   formatting each record so a constant template whose *arguments* carry the
+   values is caught as well as one that interpolates them. It carries its own
+   control — a second test plants a claim value in that logger and requires
+   the scan to catch it — so the first test's silence is evidence rather than
+   emptiness, and it asserts the refusal actually happened before saying
+   anything about the log.
 
 ## From E1-11 — the roster sync service client
 

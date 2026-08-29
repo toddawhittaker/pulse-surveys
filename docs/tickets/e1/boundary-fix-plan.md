@@ -37,10 +37,16 @@ file; C is tests-only. The finding labels (H1…) are `boundary-review.md`'s.
 
 ## Batch B — the launch door's two honesty fixes
 
-**Branch:** `e1/boundary-fix-launch-door`. **Touches:**
-`backend/app/services/provisioning.py`, `backend/app/api/lti.py` if the
-refusal wiring needs it, `backend/migrations/versions/20260826_b8c41f7d2e05_*`,
-provisioning tests, ADR 0106, two record lines.
+**Branch:** `e1/boundary-fix-launch-door`. **Touches:** `backend/app/lti/
+launch.py` (where the new guard class and the check belong — the refusal has
+to be one of the `LaunchRefusedError` family to get the family's log line and
+handshake treatment), `backend/app/api/deps.py`, `backend/app/api/lti.py`,
+`backend/app/api/auth.py` (M7's page and its four call sites),
+`backend/migrations/versions/20260826_b8c41f7d2e05_*`, the door and
+provisioning tests, ADR 0106, an amendment to ADR 0103, and the record lines
+below. `provisioning.py` turned out not to need editing: its own refusal for
+an absent `sub` already says the door "has already required" the claim, and
+M4 is what makes that true.
 
 1. **M4.** A launch token with no `sub` is refused with the calm refusal
    page and its own `data-reason` marker, before any 500 can happen — the
@@ -60,6 +66,19 @@ provisioning tests, ADR 0106, two record lines.
 3. **R6.** The `caplog` assertion PR #105 promised for
    `_log_a_refused_write`: the refusal log line is exercised and scanned for
    claim values, closing the `deferred.md` entry the records PR added.
+4. **M7**, moved here from batch C after this plan merged. The batch C entry
+   below reads as a tests-only item — "`refusal_page`'s rendered body gets the
+   same scan the sibling pages have" — and it is not one: the page **renders
+   its text argument today**, so the scan it describes fails against the code
+   and the fix is code. `refusal_page` derives its body copy from the guard
+   name alone through a module-constant map with a constant default, the
+   free-text parameter is deleted, and every call site moves to the new
+   signature — the launch door's two, the web door's `SessionRefusedError`
+   branch, and the provider-error branch, which named no guard at all and so
+   rendered no `data-reason` marker. That last one is why four pre-existing
+   web-door tests are red at the tests-first commit. `refusal_page` is in this
+   batch's files rather than batch C's, which is the other reason it moves
+   here. Settled by the orchestrator; batch C keeps M6 and M8.
 
 ## Batch C — the guards close their sets
 
@@ -73,10 +92,10 @@ tests it marks and writes are invariant-marked, which is a heavy row.
    landing test, the E1-12 identity-merge module, the `person`/`user`/
    `web_login_subject` grant refusals, the `resolve_scope` union test, two
    roster-definer denials, the launch-provisioning defect test).
-2. **M7.** `refusal_page`'s rendered body gets the same scan the sibling
-   pages have: a canary value planted in the guard exception's message must
-   not appear in the body (only the constant copy and the `data-reason`
-   class name may).
+2. ~~**M7.**~~ **Moved to batch B** (item 4 there) after this plan merged.
+   The entry read as tests-only and was not: `refusal_page` renders its text
+   argument today, so the scan described here fails against the code and the
+   fix is code. `refusal_page` is also one of batch B's files.
 3. **M8.** The org-view sweep's inventory comes from the `views_sql` catalog
    — the structure the guarded set cannot shrink — instead of a hand-written
    three-name list, and covers base `enrollment`. The `SQL_MUST_ALLOW` entry

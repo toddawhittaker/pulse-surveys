@@ -50,10 +50,24 @@ Both the backfill and that refusal are one PL/pgSQL block rather than a read in
 Python, so `alembic upgrade --sql` emits a script that carries them; see the
 comment on `BIND_EXISTING_SECTIONS`.
 
-**The downgrade drops the columns and restores the wider grant**, and leaves the
-two enum labels in place: Postgres cannot remove a label from a type, so the
-upgrade adds them with `IF NOT EXISTS` and re-running it after a downgrade is a
-no-op rather than an error.
+**The downgrade preserves every section's binding before it drops it**, into
+`section_binding_preserved` — one row per section, carrying the section's own
+primary key, its `lms_context_id` and its `lti_deployment_id` — and the upgrade
+restores from that table, by key, and drops it. So the round trip is the
+identity this docstring used to claim it was without doing anything to earn it.
+It also restores the wider grant and leaves the two enum labels in place:
+Postgres cannot remove a label from a type, so the upgrade adds them with
+`IF NOT EXISTS` and re-running it after a downgrade is a no-op rather than an
+error.
+
+**What the preserve/restore is worth, stated plainly** (the E1 boundary review's
+H2). Before it, a downgrade and re-upgrade left every bound section reading
+`pre-binding-section-<uuid>`: the backfill below cannot tell a section whose
+binding was just dropped from one that never had a binding, so it invented one.
+Nothing a platform issues looks like that value, and the application holds no
+`UPDATE` on the column, so every staff launch from the section's real context
+was refused as a `context_collision` from then on, permanently, with nothing in
+the failure saying a downgrade had caused it.
 """
 
 from collections.abc import Sequence
@@ -84,6 +98,77 @@ DEPLOYMENT_COLUMN = "lti_deployment_id"
 # so a real launch cannot resolve one of these rows, which is the whole point of
 # backfilling rather than refusing.
 BACKFILL_CONTEXT_ID = "pre-binding-section-"
+
+# Where a downgrade puts the bindings it is about to drop, and where the upgrade
+# looks for them. Not in `Base.metadata` and not meant to be: it exists only
+# between a downgrade and the upgrade that restores from it, and the upgrade
+# drops it — so a database standing at head never has it and `alembic check`
+# never sees it.
+PRESERVED_TABLE = "section_binding_preserved"
+PRESERVED_KEY_COLUMN = "section_id"
+
+# Keep every section's binding, keyed by the section's own primary key.
+#
+# **Keyed, and not merely kept.** Restoring two preserved pairs onto the wrong
+# two sections would leave the set of stored bindings exactly right and point
+# each section at the other's context — the repointing the binding was added to
+# prevent, arriving through a migration instead of through a launch. The key is
+# the primary key, and it is the primary key of this table too, so a second copy
+# of a section's binding cannot be written at all.
+#
+# **Dropped first, and it is defence rather than the thing that makes a second
+# trip work.** The upgrade drops this table after restoring from it, so an
+# ordinary down-up-down-up journey finds nothing here to collide with — mutating
+# this line away leaves both round-trip tests green, which was measured rather
+# than assumed. What it covers is the journey where the upgrade did not run or
+# did not finish: a downgrade that meets its own leftovers would otherwise fail
+# on `CREATE TABLE`, or insert a second copy of every section's binding beside
+# the first, and either way the operator learns it on the trip after the one
+# that went wrong.
+PRESERVE_THE_BINDINGS = f"""
+DROP TABLE IF EXISTS public.{PRESERVED_TABLE};
+CREATE TABLE public.{PRESERVED_TABLE} (
+    {PRESERVED_KEY_COLUMN} uuid PRIMARY KEY,
+    {CONTEXT_ID_COLUMN} text NOT NULL,
+    {DEPLOYMENT_COLUMN} uuid NOT NULL
+);
+INSERT INTO public.{PRESERVED_TABLE}
+    ({PRESERVED_KEY_COLUMN}, {CONTEXT_ID_COLUMN}, {DEPLOYMENT_COLUMN})
+SELECT id, {CONTEXT_ID_COLUMN}, {DEPLOYMENT_COLUMN} FROM public.section;
+"""
+
+# Give every section its preserved binding back, then take the table away.
+#
+# **One PL/pgSQL block, for `BIND_EXISTING_SECTIONS`'s reason**: `alembic upgrade
+# --sql` has to carry this, and it has to do the right thing on a database that
+# never went down — where the table is simply absent and there is nothing to
+# restore. `to_regclass` answers NULL for a table that is not there rather than
+# raising, which is what makes that check a branch instead of an error.
+#
+# It runs **before** the backfill, so a section whose binding came back is not
+# unbound by the time the backfill counts, and the `registrations <> 1` refusal
+# below cannot fire over rows that were never in question.
+#
+# The table is dropped on the way out: it exists to carry values across one
+# round trip, and a database at head that still had it would be one `alembic
+# check` reports a difference for.
+RESTORE_PRESERVED_BINDINGS = f"""
+DO $$
+BEGIN
+    IF to_regclass('public.{PRESERVED_TABLE}') IS NULL THEN
+        RETURN;
+    END IF;
+
+    UPDATE public.section AS s
+       SET {CONTEXT_ID_COLUMN} = kept.{CONTEXT_ID_COLUMN},
+           {DEPLOYMENT_COLUMN} = kept.{DEPLOYMENT_COLUMN}
+      FROM public.{PRESERVED_TABLE} AS kept
+     WHERE kept.{PRESERVED_KEY_COLUMN} = s.id;
+
+    DROP TABLE public.{PRESERVED_TABLE};
+END
+$$;
+"""
 
 # Give every stored section a binding, or stop the upgrade and say why.
 #
@@ -132,12 +217,20 @@ $$;
 
 
 def upgrade() -> None:
-    """Bind sections to their contexts, widen the defect kinds, narrow the `user` read."""
+    """Bind sections to their contexts, widen the defect kinds, narrow the `user` read.
+
+    **The restore comes before the backfill**, and the order is the whole of what
+    makes the round trip an identity: a section whose binding a downgrade
+    preserved gets it back first, so the backfill sees it as bound and invents
+    nothing for it. On a database that has never been downgraded there is no
+    preserved table, the restore returns, and this reads exactly as it did.
+    """
     for kind in NEW_DEFECT_KINDS:
         op.execute(f"ALTER TYPE launch_defect_kind ADD VALUE IF NOT EXISTS '{kind}'")
 
     op.add_column("section", sa.Column(CONTEXT_ID_COLUMN, sa.Text(), nullable=True))
     op.add_column("section", sa.Column(DEPLOYMENT_COLUMN, sa.Uuid(), nullable=True))
+    op.execute(RESTORE_PRESERVED_BINDINGS)
     op.execute(BIND_EXISTING_SECTIONS)
     op.alter_column("section", CONTEXT_ID_COLUMN, nullable=False)
     op.alter_column("section", DEPLOYMENT_COLUMN, nullable=False)
@@ -160,7 +253,24 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Undo this revision: the wider grant back, the binding gone, the labels left."""
+    """Undo this revision: the binding kept then dropped, the wider grant back, the labels left.
+
+    **What is preserved, and where.** Every section's `lms_context_id` and
+    `lti_deployment_id` are copied into `public.section_binding_preserved`, one
+    row per section keyed by the section's own primary key, before the columns
+    are dropped — and `upgrade` restores from that table by key and drops it. A
+    downgrade is not a discard here: the values are the platform's own, the
+    application holds no `UPDATE` on the column, and a section that lost them
+    would be refused on every staff launch from its real context for ever (the
+    E1 boundary review, H2).
+
+    The preserved table is left standing while the database sits at the older
+    revision — that is where the values live in the meantime — and the only
+    thing that removes it is the upgrade that puts them back. A database walked
+    down and then abandoned keeps a small table nothing reads, which is the
+    right trade against losing bindings nothing can reconstruct.
+    """
+    op.execute(PRESERVE_THE_BINDINGS)
     op.execute('REVOKE SELECT (id) ON public."user" FROM pulse_app')
     op.execute('GRANT SELECT ON public."user" TO pulse_app')
     op.drop_constraint(op.f("uq_section_lti_deployment_id_lms_context_id"), "section", type_="unique")

@@ -1,5 +1,16 @@
 # 0103 — The refusing guard's class name is a `data-reason` marker on the refusal page
 
+> **Amended by the E1 boundary fix (M7), and by ADR 0106.** The decision below
+> stands: the guard's class name is the marker. Three statements in it are no
+> longer true of the code. `refusal_page`/`refused` no longer take a `reason`
+> and a keyword `guard` — the guard name is the *only* parameter either takes,
+> and the body copy is derived from it through `REFUSAL_COPY`, so there is no
+> parameter a caller's words can arrive in. There is therefore no
+> attribute-less case left: every refusal names a guard, including the web
+> door's provider-error branch, which names its own `SessionRefusedError`.
+> And the launch vocabulary is eleven subclasses rather than ten —
+> `AnonymousLaunchRefused` joined it with ADR 0106.
+
 ## Context
 
 Both doors answer a refusal with the same page (`app.api.deps::refusal_page`),
