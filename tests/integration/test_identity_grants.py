@@ -3786,6 +3786,7 @@ def test_no_role_outside_this_scheme_is_granted_anything_in_public(db_session: A
     )
 
 
+@pytest.mark.invariant
 def test_the_runtime_roles_hold_no_privilege_on_a_base_table_beyond_the_reveals_own(
     db_session: Any,
 ) -> None:

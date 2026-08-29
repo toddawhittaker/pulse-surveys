@@ -143,6 +143,7 @@ def recorded_names(session: Any, *tables: str) -> set[str]:
 
 
 def test_generated_constraint_names_follow_the_convention_and_not_postgres(
+    configured_env: dict[str, str],
     db_session: Any,
 ) -> None:
     """Criterion 4, against the server.

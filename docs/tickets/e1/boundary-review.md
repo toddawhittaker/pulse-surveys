@@ -65,9 +65,16 @@ the reversal as complete. Tempering facts from verification: a DBA can repair
 it (the real context id lands in `launch_defect.context_id` on the first
 collided launch), and hourly sync survives (the roster address column
 round-trips intact); what dies is launch-triggered ingestion and refresh.
-The fix shape already exists in-tree: `e2c94b6a1f70`'s downgrade preserves
-into a scratch table. Fixed in batch B, which also corrects the E1-10 item 3
+Fixed in batch B, which also corrects the E1-10 item 3
 closure note in `deferred.md` that a `count(*) = 0` measurement had closed.
+**One sentence of this entry was wrong and is struck**: it said "the fix shape
+already exists in-tree: `e2c94b6a1f70`'s downgrade preserves into a scratch
+table". It does not. That downgrade *fills* `user_identity.identity_name` with
+a marker before restoring a `NOT NULL`; no migration in this repository creates
+a scratch table, which batch B established by grep before writing one. The fix
+is right and there was no precedent to copy — the preserve/restore blocks are
+written in the style of `b8c41f7d2e05`'s own `BIND_EXISTING_SECTIONS`, a
+`DO $$` block so that `alembic upgrade --sql` carries them.
 
 **H3 — the roster sync's log is an untested read path.** The one component
 that handles a whole section's names and email addresses has no test of any
@@ -104,7 +111,10 @@ and failure paths, canary-shaped).
   collected; none of the seven among them). Batch C.
 - **M7 — `refusal_page` is the one door answer whose body no test scans**
   for caller-supplied values; the sibling pages each have a scan. Latent
-  (every message passed today is a constant). Batch C.
+  (every message passed today is a constant). ~~Batch C.~~ **Batch B**: the
+  page renders its text argument, so the scan this finding asks for fails
+  against the code and the fix is code, not a test — the copy comes from the
+  guard name through a constant map now and the free-text parameter is gone.
 - **M8 — the org-view sweep polices a hand-written list** that omits
   `section_roster`, `section_enrollment_count`, and base `enrollment` —
   the three relations where `pulse_app` holds table-grain SELECT and

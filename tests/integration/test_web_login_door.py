@@ -420,13 +420,36 @@ def no_session_was_issued(response: Any, what: str) -> None:
 
 
 def refused(response: Any, contract: Any, what: str) -> None:
-    """The tool refused, and handed the caller nothing on the way out.
+    """The tool refused, handed the caller nothing, and said which guard did it.
 
     **E1-09 adds the second half.** Under E0-18 a landing was a rendered page, so
     "no landing testid in the body" was the whole of what a refusal had to avoid.
     A landing is a session now, so the thing a refusal must not do is issue one —
     and that check is live where the testid check has become a formality kept for
     the door that renders the old inline page.
+
+    **The E1 boundary fix round's M7 adds the last two.** The refusal page is
+    shared between the two doors, and its copy now comes from the guard name
+    alone through a module constant — so every refusal this door answers still
+    has to render that page, with exactly one machine-readable marker on it.
+    Extended here rather than asserted in a module of its own, because every
+    refusal in this file already comes through this helper and a second copy of
+    the rule is `docs/MISTAKES.md` entry 13.
+
+    **The mutation the marker assertion kills:** a refusal path that answers
+    with something other than the shared page — an `HTTPException` detail, a
+    framework error body — which satisfies "4xx, no landing, no session" and
+    leaves a reader nothing that says what refused. **The near miss it must
+    survive:** a page that prints every guard's marker, which leaves "the guard
+    is named" true and useless; the assertion is on the count, not on a
+    substring.
+
+    The body-is-not-empty assertion comes first, because every other statement
+    made about a refusal here is true of a response with nothing in it
+    (`docs/MISTAKES.md` entry 3).
+
+    `reason_markers` is defined further down, beside the test that reads a
+    marker's *value*; a name in a function body resolves when the function runs.
     """
     assert 400 <= response.status_code < 500, (
         f"The tool answered {response.status_code} to {what}. E0-18 requires a 4xx: this is auth "
@@ -440,6 +463,19 @@ def refused(response: Any, contract: Any, what: str) -> None:
         "status line."
     )
     no_session_was_issued(response, what)
+    assert response.text.strip(), (
+        f"The tool refused {what} with an empty body. 'No landing testid', 'no session' and 'one "
+        "reason marker' are all true of a page with nothing on it, and the person who was refused "
+        "is owed words."
+    )
+    markers = reason_markers(response)
+    assert len(markers) == 1 and markers[0].strip(), (
+        f"The page the tool refused {what} with carries the reason markers {markers}; it should "
+        "carry exactly one, naming the guard that fired. Both doors share this page and its copy "
+        "comes from that name alone (E1 boundary fix, M7), so a refusal rendered by something "
+        "else — or by a page naming every guard, or none — is one no reader and no browser-side "
+        "spec can tell apart from another."
+    )
 
 
 def person_holding(provider: Any, role: str, *, and_a_launch_assignment: bool = False) -> Any:

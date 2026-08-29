@@ -250,6 +250,18 @@ class ClockSkewRefused(LaunchRefusedError):  # noqa: N818 - the class name is th
     """The launch was minted too far in the future, or expired too long ago."""
 
 
+class AnonymousLaunchRefused(LaunchRefusedError):  # noqa: N818 - the class name is the guard string the door logs and the refusal suite asserts
+    """The launch carries no `sub`, so it names nobody this tool can serve.
+
+    The one guard here that refuses a launch the specification calls well
+    formed: LTI 1.3 Core §5.3.6.1 says a tool MUST read a missing `sub` as an
+    anonymous-user launch. Pulse has no anonymous user — every view is
+    somebody's, and every door resolves a subject to a `user` row — so it
+    refuses politely instead of admitting a person it cannot represent.
+    ADR 0106 records the deliberate break and what was rejected for it.
+    """
+
+
 class _FastApiOIDCLogin(OIDCLogin):  # type: ignore[type-arg]
     """`pylti1p3`'s OIDC login, redirecting through this adapter's `Redirect`."""
 
@@ -454,7 +466,19 @@ def _validate(
     if body.get(VERSION_CLAIM) != LTI_VERSION:
         raise VersionRefused("The launch states an LTI version this tool does not speak.")
 
-    # 11. Spend the nonce — single-use, and only now that everything else holds.
+    # 11. The launch names somebody. A missing `sub` is a *conformant* message
+    # (LTI 1.3 Core §5.3.6.1: a tool MUST read it as an anonymous-user launch)
+    # and Pulse has no anonymous user, so it is refused here rather than carried
+    # into `app.services.provisioning`, which reads the claim and has nowhere to
+    # put its absence. ADR 0106 is the deliberate break with that MUST.
+    subject = body.get("sub")
+    if not isinstance(subject, str) or not subject:
+        raise AnonymousLaunchRefused(
+            "This launch names nobody. Pulse Surveys shows each person their own work, so a "
+            "launch that carries no subject is one it cannot open."
+        )
+
+    # 12. Spend the nonce — single-use, and only now that everything else holds.
     claim_nonce(
         session,
         nonce=str(body["nonce"]),
