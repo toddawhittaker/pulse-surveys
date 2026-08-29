@@ -2,6 +2,11 @@
 
 **Caught: 7**
 
+*7 preventions recorded: the two set out in "What happened" below, and the five
+notes above — three from earlier reviews (E0-17, a second E0-10, E0-26) and this
+fix round's two, round 2's caught and then unmade when round 3 probed harder,
+round 3's the one that stood.*
+
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
 *(In E0-17's review round, applied to somebody else's prescription
@@ -56,20 +61,46 @@ confidentiality guard must never take — it decides from the absence of evidenc
 so an empty answer is a yes. Probing is what turned that from a review finding
 into fifteen minutes.)*
 
-*(In E1's boundary-fix batch A, round 3, twice on one round's fixes. The security
-rule 6 rewrite was handed down as a one-line change — compare the dialled host
-directly against the judged one — and before it was written the settled design
-was run against fifteen host vectors: the five divergences it must refuse and the
-ten legal spellings it must accept, each read three ways (parsed, dialled, and
-the judged name re-read). It held, and the probe was kept as the record. The
-parser's unterminated-quote fix was probed the same way against sixteen header
-shapes, which is where "does this still pass every round-1 and round-2 green"
-stopped being a hope. And the pin's fail-closed — a guard chosen precisely
-because it sits behind rule 6 and is never reached in normal operation — was
-proved to fire against the diverged host before it was believed, then exposed by
-removing rule 6, exactly entry 9's demand made on a guard that would otherwise be
-a comment. The one-line prescription was correct; the probe is what let it be
-believed rather than argued, and it is the same fifteen minutes each time.)*
+*(In E1's boundary-fix batch A, round 2, and it is the sharpest instance this
+entry holds — because the probe **was** run and the fix was still wrong. Round
+2's rule 6 had to refuse a fetched address whose judging parser and fetching
+client read a different host. The prescription was probed before it was written,
+which is this entry working: run against the suite's host shapes, a direct
+comparison of the raw parsed host against the client-prepared one *appeared* to
+refuse every internationalised domain — `röster.example` parsed,
+`xn--rster-jua.example` dialled — and rebuilding the judged URL as
+`https://{host}/` *appeared* to refuse every IPv6 literal. So round 2 added a
+second preparation of the judged host and a re-bracketing step to sidestep both,
+and recorded a catch. Round 3 probed harder and found the catch rested on a
+misread: `url_host` already IDNA-encodes, through `canonical_host` and urllib3,
+so `röster.example` is punycode on **both** sides with no second preparation —
+the IDN refusal round 2 feared could not have happened, and the re-bracketing was
+for a problem that was not there. Worse, the re-prepared form round 2 chose was
+itself defeated one level out: a backslash inside the host truncated both sides
+to the same string, so the rule reported agreement about a name the packet would
+not go to. This is the entry's own warning turned on the fix that heeded it — the
+mechanism chosen precisely to avoid a known flaw is the one to probe hardest, and
+round 2's re-preparation was exactly that mechanism, and exactly the one that
+needed the harder probe it did not get until round 3. Counted, because the probe
+is what surfaced the whole thing; qualified, because a harder probe unmade its
+conclusion.)*
+
+*(And round 3, which is where it was made right — the genuine catch this entry
+credits, twice on one round's fixes. The rule 6 rewrite was reduced to one line —
+compare the dialled host directly against the judged one, no second preparation,
+the step round 2's misread had added — and before it was written the settled
+design was run against fifteen host vectors: the five divergences it must refuse
+and the ten legal spellings it must accept, each read three ways (parsed,
+dialled, and the judged name re-read). It held, and the probe was kept as the
+record. The parser's unterminated-quote fix was probed the same way against
+sixteen header shapes, which is where "does this still pass every round-1 and
+round-2 green" stopped being a hope. And the pin's fail-closed — a guard chosen
+precisely because it sits behind rule 6 and is never reached in normal operation
+— was proved to fire against the diverged host before it was believed, then
+exposed by removing rule 6, exactly entry 9's demand made on a guard that would
+otherwise be a comment. The one-line prescription was correct; the probe is what
+let it be believed rather than argued, and it is the same fifteen minutes each
+time.)*
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and
