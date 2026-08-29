@@ -144,7 +144,17 @@ DROPPED_STATUSES: Final[frozenset[str]] = frozenset({"Inactive", "Deleted"})
 # it. The parameter tail stops at a comma so that two links in one header are read
 # as two, which is the shape a platform sends when it offers `prev`, `next` and
 # `first` together; `[^>]*` inside the angle brackets is the URI-reference, which
-# RFC 8288 §3 says carries no `>` unencoded.
+# RFC 8288 §3 says carries no `>` unencoded — and which is why a comma *inside* a
+# link's URL cannot end it either.
+#
+# **A quoted parameter value is a single value, comma and semicolon included**
+# (RFC 9110 §5.6.4, which RFC 8288 §3 builds its parameters on). That is the
+# alternation in the tail: a run of characters that are neither delimiter nor
+# quote, or a whole quoted-string with its `\"` escapes. A tail that stopped at
+# the first comma read `<url>; title="Page 2, of 9"; rel="next"` as a link ending
+# mid-title, whose `rel="next"` belonged to nothing — the walk ends early and
+# **complete**, which is H1's own silent truncation reached through a spelling the
+# specification explicitly permits.
 #
 # **This tool reads the header itself rather than taking `pylti1p3`'s answer**, and
 # the boundary review's H1 is why. `ServiceConnector.make_service_request` searches
@@ -157,7 +167,13 @@ DROPPED_STATUSES: Final[frozenset[str]] = frozenset({"Inactive", "Deleted"})
 # that may be bare. A header the pattern misses ends the walk early **as complete**,
 # which closes the enrollment of every member on the pages that were never fetched.
 LINK_HEADER_ENTRY: Final[re.Pattern[str]] = re.compile(
-    r"<(?P<url>[^>]*)>(?P<parameters>(?:\s*;[^,;]*)*)"
+    r"""<(?P<url>[^>]*)>                    # the URI-reference, opaque between the brackets
+        (?P<parameters>                     # its parameters, up to the next link
+            (?: \s*;                        # each one introduced by a semicolon
+                (?: [^,;"] | "(?:[^"\\]|\\.)*" )*   # bare text, or a whole quoted-string
+            )*
+        )""",
+    re.VERBOSE,
 )
 
 # The link relation a paged container advertises its next page under (RFC 8288 §3
@@ -918,7 +934,17 @@ def _next_page_url(headers: Mapping[str, Any]) -> str | None:
       - a `rel` value is a **token**, quoted or bare, and may name several relations
         on one link (`rel="first next"`), so the value is unquoted and split;
       - a header may carry **several comma-separated links**, so each is read and
-        only the one declaring `next` is followed.
+        only the one declaring `next` is followed;
+      - a **quoted** parameter value is one value whatever it contains, so a
+        parameter is separated from the next by a semicolon *outside* quotation
+        marks. A `rel=next` written inside some other parameter's quoted value is
+        that value's text and not a relation this platform declared — and the
+        difference decides where the tool sends its access token, so it is the
+        platform's declaration that governs and never a string it quoted.
+
+    The header's name is matched case-insensitively, because RFC 9110 §5.1 makes a
+    field name case-insensitive and RFC 8288 §3 spells this one `Link`, which is
+    what a real platform sends.
 
     The URL is handed back byte for byte. Nothing is lower-cased, unescaped or
     resolved against the page it came from: what a platform put between the angle
@@ -936,13 +962,52 @@ def _next_page_url(headers: Mapping[str, Any]) -> str | None:
     if not isinstance(header, str) or not header:
         return None
     for entry in LINK_HEADER_ENTRY.finditer(header.replace("\n", " ")):
-        for parameter in entry.group("parameters").split(";"):
+        for parameter in _split_outside_quotes(entry.group("parameters"), ";"):
             name, _, value = parameter.partition("=")
             if name.strip().lower() != "rel":
                 continue
             if NEXT_RELATION in value.strip().strip('"').lower().split():
                 return entry.group("url").strip() or None
     return None
+
+
+def _split_outside_quotes(text: str, delimiter: str) -> list[str]:
+    """Split `text` on `delimiter`, ignoring any that falls inside a quoted-string.
+
+    RFC 9110 §5.6.4's quoted-string, which is what a `Link` header's parameter
+    values are: between the quotation marks every character is content, including
+    the `;` that separates two parameters, and `\\` escapes the character after it
+    so that a quoted value can contain a quotation mark of its own.
+
+    A bare `str.split(";")` reads `title="a; rel=next"; rel="prev"` as three
+    parameters, two of them fragments of one title — and the fragment `rel=next`
+    then answers the question "what relation does this link declare?" with a value
+    the platform put inside quotation marks rather than with the relation it
+    declared. That is the platform choosing which of its addresses this tool walks
+    into, and how often, from a string it never offered as a relation.
+
+    An unterminated quotation mark leaves the rest of the text quoted, so the
+    delimiters inside it are content. That is the reading that refuses to find a
+    relation rather than the one that invents one out of a malformed header.
+    """
+    parts: list[str] = []
+    held: list[str] = []
+    quoted = False
+    escaped = False
+    for character in text:
+        held.append(character)
+        if escaped:
+            escaped = False
+        elif quoted and character == "\\":
+            escaped = True
+        elif character == '"':
+            quoted = not quoted
+        elif character == delimiter and not quoted:
+            held.pop()
+            parts.append("".join(held))
+            held = []
+    parts.append("".join(held))
+    return parts
 
 
 def _deduplicated(roster: Sequence[Mapping[str, Any]], section_id: UUID) -> list[Mapping[str, Any]]:
