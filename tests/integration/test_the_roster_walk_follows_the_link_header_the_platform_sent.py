@@ -1142,14 +1142,12 @@ def test_an_unterminated_quote_does_not_let_quoted_content_declare_the_next_page
         "platform may really be declaring a next page and following it would be correct."
     )
     assert 'rel="prev"' in header, (
-        f"{header!r} carries no terminated `rel=\"prev\"`, so there is no real declaration for the "
+        f'{header!r} carries no terminated `rel="prev"`, so there is no real declaration for the '
         "quoted content to be judged against."
     )
 
     service_wire.serve(
-        HeaderRewritten(
-            compose_a_roster(synced_section, [roster_contract.member(first)]), header
-        )
+        HeaderRewritten(compose_a_roster(synced_section, [roster_contract.member(first)]), header)
     )
     service_wire.serve(
         served_at(
