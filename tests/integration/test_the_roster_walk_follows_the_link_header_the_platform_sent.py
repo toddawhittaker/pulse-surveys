@@ -29,9 +29,45 @@ client, rather than on whether some page came back.
 own path; neither can carry a `Link` header of this module's choosing, because
 every header the fixture writes is the one shape a conformant platform sends. The
 two helpers below are that one difference and nothing else: `HeaderRewritten` swaps
-the `Link` header on a page the fixture composed, and `served_at` moves a composed
-page to a path of its own. Both are here rather than in `tests/fixtures/` because
-no other module needs them — the fixture module's own docstring draws that line.
+the `Link` header on a page the fixture composed — its value *and* the case of its
+name — and `served_at` moves a composed page to a path of its own. Both are here
+rather than in `tests/fixtures/` because no other module needs them — the fixture
+module's own docstring draws that line.
+
+**What the fix round added, and why each one needed a test that did not exist.**
+The verification battery killed 15 mutations on the tests above and found four
+survivors; the four are the subject of the second half of this module.
+
+  - **"Incomplete" was a word rather than an assertion.** Mutating the failure
+    branch to report the walk as *complete* survived every test in the tree: a
+    truncated walk that claims completeness makes the sync close every member it
+    did not see, so a platform whose second page fails for an hour ends the
+    enrollment of everyone on it. So the failed walk is now asserted to close
+    nobody, and the pair — a walk that really is complete and really has lost a
+    member closes them — is
+    `test_the_roster_sync_records_enrollment_windows.py::test_a_member_who_vanishes_
+    from_the_roster_is_ended_at_the_syncs_own_date`, cited rather than copied.
+  - **Every failure here arrived as an HTTP status**, so the handler for a
+    transport that never answers at all was unasserted. One test now fails the
+    second page at the socket rather than at the status line.
+  - **The header's *name* was only ever served lower case** by this module's own
+    machinery, so a reader narrowed to exactly `link` passed — `docs/MISTAKES.md`
+    entry 30's shape, where the fixture supplies the value under test. RFC 9110
+    §5.1 makes a field name case-insensitive and RFC 8288 §3 spells this one
+    `Link`; both spellings are now served.
+  - **The parser is not quoted-string aware in either direction.** A legal comma
+    inside a quoted parameter value ends the link early, and a `rel=next` written
+    inside a quoted value is followed as though the platform had declared it. The
+    first is the same silent truncation as H1 itself, reached through a spelling
+    RFC 8288 explicitly permits; the second is a platform-controlled string
+    choosing where this tool sends its Bearer token.
+
+**One vector this module drives is a security finding rather than a paging one.**
+A URL whose authority carries a raw backslash is parsed one way by `urlsplit` and
+another by `requests`, so the address that is judged is not the address that is
+dialled. That belongs with the other address rules and is asserted in
+`test_the_roster_sync_refuses_an_address_it_was_told_to_fetch.py` and in
+`tests/unit/test_registration_address_constraints.py`, not here.
 
 **The controls come first and they must be green.** A header this module believes
 declares `rel="next"` at a URL, and a wire that can tell that URL from its
@@ -45,6 +81,7 @@ back the exception instead of asserting about it, and what is asserted is the ro
 that were written and the requests that were made.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -96,6 +133,28 @@ LINK_HEADER_SHAPES = {
     ),
 }
 
+# How a platform may spell the header's *name*. RFC 9110 §5.1: "Field names are
+# case-insensitive"; RFC 8288 §3 writes this one `Link`, which is the spelling
+# Canvas and Moodle both send and the one this module's own machinery never sent
+# until the fix round — so a reader narrowed to exactly `link` passed every test
+# here (`docs/MISTAKES.md` entry 30: the fixture supplied the value under test).
+# `link` stays in the set as the instrument's own case.
+LINK_HEADER_NAMES = ("Link", "LiNk", "link")
+
+# A parameter value carrying a comma, quoted, which RFC 8288 §3 and RFC 9110 §5.6.4
+# permit: inside a quoted-string a comma is a character and not the separator
+# between two links. A parser that splits the header on commas first sees this link
+# end in the middle of its own title, and the `rel="next"` that follows belongs to
+# nothing.
+A_QUOTED_COMMA_TITLE = "Page 2, of 9"
+
+# A `rel=next` written inside a quoted parameter value on a link the platform
+# declared `prev`. A parser that searches the raw header for the relation finds
+# this one, and the platform's own declaration is overruled by a string the
+# platform put inside quotation marks — which is a platform choosing where this
+# tool sends its Bearer token.
+A_QUOTED_RELATION_TITLE = "a; rel=next"
+
 
 def page_url(section: Any, path: str, query: str = "") -> str:
     """A URL on the section's own platform, at `path`, carrying `query`.
@@ -123,18 +182,26 @@ class HeaderRewritten:
     the byte-exact URL, and the page that cannot be fetched — the first page is
     composed with `compose_a_roster(..., next_url=…)`, so the header those walks
     read is the fixture's own and nothing about them rests on this class.
+
+    **`name` is the case the header's own name is served under**, and it defaults
+    to the fixture's lower-case spelling so that nothing above changes. It exists
+    because this class wrote `link` and only `link`, which made a reader narrowed
+    to exactly that spelling pass every test in this module while a platform
+    sending RFC 8288's own `Link` was ignored: the fixture was supplying the value
+    under test (`docs/MISTAKES.md` entry 30).
     """
 
-    def __init__(self, page: Any, link: str | None) -> None:
+    def __init__(self, page: Any, link: str | None, name: str = "link") -> None:
         self.page = page
         self.path = page.path
         self.link = link
+        self.name = name
 
     def document(self, url: str) -> tuple[dict[str, Any], dict[str, str]]:
         body, headers = self.page.document(url)
         served = {name: value for name, value in headers.items() if name.lower() != "link"}
         if self.link is not None:
-            served["link"] = self.link
+            served[self.name] = self.link
         return body, served
 
 
@@ -150,7 +217,9 @@ def served_at(page: Any, path: str) -> Any:
     return page
 
 
-def sync(roster_sync: Any, section: Any, wire: Any, rows: Any) -> tuple[list[Any], Any]:
+def sync(
+    roster_sync: Any, section: Any, wire: Any, rows: Any, http: Any = None
+) -> tuple[list[Any], Any]:
     """Run one section's sync; answer the calls it made and the exception it raised.
 
     The calls are sliced from the mark taken before the run, so a request this test
@@ -158,6 +227,11 @@ def sync(roster_sync: Any, section: Any, wire: Any, rows: Any) -> tuple[list[Any
     sync made. Whether the sync raises or returns on a failure is deliberately not
     asserted anywhere in this module (ADR 0090's consequences leave it to the
     writer); what is asserted is what it fetched and what it wrote.
+
+    `http` is the wire's own session unless a test hands one over. One test does:
+    the transport-failure case mounts an adapter that fails at the socket rather
+    than at the status line, which is a failure the wire cannot express — every
+    answer it gives is a well-formed HTTP response.
     """
     mark = len(wire.calls)
     try:
@@ -165,7 +239,7 @@ def sync(roster_sync: Any, section: Any, wire: Any, rows: Any) -> tuple[list[Any
             roster_sync.sync_one_section,
             session=rows.session,
             section_id=section.id,
-            http=wire.session(),
+            http=wire.session() if http is None else http,
         )
         rows.commit()
         return wire.calls[mark:], None
@@ -177,6 +251,64 @@ def sync(roster_sync: Any, section: Any, wire: Any, rows: Any) -> tuple[list[Any
 def gets(calls: list[Any]) -> list[str]:
     """Every URL the client asked for with a GET, in order, as it sent them."""
     return [call.url for call in calls if call.method.upper() == "GET"]
+
+
+class RefusedByTheNetwork:
+    """A transport that fails the way a socket does: no answer, no status line.
+
+    `ServiceWire` answers every request with a well-formed HTTP response, so a
+    failure it produces always arrives as a status code. That left the sync's
+    transport handler — the `requests.RequestException` branch — unasserted, and
+    reverting it to discarding the whole container survived the battery.
+
+    This is mounted on the session for one URL prefix, so the first page still goes
+    over the wire and the second page meets a connection that is refused.
+    `requests.exceptions.ConnectionError` is what a refused connection, a DNS
+    failure and a reset all arrive as, so this is the class of failure rather than
+    one member of it.
+    """
+
+    def __init__(self) -> None:
+        self.attempts: list[str] = []
+
+    def send(self, request: Any, **_: Any) -> Any:
+        import requests
+
+        self.attempts.append(str(request.url))
+        raise requests.exceptions.ConnectionError(
+            "the roster page's host refused the connection", request=request
+        )
+
+    def close(self) -> None:
+        return None
+
+
+def a_session_that_cannot_reach(wire: Any, url: str) -> tuple[Any, RefusedByTheNetwork]:
+    """The wire's session, with `url` unreachable at the socket.
+
+    `Session.mount` matches the longest prefix, so the page mounted here is the
+    only request that fails: the token endpoint and the first page still travel
+    over the wire and are recorded on it.
+    """
+    session = wire.session()
+    adapter = RefusedByTheNetwork()
+    session.mount(url, adapter)
+    return session, adapter
+
+
+def weeks_ago(weeks: int) -> datetime:
+    """An aware instant in the past, for a member Pulse synced before today."""
+    return datetime.now(UTC) - timedelta(weeks=weeks)
+
+
+def one_enrollment(rows: Any, subject: str) -> Any:
+    """The single enrollment row for one member, or a failure counting them."""
+    found = rows.enrollments_for(subject)
+    assert len(found) == 1, (
+        f"The member {subject!r} has {len(found)} enrollment rows and this test is about one: "
+        f"{[dict(row) for row in found]}."
+    )
+    return found[0]
 
 
 # ---------------------------------------------------------------------------
@@ -581,4 +713,373 @@ def test_a_next_page_that_cannot_be_fetched_ends_the_walk_incomplete_and_recorde
         "codes' on the admin console, and D9 makes NULL mean a call that never reached the "
         "platform — so a fetched page that failed and left no row, or a row with no code, is a "
         "truncated roster an operator has no way to see."
+    )
+
+
+# ---------------------------------------------------------------------------
+# What "incomplete" is worth: the two failures, and the member neither of them
+# may close.
+# ---------------------------------------------------------------------------
+
+
+def test_an_incomplete_walk_closes_no_enrollment_window(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    seed_a_member: Any,
+    a_subject: Any,
+) -> None:
+    """What a truncated walk costs if it is mistaken for a finished one.
+
+    **The mutation this kills**: reporting the failed walk as complete — the
+    battery's `return members, True`, which survived every test in this module and
+    in the tree. Completeness is not a bookkeeping flag: it is the licence to close
+    the enrollment of every member the walk did not see. A platform whose second
+    page fails for one hour would end the enrollment of everyone on it, and SPEC
+    §3.4's "was this student enrolled in week N" would answer no for a class that
+    never left.
+
+    The member here was synced three weeks ago and lives on the page that fails, so
+    the walk genuinely never sees them. After a failed walk their window is still
+    open, because nothing was learned about them.
+
+    **The pair, cited rather than copied**: a walk that really is complete and that
+    really has lost a member does close them, in
+    `test_the_roster_sync_records_enrollment_windows.py::test_a_member_who_vanishes_
+    from_the_roster_is_ended_at_the_syncs_own_date`. Without that half this test is
+    satisfied by a sync that never closes anybody, which is the opposite defect and
+    just as expensive.
+
+    The window is read before the walk as well as after it. A member seeded already
+    closed would satisfy the assertion below for a reason that has nothing to do
+    with the walk (`docs/MISTAKES.md` entry 3).
+    """
+    returning = a_subject("synced-three-weeks-ago")
+    seed_a_member(synced_section, returning, started_on=weeks_ago(3))
+    first = a_subject("first-page")
+    following = page_url(synced_section, NEXT_PAGE_PATH)
+    service_wire.serve(
+        compose_a_roster(synced_section, [roster_contract.member(first)], next_url=following)
+    )
+    service_wire.failing(following, 500)
+
+    opened = one_enrollment(roster_rows, returning)
+    assert opened[roster_contract.ended_on_column] is None, (
+        f"The seeded member's enrollment is already closed "
+        f"({opened[roster_contract.ended_on_column]!r}) before the walk ran, so the assertion below "
+        "would hold whatever the sync did."
+    )
+
+    during, _ = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert following in gets(during), (
+        f"The walk never asked for {following!r}, so it never met the failure that makes it "
+        f"incomplete. It fetched {gets(during)}."
+    )
+    after = one_enrollment(roster_rows, returning)
+    assert after[roster_contract.ended_on_column] is None, (
+        f"A walk that could not fetch its second page closed {returning!r}: "
+        f"`{roster_contract.ended_on_column}` is {after[roster_contract.ended_on_column]!r}. That "
+        "member is on the page that failed, so the sync learned nothing about them — and closing "
+        "an enrollment on the strength of a page that never arrived ends the enrollment of every "
+        "member of every page a platform fails to serve. A walk that did not finish may not be "
+        "read as a roster that shrank."
+    )
+
+
+def test_a_transport_failure_on_a_later_page_keeps_the_pages_already_read(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    seed_a_member: Any,
+    a_subject: Any,
+) -> None:
+    """The failure that never reaches a status line, which nothing else here drives.
+
+    Every other failure in this module arrives as an HTTP status, because
+    `ServiceWire` answers every request with a well-formed response. A platform's
+    host that stops answering — a refused connection, a reset, a name that stops
+    resolving — reaches the client as `requests.RequestException` and nothing else,
+    and reverting that handler to discarding the whole container survived the
+    battery.
+
+    **The mutation this kills**: `return None` from the transport branch — the walk
+    throws away every page it had already read, so a class whose second page timed
+    out syncs as no members at all. Paired with the mutation the test above kills,
+    the two ends of the same handler: discarding what was read, and pretending what
+    was not read was empty.
+
+    Two things are asserted, and the second is the one the status-code tests cannot
+    reach. The first page's member survives. And the member the walk never got to
+    is not closed — a transport failure is not news about anybody's enrollment.
+    """
+    returning = a_subject("synced-three-weeks-ago")
+    seed_a_member(synced_section, returning, started_on=weeks_ago(3))
+    first = a_subject("first-page")
+    following = page_url(synced_section, NEXT_PAGE_PATH)
+    service_wire.serve(
+        compose_a_roster(synced_section, [roster_contract.member(first)], next_url=following)
+    )
+    session, refused = a_session_that_cannot_reach(service_wire, following)
+
+    sync(roster_sync, synced_section, service_wire, committed_rows, http=session)
+
+    assert refused.attempts, (
+        f"Nothing reached the adapter mounted at {following!r}, so no transport failure happened "
+        'and this test is about an ordinary walk. Either the walk did not follow the `rel="next"` '
+        "header, or the session it was handed is not the one this test mounted."
+    )
+    assert roster_rows.enrollments_for(first), (
+        f"The first page's member {first!r} was not ingested after the connection to the second "
+        "page was refused. The container that had already arrived was discarded because a later "
+        "request failed at the socket, so a platform with one bad minute syncs the class to empty."
+    )
+    after = one_enrollment(roster_rows, returning)
+    assert after[roster_contract.ended_on_column] is None, (
+        f"A walk whose second page could not be connected to closed {returning!r}: "
+        f"`{roster_contract.ended_on_column}` is {after[roster_contract.ended_on_column]!r}. A "
+        "connection this tool could not make is not evidence that a student left."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The header's own name, and its quoted parameter values.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("spelling", LINK_HEADER_NAMES)
+def test_the_walk_follows_the_next_relation_however_the_header_name_is_spelled(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    a_subject: Any,
+    spelling: str,
+) -> None:
+    """RFC 9110 §5.1: a field name is case-insensitive, and platforms send `Link`.
+
+    **The mutation this kills**: a reader that looks up the header under exactly
+    `link`. Every test in this module passed against it, because this module's own
+    machinery had only ever *served* the name in lower case — the fixture was
+    supplying the value under test, which is `docs/MISTAKES.md` entry 30 and which
+    is why the case is now a parameter rather than a constant.
+
+    `Link` is RFC 8288's own spelling and the one Canvas and Moodle send, so the
+    narrowed reader fails against every real platform while every test here stays
+    green. `LiNk` is legal too and is here because a fix that lower-cases the name
+    it looks for and a fix that hard-codes `Link` are one line apart. `link` is the
+    instrument's own case: it is what the rest of this module serves, so a red on
+    that parameter alone means the machinery broke rather than the reader.
+
+    The header is required to have arrived under the spelling this test served
+    before the walk is asserted about: `requests` reads a response's headers
+    case-insensitively, so a wire that normalised the name on the way through would
+    make this parameter indistinguishable from the one below it.
+    """
+    first = a_subject("first-page")
+    second = a_subject("second-page")
+    following = page_url(synced_section, NEXT_PAGE_PATH)
+    service_wire.serve(
+        HeaderRewritten(
+            compose_a_roster(synced_section, [roster_contract.member(first)]),
+            f'<{following}>; rel="next"',
+            name=spelling,
+        )
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(second)]), NEXT_PAGE_PATH
+        )
+    )
+
+    answered = service_wire.session().get(str(synced_section.address))
+    assert spelling in dict(answered.headers), (
+        f"The first page's headers arrived as {sorted(dict(answered.headers))} and this test served "
+        f"the paging header as {spelling!r}. Something between the wire and the client has "
+        "re-spelled the name, so this parameter is no longer about the spelling it names."
+    )
+
+    during, _ = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert following in gets(during), (
+        f"With the paging header named {spelling!r}, the walk fetched {gets(during)} and never "
+        f"{following!r}. RFC 9110 §5.1 makes a field name case-insensitive; RFC 8288 §3 spells this "
+        "one `Link`, which is what a real platform sends — a reader that matches one casing ends "
+        "every roster at its first page against every platform in the field, and leaves this whole "
+        "module green."
+    )
+    assert roster_rows.enrollments_for(
+        second
+    ), f"The next page's member {second!r} has no enrollment, from a header named {spelling!r}."
+
+
+def test_a_quoted_parameter_value_carrying_a_comma_does_not_end_the_link(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    a_subject: Any,
+) -> None:
+    """A comma inside a quoted parameter value is a character, not a separator.
+
+    RFC 9110 §5.6.4 defines the quoted-string, and RFC 8288 §3 builds the `Link`
+    header's parameters on it: inside quotation marks a comma is part of the value.
+    A platform whose page title is `Page 2, of 9` sends exactly this header, and it
+    is a header a tool has to read.
+
+    **The mutation this kills**: splitting the header on commas before the quoting
+    is accounted for. The link ends in the middle of its own title, the `rel="next"`
+    that follows belongs to a fragment with no URL, and the walk ends *complete* —
+    the same silent truncation H1 is about, reached through a spelling the
+    specification explicitly permits rather than through a bug in a library.
+
+    **The guards come first and they are about this test's own string**, because no
+    parser in this repository can serve as the oracle here: E0-15's `link_relations`
+    splits parameters at the comma exactly as the defect does, so using it as the
+    control would confirm the defect rather than the header. What is checked instead
+    is structural and needs no parser — the header names one link, its only comma
+    lies between the title's quotation marks, and the `rel="next"` parameter is
+    outside them.
+    """
+    first = a_subject("first-page")
+    second = a_subject("second-page")
+    following = page_url(synced_section, NEXT_PAGE_PATH)
+    header = f'<{following}>; title="{A_QUOTED_COMMA_TITLE}"; rel="next"'
+
+    opening = header.index('"')
+    closing = header.index('"', opening + 1)
+    assert header.count("<") == 1 and header.count(",") == 1, (
+        f"This test's header {header!r} does not carry exactly one link and one comma, so what it "
+        "poses is not the case it is named after."
+    )
+    assert opening < header.index(",") < closing, (
+        f"The comma in {header!r} is not inside the quoted title, so this header really does "
+        "declare two links and a parser that split it would be right."
+    )
+    assert header.index('rel="next"') > closing, (
+        f'The `rel="next"` in {header!r} is inside the quoted title rather than a parameter of '
+        "the link, so the platform is not declaring a next page at all."
+    )
+
+    service_wire.serve(
+        HeaderRewritten(compose_a_roster(synced_section, [roster_contract.member(first)]), header)
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(second)]), NEXT_PAGE_PATH
+        )
+    )
+
+    during, _ = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert following in gets(during), (
+        f"The platform declared its next page with a quoted title carrying a comma "
+        f"({header!r}) and the walk fetched {gets(during)}. Inside a quoted-string a comma is a "
+        "character (RFC 9110 §5.6.4), so this is one link declaring `next` — and a reader that "
+        "takes the header apart at commas first ends the roster here, reports nothing, and leaves "
+        "the section short in a way no operator can see."
+    )
+    assert roster_rows.enrollments_for(second), (
+        f"The next page's member {second!r} has no enrollment from a link whose title contains a "
+        "comma."
+    )
+
+
+def test_a_relation_spelled_inside_a_quoted_parameter_value_is_not_a_next_page(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    a_subject: Any,
+) -> None:
+    """The other direction of the same defect, and it is the platform choosing.
+
+    A link the platform declares `prev`, whose *title* contains the text
+    `rel=next`. A reader that searches the raw header for the relation, or that
+    splits a link's parameters at semicolons without accounting for quotation
+    marks, finds the relation inside the title and follows a URL the platform did
+    not offer as a next page.
+
+    **Why that is a security property and not a paging one.** The tool's Bearer
+    token goes with every page it fetches, and the URL it is sent to is now
+    determined by a string inside a quoted value rather than by the relation the
+    platform declared. Every address rule still applies — this is not the same
+    finding as a hostile URL — but which of a platform's own advertised addresses
+    the tool walks into, and how many times, stops being the platform's stated
+    intent.
+
+    **The mutation this kills**: a relation match run over the header text, or over
+    parameters split at `;` with no quoting rule. The `three-links-in-one-header`
+    case above passes against both.
+
+    **The guards are structural, for the reason the test above gives**: both parsers
+    available in this repository share the defect, so neither can be the oracle.
+    What is checked is that this module's own decoy segment declares `prev` and that
+    its `rel=next` text lies strictly inside the quoted title.
+    """
+    first = a_subject("first-page")
+    second = a_subject("second-page")
+    decoyed = a_subject("decoy-page")
+    following = page_url(synced_section, NEXT_PAGE_PATH)
+    decoy = page_url(synced_section, DECOY_PAGE_PATH)
+    decoy_segment = f'<{decoy}>; title="{A_QUOTED_RELATION_TITLE}"; rel="prev"'
+    header = f'{decoy_segment}, <{following}>; rel="next"'
+
+    quotes = [index for index, character in enumerate(decoy_segment) if character == '"']
+    hidden = decoy_segment.index("rel=next")
+    assert quotes[0] < hidden < quotes[1], (
+        f"The `rel=next` in {decoy_segment!r} is not inside the quoted title, so the platform "
+        "really is declaring this link a next page and following it would be correct."
+    )
+    assert decoy_segment.endswith('rel="prev"'), (
+        f"{decoy_segment!r} does not declare the decoy link as `prev`, so the assertion below is "
+        "not about a relation the platform declared."
+    )
+
+    service_wire.serve(
+        HeaderRewritten(compose_a_roster(synced_section, [roster_contract.member(first)]), header)
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(second)]), NEXT_PAGE_PATH
+        )
+    )
+    service_wire.serve(
+        served_at(
+            compose_a_roster(synced_section, [roster_contract.member(decoyed)]), DECOY_PAGE_PATH
+        )
+    )
+
+    during, _ = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert decoy not in gets(during), (
+        f"The walk fetched {decoy!r}, which this platform declared as `prev`. The only place the "
+        f"text `rel=next` appears for that link is inside its quoted title ({decoy_segment!r}), so "
+        "the tool is taking its instructions from a value the platform quoted rather than from the "
+        f"relation the platform declared. It fetched {gets(during)}."
+    )
+    assert not roster_rows.enrollments_for(
+        decoyed
+    ), f"The member {decoyed!r} was ingested from the page declared `prev`."
+    assert roster_rows.enrollments_for(second), (
+        f"The real next page's member {second!r} has no enrollment. The header declares `next` at "
+        f"{following!r} after the decoy, so a reader that stopped at the decoy — or that read the "
+        "quoted title as the relation — never reached the page the platform actually offered."
     )

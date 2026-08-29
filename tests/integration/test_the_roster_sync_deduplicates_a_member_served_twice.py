@@ -30,6 +30,14 @@ one rule (`docs/MISTAKES.md` entry 19).
 members. A sync that deduplicates by page position, or that throws the second page
 away, satisfies every assertion about the duplicate and quietly halves every class
 that pages.
+
+**"First occurrence wins" is a rule about *which* copy, and two identical copies
+cannot say which one was kept.** The battery found that: with both copies the same
+document, taking the last one survives every assertion here. So the two copies now
+differ in a field the ingest writes — the member's address — and the stored row is
+required to carry the first page's value. The rule matters in the direction the
+plan chose it: pages arrive in the platform's order, and the first is the copy read
+from the container's earlier, more stable page.
 """
 
 import logging
@@ -183,6 +191,76 @@ def test_a_member_served_on_two_pages_syncs_to_one_open_enrollment_window(
         f"criterion is one: {[dict(row) for row in windows]}. None means the sync finished by "
         "ingesting nobody; two means the duplicate reached the database, which SPEC §3.4's "
         "'was this student enrolled in week N' has no rule for answering."
+    )
+
+
+def test_the_first_copy_of_a_duplicated_member_is_the_one_that_is_kept(
+    roster_sync: Any,
+    synced_section: Any,
+    service_wire: Any,
+    compose_a_roster: Any,
+    committed_rows: Any,
+    roster_rows: Any,
+    roster_contract: Any,
+    a_subject: Any,
+) -> None:
+    """The plan's "first occurrence wins", on a field the two copies disagree about.
+
+    **The mutation this kills**: keeping the *last* copy — `seen[user_id] = member`
+    rather than `seen.setdefault(user_id, member)`. It survived every other test in
+    this module, because two identical member documents cannot say which of them
+    was kept, which is the whole reason this test exists.
+
+    The two copies differ in the one field the ingest writes out of a member
+    document and stores where a test can read it: the address, which lands in
+    `user_identity.identity_email` (D7, and
+    `test_the_roster_sync_writes_members_emails_and_the_teaching_instructor.py` is
+    where that column's own rules are asserted).
+
+    **Why the direction is not arbitrary.** A container is paged over a collection
+    that is changing, and the duplicate exists because a later page re-served a row
+    the earlier page had already carried. The plan chose the first occurrence, and
+    a rule that says so is worth more than a rule that happens to hold: without
+    this, "deduplicated" means "one of them, and nobody knows which", and two runs
+    an hour apart can disagree about a member's address with nothing changed at the
+    platform.
+    """
+    duplicated = a_subject("served-twice")
+    first_address = f"{duplicated}-first-copy@pulse-tests.invalid"
+    second_address = f"{duplicated}-second-copy@pulse-tests.invalid"
+    assert (
+        first_address != second_address
+    ), "The two copies carry the same address, so neither answer could be told from the other."
+    roster = two_pages(
+        compose_a_roster,
+        synced_section,
+        [
+            roster_contract.member(duplicated, email=first_address),
+            roster_contract.member(duplicated, email=second_address),
+        ],
+    )
+    served_across_two_pages(roster, [duplicated, duplicated], roster_contract)
+    service_wire.serve(roster)
+
+    failure = sync(roster_sync, synced_section, service_wire, committed_rows)
+
+    assert failure is None, (
+        f"The duplicated member aborted the section's sync: {failure!r}. That is the finding "
+        "`test_a_member_served_on_two_pages_syncs_to_one_open_enrollment_window` is about; this "
+        "test cannot ask which copy was kept until a copy is kept at all."
+    )
+    stored = roster_rows.identity_for(duplicated)
+    assert stored is not None, (
+        f"No `user_identity` row holds an address for {duplicated!r}, whom the container served "
+        f"twice with {first_address!r} and {second_address!r}. D7 stores the address a member "
+        "exposes, so with no row at all there is nothing here to say which copy won."
+    )
+    assert stored[roster_contract.identity_email_column] == first_address, (
+        f"The stored address is {stored[roster_contract.identity_email_column]!r}; the first page "
+        f"served {first_address!r} and the second served {second_address!r}. The plan's rule is "
+        "'first occurrence wins', and a dedup that keeps the last copy passes every other test in "
+        "this module — two identical copies cannot tell the two rules apart, which is why these "
+        "two differ."
     )
 
 

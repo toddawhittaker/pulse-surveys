@@ -19,6 +19,16 @@ freshly upgraded database and is where drift between the declaration and the
 migration is diagnosed, for every ticket. Two tests of one rule is
 `docs/MISTAKES.md` entry 19's shape.
 
+**The reach of the test below, stated exactly, because it is narrower than it
+reads.** It answers one question: does an index with these key columns, in this
+order, with this direction, exist. It does **not** notice a superseded index left
+behind beside it — the `section_id`-only index this one replaces, still there,
+still costing every write — because an extra index is not an absent one. That is
+`test_alembic_baseline.py`'s catch, through the drift `alembic check` reports
+between `Base.metadata` and the database, and it is named here rather than left
+for a reader to assume this module covers it (`docs/MISTAKES.md` entry 14: the
+boundary of a search said out loud rather than left looking like coverage).
+
 **Column order and sort direction are the whole point, so both are read.** An index
 on `section_id` alone is what exists today and is what the measurement condemns; an
 index on `(called_at, section_id)` is the same two columns in the order that does
