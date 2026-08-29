@@ -198,3 +198,95 @@ roster-sync modules, the address-rules integration module,
 `test_alembic_baseline.py`, `test_identity_schema.py`); `tests/unit` 954 passed;
 ruff format, ruff check and mypy over `backend/` clean. No schema moved, so no
 migration round trip was owed this round.
+
+# Round 3 — rule 6 defeated one level out, and three more findings
+
+Tests committed red at `3235ae1`; the epic tip was merged in (batches B and C
+landed). Confirmed cold before touching anything: **10 failed / 289 passed**,
+exactly the coordinator's measurement. The `\@`-before-at row was already green —
+round 2's rule 6 refused it — which is why it is a kept-green guard rather than a
+red.
+
+## Attempt 7 — rule 6 rewritten to compare the two readings (`models/lti.py`), worked
+
+Commit `9424faf`. Round 2's rule 6 ran the *judged* host back through the
+client's parser before comparing, so a backslash *inside* the host truncated both
+sides identically and the rule reported agreement about a name the packet would
+not go to. The settled one-line design — compare the dialled host directly
+against the judged one, both read once through `url_host` — was **probed against
+fifteen vectors before it was written** (entry 8): five divergences (backslash
+inside the host, backslash before `@`, a percent-escape, a space, a quotation
+mark) all refused, ten legal spellings (IDN, punycode, trailing dot, port,
+userinfo, mixed case, underscore, IPv4, IPv6, IPv4-mapped) all accepted. The
+probe confirmed the coordinator's proof: `url_host` already IDNA-encodes through
+urllib3, so `röster.example` is punycode on both sides and needs no second
+preparation — the re-preparation the round-2 form did was what re-introduced the
+divergence.
+
+Item 2, the parse-fail family: an authority carrying `[` or `]` made `urlsplit`
+raise `ValueError` out of `url_host`, which the walk's `except
+RegistrationAddressError` does not catch — so the section lost its `nrps_call`
+row and the members already read, not one page. `_judged_host_or_refuse` turns
+that parse failure into a refusal, forced once at the top of the fetched
+chokepoint before any rule reads the host. Rule 5's comment had claimed this
+family closed; it is true now.
+
+Item 3, the registration columns: rule 6 now runs on `jwks_url` and
+`auth_token_url` in `refuse_invalid_registration_addresses` too, because rule 5
+does not backstop the divergence there and `auth_token_url` is where the tool's
+signed client assertion is posted. `authorization_endpoint` is left uncovered —
+a browser fetches it, the stance rule 4 already takes.
+
+## Attempt 8 — the parser and the pin (`services/roster_sync.py`), worked
+
+Commit `426d2da`, two findings in the walk.
+
+Item 4, the parser differential. `LINK_HEADER_ENTRY` required a closing quote, so
+on an *unterminated* quote it treated the quoted value as bare text and resumed
+the `<...>` scan inside it, finding a link the platform never terminated — while
+`_split_outside_quotes` read the same characters as one quoted value. The closing
+quote is now optional (`"?`), so an unterminated quote consumes to the end of the
+header, the reading the splitter already took. **Probed against sixteen header
+shapes** (entry 8) — the new unterminated case plus every round-1/2 green — all
+sixteen correct.
+
+Item 5, the pin fails closed. `PinnedResolutionAdapter` fell through to the
+unpinned inner adapter on any pin miss, resolving the name a second time at dial
+time. It now refuses a pin miss for a host that is neither pinned nor in the small
+set the sync dials unpinned on purpose — the token endpoint, and in development
+the section's own exempt roster host, both threaded in by reference from
+`sync_section`. **Proved both ways** (entry 9 — a guard nobody watched catch its
+case is a comment): a unit probe showed the adapter raises on the diverged host
+and passes an allowed-unpinned host; then, at integration, neutering rule 6 left
+the pin catching the vector (green), and neutering both left it red. The probes
+were reverted before committing.
+
+**Where the fix went, and where it did not.** The pin allowlist is
+`{token endpoint host, exempt host}` per section, populated after the connector's
+registration is resolved. In production the exempt (stored) host is judged and
+pinned anyway, so its allowlist entry is redundant there; in development it is
+the one host dialled unpinned and the entry is load-bearing. The fail-closed is
+second-layer — rule 6 refuses the diverging address before the walk pins it — so
+the pin miss is only reachable if rule 6 is removed, which is exactly why the
+battery must remove rule 6 to see the pin assert.
+
+## Round 3 verification
+
+364 passed across the three round-3 modules plus every adjacent one (the five
+roster-sync modules, the address-rules integration module, the debounce-index
+module, `test_alembic_baseline.py`, `test_identity_schema.py`); ruff format, ruff
+check and mypy over the two changed files clean. No schema moved, so no migration
+round trip was owed. The constraint-names test now depends on `configured_env`,
+so it passed under the module-scoped run; per the coordinator I did not run the
+full `-n 4` suite.
+
+## Records reconciled this round
+
+`docs/MISTAKES.md`'s index counters for entries 34 and 8 were bumped in rounds 1
+and 2, but the incident files under `docs/mistakes/` were not — the counters
+disagreed with the table, which the spec-conformance pass flagged as a HIGH on
+#121. This round brings the incident files up to match: `34-*.md` to `Caught: 3`
+and `08-*.md` to `Caught: 7`, each with a paragraph documenting this round's real
+instance (the sixteen-shape and three-reading probes for 8; the redirect-and-read
+-`$?` discipline across every probe for 34). The index counters were already at 3
+and 7, so they are unchanged and now agree with the incident files.

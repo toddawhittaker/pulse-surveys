@@ -1,6 +1,6 @@
 # Entry 8. Prescribing a fix without probing it
 
-**Caught: 6**
+**Caught: 7**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -55,6 +55,21 @@ And note the shape: this candidate failed *open*, which is the direction a
 confidentiality guard must never take — it decides from the absence of evidence,
 so an empty answer is a yes. Probing is what turned that from a review finding
 into fifteen minutes.)*
+
+*(In E1's boundary-fix batch A, round 3, twice on one round's fixes. The security
+rule 6 rewrite was handed down as a one-line change — compare the dialled host
+directly against the judged one — and before it was written the settled design
+was run against fifteen host vectors: the five divergences it must refuse and the
+ten legal spellings it must accept, each read three ways (parsed, dialled, and
+the judged name re-read). It held, and the probe was kept as the record. The
+parser's unterminated-quote fix was probed the same way against sixteen header
+shapes, which is where "does this still pass every round-1 and round-2 green"
+stopped being a hope. And the pin's fail-closed — a guard chosen precisely
+because it sits behind rule 6 and is never reached in normal operation — was
+proved to fire against the diverged host before it was believed, then exposed by
+removing rule 6, exactly entry 9's demand made on a guard that would otherwise be
+a comment. The one-line prescription was correct; the probe is what let it be
+believed rather than argued, and it is the same fifteen minutes each time.)*
 
 **What happened.** `hide_input_in_errors=True` was the obvious fix for a
 credential appearing in a pydantic validation error. It cleans `str(exc)` and
