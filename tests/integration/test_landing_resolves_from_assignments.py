@@ -636,6 +636,7 @@ def test_the_administrator_lands_on_admin_at_the_web_door(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.invariant
 def test_a_launch_whose_claims_say_instructor_lands_by_the_rows_and_never_on_instructor(
     launch_driver: Any,
     provisioning_contract: Any,
