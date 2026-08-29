@@ -421,6 +421,7 @@ def test_the_two_hat_person_resolves_to_one_person_row_through_both_doors(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.invariant
 def test_a_second_person_entering_by_launch_resolves_to_their_own_person_row(
     launch_driver: Any,
     provisioning_contract: Any,
