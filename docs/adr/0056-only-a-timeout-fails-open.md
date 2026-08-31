@@ -4,7 +4,9 @@
 its rows wrong; the decision that the fail-open is narrower than "any failure"
 stands, and where the line sits has moved. Amended 2026-08-21 (E0-37): item 12
 closed the keyless-cleartext allowance this record used to name, and item 13
-recorded why HTTP 429 and 500 sit outside the floor. The taxonomy is unchanged.
+recorded why HTTP 429 and 500 sit outside the floor. Amended 2026-08-31: the
+provider library changed transport packages, so the rule below now names the
+exception classes of both. The taxonomy is unchanged by either amendment.
 **Date:** 2026-08-18
 **Tickets:** E0-13, E0-37
 
@@ -97,10 +99,29 @@ louder: E2 sees the error on the submit path and answers for it.
 **The classification is made on the exception chain, never on a message.** The
 library flattens all of these into one class carrying a sentence — "Request timed
 out." against "Connection error." — and a rule that reads either breaks when the
-library rewords it. `_unanswered_outcome` looks for `httpx.ReadTimeout` and
-`httpx.WriteTimeout` *specifically* rather than for their common parent, which is
+library rewords it. `_unanswered_outcome` looks for `ReadTimeout` and
+`WriteTimeout` *specifically* rather than for their common parent, which is
 the mistake this revision corrects. **A chain the check cannot read is treated as
 unreachable**, so an unrecognised failure surfaces rather than being absorbed.
+
+> **Amended 2026-08-31.** Those class names used to be written here, and matched
+> in the code, as `httpx.ReadTimeout` and `httpx.WriteTimeout`. pydantic-ai built
+> its OpenAI client on `httpx` up to 2.31 and on `httpx2` — pydantic's fork —
+> from 2.32, so a chain that used to carry `httpx.ReadTimeout` now carries
+> `httpx2.ReadTimeout`. The fork keeps the names and the hierarchy and is a
+> different set of class objects, so the old check matched nothing the new
+> transport raises: measured against the bump to 2.35.3, every unanswered
+> request fell through to the unreachable default and a read timeout raised
+> instead of flooring, which is §3.3's case blocking a student. The rule now
+> names the classes of both packages. `httpx` stays in it because this project
+> uses it directly for its own requests and pydantic-ai still accepts an `httpx`
+> client on a deprecated path.
+>
+> **The taxonomy is untouched.** Both packages are matched at exactly the same
+> two points: read and write timeouts specifically, then the parent
+> `TimeoutException` for the connect and pool cases that must not floor. Nothing
+> moved between the columns of the table above, and no case matches on a base
+> class that did not already.
 
 **`AI_PROVIDER_BASE_URL` carries no credential of its own**, and is refused at
 startup if it does — over https as well as http, and on loopback as well as off

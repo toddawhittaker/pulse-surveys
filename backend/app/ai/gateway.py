@@ -82,6 +82,7 @@ from functools import cache
 from typing import Any, TypeVar
 
 import httpx
+import httpx2
 from pydantic import BaseModel, create_model
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
@@ -592,42 +593,71 @@ def _chain(failure: BaseException) -> Iterator[BaseException]:
         current = current.__cause__ or current.__context__
 
 
+# **Both transport packages, because the provider library changed which one it
+# uses and the names did not change with it.** pydantic-ai built its OpenAI
+# client on `httpx` up to 2.31; from 2.32 `pydantic_ai._http` builds it on
+# `httpx2`, pydantic's fork, and treats `httpx` as legacy. The fork's exception
+# classes have the same names and the same hierarchy — `ReadTimeout` under
+# `TimeoutException` under `TransportError` — and are a different set of class
+# objects, so `issubclass(httpx2.ReadTimeout, httpx.ReadTimeout)` is `False` and
+# a check written against one package silently matches nothing raised by the
+# other. That is what the bump to 2.35.3 did: every unanswered request fell
+# through to the unreachable default below, and §3.3's floor stopped applying to
+# the read timeout it exists for.
+#
+# Both are listed rather than one, because both can still occur. `httpx` is a
+# direct dependency this project uses for its own requests, and pydantic-ai
+# still accepts an `httpx` client on the deprecated path. Listing the concrete
+# classes rather than probing for a name is the same decision ADR 0056 makes
+# about messages: a rule that reads a spelling breaks when the spelling changes,
+# and a rule that reads the class does not.
+_REACHED_AND_SILENT = (
+    httpx.ReadTimeout,
+    httpx.WriteTimeout,
+    httpx2.ReadTimeout,
+    httpx2.WriteTimeout,
+)
+_ANY_TIMEOUT = (httpx.TimeoutException, httpx2.TimeoutException)
+
+
 def _unanswered_outcome(failure: ModelAPIError) -> tuple[type[AIGatewayError], str]:
     """Which class a request that got no answer belongs to, and what to say about it.
 
     Decided on the exception chain rather than on a message, because the layers
     above flatten every one of these into one class carrying a sentence —
     "Request timed out." against "Connection error." — and a rule that reads
-    either sentence breaks when the library rewords it. The types below are
-    `httpx`'s, which this project depends on directly and pins.
+    either sentence breaks when the library rewords it. The types are the
+    transport client's, and there are two clients: see `_REACHED_AND_SILENT`.
 
     **The line is whether the request reached an endpoint that could have
     answered.** A read or write timeout means the connection was open and the
     request was on it, which is §3.3's "did not answer in time". A *connect*
     timeout means nothing arrived — the packets went into a hole — and a pool
     timeout means the request never left this process. Both of those are
-    `httpx.TimeoutException` subclasses, which is why this looks for the two
-    specific ones rather than for the parent: E0-13's second review pass measured
-    a blackholed route flooring the classifier with zero requests reaching any
+    `TimeoutException` subclasses, which is why this looks for the two specific
+    ones rather than for the parent: E0-13's second review pass measured a
+    blackholed route flooring the classifier with zero requests reaching any
     server, under a rule that matched the parent.
 
     Measured on the pinned versions: a held request gives `ModelAPIError <-
-    APITimeoutError <- httpx.ReadTimeout`; a refused connection, a name that does
-    not resolve and a failed TLS handshake all give `... <- APIConnectionError <-
-    httpx.ConnectError`; a blackholed route gives `... <- httpx.ConnectTimeout`.
+    APITimeoutError <- httpx2.ReadTimeout <- httpcore2.ReadTimeout`; a refused
+    connection, a name that does not resolve and a failed TLS handshake all give
+    `... <- APIConnectionError <- httpx2.ConnectError`; a blackholed route gives
+    `... <- APITimeoutError <- httpx2.ConnectTimeout`. Under pydantic-ai 2.31 and
+    earlier the same three chains carried the `httpx` spellings of those names.
 
     A chain this cannot read is treated as unreachable, which is the safe
     direction: an unrecognised failure surfaces rather than being absorbed by
     §3.3's floor.
     """
     for link in _chain(failure):
-        if isinstance(link, httpx.ReadTimeout | httpx.WriteTimeout):
+        if isinstance(link, _REACHED_AND_SILENT):
             return (
                 AIProviderUnavailableError,
                 "The model endpoint accepted the request and did not answer within the task's "
                 "timeout.",
             )
-        if isinstance(link, httpx.TimeoutException):
+        if isinstance(link, _ANY_TIMEOUT):
             return (
                 AIProviderUnreachableError,
                 "The model endpoint could not be reached: the connection did not complete "

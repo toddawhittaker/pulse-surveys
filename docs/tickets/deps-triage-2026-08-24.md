@@ -42,6 +42,21 @@ amended where the shim changes its transport claims (the thread-bound client,
 fail-open path plus the error/retry paths triage skipped are exercised against
 the new pairing, not assumed from the one measured timeout.
 
+**Measured 2026-08-31 on PR #133, and the sentence above about the shim is no
+longer true.** Triage's measurement was of openai 3.x under `pydantic-ai-slim`
+2.31, where pydantic-ai still built the OpenAI client on `httpx` and the chain
+still carried `httpx.ReadTimeout`. `pydantic-ai-slim` 2.32 moved that client to
+`httpx2`, pydantic's fork; the fork keeps the class names while being a
+different set of class objects, so `isinstance(link, httpx.TimeoutException)`
+matched nothing the new transport raises. The bump to 2.35.3 made every
+unanswered request fall through to the unreachable default, and a read timeout
+raised instead of flooring — §3.3's own case blocking a student. Twelve tests in
+`tests/integration/test_ai_gateway_validity_roundtrip.py` caught it before merge.
+The gateway now names the classes of both packages and ADR 0056 records the
+rename. The error and retry paths triage skipped are exercised by that module's
+`[http-401]`, `[http-429]`, `[http-500]`, `[http-503]` and `[http-504]` rows,
+which stayed green throughout — the HTTP branch was never what broke.
+
 ### 2. A lockfile-agreement gate — owner: process, near-term; ride with or precede entry 1
 
 `make lock` uses `--strip-extras`, so the committed lock can satisfy `pip`
