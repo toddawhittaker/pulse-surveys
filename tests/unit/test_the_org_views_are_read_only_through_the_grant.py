@@ -282,10 +282,11 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
     name is a *string* rather than an `ast.Import` or `ast.ImportFrom`, so the
     import sweep has nothing to resolve, and the handler names no relation of its
     own for the SQL sweep to read. It is **recorded and not swept**: a sweep over
-    string constants that look like module names would fire on this file, on
-    every test that names a module under test, and on the docstrings that tell
-    people which module to call — red against correct code, which is the kind of
-    red that gets deleted rather than fixed. What stands against it is review of
+    string constants that look like module names would go red on the first
+    legitimate one written in application code — a plugin table, a lazy-import
+    registry, an error message naming the module to call — which is red against
+    correct code, and that is the kind of red that gets deleted rather than
+    fixed. What stands against it is review of
     a handler that imports dynamically at all, which is not a shape anything in
     this repository writes.
   - **Migrations.** `backend/alembic.ini`'s revisions live outside
