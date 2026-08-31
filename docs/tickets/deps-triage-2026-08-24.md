@@ -127,12 +127,19 @@ when that range widens. E1-03's record is
 ### 4. `@types/node` tracks the runtime — owner: E1
 
 #81 (20.19.43 → 26.2.0) was green because nothing ties `@types/node` to the
-Node 20 CI actually runs; tsc would happily accept Node 26 APIs the runtime
+Node 20 CI ran at the time; tsc would happily accept Node 26 APIs the runtime
 lacks. Triage decision: types track the runtime's Node major.
 
 **Done when** a guard ties `@types/node`'s major to `NODE_VERSION` the way
 `test_image_pins_agree.py` ties Postgres, and `dependabot.yml` ignores
 `@types/node` majors so the bump arrives only when `NODE_VERSION` moves.
+
+**Done, 2026-08-31.** E1-02 landed the guard and the `dependabot.yml` ignore,
+tying `@types/node`'s major to `NODE_VERSION`. #134 (merged as 6e48520)
+extended the tie to the third side — every Dockerfile `FROM node:` stage —
+and moved the runtime itself from Node 20 to Node 26.
+`tests/unit/test_types_node_tracks_runtime.py` is the guard, and now compares
+all three.
 
 ### 5. The Python 3.14 platform decision — owner: unscheduled; a deliberate ticket, E13 at the latest
 
