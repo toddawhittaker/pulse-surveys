@@ -319,14 +319,22 @@ def test_the_denial_module_sweep_flags_a_planted_offender_and_spares_its_near_mi
     the sweep green over a module that is half inside the pass; the second drags
     the gate's own machinery guards into §4.1.
 
-    **What none of this kills, said rather than left to be discovered**
-    (`docs/MISTAKES.md` entry 14): *deleting* a shape. A shape that is gone
-    matches nothing, so there is nothing for the last assertion to check, and the
-    real modules it used to demand simply stop being demanded — with this file and
-    the sweep below both green. That is the same disclosed limit the module
+    **Deleting a shape takes two steps, and only the second one is silent** — said
+    precisely, because the credit and the gap are both easy to state wrongly.
+    Delete a shape *alone* and this test goes **red**: the module planted for that
+    shape drops out of `demanded` while `PLANTED_DEMANDED` still names it, so the
+    demanded-set equality fails and its message names the shape. That is the
+    ordinary way somebody would do it, and it is covered.
+
+    **What is silent is deleting the shape and its planted module in the same
+    change** (`docs/MISTAKES.md` entry 14). The two assertions agree with each
+    other again — nothing is demanded that should not be, and every surviving
+    shape still has a sample — while the real modules that shape used to demand
+    are demanded by nothing, with this file and the sweep below both green. That
+    two-step deletion is the disclosed limit, and it is the same one the module
     docstring states from the other end: the shapes are an inventory of a naming
-    convention, they are not a structure the guarded set cannot shrink, and the
-    class is carried to E2 rather than pretended closed here.
+    convention, not a structure the guarded set cannot shrink, and the class is
+    carried to E2 rather than pretended closed here.
     """
     for name, source in PLANTED_MODULES.items():
         (tmp_path / name).write_text(source, encoding="utf-8")

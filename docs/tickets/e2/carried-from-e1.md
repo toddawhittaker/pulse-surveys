@@ -339,13 +339,17 @@ none reachable today.
 - The denial-module closure sweep's inventory is a naming convention
   (`DENIAL_NAME_SHAPES` in
   `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`),
-  so a §4.1 denial module named outside every shape escapes it, and a
-  deleted shape un-demands its modules with no test going red — both
-  disclosed in the sweep's own docstring after the singular
-  `_name_nobody` spelling nearly escaped this way (PR #130's review caught
-  it). **Owner:** E2's breakdown. Done when the sweep's inventory has a
-  source the naming convention cannot shrink, or the E2 boundary review
-  re-affirms the disclosed limit in writing.
+  with two disclosed limits, stated precisely because the first draft of
+  this bullet got them wrong: a §4.1 denial module named outside every
+  shape escapes the sweep (the singular `_name_nobody` spelling nearly
+  escaped exactly this way; PR #130's review caught it), and deleting a
+  shape **together with its planted sample in the same change** is green
+  in both tests while the modules that shape demanded are demanded by
+  nothing. A shape deleted *alone* is red on the demanded-set equality —
+  that half is covered. The paired deletion is the one a future editor
+  could do by accident while tidying. **Owner:** E2's breakdown. Done when
+  the sweep's inventory has a source the naming convention cannot shrink,
+  or the E2 boundary review re-affirms both disclosed limits in writing.
 
 ## Owned by the spec already
 

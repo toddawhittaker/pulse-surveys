@@ -57,8 +57,12 @@ was not wrong before: the denial below carried `@pytest.mark.invariant` and ran
 in that pass exactly as it does now. What was wrong is what the *next* denial
 test in this module would have inherited, which is nothing —
 `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
-demands the module-level form for that reason and names this module as one of the
-five it found. This module holds two tests, and the change makes an invariant of
+demands the module-level form for that reason, and this module was one of the
+four it found on the day it landed. A fifth followed, the launch-views module,
+which that sweep's first shape list did not reach and which this pull request's
+own review found instead — three counts and three different finders, none of them
+a list, as that file's own record says. This module holds two tests, and the
+change makes an invariant of
 the other one: `test_the_section_row_reader_reads_a_rows_text_and_attributes_and_
 no_other_row`, the control over the row reader. That is the whole cost and it is
 small — the reader is the instrument this file's denial is measured with, and a
