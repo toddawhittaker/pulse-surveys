@@ -65,6 +65,10 @@ schema first buys.
    twice changes nothing.
 4. `make ci` green, including migration drift and the §4.1 invariant pass
    (which must still collect — the suite's non-emptiness guard is the canary).
+5. `response`'s submission timestamp columns declare **no server default** —
+   asserted by a test that inspects the live table, not by review, because
+   E2-08 writes them through the clock service and a `func.now()` default
+   would silently win.
 
 ## Out of scope
 

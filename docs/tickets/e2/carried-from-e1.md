@@ -333,9 +333,11 @@ none reachable today.
   no generative purview coverage — §4.1 item 2 is proven on hand-built
   fixtures only, which stands while the union computation is E9's (E9
   already owns the Hypothesis purview properties, listed below).
-  **Owner:** E2 for the comment correction, done when the comment counts
-  what the sweep polices; the purview note is E9's already and carries no
-  work here.
+  **Owner:** E2 for the comment correction, done when the comment stops
+  asserting a count and points at the catalog the sweep reads (amended at
+  the E2 breakdown: this entry first said "counts what the sweep polices",
+  and a written count re-creates the drift the fix exists to end); the
+  purview note is E9's already and carries no work here.
 - The denial-module closure sweep's inventory is a naming convention
   (`DENIAL_NAME_SHAPES` in
   `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`),

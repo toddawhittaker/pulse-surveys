@@ -91,13 +91,22 @@ policy is exactly the async-reclassify enqueue this ticket writes).
    re-classification lands a second row, and the request returns inside the
    §10 budget rather than hanging on the worker (MISTAKES entry 41's
    near-miss is the test). Mock told to answer 503 — floors. Mock told to
-   answer 500 — the recorded refused-behavior, not the floor. Both cells
-   run, and the ADR names the choice.
+   answer 500 — the recorded refused-behavior, not the floor. And the
+   *unreachable* row runs too, at the integration level with the provider
+   address pointed at a closed port (a mock that answers cannot mint a
+   connection that fails): the recorded unreachable-behavior, **not the
+   floor** — flooring on a blackholed provider is the exact defect
+   ADR 0056's 2026-08-31 amendment records returning once already. All
+   three cells run, and the ADR names the choices.
 3. A second submission racing the first cannot produce two responses for one
    (student, section, week) — the constraint is seen refusing, not cited
    (MISTAKES entry 9).
 4. Every user-facing string this path serves is externalized where E2-11's
    inventory will read it, and says what §4.1 items 4–5 permit.
+5. A dev-clock submission stores the clock service's time: an integration
+   test sets the override, submits, and reads the row's timestamp back
+   inside the pretend window — the criterion that makes the no-server-default
+   rule in E2-05 mean something.
 
 ## Out of scope
 

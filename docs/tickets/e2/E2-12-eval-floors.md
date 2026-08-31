@@ -38,7 +38,15 @@ demands of any probe that decides whether a gate runs;
 `.env`. Hundreds of live calls per merge is exactly what this design refuses.
 
 Read first: ADR 0002 whole (both amendments); the `evals` and `detect` jobs
-and the `changed` job in `.github/workflows/ci.yml`; SPEC §9.3, §7.4 (typed
+and the `changed` job in `.github/workflows/ci.yml`; **the two tests that
+police the step guards before rewriting one** —
+`tests/unit/test_the_detect_probes_see_the_files_their_jobs_run.py` requires
+every expensive gate's step condition to mention
+`needs.changed.outputs.inert`, and its sibling
+`test_no_expensive_gate_is_guarded_the_wrong_way_round` reads the operator —
+so the new `ai_surface` clause **composes with** the existing inert clause
+rather than replacing it, and the tempting repair after a red round (touch
+the guard test) is the wrong one; SPEC §9.3, §7.4 (typed
 contracts are the eval fixtures); ADR 0031, 0032 (prompt immutability —
 grown eval cases cite prompt versions); `.claude/review-fixtures/eval-floor-lowered.diff`
 and the review-selftest that uses it; MISTAKES entries 9 and 36 (a gate that

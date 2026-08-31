@@ -73,6 +73,12 @@ make).
 
 ## Out of scope
 
+- An *unreachable* selector — deliberately. A mock that answers cannot fail
+  to connect, so ADR 0056's unreachable row cannot be minted by any response
+  this service returns. E2-08 drives that row at the integration level with
+  the provider address pointed at a closed port; this mock covers the
+  unavailable and refused rows only.
+
 - Moderation, summary, draft, and draft-check verdicts — each lands with the
   epic that builds its task (E4, E6, E7); the mock grows then.
 - Any eval-suite use — evals measure the real model (E2-12); a mock that

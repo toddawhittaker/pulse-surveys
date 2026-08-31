@@ -106,7 +106,7 @@ it. The entries' own done-whens govern; the tickets point at them.
 | Item | Lands in |
 |---|---|
 | The `views_sql` exemption and the import guard disagree (deadline: before E2's first read path) | E2-01 |
-| Org-sweep record fixes: statement-pin docstrings, `authz.py` relation count | E2-01 |
+| Org-sweep record fixes: statement-pin docstrings, the `authz.py` comment's stale count | E2-01 |
 | M9 — the unscoped roster-ingestion trigger (deadline: before any roster-derived surface) | E2-02 |
 | Roster low findings: cycle-cap prefix, `unpinned_hosts` docstring, the `DESC` index | E2-02 |
 | The restore's raw constraint violation; the struck-precedent docstring | E2-03 |

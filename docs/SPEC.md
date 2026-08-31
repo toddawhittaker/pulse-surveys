@@ -576,7 +576,7 @@ The queue over the reveal machinery E0 already built (ADRs 0042, 0043, 0071): th
 *Exit:* a seeded threat comment reaches only Care, a false positive closes without identity ever surfacing, and every reveal leaves the audit trail §4 requires under the decided grain.
 
 **E11 — Admin console & observability** · medium
-LTI health and launch-outcome log — including §7.3's never-synced-section state, which is a different thing from an empty roster — job dashboard, AI provider metrics and spend, classifier drift panel with the override-to-eval feed, the full configuration surface (§6.3, picking up the term-map re-derivation if E2 did not), and the platform registration UI over E1's per-registration columns.
+LTI health and launch-outcome log — including §7.3's never-synced-section state, which is a different thing from an empty roster — job dashboard, AI provider metrics and spend, classifier drift panel with the override-to-eval feed, the full configuration surface (§6.3, including the term-map re-derivation ruled to this epic 2026-08-31 — see the E2 entry), and the platform registration UI over E1's per-registration columns.
 *Exit:* an operator can diagnose a failed launch and a stuck job without shell access.
 
 **E12 — Notifications** · small

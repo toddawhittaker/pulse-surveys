@@ -37,9 +37,10 @@ an inventory needs a source the guarded structure cannot shrink.
   externalized frontend string module(s) and the backend-served copy (bounce
   feedback, refusal messages) — per surface, from the source of record, not
   from a copied list. The registry shape is E2-08's (E2-09 and E2-10 follow
-  it), so this ticket consumes one convention rather than reconciling three. A governed surface registers itself; the collector
-  proves non-emptiness per registered surface (an empty surface is a failure,
-  not a pass) and carries a canary string it must always find.
+  it), so this ticket consumes one convention rather than reconciling
+  three. A governed surface registers itself; the collector proves
+  non-emptiness per registered surface (an empty surface is a failure, not
+  a pass) and carries a canary string it must always find.
 - The vocabulary assertions over the inventory: item 4's forbidden terms and
   shapes, item 5's exactly-once confidentiality copy per surface with its
   placement (submit bar) and the no-iconography rule as far as text can carry
