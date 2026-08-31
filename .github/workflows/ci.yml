@@ -20,7 +20,7 @@ permissions:
 # github-actions and pip ecosystems bump these; nothing here floats.
 env:
   PYTHON_VERSION: '3.13'
-  NODE_VERSION: '20'
+  NODE_VERSION: '26'
   RUFF_VERSION: '0.6.9'
   MYPY_VERSION: '1.11.2'
   PIP_AUDIT_VERSION: '2.7.3'

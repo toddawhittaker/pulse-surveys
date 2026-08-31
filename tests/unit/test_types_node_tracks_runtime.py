@@ -5,9 +5,9 @@
 runtime. `@types/node` is what tells `tsc` which standard-library surface exists.
 Nothing tied the two together, and Dependabot #81 proposed `@types/node`
 20.19.43 → 26.2.0 with the whole pipeline green: `tsc` would have accepted
-`node:` APIs that the Node 20 CI actually runs does not have, and the failure
-would have arrived at run time in the e2e job or later, as a missing export
-rather than as a type error.
+`node:` APIs that the Node 20 the pipeline then ran did not have, and the
+failure would have arrived at run time in the e2e job or later, as a missing
+export rather than as a type error.
 
 **The third document is `backend/Dockerfile`, and it was the gap.** Its
 `FROM node:` stage is the Node that builds the frontend bundle the image ships,
