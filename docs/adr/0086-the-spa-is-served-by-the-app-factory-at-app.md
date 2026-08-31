@@ -107,9 +107,13 @@ serve nothing — is worse: it reports 200 over an empty tree, which is ADR
   --workspace frontend` has run.
 - **The api image now depends on Node**, at build time only. It is pinned by tag
   and digest to the major `NODE_VERSION` names, so the bundle that ships and the
-  bundle the pull-request gate builds come from the same runtime; a drift between
-  those two would be a difference nothing compares. No `node_modules` and no node
-  binary reach the runtime stage.
+  bundle the pull-request gate builds come from the same runtime. When this was
+  written that agreement was a convention and the sentence here said a drift
+  between the two would be a difference nothing compares; it was, and Dependabot
+  proposed exactly that drift in #132. `tests/unit/test_types_node_tracks_runtime.py`
+  now compares them, together with `@types/node`, so the three majors move as one
+  or the gate is red. No `node_modules` and no node binary reach the runtime
+  stage.
 - **`design/tokens.css` became a build input.** `frontend/src/styles.css` imports
   it from outside its own package so that §7.6's single source stays one file,
   which means `.dockerignore` has to re-include it and the frontend build stage
