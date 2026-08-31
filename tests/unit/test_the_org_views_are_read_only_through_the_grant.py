@@ -205,6 +205,13 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
     E10 will want in `safety.py`.
     `test_each_pinned_exemption_names_exactly_the_relations_its_reason_names`
     goes red on the file whose reads have grown, and names what it grew by.
+  - **Appending a fifth path to `SQL_SWEEP_EXEMPT_FILES`** — the widening that
+    needs no containment test at all, and the one E2-01's security review found
+    this file green under.
+    `test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape` goes
+    red on its excused-set equality, which is written out rather than derived
+    from the tuple the sweep reads, so the two spellings have to move together
+    and a reviewer sees the decision.
   - **Restoring either package exemption** — `views_sql/` back in
     `sql_sweep_is_exempt` by containment, or in `import_sweep_is_exempt` by
     containment.
@@ -268,6 +275,19 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
     premise test exists to catch for the six names the rule is written about.
   - **`from app import views_sql` followed by attribute access**, for the import
     half: reaching the package and walking to it is a route this does not follow.
+  - **A dynamic import**, the same half's other blind spot, confirmed by E2-01's
+    security review rather than reasoned about:
+    `importlib.import_module("app.views_sql.queries")` in a handler, running one
+    of the statements on a session of its own, passes both halves. The module
+    name is a *string* rather than an `ast.Import` or `ast.ImportFrom`, so the
+    import sweep has nothing to resolve, and the handler names no relation of its
+    own for the SQL sweep to read. It is **recorded and not swept**: a sweep over
+    string constants that look like module names would fire on this file, on
+    every test that names a module under test, and on the docstrings that tell
+    people which module to call — red against correct code, which is the kind of
+    red that gets deleted rather than fixed. What stands against it is review of
+    a handler that imports dynamically at all, which is not a shape anything in
+    this repository writes.
   - **Migrations.** `backend/alembic.ini`'s revisions live outside
     `backend/app/`, and creating these relations is what they are for.
 
@@ -1277,10 +1297,20 @@ def test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape() -> N
     `test_no_module_outside_the_sanctioned_locations_runs_sql_naming_a_policed_relation`
     is where it gets reported.
 
-    **The mutations this exists to survive**: widening an exemption to a shape —
-    "a statement that only counts is fine", "a statement with a `WHERE` is fine" —
-    and widening it to a neighbourhood, by testing the path with `startswith`, by
-    file name, or by directory name. `services/authz_helpers.py`,
+    **The mutation E2-01's security review found this test surviving**, named
+    first because the repair is what the assertion below now looks like: a fifth
+    path **appended to `SQL_SWEEP_EXEMPT_FILES`**, with a raw read of
+    `enrollment` planted in that fifth file. The expectation was derived from the
+    same tuple the sweep reads, so both sides moved together and the whole file
+    stayed green — a widened exemption with nothing asserting against it. The
+    expectation is written out now, so appending to the tuple alone reds here, and
+    a fifth exemption costs two edits in one diff. The import half was never
+    exposed to this: it compares against one literal path.
+
+    **The other mutations this exists to survive**: widening an exemption to a
+    shape — "a statement that only counts is fine", "a statement with a `WHERE` is
+    fine" — and widening it to a neighbourhood, by testing the path with
+    `startswith`, by file name, or by directory name. `services/authz_helpers.py`,
     `api/v1/dev.py`, `api/safety.py`, `api/views_sql/queries.py` and the three
     package shapes (`views_sql/e2_planted_second_module.py`, `views_sql/loader.py`
     and `views_sql/v2/queries.py`) are in the lookalike list because each is what
@@ -1294,18 +1324,37 @@ def test_the_sql_sweep_exempts_four_locations_and_no_exemption_is_a_shape() -> N
             "path this list still excuses."
         )
     excused = sorted(
-        str(path.relative_to(REPO_ROOT))
+        path.relative_to(REPO_ROOT).as_posix()
         for path in APP_ROOT.rglob("*.py")
         if sql_sweep_is_exempt(path)
     )
-    expected = sorted(str(path.relative_to(REPO_ROOT)) for path in SQL_SWEEP_EXEMPT_FILES)
+    # **Written out, not derived from `SQL_SWEEP_EXEMPT_FILES`.** This is a
+    # deliberate second spelling of the same four paths, and E2-01's security
+    # review is why: with the expectation derived from the tuple the sweep reads,
+    # both sides moved together, and appending a fifth path to the tuple — with a
+    # raw read of `enrollment` planted in that fifth file — left this whole file
+    # green. Widening the exemption now takes two edits in one diff, which is the
+    # visible decision the failure message below has always demanded. Sorted, and
+    # spelled with `/` against `as_posix()` above, so the comparison is about the
+    # set and not about ordering or a path separator.
+    expected = [
+        "backend/app/api/dev.py",
+        "backend/app/services/authz.py",
+        "backend/app/services/safety.py",
+        "backend/app/views_sql/queries.py",
+    ]
     assert excused == expected, (
         f"The SQL sweep excuses {excused} under `backend/app/`, and the four files M8 settles on "
-        f"and E2-01 corrects hold {expected}. Every other module in the tree runs its reads "
+        f"and E2-01 corrects are {expected}. Every other module in the tree runs its reads "
         "through a grant function in `services/authz.py`; a fifth excused location is a fifth "
         "place SPEC §2.1's purview can be computed by whoever wrote the query, and it belongs in "
         "the pull request that adds it with the reason beside it — the three that are not the "
         "chokepoint each carry theirs at the top of this file.\n\n"
+        "**If you reached here by adding a path to `SQL_SWEEP_EXEMPT_FILES`, that is this "
+        "assertion working.** The list above is written out rather than derived from that tuple, "
+        "so a fifth exemption is two edits in one diff and a reviewer sees the decision. Add the "
+        "path here, with the reason beside the constant, and pin the file unless reading these "
+        "relations is the whole of what it is for.\n\n"
         "If the extra entries are other modules under `backend/app/views_sql/`, the package "
         "exemption is back: it was a containment test until E2-01, and it excused every module "
         "anybody filed in that package — which is the two-step route to the institution the PR "
