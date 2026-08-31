@@ -172,9 +172,15 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
   - **Reading the catalog one directory deep** — `VIEWS_SQL_DIR.glob("*.sql")` in
     place of `rglob`, which is one word and changes nothing about today's tree.
     `test_the_policed_inventory_reads_a_view_filed_in_a_subdirectory_of_the_catalog`
-    goes red on the nested view and the relation it is built on. It also holds
-    the other side of that repair: widening to `rglob("*")` would police a
-    `CREATE VIEW` written in a note, and the same test names it.
+    goes red on the nested view and the relation it is built on.
+  - **Widening that repair past `.sql`** — a recursive read that takes every
+    *file* under the catalog whatever its extension, which polices a `CREATE
+    VIEW` written in a note. The same test goes red, printing the two relations
+    the note contributed. Its bare cousin, `rglob("*")`, is red too but not here:
+    it yields the subdirectory itself and raises `IsADirectoryError` inside
+    `policed_relations` before any inventory exists. Both are caught, one as an
+    assertion and one as a crash, and the difference is recorded so neither is
+    cited as the other.
 
 **What this cannot see**, stated so nothing here is cited as more than it is
 (`docs/MISTAKES.md` entry 14):
@@ -865,15 +871,27 @@ def test_the_policed_inventory_reads_a_view_filed_in_a_subdirectory_of_the_catal
     and it reopens it silently.
 
     **The mutation this kills:** reading the catalog with `glob("*.sql")` instead
-    of `rglob("*.sql")` — one word, which is the state of `policed_relations` as
-    this test is written. The nested view's name and its base relation are both
-    absent from the inventory under it, and the equality below names them.
+    of `rglob("*.sql")` — one word, which is the state `policed_relations` was in
+    when this test was written. The nested view's name and its base relation are
+    both absent from the inventory under it, and the equality below names them.
 
     **The near miss it tolerates:** a file in that same subdirectory that is not
-    `.sql`. A `CREATE VIEW` written in a note or a README contributes nothing,
-    which is what keeps the repair from being `rglob("*")` — that widening would
-    put `e1_depth_text_view` and `e1_depth_text_base` in the policed set, and the
-    equality below says so.
+    `.sql`. A `CREATE VIEW` written in a note or a README contributes nothing, and
+    that is what stops the repair being a recursive read of *everything* — a
+    catalog read that took any file would police `e1_depth_text_view` and
+    `e1_depth_text_base`, and the equality below prints both.
+
+    **The widening comes in two shapes and they die differently**, which is worth
+    the sentence because only one of them dies here (`docs/MISTAKES.md` entry 9:
+    do not cite a guard for a case it was never run against). A bare `rglob("*")`
+    never reaches an inventory at all — it yields the `reporting/` directory
+    itself, and reading it raises `IsADirectoryError` inside `policed_relations`.
+    That is a red, and a loud one, but it is a crash rather than this assertion.
+    The shape this test actually kills is the *file-filtered* recursive read —
+    every file under the catalog, directories skipped, extension ignored — which
+    builds an inventory perfectly well and puts the two text relations in it.
+    That is also the shape somebody writes on purpose, reaching for "read the
+    whole catalog", so it is the one worth a test.
 
     **The control is the top-level file**, asserted before the nested one. Without
     it a `policed_relations` that read nothing at all — a monkeypatch that did not

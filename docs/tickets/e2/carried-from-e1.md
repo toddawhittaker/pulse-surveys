@@ -308,8 +308,9 @@ none reachable today.
   the index is comparable or the `DESC` has a reader.
 - `tests/integration/test_the_section_binding_survives_a_downgrade.py`
   cites `e2c94b6a1f70` as a preserve/restore precedent that the boundary
-  record corrections in the same merge struck as false. One-line docstring
-  fix on next touch.
+  record corrections in the same merge struck as false. **Owner:** E2,
+  with the migration-message bullet below — same file family, one ticket.
+  Done when the docstring names no precedent the record has struck.
 - Downgrade below `b8c41f7d2e05`, delete the registration, upgrade back:
   the restore hands the foreign key a dead deployment and the operator gets
   a raw constraint violation instead of the migration's usual actionable
@@ -317,8 +318,10 @@ none reachable today.
   survive for a retry. **Owner:** E2. Done when that path refuses with a
   sentence naming the preserved table.
 - The stored roster host joins `unpinned_hosts` in every environment while
-  the docstring beside it calls that entry development-only. One-line
-  narrowing on next touch of the sync's transport.
+  the docstring beside it calls that entry development-only. **Owner:**
+  E2's roster work, alongside M9, which owns the sync's transport. Done
+  when the entry is environment-narrowed or the docstring states what the
+  code does.
 - The roster walk's cycle/page-cap terminator is the one exit that discards
   members it already read; every other failure exit keeps the prefix with
   `complete=False`. A platform that advertises `next` on a full final page
@@ -330,6 +333,19 @@ none reachable today.
   no generative purview coverage — §4.1 item 2 is proven on hand-built
   fixtures only, which stands while the union computation is E9's (E9
   already owns the Hypothesis purview properties, listed below).
+  **Owner:** E2 for the comment correction, done when the comment counts
+  what the sweep polices; the purview note is E9's already and carries no
+  work here.
+- The denial-module closure sweep's inventory is a naming convention
+  (`DENIAL_NAME_SHAPES` in
+  `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`),
+  so a §4.1 denial module named outside every shape escapes it, and a
+  deleted shape un-demands its modules with no test going red — both
+  disclosed in the sweep's own docstring after the singular
+  `_name_nobody` spelling nearly escaped this way (PR #130's review caught
+  it). **Owner:** E2's breakdown. Done when the sweep's inventory has a
+  source the naming convention cannot shrink, or the E2 boundary review
+  re-affirms the disclosed limit in writing.
 
 ## Owned by the spec already
 

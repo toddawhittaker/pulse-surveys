@@ -58,11 +58,13 @@ in that pass exactly as it does now. What was wrong is what the *next* denial
 test in this module would have inherited, which is nothing —
 `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
 demands the module-level form for that reason and names this module as one of the
-four it found. So the two readers above it are now invariant tests too. That is
-the cost and it is small: they are the instrument this file's denial is measured
-with, and a module whose reader can be skipped while its denial cannot is a
-module whose denial is measured by nothing. `tests/unit/test_no_service_reads_an_
-identity_table_directly.py` marks its own control the same way.
+five it found. This module holds two tests, and the change makes an invariant of
+the other one: `test_the_section_row_reader_reads_a_rows_text_and_attributes_and_
+no_other_row`, the control over the row reader. That is the whole cost and it is
+small — the reader is the instrument this file's denial is measured with, and a
+module whose instrument can be skipped while its denial cannot is a module whose
+denial is measured by nothing. `tests/unit/test_no_service_reads_an_identity_
+table_directly.py` marks its own control the same way.
 """
 
 from html.parser import HTMLParser

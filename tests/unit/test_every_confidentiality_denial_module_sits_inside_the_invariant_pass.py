@@ -16,19 +16,30 @@ this repository asks today: **which modules ought to be in the marked set?**
 
 **The set is derived from the filename, and that is the whole trick.** This
 project names a denial module after what it denies — `..._names_nobody`,
-`..._repeats_nothing...`, `..._names_nothing...` — so the name is a claim the
-author already made, in the one place a reviewer of the diff certainly reads. A
-sweep over those names needs no list anybody maintains, which is what M6 cost and
-what a hand-written inventory would cost again.
+`..._name_nobody`, `..._repeats_nothing...`, `..._names_nothing...` — so the name
+is a claim the author already made, in the one place a reviewer of the diff
+certainly reads. A sweep over those names needs no list anybody maintains, which
+is what M6 cost and what a hand-written inventory would cost again.
 
-**What the shapes cannot see**, stated so nothing here is cited as more than it
-is (`docs/MISTAKES.md` entry 14). A §4.1 denial written under some other name is
-not demanded by this sweep and never will be: `tests/integration/
-test_the_launch_views_name_nobody.py` says `name_nobody`, not `names_nobody`, and
-is outside these shapes. The remedy when a new denial module wants covering is
-to name it in one of these shapes or to add a shape here, in the pull request
-that adds the module. This closes the naming convention the fix round used; it
-does not close §4.1.
+**The shapes are an inventory of a naming convention, and that is their
+disclosed limit** (`docs/MISTAKES.md` entry 14, on an enumeration reported as an
+impossibility). A §4.1 denial written under a name none of these shapes reaches
+is not demanded here, and no amount of widening makes the list closed — the
+names are a convention, not a structure the guarded set cannot shrink. **That
+class is carried to E2** (`docs/tickets/e2/carried-from-e1.md`); it is not closed
+here and this file should not be read as closing it. What is closed is the
+convention: a module named in one of these shapes is inside the isolated pass or
+this test says which one is not.
+
+**The singular spelling is here because the review of this pull request found
+it.** `tests/integration/test_the_launch_views_name_nobody.py` is a wholly-denial
+module in precisely the currency this rule refuses — three tests, each decorated,
+nothing at the module level — and it escaped the first version of this sweep by
+spelling `name_nobody` rather than `names_nobody`. One letter. It is fixed in the
+same change that added the shape, and the episode is the argument for the
+paragraph above rather than against it: a convention has as many spellings as
+authors, and the honest thing is to say where the inventory ends rather than to
+keep widening it and calling it closed.
 
 **One currency, and the module-level form is it.** A test can be marked two ways
 and only one of them is demanded here. That is deliberate, and it is this
@@ -52,13 +63,15 @@ inside the pass reads, to every later reader, exactly like a module inside it.
 The marker moved to the module level and the decorator went with it, which is the
 repair this rule asks for — one line in the module, never a widening here.
 
-**The re-review found four modules, not the three it reported.** Three were the
-fix round's own new denial modules; the fourth was the dev console above, half
-in. The count is recorded because it is the shape of the finding: M6 was closed
-by marking a list of modules, and a list is what a closure exists to replace.
+**The count went three, then four, then five, and the sequence is the finding.**
+The re-review reported three — the fix round's own new denial modules. This sweep
+found a fourth on the day it landed, the dev console above. The pull request's own
+review found a fifth, the launch-views module, which no shape then reached. M6 was
+closed by marking a list of modules; every count after it was found by something
+other than a list, which is the whole argument for a closure.
 
-**The module-level form includes the list spelling**, and it has to. Three of the
-four modules already carried `pytestmark = [pytest.mark.integration,
+**The module-level form includes the list spelling**, and it has to. Four of the
+five modules already carried `pytestmark = [pytest.mark.integration,
 pytest.mark.lti]`, and demanding the bare `pytestmark = pytest.mark.invariant` of
 them would be demanding they drop the markers that place them in the suite — a
 property no implementation could satisfy (`docs/MISTAKES.md` entry 24). What is
@@ -88,11 +101,18 @@ MARKER = "invariant"
 MODULE_MARKS = "pytestmark"
 
 # The filename shapes this project gives a confidentiality-denial module, as
-# substrings of the module's stem. Written as the re-review names them, and each
-# one is a sentence an author wrote about what the module proves: the page
-# repeats nothing it was handed, the log names nobody, the refused write names
-# nothing from the launch.
-DENIAL_NAME_SHAPES = ("_names_nobody", "repeats_nothing", "names_nothing")
+# substrings of the module's stem. Each one is a sentence an author wrote about
+# what the module proves: the page repeats nothing it was handed, the log names
+# nobody, the launch view names nobody, the refused write names nothing from the
+# launch.
+#
+# **`_name_nobody` is not covered by `_names_nobody`** and is listed separately
+# for that reason — the singular is not a substring of the plural, one letter
+# stands between them, and `test_the_launch_views_name_nobody.py` escaped the
+# first version of this sweep on exactly that letter. Adding a shape is a
+# widening of a convention rather than a closing of a class; the module docstring
+# says where the inventory ends and who owns the class.
+DENIAL_NAME_SHAPES = ("_names_nobody", "_name_nobody", "repeats_nothing", "names_nothing")
 
 # Two real modules that certainly carry the module-level marker, used as the
 # control that the reader below can find one on this tree rather than only on a
@@ -106,10 +126,12 @@ CERTAINLY_MARKED = (
 )
 
 # ---------------------------------------------------------------------------
-# The planted tree for the control. Six modules: four the shapes must demand and
-# two they must not, and among the demanded four every marking state a module can
-# be in — the module-level form, the list form, per-test decoration, and nothing
-# at all.
+# The planted tree for the control. Seven modules: five the shapes must demand
+# and two they must not. Among the demanded five, every marking state a module
+# can be in — the module-level form, the list form, per-test decoration, and
+# nothing at all — and every shape in `DENIAL_NAME_SHAPES`, so that a shape added
+# to that tuple and matched by nothing here is not left as a rule nobody has run
+# in either direction (`docs/MISTAKES.md` entry 3).
 #
 # Planted under `tmp_path` rather than pointed at real files, because a control
 # built out of the tree it is controlling moves when the tree moves: the day
@@ -128,8 +150,8 @@ PLANTED_MODULES = {
         f"import pytest\n\npytestmark = pytest.mark.{MARKER}\n\n\n{A_DENIAL_TEST}"
     ),
     # Demanded, and marked in the list form — which is what a module already
-    # carrying `integration` and `lti` has to use, and therefore what three of
-    # the four real offenders look like now they are fixed.
+    # carrying `integration` and `lti` has to use, and therefore what four of
+    # the five real offenders look like now they are fixed.
     "test_a_planted_write_names_nothing_from_the_launch.py": (
         f"import pytest\n\npytestmark = [pytest.mark.{MARKER}, pytest.mark.integration]\n\n\n"
         f"{A_DENIAL_TEST}"
@@ -143,9 +165,21 @@ PLANTED_MODULES = {
         "import pytest\n\npytestmark = [pytest.mark.integration]\n\n\n"
         f"@pytest.mark.{MARKER}\n{A_DENIAL_TEST}"
     ),
-    # Demanded, and marked with nothing at all: the state three of the four real
-    # offenders were found in, and the state this rule is written against.
+    # Demanded, and carrying no `pytestmark` at all — a state the sample above
+    # does not cover, since that one has a `pytestmark` holding other marks and a
+    # reader could in principle handle "absent" and "present without `invariant`"
+    # differently. One real offender was found this way
+    # (`test_the_refusal_page_repeats_nothing_it_was_handed.py`); two more were
+    # found with a `pytestmark` list carrying `integration` and `lti` and no
+    # `invariant`, which is the sample above minus its decorator.
     "test_a_planted_console_names_nobody_at_all.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
+    # Demanded, and the singular shape. `_name_nobody` is not a substring of
+    # `_names_nobody`, so without this sample that tuple entry would be a rule no
+    # control had ever run — and it is the entry the pull request's own review
+    # had to find by hand, on `test_the_launch_views_name_nobody.py`. Marked with
+    # nothing, so it is demanded *and* flagged: a shape that matched but never
+    # reported would be as silent as one that never matched.
+    "test_a_planted_launch_view_name_nobody.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
     # Not demanded: the name carries no denial shape. Unmarked, so a sweep that
     # demanded it would fail on it and this module would be red against a test
     # that is nobody's §4.1 invariant.
@@ -165,6 +199,7 @@ PLANTED_DEMANDED = {
     "test_a_planted_write_names_nothing_from_the_launch.py",
     "test_a_planted_log_names_nobody.py",
     "test_a_planted_console_names_nobody_at_all.py",
+    "test_a_planted_launch_view_name_nobody.py",
 }
 
 PLANTED_CARRYING_THE_MARKER = {
@@ -252,7 +287,7 @@ def test_the_denial_module_sweep_flags_a_planted_offender_and_spares_its_near_mi
 ) -> None:
     """The instrument, both directions, before the tree is judged with it.
 
-    Two functions and four claims, and none of them can be believed off a green
+    Two functions and five claims, and none of them can be believed off a green
     over the real tree — a shape matcher that matched nothing and a marker reader
     that found a marker on everything both make the sweep below silent
     (`docs/MISTAKES.md` entry 3, and entry 9 on citing a guard nobody has run).
@@ -262,8 +297,8 @@ def test_the_denial_module_sweep_flags_a_planted_offender_and_spares_its_near_mi
         carries `invariant` **passes**, in the bare form and in the list form.
         Without this half, a sweep that demanded the marker of nothing — or that
         could not read a `pytestmark` at all — would fail every module in the
-        tree and be deleted rather than fixed, and the list form is what three
-        of the four real offenders ended up in.
+        tree and be deleted rather than fixed, and the list form is what four
+        of the five real offenders ended up in.
       - a module whose name carries a shape and holds its marker **per test** is
         **flagged**. This is the discriminating case and the reason the rule pins
         one currency: a sweep that accepted the decorator would report such a
@@ -273,11 +308,25 @@ def test_the_denial_module_sweep_flags_a_planted_offender_and_spares_its_near_mi
       - a module whose name carries no shape is **not demanded**, marked or not,
         including `asserts_nothing`, which is neither `names_nothing` nor
         `repeats_nothing` and is the real machinery guard next door.
+      - **every shape in `DENIAL_NAME_SHAPES` matches one of these modules.** A
+        shape added to that tuple with nothing planted for it is a rule no
+        control has run in either direction, and the singular `_name_nobody` is
+        exactly how that goes wrong: it is one letter from `_names_nobody`, it is
+        not a substring of it, and a reader skimming the tuple sees a duplicate.
 
     **The mutation this kills:** widening `module_level_marks` to read decorators,
     or widening `carries_a_denial_shape` to a bare `"nothing"`. The first turns
     the sweep green over a module that is half inside the pass; the second drags
     the gate's own machinery guards into §4.1.
+
+    **What none of this kills, said rather than left to be discovered**
+    (`docs/MISTAKES.md` entry 14): *deleting* a shape. A shape that is gone
+    matches nothing, so there is nothing for the last assertion to check, and the
+    real modules it used to demand simply stop being demanded — with this file and
+    the sweep below both green. That is the same disclosed limit the module
+    docstring states from the other end: the shapes are an inventory of a naming
+    convention, they are not a structure the guarded set cannot shrink, and the
+    class is carried to E2 rather than pretended closed here.
     """
     for name, source in PLANTED_MODULES.items():
         (tmp_path / name).write_text(source, encoding="utf-8")
@@ -306,9 +355,24 @@ def test_the_denial_module_sweep_flags_a_planted_offender_and_spares_its_near_mi
         "reads decorators and cannot tell a module that is wholly inside the §4.1 pass from one "
         "that is half in — which is the state the re-review found and the reason the rule pins the "
         "module-level form.\n\n"
-        "If the list form is missing instead, the sweep cannot be satisfied by three of the four "
+        "If the list form is missing instead, the sweep cannot be satisfied by four of the five "
         "modules it is about: they already carry `pytestmark = [pytest.mark.integration, "
         "pytest.mark.lti]`, and the marker joins that list rather than replacing it."
+    )
+
+    unexercised = sorted(
+        shape for shape in DENIAL_NAME_SHAPES if not any(shape in path.stem for path in planted)
+    )
+    assert not unexercised, (
+        f"The shapes {unexercised} match none of the planted modules, so they are entries in "
+        f"`DENIAL_NAME_SHAPES` that no control has ever run in either direction — a rule that "
+        "would go on demanding real modules while nothing here had shown it matching anything "
+        "(`docs/MISTAKES.md` entry 3).\n\n"
+        "A shape added to that tuple gets a planted module in the same change. The one this "
+        "assertion exists for is `_name_nobody`: it is one letter from `_names_nobody`, it is not "
+        "a substring of it, and it reads like a duplicate to anybody skimming the tuple — which is "
+        "how `tests/integration/test_the_launch_views_name_nobody.py` escaped the first version of "
+        "this sweep and had to be found by a reviewer instead."
     )
 
 
@@ -327,7 +391,9 @@ def test_every_confidentiality_denial_module_carries_the_module_level_invariant_
     more and marked none, and no gate noticed, because the only gate on the marked
     set is one that reads the marked set. This sweep found a fourth the re-review
     had not — the dev console, which held its marker on one test rather than on
-    the module — which is the argument for a closure over a list in one line.
+    the module — and the pull request's own review found a fifth this sweep's
+    first shape list did not reach, the launch-views module. Three counts, three
+    different finders, none of them a list.
 
     **The mutations this kills**: a new confidentiality-denial module landing with
     no marker, which is the defect itself and the only way it has ever arrived;
@@ -335,9 +401,10 @@ def test_every_confidentiality_denial_module_carries_the_module_level_invariant_
     collector today and leaves the module's next test outside the pass.
 
     **The near misses that must stay green**: a module marked in the list form
-    beside `integration` and `lti`, which is what the modules in this finding will
-    look like fixed; and any module whose name carries no denial shape, which this
-    sweep does not reach at all — this closes a naming convention, not §4.1.
+    beside `integration` and `lti`, which is what four of the five modules in this
+    finding look like fixed; and any module whose name carries no denial shape,
+    which this sweep does not reach at all — this closes a naming convention, not
+    §4.1, and the module docstring says who owns the rest of the class.
 
     **Two controls, because a sweep for absence is satisfied by emptiness.** The
     demanded set must be non-empty, or "every one of them is marked" is a
@@ -400,7 +467,7 @@ def test_every_confidentiality_denial_module_carries_the_module_level_invariant_
             "",
             "The other repair, if a module named this way is genuinely not a §4.1 denial, is to "
             "rename it. Widening what this sweep accepts is not one of the answers: the re-review "
-            "of 2026-08-31 found M6's own defect recurring four modules later, and a rule that "
+            "of 2026-08-31 found M6's own defect recurring five modules later, and a rule that "
             "accepts every currency is the rule that let it.",
         ]
     )

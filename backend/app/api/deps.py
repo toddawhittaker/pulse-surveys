@@ -387,7 +387,6 @@ PAGE = """<!doctype html>
     --spruce: #1E3932;
     --spruce-60: #5B7269;
     --mist: #93A5A0;
-    --marigold: #DFA320;
     --marigold-deep: #8F6A10;
     --font-display: 'Literata', Georgia, serif;
     --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
