@@ -114,8 +114,10 @@ unreachable**, so an unrecognised failure surfaces rather than being absorbed.
 > request fell through to the unreachable default and a read timeout raised
 > instead of flooring, which is §3.3's case blocking a student. The rule now
 > names the classes of both packages. `httpx` stays in it because this project
-> uses it directly for its own requests and pydantic-ai still accepts an `httpx`
-> client on a deprecated path.
+> uses it directly for its own requests: the legacy entries are inert unless an
+> `httpx` exception reaches the chain, and correct if one does. 2.35.3's source
+> also carries a warning path for a caller that hands it an `httpx` client,
+> which was read rather than exercised.
 >
 > **The taxonomy is untouched.** Both packages are matched at exactly the same
 > two points: read and write timeouts specifically, then the parent

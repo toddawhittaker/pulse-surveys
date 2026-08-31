@@ -53,9 +53,16 @@ unanswered request fall through to the unreachable default, and a read timeout
 raised instead of flooring — §3.3's own case blocking a student. Twelve tests in
 `tests/integration/test_ai_gateway_validity_roundtrip.py` caught it before merge.
 The gateway now names the classes of both packages and ADR 0056 records the
-rename. The error and retry paths triage skipped are exercised by that module's
-`[http-401]`, `[http-429]`, `[http-500]`, `[http-503]` and `[http-504]` rows,
-which stayed green throughout — the HTTP branch was never what broke.
+rename. The error and retry paths triage skipped are exercised by
+`test_a_provider_condition_floors_or_raises_as_the_taxonomy_says`, whose
+`[http-401]`, `[http-429]`, `[http-500]`, `[http-503]` and `[http-504]` rows
+stayed green with only its `[read-timeout]` row red — the HTTP branch was never
+what broke. Three raising rows of
+`test_a_condition_outside_the_floor_leaves_no_floored_classification_behind`
+went red as well, but as collateral rather than through the HTTP branch: that
+test arranges a real read timeout at line 2426 to learn the floor's marker
+before it exercises its own condition, so the timeout defect failed it during
+its own setup.
 
 ### 2. A lockfile-agreement gate — owner: process, near-term; ride with or precede entry 1
 
