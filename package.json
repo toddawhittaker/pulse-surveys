@@ -11,9 +11,9 @@
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.62.1",
     "@types/node": "20.19.43",
-    "eslint": "10.9.0",
+    "eslint": "10.9.1",
     "license-checker-rseidelsohn": "5.0.1",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.67.0"
+    "typescript-eslint": "8.68.0"
   }
 }
