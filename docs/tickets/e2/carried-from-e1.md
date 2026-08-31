@@ -333,9 +333,11 @@ none reachable today.
   no generative purview coverage — §4.1 item 2 is proven on hand-built
   fixtures only, which stands while the union computation is E9's (E9
   already owns the Hypothesis purview properties, listed below).
-  **Owner:** E2 for the comment correction, done when the comment counts
-  what the sweep polices; the purview note is E9's already and carries no
-  work here.
+  **Owner:** E2 for the comment correction, done when the comment stops
+  asserting a count and points at the catalog the sweep reads (amended at
+  the E2 breakdown: this entry first said "counts what the sweep polices",
+  and a written count re-creates the drift the fix exists to end); the
+  purview note is E9's already and carries no work here.
 - The denial-module closure sweep's inventory is a naming convention
   (`DENIAL_NAME_SHAPES` in
   `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`),
@@ -359,5 +361,5 @@ resolve-only-your-own-subject rule, and the Hypothesis purview properties
 (E9, per `carried-from-e0.md`'s three entries); §4.1 item 1's assertion and
 the copy-inventory test (E2); `PlatformProfile` adapters (E3);
 supervision-graph and Lead-Faculty-mapping editing (E9); notifications
-(E12); term-map edits re-deriving section calendars (E2 or E11, ADR 0018
-and ADR 0021); real-LMS certification (post-v1, §14.4).
+(E12); term-map edits re-deriving section calendars (ruled E11, 2026-08-31,
+at the E2 breakdown; ADR 0018 and ADR 0021); real-LMS certification (post-v1, §14.4).

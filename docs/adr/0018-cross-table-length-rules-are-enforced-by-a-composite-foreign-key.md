@@ -157,7 +157,9 @@ weeks past the new end (and to any `survey_window` keyed to one) is scheduling
 and admin policy. That belongs to E2 and to E11's calendar editor (§6.3), which
 is where a length is edited. This ADR is where the hazard is recorded so it
 reaches them; the assertion that a term's weeks are 1..N *after* an edit belongs
-to whichever of them closes it.
+to whichever of them closes it. **Ruled 2026-08-31 at the E2 breakdown: E11's,
+with the editor** — E2's scheduling (E2-06) tolerates a missing week loudly and
+repairs nothing.
 
 **Deleting a term requires deleting its weeks first** (`ON DELETE RESTRICT`,
 matching every containment key in `app/models/org.py`). Deliberate: losing a term

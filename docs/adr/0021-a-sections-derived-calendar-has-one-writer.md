@@ -89,7 +89,8 @@ dates it was written with, and only a comparison against the map would show
 them disagreeing. This is the same shape ADR 0018 records for `week` rows after
 a term's length changes, it has the same owners — E2's scheduling and E11's
 calendar editor (§6.3), which is where a map is edited in the first place — and
-whoever builds that owns the re-derivation.
+whoever builds that owns the re-derivation. **Ruled 2026-08-31 at the E2
+breakdown: E11's, with the editor.**
 
 Because the columns are `NOT NULL` and no test fixture may leave them empty, any
 future test that inserts a `section` row directly has to invent all four. The

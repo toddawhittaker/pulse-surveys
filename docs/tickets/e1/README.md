@@ -141,7 +141,7 @@ is silently dropped.
   E1's landing views still comply with items 4 and 5 (they ship almost no copy;
   what they ship follows the brief), but the inventory that asserts it is E2's.
 - **Term-map edits re-deriving section calendars** — E2 or E11 (ADR 0018,
-  ADR 0021 name the owners).
+  ADR 0021 name the owners). *(Ruled E11, 2026-08-31, at the E2 breakdown.)*
 - **Deep Linking.** §7.3 makes plain resource-link launch the default, and E0-14
   already deferred Deep Linking out of the mock. Nothing in E1..E13 names it;
   scheduling it is raised to Todd in this breakdown's PR rather than decided
