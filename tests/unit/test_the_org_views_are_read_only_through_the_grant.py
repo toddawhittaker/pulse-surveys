@@ -10,11 +10,22 @@ extend is not a closed set, and the three it omitted are the three E1 added.
 **The file keeps its name; the rule it enforces is wider than the name.**
 
 **So the policed inventory is parsed out of the catalog at test time**, in two
-parts, from the `.sql` files under `backend/app/views_sql/`:
+parts, from the `.sql` files under `backend/app/views_sql/` **at any depth**:
 
   - every relation a **`CREATE VIEW`** creates, and
   - every relation those **view bodies read** — the `FROM` and `JOIN` relations
     of each view's definition, base tables included.
+
+The depth is part of the rule rather than an implementation detail. Every `.sql`
+file in that directory sits at the top of it today, which is a fact about how
+many views E1 shipped; `tests/integration/test_identity_separated_views.py` reads
+the same catalog recursively and says in as many words that the SQL is found at
+any depth, so a view filed in a subdirectory is a catalog member everywhere else
+in this suite. A one-deep read here would take that view *and the relations it is
+built on* out of the policed set with nothing saying so — M8's own failure one
+directory down, which is what the re-review of 2026-08-31 found and what
+`test_the_policed_inventory_reads_a_view_filed_in_a_subdirectory_of_the_catalog`
+now holds closed.
 
 That is the structure the guarded set cannot shrink without the guard noticing.
 A view is the thing §4.1 is written about, and the table underneath it is the
@@ -158,6 +169,12 @@ comments are absent from the tree entirely, and docstrings are subtracted by nam
   - **Re-adding the hand-written list** — replacing the parse with a tuple of
     the three org views. The premise test goes red on the other three names,
     which is the failure M8 reported and the reason the list is gone.
+  - **Reading the catalog one directory deep** — `VIEWS_SQL_DIR.glob("*.sql")` in
+    place of `rglob`, which is one word and changes nothing about today's tree.
+    `test_the_policed_inventory_reads_a_view_filed_in_a_subdirectory_of_the_catalog`
+    goes red on the nested view and the relation it is built on. It also holds
+    the other side of that repair: widening to `rglob("*")` would police a
+    `CREATE VIEW` written in a note, and the same test names it.
 
 **What this cannot see**, stated so nothing here is cited as more than it is
 (`docs/MISTAKES.md` entry 14):
@@ -441,8 +458,17 @@ def policed_relations() -> tuple[str, ...]:
     in this set — with whatever it is built on — without this file being edited.
     That is the difference between an inventory and a list somebody has to
     remember to update, and M8 is what the list cost.
+
+    **`rglob`, so the catalog is read at any depth.** Every `.sql` file happens to
+    sit at the top of that directory today, which is a fact about how many views
+    E1 shipped rather than a rule; the sibling guard
+    `tests/integration/test_identity_separated_views.py` already reads the same
+    catalog recursively and documents the SQL as found at any depth. A one-deep
+    read here would drop a view somebody files in a subdirectory *and its base
+    tables* out of the policed set, silently — which is M8's own failure one
+    directory down, and what the re-review of 2026-08-31 found.
     """
-    files = sorted(VIEWS_SQL_DIR.glob("*.sql"))
+    files = sorted(VIEWS_SQL_DIR.rglob("*.sql"))
     assert files, (
         f"There are no `.sql` files under {VIEWS_SQL_DIR.relative_to(REPO_ROOT)}, so the policed "
         "inventory this file sweeps for is empty and every assertion below is vacuous. ADR 0041 "

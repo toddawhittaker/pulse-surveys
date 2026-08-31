@@ -42,21 +42,30 @@ uses; the answer taken here is not a longer enumeration but a shorter one. **The
 sweep demands the module-level form and refuses every other**, so a module that
 holds its marker in some other currency is red rather than quietly approved.
 
-**So a per-test-decorated module is red here by design.** `tests/integration/
-test_the_dev_console_names_nobody.py` is in exactly that state today: its one
-denial test carries `@pytest.mark.invariant` and the module carries none. Nothing
-is wrong with that test. What is wrong is that the module's *next* denial test
-inherits nothing, which is the shape of the defect this file exists for — a
-module half inside the pass reads, to every later reader, exactly like a module
-inside it. The repair is one line in that module, not a widening here.
+**So a per-test-decorated module is red here by design**, and one real module was
+in that state when this file landed. `tests/integration/
+test_the_dev_console_names_nobody.py` carried `@pytest.mark.invariant` on its one
+denial test and nothing at the module level. Nothing was wrong with that test —
+it ran in the isolated pass exactly as it does now. What was wrong is what the
+module's *next* denial test would have inherited, which is nothing; a module half
+inside the pass reads, to every later reader, exactly like a module inside it.
+The marker moved to the module level and the decorator went with it, which is the
+repair this rule asks for — one line in the module, never a widening here.
 
-**The module-level form includes the list spelling**, and it has to. Two of the
-three modules the re-review found already carry `pytestmark = [pytest.mark.
-integration, pytest.mark.lti]`, and demanding the bare `pytestmark = pytest.mark.
-invariant` of them would be demanding they drop the markers that place them in
-the suite — a property no implementation could satisfy (`docs/MISTAKES.md` entry
-24). What is pinned is *where* the mark sits, not how the assignment is written:
-a module-level `pytestmark`, carrying `invariant` among its marks.
+**The re-review found four modules, not the three it reported.** Three were the
+fix round's own new denial modules; the fourth was the dev console above, half
+in. The count is recorded because it is the shape of the finding: M6 was closed
+by marking a list of modules, and a list is what a closure exists to replace.
+
+**The module-level form includes the list spelling**, and it has to. Three of the
+four modules already carried `pytestmark = [pytest.mark.integration,
+pytest.mark.lti]`, and demanding the bare `pytestmark = pytest.mark.invariant` of
+them would be demanding they drop the markers that place them in the suite — a
+property no implementation could satisfy (`docs/MISTAKES.md` entry 24). What is
+pinned is *where* the mark sits, not how the assignment is written: a module-level
+`pytestmark`, carrying `invariant` among its marks. Both halves of the §4.1 gate
+read that spelling — `scripts/ci/check_invariant_assertions.py` says so in its own
+docstring, and pytest collects it — so nothing is lost by allowing it.
 
 **This module is itself marked**, and it is not a term in its own set: its name
 carries none of the shapes above, so the sweep does not demand itself and the
@@ -97,10 +106,10 @@ CERTAINLY_MARKED = (
 )
 
 # ---------------------------------------------------------------------------
-# The planted tree for the control. Six modules: three the shapes must demand
-# and three they must not, and among the demanded three every marking state a
-# module can be in — the module-level form, the list form, per-test decoration,
-# and nothing at all.
+# The planted tree for the control. Six modules: four the shapes must demand and
+# two they must not, and among the demanded four every marking state a module can
+# be in — the module-level form, the list form, per-test decoration, and nothing
+# at all.
 #
 # Planted under `tmp_path` rather than pointed at real files, because a control
 # built out of the tree it is controlling moves when the tree moves: the day
@@ -119,8 +128,8 @@ PLANTED_MODULES = {
         f"import pytest\n\npytestmark = pytest.mark.{MARKER}\n\n\n{A_DENIAL_TEST}"
     ),
     # Demanded, and marked in the list form — which is what a module already
-    # carrying `integration` and `lti` has to use, and therefore what two of the
-    # three real offenders will look like once they are fixed.
+    # carrying `integration` and `lti` has to use, and therefore what three of
+    # the four real offenders look like now they are fixed.
     "test_a_planted_write_names_nothing_from_the_launch.py": (
         f"import pytest\n\npytestmark = [pytest.mark.{MARKER}, pytest.mark.integration]\n\n\n"
         f"{A_DENIAL_TEST}"
@@ -134,8 +143,8 @@ PLANTED_MODULES = {
         "import pytest\n\npytestmark = [pytest.mark.integration]\n\n\n"
         f"@pytest.mark.{MARKER}\n{A_DENIAL_TEST}"
     ),
-    # Demanded, and marked with nothing at all: the state all three real
-    # offenders are in as this is written.
+    # Demanded, and marked with nothing at all: the state three of the four real
+    # offenders were found in, and the state this rule is written against.
     "test_a_planted_console_names_nobody_at_all.py": f"import pytest\n\n\n{A_DENIAL_TEST}",
     # Not demanded: the name carries no denial shape. Unmarked, so a sweep that
     # demanded it would fail on it and this module would be red against a test
@@ -253,8 +262,8 @@ def test_the_denial_module_sweep_flags_a_planted_offender_and_spares_its_near_mi
         carries `invariant` **passes**, in the bare form and in the list form.
         Without this half, a sweep that demanded the marker of nothing — or that
         could not read a `pytestmark` at all — would fail every module in the
-        tree and be deleted rather than fixed, and the list form is what two of
-        the three real offenders must end up in.
+        tree and be deleted rather than fixed, and the list form is what three
+        of the four real offenders ended up in.
       - a module whose name carries a shape and holds its marker **per test** is
         **flagged**. This is the discriminating case and the reason the rule pins
         one currency: a sweep that accepted the decorator would report such a
@@ -297,7 +306,7 @@ def test_the_denial_module_sweep_flags_a_planted_offender_and_spares_its_near_mi
         "reads decorators and cannot tell a module that is wholly inside the §4.1 pass from one "
         "that is half in — which is the state the re-review found and the reason the rule pins the "
         "module-level form.\n\n"
-        "If the list form is missing instead, the sweep cannot be satisfied by two of the three "
+        "If the list form is missing instead, the sweep cannot be satisfied by three of the four "
         "modules it is about: they already carry `pytestmark = [pytest.mark.integration, "
         "pytest.mark.lti]`, and the marker joins that list rather than replacing it."
     )
@@ -316,7 +325,9 @@ def test_every_confidentiality_denial_module_carries_the_module_level_invariant_
     That is the recurrence the re-review of 2026-08-31 found. M6 marked the seven
     denial modules that existed when it was written; the fix round wrote three
     more and marked none, and no gate noticed, because the only gate on the marked
-    set is one that reads the marked set.
+    set is one that reads the marked set. This sweep found a fourth the re-review
+    had not — the dev console, which held its marker on one test rather than on
+    the module — which is the argument for a closure over a list in one line.
 
     **The mutations this kills**: a new confidentiality-denial module landing with
     no marker, which is the defect itself and the only way it has ever arrived;
@@ -389,7 +400,7 @@ def test_every_confidentiality_denial_module_carries_the_module_level_invariant_
             "",
             "The other repair, if a module named this way is genuinely not a §4.1 denial, is to "
             "rename it. Widening what this sweep accepts is not one of the answers: the re-review "
-            "of 2026-08-31 found M6's own defect recurring three modules later, and a rule that "
+            "of 2026-08-31 found M6's own defect recurring four modules later, and a rule that "
             "accepts every currency is the rule that let it.",
         ]
     )

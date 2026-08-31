@@ -120,10 +120,27 @@ PLANTED_TEST = re.compile(r"^def (?P<name>test_\w+)", re.MULTILINE)
 # the allow half always exists: without it, a checker that refused every
 # `pytestmark`-marked module whatever its body would pass the refusal below and be
 # red against the §4.1 invariants in the tree that are marked that way. Both
-# `pytestmark` samples use the single-mark form. The list form,
-# `pytestmark = [pytest.mark.invariant, …]`, appears nowhere in this repository and
-# is not covered here — named rather than left implied, because an enumeration
-# that does not say what it omits reads as complete (`docs/MISTAKES.md` entry 35).
+# `pytestmark` samples use the single-mark form, and the list form,
+# `pytestmark = [pytest.mark.invariant, …]`, is not covered here — named rather
+# than left implied, because an enumeration that does not say what it omits reads
+# as complete (`docs/MISTAKES.md` entry 35).
+#
+# **That omission used to cost nothing and now costs something**, so the sentence
+# is corrected rather than left standing (`docs/MISTAKES.md` entry 1). When this
+# file was written the list form appeared nowhere in the repository. E1's
+# re-review fixes put three §4.1 modules into it —
+# `tests/integration/test_the_roster_sync_log_names_nobody.py`,
+# `test_a_refused_provisioning_write_names_nothing_from_the_launch.py` and
+# `test_the_dev_console_names_nobody.py` — because each already carried
+# `pytestmark = [pytest.mark.integration, pytest.mark.lti]` and the marker joins
+# that list rather than replacing it.
+#
+# It is still not sampled here, and that is a judgement rather than an oversight.
+# A regression in the checker's list-form path is caught one level out, by
+# `tests/unit/test_the_invariant_gate_halves_agree.py`: the collector sees those
+# three modules' tests and the scan would not, and that module compares the two
+# numbers. Sampling it here as well would be a second copy of a guarantee that is
+# already executed against the real tree.
 ALLOWED = {
     "an assert in the body": """
 import pytest

@@ -49,7 +49,14 @@ from uuid import uuid4
 
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.lti]
+# `invariant` joins the list rather than replacing it: every test here is a SPEC
+# §4.1 denial, and CLAUDE.md makes that pass unskippable — but
+# `scripts/ci/check_invariants.py` enforces it only over tests already carrying
+# the marker, so a denial module without one is not reported skipped, it is not
+# reported at all. Held at module level so the module's *next* denial test
+# inherits it; the rule is
+# `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`.
+pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
 
 # `roster_sync`, `synced_section`, `service_wire`, `compose_a_roster`,
 # `roster_contract`, `roster_rows` and `a_subject` come from

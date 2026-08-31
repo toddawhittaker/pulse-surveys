@@ -388,13 +388,14 @@ PAGE = """<!doctype html>
     --spruce-60: #5B7269;
     --mist: #93A5A0;
     --marigold: #DFA320;
+    --marigold-deep: #8F6A10;
     --font-display: 'Literata', Georgia, serif;
     --font-body: 'Schibsted Grotesk', 'Helvetica Neue', sans-serif;
     --space-4: 16px;
     --space-5: 24px;
     --space-7: 48px;
   }}
-  :focus-visible {{ outline: 2px solid var(--marigold); outline-offset: 2px; }}
+  :focus-visible {{ outline: 2px solid var(--marigold-deep); outline-offset: 2px; }}
   body {{
     margin: 0;
     background: var(--chalk);
