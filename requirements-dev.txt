@@ -683,6 +683,7 @@ httpx2==2.12.0 \
     #   -c requirements.txt
     #   genai-prices
     #   openai
+    #   pulse-surveys (pyproject.toml)
     #   pydantic-ai-slim
 hypothesis==6.165.10 \
     --hash=sha256:00de0abdcf8c05c9d0eab735a3c49a276376b55151e6fcb903c2b39a90e5e5c3 \
