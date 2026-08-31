@@ -199,3 +199,24 @@ findings they answer (`lti-oidc`, `data-model`, `invariant-coverage`,
 `threat-model` on M8's closure, `a11y-copy` on the ring); then stop. Findings
 not selected for fixing are carried above — silence stays accounted either
 way.
+
+## Re-review disposition (2026-08-31)
+
+The re-review pass ran 2026-08-31 against the epic tip 87448d7 — the five
+reviewers scoped exactly as the fix plan mandates — and its consolidated
+result is a comment on PR #123. Every finding selected for the fix round
+verified closed, with two qualifications: the focus-ring fix left two
+hand-copied duplicates of the superseded color, and M8's closure holds in
+substance with defects in its own perimeter. The pass found one new HIGH
+(the fix round's three new confidentiality-denial test modules carry no
+`invariant` marker — M6's own defect recurring), four further MEDIUMs,
+seven LOWs, and record notes.
+
+Ruling (Todd, 2026-08-31): the HIGH is fixed inside E1 together with the
+three ride-along MEDIUMs — the recursive catalog derivation, the
+`--marigold` comment correction, and the door-page focus color — through
+one further tests-first PR into the epic branch (`e1/re-review-fixes`).
+The `views_sql` package-exemption MEDIUM is carried to E2 with a hard
+deadline, and the LOWs and record notes are carried with owners; both in
+`docs/tickets/e2/carried-from-e1.md`. This ruling supersedes the stopping
+rule's "then stop" for exactly that scope and no more.

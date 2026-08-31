@@ -12,9 +12,10 @@
   --spruce: #1E3932;        /* Primary ink: body text, headings, filled bars, the Course line in TrendDuo. */
   --spruce-60: #5B7269;     /* Secondary ink: labels, helpers, meta, mono eyebrows, axis text. */
   --hairline: #DCE4DD;      /* Borders, dividers, table rules, chart gridlines. Never for text. */
-  --marigold: #DFA320;      /* The hero accent: current-section trend line + terminal dot, focus ring,
+  --marigold: #DFA320;      /* The hero accent: current-section trend line + terminal dot,
                                selected/active states, validity coaching (never an error red). */
-  --marigold-deep: #8F6A10; /* Marigold at text-contrast: links, marigold-toned text on paper/chalk. */
+  --marigold-deep: #8F6A10; /* Marigold at text-contrast: links, marigold-toned text on paper/chalk,
+                               focus ring. */
   --madder: #A93F32;        /* Reserved: "attend to this." Flag chips, Care classification labels,
                                breached thresholds in the admin strip. Never decoration, never headers. */
   --mist: #93A5A0;          /* De-emphasis: benchmark/university comparison lines (dashed/dotted),

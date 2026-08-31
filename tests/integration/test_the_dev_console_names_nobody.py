@@ -50,6 +50,25 @@ whole chain. Two fixture shapes, so two modules, and this one names the other.
 
 The console's production half — that `/dev` 404s outside development — is
 asserted in `tests/unit/test_dev_console_exposure.py` and is not reopened here.
+
+**The `invariant` marker moved from the denial test to the module**, in E1's
+re-review fixes, and the whole module joined the isolated §4.1 pass with it. It
+was not wrong before: the denial below carried `@pytest.mark.invariant` and ran
+in that pass exactly as it does now. What was wrong is what the *next* denial
+test in this module would have inherited, which is nothing —
+`tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
+demands the module-level form for that reason, and this module was one of the
+four it found on the day it landed. A fifth followed, the launch-views module,
+which that sweep's first shape list did not reach and which this pull request's
+own review found instead — three counts and three different finders, none of them
+a list, as that file's own record says. This module holds two tests, and the
+change makes an invariant of
+the other one: `test_the_section_row_reader_reads_a_rows_text_and_attributes_and_
+no_other_row`, the control over the row reader. That is the whole cost and it is
+small — the reader is the instrument this file's denial is measured with, and a
+module whose instrument can be skipped while its denial cannot is a module whose
+denial is measured by nothing. `tests/unit/test_no_service_reads_an_identity_
+table_directly.py` marks its own control the same way.
 """
 
 from html.parser import HTMLParser
@@ -59,7 +78,11 @@ from urllib.parse import urlsplit
 import pytest
 from sqlalchemy import text
 
-pytestmark = [pytest.mark.integration, pytest.mark.lti]
+# `invariant` joins the list rather than replacing it, and it sits here rather
+# than on the one denial test below. See the module docstring on why the marker
+# moved; the rule is
+# `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`.
+pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
 
 DEV_CONSOLE_PATH = "/dev"
 
@@ -440,11 +463,11 @@ def test_the_section_row_reader_reads_a_rows_text_and_attributes_and_no_other_ro
 
 
 # ---------------------------------------------------------------------------
-# The invariant: a synced section, on the console, naming nobody.
+# The invariant: a synced section, on the console, naming nobody. Marked at the
+# top of the module rather than here — see the module docstring.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.invariant
 def test_the_dev_consoles_sections_table_names_no_member_of_a_synced_section(
     roster_sync: Any,
     synced_section: Any,

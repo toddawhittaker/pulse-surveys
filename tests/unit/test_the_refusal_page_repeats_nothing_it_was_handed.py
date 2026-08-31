@@ -54,6 +54,14 @@ from typing import Any
 
 import pytest
 
+# Every test here is a SPEC §4.1 denial, so the marker is the module's and not any
+# one test's: CLAUDE.md makes the isolated invariant pass unskippable, and
+# `scripts/ci/check_invariants.py` enforces that only over tests already carrying
+# this. Held at module level so the module's *next* denial test inherits it —
+# `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
+# is what requires that, and this module was one of the four it named.
+pytestmark = pytest.mark.invariant
+
 # The page under test, by the name every record in this repository spells it —
 # `tests/fixtures/landing.py`'s D5 note ("`PAGE`, `refusal_page`,
 # `cancelled_page`, `no_account_page` and the new `no_access` move into"

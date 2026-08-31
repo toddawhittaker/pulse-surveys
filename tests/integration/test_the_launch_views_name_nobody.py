@@ -116,7 +116,15 @@ from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.lti]
+# `invariant` joins the list rather than replacing it, and it sits here rather
+# than on each of the three denials below. Every test in this module is a SPEC
+# §4.1 denial, so the marker is the module's: held at module level, the module's
+# *next* denial test inherits it, which a decorator on each of today's three does
+# not. Collection does not move — all three were already marked — and the rule is
+# `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`,
+# whose shape list gained this module's singular `name_nobody` spelling in the
+# same change.
+pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
 
 # How far back the seeded enrollment window starts. Comfortably longer than any
 # timezone offset, so a window opened this many days before UTC's today contains
@@ -605,7 +613,6 @@ def around(body: str, needle: str) -> str:
     return body[max(0, at - CONTEXT_CHARACTERS) : at + len(needle) + CONTEXT_CHARACTERS]
 
 
-@pytest.mark.invariant
 @pytest.mark.parametrize(("role_uri", "role"), LANDING_PAGES)
 def test_a_launch_landing_page_names_nobody_but_the_person_who_launched(
     tool: Any,
@@ -686,7 +693,6 @@ def test_a_launch_landing_page_names_nobody_but_the_person_who_launched(
     )
 
 
-@pytest.mark.invariant
 @pytest.mark.parametrize(("role_uri", "role"), LANDING_PAGES)
 def test_a_launch_landing_page_carries_no_section_code_or_course_number(
     tool: Any,
@@ -792,7 +798,6 @@ def test_a_launch_landing_page_carries_no_section_code_or_course_number(
     )
 
 
-@pytest.mark.invariant
 @pytest.mark.parametrize(("role_uri", "role"), LANDING_PAGES)
 def test_a_launch_landing_page_carries_no_roster_count(
     tool: Any,

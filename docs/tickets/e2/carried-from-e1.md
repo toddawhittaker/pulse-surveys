@@ -269,6 +269,88 @@ within the launcher's resolved purview (with the first-launch case settled
 and recorded), a launch outside it records a defect row rather than binding,
 and a two-directional test pair pins both sides.
 
+## The `views_sql` package exemption and the import guard disagree on their object
+
+From the post-merge re-review (threat-model; consolidated comment on PR
+#123, finding 3). The org-view SQL sweep excuses any module under
+`backend/app/views_sql/` by containment, while the one-importer sweep pins
+the literal name `app.views_sql.queries` — so a second module added to the
+package, holding a raw org read and imported from an API handler, passes
+both halves of the M8 closure in two individually legal steps (reproduced
+with a planted module during the re-review). ADR 0107's stated reason for
+leaving the package unpinned ("the one-importer sweep guards `views_sql`
+separately") describes a guard that watches one module name, not the
+package.
+**Owner:** E2. **Deadline (Todd's ruling, 2026-08-31):** fixed before any
+second module lands under `backend/app/views_sql/` and before E2's first
+read path behind the sweep, whichever comes first.
+**Done when:** the exemption and the import guard name the same object —
+either the exemption narrows to the module the import guard watches, or the
+import guard widens to the package — proven by the re-review's two-step
+planted offender going red, and ADR 0107's sentence corrected.
+
+## Low findings and record notes from the post-merge re-review
+
+From the consolidated re-review comment on PR #123 (findings 6–12 there,
+each with file-and-line evidence). Carried as a block; the re-review judged
+none reachable today.
+
+- The exempt files' statement pin compares relation names, not statements,
+  and the test docstring claims otherwise; ADR 0107 describes the pin
+  honestly, so the two records disagree. The count-only-plant docstring in
+  the same file also claims a location assertion the assertion doesn't make.
+  **Owner:** whichever E2 ticket next touches the org sweep. Done when the
+  pin matches its docstring or the docstrings match the pin.
+- The `DESC` on `ix_nrps_call_section_id_called_at_desc` serves no query in
+  the tree, and it is exactly what makes the declaration invisible to
+  `alembic check`; a plain ascending composite would perform identically
+  and be comparable. **Owner:** E2's roster work, alongside M9. Done when
+  the index is comparable or the `DESC` has a reader.
+- `tests/integration/test_the_section_binding_survives_a_downgrade.py`
+  cites `e2c94b6a1f70` as a preserve/restore precedent that the boundary
+  record corrections in the same merge struck as false. **Owner:** E2,
+  with the migration-message bullet below — same file family, one ticket.
+  Done when the docstring names no precedent the record has struck.
+- Downgrade below `b8c41f7d2e05`, delete the registration, upgrade back:
+  the restore hands the foreign key a dead deployment and the operator gets
+  a raw constraint violation instead of the migration's usual actionable
+  refusal. Fail-closed — the transaction rolls back and the preserved rows
+  survive for a retry. **Owner:** E2. Done when that path refuses with a
+  sentence naming the preserved table.
+- The stored roster host joins `unpinned_hosts` in every environment while
+  the docstring beside it calls that entry development-only. **Owner:**
+  E2's roster work, alongside M9, which owns the sync's transport. Done
+  when the entry is environment-narrowed or the docstring states what the
+  code does.
+- The roster walk's cycle/page-cap terminator is the one exit that discards
+  members it already read; every other failure exit keeps the prefix with
+  `complete=False`. A platform that advertises `next` on a full final page
+  starves that section's roster forever, with 200s in `nrps_call` and only
+  an ERROR line as signal. **Owner:** E2's roster work, alongside M9. Done
+  when that branch returns the prefix incomplete like its siblings.
+- Record notes: `backend/app/services/authz.py` still says the sweep
+  polices "the three org views" (it is fourteen relations now); and E1 has
+  no generative purview coverage — §4.1 item 2 is proven on hand-built
+  fixtures only, which stands while the union computation is E9's (E9
+  already owns the Hypothesis purview properties, listed below).
+  **Owner:** E2 for the comment correction, done when the comment counts
+  what the sweep polices; the purview note is E9's already and carries no
+  work here.
+- The denial-module closure sweep's inventory is a naming convention
+  (`DENIAL_NAME_SHAPES` in
+  `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`),
+  with two disclosed limits, stated precisely because the first draft of
+  this bullet got them wrong: a §4.1 denial module named outside every
+  shape escapes the sweep (the singular `_name_nobody` spelling nearly
+  escaped exactly this way; PR #130's review caught it), and deleting a
+  shape **together with its planted sample in the same change** is green
+  in both tests while the modules that shape demanded are demanded by
+  nothing. A shape deleted *alone* is red on the demanded-set equality —
+  that half is covered. The paired deletion is the one a future editor
+  could do by accident while tidying. **Owner:** E2's breakdown. Done when
+  the sweep's inventory has a source the naming convention cannot shrink,
+  or the E2 boundary review re-affirms both disclosed limits in writing.
+
 ## Owned by the spec already
 
 Listed so this file is a complete boundary record; each is §14.3's or a
