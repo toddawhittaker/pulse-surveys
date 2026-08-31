@@ -918,8 +918,10 @@ class ScopedReader:
     import — and E0-41 mechanised that. The sweep in
     `tests/unit/test_the_org_views_are_read_only_through_the_grant.py` fails any
     module under `backend/app/` outside this one that makes that import, or that
-    runs SQL naming one of the three org views. Until then it was a property a
-    reviewer had to notice in a diff, and a property nothing executes is a
+    runs SQL naming a relation in the policed inventory — parsed at test time
+    from the catalog under `backend/app/views_sql/`, so the set moves with the
+    catalog and no count written here can go stale. Until then it was a property
+    a reviewer had to notice in a diff, and a property nothing executes is a
     comment (`docs/MISTAKES.md` entry 9).
     """
 
