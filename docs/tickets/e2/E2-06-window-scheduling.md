@@ -64,7 +64,8 @@ clock service.
    start-letter map, or the full seeded map — the generator must include the
    boundary instants, MISTAKES entry 15).
 3. Open/closed flips with the dev clock against the running stack — the
-   interactive check Todd asked for, scripted so it stays true.
+   interactive check this epic was asked to support, scripted so it stays
+   true.
 4. No code outside the one writer writes `survey_window` (the E0-35 sweep
    pattern already used for section calendars extends or its absence is
    recorded in the ADR).
@@ -73,5 +74,5 @@ clock service.
 
 - The submit path and what an open window permits — E2-08.
 - Editing the rhythm, the term, or the start-letter map, and re-deriving
-  anything after such an edit — E11 (Todd, 2026-08-31).
+  anything after such an edit — E11 (ruled 2026-08-31).
 - Report generation at window close — E4.

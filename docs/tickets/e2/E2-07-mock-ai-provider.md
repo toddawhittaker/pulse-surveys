@@ -21,9 +21,10 @@ either burns real tokens or exercises only the fail-open timeout path — four
 seconds of dead wait per submit, and the "bounced with immediate feedback"
 exit clause never actually tested against a verdict.
 
-Todd's constraint, decided 2026-08-31: no live AI calls in ordinary runs.
-Live calls happen only in the eval suite (E2-12), path-filtered and manual.
-Everything else — dev, e2e, CI — talks to this mock.
+The governing constraint, decided at the breakdown 2026-08-31: no live AI
+calls in ordinary runs. Live calls happen only in the eval suite (E2-12),
+path-filtered and manual. Everything else — dev, e2e, CI — talks to this
+mock.
 
 Read first: SPEC §7.4 (single-shot boundary, typed contracts); ADR 0053 (the
 gateway speaks OpenAI-format chat completions through pydantic-ai — the mock

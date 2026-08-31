@@ -2,9 +2,9 @@
 
 **ID:** E2-09
 **Branch:** `e2/student-read-path`
-**Depends on:** E2-01, E2-02, E2-05, E2-06 (E2-02 by deadline: Todd's ruling
-puts the purview fix before any surface renders roster-derived data, and
-this read path plus E2-10's screen are that surface)
+**Depends on:** E2-01, E2-02, E2-05, E2-06 (E2-02 by deadline: the 2026-08-28
+ruling puts the purview fix before any surface renders roster-derived data,
+and this read path plus E2-10's screen are that surface)
 **Lane:** heavy
 **Security-relevant:** the first student-visible read path — the reason §4.1
 item 1 has been waiting since E0. The invariant test this ticket adds is the
@@ -22,7 +22,7 @@ unskippable like the rest of the §4.1 pass.
 The student path reads the student's *own* rows — identity separation
 (ADR 0001) constrains instructor and leadership reads, not a person reading
 themself — but it goes behind the same discipline: E2-01's corrected sweep
-and import guard are a hard dependency by Todd's deadline (before E2's first
+and import guard are a hard dependency by the ruled deadline (before E2's first
 read path behind the sweep), and any new relation read follows the sweep's
 sanctioned locations.
 

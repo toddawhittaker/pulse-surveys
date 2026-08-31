@@ -17,7 +17,7 @@ module added to the package, holding a raw org read and imported from an API
 handler, passes both halves in two individually legal steps. The re-review
 reproduced this with a planted module.
 
-**Deadline (Todd, 2026-08-31):** fixed before any second module lands under
+**Deadline (ruled 2026-08-31):** fixed before any second module lands under
 `backend/app/views_sql/` and before E2's first read path behind the sweep —
 which makes this ticket first in the build order, the same way E1-01 was.
 

@@ -28,14 +28,16 @@ every other ticket is heavy — the epic's substance lives in `services/`,
 `models/`, `migrations/`, `api/`, compose, workflows, and invariant-marked
 tests, all heavy-lane paths.
 
-**Three decisions Todd made at breakdown time (2026-08-31),** recorded here
-so no ticket re-litigates them:
+**Three decisions made at breakdown time (2026-08-31),** each ruled in the
+conversation that produced this breakdown, recorded here so no ticket
+re-litigates them:
 
 1. **Live AI calls happen only in the eval suite.** Ordinary tests and e2e
    use the loopback stub and the E2-07 mock. The eval suite runs on
    AI-touching changes (step-level path condition), on manual dispatch, and
    locally — never on every merge. E2-12 carries the mechanics; the provider
-   key secret is created by Todd and referenced only after his written go.
+   key secret is created by the repository owner and referenced only after a
+   written go.
 2. **Time is mocked by a clock service with a development-only override**,
    set interactively from `/dev`, stored in the database so backend and
    worker agree. E2-04 builds it; protocol clocks (launch validation,
@@ -80,7 +82,7 @@ three; 13 needs everything.)
 Six starts run independently and can interleave: the two carried guards (01,
 02), the record fix (03), the clock (04) and schema (05) that feed the window
 chain (06 → 08/09 → 10 → 11), the mock (07), and the eval suite (12). 01 goes
-first on principle as well as dependency: Todd's deadline puts it before any
+first on principle as well as dependency: the ruled deadline puts it before any
 E2 read path, and building the guard while no E2 view exists is what makes
 its red case honest — the same reasoning as E1-01. 02's deadline has the
 same shape and is encoded the same way — as a dependency of 09 — so the
@@ -115,7 +117,7 @@ it. The entries' own done-whens govern; the tickets point at them.
 | The AI eval floors, the last CI tolerance (spec-owned to E2) | E2-12 |
 | The denial-module sweep's inventory: **decided at breakdown** — the E2 boundary review re-affirms the two disclosed limits in writing | E2-13 |
 | `PERSON_TABLES` standing review question, asked of the tables E2 adds | E2-05 (answered in its PR body) |
-| Term-map re-derivation (E2 or E11 per ADR 0018/0021) | **E11** — Todd, 2026-08-31 |
+| Term-map re-derivation (E2 or E11 per ADR 0018/0021) | **E11** — ruled 2026-08-31 |
 
 Every other `carried-from-e1.md` entry passes through by being re-listed in
 `carried-from-e2.md` at E2-13 — the completeness rule is *every entry not
@@ -134,7 +136,7 @@ Named so scope creep has something to push against. Each item has an owner.
 
 - **Term-map and term edits re-deriving sections or reconciling weeks** —
   E11's calendar editor, with ADR 0018's lengthening hazard and ADR 0021's
-  re-derivation both recorded there. Todd ruled 2026-08-31. E2-06 tolerates a
+  re-derivation both recorded there. Ruled 2026-08-31. E2-06 tolerates a
   missing week loudly; it does not repair one.
 - **Window-rhythm and threshold configuration surfaces** — §6.3, E11. The
   rhythm ships as cited constants.
@@ -189,8 +191,8 @@ steps decide. A job-level `if:` is the shape
   read path it polices.
 - **12 is independent and can land any time.** It measures the E0-13 task as
   shipped; nothing in the survey chain changes the prompt or the contract.
-  If a floor cannot be met by the shipped prompt, that is a finding for
-  Todd, not a reason to hold the epic.
+  If a floor cannot be met by the shipped prompt, that is a finding to
+  raise and wait on, not a reason to hold the epic.
 - **Every ticket that touches the seed** (05, 06, 07's env defaults) stays
   behind the development-environment guard (ADR 0063, 0064). The dev clock
   override is inert outside development by construction, and E2-04 asserts

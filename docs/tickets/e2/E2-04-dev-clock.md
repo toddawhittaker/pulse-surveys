@@ -14,8 +14,9 @@ closed.
 
 Survey windows are wall-clock behavior (§3.1: opens Friday 18:00, closes
 Sunday 23:59:59, institution timezone), and E2 has to be testable — including
-*interactively*: Todd drives the stack and wants to see what a student sees on
-a Friday evening without waiting for one. Decided with Todd 2026-08-31: a
+*interactively*: the stack is driven by hand during development, and what a
+student sees on a Friday evening has to be visible without waiting for one.
+Decided at the breakdown, 2026-08-31: a
 clock service that all scheduling reads go through, with a development-only
 override set from the existing `/dev` console and stored in the database so
 the backend and the worker agree.

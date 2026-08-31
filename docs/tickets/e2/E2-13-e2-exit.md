@@ -88,6 +88,7 @@ deferred notes as they accumulated in `deferred.md`.
 
 ## Out of scope
 
-- Merging `epic/e2-weekly-survey-validity` to `main` — Todd's, always.
+- Merging `epic/e2-weekly-survey-validity` to `main` — never done from a
+  ticket; it waits for written approval, per the branch discipline.
 - Fixing what the boundary reviews find — those are their own tickets in
   E2's final batch, scoped when found.

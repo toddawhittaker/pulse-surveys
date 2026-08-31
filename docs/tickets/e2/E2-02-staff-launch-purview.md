@@ -19,7 +19,7 @@ section, stores its roster address permanently
 `lms_context_memberships_url` write), and pulls the full membership —
 including the squat hazard on the `(course, term, section_code)` name.
 
-**Deadline (Todd, 2026-08-28):** fixed before any surface renders
+**Deadline (ruled 2026-08-28):** fixed before any surface renders
 roster-derived data. E2's student surface is that surface, so this ticket
 lands before E2-09 and E2-10 merge.
 

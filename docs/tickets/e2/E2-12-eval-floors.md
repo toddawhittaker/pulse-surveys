@@ -12,13 +12,13 @@ ever calls a paid provider from CI. The secrets policy binds hard here.
 The last E0 tolerance. CI's `evals` job is a `::notice::` today; the `detect`
 probe already pins `tests/evals/runner.py`, and the job's own notice records
 that running it for real "needs a provider API key as a repository secret and
-a `secrets.*` reference in this workflow" — Todd's call under the secrets
-policy. §14.3 E2: "turns the AI eval floors enforcing, the last CI tolerance
+a `secrets.*` reference in this workflow" — the repository owner's call
+under the secrets policy. §14.3 E2: "turns the AI eval floors enforcing, the last CI tolerance
 E0 left." §11 question 4: the production "substantive" definition is the
 classifier's, and its eval set and threshold need real seeded data **before
 E2 exits**.
 
-**Decided with Todd, 2026-08-31 — when live calls happen.** Ordinary test
+**Decided at the breakdown, 2026-08-31 — when live calls happen.** Ordinary test
 runs never call a provider (they use the loopback stub and E2-07's mock). The
 eval suite is the only live-provider surface, and it runs: (a) in CI only
 when the change touches what §9.3's gate names — **prompt or model** — so the
@@ -72,18 +72,18 @@ itself a gate).
   they were picked against a real run.
 - The CI flip: real steps in the `evals` job behind the step-level path
   condition plus `workflow_dispatch`; the tolerant notice steps retire. The
-  `secrets.*` reference for the provider key lands **only after Todd creates
-  the secret and says go in the PR conversation** — asked, then waited for,
-  never provisional. The runner refuses plainly when the key is absent
+  `secrets.*` reference for the provider key lands **only after the secret
+  exists and a written go is given in the PR conversation** — asked, then
+  waited for, never provisional. The runner refuses plainly when the key is absent
   (an AI-touching PR without the secret is a red gate naming what is
   missing, not a quiet pass — MISTAKES entry 34's cousin).
 - **The sequencing this creates is a named blocker, not a surprise:** this
   ticket's own PR touches `tests/evals/`, so its own eval steps fire, and
-  without the secret they go red — and red does not merge. So the ask to
-  Todd happens at ticket start, the secret exists before the flip can land,
-  and the PR's green run with the secret in place is itself the proof the
-  wiring works. If Todd declines the secret, the ticket stops and the
-  fallback (local-only enforcement) is his decision to make, not the
+  without the secret they go red — and red does not merge. So the ask is
+  made at ticket start, the secret exists before the flip can land, and the
+  PR's green run with the secret in place is itself the proof the wiring
+  works. If the secret is declined, the ticket stops; the fallback
+  (local-only enforcement) is the repository owner's decision, not the
   builder's.
 - The flip proven by breaking, both ways: a planted floor breach (a case set
   the current prompt fails) runs red through the real runner; the
@@ -100,8 +100,9 @@ itself a gate).
 2. An AI-touching PR runs the live eval steps; a docs-only or unrelated PR
    runs none and the aggregate stays sound (both shapes shown on real CI
    runs of this branch).
-3. No `secrets.*` reference exists in the diff until Todd's go is quoted in
-   the PR; after it, the Secrets-check box in the PR template says where.
+3. No `secrets.*` reference exists in the diff until the written go is
+   quoted in the PR; after it, the Secrets-check box in the PR template says
+   where.
 4. §11 question 4 can be marked settled-for-v1 in the spec's terms, or the
    PR says precisely what remains and E2-13 carries it — no silent residue.
 5. ADR 0002's "last tolerance" state is recorded: after this flip, a new
@@ -114,5 +115,5 @@ itself a gate).
   rework.
 - The admin-override feed into eval sets (§6.1) — E11.
 - Any prompt change to `validity.v1.md` — if a floor cannot be met without
-  one, that is a finding for Todd, not a quiet edit (ADR 0032 makes the old
-  prompt immutable anyway).
+  one, that is a finding to raise and wait on, not a quiet edit (ADR 0032
+  makes the old prompt immutable anyway).
