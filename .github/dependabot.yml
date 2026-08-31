@@ -62,14 +62,15 @@ updates:
     ignore:
       # `@types/node` says which standard library `tsc` checks against, so its
       # major is a property of the runtime rather than a dependency choice: it
-      # has to be the major `NODE_VERSION` runs. #81 proposed 20 → 26 and every
-      # gate was green, because nothing read both files.
+      # has to be the major `NODE_VERSION` runs, and the major every Dockerfile
+      # `FROM node:` stage builds with. #81 proposed 20 → 26 and every gate was
+      # green, because nothing read all three files.
       #
       # What this gives up: Dependabot stops proposing the major, so a new
       # `@types/node` major sits unnoticed until someone moves the runtime.
       # What makes that safe is that the bump had no value on its own — a type
       # surface ahead of the runtime is wrong, not new — and that
-      # `tests/unit/test_types_node_tracks_runtime.py` fails if the two majors
+      # `tests/unit/test_types_node_tracks_runtime.py` fails if the three majors
       # part, whichever side moves. So the reduction removes a pull request
       # nobody could correctly merge, and the case it was covering (the runtime
       # moving without its types) is covered by a gate instead.
