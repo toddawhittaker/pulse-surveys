@@ -347,7 +347,7 @@ services:
   # SMTP capture, so the Monday mail in §5.7 has somewhere to go that is not a
   # real inbox. Its web interface is published by the development override.
   mailpit:
-    image: axllent/mailpit:v1.30.7@sha256:d5ecbb067db3705fa953d79e1b7f81ef84038df67aba6c52825d8c02a1ea748a
+    image: axllent/mailpit:v1.31.0@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
 
   # The in-repo LTI 1.3 platform to launch from (§7.2 lists it, §9.2 says what
   # it is for). Development and test only, and it is in this file rather than
