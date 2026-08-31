@@ -206,6 +206,7 @@ remedy there is to rename the CTE.
 
 import ast
 import re
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -782,6 +783,113 @@ def test_the_policed_inventory_comes_from_the_catalog_and_holds_the_six_the_rule
         "change; if a roster view stopped being defined over `enrollment`, this inventory can no "
         "longer see that table and the sweep below has stopped policing it. A sweep for a name "
         "nothing defines is green forever, which is the finding (M8) this test keeps closed."
+    )
+
+
+# ---------------------------------------------------------------------------
+# A catalog planted at a depth the real one does not use yet, so that "the
+# inventory is read from the catalog" is asserted about the *whole* catalog
+# rather than about its top directory. The names are ones nothing in this
+# repository defines, so a hit is this test's own file rather than a coincidence.
+# ---------------------------------------------------------------------------
+
+DEPTH_TOP_VIEW = "e1_depth_top_view"
+DEPTH_TOP_BASE = "e1_depth_top_base"
+DEPTH_NESTED_VIEW = "e1_depth_nested_view"
+DEPTH_NESTED_BASE = "e1_depth_nested_base"
+DEPTH_TEXT_VIEW = "e1_depth_text_view"
+DEPTH_TEXT_BASE = "e1_depth_text_base"
+
+DEPTH_SUBDIRECTORY = "reporting"
+
+PLANTED_CATALOG = {
+    f"{DEPTH_TOP_VIEW}_v001.sql": (
+        f"CREATE VIEW {DEPTH_TOP_VIEW} AS\n  SELECT id FROM public.{DEPTH_TOP_BASE};\n"  # noqa: S608
+    ),
+    f"{DEPTH_SUBDIRECTORY}/{DEPTH_NESTED_VIEW}_v001.sql": (
+        f"CREATE VIEW {DEPTH_NESTED_VIEW} AS\n  SELECT id FROM public.{DEPTH_NESTED_BASE};\n"  # noqa: S608
+    ),
+    # The near miss: a file in the same subdirectory that is not `.sql`. A view
+    # definition sitting in a note contributes no relation, because ADR 0041 puts
+    # the catalog in `.sql` files and nothing else in that tree is executed.
+    f"{DEPTH_SUBDIRECTORY}/{DEPTH_TEXT_VIEW}.txt": (
+        f"CREATE VIEW {DEPTH_TEXT_VIEW} AS\n  SELECT id FROM public.{DEPTH_TEXT_BASE};\n"  # noqa: S608
+    ),
+}
+
+
+def test_the_policed_inventory_reads_a_view_filed_in_a_subdirectory_of_the_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The inventory is the catalog at any depth, not the catalog's top directory.
+
+    `tests/integration/test_identity_separated_views.py` reads the same catalog
+    with `rglob` and says in as many words that a view's SQL is found "at any
+    depth". A view filed in a subdirectory is therefore a legitimate catalog
+    member everywhere else in this suite — and it contributes nothing to the
+    policed inventory here, which is the gap the re-review of 2026-08-31 found in
+    M8's own closure. The relation such a view is built on is then a relation
+    `pulse_app` reads unfiltered with no sweep over it and no sentence anywhere
+    saying so: the silence reads exactly like a clean tree, which is the whole
+    failure M8 was about, one directory down.
+
+    Nothing exercises this today because every `.sql` file in the catalog happens
+    to sit at the top. That is a fact about how many views E1 shipped, not a rule
+    — the first ticket that groups its views into a subdirectory reopens the hole,
+    and it reopens it silently.
+
+    **The mutation this kills:** reading the catalog with `glob("*.sql")` instead
+    of `rglob("*.sql")` — one word, which is the state of `policed_relations` as
+    this test is written. The nested view's name and its base relation are both
+    absent from the inventory under it, and the equality below names them.
+
+    **The near miss it tolerates:** a file in that same subdirectory that is not
+    `.sql`. A `CREATE VIEW` written in a note or a README contributes nothing,
+    which is what keeps the repair from being `rglob("*")` — that widening would
+    put `e1_depth_text_view` and `e1_depth_text_base` in the policed set, and the
+    equality below says so.
+
+    **The control is the top-level file**, asserted before the nested one. Without
+    it a `policed_relations` that read nothing at all — a monkeypatch that did not
+    land, a directory that was never written — would leave both halves of the
+    equality failing for a reason that has nothing to do with depth.
+    """
+    catalog = tmp_path / "views_sql"
+    for name, sql in PLANTED_CATALOG.items():
+        path = catalog / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(sql, encoding="utf-8")
+
+    monkeypatch.setattr(sys.modules[__name__], "VIEWS_SQL_DIR", catalog)
+    inventory = policed_relations()
+
+    assert {DEPTH_TOP_VIEW, DEPTH_TOP_BASE} <= set(inventory), (
+        f"The parse read {sorted(inventory)} from a planted catalog whose top directory holds a "
+        f"view named {DEPTH_TOP_VIEW!r} built on {DEPTH_TOP_BASE!r}.\n\n"
+        "This is the control, not the criterion: with the top-level file missing too, the failure "
+        "below is about the catalog not being read at all — a monkeypatch that did not land, or a "
+        "directory nothing was written into — rather than about depth."
+    )
+
+    assert set(inventory) == {
+        DEPTH_TOP_VIEW,
+        DEPTH_TOP_BASE,
+        DEPTH_NESTED_VIEW,
+        DEPTH_NESTED_BASE,
+    }, (
+        f"The policed inventory over the planted catalog is {sorted(inventory)}.\n\n"
+        f"It holds a view at the top ({DEPTH_TOP_VIEW}, built on {DEPTH_TOP_BASE}) and one in the "
+        f"`{DEPTH_SUBDIRECTORY}/` subdirectory ({DEPTH_NESTED_VIEW}, built on "
+        f"{DEPTH_NESTED_BASE}), and both are catalog members: "
+        "`tests/integration/test_identity_separated_views.py` reads this same directory with "
+        "`rglob` and documents the SQL as found at any depth.\n\n"
+        f"If {DEPTH_NESTED_VIEW!r} and {DEPTH_NESTED_BASE!r} are the ones missing, the derivation "
+        "is reading one directory deep — and a view somebody files in a subdirectory brings its "
+        "base tables out of the policed set with it, leaving relations `pulse_app` reads "
+        "unfiltered with nothing sweeping for them and every test in this file green.\n\n"
+        f"If {DEPTH_TEXT_VIEW!r} or {DEPTH_TEXT_BASE!r} are present instead, the widening went too "
+        "far: they are written in a `.txt` file, and ADR 0041 puts the executed catalog in `.sql` "
+        "files. A parse that reads prose polices relations no view is defined over."
     )
 
 
